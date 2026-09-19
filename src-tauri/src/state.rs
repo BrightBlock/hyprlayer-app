@@ -112,6 +112,10 @@ impl AppState {
             host,
             local_server_name,
             server_version: guard.client.as_ref().map(|c| c.server_version()),
+            server_release: guard
+                .client
+                .as_ref()
+                .and_then(|c| c.server_semver().map(str::to_string)),
             server_outdated: guard.client.is_some() && guard.outdated,
             error: guard.failure.clone(),
         }
@@ -192,6 +196,7 @@ mod tests {
                 .write_control(&Control::Hello {
                     protocol_version: PROTOCOL_VERSION,
                     build: None,
+                    version: None,
                 })
                 .await;
             // The connection must outlive the handshake; reading to EOF parks

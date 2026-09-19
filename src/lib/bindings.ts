@@ -258,6 +258,11 @@ export const commands = {
 	 *  one is single-use, and reusing it silently drops the second call's steps.
 	 */
 	provisionHost: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("provision_host", { host, onStep })),
+	/**
+	 *  Moves a host onto this client's server: installs it if absent, then stops
+	 *  the running one so the reconnect starts it. Ends every session there.
+	 */
+	updateHostServer: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("update_host_server", { host, onStep })),
 	listLocalServers: () => typedError<LocalServer[], AppError>(__TAURI_INVOKE("list_local_servers")),
 	revealLogs: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_logs")),
 	collectDiagnostics: () => typedError<string, AppError>(__TAURI_INVOKE("collect_diagnostics")),
@@ -635,8 +640,13 @@ export type ConnectionStatus = {
 	localServerName?: string | null,
 	serverVersion: number | null,
 	/**
-	 *  Connected to a server built from different bytes than the one this app
-	 *  would start; `restart_server` swaps it.
+	 *  The server's release version; `None` when unconnected or from a server
+	 *  up to 0.8.2, which does not report one.
+	 */
+	serverRelease: string | null,
+	/**
+	 *  Connected to an older server than this app ships; `restart_server`
+	 *  (local) or `update_host_server` (remote) replaces it.
 	 */
 	serverOutdated: boolean,
 	/**  `Some` for `Failed` and `Lost`. */
@@ -862,6 +872,11 @@ export type HostProvisioning = {
 	 *  state rather than a flag this side would have to keep in step with it.
 	 */
 	installedVersions: string[],
+	/**
+	 *  What the relay runs: this client's version when `Ready`, else the newest
+	 *  installed version at or above the minimum. `None` means install first.
+	 */
+	usableVersion: string | null,
 	source: BinarySource,
 };
 

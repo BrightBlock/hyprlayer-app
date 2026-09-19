@@ -3,7 +3,8 @@
 **Status:** accepted · 2026-09-03 · amended 2026-09-18 (the Keychain lookup is
 deleted — the runtime reads no provider credentials) · amended 2026-09-19 (OpenCode
 config I/O moves to the server) · amended 2026-09-19 (the server writes its own log
-files; a spawned server's stderr goes to a file, not a pipe)
+files; a spawned server's stderr goes to a file, not a pipe) · amended 2026-09-19
+(the server is versioned and released apart from the app; the app sets a minimum)
 
 ## Decision
 
@@ -53,6 +54,35 @@ Everything else in ADR-0008 stands: no separate core repository, no database
 replacement, no `ProjectKey` migration, and no `hyprlayer-runtime` facade crate — the
 server is a second consumer that strengthens the case for extracting one; it does not
 do it.
+
+### The server has its own version; the app sets a minimum
+
+*(Added 2026-09-19.)* Until v0.8.2 the server took the workspace version, so every
+app release was also a server release: the remote install directory was keyed by the
+app's version, which blocked a remote host until the new binary was installed, and
+"outdated" meant a different SHA-256, which every rebuild produces. Every app update
+therefore asked every user to restart their server and lose its sessions.
+
+- `crates/hyprlayer-server/Cargo.toml` carries its own `version`
+  (`hyprlayer_server::VERSION`), sent in `Hello` as `version`. Servers up to 0.8.2 send
+  none and are read as 0.8.2.
+- The app declares `MIN_SERVER_VERSION` (`src-tauri/src/server_version.rs`). A server
+  below it is replaced locally, the way a protocol mismatch is, and blocks a remote
+  connection with `remote_server_outdated` until the user updates it. A server at or
+  above it but older than the one the app ships is an optional update. Bytes are
+  compared only in debug builds.
+- A remote relay runs this app's version if it is installed, else the newest installed
+  version at or above the minimum, so an app update never blocks on an install.
+- **Bump rule.** `PROTOCOL_VERSION` covers the frame format and envelope. Any change
+  under `crates/hyprlayer-{server,core,models,proto}` bumps the server version, and an
+  app that depends on that change raises `MIN_SERVER_VERSION` to it. `release.sh`
+  refuses a release whose server code changed since the last `server-v<version>` tag
+  without a bump.
+- **Publishing.** A new server version is tagged `server-v<version>` beside the app
+  tag, and `release-local.sh` publishes its binaries, Homebrew formula, and
+  `hyprlayer-server-bin` AUR package under that tag, requiring every platform.
+  An app release with an unchanged server publishes none of them; the bundled binary
+  is still rebuilt, at the same version.
 
 ### One server, one profile, one user
 
@@ -341,10 +371,10 @@ would need all of the authentication machinery this decision declines to build.
 
 ## Consequences
 
-- **Quitting the app is free; updating it is not.** The protocol handshake is strict
-  equality. An upgraded desktop that finds an older server asks it to shut down, waits
-  for the profile lock, and spawns its own matching binary — which ends every live
-  session and terminal on that profile. Release notes from that version onward say so.
+- **Quitting the app is free; updating it usually is too.** Only a protocol change or
+  a raised `MIN_SERVER_VERSION` makes an upgraded desktop shut down an older local
+  server and spawn its own, which ends every live session and terminal on that
+  profile. Release notes for such a version say so.
 - The shell holds no runtime: `AppState` becomes an RPC client handle, and the 161
   Tauri commands keep their signatures while their bodies become RPC calls, so
   the frontend does not change *for the transport itself*. It changed for the

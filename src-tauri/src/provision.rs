@@ -1,8 +1,9 @@
-//! Puts a version-keyed `hyprlayer-server` on a remote host and runs that one
-//! (plan Phase 7), the way VS Code Remote-SSH materializes a commit-pinned
+//! Puts a version-keyed `hyprlayer-server` on a remote host and runs one of
+//! those (plan Phase 7), the way VS Code Remote-SSH materializes a pinned
 //! server: versions install side by side, nothing upgrades in place, and the
-//! client only ever invokes the absolute path it installed. A packaged server
-//! on the host keeps `PATH` for headless use; the two never collide.
+//! client only ever invokes an absolute path under `~/.hyprlayer/server`. A
+//! packaged server on the host keeps `PATH` for headless use; the two never
+//! collide.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -12,12 +13,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
 use crate::hosts::Host;
+use crate::server_version::{self, SERVER_VERSION};
 use crate::supervisor;
-
-/// The client's own version, and the only server it can talk to:
-/// `PROTOCOL_VERSION` is strict equality and has already moved backwards once,
-/// so "latest" is not merely risky here, it is incoherent.
-pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const RELEASE_BASE: &str = "https://github.com/BrightBlock/hyprlayer-releases/releases/download";
 const SUMS_ASSET: &str = "hyprlayer-server-sha256sums.txt";
@@ -59,6 +56,9 @@ pub struct HostProvisioning {
     /// user already accepted" (plan Phase 7 §4) — derived from the host's own
     /// state rather than a flag this side would have to keep in step with it.
     pub installed_versions: Vec<String>,
+    /// What the relay runs: this client's version when `Ready`, else the newest
+    /// installed version at or above the minimum. `None` means install first.
+    pub usable_version: Option<String>,
     pub source: BinarySource,
 }
 
@@ -131,15 +131,48 @@ fn remote_binary(version: &str) -> String {
     format!("\"$HOME/.hyprlayer/server/{version}/hyprlayer-server\"")
 }
 
-/// What `ssh <host> …` runs: the absolute, version-keyed path this client
-/// installed, never whatever `hyprlayer-server` resolves to on the host's PATH.
-pub fn relay_command() -> String {
-    format!("{} relay", remote_binary(SERVER_VERSION))
+/// What `ssh <host> …` runs: an absolute, version-keyed path under
+/// `~/.hyprlayer/server`, never whatever `hyprlayer-server` resolves to on the
+/// host's PATH.
+pub fn relay_command(version: &str) -> String {
+    format!("{} relay", remote_binary(version))
 }
 
 /// Prints the tails of the host's server logs; works with no server running.
-pub fn logs_command() -> String {
-    format!("{} logs", remote_binary(SERVER_VERSION))
+pub fn logs_command(version: &str) -> String {
+    format!("{} logs", remote_binary(version))
+}
+
+/// Stops the host's running server, whichever version it is, and waits for it
+/// to go, so the next relay starts `version` rather than reattaching to it.
+/// Nothing running is success; a server still answering after 10s is not.
+fn stop_script(version: &str) -> String {
+    let bin = remote_binary(version);
+    format!(
+        "{bin} status >/dev/null 2>&1 || exit 0; {bin} stop >&2; i=0; \
+         while {bin} status >/dev/null 2>&1; do \
+         [ $i -ge 50 ] && {{ echo 'the server did not stop within 10s' >&2; exit 1; }}; \
+         sleep 0.2; i=$((i+1)); done; exit 0"
+    )
+}
+
+/// Installs this client's server if the host lacks it, then stops whatever is
+/// running there. Ends every session and terminal on that host.
+pub async fn update(
+    host: &Host,
+    app_data_dir: &Path,
+    on_step: impl Fn(ProvisionStep),
+) -> Result<(), AppError> {
+    if readiness(host, app_data_dir).await?.state != HostServerState::Ready {
+        provision(host, app_data_dir, &on_step).await?;
+    }
+    log::warn!(
+        "stopping the server on {} to start {SERVER_VERSION}; its sessions and terminals end",
+        host.destination
+    );
+    supervisor::ssh_capture(host, &stop_script(SERVER_VERSION)).await?;
+    on_step(ProvisionStep::Done);
+    Ok(())
 }
 
 /// Receives the pushed binary into `<version>.tmp/`. An interrupted transfer
@@ -238,6 +271,18 @@ fn state_for(installed: bool, host_sha: Option<&str>, local_sha: Option<&str>) -
     }
 }
 
+/// A stale install of this client's own version is a dev build shadowing the
+/// release, so it blocks rather than falling back to an older version.
+fn usable_version(state: HostServerState, installed: &[String]) -> Option<String> {
+    match state {
+        HostServerState::Ready => Some(SERVER_VERSION.to_string()),
+        HostServerState::Stale => None,
+        HostServerState::Missing => {
+            server_version::newest_usable(installed.iter().map(String::as_str)).map(str::to_string)
+        }
+    }
+}
+
 pub(crate) fn sha256_file(path: &Path) -> Option<String> {
     Some(format!("{:x}", Sha256::digest(std::fs::read(path).ok()?)))
 }
@@ -262,10 +307,12 @@ pub async fn inspect(
         .as_ref()
         .filter(|_| seen.installed)
         .and_then(|found| sha256_file(&found.path));
+    let state = state_for(seen.installed, seen.sha.as_deref(), local_sha.as_deref());
     let provisioning = HostProvisioning {
         version: SERVER_VERSION.to_string(),
         triple: triple.to_string(),
-        state: state_for(seen.installed, seen.sha.as_deref(), local_sha.as_deref()),
+        state,
+        usable_version: usable_version(state, &seen.versions),
         installed_versions: seen.versions,
         source: local
             .map(|found| found.source)
@@ -366,7 +413,7 @@ async fn download_into_cache(
     let part = dest.with_extension("part");
 
     on_step(ProvisionStep::Download);
-    let base = format!("{RELEASE_BASE}/v{SERVER_VERSION}");
+    let base = format!("{RELEASE_BASE}/server-v{SERVER_VERSION}");
     let binary_url = format!("{base}/{asset}");
     curl_to(&binary_url, &part)
         .await
@@ -581,9 +628,45 @@ mod tests {
 
     #[test]
     fn the_relay_runs_the_version_keyed_path_not_whatever_path_resolves() {
-        let command = relay_command();
+        let command = relay_command("0.8.2");
         assert!(command.starts_with("\"$HOME/.hyprlayer/server/"));
-        assert!(command.ends_with(&format!("/{SERVER_VERSION}/hyprlayer-server\" relay")));
+        assert!(command.ends_with("/0.8.2/hyprlayer-server\" relay"));
+    }
+
+    #[test]
+    fn a_missing_current_version_falls_back_to_an_older_usable_install() {
+        let installed = vec![
+            "0.0.1".to_string(),
+            server_version::MIN_SERVER_VERSION.to_string(),
+        ];
+        assert_eq!(
+            usable_version(HostServerState::Missing, &installed).as_deref(),
+            Some(server_version::MIN_SERVER_VERSION)
+        );
+        assert_eq!(
+            usable_version(HostServerState::Missing, &["0.0.1".to_string()]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_server_that_keeps_answering_fails_the_stop() {
+        let script = stop_script("0.8.3");
+        // Only "nothing is running" short-circuits to success.
+        assert!(script.starts_with("\"$HOME/.hyprlayer/server/0.8.3/hyprlayer-server\" status"));
+        assert!(script.contains("|| exit 0;"));
+        assert!(!script.contains("stop >/dev/null 2>&1 || exit 0"));
+        assert!(script.contains("exit 1"));
+    }
+
+    #[test]
+    fn a_stale_current_version_does_not_fall_back() {
+        let installed = vec![server_version::MIN_SERVER_VERSION.to_string()];
+        assert_eq!(usable_version(HostServerState::Stale, &installed), None);
+        assert_eq!(
+            usable_version(HostServerState::Ready, &installed).as_deref(),
+            Some(SERVER_VERSION)
+        );
     }
 
     #[test]

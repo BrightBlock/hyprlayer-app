@@ -33,7 +33,8 @@ const h = vi.hoisted(() => {
     onmessage: ((step: unknown) => void) | null = null;
   }
   const provisionHost = vi.fn(async () => ({ status: "ok", data: null }));
-  return { FakeChannel, provisionHost };
+  const updateHostServer = vi.fn(async () => ({ status: "ok", data: null }));
+  return { FakeChannel, provisionHost, updateHostServer };
 });
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
 
@@ -41,7 +42,14 @@ const reconnect = vi.hoisted(() => ({ retryConnection: vi.fn() }));
 vi.mock("./reconnect", () => reconnect);
 vi.mock("@/lib/bindings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/bindings")>();
-  return { ...actual, commands: { ...actual.commands, provisionHost: h.provisionHost } };
+  return {
+    ...actual,
+    commands: {
+      ...actual.commands,
+      provisionHost: h.provisionHost,
+      updateHostServer: h.updateHostServer,
+    },
+  };
 });
 
 const NEXUS: Host = { destination: "nexus", label: "Nexus" };
@@ -63,6 +71,7 @@ const PROVISIONING: HostProvisioning = {
   triple: "x86_64-unknown-linux-gnu",
   state: "missing",
   installedVersions: [],
+  usableVersion: null,
   source: "cache",
 };
 
@@ -116,13 +125,13 @@ describe("HostsDialog", () => {
   });
 
   it("renders nothing on a healthy connection", () => {
-    mockStatus({ state: "connected", host: null, serverVersion: 3, serverOutdated: false, error: null });
+    mockStatus({ state: "connected", host: null, serverVersion: 3, serverRelease: null, serverOutdated: false, error: null });
     const { container } = render(<HostsDialog />);
     expect(container.innerHTML).toBe("");
   });
 
   it("opens with no host configured and a failed local server", () => {
-    mockStatus({ state: "failed", host: null, serverVersion: null, serverOutdated: false, error: LOCAL_DOWN });
+    mockStatus({ state: "failed", host: null, serverVersion: null, serverRelease: null, serverOutdated: false, error: LOCAL_DOWN });
     render(<HostsDialog />);
 
     expect(screen.getByRole("dialog")).toBeTruthy();
@@ -136,7 +145,7 @@ describe("HostsDialog", () => {
   });
 
   it("opens with a configured host that cannot be reached, naming the reason", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: UNREACHABLE });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: UNREACHABLE });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     render(<HostsDialog />);
 
@@ -154,7 +163,7 @@ describe("HostsDialog", () => {
       state: "lost",
       host: NEXUS,
       serverVersion: 3,
-      serverOutdated: false,
+      serverRelease: null, serverOutdated: false,
       error: { code: "server_disconnected", message: "The server connection ended.", remedy: null },
     });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
@@ -164,7 +173,7 @@ describe("HostsDialog", () => {
   });
 
   it("does not close on Escape in blocking mode, and still consumes the key", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: UNREACHABLE });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: UNREACHABLE });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     render(<HostsDialog />);
 
@@ -174,7 +183,7 @@ describe("HostsDialog", () => {
   });
 
   it("confirms before switching, then writes, flushes and relaunches", async () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: UNREACHABLE });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: UNREACHABLE });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     render(<HostsDialog />);
 
@@ -194,7 +203,7 @@ describe("HostsDialog", () => {
   });
 
   it("says the old server's agents keep running, but only when one is live", async () => {
-    mockStatus({ state: "connected", host: null, serverVersion: 3, serverOutdated: false, error: null });
+    mockStatus({ state: "connected", host: null, serverVersion: 3, serverRelease: null, serverOutdated: false, error: null });
     mockHosts({ hosts: [NEXUS], active: null });
     useHostsUiStore.setState({ open: true });
     render(<HostsDialog />);
@@ -211,7 +220,7 @@ describe("HostsDialog", () => {
   });
 
   it("offers the install when the host has no server, naming the version once", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     b.useHostProvisioning.mockReturnValue({ data: PROVISIONING });
     render(<HostsDialog />);
@@ -233,7 +242,7 @@ describe("HostsDialog", () => {
   });
 
   it("reports the download as live state rather than pre-announcing it", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     b.useHostProvisioning.mockReturnValue({ data: { ...PROVISIONING, source: "download" } });
     render(<HostsDialog />);
@@ -245,7 +254,7 @@ describe("HostsDialog", () => {
   });
 
   it("installs without asking on a host that already carries one of our servers", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     b.useHostProvisioning.mockReturnValue({
       data: { ...PROVISIONING, installedVersions: ["0.7.4"] },
     });
@@ -259,7 +268,7 @@ describe("HostsDialog", () => {
   });
 
   it("reconnects once the install lands, rather than leaving the stale failure up", async () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
     b.useHostProvisioning.mockReturnValue({ data: PROVISIONING });
     render(<HostsDialog />);
@@ -275,7 +284,7 @@ describe("HostsDialog", () => {
   });
 
   it("reinstalls a same-version binary whose bytes are not ours, without asking", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     b.useHostProvisioning.mockReturnValue({
       data: { ...PROVISIONING, state: "stale", installedVersions: ["0.7.5"] },
     });
@@ -290,20 +299,20 @@ describe("HostsDialog", () => {
   });
 
   it("offers nothing when the host is ready, or failed for another reason", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: NO_SERVER });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: NO_SERVER });
     b.useHostProvisioning.mockReturnValue({ data: { ...PROVISIONING, state: "ready" } });
     const ready = render(<HostsDialog />);
     expect(ready.container.textContent).not.toContain("Install server");
     cleanup();
 
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: UNREACHABLE });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: UNREACHABLE });
     b.useHostProvisioning.mockReturnValue({ data: PROVISIONING });
     render(<HostsDialog />);
     expect(screen.queryByRole("button", { name: /Install server/ })).toBeNull();
   });
 
   it("flushes the debounced writes before relaunching", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverOutdated: false, error: UNREACHABLE });
+    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, error: UNREACHABLE });
     render(<HostsDialog />);
 
     fireEvent.click(screen.getByRole("button", { name: "Relaunch" }));
@@ -320,7 +329,7 @@ describe("HostsDialog", () => {
       state: "connected",
       host: null,
       serverVersion: 3,
-      serverOutdated: true,
+      serverRelease: null, serverOutdated: true,
       error: null,
     };
     mockStatus(connected);
@@ -345,5 +354,54 @@ describe("HostsDialog", () => {
     mockStatus({ ...connected, serverOutdated: false });
     rerender(<HostsDialog />);
     expect(screen.queryByText(/Restarting…/)).toBeNull();
+  });
+  it("updates a remote server below the minimum, then reconnects", async () => {
+    mockStatus({
+      state: "failed",
+      host: NEXUS,
+      serverVersion: null,
+      serverRelease: null,
+      serverOutdated: false,
+      error: {
+        code: "remote_server_outdated",
+        message: "Nexus is running Hyprlayer server 0.8.2; this app needs 0.9.0 or newer.",
+        remedy: "Update it from the Hyprlayer server panel.",
+      },
+    });
+    render(<HostsDialog />);
+    expect(screen.queryByText("Update it from the Hyprlayer server panel.")).toBeNull();
+    expect(screen.queryByText(/this app ships a newer one/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Update server" }));
+    const [, confirm] = screen.getAllByRole("button", { name: "Update server" });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(h.updateHostServer).toHaveBeenCalledTimes(1);
+    expect(reconnect.retryConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers an optional update on a connected remote host, naming its version", async () => {
+    mockStatus({
+      state: "connected",
+      host: NEXUS,
+      serverVersion: 1,
+      serverRelease: "0.8.3",
+      serverOutdated: true,
+      error: null,
+    });
+    useHostsUiStore.setState({ open: true });
+    render(<HostsDialog />);
+    expect(screen.getByText(/running 0\.8\.3/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Restart server" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Update server" }));
+    const [, confirm] = screen.getAllByRole("button", { name: "Update server" });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(h.updateHostServer).toHaveBeenCalledTimes(1);
+    // The dropped connection's own reconnect loop takes it from here.
+    expect(reconnect.retryConnection).not.toHaveBeenCalled();
   });
 });

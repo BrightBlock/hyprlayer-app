@@ -8,10 +8,9 @@ pub mod frame;
 
 use serde::{Deserialize, Serialize};
 
-/// Strict equality on the handshake. Stays at 1 until the first release that
-/// ships `hyprlayer-server` — nothing has ever shipped with a different
-/// number, so wire changes before that release are free. Bump on every
-/// wire-affecting change from that release onward.
+/// Strict equality on the handshake: the frame format and envelope, not the
+/// command table. A client needing a newer server raises its minimum server
+/// version instead (ADR-0009).
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// The v0.7 `AppError` envelope, pinned by
@@ -99,6 +98,10 @@ pub enum ControlFrame<Req, Resp, StreamReq, StreamResp, Ev> {
         /// peers from before the field ignore it and are read as unknown.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         build: Option<String>,
+        /// The server's own semver, which clients compare against their
+        /// minimum. Absent from servers up to 0.8.2.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
     },
     Refused {
         error: WireError,
@@ -185,6 +188,7 @@ mod tests {
             serde_json::to_string(&Envelope::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
+                version: None,
             })
             .unwrap(),
             format!(r#"{{"hello":{{"protocol_version":{}}}}}"#, PROTOCOL_VERSION)
@@ -210,10 +214,29 @@ mod tests {
     }
 
     #[test]
+    fn a_hello_without_a_version_still_parses_as_an_unversioned_server() {
+        let old: Envelope =
+            serde_json::from_str(r#"{"hello":{"protocol_version":1,"build":"abc"}}"#).unwrap();
+        assert!(matches!(old, ControlFrame::Hello { version: None, .. }));
+
+        let json = serde_json::to_string(&Envelope::Hello {
+            protocol_version: 1,
+            build: None,
+            version: Some("0.8.3".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"hello":{"protocol_version":1,"version":"0.8.3"}}"#
+        );
+    }
+
+    #[test]
     fn a_client_on_the_next_protocol_version_is_refused() {
         let hello = serde_json::to_string(&Envelope::Hello {
             protocol_version: PROTOCOL_VERSION + 1,
             build: None,
+            version: None,
         })
         .unwrap();
         let mut decoder = Decoder::new();

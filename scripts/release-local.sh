@@ -88,6 +88,22 @@ VERSION="$(node -p 'require("./package.json").version')"
 TAG="v$VERSION"
 git rev-parse "$TAG" >/dev/null 2>&1 || die "tag $TAG not found — run ./scripts/release.sh <bump> first"
 
+# release.sh tags server-v<version> on the same commit as the app tag only when
+# that server version is new, so this is stable across re-runs (ADR-0009).
+SERVER_VERSION="$(sed -nE 's/^version = "(.*)"$/\1/p' crates/hyprlayer-server/Cargo.toml)"
+[[ -n "$SERVER_VERSION" ]] || die "no version line in crates/hyprlayer-server/Cargo.toml"
+SERVER_TAG="server-v$SERVER_VERSION"
+git rev-parse "$SERVER_TAG" >/dev/null 2>&1 \
+  || die "tag $SERVER_TAG not found — run ./scripts/release.sh <bump> first"
+SHIP_SERVER=0
+if [[ "$(git rev-list -n1 "$SERVER_TAG")" == "$(git rev-list -n1 "$TAG")" ]]; then
+  SHIP_SERVER=1
+  # A remote host downloads its own platform's binary from this release, and a
+  # later release will not add to it.
+  [[ "$INCLUDE_LINUX" == "1" && "$INCLUDE_WINDOWS" == "1" ]] \
+    || die "hyprlayer-server $SERVER_VERSION is new, so this release must build every platform (drop --mac-only/--no-linux/--no-windows)"
+fi
+
 CL_TOP="$(node -p 'JSON.parse(require("fs").readFileSync("changelog.json","utf8")).versions[0].version' 2>/dev/null || echo "")"
 [[ "$CL_TOP" == "$VERSION" ]] || die "changelog.json top entry ($CL_TOP) != $VERSION — fix it and re-run ./scripts/release.sh"
 
@@ -396,17 +412,26 @@ if [[ "$ASSUME_YES" -ne 1 ]]; then
   echo ""
   KEYS="darwin-aarch64"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && KEYS="$KEYS + windows-x86_64"
-  ASSET_DESC="dmg + updater tarball + hyprlayer-server binaries"
+  ASSET_DESC="dmg + updater tarball"
   [[ "$INCLUDE_WINDOWS" == "1" ]] && ASSET_DESC="$ASSET_DESC + Windows setup.exe"
   [[ "$INCLUDE_LINUX" == "1" ]] && ASSET_DESC="$ASSET_DESC + Linux deb/rpm"
   echo "About to publish $TAG:"
   echo "  • push commit + tag to origin/main"
   echo "  • GitHub Release on $RELEASES_REPO ($ASSET_DESC + sigs)"
+  if [[ "$SHIP_SERVER" == "1" ]]; then
+    echo "  • hyprlayer-server $SERVER_VERSION → $SERVER_TAG on $RELEASES_REPO"
+  else
+    echo "  • hyprlayer-server stays at $SERVER_VERSION (already released)"
+  fi
   echo "  • updater manifest ($KEYS) → $WEBSITE_REPO"
   [[ "$INCLUDE_WINDOWS" == "1" ]] || echo "  Windows installs will NOT be served this version."
   echo "  • Homebrew cask bump → $TAP_REPO"
-  [[ "$INCLUDE_LINUX" == "1" ]] && echo "  • Homebrew formula bump → $TAP_REPO ($FORMULA_PATH)"
-  [[ "$INCLUDE_AUR" == "1" ]] && echo "  • AUR push → $AUR_PKGNAME + $AUR_SERVER_PKGNAME"
+  [[ "$SHIP_SERVER" == "1" ]] && echo "  • Homebrew formula bump → $TAP_REPO ($FORMULA_PATH)"
+  if [[ "$INCLUDE_AUR" == "1" && "$SHIP_SERVER" == "1" ]]; then
+    echo "  • AUR push → $AUR_PKGNAME + $AUR_SERVER_PKGNAME"
+  elif [[ "$INCLUDE_AUR" == "1" ]]; then
+    echo "  • AUR push → $AUR_PKGNAME"
+  fi
   [[ "$INCLUDE_LINUX" == "1" ]] || echo "  Linux packages will NOT be published this version."
   read -r -p "Proceed? [y/N] " reply
   [[ "$reply" == "y" || "$reply" == "Y" ]] || die "aborted (build artifacts kept under target/)"
@@ -415,6 +440,7 @@ fi
 say "Pushing $TAG to origin/main…"
 git push origin main
 git push origin "$TAG"
+[[ "$SHIP_SERVER" == "1" ]] && git push origin "$SERVER_TAG"
 
 say "Creating GitHub Release on ${RELEASES_REPO}…"
 ASSETS=("$DMG" "$TARBALL" "$TARBALL.sig")
@@ -424,23 +450,6 @@ fi
 if [[ "$INCLUDE_LINUX" == "1" ]]; then
   ASSETS+=("$LINUX_OUT/$DEB_NAME" "$LINUX_OUT/$RPM_NAME")
 fi
-
-# Standalone server binaries, per target triple. These feed the hyprlayer-server
-# packages and the client-managed remote install (ADR-0009). Required, not
-# best-effort: a missing one publishes a release pointing at an absent asset.
-SERVER_ASSETS=("$MAC_SERVER_BIN")
-[[ "$INCLUDE_LINUX" == "1" ]] && SERVER_ASSETS+=("$LINUX_SERVER_BIN")
-[[ "$INCLUDE_WINDOWS" == "1" ]] && SERVER_ASSETS+=("$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe")
-for _s in "${SERVER_ASSETS[@]}"; do
-  [[ -f "$_s" ]] || die "missing server asset $_s — every platform in this release must ship one"
-done
-# Basename-keyed: a consumer downloads hyprlayer-server-<triple>, not a path.
-SERVER_SUMS="$TMP/hyprlayer-server-sha256sums.txt"
-: > "$SERVER_SUMS"
-for _s in "${SERVER_ASSETS[@]}"; do
-  ( cd "$(dirname "$_s")" && shasum -a 256 "$(basename "$_s")" ) >> "$SERVER_SUMS"
-done
-ASSETS+=("${SERVER_ASSETS[@]}" "$SERVER_SUMS")
 
 NOTES_FILE="$(mktemp)"; TMPDIRS+=("$NOTES_FILE")
 HYPRLAYER_AUR_PKGNAME="$AUR_PKGNAME" \
@@ -455,6 +464,34 @@ else
     --title "$TAG" --notes-file "$NOTES_FILE" "${ASSETS[@]}"
 fi
 ok "Release published"
+
+SERVER_BASE="https://github.com/$RELEASES_REPO/releases/download/$SERVER_TAG"
+if [[ "$SHIP_SERVER" == "1" ]]; then
+  # Standalone server binaries, per target triple. These feed the hyprlayer-server
+  # packages and the client-managed remote install (ADR-0009). Required, not
+  # best-effort: a missing one publishes a release pointing at an absent asset.
+  SERVER_ASSETS=("$MAC_SERVER_BIN" "$LINUX_SERVER_BIN" "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe")
+  for _s in "${SERVER_ASSETS[@]}"; do
+    [[ -f "$_s" ]] || die "missing server asset $_s — every platform must ship one"
+  done
+  # Basename-keyed: a consumer downloads hyprlayer-server-<triple>, not a path.
+  SERVER_SUMS="$TMP/hyprlayer-server-sha256sums.txt"
+  : > "$SERVER_SUMS"
+  for _s in "${SERVER_ASSETS[@]}"; do
+    ( cd "$(dirname "$_s")" && shasum -a 256 "$(basename "$_s")" ) >> "$SERVER_SUMS"
+  done
+  say "Creating hyprlayer-server $SERVER_VERSION release on ${RELEASES_REPO}…"
+  if gh release view "$SERVER_TAG" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+    say "release $SERVER_TAG already exists — re-uploading assets (--clobber)"
+    gh release upload "$SERVER_TAG" --repo "$RELEASES_REPO" --clobber "${SERVER_ASSETS[@]}" "$SERVER_SUMS"
+  else
+    gh release create "$SERVER_TAG" --repo "$RELEASES_REPO" --target main --latest=false \
+      --title "hyprlayer-server $SERVER_VERSION" \
+      --notes "hyprlayer-server $SERVER_VERSION, first shipped with Hyprlayer $TAG. Hyprlayer installs it on remote hosts itself; these binaries are for headless and packaged installs." \
+      "${SERVER_ASSETS[@]}" "$SERVER_SUMS"
+  fi
+  ok "Server release published"
+fi
 
 say "Writing updater manifest to ${WEBSITE_REPO}…"
 SITE="$(mktemp -d)"; TMPDIRS+=("$SITE")
@@ -517,16 +554,16 @@ else
 fi
 ok "Homebrew cask bumped"
 
-# The formula carries both platforms' sha256, so a mac-only release leaves the
-# tap alone rather than publishing one with a stale Linux sha.
-if [[ "$INCLUDE_LINUX" == "1" ]]; then
+# Only a new server version moves the formula; SHIP_SERVER already required
+# every platform, so both sha256 values are fresh.
+if [[ "$SHIP_SERVER" == "1" ]]; then
   say "Bumping hyprlayer-server formula in ${TAP_REPO}…"
   MAC_SERVER_SHA="$(shasum -a 256 "$MAC_SERVER_BIN" | awk '{print $1}')"
   LINUX_SERVER_SHA="$(shasum -a 256 "$LINUX_SERVER_BIN" | awk '{print $1}')"
   FORMULA_OUT="$TMP/hyprlayer-server.rb"
   # @PLIST@ takes the canonical launchd plist verbatim, indented into the
   # formula's squiggly heredoc, so the packaged and brewed plists cannot drift.
-  VERSION="$VERSION" MAC_SHA="$MAC_SERVER_SHA" LINUX_SHA="$LINUX_SERVER_SHA" \
+  VERSION="$SERVER_VERSION" MAC_SHA="$MAC_SERVER_SHA" LINUX_SHA="$LINUX_SERVER_SHA" \
   PLIST_SRC="$LAUNCHD_PLIST" TEMPLATE="packaging/homebrew/hyprlayer-server.rb" \
   python3 - "$FORMULA_OUT" <<'PYRENDER'
 import os, sys
@@ -549,14 +586,14 @@ PYRENDER
   cp "$FORMULA_OUT" "$TAP/$FORMULA_PATH"
   git -C "$TAP" add "$FORMULA_PATH"
   if git -C "$TAP" diff --cached --quiet; then
-    say "formula already at $VERSION — nothing to commit"
+    say "formula already at $SERVER_VERSION — nothing to commit"
   else
-    git -C "$TAP" commit -q -m "hyprlayer-server $VERSION"
+    git -C "$TAP" commit -q -m "hyprlayer-server $SERVER_VERSION"
     git -C "$TAP" push -q
   fi
   ok "Homebrew formula bumped"
 else
-  warn "no Linux build this release — hyprlayer-server formula left at its previous version"
+  say "hyprlayer-server $SERVER_VERSION already released — formula left alone"
 fi
 
 say "Verifying published assets…"
@@ -573,6 +610,11 @@ if [[ "$INCLUDE_LINUX" == "1" ]]; then
   ok "Linux .deb reachable"
   curl -fsI -L "$BASE/$RPM_NAME" >/dev/null || die "rpm not reachable at $BASE/$RPM_NAME"
   ok "Linux .rpm reachable"
+fi
+if [[ "$SHIP_SERVER" == "1" ]]; then
+  curl -fsI -L "$SERVER_BASE/hyprlayer-server-sha256sums.txt" >/dev/null \
+    || die "server checksums not reachable at $SERVER_BASE"
+  ok "server release reachable"
 fi
 
 if [[ "$INCLUDE_AUR" == "1" ]]; then
@@ -594,8 +636,10 @@ if [[ "$INCLUDE_AUR" == "1" ]]; then
       || die "AUR push rejected — inspect $LINUX_OUT/aur and push by hand"
   fi
   ok "AUR package published"
+fi
 
-  say "Pushing $AUR_SERVER_PKGNAME $VERSION to the AUR…"
+if [[ "$INCLUDE_AUR" == "1" && "$SHIP_SERVER" == "1" ]]; then
+  say "Pushing $AUR_SERVER_PKGNAME $SERVER_VERSION to the AUR…"
   AUR_SERVER="$(mktemp -d)"; TMPDIRS+=("$AUR_SERVER")
   git clone -q "$AUR_SERVER_REPO" "$AUR_SERVER" \
     || die "could not clone $AUR_SERVER_REPO — check AUR SSH access, or re-run with --no-aur"
@@ -607,9 +651,9 @@ if [[ "$INCLUDE_AUR" == "1" ]]; then
   git -C "$AUR_SERVER" config user.email "$AUR_AUTHOR_EMAIL"
   git -C "$AUR_SERVER" add PKGBUILD .SRCINFO hyprlayer-server.service
   if git -C "$AUR_SERVER" diff --cached --quiet; then
-    say "AUR server package already at $VERSION — nothing to commit"
+    say "AUR server package already at $SERVER_VERSION — nothing to commit"
   else
-    git -C "$AUR_SERVER" commit -q -m "$AUR_SERVER_PKGNAME $VERSION"
+    git -C "$AUR_SERVER" commit -q -m "$AUR_SERVER_PKGNAME $SERVER_VERSION"
     git -C "$AUR_SERVER" push -q origin master \
       || die "AUR push rejected — inspect $LINUX_OUT/aur-server and push by hand"
   fi
@@ -621,7 +665,8 @@ ok "Released Hyprlayer $TAG ($PLATFORM_DESC)"
 echo "  Release : https://github.com/$RELEASES_REPO/releases/tag/$TAG"
 echo "  Updates : https://brightblock.ai/hyprlayer/updates/latest.json"
 [[ "$INCLUDE_AUR" == "1" ]] && echo "  AUR     : https://aur.archlinux.org/packages/$AUR_PKGNAME"
-[[ "$INCLUDE_AUR" == "1" ]] && echo "  AUR srv : https://aur.archlinux.org/packages/$AUR_SERVER_PKGNAME"
+[[ "$SHIP_SERVER" == "1" ]] && echo "  Server  : https://github.com/$RELEASES_REPO/releases/tag/$SERVER_TAG"
+[[ "$INCLUDE_AUR" == "1" && "$SHIP_SERVER" == "1" ]] && echo "  AUR srv : https://aur.archlinux.org/packages/$AUR_SERVER_PKGNAME"
 if [[ "$INCLUDE_WINDOWS" != "1" ]]; then
   echo "  Note    : Windows + Intel installs stay on their current version until"
   echo "            the next all-platform release."

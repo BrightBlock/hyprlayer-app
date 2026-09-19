@@ -7,6 +7,7 @@ mod hosts;
 mod logging;
 mod provision;
 mod runtime_events;
+mod server_version;
 mod state;
 mod supervisor;
 mod webview_gestures;
@@ -201,6 +202,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::restart_server,
             commands::hosts::inspect_host_provisioning,
             commands::hosts::provision_host,
+            commands::hosts::update_host_server,
             commands::hosts::list_local_servers,
             commands::diagnostics::reveal_logs,
             commands::diagnostics::collect_diagnostics,

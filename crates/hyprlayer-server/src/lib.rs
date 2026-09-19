@@ -99,7 +99,7 @@ pub async fn run(command: Command) -> i32 {
             0
         }
         Command::Version => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            println!("{VERSION}");
             0
         }
     }
@@ -144,6 +144,9 @@ fn write_runtime_fatal(path: &Path, error: WireError) {
     }
 }
 
+/// This server's release version, independent of the desktop's.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Set once by `serve`, before the socket binds, so a binary replaced on disk
 /// afterwards cannot change what this process reports.
 static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -166,7 +169,7 @@ async fn serve() -> i32 {
     tracing::info!(
         "hyprlayer-server {} starting: pid {}, protocol {PROTOCOL_VERSION}, build {}, {}/{}, \
          config {}, data {}, logs {}",
-        env!("CARGO_PKG_VERSION"),
+        VERSION,
         std::process::id(),
         BUILD
             .get()
@@ -250,11 +253,7 @@ async fn relay() -> i32 {
     let (config_dir, data_dir) = app_dirs();
     let log_dir = logging::log_dir(&data_dir);
     let _log = logging::init(logging::Process::Relay, &log_dir);
-    tracing::info!(
-        "relay {} starting: pid {}",
-        env!("CARGO_PKG_VERSION"),
-        std::process::id()
-    );
+    tracing::info!("relay {} starting: pid {}", VERSION, std::process::id());
     let io = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
     match relay::run(config_dir, data_dir, &log_dir, io).await {
         Ok(()) => 0,
@@ -498,6 +497,7 @@ where
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
             build: BUILD.get().cloned(),
+            version: Some(VERSION.to_string()),
         })
         .await?;
     match reader.next_control().await? {
@@ -879,6 +879,7 @@ mod tests {
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION + 1,
                 build: None,
+                version: None,
             })
             .await
             .unwrap();
@@ -926,6 +927,7 @@ mod tests {
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION.saturating_sub(1),
                 build: None,
+                version: None,
             })
             .await
             .unwrap();
@@ -946,6 +948,7 @@ mod tests {
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
+                version: None,
             })
             .await
             .unwrap();

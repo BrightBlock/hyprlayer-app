@@ -1,9 +1,6 @@
-import { useEffect, useRef } from "react";
-
 import { GlobeIcon } from "@/components/icons";
 import { RAIL_ICON_BASE, railNavClass } from "@/components/ui";
 import { useConnectionStatus } from "@/lib/queries";
-import { useToast } from "@/lib/toast";
 import { openHostsUi } from "./hostsUi";
 
 type Tone = "accent" | "bad" | "warn";
@@ -52,20 +49,6 @@ export function HostIndicator() {
     tone = "accent";
     title = `Server: ${label}`;
   }
-
-  const outdated = connection?.state === "connected" && connection.serverOutdated;
-  const announced = useRef(false);
-  useEffect(() => {
-    if (!outdated || announced.current) return;
-    announced.current = true;
-    useToast
-      .getState()
-      .show(
-        "Server update available",
-        `The Hyprlayer server on ${label ?? "this machine"} is running an older build than this app.`,
-        { tone: "warn", action: { label: "Review", onClick: openHostsUi } },
-      );
-  }, [outdated, label]);
 
   const className = tone
     ? `${RAIL_ICON_BASE} ${TONE_CLASS[tone]}`

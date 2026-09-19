@@ -89,12 +89,15 @@ SERVER_BIN="$BUILD_DIR/src-tauri/binaries/hyprlayer-server-x86_64-unknown-linux-
 
 step "Rendering hyprlayer-server AUR PKGBUILD + .SRCINFO"
 SERVER_SHA="$(sha256sum "$SERVER_BIN" | awk '{print $1}')"
+# The server package follows the server's own version, not the app's (ADR-0009).
+SERVER_VERSION="$(sed -nE 's/^version = "(.*)"$/\1/p' crates/hyprlayer-server/Cargo.toml)"
+[[ -n "$SERVER_VERSION" ]] || die "no version line in crates/hyprlayer-server/Cargo.toml"
 
 AUR_SERVER_DIR="$BUILD_DIR/aur-server-out"
 rm -rf "$AUR_SERVER_DIR"
 mkdir -p "$AUR_SERVER_DIR"
 cp "$UNIT_SRC" "$AUR_SERVER_DIR/"
-sed -e "s/@VERSION@/$VERSION/g" \
+sed -e "s/@VERSION@/$SERVER_VERSION/g" \
     -e "s/@SHA256_SERVER@/$SERVER_SHA/g" \
     -e "s/@SHA256_UNIT@/$UNIT_SHA/g" \
   packaging/aur/PKGBUILD-server.in > "$AUR_SERVER_DIR/PKGBUILD"

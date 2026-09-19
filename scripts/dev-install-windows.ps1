@@ -225,9 +225,8 @@ fs.writeFileSync("src-tauri/tauri.devinstall.conf.json", JSON.stringify({
   bundle: { createUpdaterArtifacts: false },
 }, null, 2) + "\n");
 
-// hyprlayer-server reports env!("CARGO_PKG_VERSION"), which Phase 7 keys the
-// remote install directory and its content check on. Without this a dev build
-// claims to be the release it descends from.
+// The app reports the workspace version; without this a dev build claims to be
+// the release it descends from.
 const manifest = fs.readFileSync("Cargo.toml", "utf8");
 // Exactly one, not at least one: `replace` without /g rewrites the *first*
 // match, so a second `version = "..."` at column 0 would silently send this
@@ -239,6 +238,21 @@ if (hits.length !== 1) {
 fs.writeFileSync(
   "Cargo.toml",
   manifest.replace(/^version = ".*"$/m, 'version = "' + process.env.BUILD_VERSION + '"'),
+);
+
+// The server is versioned apart from the app, and its version keys the remote
+// install directory: without the same +dev suffix it collides with the release.
+const serverToml = "crates/hyprlayer-server/Cargo.toml";
+const server = fs.readFileSync(serverToml, "utf8");
+const serverHits = server.match(/^version = ".*"$/gm) || [];
+if (serverHits.length !== 1) {
+  throw new Error("expected exactly one version line in " + serverToml + ", found " + serverHits.length);
+}
+const plus = process.env.BUILD_VERSION.indexOf("+");
+const suffix = plus === -1 ? "" : process.env.BUILD_VERSION.slice(plus);
+fs.writeFileSync(
+  serverToml,
+  server.replace(/^version = "([^"+]*)[^"]*"$/m, (_, base) => 'version = "' + base + suffix + '"'),
 );
 '@
 

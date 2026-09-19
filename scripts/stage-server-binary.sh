@@ -37,7 +37,7 @@ REMOTE_DIR="hyprlayer-server-stage"
 FORCE=0
 FROM_HEAD=0
 VERSION_OVERRIDE=""
-# dev-install-*.sh all build out of this clone, rewriting its Cargo.toml to
+# dev-install-*.sh all build out of this clone, stamping the server's version
 # `<version>+dev.<sha>` first — so it records what the installed app asks for.
 DEV_CLONE="${HYPRLAYER_DEV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/hyprlayer-dev}/src"
 DEV_IDENTIFIER="ai.brightblock.hyprlayer.main"
@@ -60,7 +60,7 @@ usage() {
     '                        may read an empty cache.' \
     '  --version <v>         key the cache at this version for every identifier' \
     '                        instead of the one each app reports. Default: the' \
-    "                        tree's Cargo.toml version, except for" \
+    "                        tree's hyprlayer-server version, except for" \
     '                        ai.brightblock.hyprlayer.main, which is read from' \
     '                        the dev-install build clone.' \
     '  --force               rebuild even when the cache already holds it' \
@@ -89,9 +89,13 @@ done
 
 manifest_version() { sed -n 's/^version = "\(.*\)"$/\1/p' "$1" | head -n1; }
 
+# The server is versioned apart from the app (ADR-0009), and its version is what
+# the client keys the cache on.
+SERVER_MANIFEST="crates/hyprlayer-server/Cargo.toml"
+
 # What this tree builds, so what the builder's binary must report.
-VERSION="$(manifest_version Cargo.toml)"
-[[ -n "$VERSION" ]] || die "could not read the workspace version from Cargo.toml"
+VERSION="$(manifest_version "$SERVER_MANIFEST")"
+[[ -n "$VERSION" ]] || die "could not read the server version from $SERVER_MANIFEST"
 
 # What the app asks for, which is a different question: a dev-install build
 # carries `+dev.<sha>`, so it reads a cache directory this tree's version never
@@ -100,8 +104,8 @@ cache_version_for() {
   local built
   if [[ -n "$VERSION_OVERRIDE" ]]; then
     printf '%s' "$VERSION_OVERRIDE"
-  elif [[ "$1" == "$DEV_IDENTIFIER" && -f "$DEV_CLONE/Cargo.toml" ]] \
-    && built="$(manifest_version "$DEV_CLONE/Cargo.toml")" && [[ -n "$built" ]]; then
+  elif [[ "$1" == "$DEV_IDENTIFIER" && -f "$DEV_CLONE/$SERVER_MANIFEST" ]] \
+    && built="$(manifest_version "$DEV_CLONE/$SERVER_MANIFEST")" && [[ -n "$built" ]]; then
     # Only the build metadata may differ: a clone left on another release builds
     # a server whose protocol this tree's bytes need not speak.
     if [[ "${built%%+*}" == "${VERSION%%+*}" ]]; then

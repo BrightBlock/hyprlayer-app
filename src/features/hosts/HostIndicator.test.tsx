@@ -26,14 +26,14 @@ afterEach(() => {
 
 describe("HostIndicator", () => {
   it("opens the deliberate hosts dialog mode on click", () => {
-    mockStatus({ state: "connected", host: null, serverVersion: 3, serverOutdated: false, error: null });
+    mockStatus({ state: "connected", host: null, serverVersion: 3, serverRelease: null, serverOutdated: false, error: null });
     render(<HostIndicator />);
     fireEvent.click(screen.getByRole("button", { name: "Server: this machine" }));
     expect(useHostsUiStore.getState().open).toBe(true);
   });
 
   it("reads 'Server: this machine' and shows no dot when local and connected", () => {
-    mockStatus({ state: "connected", host: null, serverVersion: 3, serverOutdated: false, error: null });
+    mockStatus({ state: "connected", host: null, serverVersion: 3, serverRelease: null, serverOutdated: false, error: null });
     render(<HostIndicator />);
     const button = screen.getByRole("button", { name: "Server: this machine" });
     expect(button.title).toBe("Server: this machine");
@@ -41,7 +41,7 @@ describe("HostIndicator", () => {
   });
 
   it("names the host and shows a dot when remote and connected", () => {
-    mockStatus({ state: "connected", host: NEXUS, serverVersion: 3, serverOutdated: false, error: null });
+    mockStatus({ state: "connected", host: NEXUS, serverVersion: 3, serverRelease: null, serverOutdated: false, error: null });
     render(<HostIndicator />);
     const button = screen.getByRole("button", { name: "Server: Nexus" });
     expect(button.querySelector("span[aria-hidden]")).not.toBeNull();
@@ -52,7 +52,7 @@ describe("HostIndicator", () => {
       state: "failed",
       host: NEXUS,
       serverVersion: null,
-      serverOutdated: false,
+      serverRelease: null, serverOutdated: false,
       error: { code: "remote_unreachable", message: "Could not reach nexus.", remedy: null },
     });
     render(<HostIndicator />);
@@ -65,7 +65,7 @@ describe("HostIndicator", () => {
       state: "lost",
       host: NEXUS,
       serverVersion: 3,
-      serverOutdated: false,
+      serverRelease: null, serverOutdated: false,
       error: { code: "server_disconnected", message: "The server connection ended.", remedy: null },
     });
     render(<HostIndicator />);

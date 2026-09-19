@@ -30,6 +30,28 @@ else
   echo "⚠ RELEASE_SKIP_CHECKS=1 — skipping the verification gate"
 fi
 
+# The server is versioned apart from the app (ADR-0009): a release ships a new
+# one only when crates/hyprlayer-server's version has no server-v tag yet, and
+# any server-side change since the last one must come with that bump.
+SERVER_VERSION="$(sed -nE 's/^version = "(.*)"$/\1/p' crates/hyprlayer-server/Cargo.toml)"
+[[ -n "$SERVER_VERSION" ]] || { echo "✗ no version line in crates/hyprlayer-server/Cargo.toml"; exit 1; }
+SERVER_TAG="server-v$SERVER_VERSION"
+SERVER_PATHS=(crates/hyprlayer-server crates/hyprlayer-core crates/hyprlayer-models crates/hyprlayer-proto)
+NEW_SERVER=1
+if git rev-parse -q --verify "refs/tags/$SERVER_TAG" >/dev/null; then
+  NEW_SERVER=0
+  if ! git diff --quiet "$SERVER_TAG" HEAD -- "${SERVER_PATHS[@]}"; then
+    echo "✗ server code changed since $SERVER_TAG, but crates/hyprlayer-server is still $SERVER_VERSION."
+    echo "  Bump its version, and raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs"
+    echo "  if this app needs the change. Changed:"
+    git diff --stat "$SERVER_TAG" HEAD -- "${SERVER_PATHS[@]}" | tail -n 5
+    exit 1
+  fi
+  echo "→ hyprlayer-server $SERVER_VERSION unchanged since $SERVER_TAG — no server release"
+else
+  echo "→ hyprlayer-server $SERVER_VERSION is new — this release publishes $SERVER_TAG"
+fi
+
 CUR="$(node -p 'require("./package.json").version')"
 case "$BUMP" in
   patch) NEW=$(awk -F. -v OFS=. '{$3++; print}' <<<"$CUR") ;;
@@ -90,9 +112,11 @@ cargo update -p hyprlayer-app -p hyprlayer-core >/dev/null 2>&1 || true
 git add package.json Cargo.toml Cargo.lock src-tauri/tauri.conf.json changelog.json
 git commit -m "release: v$NEW"
 git tag "v$NEW"
+[[ "$NEW_SERVER" == "1" ]] && git tag "$SERVER_TAG"
 
 echo ""
 echo "✓ Tagged v$NEW."
+[[ "$NEW_SERVER" == "1" ]] && echo "✓ Tagged $SERVER_TAG."
 echo "  Publish (all three):   ./scripts/release-local.sh"
 echo "  Publish (skip Linux):  ./scripts/release-local.sh --no-linux"
 echo "  Publish (mac only):    ./scripts/release-local.sh --mac-only"

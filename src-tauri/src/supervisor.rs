@@ -21,6 +21,7 @@ use crate::client::{self, ConnectError, RpcClient};
 use crate::error::AppError;
 use crate::hosts::{self, Host, Target};
 use crate::provision;
+use crate::server_version::{self, Fit, MIN_SERVER_VERSION, SERVER_VERSION};
 
 const CONNECT_RETRIES: u32 = 10;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -67,8 +68,8 @@ pub fn incompatible_server_detail() -> String {
 }
 
 pub enum Outcome {
-    /// `outdated`: the server answered with a different build from the binary
-    /// this app would start, so a restart would change what it runs.
+    /// `outdated`: the server is older than the one this app ships, so a
+    /// restart would update it. Optional while it meets `MIN_SERVER_VERSION`.
     Connected {
         client: Arc<RpcClient>,
         outdated: bool,
@@ -119,6 +120,15 @@ pub async fn connect(
     let started = Instant::now();
     let outcome = match target {
         Target::Own => match connect_or_spawn(app_config_dir, app_data_dir, app_log_dir).await {
+            Outcome::Connected { client, .. }
+                if server_version::fit(client.server_semver()) == Fit::TooOld =>
+            {
+                log::warn!(
+                    "replacing the running server {}: this app needs {MIN_SERVER_VERSION}",
+                    server_version::describe(client.server_semver())
+                );
+                replace_own_server(client, app_config_dir, app_data_dir, app_log_dir).await
+            }
             Outcome::Connected { client, .. } => {
                 let expected = provision::sha256_file(&server_binary());
                 let outdated = is_outdated(&client, expected.as_deref());
@@ -136,14 +146,15 @@ pub async fn connect(
 fn log_outcome(target: &Target, elapsed: Duration, outcome: &Outcome) {
     match outcome {
         Outcome::Connected { client, outdated } => log::info!(
-            "connected to {} in {elapsed:?}: server protocol {}, build {}{}",
+            "connected to {} in {elapsed:?}: server {}, protocol {}, build {}{}",
             target.name(),
+            server_version::describe(client.server_semver()),
             client.server_version(),
             client
                 .server_build()
                 .map_or("unknown", |build| &build[..build.len().min(12)]),
             if *outdated {
-                ", not the build this app ships"
+                ", older than the server this app ships"
             } else {
                 ""
             }
@@ -168,14 +179,28 @@ fn log_outcome(target: &Target, elapsed: Duration, outcome: &Outcome) {
     }
 }
 
-/// A server from before the build field reports none, which reads as outdated
-/// whenever there is a binary to compare against.
-fn is_outdated(client: &RpcClient, expected: Option<&str>) -> bool {
-    expected.is_some_and(|expected| client.server_build() != Some(expected))
+/// Decided by version, so an app release that leaves the server alone asks
+/// for no restart. Bytes are compared only in debug builds, where `cargo
+/// build` changes the server without changing its version.
+fn is_outdated(client: &RpcClient, expected_build: Option<&str>) -> bool {
+    match server_version::fit(client.server_semver()) {
+        Fit::TooOld | Fit::Older => true,
+        Fit::Current => {
+            cfg!(debug_assertions)
+                && expected_build.is_some_and(|expected| client.server_build() != Some(expected))
+        }
+    }
 }
 
 async fn connect_local_profile(data_dir: &Path, name: &str) -> Outcome {
     let mut error = match client::connect(data_dir).await {
+        Ok(client) if server_version::fit(client.server_semver()) == Fit::TooOld => {
+            AppError::server_unavailable(format!(
+                "The Hyprlayer server for {name} is version {}; this app needs {MIN_SERVER_VERSION} or newer.",
+                server_version::describe(client.server_semver())
+            ))
+        }
+        // Not flagged outdated: this app does not restart another profile's server.
         Ok(client) => return Outcome::connected(client),
         Err(ConnectError::Refused(e)) => AppError::from(e),
         Err(e) => AppError::server_unavailable(format!(
@@ -253,6 +278,7 @@ async fn peer_version(socket_path: &Path) -> Option<u32> {
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
             build: None,
+            version: None,
         })
         .await
         .ok()?;
@@ -376,7 +402,7 @@ async fn ssh_relay_connect(
     // descends from, and a stale one is only caught by the handshake, after
     // connecting (plan Phase 7 §3.2).
     let (provisioning, host_sha) = provision::inspect(host, app_data_dir).await?;
-    if provisioning.state != provision::HostServerState::Ready {
+    let Some(version) = provisioning.usable_version.clone() else {
         let key = format!("{}:{:?}", host.destination, provisioning.state);
         if CONNECT_FAILURES.admit(&key).is_some() {
             log::warn!(
@@ -388,12 +414,15 @@ async fn ssh_relay_connect(
             );
         }
         return Err(AppError::remote_cli_missing(&host.label));
-    }
+    };
+    // The host's hash is of this client's version directory, so it says
+    // nothing about an older one the relay falls back to.
+    let host_sha = host_sha.filter(|_| version == SERVER_VERSION);
 
     let mut cmd = tokio::process::Command::new("ssh");
     hide_console(&mut cmd);
     cmd.arg(&host.destination)
-        .arg(provision::relay_command())
+        .arg(provision::relay_command(&version))
         .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -412,6 +441,15 @@ async fn ssh_relay_connect(
 
     let joined = tokio::io::join(stdout, stdin);
     match RpcClient::connect(joined).await {
+        Ok(client) if server_version::fit(client.server_semver()) == Fit::TooOld => {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
+            Err(AppError::remote_server_outdated(
+                &host.label,
+                &server_version::describe(client.server_semver()),
+                MIN_SERVER_VERSION,
+            ))
+        }
         Ok(client) => Ok((
             client,
             Relay {
@@ -923,6 +961,7 @@ async fn request_shutdown_of_refusing_server(socket_path: &Path) -> std::io::Res
         .write_control(&Control::Hello {
             protocol_version: PROTOCOL_VERSION,
             build: None,
+            version: None,
         })
         .await?;
     let _ = reader.next_control().await?;
@@ -937,6 +976,32 @@ async fn wait_for_socket_gone(socket_path: &Path, attempts: u32, delay: Duration
         tokio::time::sleep(delay).await;
     }
     false
+}
+
+/// Same protocol, below `MIN_SERVER_VERSION`: this app cannot use it, so it
+/// is replaced the way a protocol mismatch is, ending its sessions.
+async fn replace_own_server(
+    client: Arc<RpcClient>,
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+) -> Outcome {
+    let socket_path = socket::socket_path(app_data_dir);
+    if let Err(e) = client.request_shutdown().await {
+        return Outcome::blocked(
+            CANNOT_START,
+            format!(
+                "Could not ask the running Hyprlayer server to step aside: {}\n\n{STOP_THE_SERVER_REMEDY}",
+                e.message
+            ),
+        );
+    }
+    drop(client);
+    if !wait_for_socket_gone(&socket_path, CONNECT_RETRIES, CONNECT_RETRY_DELAY).await {
+        log::error!("the old server did not stop");
+        return Outcome::blocked(CANNOT_START, STOP_THE_SERVER_REMEDY);
+    }
+    spawn_and_connect(app_config_dir, app_data_dir, app_log_dir).await
 }
 
 /// The normal path for every release from here on: shut down the older

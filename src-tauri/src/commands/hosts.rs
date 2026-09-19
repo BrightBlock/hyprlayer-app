@@ -35,8 +35,11 @@ pub struct ConnectionStatus {
     #[specta(optional)]
     pub local_server_name: Option<String>,
     pub server_version: Option<u32>,
-    /// Connected to a server built from different bytes than the one this app
-    /// would start; `restart_server` swaps it.
+    /// The server's release version; `None` when unconnected or from a server
+    /// up to 0.8.2, which does not report one.
+    pub server_release: Option<String>,
+    /// Connected to an older server than this app ships; `restart_server`
+    /// (local) or `update_host_server` (remote) replaces it.
     pub server_outdated: bool,
     /// `Some` for `Failed` and `Lost`.
     pub error: Option<AppError>,
@@ -48,7 +51,7 @@ fn app_config_dir(app: &AppHandle) -> CmdResult<PathBuf> {
         .map_err(|e| AppError::internal(format!("could not resolve the app config directory: {e}")))
 }
 
-fn app_data_dir(app: &AppHandle) -> CmdResult<PathBuf> {
+pub(crate) fn app_data_dir(app: &AppHandle) -> CmdResult<PathBuf> {
     app.path()
         .app_data_dir()
         .map_err(|e| AppError::internal(format!("could not resolve the app data directory: {e}")))
@@ -207,6 +210,22 @@ pub async fn provision_host(
 ) -> CmdResult<()> {
     let data_dir = app_data_dir(&app)?;
     provision::provision(&host, &data_dir, |step| {
+        let _ = on_step.send(step);
+    })
+    .await
+}
+
+/// Moves a host onto this client's server: installs it if absent, then stops
+/// the running one so the reconnect starts it. Ends every session there.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_host_server(
+    app: AppHandle,
+    host: Host,
+    on_step: Channel<ProvisionStep>,
+) -> CmdResult<()> {
+    let data_dir = app_data_dir(&app)?;
+    provision::update(&host, &data_dir, |step| {
         let _ = on_step.send(step);
     })
     .await

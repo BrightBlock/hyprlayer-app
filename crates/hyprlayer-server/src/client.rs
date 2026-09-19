@@ -79,6 +79,7 @@ pub struct RpcClient {
     events: Mutex<Option<mpsc::UnboundedReceiver<RuntimeEvent>>>,
     server_version: u32,
     server_build: Option<String>,
+    server_semver: Option<String>,
 }
 
 impl RpcClient {
@@ -96,6 +97,7 @@ impl RpcClient {
             .write_control(&Control::Hello {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
+                version: None,
             })
             .await?;
         let hello = match tokio::time::timeout(HANDSHAKE_TIMEOUT, reader.next_control()).await {
@@ -114,13 +116,14 @@ impl RpcClient {
                 )))
             }
         };
-        let (server_version, server_build) = match hello {
+        let (server_version, server_build, server_semver) = match hello {
             Some(Control::Hello {
                 protocol_version,
                 build,
+                version,
             }) => {
                 check_version(protocol_version).map_err(ConnectError::Refused)?;
-                (protocol_version, build)
+                (protocol_version, build, version)
             }
             Some(Control::Refused { error }) => return Err(ConnectError::Refused(error)),
             Some(other) => {
@@ -163,6 +166,7 @@ impl RpcClient {
             events: Mutex::new(Some(events_rx)),
             server_version,
             server_build,
+            server_semver,
         }))
     }
 
@@ -176,6 +180,11 @@ impl RpcClient {
 
     pub fn server_build(&self) -> Option<&str> {
         self.server_build.as_deref()
+    }
+
+    /// The server's release version; `None` from servers up to 0.8.2.
+    pub fn server_semver(&self) -> Option<&str> {
+        self.server_semver.as_deref()
     }
 
     /// The server's runtime events, handed out once; the stream ends when the

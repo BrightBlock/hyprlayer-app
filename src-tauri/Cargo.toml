@@ -42,6 +42,7 @@ specta-typescript = "0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 log = "0.4"
 base64 = "0.22"
+semver = "1"
 sha2 = "0.10"
 uuid = { version = "1.23.3", features = ["v4"] }
 # cookie 0.18.1 conflicts with time 0.3.48.

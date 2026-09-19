@@ -27,7 +27,7 @@ import {
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
 import { HostList, LocalServerList, WorkStatus } from "./HostList";
 import { retryConnection } from "./reconnect";
-import { runProvision, STEP_LABEL } from "./serverInstall";
+import { runProvision, runUpdate, SERVER_OUTDATED, STEP_LABEL } from "./serverInstall";
 
 const EMPTY: HostsFile = { hosts: [], active: null };
 
@@ -117,44 +117,77 @@ function ServerInstall({ host, onWork }: { host: Host; onWork: (work: string | n
 }
 
 /**
- * The binary is already in place — bundled beside the app, or pushed to the
- * host by provisioning — so updating is only a restart. It is offered, never
- * done on connect, because it ends every agent and terminal on that server.
+ * Locally the newer binary is already beside the app, so updating is a
+ * restart; a host may need it installed first. Offered, never done on connect,
+ * because it ends every agent and terminal on that server.
  */
-function ServerUpdate({ where, onRestart }: { where: string; onRestart: () => void }) {
+function ServerUpdate({
+  host,
+  connected,
+  where,
+  release,
+  onStarted,
+  onWork,
+}: {
+  host: Host | null;
+  connected: boolean;
+  where: string;
+  release: string | null;
+  onStarted: () => void;
+  onWork: (work: string | null) => void;
+}) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const label = host ? "Update server" : "Restart server";
 
-  async function restart() {
+  async function update() {
     setBusy(true);
     setError(null);
     try {
-      await unwrap(commands.restartServer());
-      onRestart();
-      setConfirming(false);
+      if (host) {
+        setConfirming(false);
+        await runUpdate(host, (step) => onWork(STEP_LABEL[step]));
+        onStarted();
+        // A live connection drops when the server stops, and that drop starts the
+        // reconnect loop; retrying here as well would hold the loop off.
+        if (!connected) {
+          onWork("Connecting");
+          await retryConnection();
+        }
+      } else {
+        await unwrap(commands.restartServer());
+        setConfirming(false);
+        onStarted();
+      }
     } catch (e) {
       setError(e);
     } finally {
       setBusy(false);
+      if (host) onWork(null);
     }
   }
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-ink-dim">
-        The server is running an older build than this app. Restart it to update.
-      </p>
-      <Button variant="primary" onClick={() => setConfirming(true)}>
-        Restart server
+      {/* Blocked, the header's error already names both versions. */}
+      {connected && (
+        <p className="text-sm text-ink-dim">
+          {release ? `The server is running ${release}` : "The server is running an older version"};
+          this app ships a newer one.
+        </p>
+      )}
+      <Button variant="primary" onClick={() => setConfirming(true)} disabled={busy}>
+        {label}
       </Button>
+      {!confirming && <ErrorNote error={error} />}
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}
-        title="Restart the server?"
-        confirmLabel="Restart server"
+        title={host ? "Update the server?" : "Restart the server?"}
+        confirmLabel={label}
         confirmVariant="danger"
-        onConfirm={() => void restart()}
+        onConfirm={() => void update()}
         busy={busy}
         error={error}
         onDismissError={() => setError(null)}
@@ -206,9 +239,11 @@ export function HostsDialog() {
   // `remote_cli_missing` is the one failure provisioning answers — Phase 1 named
   // it as the trigger this phase would give it.
   const showInstall = Boolean(connection?.host) && connection?.error?.code === "remote_cli_missing";
+  const tooOld = Boolean(connection?.host) && connection?.error?.code === SERVER_OUTDATED;
+  const showUpdate = (connection?.state === "connected" && connection.serverOutdated) || tooOld;
   // Its remedy reads "Install it from the Hyprlayer server panel", which is the
   // panel rendered directly below — a call to action pointing at itself.
-  const remedy = connection?.error && !showInstall ? errorRemedy(connection.error) : null;
+  const remedy = connection?.error && !showInstall && !tooOld ? errorRemedy(connection.error) : null;
   const localFailed = blocking && connection?.host === null && !connection?.localServerName;
   const localProfile = file.active ? null : (file.localProfile ?? null);
   const usingLocal = (file.active ?? null) === null && localProfile === null;
@@ -274,8 +309,15 @@ export function HostsDialog() {
 
           {showInstall && connection?.host && <ServerInstall host={connection.host} onWork={setInstallWork} />}
 
-          {connection?.state === "connected" && connection.serverOutdated && (
-            <ServerUpdate where={where} onRestart={requestRestart} />
+          {showUpdate && (
+            <ServerUpdate
+              host={connection?.host ?? null}
+              connected={connection?.state === "connected"}
+              where={where}
+              release={connection?.serverRelease ?? null}
+              onStarted={requestRestart}
+              onWork={setInstallWork}
+            />
           )}
 
           <LocalServerList

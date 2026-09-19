@@ -78,6 +78,18 @@ impl AppError {
         }
     }
 
+    /// The server answered but is older than `MIN_SERVER_VERSION`; its fix
+    /// ends the sessions on it, so it is offered rather than done on connect.
+    pub fn remote_server_outdated(host: &str, running: &str, minimum: &str) -> Self {
+        Self {
+            code: "remote_server_outdated".into(),
+            message: format!(
+                "{host} is running Hyprlayer server {running}; this app needs {minimum} or newer."
+            ),
+            remedy: Some("Update it from the Hyprlayer server panel.".into()),
+        }
+    }
+
     /// The host runs something none of ADR-0008's three targets covers, so
     /// there is no binary to install on it (plan Phase 7 §2).
     pub fn remote_platform_unsupported(host: &str, uname: &str) -> Self {
