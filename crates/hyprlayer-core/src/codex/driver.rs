@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::protocol::{
     approval_reply, decode_line, question_reply, CodexPosture, CollabMode, Incoming, Translator,
 };
-use crate::agent::KillFlag;
+use crate::agent::{rewind_unsupported, KillFlag};
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
 use hyprlayer_models::session::QuestionAnswers;
@@ -23,17 +23,21 @@ const EVENT_CHANNEL_CAP: usize = 1024;
 const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 const REQUEST_USER_INPUT_CONFIG: &str = "tools.experimental_request_user_input.enabled=true";
+// Opt-in since codex 0.152; without it `turn/plan/updated` never fires.
+const UPDATE_PLAN_CONFIG: &str = "tools.update_plan.enabled=true";
 // Personal custom agents are still guarded independently of the stable
 // multi-agent runtime in Codex 0.149.x. Set the documented agent registry gate
 // so installed persona TOMLs are available in every Hyprlayer Codex session.
 const AGENTS_ENABLED_CONFIG: &str = "agents.enabled=true";
-const APP_SERVER_ARGS: [&str; 6] = [
+const APP_SERVER_ARGS: [&str; 8] = [
     "app-server",
     "--stdio",
     "-c",
     AGENTS_ENABLED_CONFIG,
     "-c",
     REQUEST_USER_INPUT_CONFIG,
+    "-c",
+    UPDATE_PLAN_CONFIG,
 ];
 
 fn initialize_params() -> Value {
@@ -79,6 +83,7 @@ pub struct CodexDriver {
     pending: PendingReplies,
     state: Arc<StdMutex<Translator>>,
     killer: Killer,
+    paginated: bool,
 }
 
 impl CodexDriver {
@@ -155,11 +160,12 @@ impl CodexDriver {
             pending,
             state,
             killer: Killer { pid },
+            paginated: false,
         };
 
         let started = driver.handshake(&config).await;
         drop(startup);
-        let (thread_id, model) = match started {
+        let (thread_id, model, paginated) = match started {
             Ok(v) => v,
             Err(e) => {
                 driver.kill();
@@ -170,6 +176,7 @@ impl CodexDriver {
         let driver = Self {
             thread_id,
             thread_model: StdMutex::new(model.clone()),
+            paginated,
             ..driver
         };
 
@@ -181,7 +188,7 @@ impl CodexDriver {
         Ok((driver, primary_rx))
     }
 
-    async fn handshake(&self, config: &SpawnConfig) -> Result<(String, Option<String>)> {
+    async fn handshake(&self, config: &SpawnConfig) -> Result<(String, Option<String>, bool)> {
         self.request("initialize", initialize_params()).await?;
         self.notify("initialized", json!({}))?;
 
@@ -221,7 +228,69 @@ impl CodexDriver {
             .and_then(Value::as_str)
             .map(str::to_string)
             .or_else(|| config.model.clone());
-        Ok((thread_id, model))
+        let paginated = is_paginated(&result);
+        if paginated {
+            let turn_ids = self
+                .thread_turn_ids(&thread_id, &result, config.prior_user_turns)
+                .await;
+            if let Ok(mut s) = self.state.lock() {
+                s.turn_ids = turn_ids;
+            }
+        }
+        Ok((thread_id, model, paginated))
+    }
+
+    /// The thread's turn ids, oldest first, or `None` when they do not match the
+    /// session's user turns one for one.
+    async fn thread_turn_ids(
+        &self,
+        thread_id: &str,
+        response: &Value,
+        prior_user_turns: usize,
+    ) -> Option<Vec<String>> {
+        let window = turn_ids_in(response.get("thread").and_then(|t| t.get("turns")));
+        let mut seen: HashSet<String> = window.iter().cloned().collect();
+        let mut older = Vec::new();
+        let mut cursor = response
+            .get("turnsBackwardsCursor")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        while let Some(current) = cursor.take() {
+            let params = json!({
+                "threadId": thread_id,
+                "cursor": current,
+                "sortDirection": "desc",
+                "itemsView": "notLoaded",
+            });
+            let page = match self.request("thread/turns/list", params).await {
+                Ok(page) => page,
+                Err(e) => {
+                    tracing::warn!("codex thread {thread_id}: its turns could not be listed: {e}");
+                    return None;
+                }
+            };
+            older.extend(
+                turn_ids_in(page.get("data"))
+                    .into_iter()
+                    .filter(|id| seen.insert(id.clone())),
+            );
+            cursor = page
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .filter(|next| *next != current)
+                .map(str::to_string);
+        }
+        older.reverse();
+        older.extend(window);
+        if older.len() != prior_user_turns {
+            tracing::info!(
+                "codex thread {thread_id} holds {} turns but the session logged {prior_user_turns}; \
+                 a rewind will not reach the model",
+                older.len()
+            );
+            return None;
+        }
+        Some(older)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
@@ -355,15 +424,22 @@ impl CodexDriver {
     }
 
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {
-        let total = self.state.lock().map(|s| s.user_turns).unwrap_or(0);
-        let num_turns = rollback_count(ordinal, total)?;
-        self.request(
-            "thread/rollback",
-            json!({ "threadId": self.thread_id, "numTurns": num_turns }),
-        )
-        .await?;
+        let (method, params) = {
+            let state = self.state.lock().map_err(|_| rewind_unsupported())?;
+            rewind_request(&self.thread_id, self.paginated, ordinal, &state)?
+        };
+        match self.request(method, params).await {
+            // codex 0.156 removed thread/rollback, which leaves legacy threads
+            // with no model-level rewind.
+            Err(CoreError::OutputParse { detail, .. })
+                if detail.contains("unknown variant `thread/rollback`") =>
+            {
+                return Err(rewind_unsupported());
+            }
+            result => result?,
+        };
         if let Ok(mut s) = self.state.lock() {
-            s.user_turns = ordinal.saturating_sub(1);
+            s.rewound_to(ordinal);
         }
         Ok(())
     }
@@ -524,16 +600,6 @@ fn thread_params(config: &SpawnConfig) -> (&'static str, Value) {
     }
 }
 
-// The oldest installed codex whose generated app-server schema was checked for
-// developerInstructions (0.152.0 and 0.154.0); 0.149.x-0.151.x are unverified.
-const DEVELOPER_INSTRUCTIONS_SINCE: [u64; 3] = [0, 152, 0];
-
-pub fn accepts_developer_instructions(version: Option<&str>) -> bool {
-    version
-        .and_then(crate::process::binaries::parse_semver)
-        .is_some_and(|v| v >= DEVELOPER_INSTRUCTIONS_SINCE)
-}
-
 pub fn config_sets_developer_instructions(config_toml: &str) -> bool {
     toml::from_str::<toml::Table>(config_toml).is_ok_and(|config| {
         config
@@ -569,7 +635,58 @@ fn turn_params(
     params
 }
 
+// A schema default: a thread without the field is legacy.
+fn is_paginated(response: &Value) -> bool {
+    response
+        .get("thread")
+        .and_then(|t| t.get("historyMode"))
+        .and_then(Value::as_str)
+        == Some("paginated")
+}
+
+fn turn_ids_in(turns: Option<&Value>) -> Vec<String> {
+    turns
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|turn| turn.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
+}
+
+// Paginated threads reject thread/rollback, so they revert by turn id.
+fn rewind_request(
+    thread_id: &str,
+    paginated: bool,
+    ordinal: usize,
+    state: &Translator,
+) -> Result<(&'static str, Value)> {
+    if !paginated {
+        let num_turns = rollback_count(ordinal, state.user_turns)?;
+        return Ok((
+            "thread/rollback",
+            json!({ "threadId": thread_id, "numTurns": num_turns }),
+        ));
+    }
+    let ids = state
+        .turn_ids
+        .as_deref()
+        .ok_or_else(|| CoreError::OutputParse {
+            program: "codex".into(),
+            detail: "this thread's turns do not match the session's user turns".into(),
+        })?;
+    let before = &ids[turn_index(ordinal, ids.len())?];
+    Ok((
+        "thread/revert",
+        json!({ "threadId": thread_id, "beforeTurnId": before }),
+    ))
+}
+
 fn rollback_count(ordinal: usize, total: usize) -> Result<u64> {
+    Ok((total - turn_index(ordinal, total)?) as u64)
+}
+
+fn turn_index(ordinal: usize, total: usize) -> Result<usize> {
     let unsupported = |detail: &str| CoreError::OutputParse {
         program: "codex".into(),
         detail: detail.to_string(),
@@ -582,7 +699,7 @@ fn rollback_count(ordinal: usize, total: usize) -> Result<u64> {
             "that turn predates this session's live generation",
         ));
     }
-    Ok((total - ordinal + 1) as u64)
+    Ok(ordinal - 1)
 }
 
 async fn write_loop(
@@ -800,6 +917,188 @@ mod tests {
         assert!(rollback_count(1, 0).is_err());
     }
 
+    fn ids(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    fn tracking(turn_ids: &[&str]) -> Translator {
+        let mut t = Translator::resumed(turn_ids.len());
+        t.turn_ids = Some(ids(turn_ids));
+        t
+    }
+
+    #[test]
+    fn only_a_paginated_history_mode_reverts() {
+        assert!(is_paginated(
+            &json!({ "thread": { "id": "t1", "historyMode": "paginated" } })
+        ));
+        assert!(!is_paginated(
+            &json!({ "thread": { "id": "t1", "historyMode": "legacy" } })
+        ));
+        assert!(!is_paginated(&json!({ "thread": { "id": "t1" } })));
+    }
+
+    #[test]
+    fn a_paginated_rewind_reverts_before_the_ordinals_turn() {
+        let t = tracking(&["a", "b", "c"]);
+        for (ordinal, before) in [(1, "a"), (2, "b"), (3, "c")] {
+            let (method, params) = rewind_request("t1", true, ordinal, &t).unwrap();
+            assert_eq!(method, "thread/revert");
+            assert_eq!(params, json!({ "threadId": "t1", "beforeTurnId": before }));
+        }
+        assert!(rewind_request("t1", true, 0, &t).is_err());
+        assert!(rewind_request("t1", true, 4, &t).is_err());
+    }
+
+    #[test]
+    fn a_legacy_rewind_still_rolls_back_by_count() {
+        let (method, params) = rewind_request("t1", false, 2, &tracking(&["a", "b", "c"])).unwrap();
+        assert_eq!(method, "thread/rollback");
+        assert_eq!(params, json!({ "threadId": "t1", "numTurns": 2 }));
+
+        let (method, params) = rewind_request("t1", false, 2, &Translator::resumed(5)).unwrap();
+        assert_eq!(method, "thread/rollback");
+        assert_eq!(params, json!({ "threadId": "t1", "numTurns": 4 }));
+    }
+
+    #[test]
+    fn a_paginated_thread_without_aligned_turn_ids_does_not_revert() {
+        assert!(rewind_request("t1", true, 1, &Translator::resumed(3)).is_err());
+    }
+
+    fn fake_driver(paginated: bool, state: Translator) -> (CodexDriver, FakeCodex) {
+        let (stdin_tx, requests) = mpsc::unbounded_channel();
+        let pending: PendingReplies = Arc::new(StdMutex::new(HashMap::new()));
+        let driver = CodexDriver {
+            thread_id: "t1".into(),
+            stdin_tx,
+            events: broadcast::channel(8).0,
+            rpc_seq: AtomicU64::new(1),
+            model: StdMutex::new(None),
+            effort: StdMutex::new(None),
+            collab_mode: StdMutex::new(None),
+            thread_model: StdMutex::new(None),
+            stderr_ring: Arc::new(StdMutex::new(Vec::new())),
+            kill_flag: Arc::new(KillFlag::default()),
+            pending: pending.clone(),
+            state: Arc::new(StdMutex::new(state)),
+            killer: Killer { pid: None },
+            paginated,
+        };
+        (driver, FakeCodex { requests, pending })
+    }
+
+    struct FakeCodex {
+        requests: mpsc::UnboundedReceiver<String>,
+        pending: PendingReplies,
+    }
+
+    impl FakeCodex {
+        async fn answer(
+            &mut self,
+            method: &str,
+            reply: std::result::Result<Value, String>,
+        ) -> Value {
+            let line = self.requests.recv().await.expect("a request");
+            let request: Value = serde_json::from_str(line.trim()).unwrap();
+            assert_eq!(request["method"], json!(method));
+            let id = request["id"].as_u64().unwrap();
+            let waiter = self.pending.lock().unwrap().remove(&id).unwrap();
+            waiter.send(reply).unwrap();
+            request["params"].clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_revert_forgets_the_dropped_turns() {
+        let (driver, mut codex) = fake_driver(true, tracking(&["a", "b", "c"]));
+        let (rewound, params) = tokio::join!(
+            driver.rewind_to_ordinal(2),
+            codex.answer("thread/revert", Ok(json!({ "thread": { "id": "t1" } })))
+        );
+        rewound.unwrap();
+        assert_eq!(params["beforeTurnId"], json!("b"));
+        let state = driver.state.lock().unwrap();
+        assert_eq!(state.turn_ids, Some(ids(&["a"])));
+        assert_eq!(state.user_turns, 1);
+    }
+
+    #[tokio::test]
+    async fn a_refused_revert_keeps_the_turns() {
+        let (driver, mut codex) = fake_driver(true, tracking(&["a", "b"]));
+        let (rewound, _) = tokio::join!(
+            driver.rewind_to_ordinal(1),
+            codex.answer("thread/revert", Err("thread not found: t1".into()))
+        );
+        assert!(rewound.is_err());
+        assert_eq!(
+            driver.state.lock().unwrap().turn_ids,
+            Some(ids(&["a", "b"]))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_removed_rollback_reads_as_an_unsupported_rewind() {
+        let (driver, mut codex) = fake_driver(false, Translator::resumed(3));
+        // codex 0.156.0-alpha.7's reply, abridged.
+        let removed = "Invalid request: unknown variant `thread/rollback`, expected one of \
+                       `initialize`, `thread/start`";
+        let (rewound, params) = tokio::join!(
+            driver.rewind_to_ordinal(1),
+            codex.answer("thread/rollback", Err(removed.into()))
+        );
+        assert_eq!(params["numTurns"], json!(3));
+        match rewound {
+            Err(CoreError::OutputParse { detail, .. }) => {
+                assert_eq!(
+                    detail,
+                    "conversation rewind is not supported by this harness"
+                )
+            }
+            other => panic!("expected the unsupported-rewind error, got {other:?}"),
+        }
+        assert_eq!(driver.state.lock().unwrap().user_turns, 3);
+    }
+
+    #[tokio::test]
+    async fn a_resume_seeds_turn_ids_from_its_window_then_older_pages() {
+        let (driver, mut codex) = fake_driver(true, Translator::default());
+        let resumed = json!({
+            "thread": { "id": "t1", "historyMode": "paginated", "turns": [{ "id": "c" }, { "id": "d" }] },
+            "turnsBackwardsCursor": "at-d",
+        });
+        let pages = async {
+            let first = codex
+                .answer(
+                    "thread/turns/list",
+                    Ok(json!({ "data": [{ "id": "d" }, { "id": "c" }, { "id": "b" }], "nextCursor": "at-b" })),
+                )
+                .await;
+            assert_eq!(first["cursor"], json!("at-d"));
+            assert_eq!(first["sortDirection"], json!("desc"));
+            let second = codex
+                .answer(
+                    "thread/turns/list",
+                    Ok(json!({ "data": [{ "id": "a" }], "nextCursor": null })),
+                )
+                .await;
+            assert_eq!(second["cursor"], json!("at-b"));
+        };
+        let (seeded, ()) = tokio::join!(driver.thread_turn_ids("t1", &resumed, 4), pages);
+        assert_eq!(seeded, Some(ids(&["a", "b", "c", "d"])));
+    }
+
+    #[tokio::test]
+    async fn a_resumed_thread_that_disagrees_with_the_log_keeps_no_turn_ids() {
+        let (driver, _codex) = fake_driver(true, Translator::default());
+        let resumed = json!({ "thread": { "id": "t1", "turns": [{ "id": "a" }, { "id": "b" }] } });
+        assert_eq!(driver.thread_turn_ids("t1", &resumed, 3).await, None);
+        assert_eq!(
+            driver.thread_turn_ids("t1", &resumed, 2).await,
+            Some(ids(&["a", "b"]))
+        );
+    }
+
     #[test]
     fn unmodelled_server_requests_are_declined_not_ignored() {
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -819,7 +1118,7 @@ mod tests {
     }
 
     #[test]
-    fn app_server_args_enable_the_user_input_tool() {
+    fn app_server_args_enable_the_user_input_and_plan_tools() {
         assert_eq!(
             APP_SERVER_ARGS,
             [
@@ -828,7 +1127,9 @@ mod tests {
                 "-c",
                 "agents.enabled=true",
                 "-c",
-                "tools.experimental_request_user_input.enabled=true"
+                "tools.experimental_request_user_input.enabled=true",
+                "-c",
+                "tools.update_plan.enabled=true"
             ]
         );
     }
@@ -908,16 +1209,6 @@ mod tests {
             ..spawn_config(PermissionMode::Plan, Some("t1"), None)
         };
         assert!(thread_params(&resume).1.get("ephemeral").is_none());
-    }
-
-    #[test]
-    fn accepts_developer_instructions_from_0_152() {
-        for version in ["0.152.0", "0.154.0"] {
-            assert!(accepts_developer_instructions(Some(version)), "{version}");
-        }
-        for version in [Some("0.151.9"), Some("0.149.1"), None, Some("garbage")] {
-            assert!(!accepts_developer_instructions(version), "{version:?}");
-        }
     }
 
     #[test]

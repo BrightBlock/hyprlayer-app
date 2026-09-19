@@ -51,7 +51,7 @@ impl BinaryKind {
         match self {
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
             BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
-            BinaryKind::Codex => Some(("0.149.0", [0, 149, 0])),
+            BinaryKind::Codex => Some(("0.155.1", [0, 155, 1])),
             _ => None,
         }
     }
@@ -449,7 +449,7 @@ async fn probe_version(path: &PathBuf) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-pub(crate) fn parse_semver(s: &str) -> Option<[u64; 3]> {
+fn parse_semver(s: &str) -> Option<[u64; 3]> {
     let core = s.trim_start_matches('v').split(['-', '+']).next()?;
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -544,13 +544,13 @@ mod tests {
     #[test]
     fn codex_version_floor_still_flags_too_old() {
         assert_eq!(
-            state_for(BinaryKind::Codex, Some("0.148.0")),
+            state_for(BinaryKind::Codex, Some("0.155.0")),
             BinaryState::TooOld {
-                min: "0.149.0".into()
+                min: "0.155.1".into()
             }
         );
         assert_eq!(
-            state_for(BinaryKind::Codex, Some("0.149.0")),
+            state_for(BinaryKind::Codex, Some("0.155.1")),
             BinaryState::Ok
         );
     }

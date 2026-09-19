@@ -38,7 +38,7 @@ things:
 |---|---|---|
 | A memory view in the workstream sidebar | you | `listProjectMemory(workstreamId)` |
 | Edit mode for an existing memory file | you | `saveProjectMemoryFile(workstreamId, name, content, baseMtimeMs)` |
-| The index as codex `developerInstructions` | codex chat tabs on codex-cli 0.152.0 or newer | the codex arm of `SessionService::spawn_driver` |
+| The index as codex `developerInstructions` | codex chat tabs | the codex arm of `SessionService::spawn_driver` |
 
 Both commands carry a workstream id and at most a bare file name. The server
 resolves the directory on its own machine, so no path from the client reaches
@@ -148,9 +148,7 @@ enables it, writes after a turn ends, which affects freshness below.
 
 ### A codex tab launches
 
-`spawn_driver`'s codex arm skips memory unless the codex binary reports
-0.152.0 or newer, the oldest version whose generated app-server schema has the
-field. `memory_instructions` then:
+`spawn_driver`'s codex arm calls `memory_instructions`, which:
 
 1. calls `project_memory` for the workstream, and gives up on a `mismatch`;
 2. gives up if `<codex_home>/config.toml` sets a top-level string
@@ -187,8 +185,8 @@ then counting them in the rollout, codex's per-thread log under
 | Does a thread value merge with `developer_instructions` in `config.toml`? | No, it replaces it. The model refused to quote its instructions, so this answer rests on the rollout alone: with memory sent, the config sentinel never reached the thread (0), and a control thread without memory received it (1) | withholds memory when `config.toml` sets the key, re-checked live (config sentinel 1, no memory message) |
 
 The floor check ran codex-cli 0.152.0 for delivery on `thread/start` only, and
-it named the sentinel. The checks skipped 0.149.0 to 0.151.x, which the app
-otherwise accepts (ADR-0007); those versions get no memory.
+it named the sentinel. No version gate remains: the field is in the generated
+schema from 0.149.1, below the app's codex floor of 0.155.1 (ADR-0007).
 
 The preamble asks codex not to write. The sandbox `approval_posture` picks for
 each permission mode decides whether it can:
@@ -347,8 +345,8 @@ B.
 - **A codex `developer_instructions` under a `[profiles.*]` table.** hyprlayer
   detects only the top-level key. The checks didn't measure whether a thread
   value replaces a profile's value the way it replaces the top-level one.
-- **Codex 0.149.0 to 0.151.x, OpenCode, the multiplexer's non-Claude engines,
-  and title generation.** None of them gets memory.
+- **OpenCode, the multiplexer's non-Claude engines, and title generation.** None
+  of them gets memory.
 - **Codex writing memory.** That would need the directory in `writable_roots`
   and a policy for concurrent writes with Claude.
 - **Creating or deleting memory files from the app, and a filesystem watcher on
@@ -385,8 +383,8 @@ B.
 |---|---|
 | Key, root, `autoMemoryDirectory`, index bounds, listing, name check, codex preamble | `crates/hyprlayer-core/src/claude/memory.rs` |
 | `project_memory`, `save_project_memory_file` | `crates/hyprlayer-core/src/runtime/workstreams.rs` |
-| The codex version gate and `memory_instructions` | `crates/hyprlayer-core/src/runtime/sessions/service.rs` |
-| `thread_params`, `accepts_developer_instructions`, `config_sets_developer_instructions` | `crates/hyprlayer-core/src/codex/driver.rs` |
+| `memory_instructions` | `crates/hyprlayer-core/src/runtime/sessions/service.rs` |
+| `thread_params`, `config_sets_developer_instructions` | `crates/hyprlayer-core/src/codex/driver.rs` |
 | Codex sandbox and approval per permission mode | `crates/hyprlayer-core/src/codex/protocol.rs` |
 | Managed settings path per OS | `crates/hyprlayer-core/src/env.rs` |
 | `ListProjectMemory`, `SaveProjectMemoryFile` | `crates/hyprlayer-server/src/rpc.rs`, `crates/hyprlayer-server/src/dispatch.rs` |

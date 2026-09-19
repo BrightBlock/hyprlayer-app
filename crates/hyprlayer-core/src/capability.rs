@@ -74,11 +74,11 @@ pub fn codex_posture(stage: Stage, mode: PermissionMode) -> CodexPosture {
             posture.network_access = false;
         }
         // Commit's contract is "commit, but never push without a yes." Claude
-        // enforces it with a mode-independent deny of `git push`. Codex has no
-        // per-command deny, so the closest equivalent is to require approval
-        // before *any* command runs — a push included — even under AcceptEdits or
-        // Bypass, which would otherwise auto-run it. The push still goes through
-        // once the user approves; it just cannot happen silently.
+        // leaves `git push` off its allow list, so Default mode asks first. Codex
+        // has no per-command lists, so the closest equivalent is to require
+        // approval before *any* command runs — a push included — even under
+        // AcceptEdits or Bypass, which would otherwise auto-run it. The push still
+        // goes through once the user approves; it just cannot happen silently.
         Stage::Commit => {
             posture.approval_policy = "untrusted";
             posture.sandbox = "workspace-write";

@@ -11,8 +11,7 @@ use crate::claude::{
     memory, ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig,
 };
 use crate::codex::{
-    accepts_developer_instructions, config_sets_developer_instructions, CodexDriver, CollabMode,
-    SpawnConfig as CodexSpawnConfig,
+    config_sets_developer_instructions, CodexDriver, CollabMode, SpawnConfig as CodexSpawnConfig,
 };
 use crate::error::{CoreError, Result};
 use crate::opencode::runtime::OpenCodeDriver;
@@ -689,18 +688,7 @@ impl SessionService<'_> {
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
                 env.extend(self.runtime.environment.overlay_env());
 
-                let codex_version = self
-                    .runtime
-                    .binaries
-                    .status(BinaryKind::Codex)
-                    .await
-                    .version;
-                let developer_instructions =
-                    if accepts_developer_instructions(codex_version.as_deref()) {
-                        self.memory_instructions(&session.workstream_id).await
-                    } else {
-                        None
-                    };
+                let developer_instructions = self.memory_instructions(&session.workstream_id).await;
 
                 let resume_thread = resume
                     .then(|| session.provider_session_id.clone())
@@ -739,6 +727,11 @@ impl SessionService<'_> {
                     developer_instructions,
                 })
                 .await?;
+                // codex 0.156+ resumes a thread in its saved plan mode, and a
+                // relaunch never runs phase two to leave it.
+                if driver.observed_collab_mode().as_deref() == Some("plan") {
+                    driver.set_collab_mode(Some(CollabMode::Default));
+                }
                 let driver: Arc<dyn AgentDriver> = Arc::new(driver);
                 Ok((driver, rx, Some(permission_mode)))
             }

@@ -44,6 +44,9 @@ pub(crate) async fn run_followup(
                 tracing::warn!(
                     "session {session_id}: follow-up abandoned after missing {n} events"
                 );
+                if matches!(followup, Followup::CodexExecute(_)) {
+                    driver.set_collab_mode(Some(CollabMode::Default));
+                }
                 return;
             }
             Err(broadcast::error::RecvError::Closed) => return,
@@ -66,6 +69,8 @@ pub(crate) async fn run_followup(
                 tracing::info!(
                     "session {session_id}: phase one ended with status {status:?}; phase two skipped"
                 );
+                // Plan mode is sticky: the user's next turn would run in it too.
+                driver.set_collab_mode(Some(CollabMode::Default));
                 return;
             }
             let observed = driver.observed_collab_mode();

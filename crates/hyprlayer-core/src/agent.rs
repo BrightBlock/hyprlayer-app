@@ -42,6 +42,13 @@ impl KillFlag {
     }
 }
 
+pub(crate) fn rewind_unsupported() -> CoreError {
+    CoreError::OutputParse {
+        program: "agent".into(),
+        detail: "conversation rewind is not supported by this harness".into(),
+    }
+}
+
 pub trait AgentDriver: Send + Sync {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
@@ -79,12 +86,7 @@ pub trait AgentDriver: Send + Sync {
         &'a self,
         _ordinal: usize,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async {
-            Err(CoreError::OutputParse {
-                program: "agent".into(),
-                detail: "conversation rewind is not supported by this harness".into(),
-            })
-        })
+        Box::pin(async { Err(rewind_unsupported()) })
     }
 
     fn kill(&self);

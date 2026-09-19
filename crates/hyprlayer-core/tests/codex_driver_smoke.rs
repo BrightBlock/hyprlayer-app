@@ -219,7 +219,63 @@ async fn rewind_to_ordinal_truncates_model_memory() {
     driver
         .rewind_to_ordinal(2)
         .await
-        .expect("codex should accept the rollback");
+        .expect("codex should accept the rewind");
+
+    let recalled = run_turn(
+        &driver,
+        &mut events,
+        "Which of ALPHA, BRAVO, CHARLIE did I ask you to remember? List only those you were told.",
+    )
+    .await;
+    println!("recalled: {recalled}");
+    driver.kill();
+
+    let recalled = recalled.to_uppercase();
+    assert!(
+        recalled.contains("ALPHA"),
+        "turn 1 should survive: {recalled:?}"
+    );
+    assert!(
+        !recalled.contains("BRAVO") && !recalled.contains("CHARLIE"),
+        "the rewound turns should be forgotten: {recalled:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn rewind_after_a_resume_reverts_the_seeded_turns() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan))
+            .await
+            .expect("spawn codex app-server");
+    run_turn(&driver, &mut events, "Remember the word ALPHA. Reply: ok.").await;
+    run_turn(&driver, &mut events, "Remember the word BRAVO. Reply: ok.").await;
+    let thread = driver.thread_id().to_string();
+    driver.kill();
+    while !matches!(
+        events.recv().await,
+        Ok(SessionEvent::Exited { .. }) | Err(_)
+    ) {}
+
+    let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
+        resume: Some(thread),
+        prior_user_turns: 2,
+        ..persisted_config(codex, PermissionMode::Plan)
+    })
+    .await
+    .expect("resume the thread");
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember the word CHARLIE. Reply: ok.",
+    )
+    .await;
+
+    driver
+        .rewind_to_ordinal(2)
+        .await
+        .expect("codex should revert to a turn from before the resume");
 
     let recalled = run_turn(
         &driver,

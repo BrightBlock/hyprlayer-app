@@ -2,7 +2,9 @@
 
 **Status:** accepted · 2026-08-26 · amended 2026-08-26 (codex's structured question
 tool is enabled and reachable; Commit, Plan, and Research run two-phase on codex,
-and Research gains a posture of its own)
+and Research gains a posture of its own) · amended 2026-09-19 (codex floor raised to
+0.155.1: paginated threads rewind with `thread/revert`, the planning tool is switched
+on, and a skipped phase two leaves plan mode; Claude's Commit never denied `git push`)
 
 ## Decision
 
@@ -13,9 +15,10 @@ primitives, so the mapping lives in one place: `crates/hyprlayer-core/src/capabi
 
 `capability::launch_policy(harness, stage, requested_mode) -> LaunchPolicy` is the
 single point that lowers `(harness, stage)` onto the primitive a driver
-understands. `launch_session` (`src-tauri/src/commands/sessions.rs`) is a thin
-consumer: it destructures the variant for the harness it is spawning and passes
-those fields straight to the driver.
+understands. `SessionService::spawn_driver`
+(`crates/hyprlayer-core/src/runtime/sessions/service.rs`) is a thin consumer: it
+destructures the variant for the harness it is spawning and passes those fields
+straight to the driver.
 
 | Harness | Primitive it enforces | Lowering |
 |---|---|---|
@@ -49,8 +52,9 @@ Two related, harness-aware seams sit alongside it:
 - **`CodexPosture`** (`crates/hyprlayer-core/src/codex/protocol.rs`) is codex's
   guardrail primitive — `approval_policy` + `sandbox` + `network_access`. It is
   resolved once, at launch, into `CodexDriver::SpawnConfig`; a mid-session
-  permission-mode change kills and relaunches (`sessions.rs`), so there is no
-  second path to keep in sync.
+  permission-mode change kills and relaunches (`ResumeSession` in
+  `crates/hyprlayer-server/src/streams.rs`), so there is no second path to keep in
+  sync.
 
 ## Consequences
 
@@ -69,34 +73,58 @@ Two related, harness-aware seams sit alongside it:
 
 - **Two-phase stages on codex.** `pipeline::codex_phase_two(harness, stage, bodies)`
   is the single predicate deciding whether a stage runs as collaborate-then-execute,
-  and `run_followup` (`src-tauri/src/commands/sessions.rs`) is the single
-  orchestrator, shared with Ship. Three stages qualify: **Commit** (review and ask,
-  then commit and maybe push), **Plan**, and **Research** (collaborate and ask, then
-  write the document). Commit two-phases only when its built-in body is in play — a
-  user's custom body owns its turn — while Plan and Research have no custom-body
-  path at all, so they always two-phase.
+  and `run_followup` (`crates/hyprlayer-core/src/runtime/sessions/followup.rs`) is
+  the single orchestrator, shared with Ship. Three stages qualify: **Commit**
+  (review and ask, then commit and maybe push), **Plan**, and **Research**
+  (collaborate and ask, then write the document). Commit two-phases only when its
+  built-in body is in play — a user's custom body owns its turn — while Plan and
+  Research have no custom-body path at all, so they always two-phase.
 
   The codex arm deliberately diverges from Ship's: it fires only after a turn whose
   `turn_status` parses to exactly `TurnStatus::Completed`, because its follow-up is
   destructive where Ship's only writes a PR description. Codex reports an
-  interrupted turn as `"interrupted"` (verified on 0.149.1), but the check demands
-  an exact `Completed` rather than excluding known-bad statuses, so an absent or
-  unrecognised status fails safe too. Each set-mode-then-send pair runs under the
-  session op-lock `send_user_message` already takes, so a message typed mid-flight
-  cannot consume the one-shot collaboration mode.
+  interrupted turn as `"interrupted"` (verified on 0.149.1 and 0.155.1), but the
+  check demands an exact `Completed` rather than excluding known-bad statuses, so an
+  absent or unrecognised status fails safe too. Each set-mode-then-send pair runs
+  under the session op-lock `send_user_message` already takes, so a message typed
+  mid-flight cannot consume the one-shot collaboration mode.
+
+  A phase two that never runs still has to leave plan mode, because the mode
+  outlives the turn: on 0.155.1, after an interrupted Commit phase one, the user's
+  next turn ran in plan mode and codex refused to write. So a skipped or abandoned
+  codex follow-up arms `mode: "default"` for the next user turn. A relaunch never
+  re-arms a follow-up, so a resume that reports `collaborationMode: plan` arms the
+  same; only 0.156+ restores and reports the saved mode.
 
   Inherited from the Ship precedent, and unchanged: no timeout, no re-arming after
   a kill or `resume_session`, the phase-two user message is persisted but not pushed
   to the live channel (it appears on reload), and a user interjecting while the first
   turn is in flight can make the waiter fire on the wrong `TurnDone`.
 
-- **Version floor: codex-cli 0.149.** `-c` on `app-server`, `experimentalApi`, and
-  `collaborationMode` were all verified against 0.149.1. There is no runtime version
-  gate: a codex too old to accept `-c` fails at spawn with the existing exit
-  diagnostics. `codex/probe.rs`'s argv is deliberately *not* given the flag — it
-  needs no tool and is not the floor check — so Settings → Binaries can report a
-  healthy codex whose sessions would fail at spawn. Named here so nobody "fixes"
-  that inconsistency.
+- **Version floor: codex-cli 0.155.1.** Codex has created threads with
+  `historyMode: "paginated"` since 0.151, and 0.155.1 rejects `thread/rollback` on
+  them (`-32600 "paginated threads do not support thread/rollback"`), so a rewind
+  follows the thread's mode:
+
+  - **Paginated** threads rewind with `thread/revert {threadId, beforeTurnId}`,
+    which drops that turn and every later one. The driver records each root turn
+    id from `turn/started` and, on resume, seeds them from `thread.turns` and
+    `thread/turns/list`; ordinal *n* reverts before the *n*th. When the seeded
+    count disagrees with the session's logged user turns (a rewind that never
+    reached the model, say), no id can be trusted and the rewind stays app-side.
+  - **Legacy** threads, from older codex or with no `historyMode`, keep
+    `thread/rollback`'s turn count. 0.156 removes the method, and its "unknown
+    variant" error maps to the harness's "rewind is not supported", so the app log
+    is truncated and the session relaunched without a model-level rewind.
+
+  The planning tool is opt-in since 0.152, so `APP_SERVER_ARGS` also carries
+  `-c tools.update_plan.enabled=true`; without it `turn/plan/updated` never fires
+  and the plan view stays empty. `-c` on `app-server`, `experimentalApi`,
+  `collaborationMode`, and `developerInstructions` all predate the floor, so
+  nothing above it is version-gated, and `BinaryResolver::require` refuses a codex
+  that reports a version below it. `codex/probe.rs`'s argv is deliberately *not*
+  given the `-c` flags — it needs no tool and is not the floor check. Named here so
+  nobody "fixes" that inconsistency.
 
 - **The Prompt Library is harness-unaware.** `PromptDefaults::commit`
   (`src-tauri/src/commands/projects.rs`) shows Claude's wording to every harness, and
@@ -119,17 +147,21 @@ Two related, harness-aware seams sit alongside it:
   `CodexDriver::observed_collab_mode()`, fed by the `thread/settings/updated`
   notification — whose payload nests under `threadSettings`, not `settings`.
 - **Guardrails codex cannot reproduce, by construction — do not assume parity:**
-  - **Per-command deny.** Commit's `disallowed_tools` of `Bash(git push:*)` and
-    `Bash(gh:*)` has no codex equivalent — codex cannot allow `git commit` while
-    denying `git push`. The nearest faithful mapping is coarser: `codex_posture`
-    pins the Commit stage to `untrusted` approval regardless of the session mode,
-    so *every* command — the push included — prompts before it runs, even under
-    `AcceptEdits`/`BypassPermissions` that would otherwise auto-run it. This mirrors
-    Claude, whose Commit deny-list is likewise mode-independent. The cost of the
-    coarseness: `git add`/`git commit` also prompt on codex, where Claude
-    pre-allows them (in `Default` mode codex already prompted for those, so the
-    extra friction only appears if the user lowered the mode). A push is gated, not
-    forbidden — approving it lets it through.
+  - **Per-command allow and deny.** Claude's Commit pre-allows `git add` and
+    `git commit`, denies `Bash(gh:*)`, and leaves `git push` off both lists, so its
+    `Default` mode asks before a push (`pipeline.rs`'s
+    `commit_invokes_the_skill_then_offers_a_push_but_never_a_pr` asserts all three).
+    Codex has neither list, so it can neither pre-allow `git commit` nor deny `gh`.
+    The nearest mapping is coarser: `codex_posture` pins the Commit stage to
+    `untrusted` approval regardless of the session mode, so *every* command — the
+    push included — prompts before it runs, even under
+    `AcceptEdits`/`BypassPermissions` that would otherwise auto-run it. That is
+    stricter than Claude, where only the mode asks before a push, so a mode that
+    stops asking (`BypassPermissions`) lets it through. The cost of the coarseness:
+    `git add`/`git commit` also prompt on codex, where Claude pre-allows them (in
+    `Default` mode codex already prompted for those, so the extra friction only
+    appears if the user lowered the mode). A push is gated, not forbidden —
+    approving it lets it through.
 
     Since Commit went two-phase the push is gated *twice*: agreed with the user in
     phase one through the question card, and approved in phase two through the

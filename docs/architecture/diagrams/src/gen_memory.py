@@ -60,12 +60,10 @@ SEQ = [
     ("note", 820, "Claude decides what is worth keeping; topic files load on demand"),
 
     ("phase", "A codex tab launches", "only start opens a new thread; resume, restart and rewind send thread/resume"),
-    ("frame", "opt", "codex-cli 0.152.0 or newer"),
     ("call", 1, 2, "resolve( project )  +  key check", TEAL),
     ("call", 1, 2, "read_index( dir )", TEAL),
     ("ret", 2, 1, "the index, bounded as Claude bounds it", TEAL),
     ("note", 180, "withheld on a key mismatch, and when ~/.codex/config.toml sets developer_instructions, which a thread value would replace"),
-    ("endframe",),
     ("call", 1, 4, "thread/start  { developerInstructions }", VIOLET),
     ("note", 500, "the preamble names the directory, calls it read-only, and ranks the notes below the user and the repository"),
     ("note", 500, "thread/resume carries it too, but codex 0.154.0 ignores it there: a resumed thread keeps the index it started with"),
@@ -274,7 +272,7 @@ def architecture():
         ("WorkstreamService", ["project_memory(id)  →  ProjectMemory { dir, keyCheck, files }",
                                "save_project_memory_file(id, name, content, base_mtime_ms)"], TEAL),
         ("SessionService — the codex arm", ["developerInstructions on thread/start and thread/resume",
-                                            "codex ≥ 0.152.0 · no key mismatch ·",
+                                            "no key mismatch ·",
                                             "no developer_instructions in config.toml"], VIOLET),
     ])
     server.append(s_stack)
@@ -375,7 +373,7 @@ COVERAGE = [
     ("Claude chat session", "start · resume · restart · rewind", TEAL, "the index, loaded by Claude",
      "topic files on demand", True, "Claude Code's own auto-memory, unchanged"),
     ("Codex chat, new thread", "start", TEAL, "the index, as developerInstructions",
-     "topic files, read-only", False, "codex ≥ 0.152.0, no key mismatch, no config.toml value"),
+     "topic files, read-only", False, "no key mismatch, no config.toml value"),
     ("Codex chat, resumed", "resume · restart · rewind", ACCENT, "the index from its thread start",
      "topic files, read-only", False, "codex 0.154.0 ignores it on thread/resume"),
     ("Claude Code terminal", "the multiplexer's claude-code engine", TEAL, "the index, loaded by Claude",

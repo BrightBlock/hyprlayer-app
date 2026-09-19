@@ -2,9 +2,7 @@ pub mod driver;
 pub mod probe;
 pub mod protocol;
 
-pub use driver::{
-    accepts_developer_instructions, config_sets_developer_instructions, CodexDriver, SpawnConfig,
-};
+pub use driver::{config_sets_developer_instructions, CodexDriver, SpawnConfig};
 pub use probe::{CodexAuthStatus, CodexModel, CodexProbe};
 pub use protocol::{CodexPosture, CollabMode};
 

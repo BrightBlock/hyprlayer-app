@@ -137,6 +137,9 @@ pub struct Translator {
     pub pending_approvals: HashMap<String, (Value, ApprovalKind)>,
     pub pending_questions: HashMap<String, PendingQuestion>,
     pub user_turns: usize,
+    // Root turn ids, oldest first, for a paginated thread's `thread/revert`.
+    // `None` unless they line up with `user_turns`.
+    pub turn_ids: Option<Vec<String>>,
     pub collab_mode: Option<String>,
 }
 
@@ -150,6 +153,14 @@ impl Translator {
 
     pub fn set_root_thread_id(&mut self, thread_id: String) {
         self.root_thread_id = Some(thread_id);
+    }
+
+    pub fn rewound_to(&mut self, ordinal: usize) {
+        let kept = ordinal.saturating_sub(1);
+        self.user_turns = kept;
+        if let Some(ids) = &mut self.turn_ids {
+            ids.truncate(kept);
+        }
     }
 
     // codex replays thread history right behind a resume response, so the read
@@ -171,6 +182,14 @@ impl Translator {
                 .and_then(Value::as_str)
             {
                 self.set_root_thread_id(thread_id.to_string());
+            }
+            // Only a codex 0.156+ resume reports it.
+            if let Some(mode) = value
+                .get("collaborationMode")
+                .and_then(|c| c.get("mode"))
+                .and_then(Value::as_str)
+            {
+                self.collab_mode = Some(mode.to_string());
             }
         }
     }
@@ -261,6 +280,11 @@ impl Translator {
                     .and_then(|t| t.get("id"))
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                if let (Some(ids), Some(id)) = (&mut self.turn_ids, &self.active_turn) {
+                    if !ids.contains(id) {
+                        ids.push(id.clone());
+                    }
+                }
                 Vec::new()
             }
             "turn/completed" => {
@@ -1544,6 +1568,64 @@ mod tests {
             }
             other => panic!("expected TurnDone, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn root_turn_starts_are_recorded_in_order_once_tracking() {
+        let started = |t: &mut Translator, thread: &str, turn: &str| {
+            t.notification(
+                "turn/started",
+                &json!({ "threadId": thread, "turn": { "id": turn } }),
+            );
+        };
+        let mut t = Translator::default();
+        started(&mut t, "root", "t0");
+        assert_eq!(t.turn_ids, None, "a legacy thread keeps no ids");
+
+        t.turn_ids = Some(Vec::new());
+        t.set_root_thread_id("root".into());
+        for (thread, turn) in [
+            ("root", "t1"),
+            ("child", "c1"),
+            ("root", "t1"),
+            ("root", "t2"),
+        ] {
+            started(&mut t, thread, turn);
+        }
+        assert_eq!(t.turn_ids, Some(vec!["t1".to_string(), "t2".to_string()]));
+    }
+
+    #[test]
+    fn a_rewind_keeps_the_turns_before_the_ordinal() {
+        let mut t = Translator::resumed(3);
+        t.turn_ids = Some(vec!["a".into(), "b".into(), "c".into()]);
+        t.rewound_to(2);
+        assert_eq!(t.user_turns, 1);
+        assert_eq!(t.turn_ids, Some(vec!["a".to_string()]));
+
+        let mut legacy = Translator::resumed(5);
+        legacy.rewound_to(3);
+        assert_eq!(legacy.user_turns, 2);
+        assert_eq!(legacy.turn_ids, None);
+    }
+
+    #[test]
+    fn the_resume_response_reports_the_collab_mode() {
+        let mut t = Translator::default();
+        t.expect_root_thread_from(3);
+        t.observe_response(
+            3,
+            &Ok(json!({
+                "thread": { "id": "root" },
+                "collaborationMode": { "mode": "plan", "settings": { "model": "gpt-5.5" } },
+            })),
+        );
+        assert_eq!(t.collab_mode.as_deref(), Some("plan"));
+
+        let mut older = Translator::default();
+        older.expect_root_thread_from(3);
+        older.observe_response(3, &Ok(json!({ "thread": { "id": "root" } })));
+        assert_eq!(older.collab_mode, None, "codex 0.155.1 omits it");
     }
 
     #[test]

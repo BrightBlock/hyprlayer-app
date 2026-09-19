@@ -433,8 +433,8 @@ function MemoryList({
         <p className="text-sm font-medium">No memory yet</p>
         <p className="mt-1 text-xs leading-relaxed text-ink-dim">
           When auto-memory is on, Claude Code writes notes to{" "}
-          <span className="break-all font-mono">{dir}</span>, and codex tabs (codex 0.152.0 or
-          newer) read the index when they start.
+          <span className="break-all font-mono">{dir}</span>, and codex tabs read the index when
+          they start.
         </p>
       </div>
     );

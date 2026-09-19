@@ -3,13 +3,14 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
 
 use hyprlayer_core::agent::{AgentDriver, Harness};
 use hyprlayer_core::claude::{ExitOutcome, SessionEvent, SessionState};
+use hyprlayer_core::codex::CollabMode;
 use hyprlayer_core::error::{CoreError, Result as CoreResult};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::pipeline::Stage;
@@ -591,6 +592,7 @@ async fn a_user_message_is_durable_but_never_fanned_out_live() {
 
 struct FakeDriver {
     sent_turns: Arc<AtomicUsize>,
+    collab_modes: Arc<StdMutex<Vec<Option<CollabMode>>>>,
     rewind_started: Arc<Notify>,
     rewind_delay: Duration,
     rewind_ok: bool,
@@ -600,6 +602,7 @@ impl FakeDriver {
     fn new() -> Self {
         Self {
             sent_turns: Arc::new(AtomicUsize::new(0)),
+            collab_modes: Arc::default(),
             rewind_started: Arc::new(Notify::new()),
             rewind_delay: Duration::ZERO,
             rewind_ok: true,
@@ -609,6 +612,7 @@ impl FakeDriver {
     fn rewinding(rewind_started: Arc<Notify>, rewind_delay: Duration, rewind_ok: bool) -> Self {
         Self {
             sent_turns: Arc::new(AtomicUsize::new(0)),
+            collab_modes: Arc::default(),
             rewind_started,
             rewind_delay,
             rewind_ok,
@@ -623,6 +627,9 @@ impl AgentDriver for FakeDriver {
     fn send_user_turn(&self, _: &str, _: Option<&str>, _: Option<&str>) -> CoreResult<()> {
         self.sent_turns.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+    fn set_collab_mode(&self, mode: Option<CollabMode>) {
+        self.collab_modes.lock().unwrap().push(mode);
     }
     fn respond_permission(&self, _: &str, _: bool, _: Option<&str>) -> CoreResult<()> {
         Ok(())
@@ -679,6 +686,35 @@ async fn interrupted_codex_phase_one_suppresses_phase_two() {
         0,
         "an interrupted phase one must not trigger a phase-two turn"
     );
+}
+
+#[tokio::test]
+async fn a_skipped_codex_phase_two_leaves_plan_mode_on_the_next_turn() {
+    for (status, turns) in [(Some("interrupted"), 0), (None, 0), (Some("completed"), 1)] {
+        let driver = FakeDriver::new();
+        let (tx, mut rx) = broadcast::channel(8);
+        tx.send(SessionEvent::TurnDone {
+            cost_usd: None,
+            num_turns: None,
+            context_tokens: None,
+            turn_status: status.map(str::to_string),
+        })
+        .unwrap();
+
+        let op_lock = Arc::new(AsyncMutex::new(()));
+        run_codex_followup_for_test(&driver, &mut rx, "now execute", op_lock).await;
+
+        assert_eq!(
+            driver.sent_turns.load(Ordering::SeqCst),
+            turns,
+            "{status:?}"
+        );
+        assert_eq!(
+            *driver.collab_modes.lock().unwrap(),
+            [Some(CollabMode::Default)],
+            "{status:?}: whichever way phase one ends, the next turn runs in default mode"
+        );
+    }
 }
 
 #[tokio::test]
