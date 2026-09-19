@@ -23,6 +23,7 @@ use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
+use hyprlayer_core::opencode::config::OpencodeAuthEntry;
 use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
@@ -217,7 +218,9 @@ hyprlayer_proto::commands! {
     SetEnvOverlay: set_env_overlay(vars: BTreeMap<String, String>) -> ();
 
     OpencodeCatalog: opencode_catalog(force: bool) -> OpencodeCatalog;
-    InvalidateOpencodeServer: invalidate_opencode_server() -> ();
+    OpencodeAuthList: opencode_auth_list() -> Vec<OpencodeAuthEntry>;
+    OpencodeSetProviderKey: opencode_set_provider_key(provider: String, key: String) -> Vec<OpencodeAuthEntry>;
+    OpencodeRemoveProvider: opencode_remove_provider(provider: String) -> Vec<OpencodeAuthEntry>;
     SetOpencodeDefaultModel: set_opencode_default_model(model: Option<String>) -> ();
     InstallOpencode: install_opencode() -> ();
     ClaudeAuthStatus: claude_auth_status() -> ClaudeAuthStatus;

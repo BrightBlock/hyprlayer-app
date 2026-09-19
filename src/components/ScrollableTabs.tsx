@@ -7,11 +7,13 @@ export function ScrollableTabStrip({
   trailing,
   activeId,
   grow = false,
+  fullHeight = false,
 }: {
   children: ReactNode;
   trailing?: ReactNode;
   activeId?: number | null;
   grow?: boolean;
+  fullHeight?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -48,9 +50,11 @@ export function ScrollableTabStrip({
     if (el) el.scrollBy({ left: direction * el.clientWidth * 0.7, behavior: "smooth" });
   };
 
+  const stretch = fullHeight ? "self-stretch" : "";
+
   return (
-    <div className={`flex min-w-0 items-center gap-1 ${grow ? "flex-1" : ""}`}>
-      <div className="relative flex min-w-0 items-center">
+    <div className={`flex min-w-0 items-center gap-1 ${grow ? "flex-1" : ""} ${stretch}`}>
+      <div className={`relative flex min-w-0 items-center ${stretch}`}>
         {canLeft && (
           <button
             type="button"
@@ -64,9 +68,12 @@ export function ScrollableTabStrip({
         <div
           ref={scrollRef}
           onScroll={sync}
-          className="no-scrollbar flex min-w-0 items-center overflow-x-auto"
+          className={`no-scrollbar flex min-w-0 items-center overflow-x-auto ${stretch}`}
         >
-          <div ref={contentRef} className="flex items-center gap-1">
+          <div
+            ref={contentRef}
+            className={`flex gap-1 ${fullHeight ? "self-stretch items-stretch" : "items-center"}`}
+          >
             {children}
           </div>
         </div>

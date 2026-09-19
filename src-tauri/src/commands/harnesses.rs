@@ -2,13 +2,10 @@ use tauri::State;
 
 use hyprlayer_core::claude::ClaudeProbe;
 use hyprlayer_core::codex::CodexProbe;
-use hyprlayer_core::opencode::config as oc;
+use hyprlayer_core::opencode::config::OpencodeAuthEntry;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
-use hyprlayer_core::opencode::support::{
-    opencode_model_is_supported, opencode_provider_is_supported,
-};
 
 pub use hyprlayer_core::opencode::catalog::{CatalogModel, CatalogProvider, OpencodeCatalog};
 
@@ -27,8 +24,12 @@ pub async fn opencode_catalog(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn opencode_auth_list() -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
-    oc::list_auth(&crate::opencode_auth_file()).map_err(AppError::from)
+pub async fn opencode_auth_list(state: State<'_, AppState>) -> CmdResult<Vec<OpencodeAuthEntry>> {
+    state
+        .client()?
+        .opencode_auth_list()
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -37,22 +38,12 @@ pub async fn opencode_set_provider_key(
     state: State<'_, AppState>,
     provider: String,
     key: String,
-) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
-    if !opencode_provider_is_supported(&provider) {
-        return Err(AppError {
-            code: "opencode_provider_unsupported".into(),
-            message: format!("OpenCode provider `{provider}` is no longer supported"),
-            remedy: Some("Remove its saved credential from the provider list.".into()),
-        });
-    }
-    let auth_path = crate::opencode_auth_file();
-    oc::set_provider_key(&auth_path, &provider, &key).map_err(AppError::from)?;
+) -> CmdResult<Vec<OpencodeAuthEntry>> {
     state
         .client()?
-        .invalidate_opencode_server()
+        .opencode_set_provider_key(provider, key)
         .await
-        .map_err(AppError::from)?;
-    oc::list_auth(&auth_path).map_err(AppError::from)
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -60,15 +51,12 @@ pub async fn opencode_set_provider_key(
 pub async fn opencode_remove_provider(
     state: State<'_, AppState>,
     provider: String,
-) -> CmdResult<Vec<oc::OpencodeAuthEntry>> {
-    let auth_path = crate::opencode_auth_file();
-    oc::remove_provider(&auth_path, &provider).map_err(AppError::from)?;
+) -> CmdResult<Vec<OpencodeAuthEntry>> {
     state
         .client()?
-        .invalidate_opencode_server()
+        .opencode_remove_provider(provider)
         .await
-        .map_err(AppError::from)?;
-    oc::list_auth(&auth_path).map_err(AppError::from)
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
@@ -77,23 +65,10 @@ pub async fn opencode_set_default_model(
     state: State<'_, AppState>,
     model: Option<String>,
 ) -> CmdResult<()> {
-    let normalized = model.filter(|m| !m.is_empty());
-    if normalized
-        .as_deref()
-        .is_some_and(|model| !opencode_model_is_supported(model))
-    {
-        return Err(AppError {
-            code: "opencode_provider_unsupported".into(),
-            message: "GitHub Copilot models are no longer supported".into(),
-            remedy: Some("Choose a model from a supported OpenCode provider.".into()),
-        });
-    }
     state
         .client()?
-        .set_opencode_default_model(normalized.clone())
+        .set_opencode_default_model(model)
         .await
-        .map_err(AppError::from)?;
-    oc::set_default_model(&crate::opencode_config_file(), normalized.as_deref())
         .map_err(AppError::from)
 }
 

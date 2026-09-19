@@ -1008,16 +1008,22 @@ export function ProjectPage() {
         opts.onSelect();
         setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
       }}
-      className={`inline-flex shrink-0 cursor-pointer select-none items-center rounded-md ${
-        drag?.id === shell.id ? "opacity-60 bg-accent/10 ring-2 ring-inset ring-accent" : ""
+      className={`relative inline-flex shrink-0 cursor-pointer select-none items-center ${
+        drag?.id === shell.id
+          ? "rounded-md opacity-60 bg-accent/10 ring-2 ring-inset ring-accent"
+          : ""
       } ${
-        opts.active
-          ? opts.paneFocused
-            ? "bg-panel-2 text-ink"
-            : "bg-panel-2/50 text-ink-dim"
-          : "text-ink-dim hover:bg-panel-2 hover:text-ink"
+        opts.active && opts.paneFocused ? "text-ink" : "text-ink-dim hover:text-ink"
       }`}
     >
+      {opts.active && (
+        <span
+          className={`absolute inset-x-0 bottom-0 h-0.5 ${
+            opts.paneFocused ? "bg-accent" : "bg-ink-dim/40"
+          }`}
+          aria-hidden="true"
+        />
+      )}
       <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-sm font-medium">
         {shell.diffView ? (
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
@@ -1079,6 +1085,7 @@ export function ProjectPage() {
         } ${dropTarget?.paneId === paneId && dropTarget.edge === null ? "bg-accent/10" : ""}`}
       >
         <ScrollableTabStrip
+          fullHeight
           activeId={active?.id ?? null}
           trailing={
             <IconButton

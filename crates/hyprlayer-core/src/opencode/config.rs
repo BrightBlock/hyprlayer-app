@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -44,22 +45,26 @@ pub fn list_auth(path: &Path) -> Result<Vec<OpencodeAuthEntry>> {
 }
 
 pub fn set_provider_key(path: &Path, provider: &str, key: &str) -> Result<()> {
-    let mut map = read_object_or_empty(path, "opencode auth.json")?;
+    let _guard = write_lock();
+    // A parse failure must not read as empty: the rewrite would erase every other key.
+    let mut map = read_object(path, "opencode auth.json")?;
     let entry = serde_json::json!({ "type": "api", "key": key });
     map.insert(provider.trim_end_matches('/').to_string(), entry);
     write_json_atomic(path, &Value::Object(map), 0o600)
 }
 
 pub fn remove_provider(path: &Path, provider: &str) -> Result<()> {
+    let _guard = write_lock();
     if !path.exists() {
         return Ok(());
     }
-    let mut map = read_object_or_empty(path, "opencode auth.json")?;
+    let mut map = read_object(path, "opencode auth.json")?;
     map.remove(provider.trim_end_matches('/'));
     write_json_atomic(path, &Value::Object(map), 0o600)
 }
 
 pub fn set_default_model(path: &Path, model: Option<&str>) -> Result<()> {
+    let _guard = write_lock();
     let mut obj = match std::fs::read_to_string(path) {
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
@@ -84,6 +89,7 @@ pub fn set_default_model(path: &Path, model: Option<&str>) -> Result<()> {
 }
 
 pub fn clear_default_model_for_provider(path: &Path, provider: &str) -> Result<bool> {
+    let _guard = write_lock();
     let mut obj = match std::fs::read_to_string(path) {
         Ok(s) => match serde_json::from_str::<Value>(&s) {
             Ok(Value::Object(m)) => m,
@@ -107,6 +113,7 @@ pub fn clear_default_model_for_provider(path: &Path, provider: &str) -> Result<b
 }
 
 pub fn set_ollama_provider(path: &Path, base_url: &str, models: &[String]) -> Result<()> {
+    let _guard = write_lock();
     let mut obj = match std::fs::read_to_string(path) {
         Ok(s) if s.trim().is_empty() => Map::new(),
         Ok(s) => match serde_json::from_str::<Value>(&s) {
@@ -166,6 +173,13 @@ pub fn set_ollama_provider(path: &Path, base_url: &str, models: &[String]) -> Re
     write_json_atomic(path, &Value::Object(obj), 0o644)
 }
 
+// The server runs each RPC on its own task; unserialized read-modify-writes lose edits.
+static WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn write_lock() -> MutexGuard<'static, ()> {
+    WRITE_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 fn read_object(path: &Path, label: &str) -> Result<Map<String, Value>> {
     match std::fs::read_to_string(path) {
         Ok(s) if s.trim().is_empty() => Ok(Map::new()),
@@ -180,10 +194,6 @@ fn read_object(path: &Path, label: &str) -> Result<Map<String, Value>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Map::new()),
         Err(e) => Err(e.into()),
     }
-}
-
-fn read_object_or_empty(path: &Path, label: &str) -> Result<Map<String, Value>> {
-    Ok(read_object(path, label).unwrap_or_default())
 }
 
 fn write_json_atomic(path: &Path, value: &Value, mode: u32) -> Result<()> {
@@ -339,5 +349,32 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
         assert!(v["provider"].get("ollama").is_none());
         assert_eq!(v["provider"]["openai"]["npm"], "x");
+    }
+
+    #[test]
+    fn a_malformed_auth_file_is_refused_not_overwritten() {
+        let (auth_path, _) = temp_paths("malformed");
+        let malformed = r#"{"anthropic": {"type": "api", "key": "sk-ant-1"},}"#;
+        std::fs::write(&auth_path, malformed).unwrap();
+
+        assert!(set_provider_key(&auth_path, "openai", "sk-oai-2").is_err());
+        assert!(remove_provider(&auth_path, "anthropic").is_err());
+        assert_eq!(std::fs::read_to_string(&auth_path).unwrap(), malformed);
+    }
+
+    #[test]
+    fn concurrent_key_writes_all_land() {
+        let (auth_path, _) = temp_paths("concurrent");
+        std::thread::scope(|scope| {
+            for thread in 0..16 {
+                let auth_path = &auth_path;
+                scope.spawn(move || {
+                    for n in 0..8 {
+                        set_provider_key(auth_path, &format!("p{thread}-{n}"), "key").unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(list_auth(&auth_path).unwrap().len(), 16 * 8);
     }
 }

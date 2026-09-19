@@ -45,7 +45,6 @@ import {
   isOffBase,
   shortBranch,
 } from "@/lib/domain/projects";
-import { GLASS_BAND } from "@/lib/glass";
 import {
   drawerWidth,
   NAV_RAIL_WIDTH,
@@ -1323,10 +1322,7 @@ export function Root() {
                   : projectSidebarWidth(sidebarWidth, width),
               }}
             >
-              <div
-                data-glass
-                className={`relative z-10 flex h-9 shrink-0 items-center justify-between pl-4 pr-3 ${GLASS_BAND}`}
-              >
+              <div className="flex h-9 shrink-0 items-center justify-between pl-4 pr-3">
                 <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">
                   Projects
                 </p>
@@ -1340,7 +1336,7 @@ export function Root() {
                   <PlusIcon size={14} />
                 </button>
               </div>
-              <nav className="-mt-9 flex-1 overflow-y-auto px-2 pt-11">
+              <nav className="flex-1 overflow-y-auto px-2 pt-2">
                 {bootstrap.isLoading && (
                   <div className="flex justify-center py-4">
                     <Spinner />

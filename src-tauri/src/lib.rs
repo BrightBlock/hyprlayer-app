@@ -12,10 +12,8 @@ mod webview_gestures;
 mod window_geometry;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyprlayer_core::env::RuntimeEnvironment;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
@@ -218,14 +216,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::QuitRequested,
             events::ServerDisconnected
         ])
-}
-
-pub(crate) fn opencode_auth_file() -> PathBuf {
-    hyprlayer_core::env::opencode_auth_file(&RuntimeEnvironment::detect())
-}
-
-pub(crate) fn opencode_config_file() -> PathBuf {
-    hyprlayer_core::env::opencode_config_file(&RuntimeEnvironment::detect())
 }
 
 /// The vars a daemonized server has none of on its own (ADR-0009 §7):

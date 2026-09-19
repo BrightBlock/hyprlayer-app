@@ -12,7 +12,8 @@ rules are recorded here as review rules; `check-rust-boundaries.mjs` and
 of the daemon/`Host`/remote-terminal bullet under "What we're not doing" is superseded
 by ADR-0009 — the one runtime moves into a `hyprlayer-server` process; the other two
 thirds stand) · amended 2026-09-18 (the macOS Keychain carve-out and
-`commands/models.rs` are deleted; nothing in the workspace reads provider credentials)
+`commands/models.rs` are deleted; nothing in the workspace reads provider credentials) ·
+amended 2026-09-19 (the `commands/harnesses.rs` OpenCode config divergence is retired)
 
 ## Decision
 
@@ -345,6 +346,11 @@ lock for the whole setup timeout and serialise concurrent creates, a concurrency
 change no phase specified — and holds an mtime concurrency check plus PR
 attach/merge sequencing. These are the seven; anything else that looks like one is
 new.
+
+*(Amended 2026-09-19 — six now. Remote hosts (ADR-0009) turned the
+`commands/harnesses.rs` divergence into a bug: its `auth.json` and `opencode.json`
+I/O ran on the client's disk, so OpenCode keys added in Settings never reached a
+remote server. Those four commands now call `ProviderService` over RPC.)*
 
 ## Hermetic construction
 

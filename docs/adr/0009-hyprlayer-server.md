@@ -1,7 +1,8 @@
 # ADR 0009: The runtime lives in a `hyprlayer-server` process; the desktop is a client
 
 **Status:** accepted · 2026-09-03 · amended 2026-09-18 (the Keychain lookup is
-deleted — the runtime reads no provider credentials)
+deleted — the runtime reads no provider credentials) · amended 2026-09-19 (OpenCode
+config I/O moves to the server)
 
 ## Decision
 
@@ -402,6 +403,12 @@ would need all of the authentication machinery this decision declines to build.
     two ADR-0008 divergences are relocated, not fixed. `probe_default_thoughts` is
     infallible in the bindings, so a dead transport degrades it to an empty probe
     rather than a wire change.
+    *(Amended 2026-09-19 — the `opencode_auth_list` divergence did not stay. Remote
+    hosts made it a bug: it and the key set/remove and default-model commands
+    touched `auth.json` and `opencode.json` on the client, so a key added in
+    Settings never reached a remote server. All four now run in `ProviderService`
+    on the server, which invalidates `opencode serve` itself, so the
+    `invalidate_opencode_server` helper is gone.)*
   - **Phase 4 (2026-09-03).** `AppState` is one field again
     (`src-tauri/src/state.rs`); `src-tauri/src/lib.rs`'s `setup()` no longer opens
     a runtime or binds an in-process socket — it calls the new

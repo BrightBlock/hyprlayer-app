@@ -58,6 +58,9 @@ pub enum CoreError {
     #[error("GitHub Copilot models are no longer supported")]
     OpencodeProviderUnsupported,
 
+    #[error("OpenCode provider `{provider}` is no longer supported")]
+    OpencodeProviderKeyUnsupported { provider: String },
+
     #[error("OpenCode does not currently offer `{model}`")]
     OpencodeModelUnavailable { model: String },
 
@@ -422,6 +425,9 @@ impl CoreError {
             CoreError::OpencodeProviderUnsupported => {
                 Some("Choose a model from a supported OpenCode provider.".into())
             }
+            CoreError::OpencodeProviderKeyUnsupported { .. } => {
+                Some("Remove its saved credential from the provider list.".into())
+            }
             CoreError::OpencodeModelUnavailable { .. } => Some(
                 "Refresh the model list in Settings → OpenCode and pick a current model.".into(),
             ),
@@ -571,6 +577,7 @@ impl CoreError {
             CoreError::SessionEpochAdvanced { .. } => "session_epoch_advanced",
             CoreError::ThoughtsNotConfigured => "config_missing",
             CoreError::OpencodeProviderUnsupported => "opencode_provider_unsupported",
+            CoreError::OpencodeProviderKeyUnsupported { .. } => "opencode_provider_unsupported",
             CoreError::OpencodeModelUnavailable { .. } => "opencode_model_unavailable",
             CoreError::UserTurnNotFound { .. } => "user_turn_not_found",
             CoreError::SessionNotFound { .. } => "session_not_found",

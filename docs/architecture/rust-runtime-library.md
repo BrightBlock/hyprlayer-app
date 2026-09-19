@@ -260,10 +260,17 @@ an internal type, and they are supported for that reason.
 `generate_title_claude(&str, &str)`, `generate_title_codex(&str, &str)`,
 `generate_title_opencode(&str, &str)`, `opencode_server()`,
 `opencode_server_if_running()`, `invalidate_opencode_server()`,
-`opencode_catalog(bool)`.
+`opencode_catalog(bool)`, `opencode_auth_list()`,
+`opencode_set_provider_key(&str, &str)`, `opencode_remove_provider(&str)`,
+`opencode_set_default_model(Option<String>)`.
 
 Network calls go through the internal `ProviderHttp` port; the desktop shell has
 no HTTP client of its own.
+
+The OpenCode key and default-model methods edit `RuntimePaths::opencode_auth_file`
+and `opencode_config_file`. Setting or removing a key invalidates the cached
+`opencode serve`, which reads `auth.json` only when it spawns. A malformed
+`auth.json` fails the call instead of being overwritten.
 
 ### `SessionService`
 

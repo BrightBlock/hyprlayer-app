@@ -9,7 +9,9 @@ use crate::claude::{self, SessionEvent};
 use crate::codex::{self, CodexDriver, CodexPosture, SpawnConfig as CodexSpawnConfig};
 use crate::error::{CoreError, Result};
 use crate::opencode::catalog::{self, OpencodeCatalog};
+use crate::opencode::config::{self as opencode_config, OpencodeAuthEntry};
 use crate::opencode::runtime::{OpenCodeDriver, OpenCodeServer, OpenCodeServerConfig};
+use crate::opencode::support::{opencode_model_is_supported, opencode_provider_is_supported};
 use crate::process::binaries::BinaryKind;
 use crate::process::Exec;
 use crate::settings::ClaudeSettings;
@@ -606,6 +608,57 @@ impl ProviderService<'_> {
             providers,
             source: loaded.source,
         })
+    }
+
+    pub async fn opencode_auth_list(&self) -> Result<Vec<OpencodeAuthEntry>> {
+        ensure_running(self.runtime)?;
+        opencode_config::list_auth(&self.runtime.paths.opencode_auth_file)
+    }
+
+    pub async fn opencode_set_provider_key(
+        &self,
+        provider: &str,
+        key: &str,
+    ) -> Result<Vec<OpencodeAuthEntry>> {
+        ensure_running(self.runtime)?;
+        if !opencode_provider_is_supported(provider) {
+            return Err(CoreError::OpencodeProviderKeyUnsupported {
+                provider: provider.to_string(),
+            });
+        }
+        let auth_file = &self.runtime.paths.opencode_auth_file;
+        opencode_config::set_provider_key(auth_file, provider, key)?;
+        // `opencode serve` reads auth.json only when it spawns.
+        self.invalidate_opencode_server().await;
+        opencode_config::list_auth(auth_file)
+    }
+
+    pub async fn opencode_remove_provider(&self, provider: &str) -> Result<Vec<OpencodeAuthEntry>> {
+        ensure_running(self.runtime)?;
+        let auth_file = &self.runtime.paths.opencode_auth_file;
+        opencode_config::remove_provider(auth_file, provider)?;
+        self.invalidate_opencode_server().await;
+        opencode_config::list_auth(auth_file)
+    }
+
+    pub async fn opencode_set_default_model(&self, model: Option<String>) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let model = model.filter(|m| !m.is_empty());
+        // Checked first: settings normalization would silently drop it instead.
+        if model
+            .as_deref()
+            .is_some_and(|m| !opencode_model_is_supported(m))
+        {
+            return Err(CoreError::OpencodeProviderUnsupported);
+        }
+        self.runtime
+            .settings
+            .update(|s| s.providers.opencode.default_model = model.clone())
+            .await?;
+        opencode_config::set_default_model(
+            &self.runtime.paths.opencode_config_file,
+            model.as_deref(),
+        )
     }
 }
 

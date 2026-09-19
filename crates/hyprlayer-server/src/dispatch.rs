@@ -20,6 +20,7 @@ use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
+use hyprlayer_core::opencode::config::OpencodeAuthEntry;
 use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::{self, ScriptSettings};
@@ -1331,18 +1332,39 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn invalidate_opencode_server(&self) -> Result<(), WireError> {
-        self.runtime.providers().invalidate_opencode_server().await;
-        Ok(())
+    async fn opencode_auth_list(&self) -> Result<Vec<OpencodeAuthEntry>, WireError> {
+        self.runtime.providers().opencode_auth_list().await.wire()
+    }
+
+    async fn opencode_set_provider_key(
+        &self,
+        provider: String,
+        key: String,
+    ) -> Result<Vec<OpencodeAuthEntry>, WireError> {
+        self.runtime
+            .providers()
+            .opencode_set_provider_key(&provider, &key)
+            .await
+            .wire()
+    }
+
+    async fn opencode_remove_provider(
+        &self,
+        provider: String,
+    ) -> Result<Vec<OpencodeAuthEntry>, WireError> {
+        self.runtime
+            .providers()
+            .opencode_remove_provider(&provider)
+            .await
+            .wire()
     }
 
     async fn set_opencode_default_model(&self, model: Option<String>) -> Result<(), WireError> {
         self.runtime
-            .settings()
-            .update(|s| s.providers.opencode.default_model = model)
+            .providers()
+            .opencode_set_default_model(model)
             .await
-            .wire()?;
-        Ok(())
+            .wire()
     }
 
     async fn install_opencode(&self) -> Result<(), WireError> {

@@ -821,4 +821,88 @@ mod tests {
         serving.await.unwrap().unwrap();
         runtime.shutdown().await;
     }
+
+    #[tokio::test]
+    async fn opencode_credentials_and_default_model_land_in_the_servers_files() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = open_runtime(root.path()).await;
+        let server = SocketServer::bind(runtime.clone(), &root.path().join("app-data"))
+            .await
+            .expect("bind");
+        let socket_path = server.socket_path().to_path_buf();
+        let stop = server.stop_handle();
+        let serving = tokio::spawn(server.run());
+
+        let client = RpcClient::connect_socket(&socket_path)
+            .await
+            .expect("connect");
+        let server_paths = paths(root.path());
+        let read_json = |path: &Path| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+        };
+
+        let listed = client
+            .opencode_set_provider_key("anthropic".into(), "sk-ant-test".into())
+            .await
+            .expect("set a key over the socket");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].provider, "anthropic");
+        assert_eq!(
+            read_json(&server_paths.opencode_auth_file)["anthropic"]["key"],
+            "sk-ant-test"
+        );
+        let relisted = client
+            .opencode_auth_list()
+            .await
+            .expect("list over the socket");
+        assert_eq!(relisted.len(), 1);
+        assert_eq!(relisted[0].provider, "anthropic");
+
+        let refused = client
+            .opencode_set_provider_key("github-copilot".into(), "ghu-test".into())
+            .await
+            .unwrap_err();
+        assert_eq!(refused.code, "opencode_provider_unsupported");
+        assert_eq!(
+            refused.message,
+            "OpenCode provider `github-copilot` is no longer supported"
+        );
+        assert_eq!(
+            refused.remedy.as_deref(),
+            Some("Remove its saved credential from the provider list.")
+        );
+
+        client
+            .set_opencode_default_model(Some("anthropic/claude-sonnet-4-5".into()))
+            .await
+            .expect("set the default model over the socket");
+        assert_eq!(
+            read_json(&server_paths.opencode_config_file)["model"],
+            "anthropic/claude-sonnet-4-5"
+        );
+        assert_eq!(
+            client
+                .get_app_settings()
+                .await
+                .unwrap()
+                .providers
+                .opencode
+                .default_model
+                .as_deref(),
+            Some("anthropic/claude-sonnet-4-5")
+        );
+
+        let remaining = client
+            .opencode_remove_provider("anthropic".into())
+            .await
+            .expect("remove over the socket");
+        assert!(remaining.is_empty());
+        assert!(read_json(&server_paths.opencode_auth_file)
+            .get("anthropic")
+            .is_none());
+
+        stop.stop();
+        serving.await.unwrap().unwrap();
+        runtime.shutdown().await;
+    }
 }
