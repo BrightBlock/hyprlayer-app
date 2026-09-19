@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.3",
+      "date": "2026-09-19",
+      "summary": "The server now updates independently of the app; codex support raised to 0.155.1.",
+      "notes": [
+        "Updating Hyprlayer no longer restarts a running server (and drops its sessions) unless the update actually needs a newer one. A host running an old server now offers an \"Update server\" action instead of just flagging the problem.",
+        "Raised the supported codex-cli version to 0.155.1. Rewind now works on newer codex threads, and codex sessions turn on the built-in planning tool.",
+        "Codex sessions always start with project memory as reference notes now, instead of only on certain versions."
+      ]
+    },
+    {
       "version": "0.8.2",
       "date": "2026-09-19",
       "summary": "Fixed OpenCode keys on remote hosts; added a Copy Diagnostics / Reveal Logs menu.",
