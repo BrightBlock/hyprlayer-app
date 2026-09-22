@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.4",
+      "date": "2026-09-22",
+      "summary": "Fixed a slow server start-up race and a stale-connection hang; test suite cleanup.",
+      "notes": [
+        "Fixed a race where a slow server start (a fresh profile's first migration, or a debug build) could be mistaken for a failure to connect.",
+        "Fixed a stale connection lingering after a server restarted instead of closing right away.",
+        "Setting up thoughts with a relative path is now rejected with a clear error instead of silently writing to the wrong place."
+      ]
+    },
+    {
       "version": "0.8.3",
       "date": "2026-09-19",
       "summary": "The server now updates independently of the app; codex support raised to 0.155.1.",
