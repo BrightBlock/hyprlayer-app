@@ -6,6 +6,7 @@ members = [
     "crates/hyprlayer-models",
     "crates/hyprlayer-proto",
     "crates/hyprlayer-server",
+    "crates/hyprlayer-e2e",
 ]
 
 [workspace.package]

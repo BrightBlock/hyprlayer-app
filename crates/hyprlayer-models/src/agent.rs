@@ -38,18 +38,6 @@ pub enum PermissionMode {
     BypassPermissions,
 }
 
-impl PermissionMode {
-    pub fn from_flag(s: &str) -> Option<PermissionMode> {
-        match s {
-            "default" => Some(PermissionMode::Default),
-            "acceptEdits" => Some(PermissionMode::AcceptEdits),
-            "plan" => Some(PermissionMode::Plan),
-            "bypassPermissions" => Some(PermissionMode::BypassPermissions),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
@@ -136,14 +124,5 @@ mod tests {
         }
         assert_eq!(Stage::try_parse("nope"), None);
         assert_eq!(Stage::parse("nope"), Stage::General);
-    }
-
-    #[test]
-    fn permission_mode_parses_its_camel_case_flags() {
-        assert_eq!(
-            PermissionMode::from_flag("acceptEdits"),
-            Some(PermissionMode::AcceptEdits)
-        );
-        assert_eq!(PermissionMode::from_flag("accept_edits"), None);
     }
 }

@@ -90,23 +90,6 @@ export function suggestedDocKind(stage: string): DocKind | null {
   }
 }
 
-export function stageCommand(stage: string): string | null {
-  switch (asStageKey(stage)) {
-    case "research":
-      return "/research_codebase";
-    case "plan":
-      return "/create_plan";
-    case "implement":
-      return "/implement_plan";
-    case "validate":
-      return "/validate_plan";
-    case "commit":
-      return "/commit";
-    default:
-      return null;
-  }
-}
-
 export const MODE_STYLES: Record<
   StageKey,
   {

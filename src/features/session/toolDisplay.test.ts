@@ -9,7 +9,6 @@ import {
   sessionDocs,
   docTitle,
   editDiffFromTool,
-  formatCost,
   formatTokens,
   parseToolInput,
   prettyToolInput,
@@ -434,20 +433,6 @@ describe("formatTokens", () => {
     expect(formatTokens(24130)).toBe("24.1k");
     expect(formatTokens(269_500)).toBe("269.5k");
     expect(formatTokens(1_000_000)).toBe("1.0M");
-  });
-});
-
-describe("formatCost", () => {
-  it("uses 4dp under a dollar and 2dp above", () => {
-    expect(formatCost(0.0042)).toBe("$0.0042");
-    expect(formatCost(1.5)).toBe("$1.50");
-    expect(formatCost(0)).toBe("$0.0000");
-  });
-
-  it("is null for missing / non-finite values", () => {
-    expect(formatCost(null)).toBeNull();
-    expect(formatCost(undefined)).toBeNull();
-    expect(formatCost(Number.NaN)).toBeNull();
   });
 });
 

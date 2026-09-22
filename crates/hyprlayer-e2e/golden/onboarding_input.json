@@ -1,0 +1,124 @@
+{
+  "scenario": "onboarding_input",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \"\"."
+          },
+          "guard": "onboarding refuses a blank create path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \"   \"."
+          },
+          "guard": "onboarding refuses a whitespace create path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \"thoughts\"."
+          },
+          "guard": "onboarding refuses a relative create path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \"\"."
+          },
+          "guard": "onboarding refuses a blank disk path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \".\"."
+          },
+          "guard": "onboarding refuses a relative disk path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "invalid_path",
+            "message": "The thoughts location has to be a full path, not \"cloned\"."
+          },
+          "guard": "onboarding refuses a relative clone location",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "bootstrap_user_required",
+            "message": "A username is needed to set up thoughts."
+          },
+          "guard": "onboarding refuses a blank user",
+          "ok": true
+        }
+      ],
+      "step": "refuse bad input"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "after": {
+              ".git": null
+            },
+            "before": {
+              ".git": null
+            }
+          },
+          "guard": "the daemon's working directory is untouched",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exists": false
+          },
+          "guard": "a refused request creates nothing at its path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "thoughts": null
+          },
+          "guard": "the CLI config gains no thoughts section",
+          "ok": true
+        }
+      ],
+      "step": "leave no trace"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "accepted": true,
+            "thoughtsRepo": "$SANDBOX/home/thoughts",
+            "user": "e2e"
+          },
+          "guard": "a ~ path resolves under the profile's home",
+          "ok": true
+        }
+      ],
+      "step": "accept good input"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

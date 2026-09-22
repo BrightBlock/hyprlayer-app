@@ -1,0 +1,51 @@
+{
+  "scenario": "remote_slow_start",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "first": true,
+            "second": true
+          },
+          "guard": "both clients get through a slow cold start",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "servers": 1
+          },
+          "guard": "one server serves them both",
+          "ok": true
+        }
+      ],
+      "step": "race two clients against a cold start"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "says_exited": true
+          },
+          "guard": "a server that cannot start is reported as having exited",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "names_the_database": true
+          },
+          "guard": "the report carries the server's own reason",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "within_25s": true
+          },
+          "guard": "the failure is reported without waiting out the timeout",
+          "ok": true
+        }
+      ],
+      "step": "fail to start"
+    }
+  ]
+}

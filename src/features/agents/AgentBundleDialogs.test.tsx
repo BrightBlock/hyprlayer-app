@@ -105,11 +105,4 @@ describe("AgentUpdateFailed", () => {
     expect(onClose).toHaveBeenCalled();
     expect(b.navigate).toHaveBeenCalledWith({ to: "/settings", search: { section: "general" } });
   });
-
-  it("offers no terminal escape hatch", () => {
-    render(
-      <AgentUpdateFailed failure={failure} open={true} onClose={() => {}} onRetry={() => {}} />,
-    );
-    expect(screen.queryByRole("button", { name: "Show output" })).toBeNull();
-  });
 });

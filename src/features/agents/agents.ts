@@ -51,11 +51,6 @@ export const MEMORY_SCOPES: ReadonlyArray<{ key: string; label: string; hint: st
   { key: "user", label: "Everywhere", hint: "Follows the agent across every project" },
 ];
 
-export function memoryLabel(memory: string | null): string {
-  if (!memory) return "Off";
-  return MEMORY_SCOPES.find((s) => s.key === memory)?.label ?? memory;
-}
-
 export function hasUnknownMemoryScope(memory: string | null): boolean {
   return !!memory && !MEMORY_SCOPES.some((s) => s.key === memory);
 }

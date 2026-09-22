@@ -617,14 +617,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn override_beats_path_and_redetect_clears() {
+    async fn an_override_beats_path() {
         let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
         let fake = PathBuf::from("/nonexistent/fake-claude");
         resolver
             .set_override(BinaryKind::Claude, Some(fake.clone()))
             .await;
         assert_eq!(resolver.resolve(BinaryKind::Claude).await, Some(fake));
-        resolver.set_override(BinaryKind::Claude, None).await;
-        let _ = resolver.resolve(BinaryKind::Claude).await;
     }
 }

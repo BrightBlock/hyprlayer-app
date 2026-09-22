@@ -45,7 +45,7 @@ U+001F, never `\0`.
 ### Row tiers
 
 Two heights, not three: `compact` (`h-7`, 28px) and `standard` (`h-9`, 36px),
-via `rowClass()` and `Row` (`ui.tsx:1004-1086`). An earlier draft of the
+via `rowClass()` (`ui.tsx:864-883`). An earlier draft of the
 implementation plan proposed a third, 48px tier for the Agents view's agent
 row on the assumption it held two lines of content. It doesn't: `AgentList.tsx`'s
 agent row (`:530-548`; `AgentList.tsx` no longer exists, deleted by the
@@ -353,7 +353,7 @@ content column is `max-w-5xl` by construction, the same width
 288px aside there is no wide table left to cap.
 
 The new sidebar's own rows — root nav, folder/agent tree, drilled-in
-configuration sections — do not build on `rowClass`/`Row`. They follow the
+configuration sections — do not build on `rowClass`. They follow the
 Prompts-anatomy bordered-row pattern instead (`border-accent/30 bg-accent/10`
 selected, `border-transparent … hover:bg-edge/40` otherwise,
 `PromptLibrary.tsx:429-433`), matching the surface the sidebar copies its
@@ -391,7 +391,7 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   `className` override win now, which is exactly the trap that shipped the
   bug this ADR opens with — the named scale exists so nobody needs to
   discover that the hard way twice.
-- Adding a new row means picking `compact` or `standard` via `rowClass`/`Row`
+- Adding a new row means picking `compact` or `standard` via `rowClass`
   and reaching for the module's hover/selection constants, not re-deriving a
   height or a hover class from scratch.
 - Adding a new floating panel means reaching for `Popover`, not hand-rolling

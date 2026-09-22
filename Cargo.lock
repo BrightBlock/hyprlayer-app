@@ -2070,6 +2070,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyprlayer-e2e"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hyprlayer-core",
+ "hyprlayer-proto",
+ "hyprlayer-server",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "hyprlayer-models"
 version = "0.8.3"
 dependencies = [

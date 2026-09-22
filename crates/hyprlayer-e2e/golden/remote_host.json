@@ -1,0 +1,168 @@
+{
+  "scenario": "remote_host",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": 1
+          },
+          "guard": "the relay starts a server when none is running",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "protocol": 1
+          },
+          "guard": "the handshake survives the SSH hop",
+          "ok": true
+        }
+      ],
+      "step": "connect through the relay"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "default_repos_root": "/home/e2e/hyprlayer/repos"
+          },
+          "guard": "the client sees the host's profile",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ids": [
+              "$WS"
+            ]
+          },
+          "guard": "a folder project lists its workstreams before onboarding",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "thoughts_repo": "yes"
+          },
+          "guard": "onboarding creates the thoughts repository on the host",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cwd": "/home/e2e/notes",
+            "os": "Linux"
+          },
+          "guard": "the terminal runs on the host, in the folder",
+          "ok": true
+        }
+      ],
+      "step": "work on the host"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "relays_left": 0
+          },
+          "guard": "the host's relay exits with its SSH session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "same_process": true,
+            "servers": 1
+          },
+          "guard": "the host's server keeps running",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "stderr": ""
+          },
+          "guard": "a fresh host's first relay says nothing on stderr",
+          "ok": true
+        }
+      ],
+      "step": "drop the SSH connection"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "attached": true
+          },
+          "guard": "the terminal survives the dropped connection",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "replayed_marker": true
+          },
+          "guard": "reattaching replays the scrollback",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "marker": true
+          },
+          "guard": "the terminal takes input after reconnecting",
+          "ok": true
+        }
+      ],
+      "step": "reconnect over a new SSH session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": 0
+          },
+          "guard": "the host's server is gone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": true
+          },
+          "guard": "the client sees its connection end",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "new_process": true,
+            "servers": 1
+          },
+          "guard": "the next relay starts a fresh server",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ids": [
+              "$WS"
+            ]
+          },
+          "guard": "the workstream survives the server's death",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "attached": false
+          },
+          "guard": "the dead server's terminal is reported gone",
+          "ok": true
+        }
+      ],
+      "step": "kill the host's server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": 0
+          },
+          "guard": "shutdown stops the host's server",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

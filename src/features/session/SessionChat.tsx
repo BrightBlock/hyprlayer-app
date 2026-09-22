@@ -12,7 +12,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Badge, Button, ErrorNote, MenuItem, MenuSeparator, Popover, Spinner } from "@/components/ui";
+import { Button, ErrorNote, MenuItem, MenuSeparator, Popover, Spinner } from "@/components/ui";
 import {
   BookIcon,
   ChevronDownIcon,
@@ -141,13 +141,6 @@ import {
   type HistoryNav,
   type NavResult,
 } from "./promptHistory";
-
-export function SessionStatusBadge({ sessionId }: { sessionId?: string }) {
-  const session = useSession(sessionId);
-  if (!session) return <Badge tone="dim">idle</Badge>;
-  const { label, tone } = describeState(session.state, session.streaming);
-  return <Badge tone={tone}>{label}</Badge>;
-}
 
 const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
   ok: "bg-ok",

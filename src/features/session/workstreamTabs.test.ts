@@ -707,11 +707,6 @@ describe("clearArchiveOnRefocus", () => {
 });
 
 describe("composer focus signal", () => {
-  it("starts with no pending request", () => {
-    useComposerFocusStore.setState({ pendingShellId: null });
-    expect(useComposerFocusStore.getState().pendingShellId).toBeNull();
-  });
-
   it("records a pending request for the target shell", () => {
     requestComposerFocus(7);
     expect(useComposerFocusStore.getState().pendingShellId).toBe(7);

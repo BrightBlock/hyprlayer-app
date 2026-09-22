@@ -5,13 +5,13 @@
 | Command | What it does |
 |---|---|
 | `cargo fmt --all` | Formats the Rust workspace — **run before every push** |
-| `cargo test` | Rust workspace tests (422) + regenerates `src/lib/bindings.ts` |
+| `cargo test` | Rust workspace tests (1,070, including the E2E scenarios) + regenerates `src/lib/bindings.ts` |
 | `pnpm typecheck` | Frontend type-check (`tsc --noEmit`) |
 | `pnpm lint` | ESLint (includes import-boundary rules) |
-| `pnpm test` | Vitest (847 tests) |
+| `pnpm test` | Vitest (1,491 tests) |
 | `pnpm build` | typecheck + vite build |
 
-Always run all of these before pushing. The release gate is `scripts/release.sh` which runs the same checks.
+Always run all of these before pushing. The release gate is `scripts/release.sh`, which runs the same checks plus the E2E container tier (`cargo test -p hyprlayer-e2e -- --ignored`), so it needs Docker running.
 
 **`cargo fmt --all` is not optional.** There is no CI to catch drift (ADR-0001 —
 releases are built locally by design), so an unformatted commit stays
@@ -93,10 +93,20 @@ hooks in `src/lib/queries.ts`. One-shot imperative calls (PTY attach, resize)
 invoke `commands.*` directly from the component. Client state is zustand, in the
 feature that owns it.
 
-**Tests.** Rust unit tests live in a `mod tests` beside the code; the seven files
-in `crates/hyprlayer-core/tests/` are integration tests, some driving real
-binaries. Frontend tests sit next to their component as `*.test.tsx`. Narrow to
-one with `cargo test -p hyprlayer-core <name>` or `pnpm test <path>`.
+**Tests.** End-to-end first. `crates/hyprlayer-e2e` runs the real
+`hyprlayer-server` binary, built from the tree, in a sandboxed profile and
+drives it over its socket; it needs `git` and the hyprlayer CLI installed. Each
+scenario writes `target/e2e/<scenario>/` and compares its `report.json` with
+`crates/hyprlayer-e2e/golden/`: `HYPRLAYER_E2E_BLESS=1` rewrites a golden, and
+the diff is reviewed like code. `HYPRLAYER_E2E_KEEP=1` keeps the sandbox.
+`cargo test -p hyprlayer-e2e -- --ignored` adds the container tier: a Linux
+host in Docker, reached through the same `ssh … relay` the desktop uses, with
+the server built for it in a `rust:1-bookworm` container.
+Isolated tests sit beside their code (`mod tests`, `*.test.tsx`) and in the 20
+files of `crates/hyprlayer-core/tests/`, some driving real binaries. Those files
+need the `test-support` feature, so `cargo test -p hyprlayer-core <name>` alone
+runs none of them: narrow with `cargo test -p hyprlayer-core --features
+test-support <name>`, or `pnpm test <path>`.
 
 **Running it.** `pnpm tauri dev`. Beware: this can trigger the separately
 installed release app's auto-updater, so a fresh mtime on the release binary is

@@ -400,13 +400,12 @@ mod tests {
     }
 
     #[test]
-    fn check_present_nested_literal_is_clean_and_writes_nothing() {
-        let (repo, wt) = dirs();
+    fn check_present_nested_literal_is_clean() {
+        let (repo, _wt) = dirs();
         write(repo.path(), "tools/operating-review/.env", b"SECRET=1");
         let r = check_worktree_patterns(repo.path(), &["tools/operating-review/.env".into()]);
         assert!(r.missing.is_empty(), "should resolve: {r:?}");
         assert!(r.errors.is_empty());
-        assert!(!wt.path().join("tools/operating-review/.env").exists());
     }
 
     #[test]

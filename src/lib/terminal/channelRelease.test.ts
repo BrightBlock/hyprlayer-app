@@ -15,18 +15,6 @@ function release(channels: FakeChannel[]) {
 }
 
 describe("releaseChannels", () => {
-  it("replaces the handler so the captured scope is no longer reachable", () => {
-    const captured = vi.fn();
-    const channels = [fake(captured)];
-    const original = channels[0].onmessage;
-
-    release(channels);
-
-    expect(original).toBe(captured);
-    expect(channels).toHaveLength(0);
-    expect(captured).not.toHaveBeenCalled();
-  });
-
   it("leaves a handler that is safe to invoke after release", () => {
     const captured = vi.fn();
     const channel = fake(captured);

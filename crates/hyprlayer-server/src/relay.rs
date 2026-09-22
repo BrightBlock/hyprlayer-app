@@ -13,7 +13,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{logging, socket};
 
-const CONNECT_RETRIES: u32 = 50;
+/// As long as the desktop's own spawn waits (`supervisor.rs`): a cold start
+/// runs migrations, and a debug build hashes its own binary first.
+const SPAWN_LISTEN_RETRIES: u32 = 300;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Connects to the profile's socket and splices `io` to it until either side
@@ -23,41 +25,52 @@ pub async fn run<S>(
     app_config_dir: PathBuf,
     app_data_dir: PathBuf,
     log_dir: &Path,
-    mut io: S,
+    io: S,
 ) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let path = socket::socket_path(&app_data_dir);
-    let mut stream = match socket::connect(&path).await {
+    let stream = match socket::connect(&path).await {
         Ok(stream) => {
             tracing::info!("relaying to the server at {}", path.display());
             stream
         }
         Err(e) => {
             tracing::info!("no server at {} ({e}); starting one", path.display());
-            let stderr_start = spawn_detached(&app_config_dir, &app_data_dir, log_dir)?;
-            match wait_for_socket(&path).await {
+            let (mut child, stderr_start) =
+                spawn_detached(&app_config_dir, &app_data_dir, log_dir)?;
+            let said = || {
+                stderr_start
+                    .map(|start| logging::stderr_since(log_dir, start))
+                    .unwrap_or_default()
+            };
+            match wait_for_spawn(&mut child, &path, said).await {
                 Ok(stream) => stream,
                 // What the server said on its way out is the reason; the
-                // connect error only says it never listened.
-                Err(e) => {
-                    let said = stderr_start
-                        .map(|start| logging::stderr_since(log_dir, start))
-                        .unwrap_or_default();
-                    return Err(match said.trim() {
-                        "" => e,
-                        said => io::Error::other(format!("{e}; the server said: {said}")),
-                    });
+                // wait only says it never listened.
+                Err(failure) => {
+                    return Err(io::Error::other(match said().trim() {
+                        "" => failure,
+                        said => format!("{failure}; the server said: {said}"),
+                    }));
                 }
             }
         }
     };
     let started = Instant::now();
-    let copied = tokio::io::copy_bidirectional(&mut stream, &mut io).await;
+    let (mut from_server, mut to_server) = tokio::io::split(stream);
+    let (mut from_client, mut to_client) = tokio::io::split(io);
+    // Either side hanging up ends the relay. Waiting for both, as
+    // `copy_bidirectional` does, leaves a client connected to a dead server
+    // until it next writes.
+    let (closer, copied) = tokio::select! {
+        bytes = tokio::io::copy(&mut from_server, &mut to_client) => ("the server", bytes),
+        bytes = tokio::io::copy(&mut from_client, &mut to_server) => ("the client", bytes),
+    };
     match &copied {
-        Ok((to_client, to_server)) => tracing::info!(
-            "relay ended after {:?}: {to_server} bytes to the server, {to_client} to the client",
+        Ok(bytes) => tracing::info!(
+            "relay ended after {:?}: {closer} closed, having sent {bytes} bytes",
             started.elapsed()
         ),
         Err(e) => tracing::warn!("relay ended after {:?}: {e}", started.elapsed()),
@@ -68,12 +81,13 @@ where
 /// A deliberate orphan, exactly like the desktop's own local spawn
 /// (`src-tauri/src/supervisor.rs::spawn_detached`): the server must outlive
 /// this relay, which itself dies with the SSH connection that started it.
-/// Returns where this spawn's stderr starts in the shared stderr file.
+/// Returns the child, for its exit status, and where this spawn's stderr
+/// starts in the shared stderr file.
 fn spawn_detached(
     app_config_dir: &Path,
     app_data_dir: &Path,
     log_dir: &Path,
-) -> io::Result<Option<u64>> {
+) -> io::Result<(tokio::process::Child, Option<u64>)> {
     let bin = std::env::current_exe()?;
     let (stderr, start) = match logging::stderr_file(log_dir) {
         Ok((file, start)) => (Stdio::from(file), Some(start)),
@@ -92,19 +106,41 @@ fn spawn_detached(
         .stderr(stderr);
     let child = hyprlayer_core::process::spawn_orphan(&mut cmd)?;
     tracing::info!("started {} serve as pid {:?}", bin.display(), child.id());
-    Ok(start)
+    Ok((child, start))
 }
 
-async fn wait_for_socket(path: &Path) -> io::Result<socket::ClientStream> {
+/// Waits for the spawned server to listen. An exit fails at once, unless it
+/// lost the profile lock to a server another relay started at the same
+/// moment, which will be listening shortly.
+async fn wait_for_spawn(
+    child: &mut tokio::process::Child,
+    path: &Path,
+    said: impl Fn() -> String,
+) -> Result<socket::ClientStream, String> {
+    let mut lost_the_race = false;
     let mut last_err = None;
-    for _ in 0..CONNECT_RETRIES {
+    for _ in 0..SPAWN_LISTEN_RETRIES {
         match socket::connect(path).await {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
+        if !lost_the_race {
+            if let Ok(Some(status)) = child.try_wait() {
+                if !said().contains("runtime_in_use") {
+                    return Err(format!("the server exited during startup ({status})"));
+                }
+                lost_the_race = true;
+            }
+        }
         tokio::time::sleep(CONNECT_RETRY_DELAY).await;
     }
-    Err(last_err.unwrap_or_else(|| io::Error::other("timed out waiting for the server to listen")))
+    let waited = CONNECT_RETRY_DELAY * SPAWN_LISTEN_RETRIES;
+    Err(format!(
+        "the server did not listen at {} within {}s{}",
+        path.display(),
+        waited.as_secs(),
+        last_err.map(|e| format!(" ({e})")).unwrap_or_default()
+    ))
 }
 
 #[cfg(all(test, unix))]

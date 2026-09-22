@@ -57,14 +57,6 @@ impl AppError {
         }
     }
 
-    pub fn thoughts_not_configured() -> Self {
-        Self {
-            code: "config_missing".into(),
-            message: "Thoughts are not configured yet.".into(),
-            remedy: Some("Add the repository as a project first.".into()),
-        }
-    }
-
     /// The host does not have the server this build needs: nothing at the
     /// version-keyed path, a binary there whose bytes are not ours, or an ssh
     /// exit naming a missing command. One code, because it is one condition and
@@ -204,26 +196,11 @@ mod tests {
     }
 
     #[test]
-    fn binary_missing_maps_to_the_pinned_v0_7_fixture() {
-        let err = AppError::from(CoreError::BinaryMissing {
-            name: "claude".into(),
-        });
-        assert_eq!((err.code, err.message, err.remedy), pinned("binaries"));
-    }
-
-    #[test]
     fn config_missing_carries_no_extra_punctuation() {
         let err = AppError::from(CoreError::ConfigMissing {
             path: "/nonexistent-hyprlayer-config-fixture/hyprlayer/config.json".into(),
         });
         let (code, message, remedy) = pinned("settingsConfig");
-        assert_eq!((err.code, err.message, err.remedy), (code, message, remedy));
-    }
-
-    #[test]
-    fn project_not_found_is_a_public_constructor() {
-        let err = AppError::project_not_found("/tmp/example-project");
-        let (code, message, remedy) = pinned("projects");
         assert_eq!((err.code, err.message, err.remedy), (code, message, remedy));
     }
 

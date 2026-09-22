@@ -885,25 +885,3 @@ export function rowClass({
 export function RowSpine() {
   return <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />;
 }
-
-type RowProps = HTMLAttributes<HTMLDivElement> & {
-  tier: RowTier;
-  selected?: RowSelection;
-  interactive?: boolean;
-};
-
-export function Row({
-  tier,
-  selected = "none",
-  interactive = true,
-  className,
-  children,
-  ...rest
-}: RowProps) {
-  return (
-    <div className={rowClass({ tier, selected, interactive, className })} {...rest}>
-      {selected === "spine" && <RowSpine />}
-      {children}
-    </div>
-  );
-}

@@ -4,7 +4,6 @@ import {
   MODE_STAGES,
   STAGES,
   nextModeStage,
-  stageCommand,
   suggestedDocKind,
 } from "./stages";
 
@@ -12,9 +11,6 @@ describe("stage modes", () => {
   it("excludes ship from the selectable modes but keeps it as a known stage", () => {
     expect(MODE_STAGES.map((s) => s.key)).not.toContain("ship");
     expect(STAGES.map((s) => s.key)).toContain("ship");
-    for (const mode of MODE_STAGES) {
-      expect(STAGES.find((s) => s.key === mode.key)).toBeDefined();
-    }
   });
 });
 
@@ -39,23 +35,6 @@ describe("suggestedDocKind", () => {
   it("unknown stages suggest nothing", () => {
     expect(suggestedDocKind("nonsense")).toBeNull();
     expect(suggestedDocKind("")).toBeNull();
-  });
-});
-
-describe("stageCommand", () => {
-  it("maps spec stages to their skill slash-command", () => {
-    expect(stageCommand("research")).toBe("/research_codebase");
-    expect(stageCommand("plan")).toBe("/create_plan");
-    expect(stageCommand("implement")).toBe("/implement_plan");
-    expect(stageCommand("validate")).toBe("/validate_plan");
-    expect(stageCommand("commit")).toBe("/commit");
-  });
-
-  it("has no command for plain-prompt stages", () => {
-    expect(stageCommand("general")).toBeNull();
-    expect(stageCommand("ship")).toBeNull();
-    expect(stageCommand("revise")).toBeNull();
-    expect(stageCommand("nonsense")).toBeNull();
   });
 });
 

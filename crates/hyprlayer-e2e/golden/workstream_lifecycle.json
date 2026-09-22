@@ -1,0 +1,338 @@
+{
+  "scenario": "workstream_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "socket": "$SANDBOX/app-data/hyprlayer.sock"
+          },
+          "guard": "a fresh profile starts and listens",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "protocol": 1
+          },
+          "guard": "client and server agree on the protocol",
+          "ok": true
+        }
+      ],
+      "step": "start"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "config": {
+              "Ready": {
+                "backend_kind": "git",
+                "configured": false,
+                "path": "$SANDBOX/home/Library/Application Support/hyprlayer/config.json",
+                "user": ""
+              }
+            }
+          },
+          "guard": "a fresh profile asks for onboarding",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "probe": {
+              "default_path": "$SANDBOX/home/thoughts",
+              "exists": false,
+              "is_git_repo": false
+            },
+            "thoughts": {
+              ".git": null,
+              ".gitignore": null,
+              "global": null,
+              "repos": null
+            }
+          },
+          "guard": "onboarding creates the thoughts repository",
+          "ok": true
+        }
+      ],
+      "step": "onboard"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mapped_name": "demo",
+            "path": "$SANDBOX/home/code/demo",
+            "source": "disk"
+          },
+          "guard": "the project registers under its canonical path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "repoMappings": {
+              "$SANDBOX/home/code/demo": "demo"
+            },
+            "user": "e2e"
+          },
+          "guard": "import bootstraps the CLI config and maps the repository",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "thoughts": {
+              "e2e": "$SANDBOX/home/thoughts/repos/demo/e2e",
+              "global": "$SANDBOX/home/thoughts/global",
+              "shared": "$SANDBOX/home/thoughts/repos/demo/shared"
+            }
+          },
+          "guard": "thoughts init links the repository",
+          "ok": true
+        }
+      ],
+      "step": "import the repository"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branch": "hyprlayer/add-greeting-$SUFFIX",
+            "head": "hyprlayer/add-greeting-$SUFFIX",
+            "worktree": "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+          },
+          "guard": "the worktree exists on its new branch",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "baseBranch": "main",
+            "main": "44e213a448e9d41aec4093308b21d7cfaf3e4233",
+            "tip": "44e213a448e9d41aec4093308b21d7cfaf3e4233"
+          },
+          "guard": "the branch starts from main",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "worktrees": [
+              "$SANDBOX/home/code/demo",
+              "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+            ]
+          },
+          "guard": "git knows the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pwd": "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+          },
+          "guard": "the Setup script ran inside the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mapping": "demo",
+            "thoughts": {
+              "e2e": "$SANDBOX/home/thoughts/repos/demo/e2e",
+              "global": "$SANDBOX/home/thoughts/global",
+              "shared": "$SANDBOX/home/thoughts/repos/demo/shared"
+            }
+          },
+          "guard": "the worktree gets its own thoughts mapping and link",
+          "ok": true
+        }
+      ],
+      "step": "create a workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cwd": "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+          },
+          "guard": "the terminal opens in the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "marker": true
+          },
+          "guard": "terminal input and output round-trip",
+          "ok": true
+        }
+      ],
+      "step": "open a terminal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "staged": [],
+            "unstaged": [
+              {
+                "change": "untracked",
+                "oldPath": null,
+                "path": "greeting.txt"
+              }
+            ]
+          },
+          "guard": "a file written through the server shows in git status",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "staged": [
+              {
+                "change": "added",
+                "oldPath": null,
+                "path": "greeting.txt"
+              }
+            ],
+            "unstaged": []
+          },
+          "guard": "staging it sticks",
+          "ok": true
+        }
+      ],
+      "step": "edit and stage a file"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exited": true
+          },
+          "guard": "archive stops the workstream's terminal",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "worktree_exists": false
+          },
+          "guard": "archive clears the worktree root",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archive_exists": true,
+            "archive_path": "$SANDBOX/home/code/demo/archived-contexts/add-greeting-$SUFFIX"
+          },
+          "guard": "the workstream is listed as archived",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "greeting": "hello\n"
+          },
+          "guard": "archive keeps the uncommitted work",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pwd": "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+          },
+          "guard": "the Archive script ran inside the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch": "hyprlayer/add-greeting-$SUFFIX"
+          },
+          "guard": "the branch survives archive",
+          "ok": true
+        }
+      ],
+      "step": "archive"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "head": "hyprlayer/add-greeting-$SUFFIX",
+            "worktree": "$SANDBOX/home/hyprlayer/worktrees/demo/add-greeting-$SUFFIX"
+          },
+          "guard": "restore brings the worktree back on its branch",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "greeting": "hello\n"
+          },
+          "guard": "restore keeps the uncommitted work",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "staged": [
+              {
+                "change": "added",
+                "oldPath": null,
+                "path": "greeting.txt"
+              }
+            ],
+            "unstaged": []
+          },
+          "guard": "restore keeps the staged index",
+          "ok": true
+        }
+      ],
+      "step": "restore"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "archive_exists": false,
+            "worktree_exists": false
+          },
+          "guard": "purge removes the archive and the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": 0,
+            "listed": 0
+          },
+          "guard": "purge forgets the workstream",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "worktrees": [
+              "$SANDBOX/home/code/demo"
+            ]
+          },
+          "guard": "the worktree registration is gone from git",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch_exists": false,
+            "deleteBranchOnArchive": true
+          },
+          "guard": "purge deletes the branch exactly when deleteBranchOnArchive is set",
+          "ok": true
+        }
+      ],
+      "step": "purge"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listening": false
+          },
+          "guard": "the socket stops accepting",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

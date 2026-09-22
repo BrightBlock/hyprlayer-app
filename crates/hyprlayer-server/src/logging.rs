@@ -70,6 +70,9 @@ pub fn init(process: Process, dir: &Path) -> Option<WorkerGuard> {
         .or_else(|| EnvFilter::try_from_default_env().ok())
         .unwrap_or_else(|| EnvFilter::new("info"));
 
+    // The appender prunes old files before its first write creates the
+    // directory, and says so on stderr, which a relay hands to the desktop.
+    let _ = std::fs::create_dir_all(dir);
     let file = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
         .filename_prefix(process.file_prefix())

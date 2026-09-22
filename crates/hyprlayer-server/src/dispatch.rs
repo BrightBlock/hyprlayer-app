@@ -558,14 +558,21 @@ impl Dispatch for Server {
             })
             .await
             .wire()?;
+        // As in `list_all_workstreams`: with no hyprlayer config yet, the
+        // workstreams still list, just without a thoughts-link status.
         let effective = match items.first() {
-            Some(first) => Some(
-                self.runtime
-                    .settings()
-                    .effective_config_for(&first.project_path)
-                    .await
-                    .wire()?,
-            ),
+            Some(first) => match self
+                .runtime
+                .settings()
+                .effective_config_for(&first.project_path)
+                .await
+            {
+                Ok(eff) => Some(eff),
+                Err(e) => {
+                    tracing::warn!("no thoughts-link status for {}: {e}", first.project_path);
+                    None
+                }
+            },
             None => None,
         };
         let views = status_batch(items, move |item| {

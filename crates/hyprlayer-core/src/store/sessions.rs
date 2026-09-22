@@ -270,52 +270,11 @@ impl Db {
         })
     }
 
-    pub fn mark_session_init(
-        &self,
-        id: &str,
-        provider_session_id: &str,
-        model: Option<&str>,
-    ) -> Result<()> {
-        self.with(|conn| {
-            conn.execute(
-                "UPDATE sessions SET claude_session_id = ?2, model = ?3, state = 'running'
-                 WHERE id = ?1",
-                params![id, provider_session_id, model],
-            )?;
-            Ok(())
-        })
-    }
-
     pub fn set_session_state(&self, id: &str, state: SessionState) -> Result<()> {
         self.with(|conn| {
             conn.execute(
                 "UPDATE sessions SET state = ?2 WHERE id = ?1",
                 params![id, state.as_str()],
-            )?;
-            Ok(())
-        })
-    }
-
-    pub fn set_session_cost(&self, id: &str, cost_usd: f64) -> Result<()> {
-        self.with(|conn| {
-            conn.execute(
-                "UPDATE sessions SET cost_usd = ?2 WHERE id = ?1",
-                params![id, cost_usd],
-            )?;
-            Ok(())
-        })
-    }
-
-    pub fn finish_session(
-        &self,
-        id: &str,
-        state: SessionState,
-        exit_summary: Option<&str>,
-    ) -> Result<()> {
-        self.with(|conn| {
-            conn.execute(
-                "UPDATE sessions SET state = ?2, ended_at = ?3, exit_summary = ?4 WHERE id = ?1",
-                params![id, state.as_str(), now_ms(), exit_summary],
             )?;
             Ok(())
         })
@@ -616,61 +575,6 @@ impl Db {
 mod tests {
     use super::*;
     use crate::store::workstreams::WorktreeMode;
-
-    #[test]
-    fn session_lifecycle_persists_and_replays() {
-        let db = Db::open_in_memory().unwrap();
-        db.insert_workstream(crate::store::NewWorkstream {
-            project_path: "/p".into(),
-            title: "t".into(),
-            slug: "t-1".into(),
-            branch: "hyprlayer/t-1".into(),
-            worktree_path: "/wt".into(),
-            base_branch: "main".into(),
-            worktree_mode: WorktreeMode::Isolated,
-        })
-        .unwrap();
-        let ws = db.list_active_workstreams().unwrap().pop().unwrap();
-
-        let session = db
-            .insert_session(NewSession {
-                id: "s1".into(),
-                workstream_id: ws.id.clone(),
-                stage: Stage::Research,
-                harness: Harness::Claude,
-                cwd: "/wt".into(),
-            })
-            .unwrap();
-        assert_eq!(session.state, SessionState::Starting);
-
-        db.mark_session_init("s1", "claude-abc", Some("claude-opus-4-8"))
-            .unwrap();
-        db.append_session_event("s1", 0, "init", r#"{"kind":"init"}"#)
-            .unwrap();
-        db.append_session_event(
-            "s1",
-            1,
-            "assistantText",
-            r#"{"kind":"assistantText","text":"hi"}"#,
-        )
-        .unwrap();
-        db.set_session_cost("s1", 0.05).unwrap();
-        db.finish_session("s1", SessionState::Completed, Some("done"))
-            .unwrap();
-
-        let reloaded = db.get_session("s1").unwrap().unwrap();
-        assert_eq!(reloaded.provider_session_id.as_deref(), Some("claude-abc"));
-        assert_eq!(reloaded.state, SessionState::Completed);
-        assert_eq!(reloaded.cost_usd, Some(0.05));
-        assert!(reloaded.ended_at.is_some());
-
-        let events = db.session_events("s1").unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[0].seq, 0.0);
-        assert_eq!(events[1].kind, "assistantText");
-
-        assert_eq!(db.list_sessions(&ws.id).unwrap().len(), 1);
-    }
 
     fn seed_dialog(db: &Db, session_id: &str) {
         db.insert_workstream(crate::store::NewWorkstream {

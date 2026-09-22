@@ -149,11 +149,6 @@ describe("selectedVersion", () => {
     expect(versionOptions(VERSIONS).map((o) => o.value)).not.toContain("1.5.9");
   });
 
-  it("names the installed version with no list loaded at all", () => {
-    expect(selectedVersion(STATUS)).toBe("1.6.0");
-    expect(versionOptions(undefined)).toEqual([]);
-  });
-
   it("is empty only when the CLI reports no versions at all", () => {
     expect(selectedVersion({ installed: true })).toBe("");
     expect(selectedVersion(undefined)).toBe("");

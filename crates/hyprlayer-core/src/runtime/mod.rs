@@ -103,13 +103,12 @@ pub struct HyprlayerRuntime {
 
 impl HyprlayerRuntime {
     pub async fn open(options: RuntimeOptions) -> Result<Arc<Self>> {
-        Self::open_with(options, None, None, None).await
+        Self::open_with(options, None, None).await
     }
 
     pub(crate) async fn open_with(
         options: RuntimeOptions,
         config_cli: Option<Arc<dyn ConfigCli>>,
-        provider_http: Option<Arc<dyn ProviderHttp + Send + Sync>>,
         lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     ) -> Result<Arc<Self>> {
         let RuntimeOptions { environment, paths } = options;
@@ -179,8 +178,8 @@ impl HyprlayerRuntime {
 
         let config_cli =
             config_cli.unwrap_or_else(|| Arc::new(CliConfigCli::new(binaries.clone())));
-        let provider_http = provider_http
-            .unwrap_or_else(|| Arc::new(ReqwestProviderHttp::new(PROVIDER_HTTP_TIMEOUT)));
+        let provider_http: Arc<dyn ProviderHttp + Send + Sync> =
+            Arc::new(ReqwestProviderHttp::new(PROVIDER_HTTP_TIMEOUT));
 
         Ok(Arc::new(Self {
             config_cli,

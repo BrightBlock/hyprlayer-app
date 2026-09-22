@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::Result;
 
-use super::ports::{ConfigCli, LifecycleRunner, ProviderHttp};
+use super::ports::{ConfigCli, LifecycleRunner};
 use super::{HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths};
 
 /// Not part of the supported facade — a `#[doc(hidden)]` seam for injecting
@@ -15,7 +15,6 @@ pub struct RuntimeBuilder {
     paths: RuntimePaths,
     lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     config_cli: Option<Arc<dyn ConfigCli>>,
-    provider_http: Option<Arc<dyn ProviderHttp + Send + Sync>>,
 }
 
 impl RuntimeBuilder {
@@ -25,7 +24,6 @@ impl RuntimeBuilder {
             paths,
             lifecycle_runner: None,
             config_cli: None,
-            provider_http: None,
         }
     }
 
@@ -42,22 +40,8 @@ impl RuntimeBuilder {
         self
     }
 
-    pub fn with_provider_http(
-        mut self,
-        provider_http: Arc<dyn ProviderHttp + Send + Sync>,
-    ) -> Self {
-        self.provider_http = Some(provider_http);
-        self
-    }
-
     pub async fn open(self) -> Result<Arc<HyprlayerRuntime>> {
         let options = RuntimeOptions::new(self.environment, self.paths);
-        HyprlayerRuntime::open_with(
-            options,
-            self.config_cli,
-            self.provider_http,
-            self.lifecycle_runner,
-        )
-        .await
+        HyprlayerRuntime::open_with(options, self.config_cli, self.lifecycle_runner).await
     }
 }

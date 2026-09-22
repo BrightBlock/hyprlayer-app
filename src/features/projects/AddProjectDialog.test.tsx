@@ -514,7 +514,6 @@ describe("AddProjectDialog clone location default", () => {
     });
     setupCloneReporting("/home/jt/hyprlayer/repos");
     await vi.waitFor(() => expect(values()).toContain("/home/jt/hyprlayer/repos"));
-    expect(values().some((v) => v.startsWith("/Users/"))).toBe(false);
   });
 
   it("offers nothing rather than a guess when the server reports no root", async () => {

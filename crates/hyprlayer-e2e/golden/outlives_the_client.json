@@ -1,0 +1,112 @@
+{
+  "scenario": "outlives_the_client",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "worktree": "$SANDBOX/home/hyprlayer/worktrees/demo/long-running-$SUFFIX"
+          },
+          "guard": "the workstream exists before any disconnect",
+          "ok": true
+        }
+      ],
+      "step": "set up a workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "marker": true
+          },
+          "guard": "the first client's terminal echoes its input",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "closed": true
+          },
+          "guard": "the server sees the first client's connection close",
+          "ok": true
+        }
+      ],
+      "step": "open a terminal from a client, then drop that client"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "attached": true
+          },
+          "guard": "the terminal survives its client's disconnect",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "replayed_marker": true
+          },
+          "guard": "reattaching replays the scrollback",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "marker": true
+          },
+          "guard": "the reattached terminal accepts input",
+          "ok": true
+        }
+      ],
+      "step": "reattach from a new client"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "socket": "$SANDBOX/app-data/hyprlayer.sock"
+          },
+          "guard": "a second server binds the same profile",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ids": [
+              "$WS"
+            ],
+            "worktree_exists": true
+          },
+          "guard": "the workstream survives the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "attached": false
+          },
+          "guard": "the old terminal is reported gone rather than hanging",
+          "ok": true
+        }
+      ],
+      "step": "restart the server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

@@ -16,8 +16,6 @@ export const HARNESSES: HarnessOption[] = [
   { key: "opencode", label: "OpenCode" },
 ];
 
-export const DEFAULT_HARNESS_KEY = "claude";
-
 export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
   { key: "codex", label: "Codex" },

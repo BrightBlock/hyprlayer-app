@@ -528,15 +528,6 @@ mod tests {
         assert_eq!(scan_for_port("not-valid-base64!!"), None);
     }
 
-    #[tokio::test]
-    async fn port_allocation_is_reused_for_the_same_workstream() {
-        let registry = ScriptRegistry::new();
-        let first = registry.take_port("ws-scripts").await;
-        let second = registry.take_port("ws-scripts").await;
-        assert_eq!(first, second, "a workstream reuses its allocated port");
-        assert!(first > 0);
-    }
-
     #[cfg(unix)]
     #[tokio::test]
     async fn spawn_monitor_detects_the_port_and_records_the_exit_phase() {

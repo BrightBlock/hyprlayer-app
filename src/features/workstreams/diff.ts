@@ -1,55 +1,12 @@
 
-export type PatchLineKind = "add" | "del" | "hunk" | "meta" | "context";
-
-export function classifyPatchLine(line: string): PatchLineKind {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("+++") || line.startsWith("---")) return "meta";
-  if (
-    line.startsWith("diff ") ||
-    line.startsWith("index ") ||
-    line.startsWith("new file mode") ||
-    line.startsWith("deleted file mode") ||
-    line.startsWith("old mode") ||
-    line.startsWith("new mode") ||
-    line.startsWith("similarity index") ||
-    line.startsWith("rename from") ||
-    line.startsWith("rename to") ||
-    line.startsWith("Binary files") ||
-    line.startsWith("\\ No newline")
-  ) {
-    return "meta";
-  }
-  if (line.startsWith("+")) return "add";
-  if (line.startsWith("-")) return "del";
-  return "context";
-}
-
-export type PatchStats = { additions: number; deletions: number };
-
-export function countPatchStats(patch: string): PatchStats {
-  let additions = 0;
-  let deletions = 0;
-  for (const line of patch.split("\n")) {
-    const kind = classifyPatchLine(line);
-    if (kind === "add") additions += 1;
-    else if (kind === "del") deletions += 1;
-  }
-  return { additions, deletions };
-}
+export type PatchLineKind = "add" | "del" | "hunk" | "context";
 
 export type PatchLine = { kind: PatchLineKind; text: string };
-
-export function parsePatchLines(patch: string): PatchLine[] {
-  const lines = patch.split("\n");
-  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  return lines.map((text) => ({ kind: classifyPatchLine(text), text }));
-}
 
 export const PATCH_LINE_CLASSES: Record<PatchLineKind, string> = {
   add: "bg-ok/10 text-ok",
   del: "bg-bad/10 text-bad",
   hunk: "text-brand",
-  meta: "text-ink-dim/70",
   context: "text-ink-dim",
 };
 

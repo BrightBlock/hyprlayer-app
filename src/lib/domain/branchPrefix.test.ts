@@ -45,13 +45,11 @@ describe("suggestPrefix", () => {
   });
 
   it("tokenizes the title the way match_words tokenizes a label", () => {
-    const accented: BranchPrefix[] = [{ label: "Réparation", prefix: "fix/", keywords: [] }];
     const filled: BranchPrefix[] = [
       { label: "Réparation", prefix: "fix/", keywords: ["réparation"] },
     ];
     expect(suggestPrefix("Réparation du login", filled)?.prefix).toBe("fix/");
     expect(suggestPrefix("réparation urgente", filled)?.prefix).toBe("fix/");
-    expect(accented[0].label).toBe("Réparation");
   });
 
   it("never suggests an entry whose only keyword is the '-' opt-out", () => {

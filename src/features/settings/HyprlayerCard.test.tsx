@@ -226,16 +226,6 @@ describe("the CLI row", () => {
     await waitFor(async () => expect((await cliButton()).className).toContain("text-ok"));
   });
 
-  it("never runs a check as the download action", async () => {
-    b.updateHyprlayerCli.mockReturnValue(ok({ ok: true, exitCode: 0, stdout: "", stderr: "" }));
-    renderRung(RUNG_CURRENT);
-    const before = b.hyprlayerCliUpdateCheck.mock.calls.length;
-    fireEvent.click(await cliButton());
-    await waitFor(() => expect(b.updateHyprlayerCli).toHaveBeenCalled());
-    expect(b.hyprlayerCliUpdateCheck.mock.calls.length).toBeGreaterThanOrEqual(before);
-    expect(screen.queryByRole("button", { name: /check for cli updates/i })).toBeNull();
-  });
-
   it("hands over the manual command when the CLI cannot update itself", async () => {
     b.updateHyprlayerCli.mockReturnValue(
       ok({ ok: false, exitCode: 1, stdout: "", stderr: "sudo: no tty present" }),

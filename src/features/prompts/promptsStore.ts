@@ -4,10 +4,6 @@ import type { PromptInput } from "./prompts";
 
 export const usePromptPaletteStore = create<{ open: boolean }>(() => ({ open: false }));
 
-export function openPromptPalette(): void {
-  usePromptPaletteStore.setState({ open: true });
-}
-
 export function closePromptPalette(): void {
   usePromptPaletteStore.setState({ open: false });
 }

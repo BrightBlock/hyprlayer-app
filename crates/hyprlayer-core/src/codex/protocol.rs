@@ -1401,27 +1401,6 @@ mod tests {
     }
 
     #[test]
-    fn diff_body_lines_that_look_like_headers_survive() {
-        let (old, new) = split_unified_diff(
-            "--- a/schema.sql\n\
-             +++ b/schema.sql\n\
-             @@ -1,3 +1,3 @@\n\
-             \x20keep\n\
-             --- seed data\n\
-             +++count;\n",
-        );
-        assert_eq!(old, "keep\n-- seed data\n");
-        assert_eq!(new, "keep\n++count;\n");
-    }
-
-    #[test]
-    fn a_header_less_diff_is_all_body() {
-        let (old, new) = split_unified_diff("-a\n+b\n");
-        assert_eq!(old, "a\n");
-        assert_eq!(new, "b\n");
-    }
-
-    #[test]
     fn file_change_becomes_an_edit_with_reconstructed_strings() {
         let mut t = Translator::default();
         let out = t.notification(

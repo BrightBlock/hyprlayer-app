@@ -80,10 +80,14 @@ it *is* the update signal (see "How Linux updates work").
 ./scripts/release.sh patch     # or minor / major / an explicit version
 ```
 
-The script first runs the verification gate — `cargo test`, a standalone
-`cargo check` of the two library crates (see "Library target checks"),
-`pnpm typecheck && pnpm lint && pnpm test` — which `RELEASE_SKIP_CHECKS=1`
-skips. It then gates on `changelog.json`: it scaffolds a stub entry for the new
+The script first runs the verification gate — `cargo test`, which includes the
+local E2E scenarios in `crates/hyprlayer-e2e`, then that crate's container tier
+(`cargo test -p hyprlayer-e2e -- --ignored`: a Linux host in Docker reached over
+real SSH), a standalone `cargo check` of the two library crates (see "Library
+target checks"), `pnpm typecheck && pnpm lint && pnpm test` — which
+`RELEASE_SKIP_CHECKS=1` skips. The gate needs Docker running, and `git` and the
+hyprlayer CLI installed; it stops at once if Docker is not up. A failing E2E
+scenario leaves its artifact in `target/e2e/<scenario>/`. It then gates on `changelog.json`: it scaffolds a stub entry for the new
 version if missing and refuses to proceed until you've written a `summary`
 (≤15 words) and at least one `notes` bullet. It then bumps the version in
 `package.json`, `Cargo.toml` (`[workspace.package]`), and

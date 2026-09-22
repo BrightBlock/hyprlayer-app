@@ -126,7 +126,7 @@ pub enum CoreError {
     #[error("{detail}")]
     BranchPrefixInvalid { detail: String },
 
-    #[error("No hyprlayer config exists yet; a username is needed to create one.")]
+    #[error("A username is needed to set up thoughts.")]
     BootstrapUserRequired,
 
     #[error("{path} already exists")]
@@ -134,6 +134,9 @@ pub enum CoreError {
 
     #[error("{path} is not a directory")]
     PathNotADirectory { path: String },
+
+    #[error("The thoughts location has to be a full path, not {path:?}.")]
+    ThoughtsLocationInvalid { path: String },
 
     #[error("{path} is a bare git repository")]
     BareRepo { path: String },
@@ -460,6 +463,9 @@ impl CoreError {
             CoreError::BootstrapUserRequired => Some(
                 "Enter the username your thought documents should be attributed to.".into(),
             ),
+            CoreError::ThoughtsLocationInvalid { .. } => {
+                Some("Pick the folder, or type a full path such as ~/thoughts.".into())
+            }
             CoreError::RepoAlreadyExists { offer_remove, .. } => Some(if *offer_remove {
                 "Remove it first, or choose a different name or location.".into()
             } else {
@@ -622,6 +628,7 @@ impl CoreError {
             CoreError::BootstrapUserRequired => "bootstrap_user_required",
             CoreError::RepoAlreadyExists { .. } => "repo_exists",
             CoreError::PathNotADirectory { .. } => "invalid_path",
+            CoreError::ThoughtsLocationInvalid { .. } => "invalid_path",
             CoreError::BareRepo { .. } => "bare_repo",
             CoreError::ProjectKindConflict { .. } => "project_kind_conflict",
             CoreError::FolderIsGitRepo { .. } => "folder_is_git_repo",

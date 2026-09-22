@@ -44,13 +44,6 @@ export function isReservedRepoName(name: string): boolean {
   return RESERVED_REPO_NAMES.includes(name);
 }
 
-export function createSpecPath(spec: CreateSpec): string {
-  const location = spec.location.trim().replace(/[/\\]+$/, "");
-  const name = sanitizeProjectName(spec.name);
-  if (!name) return location;
-  return location ? `${location}/${name}` : name;
-}
-
 // The owner list is owned by the dialog, not by this component: these fields
 // unmount when the wizard advances, and an owner resolved by an effect in here
 // would be lost for any create submitted before the query settled.

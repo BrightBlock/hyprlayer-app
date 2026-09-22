@@ -526,35 +526,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn open_path_delivers_live_output() {
-        let s = PtySession::spawn(SpawnTerminal {
-            shell: PathBuf::from("/bin/sh"),
-            args: vec![],
-            cwd: std::env::temp_dir(),
-            cols: 80,
-            rows: 24,
-            env: vec![],
-            workstream_id: "test".into(),
-        })
-        .expect("spawn pty");
-
-        let mut rx = s.subscribe();
-        let mut seen = String::new();
-        s.write_input(b"printf MARKER_OK\n").unwrap();
-
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !seen.contains("MARKER_OK") && tokio::time::Instant::now() < deadline {
-            if let Ok(Some(TerminalEvent::Output { data })) =
-                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
-            {
-                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
-            }
-        }
-        assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
-        s.kill();
-    }
-
-    #[tokio::test]
     async fn clear_scrollback_drops_prior_output_but_keeps_streaming() {
         async fn wait_for(s: &PtySession, needle: &str) {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);

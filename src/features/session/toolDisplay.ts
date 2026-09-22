@@ -361,8 +361,3 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
-
-export function formatCost(usd: number | null | undefined): string | null {
-  if (usd === null || usd === undefined || !Number.isFinite(usd)) return null;
-  return `$${usd.toFixed(usd < 1 ? 4 : 2)}`;
-}

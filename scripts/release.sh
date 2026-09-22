@@ -15,11 +15,18 @@ if [[ "$BRANCH" != "main" ]]; then
 fi
 
 if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
-  echo "→ Verification gate (cargo test, library targets, typecheck, lint, vitest)…"
+  echo "→ Verification gate (cargo test with local E2E, container E2E, library targets, typecheck, lint, vitest)…"
+  # The container E2E tier reaches a Linux host over real SSH, the path remote
+  # users take; check for Docker before the long steps rather than after.
+  if ! docker info >/dev/null 2>&1; then
+    echo "✗ Docker is not running — the E2E container tier needs it. Start Docker Desktop and re-run."
+    exit 1
+  fi
   # tauri-build refuses to compile the app without the externalBin sidecar, and
   # src-tauri/binaries/ is gitignored, so a clean checkout has none.
   node scripts/build-server-sidecar.mjs --debug
   cargo test --workspace --quiet
+  cargo test --package hyprlayer-e2e --quiet -- --ignored
   cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
   pnpm typecheck && pnpm lint && pnpm test
   if [[ -n "$(git status --porcelain -- src/lib/bindings.ts)" ]]; then

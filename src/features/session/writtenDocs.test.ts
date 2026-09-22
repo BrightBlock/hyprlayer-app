@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   forgetWorkstreamDocs,
   forgetWrittenDocs,
-  migrateWrittenDocs,
   recordWrittenDocs,
   useWrittenDocsStore,
 } from "./writtenDocs";
@@ -96,11 +95,5 @@ describe("forgetWorkstreamDocs", () => {
     const before = useWrittenDocsStore.getState();
     forgetWorkstreamDocs("nope");
     expect(useWrittenDocsStore.getState()).toBe(before);
-  });
-});
-
-describe("migrateWrittenDocs", () => {
-  it("discards a v1 flat map on upgrade to v2", () => {
-    expect(migrateWrittenDocs()).toEqual({ byWorkstream: {} });
   });
 });

@@ -125,7 +125,6 @@ function patchDock(wsId: string, patch: Partial<DockState>): void {
   }));
 }
 
-export const openDock = (wsId: string): void => patchDock(wsId, { open: true });
 export const closeDock = (wsId: string): void => patchDock(wsId, { open: false });
 export const toggleDock = (wsId: string): void =>
   patchDock(wsId, { open: !dockStateFor(wsId).open });

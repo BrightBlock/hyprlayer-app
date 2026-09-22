@@ -46,7 +46,6 @@ import {
   promptStats,
   readOnlyTools,
   hasUnknownMemoryScope,
-  memoryLabel,
   MEMORY_SCOPES,
   setMcp,
   setSkill,
@@ -238,20 +237,17 @@ describe("syncSkillRules", () => {
 });
 
 describe("memory scope", () => {
-  it("calls an absent scope Off rather than inventing one", () => {
-    expect(memoryLabel(null)).toBe("Off");
+  it("treats an absent scope as known", () => {
     expect(hasUnknownMemoryScope(null)).toBe(false);
   });
 
-  it("labels every scope the editor offers", () => {
+  it("knows every scope the editor offers", () => {
     for (const s of MEMORY_SCOPES) {
-      expect(memoryLabel(s.key)).toBe(s.label);
       expect(hasUnknownMemoryScope(s.key)).toBe(false);
     }
   });
 
-  it("passes an unrecognized scope through instead of hiding it", () => {
-    expect(memoryLabel("some-future-scope")).toBe("some-future-scope");
+  it("flags an unrecognized scope instead of hiding it", () => {
     expect(hasUnknownMemoryScope("some-future-scope")).toBe(true);
   });
 });
@@ -376,12 +372,6 @@ describe("agentRows", () => {
       keepEmpty: new Set(["Something else"]),
     });
     expect(rows.some((r) => r.kind === "group")).toBe(false);
-  });
-
-  it("renders a folder absent from closedFolders open, including one that appears later", () => {
-    const rows = rowsOf([loose, filed], new Set());
-    const group = rows.find((r) => r.kind === "group");
-    expect(group).toEqual({ kind: "group", folder: "Review", count: 1, open: true });
   });
 
   it("keeps every member of a folder, not just the first", () => {

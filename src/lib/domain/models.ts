@@ -176,8 +176,6 @@ export function pendingModelSync(
   return { add: visibleModels == null ? [] : fresh, seen: [...seen, ...fresh] };
 }
 
-export const ALL_MODEL_KEY_SET = new Set(ALL_MODEL_KEYS);
-
 export function knownModelKeys(catalog: readonly ModelOption[] = MODELS): string[] {
   const inCatalog = new Set(catalog.map((m) => m.key));
   return [...inCatalog, ...ALL_MODEL_KEYS.filter((key) => !inCatalog.has(key))];

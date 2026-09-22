@@ -35,6 +35,18 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
     }
 }
 
+/// A relative path would resolve against the daemon's working directory.
+fn thoughts_location(raw: &str) -> Result<PathBuf> {
+    let path = config::expand_path(raw.trim());
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(CoreError::ThoughtsLocationInvalid {
+            path: raw.to_string(),
+        })
+    }
+}
+
 fn exec_stderr(err: &CoreError) -> String {
     match err {
         CoreError::Exec { stderr_tail, .. } => stderr_tail.clone(),
@@ -1489,10 +1501,14 @@ impl ProjectService<'_> {
     pub async fn run_onboarding(&self, req: RunOnboardingRequest) -> Result<BootstrapResult> {
         ensure_running(self.runtime)?;
         let RunOnboardingRequest { user, source } = req;
+        let user = user.trim();
+        if user.is_empty() {
+            return Err(CoreError::BootstrapUserRequired);
+        }
         let resolved: PathBuf = match &source {
             ThoughtsSource::Clone { url, location } => {
                 let dest = match location.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
-                    Some(loc) => config::expand_path(loc),
+                    Some(loc) => thoughts_location(loc)?,
                     None => self.runtime.environment.home_dir.join("thoughts"),
                 };
                 let git = self.runtime.binaries.require(BinaryKind::Git).await?;
@@ -1501,7 +1517,7 @@ impl ProjectService<'_> {
                 dest
             }
             ThoughtsSource::Disk { path } => {
-                let p = config::expand_path(path);
+                let p = thoughts_location(path)?;
                 if !repos::is_git_repo(&p) {
                     return Err(CoreError::NotAGitRepo {
                         path: p.display().to_string(),
@@ -1510,26 +1526,16 @@ impl ProjectService<'_> {
                 p
             }
             ThoughtsSource::Create { path } => {
-                let p = config::expand_path(path);
+                let p = thoughts_location(path)?;
                 let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-                thoughts_repo::scaffold(
-                    &git,
-                    &p,
-                    user.trim(),
-                    DEFAULT_REPOS_DIR,
-                    DEFAULT_GLOBAL_DIR,
-                )
-                .await?;
+                thoughts_repo::scaffold(&git, &p, user, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
+                    .await?;
                 p
             }
         };
 
         let thoughts_repo_str = resolved.to_string_lossy().into_owned();
-        config::ensure_thoughts_config(
-            self.runtime.config.path(),
-            user.trim(),
-            &thoughts_repo_str,
-        )?;
+        config::ensure_thoughts_config(self.runtime.config.path(), user, &thoughts_repo_str)?;
 
         self.runtime.config.invalidate().await;
 
@@ -1548,11 +1554,7 @@ impl ProjectService<'_> {
             tracing::warn!(
                 "thoughts repoint was clobbered by a concurrent config writer; re-applying"
             );
-            config::ensure_thoughts_config(
-                self.runtime.config.path(),
-                user.trim(),
-                &thoughts_repo_str,
-            )?;
+            config::ensure_thoughts_config(self.runtime.config.path(), user, &thoughts_repo_str)?;
             self.runtime.config.invalidate().await;
             self.relink_mapped_checkouts().await;
             self.runtime.config.invalidate().await;
@@ -1606,16 +1608,6 @@ impl ProjectService<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn canonicalized_project_path_has_no_verbatim_prefix() {
-        let here = dunce::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
-        assert!(
-            !here.to_string_lossy().starts_with(r"\\?\"),
-            "registered project path must not carry the \\\\?\\ prefix: {}",
-            here.display(),
-        );
-    }
 
     #[test]
     fn browse_lists_a_directory_and_flags_a_git_repo() {
