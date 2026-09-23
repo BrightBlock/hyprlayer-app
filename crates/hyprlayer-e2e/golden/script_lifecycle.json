@@ -1,0 +1,125 @@
+{
+  "scenario": "script_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "configured": true
+          },
+          "guard": "the run script is stored against the project",
+          "ok": true
+        }
+      ],
+      "step": "configure the scripts"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ready": true
+          },
+          "guard": "the script runs and reaches its ready marker",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "running": 1
+          },
+          "guard": "the server lists it as running",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "statuses": 1,
+            "terminal_matches": true
+          },
+          "guard": "the runtime names the terminal the script is on",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "phases": [
+              "Running"
+            ]
+          },
+          "guard": "starting the script announces a run-phase change",
+          "ok": true
+        }
+      ],
+      "step": "start the long-running script"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "running": 1
+          },
+          "guard": "dropping the stream does not stop the script",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "buffered": false
+          },
+          "guard": "a running script has no buffered output yet",
+          "ok": true
+        }
+      ],
+      "step": "the stream is not the script's lifetime"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "stopped": true
+          },
+          "guard": "stopping takes it off the running list",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "phases": [
+              "Failed"
+            ]
+          },
+          "guard": "stopping announces a terminal run phase",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "has_marker": true
+          },
+          "guard": "the exit buffers what the script printed",
+          "ok": true
+        }
+      ],
+      "step": "stop it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "buffered": false
+          },
+          "guard": "clearing drops the buffered record",
+          "ok": true
+        }
+      ],
+      "step": "clear the buffer"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

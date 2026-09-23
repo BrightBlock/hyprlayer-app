@@ -52,6 +52,7 @@ pub struct Sandbox {
     bin: PathBuf,
     tmp: PathBuf,
     run: PathBuf,
+    extra_env: Vec<(&'static str, OsString)>,
 }
 
 impl Sandbox {
@@ -71,6 +72,7 @@ impl Sandbox {
             logs: root.join("logs"),
             cwd: root.join("daemon-cwd"),
             bin: root.join("bin"),
+            extra_env: Vec::new(),
             tmp: root.join("tmp"),
             run: root.join("run"),
             dir: Some(dir),
@@ -163,7 +165,7 @@ impl Sandbox {
     /// The server's whole environment. Nothing is inherited: the shell may
     /// export the release profile's `HYPRLAYER_APP_DATA_DIR`.
     pub fn server_env(&self) -> Vec<(&'static str, OsString)> {
-        vec![
+        let mut env = vec![
             ("HOME", self.home.clone().into()),
             ("USER", "e2e".into()),
             ("LOGNAME", "e2e".into()),
@@ -176,7 +178,9 @@ impl Sandbox {
             ("HYPRLAYER_APP_DATA_DIR", self.app_data.clone().into()),
             ("HYPRLAYER_APP_LOG_DIR", self.logs.clone().into()),
             ("HYPRLAYER_LOG", "debug".into()),
-        ]
+        ];
+        env.extend(self.extra_env.iter().cloned());
+        env
     }
 
     fn path_var(&self) -> OsString {
@@ -210,6 +214,53 @@ impl Sandbox {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A stub standing in for one of the `ABSENT` binaries. Repinning the
+    /// override is the whole job: `PATH` alone would not do it, because the
+    /// resolver also searches well-known install dirs and would find the host's
+    /// real provider there.
+    pub fn stage_tool(&self, name: &str, script: &str) -> PathBuf {
+        let path = self.bin.join(name);
+        std::fs::write(&path, script).expect("write a staged tool");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("make a staged tool executable");
+        }
+        self.pin_tool(name, &path);
+        path
+    }
+
+    /// Lets one of the `ABSENT` pins reach a real binary on the host. Only a
+    /// scenario that deliberately leaves the sandbox — a live-network test —
+    /// should call this; it is the one hole in the "keep the network out" pin.
+    pub fn unpin_tool(&self, name: &str) -> PathBuf {
+        let real = find_tool(name);
+        self.pin_tool(name, &real);
+        real
+    }
+
+    fn pin_tool(&self, name: &str, path: &Path) {
+        assert!(
+            ABSENT.contains(&name),
+            "{name} is not pinned absent; repinning it would not override anything"
+        );
+        let settings_path = self.app_config.join("settings.json");
+        let mut settings = self.read_json(&settings_path);
+        settings["binaryOverrides"][name] = json!(path);
+        std::fs::write(
+            &settings_path,
+            serde_json::to_vec_pretty(&settings).expect("encode settings"),
+        )
+        .expect("repin a tool");
+    }
+
+    /// An extra variable for the server's otherwise-cleared environment, for a
+    /// credential a live test needs (`GH_TOKEN`) that no sandbox path supplies.
+    pub fn set_env(&mut self, key: &'static str, value: impl Into<OsString>) {
+        self.extra_env.push((key, value.into()));
     }
 
     /// A committed repository at `~/code/<name>` on `main`.

@@ -1,0 +1,103 @@
+{
+  "scenario": "prompts_and_thoughts",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "prompt_count": 1
+          },
+          "guard": "exporting produces a document carrying the prompt",
+          "ok": true
+        }
+      ],
+      "step": "export the prompt library"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "candidates": 1,
+            "version": 1
+          },
+          "guard": "the preview fingerprints the source it was handed",
+          "ok": true
+        }
+      ],
+      "step": "preview importing it back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "prompts_source_changed"
+          },
+          "guard": "a source that no longer matches its fingerprint is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "added": 1,
+            "renamed": 0,
+            "skipped": 0
+          },
+          "guard": "the untouched export imports back cleanly",
+          "ok": true
+        }
+      ],
+      "step": "apply it, and refuse a tampered source"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "result": {
+              "output": ""
+            }
+          },
+          "guard": "syncing the thoughts repo reports an outcome rather than failing",
+          "ok": true
+        }
+      ],
+      "step": "commit the thoughts repository"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "report": {
+              "deleted": 0,
+              "failed": 0
+            }
+          },
+          "guard": "a cutoff before every archive deletes nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "report": {
+              "deleted": 1,
+              "failed": 0
+            }
+          },
+          "guard": "no cutoff reaps the archive without failures",
+          "ok": true
+        }
+      ],
+      "step": "reap an archived worktree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

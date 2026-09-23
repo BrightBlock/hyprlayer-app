@@ -1,0 +1,105 @@
+{
+  "scenario": "pr_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pushed": true
+          },
+          "guard": "the branch reaches the remote",
+          "ok": true
+        }
+      ],
+      "step": "push the workstream branch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "state": "open",
+            "title": "E2E probe"
+          },
+          "guard": "attaching reads the PR back through gh",
+          "ok": true
+        }
+      ],
+      "step": "open a pull request"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mergeable": true,
+            "state": "open"
+          },
+          "guard": "an open PR reports itself open and unmerged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "draft": false,
+            "head": "$BRANCH"
+          },
+          "guard": "preview resolves the same PR by number",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listed": 1
+          },
+          "guard": "the branch's PR is listed as open",
+          "ok": true
+        }
+      ],
+      "step": "read its status"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "state": "MERGED"
+          },
+          "guard": "GitHub reports the PR merged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "state": "merged"
+          },
+          "guard": "the app sees the merge too",
+          "ok": true
+        }
+      ],
+      "step": "merge it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branches": [
+              "main"
+            ],
+            "delete_ok": true
+          },
+          "guard": "the run leaves only the fixture's main branch",
+          "ok": true
+        }
+      ],
+      "step": "clean up the branch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "scenario": "workstream_mutations",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "title": "Renamed title"
+          },
+          "guard": "the new title is what is listed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch_unchanged": true
+          },
+          "guard": "renaming leaves the branch alone",
+          "ok": true
+        }
+      ],
+      "step": "rename it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "has_main": true
+          },
+          "guard": "the project offers its branches as bases",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "base": "release"
+          },
+          "guard": "the recorded base follows the change",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcome": {
+              "kind": "upToDate"
+            }
+          },
+          "guard": "updating from an unchanged base reports rather than fails",
+          "ok": true
+        }
+      ],
+      "step": "move it to another base"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "roles": [
+              "plan"
+            ]
+          },
+          "guard": "attaching records the document against the workstream",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "docs": 1
+          },
+          "guard": "the attachment is listed back",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "docs": 0
+          },
+          "guard": "detaching removes it again",
+          "ok": true
+        }
+      ],
+      "step": "attach a document"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "stage": "implement"
+          },
+          "guard": "the stage is recorded",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "keys": [
+              "base_branch",
+              "branch",
+              "changed_files",
+              "diff",
+              "last_commit"
+            ]
+          },
+          "guard": "the prompt context resolves for the workstream",
+          "ok": true
+        }
+      ],
+      "step": "move through the stages"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "had_link": true,
+            "restored": true
+          },
+          "guard": "reprovisioning restores the thoughts link",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch_kept": true
+          },
+          "guard": "it keeps the branch it was on",
+          "ok": true
+        }
+      ],
+      "step": "reprovision the thoughts links"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "still_on": true
+          },
+          "guard": "an isolated worktree does not follow a checkout made inside it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "adopted": "adopted",
+            "was_previous_branch": true
+          },
+          "guard": "an in-place worktree adopts an outside checkout and announces it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "worktree_missing"
+          },
+          "guard": "a missing worktree is refused, not rebuilt",
+          "ok": true
+        }
+      ],
+      "step": "adopt a branch changed behind the app's back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

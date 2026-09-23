@@ -39,6 +39,12 @@ impl Journey {
         };
         journey.alias(sandbox.root.display().to_string(), "$SANDBOX");
         journey.alias(sandbox.given.display().to_string(), "$SANDBOX");
+        // Both diverge by platform: Linux binds the socket under $XDG_RUNTIME_DIR
+        // with a hash of the absolute profile path, macOS in the data dir; the CLI
+        // config sits under ~/.config or ~/Library/Application Support. Recording
+        // either pins the golden to one platform and one checkout directory.
+        journey.alias(sandbox.socket().display().to_string(), "$SOCKET");
+        journey.alias(sandbox.cli_config().display().to_string(), "$CLI_CONFIG");
         journey.note("tools", sandbox.tool_versions());
         journey
     }

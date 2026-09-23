@@ -1,0 +1,136 @@
+{
+  "scenario": "settings_persistence",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "completed": [
+              "opencode_remove_github_copilot_default_v1"
+            ]
+          },
+          "guard": "the runtime-migration ledger records what ran",
+          "ok": true
+        }
+      ],
+      "step": "the profile migrated on first open"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "dev_tools": true,
+            "worktree_root": "$SANDBOX/home/elsewhere"
+          },
+          "guard": "the server returns the settings it stored",
+          "ok": true
+        }
+      ],
+      "step": "change device-local settings"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "codex": "ok"
+          },
+          "guard": "an override points a binary at a real file",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "codex": "ok"
+          },
+          "guard": "redetection keeps the override rather than rediscovering past it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "codex": "missing"
+          },
+          "guard": "an override at a missing path reports missing, not found",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "binaries_changed": 1
+          },
+          "guard": "changing a binary override announces it",
+          "ok": true
+        }
+      ],
+      "step": "override a binary"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "user_version": 6
+          },
+          "guard": "the database is at its migrated schema version",
+          "ok": true
+        }
+      ],
+      "step": "restart the server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "dev_tools": true,
+            "worktree_root": "$SANDBOX/home/elsewhere"
+          },
+          "guard": "settings survive the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "prefixes": [
+              "spike/"
+            ]
+          },
+          "guard": "branch prefixes survive the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "completed": [
+              "opencode_remove_github_copilot_default_v1"
+            ],
+            "unchanged": true
+          },
+          "guard": "a completed runtime migration is not rerun",
+          "ok": true
+        }
+      ],
+      "step": "nothing was lost or repeated"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "user_version": 6
+          },
+          "guard": "the schema is not migrated a second time",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

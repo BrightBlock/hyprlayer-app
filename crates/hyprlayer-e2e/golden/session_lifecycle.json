@@ -1,0 +1,234 @@
+{
+  "scenario": "session_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "init": 1
+          },
+          "guard": "the harness announces its session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_1"
+          },
+          "guard": "the assistant's reply reaches the client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "turn_done": 1
+          },
+          "guard": "the turn completes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "partial": 1
+          },
+          "guard": "streamed deltas arrive before the finished message",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "context_window": 200000
+          },
+          "guard": "the result's token accounting reaches the client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "provider_saw_prompt": true
+          },
+          "guard": "the prompt reaches the provider, not just the log",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "states": [
+              "Running"
+            ]
+          },
+          "guard": "launching announces the session's lifecycle state",
+          "ok": true
+        }
+      ],
+      "step": "launch a stage session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "init",
+              "assistantText",
+              "contextWindow",
+              "turnDone"
+            ]
+          },
+          "guard": "the stored log carries the user turn and the reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "sessions": 1
+          },
+          "guard": "the workstream lists its session",
+          "ok": true
+        }
+      ],
+      "step": "the turn is persisted"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true
+          },
+          "guard": "the provider's permission request reaches the client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_2"
+          },
+          "guard": "the turn continues once permission is granted",
+          "ok": true
+        }
+      ],
+      "step": "answer a permission ask"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "headers": [
+              "Ship"
+            ]
+          },
+          "guard": "an AskUserQuestion tool call arrives as a question, not a permission",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "options": [
+              "Yes",
+              "No"
+            ]
+          },
+          "guard": "its options survive the round trip",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_3"
+          },
+          "guard": "the turn continues once the question is answered",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "provider_saw_answer": true
+          },
+          "guard": "the chosen option reaches the provider",
+          "ok": true
+        }
+      ],
+      "step": "answer a structured question"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "accepted": true
+          },
+          "guard": "a live session takes a new model",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": true
+          },
+          "guard": "a live session takes a new effort",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": true
+          },
+          "guard": "an idle session accepts an interrupt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "active": 1
+          },
+          "guard": "interrupting does not end the session",
+          "ok": true
+        }
+      ],
+      "step": "adjust the live session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "active": 1
+          },
+          "guard": "a dropped stream does not end the session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "attached": true
+          },
+          "guard": "the session can be reattached",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_1 E2E_REPLY_2 E2E_REPLY_3 E2E_REPLY_4"
+          },
+          "guard": "the reattached session still takes turns",
+          "ok": true
+        }
+      ],
+      "step": "the session outlives its client"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exited": 1
+          },
+          "guard": "killing the session reports the harness exit",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "active": 0
+          },
+          "guard": "a killed session is no longer active",
+          "ok": true
+        }
+      ],
+      "step": "kill the session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

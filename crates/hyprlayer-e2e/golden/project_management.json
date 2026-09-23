@@ -1,0 +1,177 @@
+{
+  "scenario": "project_management",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "found": true
+          },
+          "guard": "the registered project inspects by its canonical path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "matches": true
+          },
+          "guard": "finding it returns its view",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "source": "disk"
+          },
+          "guard": "a registered repository reports a source",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": "ready"
+          },
+          "guard": "an unregistered repository still inspects as a repo",
+          "ok": true
+        }
+      ],
+      "step": "inspect what was registered"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "projects_changed": 1
+          },
+          "guard": "importing a folder announces the project change",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "first": "$SANDBOX/home/code/second"
+          },
+          "guard": "the reordered list comes back in the order it was given",
+          "ok": true
+        }
+      ],
+      "step": "register a second and reorder"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "patterns": [
+              ".env",
+              "config/local.*"
+            ]
+          },
+          "guard": "patterns are stored against the project",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "patterns": [
+              ".env",
+              "config/local.*"
+            ]
+          },
+          "guard": "they read back unchanged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mentions_seed_file": true
+          },
+          "guard": "checking reports what a new worktree would be seeded with",
+          "ok": true
+        }
+      ],
+      "step": "seed-file patterns"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "keys": [
+              "dir",
+              "files",
+              "keyCheck"
+            ]
+          },
+          "guard": "a workstream starts with readable project memory",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "io"
+          },
+          "guard": "saving a memory file that does not exist is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "saved": true
+          },
+          "guard": "an existing memory file is writable",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "content_written": true
+          },
+          "guard": "the edit lands on disk and the file is still listed",
+          "ok": true
+        }
+      ],
+      "step": "project memory"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "keys": [
+              "ahead",
+              "behind",
+              "branch",
+              "dirty",
+              "hasRemote"
+            ]
+          },
+          "guard": "the thoughts repo reports a git status",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "profiles": 1
+          },
+          "guard": "the configured thoughts profiles are listed",
+          "ok": true
+        }
+      ],
+      "step": "the thoughts repository's own status"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "files_kept": true,
+            "still_registered": false
+          },
+          "guard": "removing deregisters it without touching the files",
+          "ok": true
+        }
+      ],
+      "step": "remove one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

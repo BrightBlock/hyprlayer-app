@@ -1,0 +1,130 @@
+{
+  "scenario": "remote_provider_auth",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "providers": []
+          },
+          "guard": "a fresh host lists no providers",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "host_auth": "no"
+          },
+          "guard": "no auth file exists on the host yet",
+          "ok": true
+        }
+      ],
+      "step": "a fresh host holds no credentials"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "providers": [
+              "anthropic"
+            ]
+          },
+          "guard": "the response lists the provider it just stored",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "host_auth": "yes"
+          },
+          "guard": "the key lands on the host that runs the agents",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mode": "600"
+          },
+          "guard": "the host file is not world-readable",
+          "ok": true
+        }
+      ],
+      "step": "set a key through the relay"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "opencode_provider_unsupported"
+          },
+          "guard": "an unsupported provider is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mentions_refused_provider": false
+          },
+          "guard": "a refused provider writes nothing",
+          "ok": true
+        }
+      ],
+      "step": "refuse an unsupported provider"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": 0
+          },
+          "guard": "the host's server is gone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "new_process": true
+          },
+          "guard": "the next relay starts a fresh server",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "providers": [
+              "anthropic"
+            ]
+          },
+          "guard": "the credential survives the server it was set on",
+          "ok": true
+        }
+      ],
+      "step": "the key outlives the server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "providers": []
+          },
+          "guard": "removal empties the list",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "host_auth": "{}"
+          },
+          "guard": "removal clears the key on the host",
+          "ok": true
+        }
+      ],
+      "step": "remove it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": 0
+          },
+          "guard": "shutdown stops the host's server",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

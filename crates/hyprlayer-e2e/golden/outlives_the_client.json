@@ -62,6 +62,32 @@
       "guards": [
         {
           "evidence": {
+            "reported": "40x120"
+          },
+          "guard": "a resize reaches the pty, not just the server's bookkeeping",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "closed": true
+          },
+          "guard": "closing a terminal is accepted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "attached": false
+          },
+          "guard": "a closed terminal cannot be reattached",
+          "ok": true
+        }
+      ],
+      "step": "resize and close the terminal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },
@@ -70,7 +96,7 @@
         },
         {
           "evidence": {
-            "socket": "$SANDBOX/app-data/hyprlayer.sock"
+            "socket": "$SOCKET"
           },
           "guard": "a second server binds the same profile",
           "ok": true

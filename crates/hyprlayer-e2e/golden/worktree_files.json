@@ -1,0 +1,142 @@
+{
+  "scenario": "worktree_files",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "entries": [
+              "edit.rs",
+              "keep.rs"
+            ]
+          },
+          "guard": "a directory lists its files",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "content": "fn edit() {}\n"
+          },
+          "guard": "a file reads back its committed content",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hits": [
+              "src/edit.rs"
+            ]
+          },
+          "guard": "search finds the file by name",
+          "ok": true
+        }
+      ],
+      "step": "read the tree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "watching": true
+          },
+          "guard": "watching a worktree is accepted",
+          "ok": true
+        }
+      ],
+      "step": "watch the worktree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "wrote": true
+          },
+          "guard": "writing reports a new mtime",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "modified_exists": true,
+            "original_exists": true
+          },
+          "guard": "the staged diff carries both sides",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "worktree_changed": 1
+          },
+          "guard": "an armed watcher announces the edit",
+          "ok": true
+        }
+      ],
+      "step": "edit, stage, and see both sides"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "staged": []
+          },
+          "guard": "unstaging moves the file out of the index",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "restored": true
+          },
+          "guard": "discard restores the committed content on disk",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changed": []
+          },
+          "guard": "the tree is clean again",
+          "ok": true
+        }
+      ],
+      "step": "unstage and discard"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "subject": "Keep it"
+          },
+          "guard": "the new commit tops the workstream's list",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "files": [
+              "src/keep.rs"
+            ]
+          },
+          "guard": "the commit names the file it changed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "both_sides": true
+          },
+          "guard": "a commit's file diffs against its parent",
+          "ok": true
+        }
+      ],
+      "step": "commit and read the commit back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "scenario": "doc_concurrency",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "under_thoughts": true
+          },
+          "guard": "the document lands inside the thoughts repository",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "Rescanned",
+              "Rescanned",
+              "Updated"
+            ]
+          },
+          "guard": "creating a document announces an index update for it",
+          "ok": true
+        }
+      ],
+      "step": "create a document"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "advanced": true
+          },
+          "guard": "a save from the current mtime is accepted",
+          "ok": true
+        }
+      ],
+      "step": "the first writer wins"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "doc_conflict"
+          },
+          "guard": "a save from a stale mtime is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "first": true,
+            "second": false
+          },
+          "guard": "the refused save leaves the winner's content alone",
+          "ok": true
+        }
+      ],
+      "step": "the second writer is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "doc_conflict"
+          },
+          "guard": "a frontmatter patch from a stale mtime is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": "shipped"
+          },
+          "guard": "a frontmatter patch from the current mtime is applied",
+          "ok": true
+        }
+      ],
+      "step": "frontmatter takes the same check"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "doc_conflict"
+          },
+          "guard": "a save that would clobber an outside edit is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "external_edit_survives": true
+          },
+          "guard": "the outside edit survives",
+          "ok": true
+        }
+      ],
+      "step": "an edit outside the app counts as a writer"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "len": 15
+          },
+          "guard": "an imported attachment reads back byte for byte",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exists": true
+          },
+          "guard": "saved bytes land inside the workstream, not the profile root",
+          "ok": true
+        }
+      ],
+      "step": "attachments round-trip through the workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hits": 1
+          },
+          "guard": "the document is reachable by search",
+          "ok": true
+        }
+      ],
+      "step": "the index can find it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

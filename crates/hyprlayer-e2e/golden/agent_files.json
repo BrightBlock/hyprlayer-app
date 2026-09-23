@@ -1,0 +1,182 @@
+{
+  "scenario": "agent_files",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "count": 19,
+            "sources": [
+              "user"
+            ]
+          },
+          "guard": "the bundle's agents are readable after onboarding",
+          "ok": true
+        }
+      ],
+      "step": "onboarding installs the CLI's agent bundle"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "named_for_the_agent": true
+          },
+          "guard": "a new agent path is offered under the project",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "name": "e2e-probe",
+            "tools": [
+              "Read"
+            ]
+          },
+          "guard": "saving returns the agent it wrote",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "on_disk": true
+          },
+          "guard": "the file exists on disk where the path said",
+          "ok": true
+        }
+      ],
+      "step": "write one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agents": [
+              "adjudicator",
+              "adversarial-reviewer",
+              "archivist",
+              "cartographer",
+              "codebase-analyzer",
+              "codebase-locator",
+              "codebase-pattern-finder",
+              "draughtsman",
+              "e2e-probe",
+              "foreman",
+              "herald",
+              "inspector",
+              "jira-searcher",
+              "jira-ticket-reader",
+              "marshal",
+              "quartermaster",
+              "ship",
+              "thoughts-analyzer",
+              "thoughts-locator",
+              "web-search-researcher"
+            ]
+          },
+          "guard": "the saved agent is listed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "has_prompt": true,
+            "wrote_file": true
+          },
+          "guard": "exporting writes a file carrying the agent's prompt",
+          "ok": true
+        }
+      ],
+      "step": "read it back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "entries": 0
+          },
+          "guard": "context files read from the installed bundle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "entries": 0
+          },
+          "guard": "mcp servers read from the installed bundle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "entries": 14
+          },
+          "guard": "skills read from the installed bundle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "commands": 18
+          },
+          "guard": "slash commands read from the worktree",
+          "ok": true
+        }
+      ],
+      "step": "the bundle's other readers"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "manageable": true,
+            "update_available": null
+          },
+          "guard": "status answers offline",
+          "ok": true
+        }
+      ],
+      "step": "bundle status"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agents": [
+              "adjudicator",
+              "adversarial-reviewer",
+              "archivist",
+              "cartographer",
+              "codebase-analyzer",
+              "codebase-locator",
+              "codebase-pattern-finder",
+              "draughtsman",
+              "foreman",
+              "herald",
+              "inspector",
+              "jira-searcher",
+              "jira-ticket-reader",
+              "marshal",
+              "quartermaster",
+              "ship",
+              "thoughts-analyzer",
+              "thoughts-locator",
+              "web-search-researcher"
+            ],
+            "on_disk": false
+          },
+          "guard": "deleting removes it from the listing and the disk",
+          "ok": true
+        }
+      ],
+      "step": "delete it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}
