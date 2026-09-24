@@ -7,7 +7,6 @@ export type ModelOption = {
   label: string;
   hint?: string;
   flag: string | null;
-  contextWindow: number;
   description?: string;
   efforts?: string[];
   unlisted?: boolean;
@@ -16,23 +15,23 @@ export type ModelOption = {
 };
 
 const FALLBACK_MODELS: ModelOption[] = [
-  { key: "opus", label: "Opus 5", hint: "1M", flag: null, contextWindow: 1_000_000 },
-  { key: "sonnet", label: "Sonnet 5", flag: "sonnet", contextWindow: 200_000 },
-  { key: "sonnet-1m", label: "Sonnet 5", hint: "1M", flag: "sonnet[1m]", contextWindow: 1_000_000 },
-  { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000 },
-  { key: "fable", label: "Fable 5", hint: "1M", flag: "fable", contextWindow: 1_000_000 },
+  { key: "opus", label: "Opus 5", hint: "1M", flag: null },
+  { key: "sonnet", label: "Sonnet 5", flag: "sonnet" },
+  { key: "sonnet-1m", label: "Sonnet 5", hint: "1M", flag: "sonnet[1m]" },
+  { key: "haiku", label: "Haiku 4.5", flag: "haiku" },
+  { key: "fable", label: "Fable 5", hint: "1M", flag: "fable" },
 ];
 
 const LEGACY_MODELS: ModelOption[] = [
-  { key: "sonnet-4-6", label: "Sonnet 4.6", flag: "claude-sonnet-4-6", contextWindow: 200_000 },
-  { key: "sonnet-4-6-1m", label: "Sonnet 4.6", hint: "1M", flag: "claude-sonnet-4-6[1m]", contextWindow: 1_000_000 },
-  { key: "opus-4-8", label: "Opus 4.8", flag: "claude-opus-4-8", contextWindow: 200_000 },
-  { key: "opus-4-8-1m", label: "Opus 4.8", hint: "1M", flag: "claude-opus-4-8[1m]", contextWindow: 1_000_000 },
-  { key: "opus-4-7", label: "Opus 4.7", flag: "claude-opus-4-7", contextWindow: 200_000 },
-  { key: "opus-4-7-1m", label: "Opus 4.7", hint: "1M", flag: "claude-opus-4-7[1m]", contextWindow: 1_000_000 },
-  { key: "opus-4-6", label: "Opus 4.6", flag: "claude-opus-4-6", contextWindow: 200_000 },
-  { key: "opus-4-6-1m", label: "Opus 4.6", hint: "1M", flag: "claude-opus-4-6[1m]", contextWindow: 1_000_000 },
-  { key: "opus-4-1", label: "Opus 4.1", flag: "claude-opus-4-1", contextWindow: 200_000 },
+  { key: "sonnet-4-6", label: "Sonnet 4.6", flag: "claude-sonnet-4-6" },
+  { key: "sonnet-4-6-1m", label: "Sonnet 4.6", hint: "1M", flag: "claude-sonnet-4-6[1m]" },
+  { key: "opus-4-8", label: "Opus 4.8", flag: "claude-opus-4-8" },
+  { key: "opus-4-8-1m", label: "Opus 4.8", hint: "1M", flag: "claude-opus-4-8[1m]" },
+  { key: "opus-4-7", label: "Opus 4.7", flag: "claude-opus-4-7" },
+  { key: "opus-4-7-1m", label: "Opus 4.7", hint: "1M", flag: "claude-opus-4-7[1m]" },
+  { key: "opus-4-6", label: "Opus 4.6", flag: "claude-opus-4-6" },
+  { key: "opus-4-6-1m", label: "Opus 4.6", hint: "1M", flag: "claude-opus-4-6[1m]" },
+  { key: "opus-4-1", label: "Opus 4.1", flag: "claude-opus-4-1" },
 ];
 
 export const MODELS: ModelOption[] = [...FALLBACK_MODELS, ...LEGACY_MODELS];
@@ -64,7 +63,7 @@ function presetKeyByName(m: ClaudeModel, oneMillion: boolean): string | undefine
   const name = modelDisplayName(m.resolvedModel);
   if (!name) return undefined;
   return MODELS.find(
-    (s) => s.flag !== null && s.label === name && (s.contextWindow === 1_000_000) === oneMillion,
+    (s) => s.flag !== null && s.label === name && (s.hint === "1M") === oneMillion,
   )?.key;
 }
 
@@ -100,7 +99,6 @@ export function liveModelOptions(models: readonly ClaudeModel[]): ModelOption[] 
         label: isDefault ? "Default" : name,
         hint: hint || undefined,
         flag: m.flag,
-        contextWindow: oneMillion ? 1_000_000 : 200_000,
         description: m.description ?? undefined,
         efforts: m.supportedEffortLevels,
         resolvedModel: m.resolvedModel,
@@ -136,7 +134,6 @@ export function modelOption(
     key,
     label: key,
     flag: key,
-    contextWindow: key.includes("[1m]") ? 1_000_000 : 200_000,
   };
 }
 

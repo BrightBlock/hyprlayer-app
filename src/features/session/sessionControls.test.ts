@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { leaf } from "./paneTree";
 import {
-  contextWindowFor,
   controlsKey,
   controlsSignature,
   useFocusedSessionControls,
@@ -98,25 +97,6 @@ describe("controlsSignature", () => {
       snapshot({ context: { tokens: 25_000, window: 200_000, title: "Context 25k / 200k" } }),
     ];
     for (const s of changed) expect(controlsSignature(s)).not.toBe(base);
-  });
-});
-
-describe("contextWindowFor", () => {
-  it("prefers the session's own window on every harness", () => {
-    expect(contextWindowFor(32_768, "opencode", 200_000)).toBe(32_768);
-    expect(contextWindowFor(400_000, "codex", 200_000)).toBe(400_000);
-    expect(contextWindowFor(1_000_000, "claude", 200_000)).toBe(1_000_000);
-  });
-
-  it("falls back to the picked model's window only on Claude", () => {
-    expect(contextWindowFor(null, "claude", 200_000)).toBe(200_000);
-    expect(contextWindowFor(null, "codex", 1_000_000)).toBeNull();
-    expect(contextWindowFor(null, "opencode", 1_000_000)).toBeNull();
-  });
-
-  it("treats a non-positive session window as unknown", () => {
-    expect(contextWindowFor(0, "codex", 200_000)).toBeNull();
-    expect(contextWindowFor(0, "claude", 200_000)).toBe(200_000);
   });
 });
 

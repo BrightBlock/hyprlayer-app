@@ -152,12 +152,11 @@ describe("actionLaunchArgs", () => {
 
   it("clamps the effort to what the live catalog says the model accepts", () => {
     const catalog: ModelOption[] = [
-      { key: "haiku", label: "Haiku 4.5", flag: "haiku", contextWindow: 200_000, efforts: [] },
+      { key: "haiku", label: "Haiku 4.5", flag: "haiku", efforts: [] },
       {
         key: "sonnet",
         label: "Sonnet 5",
         flag: "sonnet",
-        contextWindow: 200_000,
         efforts: ["low", "medium", "high"],
       },
     ];
@@ -173,14 +172,12 @@ describe("actionLaunchArgs", () => {
         key: "opus",
         label: "Opus 5",
         flag: null,
-        contextWindow: 1_000_000,
         efforts: ["low", "medium", "high"],
       },
       {
         key: "sonnet",
         label: "Sonnet 5",
         flag: "sonnet",
-        contextWindow: 200_000,
         efforts: ["low", "medium", "high"],
         disabled: true,
       },

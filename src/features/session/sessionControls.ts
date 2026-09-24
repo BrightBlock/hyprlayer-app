@@ -43,16 +43,6 @@ export function controlsSignature(s: SessionControlsSnapshot): string {
   return JSON.stringify(s, (key, value: unknown) => (key === "icon" ? undefined : value));
 }
 
-// Codex and OpenCode report their own window; only Claude's picked model has a known one.
-export function contextWindowFor(
-  sessionWindow: number | null,
-  harness: Harness,
-  pickedWindow: number,
-): number | null {
-  if (sessionWindow != null && sessionWindow > 0) return sessionWindow;
-  return harness === "claude" ? pickedWindow : null;
-}
-
 export function usePublishSessionControls(
   key: string,
   snapshot: SessionControlsSnapshot,

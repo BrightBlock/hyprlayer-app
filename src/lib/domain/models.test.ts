@@ -96,7 +96,6 @@ describe("Claude model presets", () => {
     expect(modelOption("opus-4-8").flag).toBe("claude-opus-4-8");
     expect(modelOption("opus-4-8-1m")).toMatchObject({
       flag: "claude-opus-4-8[1m]",
-      contextWindow: 1_000_000,
     });
   });
 
@@ -158,12 +157,6 @@ describe("live catalog merge", () => {
     const merged = claudeModels(live);
     expect(modelOption("opus", merged)).toMatchObject({ flag: null, label: "Default" });
     expect(modelOption("sonnet-1m", merged).flag).toBe("sonnet[1m]");
-  });
-
-  it("reads the 1M window off the flag or the resolved id", () => {
-    const merged = claudeModels(live);
-    expect(merged[0].contextWindow).toBe(1_000_000);
-    expect(merged[1].contextWindow).toBe(200_000);
   });
 
   it("keeps org-disabled models, marked, so stored keys can't resurrect them", () => {
@@ -350,7 +343,7 @@ describe("pendingModelSync", () => {
   it("carries the removal memory forward across two rounds of new models", () => {
     const first = pendingModelSync(curated, null, catalog)!;
     const kept = [...curated, "opus-4-8", "opus-4-8-1m"];
-    const later = [...catalog, { key: "opus-6", label: "Opus 6", flag: "opus6", contextWindow: 1_000_000 }];
+    const later = [...catalog, { key: "opus-6", label: "Opus 6", flag: "opus6" }];
     const second = pendingModelSync(kept, first.seen, later)!;
     expect(second.add).toEqual(["opus-6"]);
     expect(second.add).not.toContain("opus[1m]");

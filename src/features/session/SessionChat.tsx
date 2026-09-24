@@ -90,7 +90,7 @@ import {
 } from "@/lib/domain/harnessing";
 import { permissionModeOption } from "@/lib/domain/permissions";
 import { AgentModePicker } from "./AgentModePicker";
-import { contextWindowFor, controlsKey, usePublishSessionControls } from "./sessionControls";
+import { controlsKey, usePublishSessionControls } from "./sessionControls";
 import { formatTokens } from "@/lib/format";
 import { detectHandoffDoc } from "./toolDisplay";
 import { useWrittenDocs } from "./writtenDocs";
@@ -1014,11 +1014,8 @@ export function SessionChat({
   }, [jumpRequest]);
 
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
-  const contextWindow = contextWindowFor(
-    session?.contextWindow ?? null,
-    harness.key,
-    model.contextWindow,
-  );
+  // Only the harness's own report; it arrives with the first completed turn.
+  const contextWindow = session?.contextWindow || null;
   const contextPct =
     session?.contextTokens != null && contextWindow != null
       ? session.contextTokens / contextWindow
