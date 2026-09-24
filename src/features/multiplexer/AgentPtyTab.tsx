@@ -17,7 +17,8 @@ import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/termin
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 import { useScriptsStore } from "@/features/session/scriptsStore";
 import { closeAgent, ensureAgent, resolveResume, setAgentBypass } from "./agentRuntime";
-import { AgentStatePill, EngineGlyph } from "./agentStateUi";
+import { EngineGlyph } from "@/components/EngineGlyph";
+import { AgentStatePill } from "./agentStateUi";
 import {
   engineBypassArgs,
   engineMintsViaExec,

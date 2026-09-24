@@ -993,12 +993,12 @@ export function PromptLibrary({
                     <Button onClick={() => setRecording(false)}>Cancel</Button>
                   </div>
                   {conflictLabels.length > 0 && (
-                    <p className="text-xs text-warn">
+                    <p className="text-xs text-warn-ink">
                       Already used by {conflictLabels.join(", ")}
                     </p>
                   )}
                   {reserved && (
-                    <p className="text-xs text-warn">
+                    <p className="text-xs text-warn-ink">
                       This is a system shortcut, so the OS may intercept it.
                     </p>
                   )}

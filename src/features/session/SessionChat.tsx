@@ -7,20 +7,17 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Button, ErrorNote, MenuItem, MenuSeparator, Popover, Spinner } from "@/components/ui";
+import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
+import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import {
   BookIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   ClaudeMarkIcon,
   CodeIcon,
   DocIcon,
-  EffortIcon,
   EraserIcon,
   HandoffIcon,
   ImageIcon,
@@ -29,7 +26,6 @@ import {
   PlusIcon,
   QuestionIcon,
   SendIcon,
-  ShieldIcon,
   StopIcon,
   TerminalIcon,
   XIcon,
@@ -68,12 +64,13 @@ import {
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "./workstreamTabs";
-import { MODE_STAGES, MODE_STYLES, asStageKey, nextModeStage, stageLabel, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
+import { MODE_STYLES, asStageKey, nextModeStage, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
   claudeModels,
   codexEfforts,
   effectiveEffort,
   effortsForModel,
+  modelDisplayName,
   modelOption,
   modelSupportsUltracode,
   resolveCodexEffort,
@@ -91,8 +88,11 @@ import {
   opencodeModelLabel,
   opencodeModelNames,
 } from "@/lib/domain/harnessing";
-import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
-import { detectHandoffDoc, formatTokens } from "./toolDisplay";
+import { permissionModeOption } from "@/lib/domain/permissions";
+import { AgentModePicker } from "./AgentModePicker";
+import { contextWindowFor, controlsKey, usePublishSessionControls } from "./sessionControls";
+import { formatTokens } from "@/lib/format";
+import { detectHandoffDoc } from "./toolDisplay";
 import { useWrittenDocs } from "./writtenDocs";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
 import {
@@ -172,310 +172,10 @@ export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?
   );
 }
 
-type ComposerMenuOption = {
-  key: string;
-  label: string;
-  hint?: string;
-  icon?: ReactNode;
-  danger?: boolean;
-  disabled?: boolean;
-  disabledReason?: string;
-  accent?: boolean;
-};
-
-type MenuGroup = {
-  key: string;
-  label: string;
-  icon?: ReactNode;
-  items: ComposerMenuOption[];
-  disabled?: boolean;
-  more?: { label: string; items: ComposerMenuOption[] };
-};
-
 function composerMark(key: string, size = 13) {
   if (key === "codex") return <OpenAiIcon size={size} />;
   if (key === "opencode") return <CodeIcon size={size} />;
   return <ClaudeMarkIcon size={size} />;
-}
-
-function ComposerMenu({
-  leading,
-  label,
-  hint,
-  items = [],
-  groups,
-  footer,
-  activeKey,
-  onSelect,
-  title,
-  custom,
-  compact = false,
-}: {
-  leading: ReactNode;
-  label: string;
-  hint?: string;
-  items?: ComposerMenuOption[];
-  groups?: MenuGroup[];
-  footer?: { label: string; icon?: ReactNode; onClick: () => void };
-  activeKey: string;
-  onSelect: (key: string) => void;
-  title: string;
-  custom?: { label: string; placeholder?: string };
-  compact?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [editing, setEditing] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(new Set());
-  const [text, setText] = useState("");
-  const allItems = groups
-    ? groups.flatMap((g) => (g.disabled ? [] : g.items.filter((it) => !it.disabled)))
-    : items;
-  const customActive = custom != null && !allItems.some((it) => it.key === activeKey);
-  const activeDanger = allItems.some((it) => it.key === activeKey && it.danger);
-  const activeAccent = allItems.some((it) => it.key === activeKey && it.accent);
-
-  const close = () => {
-    setOpen(false);
-    setEditing(false);
-    setText("");
-    setExpandedGroups(new Set());
-  };
-  const beginCustom = () => {
-    setText(customActive ? activeKey : "");
-    setEditing(true);
-  };
-  const commitCustom = () => {
-    const value = text.trim();
-    if (value) onSelect(value);
-    close();
-  };
-  const onCustomKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitCustom();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      setEditing(false);
-    }
-  };
-
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => (open ? close() : setOpen(true))}
-        title={compact ? `${title}: ${label}` : title}
-        className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-1 text-xs hover:bg-edge/50 ${
-          activeDanger
-            ? "text-bad hover:text-bad"
-            : activeAccent
-              ? "text-accent hover:text-accent"
-              : "text-ink-dim hover:text-ink"
-        }`}
-      >
-        <span className="shrink-0">{leading}</span>
-        {!compact && (
-          <>
-            <span
-              className={`max-w-[12rem] truncate font-medium ${
-                activeDanger ? "text-bad" : activeAccent ? "text-accent" : "text-ink"
-              }`}
-            >
-              {label}
-            </span>
-            {hint && <span className={activeDanger ? "text-bad/80" : "text-ink-dim"}>{hint}</span>}
-            <ChevronDownIcon size={12} />
-          </>
-        )}
-      </button>
-      <Popover
-        open={open}
-        onClose={close}
-        anchorRef={triggerRef}
-        side="top"
-        align="start"
-        className="max-h-[60vh] min-w-44 max-w-[22rem] overflow-y-auto overflow-x-hidden"
-      >
-        {groups ? (
-          <>
-            {groups.map((g, gi) => {
-              const renderItem = (it: ComposerMenuOption) =>
-                g.disabled || it.disabled ? (
-                  <MenuItem
-                    key={it.key}
-                    disabled
-                    title={
-                      g.disabled
-                        ? undefined
-                        : (it.disabledReason ??
-                          "Locked to this session's provider. Start a new agent to use a different provider")
-                    }
-                  >
-                    <span className="flex w-full items-center gap-2 text-ink-dim/40">
-                      {it.icon && <span className="shrink-0">{it.icon}</span>}
-                      <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                      {it.hint && <span className="shrink-0 text-[10px] text-ink-dim/70">{it.hint}</span>}
-                      {g.disabled && (
-                        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
-                      )}
-                    </span>
-                  </MenuItem>
-                ) : (
-                  <MenuItem
-                    key={it.key}
-                    onClick={() => {
-                      onSelect(it.key);
-                      close();
-                    }}
-                    className={it.key === activeKey ? "text-ink" : "text-ink-dim"}
-                  >
-                    <span className="flex w-full items-center gap-2">
-                      {it.icon && <span className="shrink-0">{it.icon}</span>}
-                      <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                      {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
-                      {it.key === activeKey && (
-                        <span aria-hidden="true" className="ml-auto shrink-0">
-                          ✓
-                        </span>
-                      )}
-                    </span>
-                  </MenuItem>
-                );
-              const showMore = g.more && (expandedGroups.has(g.key) || g.more.items.some((it) => it.key === activeKey));
-              return (
-                <div key={g.key}>
-                  {gi > 0 && <MenuSeparator />}
-                  <div className="flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-ink-dim/70">
-                    {g.icon && <span className="shrink-0">{g.icon}</span>}
-                    <span>{g.label}</span>
-                  </div>
-                  {g.items.map(renderItem)}
-                  {g.more && g.more.items.length > 0 && (
-                    <>
-                      <MenuItem
-                        onClick={() =>
-                          setExpandedGroups((prev) => {
-                            const next = new Set(prev);
-                            if (!next.delete(g.key)) next.add(g.key);
-                            return next;
-                          })
-                        }
-                        className="text-ink-dim"
-                      >
-                        <span className="flex w-full items-center gap-2">
-                          <span className="shrink-0">
-                            {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">{g.more.label}</span>
-                          <span className="ml-auto shrink-0 text-[10px] text-ink-dim/70">
-                            {g.more.items.length}
-                          </span>
-                        </span>
-                      </MenuItem>
-                      {showMore && g.more.items.map(renderItem)}
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            {footer && (
-              <>
-                <MenuSeparator />
-                <MenuItem
-                  onClick={() => {
-                    footer.onClick();
-                    close();
-                  }}
-                  className="text-ink-dim hover:text-ink"
-                >
-                  <span className="flex w-full items-center gap-2">
-                    <span>{footer.label}</span>
-                    {footer.icon && <span className="ml-auto shrink-0">{footer.icon}</span>}
-                  </span>
-                </MenuItem>
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            {items.map((it) =>
-              it.disabled ? (
-                <MenuItem key={it.key} disabled title={it.hint || undefined}>
-                  <span className="flex w-full items-center gap-2 text-ink-dim/40">
-                    {it.icon && <span className="shrink-0">{it.icon}</span>}
-                    <span>{it.label}</span>
-                    {it.hint && <span>{it.hint}</span>}
-                  </span>
-                </MenuItem>
-              ) : (
-                <MenuItem
-                  key={it.key}
-                  onClick={() => {
-                    onSelect(it.key);
-                    close();
-                  }}
-                  danger={it.danger}
-                  className={
-                    it.danger
-                      ? undefined
-                      : it.accent
-                        ? "text-accent hover:text-accent"
-                        : it.key === activeKey
-                          ? "text-ink"
-                          : "text-ink-dim"
-                  }
-                >
-                  <span className="flex w-full items-center gap-2">
-                    {it.icon && <span className="shrink-0">{it.icon}</span>}
-                    <span>{it.label}</span>
-                    {it.hint && <span className="text-ink-dim">{it.hint}</span>}
-                    {it.key === activeKey && (
-                      <span aria-hidden="true" className="ml-auto">
-                        ✓
-                      </span>
-                    )}
-                  </span>
-                </MenuItem>
-              ),
-            )}
-            {custom && (
-              <>
-                <MenuSeparator />
-                {editing ? (
-                  <div className="px-2 py-1">
-                    <input
-                      autoFocus
-                      value={text}
-                      onChange={(e) => setText(e.target.value)}
-                      onKeyDown={onCustomKey}
-                      onBlur={commitCustom}
-                      placeholder={custom.placeholder}
-                      spellCheck={false}
-                      className="w-full rounded-md border border-edge bg-base px-2 py-1 text-sm text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none"
-                    />
-                  </div>
-                ) : (
-                  <MenuItem onClick={beginCustom} className={customActive ? "text-ink" : "text-ink-dim"}>
-                    <span className="flex w-full items-center gap-2">
-                      <span>{customActive ? activeKey : custom.label}</span>
-                      {customActive && (
-                        <span aria-hidden="true" className="ml-auto">
-                          ✓
-                        </span>
-                      )}
-                    </span>
-                  </MenuItem>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </Popover>
-    </div>
-  );
 }
 
 function AttachMenu({
@@ -504,7 +204,7 @@ function AttachMenu({
         onClick={() => setOpen((v) => !v)}
         title="Attach context"
         aria-label="Attach context"
-        className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         <PlusIcon />
       </button>
@@ -536,79 +236,6 @@ function AttachMenu({
   );
 }
 
-function ContextRing({ pct }: { pct: number }) {
-  const r = 7;
-  const circumference = 2 * Math.PI * r;
-  const filled = Math.min(1, Math.max(0, pct));
-  const tone = filled > 0.9 ? "text-bad" : filled > 0.75 ? "text-warn" : "text-ok";
-  return (
-    <svg width={18} height={18} viewBox="0 0 18 18" className="-rotate-90">
-      <circle cx="9" cy="9" r={r} fill="none" strokeWidth="2.5" stroke="currentColor" className="text-edge" />
-      <circle
-        cx="9"
-        cy="9"
-        r={r}
-        fill="none"
-        strokeWidth="2.5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - filled)}
-        className={tone}
-      />
-    </svg>
-  );
-}
-
-function ContextMeter({ tokens, windowSize }: { tokens: number; windowSize: number }) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const pct = Math.min(1, tokens / windowSize);
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={`Context ${formatTokens(tokens)} / ${formatTokens(windowSize)}`}
-        aria-label="Context usage"
-        className="flex h-6 items-center gap-1.5 rounded px-1.5 text-ink-dim hover:bg-edge/60 hover:text-ink"
-      >
-        <ContextRing pct={pct} />
-        <span className="font-mono text-[11px]">{formatTokens(tokens)}</span>
-      </button>
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchorRef={triggerRef}
-        side="top"
-        align="end"
-        className="w-64 p-3"
-      >
-        <div className="flex items-baseline justify-between">
-          <span className="text-sm font-medium text-ink">Context</span>
-          <span className="font-mono text-xs text-ink-dim">
-            {formatTokens(tokens)} / {formatTokens(windowSize)}
-          </span>
-        </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-edge">
-          <div className="h-full rounded-full bg-ink-dim" style={{ width: `${pct * 100}%` }} />
-        </div>
-        <dl className="mt-2.5 space-y-1 text-xs">
-          <div className="flex justify-between">
-            <dt className="text-ink-dim">Used</dt>
-            <dd className="text-ink">{(pct * 100).toFixed(1)}%</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-ink-dim">Free space</dt>
-            <dd className="text-ink">{((1 - pct) * 100).toFixed(1)}%</dd>
-          </div>
-        </dl>
-      </Popover>
-    </div>
-  );
-}
-
 function HandoffBanner({
   mode,
   contextPct,
@@ -633,7 +260,7 @@ function HandoffBanner({
       : "Create handoff";
   return (
     <div className="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2">
-      <span className="shrink-0 text-warn">
+      <span className="shrink-0 text-warn-ink">
         <HandoffIcon size={14} />
       </span>
       <span className="min-w-0 flex-1 text-xs text-ink-dim">
@@ -652,7 +279,7 @@ function HandoffBanner({
         type="button"
         disabled={disabled}
         onClick={isReady ? onClearAndResume : onCreateHandoff}
-        className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs font-medium text-warn hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-warn/10"
+        className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs font-medium text-warn-ink hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-warn/10"
       >
         {actionLabel}
       </button>
@@ -1001,31 +628,6 @@ export function SessionChat({
   addAttachmentsRef.current = onAddAttachments;
   const workstreamId = view.item.id;
 
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const naturalWidthRef = useRef(0);
-  const [compactComposer, setCompactComposer] = useState(false);
-  const measureRef = useRef<() => void>(() => {});
-  measureRef.current = () => {
-    const el = toolbarRef.current;
-    if (!el) return;
-    if (!compactComposer) {
-      naturalWidthRef.current = el.scrollWidth;
-      if (el.scrollWidth > el.clientWidth + 1) setCompactComposer(true);
-    } else if (naturalWidthRef.current && el.clientWidth >= naturalWidthRef.current) {
-      setCompactComposer(false);
-    }
-  };
-  useLayoutEffect(() => {
-    measureRef.current();
-  });
-  useLayoutEffect(() => {
-    const el = toolbarRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => measureRef.current());
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
   const mode = asStageKey(shell.mode);
@@ -1112,10 +714,10 @@ export function SessionChat({
   );
 
   const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
-  const lockOther = (itemProvider: string): Pick<ComposerMenuOption, "disabled"> =>
+  const lockOther = (itemProvider: string): Pick<OptionMenuItem, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
 
-  const claudeRow = (m: ModelOption): ComposerMenuOption => ({
+  const claudeRow = (m: ModelOption): OptionMenuItem => ({
     key: `claude:${m.key}`,
     label: m.label,
     hint: m.disabled ? (m.description ?? "unavailable") : m.hint,
@@ -1125,7 +727,7 @@ export function SessionChat({
       : lockOther("claude")),
   });
 
-  const modelGroups: MenuGroup[] = [
+  const modelGroups: OptionMenuGroup[] = [
     {
       key: "claude",
       label: "Claude Code",
@@ -1193,6 +795,20 @@ export function SessionChat({
         ? `codex:${codexModel}`
         : ""
       : `claude:${model.key}`;
+  const codexEffortOptions: OptionMenuItem[] = codexEffortItems.map((e) => ({
+    key: e.key,
+    label: e.label,
+  }));
+  const claudeEffortOptions: OptionMenuItem[] = claudeEffortItems.map((e) => {
+    const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
+    return {
+      key: e.key,
+      label: e.label,
+      hint: blocked ? "needs an xhigh-capable model" : undefined,
+      disabled: blocked,
+      accent: e.key === "ultracode",
+    };
+  });
 
   const applyClaudeModel = async (key: string) => {
     if (key === model.key) return;
@@ -1387,9 +1003,15 @@ export function SessionChat({
   const transcriptRef = useRef<TranscriptHandle | null>(null);
 
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
-  const contextWindow = session?.contextWindow ?? model.contextWindow;
+  const contextWindow = contextWindowFor(
+    session?.contextWindow ?? null,
+    harness.key,
+    model.contextWindow,
+  );
   const contextPct =
-    session?.contextTokens != null ? session.contextTokens / contextWindow : 0;
+    session?.contextTokens != null && contextWindow != null
+      ? session.contextTokens / contextWindow
+      : 0;
   const handoffDoc = shell.docs.find((d) => d.role === "handoff") ?? null;
   const sessionItems = session?.items;
   const dismissedSet = useMemo(
@@ -1667,6 +1289,44 @@ export function SessionChat({
     [sid, onDraftChange, onResetSession],
   );
 
+  usePublishSessionControls(
+    controlsKey(workstreamId, shell.id),
+    {
+      harness: harness.key,
+      interactive: !terminal,
+      model: {
+        // The live catalog labels its default model "Default"; name the model it resolves to.
+        label:
+          usingOpencode || usingCodex
+            ? composerModelLabel
+            : (modelDisplayName(model.resolvedModel) ?? model.label),
+        hint: composerModelHint ?? null,
+        activeKey: composerModelActiveKey,
+        groups: modelGroups,
+      },
+      effort: usingCodex
+        ? { label: codexEffort.label, activeKey: codexEffort.key, items: codexEffortOptions }
+        : !usingOpencode && claudeEffortItems.length > 0
+          ? { label: effort?.label ?? "Default", activeKey: effort?.key ?? "", items: claudeEffortOptions }
+          : null,
+      permissionKey: usingOpencode ? null : permissionMode.key,
+      context:
+        session?.contextTokens != null && contextWindow != null
+          ? {
+              tokens: session.contextTokens,
+              window: contextWindow,
+              title: `Context ${formatTokens(session.contextTokens)} / ${formatTokens(contextWindow)}`,
+            }
+          : null,
+    },
+    {
+      pickModel: onPickModel,
+      pickEffort: usingCodex ? onCodexEffortChange : onEffortChange,
+      setPermissionMode: (key) => void handlePermissionModeChange(key),
+      openHarnessSettings: onOpenHarnessSettings,
+    },
+  );
+
   return (
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
       {dragOver && (
@@ -1794,6 +1454,9 @@ export function SessionChat({
                   </div>
                 )}
                 <div className="flex items-end gap-1 pr-1">
+                  <div className="flex shrink-0 items-center pb-1 pl-1">
+                    <AgentModePicker mode={mode} started={started} onChange={onModeChange} />
+                  </div>
                   <div ref={composerBoxRef} className="relative min-w-0 flex-1">
                     <HighlightBackdrop
                       value={draft}
@@ -1826,6 +1489,34 @@ export function SessionChat({
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-1 pb-1">
+                    <BackgroundTasksIndicator
+                      tasks={backgroundTasks}
+                      onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
+                    />
+                    {started && (
+                      <button
+                        type="button"
+                        onClick={() => void handleClear()}
+                        title={
+                          showHandoffReady
+                            ? "Clear context and resume from the handoff doc"
+                            : "Clear context, ending this conversation to start fresh"
+                        }
+                        aria-label="Clear context"
+                        className={
+                          showHandoffReady
+                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-warn-ink ring-1 ring-warn/50 hover:bg-warn/10"
+                            : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
+                        }
+                      >
+                        <EraserIcon />
+                      </button>
+                    )}
+                    <AttachMenu
+                      onLibrary={onBrowseDocs}
+                      onFiles={onAddFiles}
+                      onScreenshots={onAddScreenshots}
+                    />
                     {busy && started && (
                       <button
                         type="button"
@@ -1857,132 +1548,6 @@ export function SessionChat({
                     >
                       {starting ? <Spinner size={14} /> : <SendIcon size={15} />}
                     </button>
-                  </div>
-                </div>
-              </div>
-              <div ref={toolbarRef} className="mt-1 flex items-center gap-0.5 overflow-x-clip">
-                {started ? (
-                  <span
-                    title={compactComposer ? stageLabel(mode) : undefined}
-                    className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${MODE_STYLES[mode].badge}`}
-                  >
-                    <ModeIcon mode={mode} size={13} />
-                    {!compactComposer && stageLabel(mode)}
-                  </span>
-                ) : (
-                  <ComposerMenu
-                    title="Agent mode"
-                    leading={<ModeIcon mode={mode} size={13} />}
-                    label={stageLabel(mode)}
-                    items={MODE_STAGES.map((s) => ({
-                      key: s.key,
-                      label: s.label,
-                      icon: <ModeIcon mode={s.key} size={13} />,
-                    }))}
-                    activeKey={mode}
-                    onSelect={(k) => onModeChange(k as StageKey)}
-                    compact={compactComposer}
-                  />
-                )}
-                <ComposerMenu
-                  title="Model"
-                  leading={composerMark(harness.key, 14)}
-                  label={composerModelLabel}
-                  hint={composerModelHint}
-                  groups={modelGroups}
-                  activeKey={composerModelActiveKey}
-                  onSelect={onPickModel}
-                  footer={{
-                    label: "Harnesses",
-                    icon: <ChevronRightIcon size={14} />,
-                    onClick: onOpenHarnessSettings,
-                  }}
-                  compact={compactComposer}
-                />
-                {usingCodex && (
-                  <ComposerMenu
-                    title="Reasoning effort"
-                    leading={<EffortIcon size={14} />}
-                    label={codexEffort.label}
-                    items={codexEffortItems.map((e) => ({ key: e.key, label: e.label }))}
-                    activeKey={codexEffort.key}
-                    onSelect={onCodexEffortChange}
-                    compact={compactComposer}
-                  />
-                )}
-                {!usingOpencode && !usingCodex && claudeEffortItems.length > 0 && (
-                  <ComposerMenu
-                    title="Reasoning effort"
-                    leading={<EffortIcon size={14} />}
-                    label={effort?.label ?? "Default"}
-                    items={claudeEffortItems.map((e) => {
-                      const blocked = e.key === "ultracode" && !modelSupportsUltracode(model);
-                      return {
-                        key: e.key,
-                        label: e.label,
-                        hint: blocked ? "needs an xhigh-capable model" : undefined,
-                        disabled: blocked,
-                        accent: e.key === "ultracode",
-                      };
-                    })}
-                    activeKey={effort?.key ?? ""}
-                    onSelect={onEffortChange}
-                    compact={compactComposer}
-                  />
-                )}
-                {!usingOpencode && (
-                  <ComposerMenu
-                    title="Permission mode"
-                    leading={<ShieldIcon size={14} />}
-                    label={permissionMode.label}
-                    hint={permissionMode.hint}
-                    items={PERMISSION_MODES.map((p) => ({
-                      key: p.key,
-                      label: p.label,
-                      hint: p.hint,
-                      danger: p.danger,
-                    }))}
-                    activeKey={permissionMode.key}
-                    onSelect={(k) => void handlePermissionModeChange(k)}
-                    compact={compactComposer}
-                  />
-                )}
-
-                {/* Right inset = the box's 1px border + its pr-1, so the w-8 column
-                    below centres Attach under Send. */}
-                <div className="ml-auto flex items-center gap-1 pr-[5px]">
-                  {started && (
-                    <button
-                      type="button"
-                      onClick={() => void handleClear()}
-                      title={
-                        showHandoffReady
-                          ? "Clear context and resume from the handoff doc"
-                          : "Clear context, ending this conversation to start fresh"
-                      }
-                      aria-label="Clear context"
-                      className={
-                        showHandoffReady
-                          ? "flex h-6 w-6 animate-pulse items-center justify-center rounded text-warn ring-1 ring-warn/50 hover:bg-warn/10"
-                          : "flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-                      }
-                    >
-                      <EraserIcon />
-                    </button>
-                  )}
-                  <BackgroundTasksIndicator
-                    tasks={backgroundTasks}
-                    onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
-                  />
-                  {session?.contextTokens != null && (
-                    <ContextMeter tokens={session.contextTokens} windowSize={contextWindow} />
-                  )}
-                  <div className="flex w-8 justify-center">
-                    <AttachMenu
-                      onLibrary={onBrowseDocs}
-                      onFiles={onAddFiles}
-                      onScreenshots={onAddScreenshots}
-                    />
                   </div>
                 </div>
               </div>

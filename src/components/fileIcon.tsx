@@ -7,7 +7,7 @@ const CATEGORY: Record<Category, { Glyph: typeof DocIcon; cls: string }> = {
   code: { Glyph: CodeIcon, cls: "text-brand" },
   markup: { Glyph: CodeIcon, cls: "text-accent" },
   style: { Glyph: HashIcon, cls: "text-brand-soft" },
-  data: { Glyph: BracesIcon, cls: "text-warn" },
+  data: { Glyph: BracesIcon, cls: "text-warn-ink" },
   image: { Glyph: ImageIcon, cls: "text-ok" },
   doc: { Glyph: DocIcon, cls: "text-ink-dim" },
 };

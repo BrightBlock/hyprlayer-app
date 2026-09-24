@@ -38,7 +38,8 @@ import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
 import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
 import { AgentPtyTab } from "@/features/multiplexer/AgentPtyTab";
-import { EngineGlyph, PtyTabDot } from "@/features/multiplexer/agentStateUi";
+import { EngineGlyph } from "@/components/EngineGlyph";
+import { PtyTabDot } from "@/features/multiplexer/agentStateUi";
 import {
   closeAgent,
   ensureAgent,

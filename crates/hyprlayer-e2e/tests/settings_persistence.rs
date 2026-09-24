@@ -46,6 +46,12 @@ async fn settings_persistence() {
     let wanted_dev_tools = settings.dev_tools;
     let worktree_root = sandbox.home.join("elsewhere").display().to_string();
     settings.worktree_root = Some(worktree_root.clone());
+    settings.providers.default_harness = Some("codex".into());
+    settings.notifications.enabled = false;
+    settings.quit.confirm = false;
+    settings.tab_titles.enabled = false;
+    // Not the outgoing harness's default, which the server drops when the harness changes.
+    settings.tab_titles.model = Some("claude:sonnet".into());
     let saved = j
         .call(&client, Request::SetAppSettings { settings })
         .await
@@ -55,6 +61,11 @@ async fn settings_persistence() {
         saved["devTools"] == json!(wanted_dev_tools)
             && text(&saved, "/worktreeRoot") == worktree_root,
         json!({ "dev_tools": saved["devTools"], "worktree_root": saved["worktreeRoot"] }),
+    );
+    j.guard(
+        "the quick settings are stored as written",
+        quick(&saved) == wanted_quick(),
+        quick(&saved),
     );
     let prefixes = vec![BranchPrefix {
         label: "Spike".into(),
@@ -155,6 +166,11 @@ async fn settings_persistence() {
             && text(&after, "/worktreeRoot") == worktree_root,
         json!({ "dev_tools": after["devTools"], "worktree_root": after["worktreeRoot"] }),
     );
+    j.guard(
+        "quick settings survive the restart",
+        quick(&after) == wanted_quick(),
+        quick(&after),
+    );
     let resolved = j
         .call(
             &client,
@@ -191,6 +207,28 @@ async fn settings_persistence() {
     );
 
     j.finish();
+}
+
+/// The slices the Settings popover and General page write. Sound is not touched by
+/// the notify toggle, so it must still read its default.
+fn quick(s: &Value) -> Value {
+    json!({
+        "default_harness": s.pointer("/providers/defaultHarness"),
+        "notify": s.pointer("/notifications/enabled"),
+        "sound": s.pointer("/notifications/sound"),
+        "quit_confirm": s.pointer("/quit/confirm"),
+        "tab_titles": s.pointer("/tabTitles"),
+    })
+}
+
+fn wanted_quick() -> Value {
+    json!({
+        "default_harness": "codex",
+        "notify": false,
+        "sound": true,
+        "quit_confirm": false,
+        "tab_titles": { "enabled": false, "model": "claude:sonnet" },
+    })
 }
 
 /// SQLite keeps `user_version` as a big-endian u32 at byte 60 of the database

@@ -9,7 +9,6 @@ import {
   sessionDocs,
   docTitle,
   editDiffFromTool,
-  formatTokens,
   parseToolInput,
   prettyToolInput,
   resultPreview,
@@ -424,15 +423,6 @@ describe("docTitle", () => {
       "libhyprlayer crate extraction",
     );
     expect(docTitle("/t/plans/big_refactor.md")).toBe("big refactor");
-  });
-});
-
-describe("formatTokens", () => {
-  it("scales to k and M", () => {
-    expect(formatTokens(980)).toBe("980");
-    expect(formatTokens(24130)).toBe("24.1k");
-    expect(formatTokens(269_500)).toBe("269.5k");
-    expect(formatTokens(1_000_000)).toBe("1.0M");
   });
 });
 

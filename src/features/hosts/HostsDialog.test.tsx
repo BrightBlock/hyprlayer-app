@@ -24,6 +24,7 @@ vi.mock("@/lib/queries", () => ({
   useTestHostConnection: b.useTestHostConnection,
   useHostProvisioning: b.useHostProvisioning,
   useLocalServers: b.useLocalServers,
+  useHostProbes: () => ({}),
 }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: b.relaunch }));
 vi.mock("@/lib/persistedStorage", () => ({ flushPersistedWrites: b.flushPersistedWrites }));

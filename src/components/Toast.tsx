@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useToast, type ToastTone } from "@/lib/toast";
 import { XIcon } from "./icons";
 
@@ -113,7 +114,8 @@ export function Toast() {
     <div
       role="status"
       aria-live="polite"
-      className={`fixed bottom-6 right-6 z-50 flex items-start ${exiting ? "animate-toast-out pointer-events-none" : "animate-toast-in"}`}
+      className={`fixed right-6 z-50 flex items-start ${exiting ? "animate-toast-out pointer-events-none" : "animate-toast-in"}`}
+      style={{ bottom: STATUS_BAR_HEIGHT + 24 }}
     >
       <button
         type="button"

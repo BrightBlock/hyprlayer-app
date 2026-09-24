@@ -21,7 +21,7 @@ import {
   Toggle,
   SettingRow,
 } from "@/components/ui";
-import { BinaryCard } from "@/features/system/BinaryCard";
+import { BinaryCard } from "@/features/settings/BinaryCard";
 
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";
@@ -201,6 +201,7 @@ export function OllamaHarnessTab({
                       )}
                     </span>
                     <Toggle
+                      aria-label={m.id}
                       checked={selected.includes(m.id)}
                       onChange={(on) => toggleModel(m.id, on)}
                     />

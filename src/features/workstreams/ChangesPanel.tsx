@@ -419,7 +419,7 @@ function MemoryList({
   if (keyCheck === "mismatch") {
     return (
       <div className="rounded-lg border border-edge bg-panel-2 p-3">
-        <p className="text-sm font-medium text-warn">Memory unavailable</p>
+        <p className="text-sm font-medium text-warn-ink">Memory unavailable</p>
         <p className="mt-1 text-xs leading-relaxed text-ink-dim">
           This Claude Code version keeps project files somewhere hyprlayer does not compute, so
           memory is hidden here and codex tabs get none. Claude tabs still read and write it.

@@ -88,7 +88,7 @@ export function BackgroundTasksIndicator({
               <Spinner size={12} />
               <span className="flex-1 truncate font-mono text-ink">{task.label}</span>
               {elapsed !== null && <span className="shrink-0 text-ink-dim">{elapsed}</span>}
-              <span className={`shrink-0 ${isAwaiting ? "text-warn" : "text-ink-dim"}`}>
+              <span className={`shrink-0 ${isAwaiting ? "text-warn-ink" : "text-ink-dim"}`}>
                 {isAwaiting ? "waiting…" : "running"}
               </span>
             </button>

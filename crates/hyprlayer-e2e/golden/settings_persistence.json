@@ -24,6 +24,20 @@
           },
           "guard": "the server returns the settings it stored",
           "ok": true
+        },
+        {
+          "evidence": {
+            "default_harness": "codex",
+            "notify": false,
+            "quit_confirm": false,
+            "sound": true,
+            "tab_titles": {
+              "enabled": false,
+              "model": "claude:sonnet"
+            }
+          },
+          "guard": "the quick settings are stored as written",
+          "ok": true
         }
       ],
       "step": "change device-local settings"
@@ -88,6 +102,20 @@
             "worktree_root": "$SANDBOX/home/elsewhere"
           },
           "guard": "settings survive the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "default_harness": "codex",
+            "notify": false,
+            "quit_confirm": false,
+            "sound": true,
+            "tab_titles": {
+              "enabled": false,
+              "model": "claude:sonnet"
+            }
+          },
+          "guard": "quick settings survive the restart",
           "ok": true
         },
         {

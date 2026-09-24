@@ -1,20 +1,26 @@
-
 import type { PermissionMode } from "@/lib/bindings";
 
 export type PermissionModeOption = {
   key: string;
   label: string;
+  short: string;
   hint?: string;
   flag: PermissionMode | null;
   danger?: boolean;
 };
 
 export const PERMISSION_MODES: PermissionModeOption[] = [
-  { key: "auto", label: "Auto", flag: null },
-  { key: "default", label: "Ask each time", flag: "default" },
-  { key: "acceptEdits", label: "Accept edits", flag: "acceptEdits" },
-  { key: "plan", label: "Plan only", flag: "plan" },
-  { key: "bypassPermissions", label: "Bypass permissions", flag: "bypassPermissions", danger: true },
+  { key: "auto", label: "Auto", short: "Auto", flag: null },
+  { key: "default", label: "Ask each time", short: "Ask", flag: "default" },
+  { key: "acceptEdits", label: "Accept edits", short: "Edits", flag: "acceptEdits" },
+  { key: "plan", label: "Plan only", short: "Plan", flag: "plan" },
+  {
+    key: "bypassPermissions",
+    label: "Bypass permissions",
+    short: "Bypass",
+    flag: "bypassPermissions",
+    danger: true,
+  },
 ];
 
 export function permissionModeOption(key: string | undefined): PermissionModeOption {

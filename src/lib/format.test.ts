@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCompactAge, formatRelativeTime, shortSha } from "./format";
+import {
+  formatCompactAge,
+  formatCompactCount,
+  formatRelativeTime,
+  formatTokens,
+  shortSha,
+} from "./format";
 
 const NOW = Date.UTC(2026, 6, 10, 12, 0, 0);
 const ago = (ms: number) => formatCompactAge(NOW - ms, NOW);
@@ -38,6 +44,49 @@ describe("formatCompactAge", () => {
   });
 });
 
+describe("formatCompactCount", () => {
+  it("prints counts under a thousand as they are", () => {
+    expect(formatCompactCount(0)).toBe("0");
+    expect(formatCompactCount(999)).toBe("999");
+  });
+
+  it("drops a zero tenth rather than printing '1.0k'", () => {
+    expect(formatCompactCount(1000)).toBe("1k");
+    expect(formatCompactCount(1050)).toBe("1k");
+    expect(formatCompactCount(1_000_000)).toBe("1M");
+  });
+
+  it("floors the tenth, never rounding a count up past what it is", () => {
+    expect(formatCompactCount(3400)).toBe("3.4k");
+    expect(formatCompactCount(3499)).toBe("3.4k");
+    expect(formatCompactCount(9999)).toBe("9.9k");
+    expect(formatCompactCount(999_999)).toBe("999k");
+    expect(formatCompactCount(1_250_000)).toBe("1.2M");
+  });
+
+  it("drops the decimal from ten units up", () => {
+    expect(formatCompactCount(10_000)).toBe("10k");
+    expect(formatCompactCount(11_000)).toBe("11k");
+    expect(formatCompactCount(11_999)).toBe("11k");
+    expect(formatCompactCount(12_500_000)).toBe("12M");
+  });
+
+  it("floors fractional input before scaling", () => {
+    expect(formatCompactCount(1234.9)).toBe("1.2k");
+    expect(formatCompactCount(999.9)).toBe("999");
+  });
+
+  it("reads 0 for input that is not a count", () => {
+    expect(formatCompactCount(Number.NaN)).toBe("0");
+    expect(formatCompactCount(Number.POSITIVE_INFINITY)).toBe("0");
+    expect(formatCompactCount(-5)).toBe("0");
+  });
+
+  it("carries no sign; the caller adds it", () => {
+    expect(formatCompactCount(3400)).not.toMatch(/[+\-−]/);
+  });
+});
+
 describe("shortSha", () => {
   it("truncates a full sha to seven characters", () => {
     expect(shortSha("a1b2c3d4e5f6789012345678901234567890abcd")).toBe("a1b2c3d");
@@ -45,5 +94,14 @@ describe("shortSha", () => {
 
   it("returns an already-short input unchanged", () => {
     expect(shortSha("a1b2c3")).toBe("a1b2c3");
+  });
+});
+
+describe("formatTokens", () => {
+  it("scales to k and M", () => {
+    expect(formatTokens(980)).toBe("980");
+    expect(formatTokens(24130)).toBe("24.1k");
+    expect(formatTokens(269_500)).toBe("269.5k");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
   });
 });

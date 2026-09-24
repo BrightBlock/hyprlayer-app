@@ -139,6 +139,22 @@ describe("applyTheme", () => {
   });
 });
 
+describe("appearanceSegment", () => {
+  it("maps the three OS-scheme modes onto themselves", async () => {
+    const { appearanceSegment } = await loadTheme();
+    expect(appearanceSegment("light")).toBe("light");
+    expect(appearanceSegment("dark")).toBe("dark");
+    expect(appearanceSegment("system")).toBe("system");
+  });
+
+  it("selects no segment for a named theme, never passing it off as dark", async () => {
+    const { appearanceSegment } = await loadTheme();
+    for (const mode of ["claude", "cobalt", "matrix", "solarized", "omarchy"] as const) {
+      expect(appearanceSegment(mode)).toBeNull();
+    }
+  });
+});
+
 describe("setMode", () => {
   it("marks the choice explicit", async () => {
     const { useThemeStore } = await loadTheme();

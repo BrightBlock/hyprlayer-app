@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
 import type {
   ButtonHTMLAttributes,
   HTMLAttributes,
@@ -13,7 +13,12 @@ import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
+import { useFocusTrap } from "@/lib/useFocusTrap";
+import { useRovingRadio } from "@/lib/useRovingRadio";
 import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
+
+// Unregistered radius names never conflict, so `rounded-card` would survive a caller's `rounded-md`.
+const twMerge = extendTailwindMerge({ extend: { theme: { radius: ["card", "control"] } } });
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
@@ -34,32 +39,42 @@ export function ChordHint({ chord, className }: { chord: string; className?: str
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "danger";
+  size?: "sm" | "md";
   busy?: boolean;
 };
 
-export function Button({ variant = "ghost", busy, className, children, disabled, ...rest }: ButtonProps) {
+export function Button({
+  variant = "ghost",
+  size = "md",
+  busy,
+  className,
+  children,
+  disabled,
+  ...rest
+}: ButtonProps) {
   return (
     <button
       className={cx(
-        "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+        "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-sm font-medium transition-colors",
+        size === "sm" && "h-6 gap-1.5 px-2 py-0 text-xs",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         variant === "primary" && "border border-accent bg-accent text-accent-ink hover:bg-accent/90",
         variant === "ghost" && "border border-edge bg-panel-2 hover:bg-edge/60",
-        variant === "danger" && "border border-bad/40 text-bad hover:bg-bad/10",
+        variant === "danger" && "border border-bad/25 text-bad-ink hover:bg-bad/10",
         className,
       )}
       disabled={disabled || busy}
       {...rest}
     >
-      {busy && <Spinner size={14} />}
+      {busy && <Spinner size={size === "sm" ? 12 : 14} />}
       {children}
     </button>
   );
 }
 
 export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cx("rounded-lg border border-edge bg-panel p-4", className)} {...rest} />;
+  return <div className={cx("rounded-card border border-edge bg-panel p-4", className)} {...rest} />;
 }
 
 export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
@@ -71,13 +86,13 @@ export type BadgeTone = "ok" | "warn" | "bad" | "dim" | "accent";
 export function Badge({ tone = "dim", children }: { tone?: BadgeTone; children: ReactNode }) {
   const tones: Record<BadgeTone, string> = {
     ok: "bg-ok/15 text-ok",
-    warn: "bg-warn/15 text-warn",
+    warn: "bg-warn/15 text-warn-ink",
     bad: "bg-bad/15 text-bad",
     dim: "bg-edge/60 text-ink-dim",
     accent: "border border-edge bg-panel-2 text-ink",
   };
   return (
-    <span className={cx("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium", tones[tone])}>
+    <span className={cx("inline-flex items-center rounded-control px-1.5 py-0.5 text-xs font-medium", tones[tone])}>
       {children}
     </span>
   );
@@ -112,7 +127,7 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
   return (
     <input
       className={cx(
-        "selectable w-full rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm text-ink",
+        "selectable w-full rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-sm text-ink",
         "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -251,7 +266,7 @@ export function DropdownSelect({
           }
         }}
         className={cx(
-          "flex w-full items-center justify-between gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
+          "flex w-full items-center justify-between gap-2 rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
           "focus:border-ink-dim/70",
           FOCUS_RING,
           "disabled:cursor-not-allowed disabled:opacity-50",
@@ -291,7 +306,7 @@ export function DropdownSelect({
                 e.preventDefault();
                 moveFocus(move);
               }}
-              className="fixed z-50 overflow-y-auto rounded-md border border-edge bg-panel p-1 shadow-2xl"
+              className="fixed z-50 overflow-y-auto rounded-card border border-edge bg-panel p-1 shadow-2xl"
               style={{
                 top: pos.top,
                 bottom: pos.bottom,
@@ -321,7 +336,7 @@ export function DropdownSelect({
                       close();
                     }}
                     className={cx(
-                      "flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm",
+                      "flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm",
                       "focus:outline-none enabled:hover:bg-panel-2 enabled:focus-visible:bg-panel-2",
                       o.disabled
                         ? "cursor-not-allowed text-ink-dim/50"
@@ -380,32 +395,104 @@ type ToggleProps = {
   checked: boolean;
   onChange: (next: boolean) => void;
   disabled?: boolean;
-  "aria-label"?: string;
-};
+  className?: string;
+  "aria-describedby"?: string;
+} & (
+  | { "aria-label": string; children?: undefined }
+  | { children: ReactNode; "aria-label"?: string }
+);
 
-export function Toggle({ checked, onChange, disabled, ...rest }: ToggleProps) {
+export function Toggle({
+  checked,
+  onChange,
+  disabled,
+  className,
+  children,
+  "aria-label": ariaLabel,
+  "aria-describedby": describedBy,
+}: ToggleProps) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={rest["aria-label"]}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
+    <label
       className={cx(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
-        FOCUS_RING,
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        checked ? "border-accent bg-accent" : "border-edge bg-panel-2",
+        "relative inline-flex shrink-0 items-center gap-2",
+        disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+        className,
       )}
     >
-      <span
-        className={cx(
-          "inline-block h-3.5 w-3.5 transform rounded-full bg-surface transition-transform",
-          checked ? "translate-x-4" : "translate-x-0.5",
-        )}
+      {children}
+      <input
+        type="checkbox"
+        role="switch"
+        className="peer sr-only"
+        checked={checked}
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-describedby={describedBy}
+        onChange={(e) => {
+          if (!disabled) onChange(e.currentTarget.checked);
+        }}
       />
-    </button>
+      <span
+        aria-hidden="true"
+        className={cx(
+          "relative h-[18px] w-[34px] shrink-0 rounded-full transition-colors",
+          "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/60",
+          checked ? "bg-accent" : "bg-track",
+        )}
+      >
+        <span
+          className={cx(
+            "absolute left-[3px] top-[3px] h-3 w-3 rounded-full bg-accent-ink transition-transform",
+            checked && "translate-x-4",
+          )}
+        />
+      </span>
+    </label>
+  );
+}
+
+type SegmentedControlProps<T extends string> = {
+  value: T | null;
+  options: ReadonlyArray<{ value: T; label: ReactNode; disabled?: boolean }>;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  className?: string;
+  "aria-label": string;
+};
+
+export function SegmentedControl<T extends string>({
+  value,
+  options,
+  onChange,
+  disabled,
+  className,
+  "aria-label": ariaLabel,
+}: SegmentedControlProps<T>) {
+  const { groupProps, itemProps } = useRovingRadio(options, value, onChange, disabled);
+  return (
+    <div
+      {...groupProps}
+      aria-label={ariaLabel}
+      className={cx("inline-flex rounded-control bg-panel-2 p-0.5", className)}
+    >
+      {options.map((o, i) => (
+        <button
+          key={o.value}
+          type="button"
+          {...itemProps(i)}
+          className={cx(
+            "rounded-[2px] px-2.5 py-0.5 text-xs transition-colors",
+            FOCUS_RING,
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            o.value === value
+              ? "bg-panel font-semibold text-ink shadow-xs"
+              : "text-ink-2 enabled:hover:text-ink",
+          )}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -467,7 +554,7 @@ export function Dialog({
         aria-modal="true"
         aria-label={ariaLabel}
         className={cx(
-          "flex max-h-full w-full flex-col overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl",
+          "flex max-h-full w-full flex-col overflow-hidden rounded-card border border-edge bg-panel shadow-2xl",
           DIALOG_SIZE[size],
           className,
         )}
@@ -490,7 +577,7 @@ export function Dialog({
                 onClick={onClose}
                 aria-label="Close dialog"
                 className={cx(
-                  "-mr-1 -mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink",
+                  "-mr-1 -mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink",
                   FOCUS_RING,
                 )}
               >
@@ -584,14 +671,14 @@ export function ErrorNote({
   if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
-    <div className="selectable relative break-words rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+    <div className="selectable relative break-words rounded-control border border-bad/30 bg-bad/10 p-3 text-sm">
       {onDismiss && (
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss error"
           className={cx(
-            "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded text-bad/70 hover:bg-bad/15 hover:text-bad",
+            "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-control text-bad/70 hover:bg-bad/15 hover:text-bad",
             FOCUS_RING,
           )}
         >
@@ -608,7 +695,7 @@ export function CliOutput({ text }: { text: string }) {
   const trimmed = text.trim();
   if (!trimmed) return null;
   return (
-    <pre className="selectable mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md border border-edge bg-panel-2 p-2.5 font-mono text-xs text-ink-dim">
+    <pre className="selectable mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-control border border-edge bg-panel-2 p-2.5 font-mono text-xs text-ink-dim">
       {trimmed}
     </pre>
   );
@@ -639,7 +726,7 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
     <button
       type="button"
       className={cx(
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         active ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink",
@@ -685,7 +772,7 @@ export function RefreshButton({
       onClick={onClick}
       disabled={busy}
       className={cx(
-        "flex shrink-0 items-center gap-1.5 rounded text-ink-dim",
+        "flex shrink-0 items-center gap-1.5 rounded-control text-ink-dim",
         FOCUS_RING,
         "enabled:hover:text-ink disabled:cursor-default",
         children ? "px-1.5 py-1" : "h-6 w-6 justify-center enabled:hover:bg-edge/60",
@@ -738,7 +825,7 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      className="fixed z-50 min-w-44 rounded-md border border-edge bg-panel p-1 shadow-2xl"
+      className="fixed z-50 min-w-44 rounded-card border border-edge bg-panel p-1 shadow-2xl"
       style={{ left: pos.x, top: pos.y }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -758,7 +845,7 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       type="button"
       role="menuitem"
       className={cx(
-        "block w-full rounded px-2.5 py-1.5 text-left text-sm",
+        "block w-full rounded-control px-2.5 py-1.5 text-left text-sm",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         danger ? "text-bad hover:bg-bad/10" : "text-ink hover:bg-panel-2",
@@ -767,7 +854,7 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       {...rest}
     >
       {children}
-      {hint && <span className="mt-0.5 block text-xs text-warn">{hint}</span>}
+      {hint && <span className="mt-0.5 block text-xs text-warn-ink">{hint}</span>}
     </button>
   );
 }
@@ -782,7 +869,18 @@ type PopoverProps = {
   sideOffset?: number;
   className?: string;
   children: ReactNode;
+  caret?: boolean;
+  /** Makes the panel a modal dialog: focus moves in, Tab cycles, focus returns on close. */
+  trapFocus?: boolean;
+  initialFocusRef?: RefObject<HTMLElement | null>;
+  /** Defaults to the anchor. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
+  "aria-label"?: string;
+  "aria-labelledby"?: string;
 };
+
+const CARET = 9;
+const CARET_INSET = 8;
 
 export function Popover({
   open,
@@ -794,14 +892,26 @@ export function Popover({
   sideOffset = GAP,
   className,
   children,
+  caret = false,
+  trapFocus = false,
+  initialFocusRef,
+  restoreFocusRef,
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
 }: PopoverProps) {
   useEscape(open ? onClose : null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const onTrapKeyDown = useFocusTrap(panelRef, open && trapFocus, {
+    initialFocusRef,
+    restoreFocusRef: restoreFocusRef ?? anchorRef,
+  });
   const [pos, setPos] = useState<{
     top?: number;
     bottom?: number;
     left: number;
     minWidth?: number;
+    caretLeft?: number;
+    below?: boolean;
   }>({ left: 0 });
 
   useLayoutEffect(() => {
@@ -818,10 +928,17 @@ export function Popover({
     const preferredFits = side === "bottom" ? spaceBelow >= height : spaceAbove >= height;
     const openBelow = preferredFits ? side === "bottom" : spaceBelow > spaceAbove;
 
-    const left = align === "start" ? a.left : a.right - width;
+    const desired = align === "start" ? a.left : a.right - width;
+    const left = Math.max(MARGIN, Math.min(desired, window.innerWidth - width - MARGIN));
+    const caretLeft = Math.max(
+      CARET_INSET,
+      Math.min(a.left + a.width / 2 - left - CARET / 2, width - CARET_INSET - CARET),
+    );
     setPos({
-      left: Math.max(MARGIN, Math.min(left, window.innerWidth - width - MARGIN)),
+      left,
       minWidth: matchAnchorWidth ? a.width : undefined,
+      caretLeft,
+      below: openBelow,
       ...(openBelow
         ? { top: a.bottom + sideOffset }
         : { bottom: window.innerHeight - a.top + sideOffset }),
@@ -834,9 +951,29 @@ export function Popover({
       <div className="fixed inset-0 z-50" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
-        className={cx("fixed z-50 rounded-md border border-edge bg-panel p-1 shadow-2xl", className)}
+        role={trapFocus ? "dialog" : undefined}
+        aria-modal={trapFocus ? true : undefined}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
+        tabIndex={trapFocus ? -1 : undefined}
+        onKeyDown={onTrapKeyDown}
+        className={cx(
+          "fixed z-50 rounded-card border border-edge bg-panel p-1 shadow-2xl outline-none",
+          className,
+        )}
         style={{ top: pos.top, bottom: pos.bottom, left: pos.left, minWidth: pos.minWidth }}
       >
+        {caret && (
+          // Below the content but above the panel's border, which it covers where they meet.
+          <span
+            aria-hidden="true"
+            className={cx(
+              "absolute -z-10 h-[9px] w-[9px] rotate-45 border-edge bg-panel",
+              pos.below ? "-top-[5px] border-l border-t" : "-bottom-[5px] border-b border-r",
+            )}
+            style={{ left: pos.caretLeft }}
+          />
+        )}
         {children}
       </div>
     </>,
@@ -876,7 +1013,7 @@ export function rowClass({
     "relative items-center",
     ROW_TIER[tier],
     interactive && ROW_HOVER,
-    selected !== "none" && "bg-accent/15",
+    selected !== "none" && "bg-accent-soft",
     FOCUS_RING,
     className,
   );

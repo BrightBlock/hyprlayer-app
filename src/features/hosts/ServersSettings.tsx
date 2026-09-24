@@ -1,0 +1,479 @@
+import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { Info } from "lucide-react";
+
+import type {
+  ConnectionStatus,
+  Host,
+  HostsFile,
+  ProvisionStep,
+  WorktreeMode,
+} from "@/lib/bindings";
+import {
+  connectionName,
+  serverRows,
+  toHost,
+  validateDestination,
+  type ServerRow,
+} from "@/lib/domain/hosts";
+import {
+  useAllWorkstreams,
+  useConnectionStatus,
+  useHostProbes,
+  useHosts,
+  useSaveHosts,
+} from "@/lib/queries";
+import { ICON } from "@/components/lucide";
+import { SettingsCard } from "@/components/SettingsCard";
+import { Button, ConfirmDialog, cx, ErrorNote, Spinner, TextInput } from "@/components/ui";
+import { shortFailure } from "./failures";
+import { WorkStatus } from "./HostList";
+import { openHostsUi } from "./hostsUi";
+import { retryConnection } from "./reconnect";
+import { NO_SERVER, STEP_LABEL } from "./serverInstall";
+import { SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
+import { useHostChecks, type HostCheck } from "./useHostChecks";
+
+const EMPTY: HostsFile = { hosts: [], active: null };
+
+const DOT: Record<ServerRow["state"], string> = {
+  ok: "bg-ok",
+  unreachable: "bg-warn",
+  unknown: "bg-ink-4",
+};
+
+const STATE_LABEL: Record<ServerRow["state"], string> = {
+  ok: "Reachable",
+  unreachable: "Unreachable",
+  unknown: "Not tested",
+};
+
+// `inplace` works in the checkout itself and `folder` has no git; neither owns a worktree.
+const WORKTREE_MODES: ReadonlySet<WorktreeMode> = new Set(["isolated", "existing"]);
+
+const plural = (n: number, noun: string) => `${n} ${n === 1 ? noun : `${noun}s`}`;
+
+/** Null for a blank destination: the empty field has nothing to be wrong about yet. */
+function destinationProblem(destination: string, hosts: Host[], own?: string): string | null {
+  const trimmed = destination.trim();
+  if (!trimmed) return null;
+  const why = validateDestination(trimmed);
+  if (why) return `Destination ${why}.`;
+  return hosts.some((h) => h.destination === trimmed && h.destination !== own)
+    ? "Another server already uses this destination."
+    : null;
+}
+
+type Draft = { destination: string; label: string };
+
+export function ServersSettings() {
+  const file = useHosts().data ?? EMPTY;
+  const connection = useConnectionStatus().data;
+  const save = useSaveHosts();
+  const workstreams = useAllWorkstreams().data;
+  const probes = useHostProbes();
+  const checks = useHostChecks(file.active ?? null, probes);
+  const serverSwitch = useServerSwitch(save);
+  const [draft, setDraft] = useState<Draft>({ destination: "", label: "" });
+  const [editing, setEditing] = useState<(Draft & { key: string }) | null>(null);
+  const [removing, setRemoving] = useState<ServerRow | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const hosts = file.hosts ?? [];
+  const rows = serverRows(file, connection, checks.checks);
+  const probing = checks.testing !== null || checks.installing !== null || retrying;
+  // The live connection already answers for the server it is connected to.
+  const testable = rows.flatMap((r) =>
+    r.host && !(r.isConnected && r.state === "ok") ? [r.host] : [],
+  );
+  const worktrees = workstreams?.filter((v) => WORKTREE_MODES.has(v.item.worktreeMode)).length ?? null;
+
+  const addProblem = destinationProblem(draft.destination, hosts);
+  const canAdd = !!draft.destination.trim() && !addProblem && !save.isPending;
+
+  async function add(e: FormEvent) {
+    e.preventDefault();
+    if (!canAdd) return;
+    const host = toHost(draft.destination, draft.label);
+    try {
+      await save.mutateAsync({ ...file, hosts: [...hosts, host] });
+    } catch {
+      return; // the page's ErrorNote carries save.error
+    }
+    setDraft({ destination: "", label: "" });
+    void checks.runTest(host);
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    const next = hosts.map((h) =>
+      h.destination === editing.key ? toHost(editing.destination, editing.label) : h,
+    );
+    try {
+      await save.mutateAsync({ ...file, hosts: next });
+    } catch {
+      return;
+    }
+    setEditing(null);
+  }
+
+  async function remove(row: ServerRow) {
+    try {
+      await save.mutateAsync({ ...file, hosts: hosts.filter((h) => h.destination !== row.key) });
+    } catch {
+      // the page's ErrorNote carries save.error
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  async function retry(row: ServerRow) {
+    if (row.host && !row.isConnected) {
+      await checks.runTest(row.host);
+      return;
+    }
+    setRetrying(true);
+    try {
+      await retryConnection();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3.5">
+      <ErrorNote error={save.error} onDismiss={() => save.reset()} />
+
+      <SettingsCard
+        title="Add a Hyprlayer server"
+        description="Point the app at a Hyprlayer server over SSH. This machine's server is found automatically; add remote machines here."
+      >
+        <form onSubmit={(e) => void add(e)} className="space-y-2.5">
+          <div className="flex items-center gap-2">
+            <TextInput
+              aria-label="SSH destination"
+              placeholder="you@devbox.local"
+              className={cx("flex-1 font-mono", addProblem && "border-bad/60 focus:border-bad")}
+              value={draft.destination}
+              disabled={save.isPending}
+              onChange={(e) => setDraft({ ...draft, destination: e.target.value })}
+            />
+            <TextInput
+              aria-label="Label"
+              placeholder="optional"
+              className="w-[170px] shrink-0"
+              value={draft.label}
+              disabled={save.isPending}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+            />
+            <Button type="submit" variant="primary" disabled={!canAdd}>
+              Add server
+            </Button>
+          </div>
+          {addProblem && (
+            <p role="alert" className="text-xs text-bad-ink">
+              {addProblem}
+            </p>
+          )}
+          <p className="flex gap-2 text-xs leading-4 text-ink-dim">
+            <Info {...ICON} className="shrink-0 text-info" />
+            <span>
+              Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
+              your SSH config and agent, so keys, ports and jump hosts come from ~/.ssh/config. It
+              stores only the destination and label. If the host has no Hyprlayer server, Test offers
+              to install one.
+            </span>
+          </p>
+        </form>
+      </SettingsCard>
+
+      <SettingsCard flush>
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <h2 className="lbl">Your servers</h2>
+          <Button
+            size="sm"
+            busy={checks.testingAll}
+            disabled={probing || testable.length === 0}
+            onClick={() => void checks.testAll(testable)}
+          >
+            Test all
+          </Button>
+        </div>
+        <ul aria-label="Servers">
+          {rows.map((row) =>
+            editing?.key === row.key && row.host ? (
+              <ServerEditor
+                key={row.key}
+                row={row}
+                draft={editing}
+                problem={
+                  editing.destination.trim()
+                    ? destinationProblem(editing.destination, hosts, row.key)
+                    : "SSH destination required."
+                }
+                saving={save.isPending}
+                onChange={(next) => setEditing({ ...editing, ...next })}
+                onSave={() => void saveEdit()}
+                onCancel={() => setEditing(null)}
+              />
+            ) : (
+              <ServerItem
+                key={row.key}
+                row={row}
+                check={row.host ? checks.checks[row.key] : undefined}
+                connection={connection}
+                worktrees={row.isConnected ? worktrees : null}
+                testing={checks.testing === row.key || (row.isConnected && retrying)}
+                installStep={
+                  checks.installing?.destination === row.key ? checks.installing.step : null
+                }
+                probing={probing}
+                saving={save.isPending}
+                onSetDefault={() =>
+                  serverSwitch.request({ ...file, active: row.host?.destination ?? null, localProfile: null })
+                }
+                onEdit={() =>
+                  row.host &&
+                  setEditing({ key: row.key, destination: row.host.destination, label: row.host.label })
+                }
+                onRemove={() => setRemoving(row)}
+                onRetry={() => void retry(row)}
+                onInstall={() => row.host && void checks.runInstall(row.host)}
+              />
+            ),
+          )}
+        </ul>
+      </SettingsCard>
+
+      <p className="font-mono text-[10.5px] text-ink-dim">
+        servers are per machine · sessions keep running on the server they started on
+      </p>
+
+      <ConfirmDialog
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        title="Remove server?"
+        confirmLabel="Remove"
+        confirmVariant="danger"
+        onConfirm={() => removing && void remove(removing)}
+        busy={save.isPending}
+      >
+        <p className="text-sm leading-relaxed text-ink-dim">
+          Hyprlayer forgets <span className="text-ink">{removing?.name}</span>. Nothing on it is
+          stopped or deleted; adding it again brings its layout back.
+        </p>
+      </ConfirmDialog>
+
+      <SwitchServerConfirm
+        pending={serverSwitch.pending}
+        leaving={connectionName(connection) ?? "this machine"}
+        live={connection?.state !== "failed"}
+        busy={save.isPending}
+        onCancel={serverSwitch.cancel}
+        onConfirm={() => void serverSwitch.confirm()}
+      />
+    </div>
+  );
+}
+
+function ServerItem({
+  row,
+  check,
+  connection,
+  worktrees,
+  testing,
+  installStep,
+  probing,
+  saving,
+  onSetDefault,
+  onEdit,
+  onRemove,
+  onRetry,
+  onInstall,
+}: {
+  row: ServerRow;
+  check: HostCheck | undefined;
+  connection: ConnectionStatus | undefined;
+  worktrees: number | null;
+  testing: boolean;
+  installStep: ProvisionStep | null;
+  probing: boolean;
+  saving: boolean;
+  onSetDefault: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+  onRetry: () => void;
+  onInstall: () => void;
+}) {
+  const unreachable = row.state === "unreachable";
+  const where = row.host?.destination ?? "this machine";
+  // A check's own words beat its code: an "Install failed" is still `remote_cli_missing`.
+  const failure = !row.isConnected && check && !check.ok ? check : null;
+  const reason = failure?.short ?? (row.failureCode ? shortFailure(row.failureCode) : "unreachable");
+  // TODO(servers): latency, last seen, other servers' worktrees — HostProbe is only {ok, serverVersion, error}, nothing persisted.
+  const detail = unreachable
+    ? `${where} · ${reason}`
+    : row.state === "ok" && worktrees !== null
+      ? `${where} · ${plural(worktrees, "worktree")}`
+      : where;
+  const tooltip = row.isConnected ? connection?.error?.message : failure?.detail;
+  const outdated = row.isConnected && connection?.state === "connected" && connection.serverOutdated;
+  const canInstall = unreachable && !!row.host && row.failureCode === NO_SERVER;
+
+  return (
+    <li
+      className={cx(
+        "flex items-center gap-3 border-t border-edge-2 px-4 py-3",
+        unreachable && "bg-warn/5",
+      )}
+    >
+      <span className="flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+        {testing ? (
+          <Spinner size={10} />
+        ) : (
+          <span
+            role="img"
+            aria-label={row.isConnected && row.state === "ok" ? "Connected" : STATE_LABEL[row.state]}
+            className={cx("h-2 w-2 rounded-full", DOT[row.state])}
+          />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[13px] text-ink">{row.name}</span>
+          {row.isDefault && (
+            <span className="shrink-0 rounded-control bg-accent-soft px-1.5 font-mono text-[9.5px] font-semibold text-ink">
+              DEFAULT
+            </span>
+          )}
+        </div>
+        <div
+          className={cx("truncate font-mono text-2xs", unreachable ? "text-warn-ink" : "text-ink-dim")}
+          title={tooltip}
+        >
+          {detail}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {installStep ? (
+          <WorkStatus label={STEP_LABEL[installStep]} />
+        ) : (
+          <>
+            {canInstall && (
+              <Button
+                size="sm"
+                disabled={probing}
+                title={`Install the server on ${row.name}`}
+                onClick={onInstall}
+              >
+                Install
+              </Button>
+            )}
+            {unreachable && (
+              <Button size="sm" disabled={probing} onClick={onRetry}>
+                Retry
+              </Button>
+            )}
+            {outdated && (
+              <Button size="sm" onClick={openHostsUi}>
+                Update
+              </Button>
+            )}
+            {!unreachable && !row.isDefault && (
+              <Button size="sm" disabled={saving} onClick={onSetDefault}>
+                Set default
+              </Button>
+            )}
+            {row.host && (
+              <Button size="sm" disabled={saving} onClick={onEdit}>
+                Edit
+              </Button>
+            )}
+            {row.host && !row.isDefault && (
+              <Button size="sm" variant="danger" disabled={saving} onClick={onRemove}>
+                Remove
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function ServerEditor({
+  row,
+  draft,
+  problem,
+  saving,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  row: ServerRow;
+  draft: Draft;
+  problem: string | null;
+  saving: boolean;
+  onChange: (next: Partial<Draft>) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    // Escape belongs to the row here, not to the settings view behind it.
+    e.stopPropagation();
+    onCancel();
+  };
+
+  return (
+    <li className="border-t border-edge-2 px-4 py-3">
+      <form
+        className="space-y-1.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!problem && !saving) onSave();
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <TextInput
+            aria-label={`Destination for ${row.name}`}
+            placeholder="you@devbox.local"
+            className={cx("flex-1 py-1 font-mono", problem && "border-bad/60 focus:border-bad")}
+            value={draft.destination}
+            // The default's destination names this window's profile; changing it needs a switch.
+            disabled={row.isDefault || saving}
+            title={row.isDefault ? "Make another server the default to change this destination." : undefined}
+            autoFocus={!row.isDefault}
+            onChange={(e) => onChange({ destination: e.target.value })}
+            onKeyDown={onKeyDown}
+          />
+          <TextInput
+            aria-label={`Label for ${row.name}`}
+            placeholder="optional"
+            className="w-[170px] shrink-0 py-1"
+            value={draft.label}
+            disabled={saving}
+            autoFocus={row.isDefault}
+            onChange={(e) => onChange({ label: e.target.value })}
+            onKeyDown={onKeyDown}
+          />
+          <Button type="submit" size="sm" variant="primary" disabled={!!problem || saving}>
+            Save
+          </Button>
+          <Button type="button" size="sm" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+        {problem && (
+          <p role="alert" className="text-xs text-bad-ink">
+            {problem}
+          </p>
+        )}
+        {!row.isDefault && (
+          <p className="text-xs text-ink-dim">
+            Changing the destination starts this server with a fresh layout.
+          </p>
+        )}
+      </form>
+    </li>
+  );
+}

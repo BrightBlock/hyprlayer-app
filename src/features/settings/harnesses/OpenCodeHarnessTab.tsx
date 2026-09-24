@@ -24,7 +24,7 @@ import {
 } from "@/components/ui";
 import { isSupportedOpencodeProvider } from "@/lib/domain/harnessing";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
-import { BinaryCard } from "@/features/system/BinaryCard";
+import { BinaryCard } from "@/features/settings/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
 

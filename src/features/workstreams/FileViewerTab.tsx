@@ -236,7 +236,7 @@ function SaveStatus({
   }
   if (dirty) {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-warn">
+      <span className="flex items-center gap-1 text-[11px] text-warn-ink">
         <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
         Unsaved
       </span>

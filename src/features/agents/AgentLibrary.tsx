@@ -17,6 +17,8 @@ import { basename } from "@/lib/path";
 import {
   invalidateAgentBundle,
   useAgentBundle,
+  useAgentFiles,
+  useAgentSkills,
   useBootstrap,
   useSetAppSettings,
 } from "@/lib/queries";
@@ -103,10 +105,7 @@ export function AgentLibrary({
   const projectPath = selectedProject;
   const scope: AgentScope = selectedProject ? "project" : "global";
 
-  const agents = useQuery({
-    queryKey: ["agent-files", projectPath],
-    queryFn: () => unwrap(commands.listAgentFiles(projectPath)),
-  });
+  const agents = useAgentFiles(projectPath);
   const contextFiles = useQuery({
     queryKey: ["agent-context-files", projectPath],
     queryFn: () => unwrap(commands.agentContextFiles(projectPath)),
@@ -115,10 +114,7 @@ export function AgentLibrary({
     queryKey: ["agent-mcp-servers", projectPath],
     queryFn: () => unwrap(commands.agentMcpServers(projectPath)),
   });
-  const skills = useQuery({
-    queryKey: ["agent-skills", projectPath],
-    queryFn: () => unwrap(commands.agentSkills(projectPath)),
-  });
+  const skills = useAgentSkills(projectPath);
   const agentBundle = useAgentBundle();
 
   const [search, setSearch] = useState("");

@@ -2,6 +2,7 @@
 export const PROJECT_SIDEBAR_MIN = 180;
 export const PROJECT_SIDEBAR_MAX = 360;
 export const NAV_RAIL_WIDTH = 48;
+export const STATUS_BAR_HEIGHT = 34;
 
 export const NARROW_WIDTH = 900;
 export const COMPACT_WIDTH = 640;

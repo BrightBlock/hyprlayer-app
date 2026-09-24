@@ -40,6 +40,7 @@ type Driver = typeof import("./reconnect");
 let driver: Driver;
 let focusManager: typeof import("@tanstack/react-query").focusManager;
 let useToast: typeof import("@/lib/toast").useToast;
+let useReconnectStore: typeof import("./reconnectState").useReconnectStore;
 // `focusManager` is a node_modules singleton that survives resetModules, so a
 // bridge left subscribed would answer the *next* case's focus too.
 let detach: Array<() => void> = [];
@@ -55,6 +56,7 @@ beforeEach(async () => {
   driver = await import("./reconnect");
   ({ focusManager } = await import("@tanstack/react-query"));
   ({ useToast } = await import("@/lib/toast"));
+  ({ useReconnectStore } = await import("./reconnectState"));
 });
 
 afterEach(() => {
@@ -189,5 +191,95 @@ describe("reconnect", () => {
     expect(b.reconnectServer).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(b.reconnectServer).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("reconnect state", () => {
+  const DROP = Date.UTC(2026, 8, 24, 12, 0, 0);
+
+  it("records the drop time when the loop starts, and a new drop clears an old halt", () => {
+    vi.setSystemTime(DROP);
+    useReconnectStore.setState({ halted: true });
+    b.reconnectServer.mockResolvedValue(fails(DOWN));
+
+    driver.startReconnecting();
+
+    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: false });
+  });
+
+  it("marks an attempt only while its call is pending", async () => {
+    let finish!: (value: unknown) => void;
+    b.reconnectServer.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    driver.startReconnecting();
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(useReconnectStore.getState().attempting).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useReconnectStore.getState().attempting).toBe(true);
+
+    finish(fails(DOWN));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useReconnectStore.getState().attempting).toBe(false);
+  });
+
+  it("marks a one-off retry while it is pending", async () => {
+    let finish!: (value: unknown) => void;
+    b.reconnectServer.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+
+    const retry = driver.retryConnection();
+    expect(useReconnectStore.getState().attempting).toBe(true);
+
+    finish(fails(DOWN));
+    await retry;
+    expect(useReconnectStore.getState().attempting).toBe(false);
+  });
+
+  it("keeps the drop time through the post-reconnect refetch, then clears it", async () => {
+    vi.setSystemTime(DROP);
+    let refetched!: () => void;
+    q.invalidateQueries.mockReturnValueOnce(new Promise<void>((resolve) => (refetched = resolve)));
+    b.reconnectServer.mockResolvedValue(ok());
+    driver.startReconnecting();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The status query still reads `lost` until the refetch lands.
+    expect(useReconnectStore.getState().lostAt).toBe(DROP);
+
+    refetched();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useReconnectStore.getState()).toEqual({ lostAt: null, attempting: false, halted: false });
+  });
+
+  it("halts on a protocol mismatch and keeps the drop time", async () => {
+    vi.setSystemTime(DROP);
+    b.reconnectServer.mockResolvedValue(fails(MISMATCH));
+    driver.startReconnecting();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: true });
+  });
+
+  it("clears a halted drop once a retry connects", async () => {
+    b.reconnectServer.mockResolvedValue(fails(MISMATCH));
+    driver.startReconnecting();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(useReconnectStore.getState().halted).toBe(true);
+
+    b.reconnectServer.mockResolvedValue(ok());
+    await driver.retryConnection();
+
+    expect(useReconnectStore.getState()).toEqual({ lostAt: null, attempting: false, halted: false });
+  });
+
+  it("leaves the drop alone when a retry does not connect", async () => {
+    vi.setSystemTime(DROP);
+    b.reconnectServer.mockResolvedValue(fails(MISMATCH));
+    driver.startReconnecting();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    b.reconnectServer.mockResolvedValue(fails(DOWN));
+    await driver.retryConnection();
+
+    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: true });
   });
 });

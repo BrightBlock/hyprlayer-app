@@ -173,7 +173,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
             onApply={(patch) => patchFrontmatter.mutate({ patch, baseMtimeMs: mtimeMs })}
           />
           {dirty && (
-            <p className="mt-2 text-xs text-warn">
+            <p className="mt-2 text-xs text-warn-ink">
               Save or discard editor changes before patching frontmatter fields.
             </p>
           )}

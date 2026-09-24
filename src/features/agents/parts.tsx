@@ -273,7 +273,7 @@ export function Callout({
   const tint = tone === "bad" ? "border-bad/35 bg-bad/10" : "border-warn/35 bg-warn/10";
   return (
     <div className={`flex gap-2.5 rounded-lg border p-3 text-xs text-ink-dim ${tint}`}>
-      <span className={`shrink-0 pt-px ${tone === "bad" ? "text-bad" : "text-warn"}`}>{icon}</span>
+      <span className={`shrink-0 pt-px ${tone === "bad" ? "text-bad" : "text-warn-ink"}`}>{icon}</span>
       <span className="text-pretty">{children}</span>
     </div>
   );

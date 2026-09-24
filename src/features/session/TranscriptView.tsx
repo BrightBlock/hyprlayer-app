@@ -33,11 +33,10 @@ import { FileCard } from "./FileCard";
 import { PromptCard } from "./PromptCard";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
-import { formatElapsed, formatRelativeTime } from "@/lib/format";
+import { formatElapsed, formatRelativeTime, formatTokens } from "@/lib/format";
 import {
   baseName,
   editDiffFromTool,
-  formatTokens,
   prettyToolInput,
   resultPreview,
   toolFilePath,
@@ -461,7 +460,7 @@ const PermissionCard = memo(function PermissionCard({
 
   return (
     <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">
-      <div className="flex items-center gap-2 text-warn">
+      <div className="flex items-center gap-2 text-warn-ink">
         <ShieldIcon />
         <span className="text-sm font-medium">Permission required</span>
       </div>

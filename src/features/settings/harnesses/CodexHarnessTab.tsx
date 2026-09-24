@@ -23,7 +23,7 @@ import {
   SettingRow,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
-import { BinaryCard } from "@/features/system/BinaryCard";
+import { BinaryCard } from "@/features/settings/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
 import { codexEfforts } from "@/lib/domain/models";

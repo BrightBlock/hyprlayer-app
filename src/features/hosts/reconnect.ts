@@ -6,6 +6,7 @@ import { errorMessage, errorRemedy, isAppError, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/lib/toast";
+import { useReconnectStore } from "./reconnectState";
 
 // Quick at first, then settled: the loop never gives up, because relaunching is
 // the annoyance this reconnect exists to remove (plan Phase 8 §5). A host asleep
@@ -35,6 +36,15 @@ export function reconnectNow(): void {
   wake?.();
 }
 
+async function attempt(): Promise<void> {
+  useReconnectStore.setState({ attempting: true });
+  try {
+    await unwrap(commands.reconnectServer());
+  } finally {
+    useReconnectStore.setState({ attempting: false });
+  }
+}
+
 /**
  * One attempt, for when something the user just did disproves the failure the
  * connection surface is still reporting — a probe that answered, an install
@@ -47,8 +57,9 @@ export async function retryConnection(): Promise<void> {
   }
   running = true;
   try {
-    await unwrap(commands.reconnectServer());
+    await attempt();
     await queryClient.invalidateQueries();
+    useReconnectStore.setState({ lostAt: null, halted: false });
   } catch (e) {
     // The status already on screen is still the best answer; the log keeps why.
     log.info("reconnect", "retry failed", e);
@@ -65,31 +76,35 @@ async function reconnectLoop(): Promise<void> {
   if (running) return;
   running = true;
   const lostAt = Date.now();
+  useReconnectStore.setState({ lostAt, halted: false });
   let lastCode: string | null = null;
   log.info("reconnect", "server connection lost; reconnecting");
   try {
-    for (let attempt = 1; ; attempt++) {
-      await wait(DELAYS[attempt - 1] ?? STEADY_DELAY);
+    for (let n = 1; ; n++) {
+      await wait(DELAYS[n - 1] ?? STEADY_DELAY);
       try {
-        await unwrap(commands.reconnectServer());
+        await attempt();
         log.info(
           "reconnect",
-          `reconnected on attempt ${attempt}, ${Math.round((Date.now() - lostAt) / 1000)}s after the drop`,
+          `reconnected on attempt ${n}, ${Math.round((Date.now() - lostAt) / 1000)}s after the drop`,
         );
         // The server may have restarted with different state.
         await queryClient.invalidateQueries();
+        // Only now: the status reads `lost` until the refetch lands, and its counter must hold.
+        useReconnectStore.setState({ lostAt: null });
         return;
       } catch (e) {
         // Logged when the reason changes, not on every retry.
         const code = isAppError(e) ? e.code : "unknown";
         if (code !== lastCode) {
           lastCode = code;
-          log.warn("reconnect", `attempt ${attempt} failed`, e);
+          log.warn("reconnect", `attempt ${n} failed`, e);
         }
         // Disagreeing binaries cannot resolve themselves, and a relaunch would
         // not help either; everything else keeps trying.
         if (isAppError(e) && e.code === "protocol_version_mismatch") {
           log.error("reconnect", "stopped: the app and server speak different protocols");
+          useReconnectStore.setState({ halted: true });
           useToast.getState().show(errorMessage(e), errorRemedy(e) ?? "", { tone: "bad" });
           return;
         }

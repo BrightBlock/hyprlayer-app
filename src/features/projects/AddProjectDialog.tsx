@@ -599,7 +599,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                     ]}
                   />
                   {selectedProfile?.foldersError && (
-                    <p className="mt-1 text-xs text-warn">
+                    <p className="mt-1 text-xs text-warn-ink">
                       Couldn't read existing folders: {selectedProfile.foldersError}
                     </p>
                   )}

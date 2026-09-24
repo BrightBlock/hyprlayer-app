@@ -1,0 +1,33 @@
+import { SquareTerminal } from "lucide-react";
+
+import { ICON } from "@/components/lucide";
+import { cx } from "@/components/ui";
+import { Dot } from "./parts";
+
+export function ScriptsDockButton({
+  open,
+  running,
+  onToggle,
+}: {
+  open: boolean;
+  running: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label="Terminal and scripts dock"
+      aria-pressed={open}
+      title={running ? "Scripts · a Run is active" : "Terminal & scripts dock"}
+      className={cx(
+        "relative flex h-6 w-[26px] shrink-0 items-center justify-center rounded-control text-ink-dim",
+        "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+        open && "bg-edge/60 text-ink",
+      )}
+    >
+      <SquareTerminal {...ICON} />
+      {running && <Dot className="absolute right-0.5 top-0.5 bg-ship" />}
+    </button>
+  );
+}

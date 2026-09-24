@@ -27,7 +27,7 @@ export function FrontmatterCard({ meta }: { meta: DocMeta }) {
         {fm.status && <Badge tone={STATUS_TONE[fm.status] ?? "dim"}>{fm.status}</Badge>}
         <Badge tone="dim">{meta.scope}</Badge>
         {meta.fmWarnings.length > 0 && (
-          <span className="text-xs text-warn" title={meta.fmWarnings.join("\n")}>
+          <span className="text-xs text-warn-ink" title={meta.fmWarnings.join("\n")}>
             ⚠ {meta.fmWarnings.length} frontmatter warning{meta.fmWarnings.length === 1 ? "" : "s"}
           </span>
         )}

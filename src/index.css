@@ -38,6 +38,11 @@
 
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: 0.875rem;
+
+  --radius-card: 5px;
+  --radius-control: 3px;
 }
 
 @theme {
@@ -58,6 +63,19 @@
   --color-brand-soft: #7dd3fc;
 
   --color-attention: #d4a056;
+
+  /* v4 tokens, derived so every theme (and Omarchy's inline palette) gets its own
+     values; the mixes land exactly on the v4 hexes under html.light. */
+  --color-ink-2: color-mix(in srgb, var(--color-ink) 60%, var(--color-ink-dim));
+  --color-ink-4: color-mix(in srgb, var(--color-ink-dim) 72.5%, var(--color-panel));
+  --color-edge-2: color-mix(in srgb, var(--color-edge) 68%, var(--color-panel));
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 15%, var(--color-panel));
+  --color-track: color-mix(in srgb, var(--color-ink-dim) 55%, var(--color-panel));
+  --color-info: var(--color-brand);
+  --color-warn-ink: var(--color-warn);
+  --color-bad-ink: var(--color-bad);
+  --color-diff-add: var(--color-ok);
+  --color-diff-del: var(--color-bad);
 
   --color-ship: #34d399;
   --color-commit: #2dd4bf;
@@ -102,9 +120,9 @@
 }
 
 html.light {
-  --color-surface: #faf9f6;
-  --color-panel: #f3f1ec;
-  --color-panel-2: #ebe8e1;
+  --color-surface: #f7f7f7;
+  --color-panel: #ffffff;
+  --color-panel-2: #f5f5f5;
 
   --color-nebula-bg-0: #edf0f7;
   --color-nebula-bg-1: #e8e6df;
@@ -113,21 +131,33 @@ html.light {
   --color-nebula-3: #4f46e5;
   --color-nebula-4: #7c3aed;
   --color-nebula-5: #9333ea;
-  --color-edge: #d4d0c8;
-  --color-ink: #1c1b1a;
-  --color-ink-dim: #55534f;
-  --color-accent: #c25e3d;
+  --color-edge: #e9e9e9;
+  --color-ink: #111111;
+  --color-ink-dim: #5e5e5e;
+  /* v4 is grayscale: accent is ink, and colour is left to status. */
+  --color-accent: #111111;
 
   --color-accent-ink: #ffffff;
+  --color-accent-soft: color-mix(in srgb, var(--color-accent) 6.3%, var(--color-panel));
+  --color-track: color-mix(in srgb, var(--color-ink-dim) 26.7%, var(--color-panel));
 
   --color-ship: #047857;
   --color-commit: #0f766e;
 
-  --color-ok: #15803d;
-  --color-warn: #b45309;
+  --color-ok: #368813;
+  --color-warn: #e0a400;
   --color-brand: #1d4ed8;
   --color-brand-soft: #7c3aed;
-  --color-bad: #b91c1c;
+  --color-bad: #ef0028;
+
+  /* #e0a400 fills read on white but its text does not (2.2:1); text uses -ink. */
+  --color-info: #206eec;
+  --color-warn-ink: #7a5a00;
+  --color-bad-ink: #b80020;
+  --color-diff-add: #2c6f10;
+  --color-diff-del: #c4001f;
+  /* The base aliases magenta to accent, which is ink here. */
+  --color-ansi-magenta: #c25e3d;
 
   --color-attention: #b45309;
 
@@ -234,6 +264,16 @@ html.solarized {
   --color-nebula-3: #6c71c4;
   --color-nebula-4: #a05cbf;
   --color-nebula-5: #d33682;
+}
+
+@utility lbl {
+  font-family: var(--font-mono);
+  font-size: var(--text-3xs);
+  line-height: var(--text-3xs--line-height);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ink-dim);
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {

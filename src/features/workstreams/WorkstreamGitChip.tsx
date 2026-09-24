@@ -6,8 +6,8 @@ export function WorkstreamGitChip({ view }: { view: WorkstreamView }) {
   if (additions > 0 || deletions > 0) {
     return (
       <span className="flex shrink-0 items-center gap-1 font-mono text-xs font-medium">
-        {additions > 0 && <span className="text-ok">+{additions}</span>}
-        {deletions > 0 && <span className="text-bad">-{deletions}</span>}
+        {additions > 0 && <span className="text-diff-add">+{additions}</span>}
+        {deletions > 0 && <span className="text-diff-del">-{deletions}</span>}
       </span>
     );
   }

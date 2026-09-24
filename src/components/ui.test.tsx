@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useRef } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ESCAPE_COMMAND_ID, isRegistered, runCommand } from "@/lib/keybindings/registry";
@@ -16,6 +16,8 @@ import {
   MenuItem,
   Popover,
   rowClass,
+  SegmentedControl,
+  Toggle,
   type DropdownOption,
 } from "./ui";
 
@@ -162,8 +164,15 @@ describe("cx / class merge", () => {
     render(<Card data-testid="card" className="py-12" />);
     const card = screen.getByTestId("card");
     expect(card.className).toMatch(/(^|\s)py-12(\s|$)/);
-    expect(card.className).toContain("rounded-lg");
+    expect(card.className).toContain("rounded-card");
     expect(card.className).toContain("border-edge");
+  });
+
+  it("treats the v4 radius tokens as radii, so a caller's radius replaces the base", () => {
+    render(<Card data-testid="card" className="rounded-none" />);
+    const card = screen.getByTestId("card");
+    expect(card.className).toMatch(/(^|\s)rounded-none(\s|$)/);
+    expect(card.className).not.toContain("rounded-card");
   });
 
   it("merges a conflicting custom-token colour class, proving twMerge groups the app's theme colours", () => {
@@ -376,5 +385,221 @@ describe("Popover", () => {
     expect(runCommand(ESCAPE_COMMAND_ID)).toBe(true);
     expect(closePopover).toHaveBeenCalledTimes(1);
     expect(closeDialog).not.toHaveBeenCalled();
+  });
+});
+
+describe("Toggle", () => {
+  it("is a native checkbox with the switch role, inside a label", () => {
+    render(<Toggle aria-label="Notify" checked={false} onChange={vi.fn()} />);
+    const input = screen.getByRole("switch", { name: "Notify" }) as HTMLInputElement;
+    expect(input.tagName).toBe("INPUT");
+    expect(input.type).toBe("checkbox");
+    expect(input.closest("label")).not.toBeNull();
+  });
+
+  it("carries its state as the native checked property, not aria-checked", () => {
+    render(<Toggle aria-label="Notify" checked onChange={vi.fn()} />);
+    const input = screen.getByRole("switch") as HTMLInputElement;
+    expect(input.checked).toBe(true);
+    expect(input.hasAttribute("aria-checked")).toBe(false);
+  });
+
+  it("reports the next value when clicked", () => {
+    const onChange = vi.fn();
+    render(<Toggle aria-label="Notify" checked={false} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("toggles from a click on its visible label text, which also names it", () => {
+    const onChange = vi.fn();
+    render(
+      <Toggle checked onChange={onChange}>
+        Confirm before quitting
+      </Toggle>,
+    );
+    expect(screen.getByRole("switch", { name: "Confirm before quitting" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Confirm before quitting"));
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  it("ignores clicks while disabled", () => {
+    const onChange = vi.fn();
+    render(<Toggle aria-label="Notify" checked={false} disabled onChange={onChange} />);
+    fireEvent.click(screen.getByRole("switch"));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+const SEGMENTS = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "Auto" },
+];
+
+function renderSegments(
+  value: string | null,
+  options: Array<{ value: string; label: string; disabled?: boolean }> = SEGMENTS,
+) {
+  const onChange = vi.fn();
+  render(
+    <SegmentedControl aria-label="Appearance" value={value} options={options} onChange={onChange} />,
+  );
+  const radio = (name: string) => screen.getByRole("radio", { name });
+  return { onChange, radio };
+}
+
+describe("SegmentedControl", () => {
+  it("is a labelled radiogroup whose checked option is the only tab stop", () => {
+    const { radio } = renderSegments("dark");
+    expect(screen.getByRole("radiogroup", { name: "Appearance" })).toBeTruthy();
+    expect(radio("Dark").getAttribute("aria-checked")).toBe("true");
+    expect(radio("Light").getAttribute("aria-checked")).toBe("false");
+    expect(radio("Dark").tabIndex).toBe(0);
+    expect(radio("Light").tabIndex).toBe(-1);
+    expect(radio("Auto").tabIndex).toBe(-1);
+  });
+
+  it("with no value checks nothing and makes the first option the tab stop", () => {
+    const { radio } = renderSegments(null);
+    for (const name of ["Light", "Dark", "Auto"]) {
+      expect(radio(name).getAttribute("aria-checked")).toBe("false");
+    }
+    expect(radio("Light").tabIndex).toBe(0);
+  });
+
+  it("selects with a click", () => {
+    const { onChange, radio } = renderSegments("light");
+    fireEvent.click(radio("Auto"));
+    expect(onChange).toHaveBeenCalledWith("system");
+  });
+
+  it("moves and selects with the arrow keys, wrapping at both ends", () => {
+    const { onChange, radio } = renderSegments("light");
+    radio("Light").focus();
+    fireEvent.keyDown(radio("Light"), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenLastCalledWith("dark");
+    expect(document.activeElement).toBe(radio("Dark"));
+    fireEvent.keyDown(radio("Dark"), { key: "ArrowDown" });
+    fireEvent.keyDown(radio("Auto"), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenLastCalledWith("light");
+    expect(document.activeElement).toBe(radio("Light"));
+    fireEvent.keyDown(radio("Light"), { key: "ArrowLeft" });
+    expect(onChange).toHaveBeenLastCalledWith("system");
+  });
+
+  it("skips disabled options", () => {
+    const { onChange, radio } = renderSegments("light", [
+      SEGMENTS[0],
+      { ...SEGMENTS[1], disabled: true },
+      SEGMENTS[2],
+    ]);
+    radio("Light").focus();
+    fireEvent.keyDown(radio("Light"), { key: "ArrowRight" });
+    expect(onChange).toHaveBeenLastCalledWith("system");
+  });
+
+  it("jumps with Home and End", () => {
+    const { onChange, radio } = renderSegments("dark");
+    radio("Dark").focus();
+    fireEvent.keyDown(radio("Dark"), { key: "End" });
+    expect(onChange).toHaveBeenLastCalledWith("system");
+    fireEvent.keyDown(radio("Auto"), { key: "Home" });
+    expect(onChange).toHaveBeenLastCalledWith("light");
+  });
+});
+
+function TrapHarness({
+  open,
+  onClose,
+  trap = true,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  trap?: boolean;
+  children?: React.ReactNode;
+}) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  return (
+    <div>
+      <button ref={anchorRef}>Gear</button>
+      <Popover
+        open={open}
+        onClose={onClose}
+        anchorRef={anchorRef}
+        trapFocus={trap}
+        aria-label="Settings"
+      >
+        {children ?? (
+          <>
+            <button>First</button>
+            <button>Middle</button>
+            <button>Last</button>
+          </>
+        )}
+      </Popover>
+    </div>
+  );
+}
+
+describe("Popover focus trap", () => {
+  it("moves focus into the panel when it opens", () => {
+    render(<TrapHarness open onClose={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "First" }));
+  });
+
+  it("wraps Tab from the last control to the first, and Shift+Tab back", () => {
+    render(<TrapHarness open onClose={vi.fn()} />);
+    const first = screen.getByRole("button", { name: "First" });
+    const last = screen.getByRole("button", { name: "Last" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("returns focus to the anchor when it closes", () => {
+    const { rerender } = render(<TrapHarness open={false} onClose={vi.fn()} />);
+    screen.getByRole("button", { name: "Gear" }).focus();
+    rerender(<TrapHarness open onClose={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "First" }));
+    rerender(<TrapHarness open={false} onClose={vi.fn()} />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Gear" }));
+  });
+
+  it("is a labelled modal dialog only when trapping", () => {
+    render(<TrapHarness open onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog", { name: "Settings" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+  });
+
+  it("leaves focus and roles alone without trapFocus", () => {
+    render(<TrapHarness open trap={false} onClose={vi.fn()} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("lets a nested dropdown keep its own keys, and Escape closes the dropdown first", () => {
+    const onClose = vi.fn();
+    render(
+      <TrapHarness open onClose={onClose}>
+        <DropdownSelect aria-label="Harness" value="sonnet" options={OPTIONS} onChange={vi.fn()} />
+        <button>After</button>
+      </TrapHarness>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Harness" }));
+    const option = screen.getByRole("option", { name: "Sonnet 5" });
+    expect(document.activeElement).toBe(option);
+    fireEvent.keyDown(option, { key: "Tab" });
+    expect(document.activeElement).toBe(option);
+
+    act(() => {
+      expect(runCommand(ESCAPE_COMMAND_ID)).toBe(true);
+    });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Harness" }));
   });
 });

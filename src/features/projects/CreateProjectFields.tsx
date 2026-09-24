@@ -237,7 +237,7 @@ export function CreateProjectFields({
                 )}
               </>
             ) : (
-              <p className="mt-2.5 text-xs text-warn">
+              <p className="mt-2.5 text-xs text-warn-ink">
                 GitHub can't name a repository after{" "}
                 <span className="font-mono">{value.name.trim()}</span>. Use letters, digits, dots,
                 dashes or underscores.

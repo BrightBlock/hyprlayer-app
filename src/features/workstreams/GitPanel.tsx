@@ -88,7 +88,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
               : `${view.item.branch} → ${baseShort}`
           }
         >
-          <SplitIcon size={13} className={`shrink-0 ${detached ? "text-warn" : "text-ok"}`} />
+          <SplitIcon size={13} className={`shrink-0 ${detached ? "text-warn-ink" : "text-ok"}`} />
           <span className="min-w-0 truncate font-mono text-xs text-ink">
             {detached ? "detached HEAD" : view.item.branch}
           </span>

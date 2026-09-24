@@ -1,32 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { Download, FolderOpen, SquarePen, Wrench } from "lucide-react";
 
 import {
   Badge,
   Card,
   CliOutput,
+  cx,
   ErrorNote,
   IconButton,
   MenuItem,
   Popover,
   Spinner,
 } from "@/components/ui";
-import { HyprlayerMark } from "@/components/Logo";
-import {
-  AnytypeIcon,
-  CheckIcon,
-  DownloadIcon,
-  FolderIcon,
-  GitBranchIcon,
-  NotionIcon,
-  ObsidianIcon,
-  PencilIcon,
-  PersonIcon,
-  WarningTriangleIcon,
-  WrenchIcon,
-  XIcon,
-} from "@/components/icons";
+import { ICON } from "@/components/lucide";
+import { CheckIcon, WarningTriangleIcon, XIcon } from "@/components/icons";
 import {
   commands,
   type AiStatus,
@@ -40,6 +29,7 @@ import {
   useAgentBundle,
   useAiStatus,
   useCliUpdateCheck,
+  useConnectionStatus,
   useEditorTargets,
 } from "@/lib/queries";
 import { useCopyFeedback } from "@/lib/clipboard";
@@ -49,15 +39,8 @@ import { AgentBundleSection, CliUpdateOutcome, useCliSelfUpdate } from "./AgentB
 import { bundleLayout, cliFailureText } from "./bundleVersions";
 import { CardRow, CARD_ROW_SPAN } from "./cardRow";
 
-function BackendIcon({ kind, size = 14 }: { kind: string; size?: number }) {
-  switch (kind) {
-    case "git": return <GitBranchIcon size={size} />;
-    case "obsidian": return <ObsidianIcon size={size} />;
-    case "notion": return <NotionIcon size={size} />;
-    case "anytype": return <AnytypeIcon size={size} />;
-    default: return null;
-  }
-}
+// Inline tier (ADR-0006): these sit inside the card's rows.
+const ROW_BUTTON = "h-6 w-6";
 
 function StatusPill({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
@@ -99,7 +82,7 @@ function CliRow({
           <span className="font-mono text-xs">{version ?? "—"}</span>
           {latest && <Badge tone="warn">{latest} available</Badge>}
         </div>
-        <span className="truncate font-mono text-xs text-ink-dim">
+        <span className="truncate font-mono text-2xs text-ink-dim">
           {binary?.path ?? "not found on PATH"}
         </span>
       </div>
@@ -109,7 +92,7 @@ function CliRow({
           title="Update the hyprlayer CLI"
           aria-label="Update the hyprlayer CLI"
           disabled={update.isPending}
-          className={failed ? "text-bad" : updated ? "text-ok" : undefined}
+          className={cx(ROW_BUTTON, failed ? "text-bad" : updated ? "text-ok" : undefined)}
           onClick={() => update.mutate()}
         >
           {update.isPending ? (
@@ -119,7 +102,7 @@ function CliRow({
           ) : updated ? (
             <CheckIcon size={14} />
           ) : (
-            <DownloadIcon size={13} />
+            <Download {...ICON} />
           )}
         </IconButton>
       </div>
@@ -137,7 +120,7 @@ function CliRow({
   );
 }
 
-function EditorPicker({ path }: { path: string }) {
+function EditorPicker({ path, disabledReason }: { path: string; disabledReason: string | null }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -157,11 +140,13 @@ function EditorPicker({ path }: { path: string }) {
       <span ref={anchorRef} className="flex">
         <IconButton
           active={open}
-          title={picked ? `Open in ${picked}` : "Open in…"}
-          aria-label={picked ? `Open in ${picked}` : "Open in…"}
+          className={ROW_BUTTON}
+          disabled={disabledReason != null}
+          title={disabledReason ?? (picked ? `Edit config in ${picked}` : "Edit config")}
+          aria-label="Edit config"
           onClick={() => setOpen((v) => !v)}
         >
-          <PencilIcon size={13} />
+          <SquarePen {...ICON} />
         </IconButton>
       </span>
       <Popover
@@ -195,6 +180,9 @@ function EditorPicker({ path }: { path: string }) {
 function ConfigRow({ path }: { path: string }) {
   const { copied, trigger } = useCopyFeedback();
   const revealLabel = IS_MACOS ? "Reveal in Finder" : "Show in folder";
+  // The path is the server's; revealing or opening it would act on this machine.
+  const remote = useConnectionStatus().data?.host ?? null;
+  const disabledReason = remote ? `The config is on ${remote.label || remote.destination}` : null;
 
   return (
     <CardRow label="Config" align="center">
@@ -212,13 +200,15 @@ function ConfigRow({ path }: { path: string }) {
 
       <div className="flex items-center gap-1.5">
         <IconButton
-          title={revealLabel}
+          className={ROW_BUTTON}
+          disabled={disabledReason != null}
+          title={disabledReason ?? revealLabel}
           aria-label={revealLabel}
           onClick={() => void revealItemInDir(path).catch(() => {})}
         >
-          <FolderIcon size={13} />
+          <FolderOpen {...ICON} />
         </IconButton>
-        <EditorPicker path={path} />
+        <EditorPicker path={path} disabledReason={disabledReason} />
       </div>
     </CardRow>
   );
@@ -228,6 +218,10 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
   const platforms = status.data?.platforms ?? [];
   const installed = status.data?.installed === true;
   const fallback = status.data?.location ?? null;
+  const broken = platforms
+    .filter((p) => p.installed === false)
+    .map((p) => p.name ?? p.id)
+    .filter((name): name is string => Boolean(name));
 
   const repair = useMutation({
     mutationFn: () => unwrap(commands.repairAgentBundle()),
@@ -256,9 +250,12 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
           </span>
         ) : !installed ? (
           <>
-            <Badge tone="warn">Needs repair</Badge>
-            <span className="text-sm text-ink-dim">
-              Claude Code and Codex agent links were not fully installed.
+            <span className="rounded-control bg-bad/10 px-1.5 py-0.5 font-mono text-3xs font-semibold text-bad-ink">
+              NEEDS REPAIR
+            </span>
+            <span className="text-[12.5px] text-ink-2">
+              {broken.length > 0 ? broken.join(" and ") : "Claude Code and Codex"} agent links were
+              not fully installed.
             </span>
           </>
         ) : platforms.length > 0 ? (
@@ -280,7 +277,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
             title="Repair / reinstall"
             aria-label="Repair / reinstall"
             disabled={repair.isPending}
-            className={failed ? "text-bad" : repaired ? "text-ok" : undefined}
+            className={cx(ROW_BUTTON, failed ? "text-bad" : repaired ? "text-ok" : undefined)}
             onClick={() => repair.mutate()}
           >
             {repair.isPending ? (
@@ -290,7 +287,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
             ) : repaired ? (
               <CheckIcon size={14} />
             ) : (
-              <WrenchIcon size={13} />
+              <Wrench {...ICON} />
             )}
           </IconButton>
         )}
@@ -356,24 +353,17 @@ export function HyprlayerCard({ data }: { data: Bootstrap }) {
   const upgradeOffered = bundleLayout(aiStatus.data, bundle.data) === "legacy";
 
   return (
-    <Card className="p-0">
-      <header className="mb-1 flex items-center justify-between gap-4 border-b border-edge px-4 py-3.5">
-        <div className="flex items-center gap-2.5">
-          <HyprlayerMark size={16} />
-          <span className="text-sm font-semibold">Hyprlayer</span>
-        </div>
+    <Card className="divide-y divide-edge-2 p-0">
+      <header className="flex items-center gap-2.5 px-4 py-3.5">
+        <span className="h-2 w-2 shrink-0 bg-ink" aria-hidden="true" />
+        <span className="text-[13.5px] font-bold text-ink">Hyprlayer</span>
         {config.state === "ready" && (
-          <div className="flex items-center gap-3.5 text-xs text-ink-dim">
-            <span className="inline-flex items-center gap-1.5">
-              <BackendIcon kind={config.backendKind} />
-              <span className="font-mono">{config.backendKind}</span>
-              {!config.configured && <Badge tone="warn">incomplete</Badge>}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <PersonIcon size={14} />
-              <span className="font-mono">{config.user || "—"}</span>
-            </span>
-          </div>
+          <span className="flex min-w-0 items-center gap-2 font-mono text-xs text-ink-dim">
+            <span>{config.backendKind}</span>
+            {!config.configured && <Badge tone="warn">incomplete</Badge>}
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{config.user || "—"}</span>
+          </span>
         )}
       </header>
 

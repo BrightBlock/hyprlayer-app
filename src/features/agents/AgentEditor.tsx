@@ -426,7 +426,7 @@ function SetupTab({
             ))}
           </div>
           {hasUnknownMemoryScope(draft.memory) && (
-            <p className="mt-1.5 text-2xs text-warn">
+            <p className="mt-1.5 text-2xs text-warn-ink">
               This file sets <code>memory: {draft.memory}</code>, a scope this editor doesn&apos;t
               know. It is left untouched unless you pick one above.
             </p>
@@ -718,16 +718,15 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           action={
             <>
               <span className="font-mono text-2xs text-ink-dim">{skillSummary(draft, skills)}</span>
-              <label className="flex items-center gap-2 text-2xs text-ink-dim">
+              <Toggle
+                className="text-2xs text-ink-dim"
+                checked={skillsRestricted(overlay.rules)}
+                onChange={(next) =>
+                  patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
+                }
+              >
                 Only these skills
-                <Toggle
-                  checked={skillsRestricted(overlay.rules)}
-                  aria-label="Only these skills"
-                  onChange={(next) =>
-                    patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
-                  }
-                />
-              </label>
+              </Toggle>
             </>
           }
         >

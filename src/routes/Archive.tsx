@@ -277,7 +277,7 @@ function ArchivedRow({ view, projectLabel, projectOrigin, busy, onRestore, onMen
       </span>
       {!view.archiveExists && (
         <span
-          className="rounded-full bg-warn/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-warn"
+          className="rounded-full bg-warn/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-warn-ink"
           title={`Backup directory was deleted from ${view.archivePath}`}
         >
           missing

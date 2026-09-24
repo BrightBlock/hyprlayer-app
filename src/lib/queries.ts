@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, skipToken, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
   commands,
@@ -26,6 +26,7 @@ import {
   type WorkstreamView,
   type WorktreeFile,
 } from "./bindings";
+import type { HostProbeResult } from "./domain/hosts";
 import { pendingModelSync, type ModelOption } from "./domain/models";
 import { unwrap } from "./ipc";
 import { queryClient } from "./queryClient";
@@ -73,7 +74,26 @@ export function useSaveHosts() {
 export function useTestHostConnection() {
   return useMutation({
     mutationFn: (host: Host) => unwrap(commands.testHostConnection(host)),
+    onSuccess: (probe, host) => {
+      queryClient.setQueryData<Record<string, HostProbeResult>>(["host-probes"], (prev) => ({
+        ...prev,
+        [host.destination]: { ok: probe.ok, code: probe.error?.code, at: Date.now() },
+      }));
+    },
   });
+}
+
+const NO_PROBES: Record<string, HostProbeResult> = {};
+
+// Nothing fetches this: `useTestHostConnection` fills it, and it lasts the session.
+export function useHostProbes(): Record<string, HostProbeResult> {
+  return (
+    useQuery<Record<string, HostProbeResult>>({
+      queryKey: ["host-probes"],
+      queryFn: skipToken,
+      gcTime: Infinity,
+    }).data ?? NO_PROBES
+  );
 }
 
 // One SSH round trip, asked only while the install offer is on screen — which
@@ -901,6 +921,20 @@ export function useAiStatus() {
     queryKey: ["aiStatus"],
     queryFn: () => unwrap(commands.getAiStatus()),
     staleTime: Infinity,
+  });
+}
+
+export function useAgentFiles(projectPath: string | null) {
+  return useQuery({
+    queryKey: ["agent-files", projectPath],
+    queryFn: () => unwrap(commands.listAgentFiles(projectPath)),
+  });
+}
+
+export function useAgentSkills(projectPath: string | null) {
+  return useQuery({
+    queryKey: ["agent-skills", projectPath],
+    queryFn: () => unwrap(commands.agentSkills(projectPath)),
   });
 }
 

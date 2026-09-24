@@ -134,7 +134,7 @@ export function ImportPromptsDialog({
 
               {showConflict && (
                 <div className="flex flex-wrap items-center gap-2 pl-[26px]">
-                  <span className="text-[11px] text-warn">“{c.name}” already exists:</span>
+                  <span className="text-[11px] text-warn-ink">“{c.name}” already exists:</span>
                   <div className="inline-flex gap-1">
                     {RESOLUTIONS.map((r) => {
                       const active = d.resolution === r.value;
@@ -159,7 +159,7 @@ export function ImportPromptsDialog({
 
               {notes.map((note, i) => (
                 <div key={i} className="flex items-start gap-2 pl-[26px] text-[11px] leading-relaxed text-ink-dim">
-                  <WarningTriangleIcon size={12} className="mt-0.5 shrink-0 text-warn" />
+                  <WarningTriangleIcon size={12} className="mt-0.5 shrink-0 text-warn-ink" />
                   <span>{note}</span>
                 </div>
               ))}

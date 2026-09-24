@@ -70,8 +70,8 @@ function ReviewBlockRow({
         title="Open the PR on GitHub"
         className="group flex w-full items-center gap-2 text-left text-xs"
       >
-        <span className="w-3 shrink-0 text-center font-mono text-warn">!</span>
-        <span className="min-w-0 flex-1 truncate font-medium text-warn">
+        <span className="w-3 shrink-0 text-center font-mono text-warn-ink">!</span>
+        <span className="min-w-0 flex-1 truncate font-medium text-warn-ink">
           {changes ? "Changes requested" : "Review required"}
         </span>
         <ExternalLinkIcon />

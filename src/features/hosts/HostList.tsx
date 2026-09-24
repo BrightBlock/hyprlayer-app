@@ -7,14 +7,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
-import type { Host, HostsFile, LocalServer, ProvisionStep } from "@/lib/bindings";
-import { validateDestination, validateHostList } from "@/lib/domain/hosts";
+import type { Host, HostsFile, LocalServer } from "@/lib/bindings";
+import { toHost, validateDestination, validateHostList } from "@/lib/domain/hosts";
 import { errorMessage } from "@/lib/ipc";
-import { useTestHostConnection } from "@/lib/queries";
+import { useHostProbes } from "@/lib/queries";
 import { cx, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
 import { CheckIcon, MoreIcon, PlusIcon, XIcon, ZapIcon } from "@/components/icons";
-import { retryConnection } from "./reconnect";
-import { NO_SERVER, runProvision, STEP_LABEL } from "./serverInstall";
+import { NO_SERVER, STEP_LABEL } from "./serverInstall";
+import { useHostChecks } from "./useHostChecks";
 
 type Props = {
   value: HostsFile;
@@ -27,33 +27,12 @@ type Props = {
 
 type DraftRow = { label: string; destination: string };
 
-// The status column carries the outcome in two or three words; the ssh text it
-// came from is the row's tooltip, since a full failure is a sentence or two and
-// would set the width of the whole list. The code is kept because one of them —
-// a missing server — is a failure this row can act on rather than only report.
-type Probe = { ok: true } | { ok: false; code?: string; short: string; detail: string };
-
-// Codes come from `supervisor::classify_ssh_failure`; anything unrecognised
-// still lands here rather than rendering a code at the user.
-const FAILURE_SHORT: Record<string, string> = {
-  remote_cli_missing: "No server",
-  remote_auth_failed: "Auth failed",
-  remote_unreachable: "Unreachable",
-  remote_platform_unsupported: "Unsupported",
-  protocol_version_mismatch: "Version mismatch",
-  server_disconnected: "Disconnected",
-};
-
-function shortFailure(code: string | undefined): string {
-  return (code && FAILURE_SHORT[code]) || "Failed";
-}
-
 function toDraft(file: HostsFile): DraftRow[] {
   return (file.hosts ?? []).map((h) => ({ label: h.label, destination: h.destination }));
 }
 
 function toRecords(rows: DraftRow[]): Host[] {
-  return rows.map((r) => ({ destination: r.destination.trim(), label: r.label.trim() }));
+  return rows.map((r) => toHost(r.destination, r.label));
 }
 
 const INVALID_FIELD = "border-bad/60 focus:border-bad";
@@ -92,13 +71,6 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
   const [draft, setDraft] = useState<DraftRow[]>(() => toDraft(value));
   const lastSent = useRef(JSON.stringify(value));
   const [editing, setEditing] = useState<Set<number>>(new Set());
-  const [probes, setProbes] = useState<Record<string, Probe>>({});
-  const [testing, setTesting] = useState<string | null>(null);
-  // One at a time, like `testing`: this pushes 16MB over ssh, and a second
-  // concurrent push is a way to saturate a link, not a feature.
-  const [installing, setInstalling] = useState<{ destination: string; step: ProvisionStep } | null>(
-    null,
-  );
   const [dragging, setDragging] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -108,7 +80,6 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
   const suppressClick = useRef(false);
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const menuAnchor = useRef<HTMLElement | null>(null);
-  const test = useTestHostConnection();
 
   useEffect(() => {
     const next = JSON.stringify(value);
@@ -119,6 +90,10 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
   }, [value]);
 
   const active = value.active ?? null;
+  const { checks: probes, testing, installing, runTest, runInstall } = useHostChecks(
+    active,
+    useHostProbes(),
+  );
   const rowErrors = validateHostList(draft);
 
   function buildFile(rows: DraftRow[], nextActive: string | null): HostsFile | null {
@@ -252,62 +227,6 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
     },
   });
 
-  async function runTest(row: DraftRow) {
-    const host = { destination: row.destination.trim(), label: row.label.trim() };
-    setTesting(host.destination);
-    const record = (probe: Probe) => setProbes((prev) => ({ ...prev, [host.destination]: probe }));
-    try {
-      const probe = await test.mutateAsync(host);
-      if (probe.ok) {
-        record({ ok: true });
-        // The connection surface above is still reporting the failure this host
-        // just disproved. Reconnecting is what makes the two agree — and it is
-        // the same work a relaunch would do, without the relaunch.
-        if (host.destination === active) void retryConnection();
-      } else {
-        record({
-          ok: false,
-          code: probe.error?.code,
-          short: shortFailure(probe.error?.code),
-          detail: errorMessage(probe.error ?? "Could not connect."),
-        });
-      }
-    } catch (e) {
-      record({ ok: false, short: "Failed", detail: errorMessage(e) });
-    } finally {
-      setTesting(null);
-    }
-  }
-
-  // Provisioning a host it has not switched to yet is the point: the probe above
-  // already knows the server is missing, and learning that only after a restart
-  // into a blocked window cost a second one to get out of.
-  async function runInstall(row: DraftRow) {
-    const host = { destination: row.destination.trim(), label: row.label.trim() };
-    setInstalling({ destination: host.destination, step: "probe" });
-    try {
-      await runProvision(host, (step) =>
-        setInstalling((cur) => (cur?.destination === host.destination ? { ...cur, step } : cur)),
-      );
-      setInstalling(null);
-      // The row's own probe is what says it worked; nothing here claims it.
-      await runTest(row);
-    } catch (e) {
-      setInstalling(null);
-      setProbes((prev) => ({
-        ...prev,
-        // Still the code that offers the action: a failed push leaves the server
-        // as missing as it was, so retrying stays one click rather than two.
-        [host.destination]: {
-          ok: false,
-          code: NO_SERVER,
-          short: "Install failed",
-          detail: errorMessage(e),
-        },
-      }));
-    }
-  }
-
   const [adding, setAdding] = useState<DraftRow | null>(null);
   const addDestination = adding?.destination.trim() ?? "";
   const addRule = validateDestination(addDestination);
@@ -316,11 +235,11 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
       ? "Another host already uses this destination."
       : null;
   const addError = addRule ? `Destination ${addRule}.` : addDuplicate;
-  const canAdd = !!adding && !!adding.label.trim() && !!addDestination && !addError;
+  const canAdd = !!adding && !!addDestination && !addError;
 
   function confirmAdd() {
     if (!adding || !canAdd) return;
-    const next = [...draft, adding];
+    const next = [...draft, toHost(adding.destination, adding.label)];
     setDraft(next);
     commit(next);
     setAdding(null);
@@ -448,7 +367,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                           type="button"
                           className={`${ROW_BUTTON} text-accent`}
                           disabled={disabled || installing !== null}
-                          onClick={() => void runInstall(row)}
+                          onClick={() => void runInstall(toHost(row.destination, row.label))}
                           title={`Install the server on ${name}`}
                         >
                           Install
@@ -459,7 +378,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         type="button"
                         className={ROW_BUTTON}
                         disabled={disabled || !destination || testing === destination || installing !== null}
-                        onClick={() => void runTest(row)}
+                        onClick={() => void runTest(toHost(row.destination, row.label))}
                         title={`Test ${name}`}
                         aria-label={`Test ${name}`}
                       >

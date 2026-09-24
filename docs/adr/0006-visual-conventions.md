@@ -1,6 +1,7 @@
 # ADR 0006: Visual conventions — row tiers, hover, dividers, dialogs
 
-**Status:** accepted · 2026-08-21
+**Status:** accepted · 2026-08-21 · amended 2026-09-24 (v4 light palette and radii, native-checkbox
+`Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes)
 
 ## Decision
 
@@ -217,8 +218,9 @@ Three tiers:
 - **Rail — `h-8 w-8 rounded-[10px]`.** `RAIL_ICON_BASE` and `railNavClass`
   (`ui.tsx:655-662`, graduated out of `Root.tsx` by the remote-host-UI plan's
   Phase 3 so a feature component could reach them without a `routes/`
-  import), for the left icon rail's Projects/Library/Prompts/Agents/Archive/
-  host indicator/Scripts/Settings buttons. Selected state is `RAIL_ACTIVE_BAR`
+  import), for the left icon rail's Projects/Library/Prompts/Agents buttons
+  (the host indicator, Settings gear and Scripts dock toggle moved to the status
+  bar, and Archive to the header, left of the editor selector; see "v4" below). Selected state is `RAIL_ACTIVE_BAR`
   (`ui.tsx:657-659`), a left `::before` bar, not a background fill — the one
   place this vocabulary marks "active" without a fill.
 
@@ -360,6 +362,81 @@ selected, `border-transparent … hover:bg-edge/40` otherwise,
 anatomy from. This is not a gap in "Row tiers" above — `rowClass` still
 governs the rest of the app's rows — it is the same second idiom
 `PromptLibrary`'s own sidebar was already carrying before this note existed.
+
+### v4: palette, radii, and the Settings and status-bar surfaces (2026-09-24)
+
+The Redesign v4 canvas's tokens apply app-wide on the light theme. Dark and the
+named themes keep their palettes.
+
+**Palette.** Spec names map onto existing tokens rather than duplicating them:
+
+| v4 | Token | Light |
+|---|---|---|
+| `--bg` / `--panel` / `--muted` | `surface` / `panel` / `panel-2` | `#f7f7f7` / `#ffffff` / `#f5f5f5` |
+| `--line` / `--line-2` | `edge` / `edge-2` (new) | `#e9e9e9` / `#f0f0f0` |
+| `--ink` / `--ink-2` / `--ink-3` / `--ink-4` | `ink` / `ink-2` (new) / `ink-dim` / `ink-4` (new) | `#111` / `#303030` / `#5e5e5e` / `#8a8a8a` |
+| `--accent` / `--accent-soft` | `accent` / `accent-soft` (new) | `#111` / `#f0f0f0` |
+| `--info` / `--ok` / `--warn` / `--bad` | `info` (new) / `ok` / `warn` / `bad` | `#206eec` / `#368813` / `#e0a400` / `#ef0028` |
+| diff add / remove | `diff-add` / `diff-del` (new) | `#2c6f10` / `#c4001f` |
+
+The new tokens are `color-mix()`es of each theme's own tokens in the base
+`@theme`, tuned so the light values land exactly on the spec. `html.light`
+overrides only what no mix reaches: `info`, `warn-ink`, `bad-ink`, `diff-add`,
+`diff-del`, and the lighter `accent-soft`/`track` mixes. `--color-ansi-magenta`
+is the first ansi slot a theme overrides, because the base aliases it to
+accent, which is ink on light.
+
+`#e0a400` is a fill. As text on white it is 2.2:1, so warning text is
+`text-warn-ink` (`#7a5a00` on light, `warn` elsewhere), and every `text-warn`
+was swept to it. `bad-ink` does the same for danger text. `info` is the
+semantic token for information; `brand` stays for syntax, terminal and
+file-icon hues.
+
+**Radii.** `rounded-card` (5px) is Card, the Dialog panel, Popover, the
+DropdownSelect menu and ContextMenu. That collapses "Floating panels"' two
+panel radii into one. `rounded-control` (3px) is Button, TextInput, the
+DropdownSelect trigger and options, Badge, IconButton, menu items and the
+inline close/dismiss buttons. `cx()` registers both names with tailwind-merge;
+unregistered, `rounded-card` would survive a caller's `rounded-none`. Left
+unmigrated: Toast, the two palettes, the `rowClass` tiers, the rail
+(`rounded-[10px]`).
+
+**Typography.** `--text-3xs` (10px) joins `--text-2xs`. The `lbl` utility is
+the v4 label: mono 10px, 600, uppercase, `.07em`, `ink-dim`. The v4 surfaces
+(status bar, Settings popover, the Settings view, Servers) use the canvas's
+exact 9.5, 10.5, 12.5, 13, 13.5 and 19px as arbitrary values, a named
+exception like those under "Typography".
+
+**Primitives.**
+- `Toggle` is a native `<input type="checkbox" role="switch">` inside a
+  `<label>`: 34×18 track, 12px knob, and `children` makes a whole row its
+  label. Space toggles; Enter does not. `isEditableTarget` no longer counts
+  checkbox, radio, button or range inputs as text entry, so a focused switch
+  does not swallow bare-key shortcuts.
+- `SegmentedControl` and `HarnessPicker`'s radio row share `useRovingRadio`
+  (`src/lib/useRovingRadio.ts`): one tab stop, arrows move and select,
+  wrapping past disabled options. The feature-local segmented controls in
+  `agents/parts.tsx` and `CreateWorkstreamDialog.tsx` are unmigrated.
+- `Popover` gains opt-in `caret` and `trapFocus` (with `initialFocusRef`,
+  `restoreFocusRef`, dialog role) through `useFocusTrap`. Tab is cycled by
+  hand, because WKWebView skips buttons unless macOS keyboard navigation is
+  on, and only while focus is inside the panel, so a nested DropdownSelect
+  listbox keeps its own keys. There is deliberately no `focusin` guard.
+- `Button` gains `size="sm"` (`h-6`). `SettingsCard`
+  (`src/components/SettingsCard.tsx`) is the v4 card: title 14px/700,
+  description 12.5px `ink-dim`.
+- `rowClass`'s selection tint is `bg-accent-soft` (the same colour as
+  `bg-accent/15` on dark).
+
+**Sizes recorded as exceptions.**
+- The status bar is 34px (`STATUS_BAR_HEIGHT`, `src/lib/layout.ts`).
+- Its gear and the Scripts dock toggle beside it are 26×24; the permission pill 24px; a meter's track 34×4; the avatar 20px.
+- The Settings nav's rows are 34px, which is not a third `rowClass` tier.
+- Toast sits `STATUS_BAR_HEIGHT + 24` above the window's bottom edge.
+
+**Icons.** `lucide-react` at 16px and stroke 1.5 (`ICON` in
+`src/components/lucide.ts`) on the v4 surfaces. `icons.tsx` stays everywhere
+else and for brand marks (`harnessIcon`).
 
 ## Rationale
 

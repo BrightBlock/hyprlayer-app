@@ -16,7 +16,7 @@ function highlightLine(line: string): ReactNode {
     let cls = "text-ink";
     if (/^["']/.test(p)) cls = "text-ship";
     else if (/^[$%]/.test(p)) cls = "text-commit";
-    else if (p.startsWith("-")) cls = "text-warn";
+    else if (p.startsWith("-")) cls = "text-warn-ink";
     else if (!sawCommand) {
       cls = "text-brand";
       sawCommand = true;

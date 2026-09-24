@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { relaunch } from "@tauri-apps/plugin-process";
 
 import {
   commands,
@@ -8,7 +7,6 @@ import {
   type HostsFile,
 } from "@/lib/bindings";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
-import { flushPersistedWrites } from "@/lib/persistedStorage";
 import {
   useConnectionStatus,
   useHostProvisioning,
@@ -28,6 +26,7 @@ import { closeHostsUi, useHostsUiStore } from "./hostsUi";
 import { HostList, LocalServerList, WorkStatus } from "./HostList";
 import { retryConnection } from "./reconnect";
 import { runProvision, runUpdate, SERVER_OUTDATED, STEP_LABEL } from "./serverInstall";
+import { relaunchNow, SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
 
 const EMPTY: HostsFile = { hosts: [], active: null };
 
@@ -40,13 +39,6 @@ const STATE_BADGE: Record<ConnectionState, { tone: BadgeTone; label: string }> =
 // Blocking mode has no dismissal: Escape still consumes into the LIFO command
 // stack and the backdrop still swallows its mousedown, both into this no-op.
 const NOOP = () => {};
-
-function relaunchNow(): void {
-  // A relaunch fires neither pagehide nor visibilitychange, so up to a second of
-  // debounced writes would be lost without this.
-  flushPersistedWrites();
-  void relaunch();
-}
 
 /**
  * Installing an executable on someone else's machine is a real action, so it
@@ -206,8 +198,7 @@ export function HostsDialog() {
   const hosts = useHosts();
   const save = useSaveHosts();
   const uiOpen = useHostsUiStore((s) => s.open);
-  // The file a confirmed switch would write; null while nothing is pending.
-  const [pending, setPending] = useState<HostsFile | null>(null);
+  const serverSwitch = useServerSwitch(save);
   const [installWork, setInstallWork] = useState<string | null>(null);
   // A restart is done once the connection has dropped and come back.
   const [restart, setRestart] = useState<"requested" | "dropped" | null>(null);
@@ -224,7 +215,7 @@ export function HostsDialog() {
   // modal from flashing before the first connection_status resolves.
   const blocking = status.isSuccess && status.data.state !== "connected";
   const localServers = useLocalServers(blocking || uiOpen).data ?? [];
-  // Deliberate mode (opened from the rail indicator while connected) is
+  // Deliberate mode (opened from the status bar while connected) is
   // dismissible; blocking mode never is, regardless of how it got opened.
   if (!blocking && !uiOpen) return null;
 
@@ -248,28 +239,6 @@ export function HostsDialog() {
   const localProfile = file.active ? null : (file.localProfile ?? null);
   const usingLocal = (file.active ?? null) === null && localProfile === null;
   const leaving = hostName ?? "this machine";
-  const target = pending?.active
-    ? ((pending.hosts ?? []).find((h) => h.destination === pending.active) ?? null)
-    : null;
-  const joining = target
-    ? target.label || target.destination
-    : pending?.localProfile
-      ? (localServers.find((s) => s.dataDir === pending.localProfile)?.name ??
-        "another server on this machine")
-      : "this machine";
-
-  async function confirmSwitch() {
-    const next = pending;
-    if (!next) return;
-    try {
-      await save.mutateAsync(next);
-    } catch {
-      setPending(null); // the dialog's own ErrorNote carries save.error
-      return;
-    }
-    setPending(null);
-    relaunchNow();
-  }
 
   return (
     <>
@@ -285,7 +254,7 @@ export function HostsDialog() {
         footer={
           <div className="flex items-center justify-between gap-3">
             <Button
-              onClick={() => setPending({ ...file, active: null, localProfile: null })}
+              onClick={() => serverSwitch.request({ ...file, active: null, localProfile: null })}
               disabled={localFailed || usingLocal || save.isPending}
             >
               Use this machine
@@ -323,14 +292,16 @@ export function HostsDialog() {
           <LocalServerList
             servers={localServers}
             active={localProfile}
-            onSelect={(dataDir) => setPending({ ...file, active: null, localProfile: dataDir })}
+            onSelect={(dataDir) =>
+              serverSwitch.request({ ...file, active: null, localProfile: dataDir })
+            }
             disabled={save.isPending}
           />
 
           <HostList
             value={file}
             onChange={(next) => save.mutate(next)}
-            onSelect={setPending}
+            onSelect={serverSwitch.request}
             activeWork={connection?.host ? work : null}
             disabled={save.isPending}
           />
@@ -338,24 +309,15 @@ export function HostsDialog() {
           <ErrorNote error={save.error} />
         </div>
       </Dialog>
-      <ConfirmDialog
-        open={pending !== null}
-        onClose={() => setPending(null)}
-        title="Switch server?"
-        confirmLabel="Switch and restart"
-        onConfirm={() => void confirmSwitch()}
+      <SwitchServerConfirm
+        pending={serverSwitch.pending}
+        leaving={leaving}
+        live={connection?.state !== "failed"}
+        localServers={localServers}
         busy={save.isPending}
-      >
-        <p className="text-sm leading-relaxed text-ink-dim">
-          Hyprlayer will restart on <span className="text-ink">{joining}</span>.
-        </p>
-        {connection?.state !== "failed" && (
-          <p className="text-sm leading-relaxed text-ink-dim">
-            Agents and terminals on {leaving} keep running — they live on the server, not in this
-            window, and are still there when you switch back.
-          </p>
-        )}
-      </ConfirmDialog>
+        onCancel={serverSwitch.cancel}
+        onConfirm={() => void serverSwitch.confirm()}
+      />
     </>
   );
 }

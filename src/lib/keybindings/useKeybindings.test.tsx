@@ -77,6 +77,21 @@ describe("useKeybindings dispatcher", () => {
     expect(modded).toHaveBeenCalledOnce();
   });
 
+  it("fires a bare-key chord while a switch has focus, since a checkbox takes no text", () => {
+    const bare = vi.fn();
+    const { container } = render(
+      <>
+        <Dispatcher overrides={{ "tab.new": "n" }} />
+        <CommandHost id="tab.new" handler={bare} />
+        <input type="checkbox" role="switch" aria-label="Notify" />
+      </>,
+    );
+    const box = container.querySelector("input")!;
+    box.focus();
+    fireEvent.keyDown(box, { key: "n" });
+    expect(bare).toHaveBeenCalledOnce();
+  });
+
   it("fires a bare-key chord when focus is not in an editable element", () => {
     const bare = vi.fn();
     render(

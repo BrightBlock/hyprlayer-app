@@ -45,7 +45,7 @@ export function BinaryCard({ status }: { status: BinaryStatus }) {
           </p>
         )}
         {status.state.state === "tooOld" && (
-          <p className="mt-1 text-xs text-warn">Minimum supported version: {status.state.min}</p>
+          <p className="mt-1 text-xs text-warn-ink">Minimum supported version: {status.state.min}</p>
         )}
         {override.isError && (
           <p className="selectable mt-1 text-xs text-bad">

@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Host, HostsFile, ProvisionStep } from "@/lib/bindings";
 import { HostList } from "./HostList";
 
-const q = vi.hoisted(() => ({ useTestHostConnection: vi.fn(), useConnectionStatus: vi.fn() }));
+const q = vi.hoisted(() => ({
+  useTestHostConnection: vi.fn(),
+  useConnectionStatus: vi.fn(),
+  useHostProbes: () => ({}),
+}));
 vi.mock("@/lib/queries", () => q);
 
 // Only the IPC call is stubbed; the step labels and the failure code stay real,

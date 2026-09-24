@@ -34,6 +34,29 @@ export function formatRelativeTime(epochMs: number | null, from: number = Date.n
   return `${ageToken(Math.floor(seconds / 60))} ago`;
 }
 
+const COUNT_UNITS = [
+  { size: 1_000_000, suffix: "M" },
+  { size: 1_000, suffix: "k" },
+];
+
+// Floors at every step: a count never reads larger than it is.
+export function formatCompactCount(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "0";
+  const whole = Math.floor(n);
+  const unit = COUNT_UNITS.find((u) => whole >= u.size);
+  if (!unit) return String(whole);
+  const tenths = Math.floor(whole / (unit.size / 10));
+  const units = Math.floor(tenths / 10);
+  const tenth = tenths % 10;
+  return units >= 10 || tenth === 0 ? `${units}${unit.suffix}` : `${units}.${tenth}${unit.suffix}`;
+}
+
 export function shortSha(sha: string): string {
   return sha.slice(0, 7);
+}
+
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }

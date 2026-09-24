@@ -44,7 +44,7 @@ function HealthRow({ check }: { check: HealthCheck }) {
           </p>
         )}
         {check.remedy && check.status !== "pass" && (
-          <p className="mt-0.5 text-xs text-warn">{check.remedy}</p>
+          <p className="mt-0.5 text-xs text-warn-ink">{check.remedy}</p>
         )}
       </div>
     </div>

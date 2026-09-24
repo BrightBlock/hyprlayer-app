@@ -16,7 +16,7 @@ export function AheadBehind({
         ↑{ahead}
       </span>
       <span
-        className={behind > 0 ? "text-warn" : "text-ink-dim/60"}
+        className={behind > 0 ? "text-warn-ink" : "text-ink-dim/60"}
         title={`${behind} commit(s) behind base`}
       >
         ↓{behind}

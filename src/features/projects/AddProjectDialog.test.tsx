@@ -117,8 +117,8 @@ describe("AddProjectDialog disk import", () => {
     setupDisk("nonGit");
     expect(screen.getByText(/plain folder/)).toBeDefined();
     expect(
-      screen.getByRole("switch", { name: /Set up a git repository/ }).getAttribute("aria-checked"),
-    ).toBe("false");
+      (screen.getByRole("switch", { name: /Set up a git repository/ }) as HTMLInputElement).checked,
+    ).toBe(false);
     expect(screen.getByRole("button", { name: "Add folder" })).toBeDefined();
   });
 

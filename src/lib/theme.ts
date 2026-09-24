@@ -44,6 +44,13 @@ const prefersDark = () =>
   typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-color-scheme: dark)").matches;
 
+export type AppearanceSegment = "light" | "dark" | "system";
+
+/** The Light / Dark / Auto choice a mode shows as; named themes show none. */
+export function appearanceSegment(mode: ThemeMode): AppearanceSegment | null {
+  return mode === "light" || mode === "dark" || mode === "system" ? mode : null;
+}
+
 export function resolveTheme(mode: ThemeMode): ResolvedTheme {
   if (mode === "system") return prefersDark() ? "dark" : "light";
   return mode;

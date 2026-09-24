@@ -131,13 +131,13 @@ function CommandRow({
               <Button onClick={onCancel}>Cancel</Button>
             </div>
             {conflicts.length > 0 && (
-              <p className="text-right text-xs text-warn">
+              <p className="text-right text-xs text-warn-ink">
                 Already used by{" "}
                 {conflicts.map((id) => commandById(id)?.label ?? id).join(", ")}
               </p>
             )}
             {reserved && (
-              <p className="text-right text-xs text-warn">
+              <p className="text-right text-xs text-warn-ink">
                 This is a system shortcut, so the OS may intercept it.
               </p>
             )}

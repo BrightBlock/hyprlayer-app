@@ -1,0 +1,165 @@
+import { useId, type ReactNode, type RefObject } from "react";
+import { Link } from "@tanstack/react-router";
+import { ChevronRight, Hammer, Server } from "lucide-react";
+
+import { visibleAgents } from "@/features/agents/agents";
+import type { AppSettings } from "@/lib/bindings";
+import { effectiveChord } from "@/lib/keybindings/resolve";
+import { invalidateNotificationSettingsCache } from "@/lib/notifications";
+import { IS_MACOS } from "@/lib/platform";
+import { useAgentFiles, useAgentSkills, useBootstrap, useSetAppSettings } from "@/lib/queries";
+import { appearanceSegment, useThemeStore, type AppearanceSegment } from "@/lib/theme";
+import { ICON } from "@/components/lucide";
+import { ChordHint, cx, ErrorNote, Popover, SegmentedControl, Toggle } from "@/components/ui";
+
+import { HarnessPicker } from "./HarnessPicker";
+import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
+import { serversMeta, workshopMeta } from "./settingsMeta";
+import { useServerCounts } from "./useServerCounts";
+
+const APPEARANCE: Array<{ value: AppearanceSegment; label: string }> = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "Auto" },
+];
+
+const ROW = "flex items-center justify-between gap-3 px-3 py-2 text-[12.5px] text-ink-2";
+const LINK_ROW =
+  "flex items-center gap-2.5 rounded-control px-3 py-2 text-[12.5px] text-ink-2 hover:bg-edge/50 " +
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+
+export function SettingsPopover({
+  open,
+  onClose,
+  anchorRef,
+}: {
+  open: boolean;
+  onClose: () => void;
+  anchorRef: RefObject<HTMLElement | null>;
+}) {
+  const headingId = useId();
+  return (
+    <Popover
+      open={open}
+      onClose={onClose}
+      anchorRef={anchorRef}
+      side="top"
+      align="end"
+      sideOffset={10}
+      caret
+      trapFocus
+      aria-labelledby={headingId}
+      className="w-[306px] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.16)]"
+    >
+      <PopoverBody headingId={headingId} onClose={onClose} />
+    </Popover>
+  );
+}
+
+function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () => void }) {
+  const settings = useBootstrap().data?.settings;
+  const chord = effectiveChord(settings?.keybindings?.overrides ?? {}, "nav.settings", IS_MACOS);
+  return (
+    <>
+      <div className="flex items-center justify-between px-3 pb-1.5 pt-1">
+        <span id={headingId} className="lbl">
+          Settings
+        </span>
+        {chord && <ChordHint chord={chord} className="font-mono text-2xs text-ink-dim" />}
+      </div>
+      <AppearanceRow />
+      {settings ? <ServerBackedRows settings={settings} /> : null}
+      <div className="mx-1 my-1 h-px bg-edge-2" />
+      <WorkshopLink onClose={onClose} />
+      <Link to="/settings" search={{ section: "servers" }} onClick={onClose} className={LINK_ROW}>
+        <Server {...ICON} className="text-ink-dim" />
+        <span className="flex-1">Servers</span>
+        <Meta>{serversMeta(useServerCounts())}</Meta>
+      </Link>
+      <Link
+        to="/settings"
+        search={{}}
+        onClick={onClose}
+        className={cx(LINK_ROW, "mt-0.5 bg-panel-2 font-semibold text-ink hover:bg-panel-2")}
+      >
+        <span className="flex-1">All settings</span>
+        <ChevronRight {...ICON} className="text-ink-dim" />
+      </Link>
+    </>
+  );
+}
+
+function AppearanceRow() {
+  const mode = useThemeStore((s) => s.mode);
+  const setMode = useThemeStore((s) => s.setMode);
+  return (
+    <div className={ROW}>
+      <span>Appearance</span>
+      <SegmentedControl
+        aria-label="Appearance"
+        value={appearanceSegment(mode)}
+        options={APPEARANCE}
+        onChange={setMode}
+      />
+    </div>
+  );
+}
+
+function ServerBackedRows({ settings }: { settings: AppSettings }) {
+  const save = useSetAppSettings();
+  const quick = quickSettings(settings);
+  return (
+    <>
+      <div className={ROW}>
+        <span>Default harness</span>
+        <HarnessPicker
+          variant="dropdown"
+          value={quick.defaultHarness}
+          onChange={(key) => save.mutate(withDefaultHarness(settings, key))}
+        />
+      </div>
+      <Toggle
+        className={cx(ROW, "flex w-full")}
+        checked={quick.notify}
+        onChange={(on) =>
+          save.mutate(withNotify(settings, on), {
+            onSuccess: () => invalidateNotificationSettingsCache(),
+          })
+        }
+      >
+        <span className="flex-1">Notify when a session needs me</span>
+      </Toggle>
+      <Toggle
+        className={cx(ROW, "flex w-full")}
+        checked={quick.confirmQuit}
+        onChange={(on) => save.mutate(withConfirmQuit(settings, on))}
+      >
+        <span className="flex-1">Confirm before quitting</span>
+      </Toggle>
+      {save.isError && (
+        <div className="px-2 pb-1">
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function WorkshopLink({ onClose }: { onClose: () => void }) {
+  const files = useAgentFiles(null).data;
+  const skills = useAgentSkills(null).data;
+  const agents = files
+    ? visibleAgents(files, { tab: "yours", scope: "global", search: "" }).length
+    : null;
+  return (
+    <Link to="/agents" onClick={onClose} className={LINK_ROW}>
+      <Hammer {...ICON} className="text-ink-dim" />
+      <span className="flex-1">Workshop</span>
+      <Meta>{workshopMeta(agents, skills?.length ?? null)}</Meta>
+    </Link>
+  );
+}
+
+function Meta({ children }: { children: ReactNode }) {
+  return <span className="font-mono text-3xs text-ink-dim">{children}</span>;
+}

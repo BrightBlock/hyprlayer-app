@@ -18,7 +18,7 @@ export function CardRow({
   return (
     <div
       className={cx(
-        "grid grid-cols-[104px_minmax(0,1fr)_auto] gap-x-4 gap-y-2 px-4 py-2.5",
+        "grid grid-cols-[104px_minmax(0,1fr)_auto] gap-x-4 gap-y-2 px-4 py-[11px]",
         align === "center" ? "items-center" : "items-start",
         className,
       )}

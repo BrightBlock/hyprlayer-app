@@ -36,7 +36,7 @@ export function AgentUpdateReport({
         <p
           className={`rounded-md border px-2.5 py-2 text-sm ${
             caution
-              ? "border-warn/30 bg-warn/10 text-warn"
+              ? "border-warn/30 bg-warn/10 text-warn-ink"
               : "border-ok/30 bg-ok/10 text-ok"
           }`}
         >

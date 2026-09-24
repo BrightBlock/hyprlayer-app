@@ -67,7 +67,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
     }
     return (
       <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
-        <p className="text-warn">
+        <p className="text-warn-ink">
           That version has no published bundle pair, so the CLI linked Claude and Codex to the
           repository fallback instead. What is active no longer matches the version shown.
         </p>
@@ -79,7 +79,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
     if (!unpinned) {
       return (
         <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
-          <p className="text-warn">
+          <p className="text-warn-ink">
             The reinstall finished, but its output did not confirm the published release asset
             was used, so treat the installed files as unverified.
           </p>
@@ -138,7 +138,7 @@ function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: 
   }
   return (
     <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
-      <p className="text-warn">
+      <p className="text-warn-ink">
         {report.source === "fallback"
           ? `Claude and Codex were linked to a fallback bundle instead of ${target}.`
           : `Claude and Codex were relinked, but the CLI did not confirm ${target} as the source.`}
@@ -210,7 +210,7 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
         <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
         {latest ? (
           <>
-            <span className="text-warn">· {latest} available</span>
+            <span className="text-warn-ink">· {latest} available</span>
             <Button variant="primary" busy={update.isPending} onClick={() => update.mutate()}>
               Update
             </Button>
@@ -230,7 +230,7 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
 function UnpairedLayoutNote({ agentTool }: { agentTool?: string | null }) {
   return (
     <div className="mt-1 flex gap-2.5 rounded-md border border-warn/35 bg-warn/8 p-3 text-sm">
-      <span className="flex pt-0.5 text-warn">
+      <span className="flex pt-0.5 text-warn-ink">
         <WarningTriangleIcon size={14} />
       </span>
       <div className="min-w-0">
@@ -341,7 +341,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 !pending && <Badge tone="ok">Latest</Badge>
               )}
               {pin.kind === "pinned" && pin.drifted && pin.binary && (
-                <span className="text-xs text-warn">this CLI ships {pin.binary}</span>
+                <span className="text-xs text-warn-ink">this CLI ships {pin.binary}</span>
               )}
             </>
           ) : layout === "legacy" ? (

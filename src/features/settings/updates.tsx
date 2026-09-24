@@ -38,9 +38,9 @@ export function UpdatesCard() {
           <CardTitle className="mb-0">Updates</CardTitle>
           <p className="mt-[3px] text-xs text-ink-dim">
             {pendingVersion ? (
-              <span className="text-warn">{pendingVersion} available</span>
+              <span className="text-warn-ink">{pendingVersion} available</span>
             ) : result === "error" ? (
-              <span className="text-warn">Couldn’t check</span>
+              <span className="text-warn-ink">Couldn’t check</span>
             ) : lastChecked === null ? (
               "Not checked yet"
             ) : (

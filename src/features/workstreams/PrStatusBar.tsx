@@ -97,7 +97,7 @@ export function PrStatusBar({
       )}
       {isOpen && changesRequested && (
         <PillButton
-          tint="border-warn/40 bg-warn/10 text-warn hover:bg-warn/20"
+          tint="border-warn/40 bg-warn/10 text-warn-ink hover:bg-warn/20"
           onClick={() => void addressPrFeedback(id, "comments", data.number)}
           title="Hand the review feedback to the agent to address on this branch"
         >

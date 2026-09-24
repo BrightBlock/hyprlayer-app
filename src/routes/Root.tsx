@@ -72,6 +72,7 @@ import type { Overrides } from "@/lib/keybindings/resolve";
 import {
   ContextMenu,
   ContextMenuItem,
+  cx,
   MenuItem,
   Popover,
   RAIL_ICON_BASE,
@@ -93,11 +94,9 @@ import {
   ClipboardIcon,
   CodeIcon,
   FolderIcon,
-  GearIcon,
   MultiplexerIcon,
   PinIcon,
   PlusIcon,
-  ScriptPanelIcon,
   TerminalIcon,
   WarningTriangleIcon,
   ZapIcon,
@@ -108,8 +107,17 @@ import { SearchPalette } from "@/features/search/SearchPalette";
 import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
-import { HostIndicator } from "@/features/hosts/HostIndicator";
 import { HostsDialog } from "@/features/hosts/HostsDialog";
+import { SettingsButton } from "@/features/settings/SettingsButton";
+import { SettingsCrumb, SettingsHeaderMeta } from "@/features/settings/SettingsHeader";
+import { parseSettingsSection } from "@/features/settings/sections";
+import {
+  closeSettingsPopover,
+  openSettingsPopover,
+  toggleSettingsPopover,
+} from "@/features/settings/settingsPopoverStore";
+import { ScriptsDockButton } from "@/features/statusbar/ScriptsDockButton";
+import { StatusBar } from "@/features/statusbar/StatusBar";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
@@ -154,7 +162,8 @@ const LEFT_CLUSTER_GAP = 4;
 const HEADER_GLYPH = 16;
 const HEADER_TERMINAL = 18;
 const HEADER_FOLDER = 20;
-const HEADER_APP_IMAGE = 13;
+// macOS app icons pad their art ~10% per side; 20px shows ~16px, matching HEADER_GLYPH.
+const HEADER_APP_IMAGE = 20;
 const HEADER_MARK = 21;
 
 const HEADER_CONTENT_PAD = 16;
@@ -481,13 +490,14 @@ function OpenInMenu({ dir }: { dir: string }) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={topIconClass}
+        className={cx(topIconClass, "w-auto gap-0.5 pl-1 pr-0.5", open && "bg-edge/60 text-ink")}
         title="Open in editor or terminal"
         aria-label="Open working directory in editor or terminal"
         aria-haspopup="menu"
         aria-expanded={open}
       >
         {headerAppIcon(defaultApp)}
+        <ChevronDownIcon size={12} strokeWidth={1.5} className="shrink-0" />
       </button>
       <Popover
         open={open}
@@ -548,7 +558,7 @@ function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
   if (problems.length === 0) return null;
   return (
     <span
-      className="flex h-6 w-6 shrink-0 items-center justify-center text-warn"
+      className="flex h-6 w-6 shrink-0 items-center justify-center text-warn-ink"
       title={`Won't be copied to new worktrees:\n${problems.join("\n")}\n\nAdd the file to the repo, or fix the path in Project settings.`}
       aria-label={`Copy file issues: ${problems.join(", ")}`}
     >
@@ -567,6 +577,7 @@ export function Root() {
     item?: string;
     doc?: string;
     from?: string;
+    section?: string;
   };
   const collapsed = useUiStore((state) => state.projectSidebarCollapsed);
   const setProjectSidebarCollapsed = useUiStore(
@@ -605,6 +616,7 @@ export function Root() {
   const onPrompts = pathname.startsWith("/prompts");
   const onSettings = pathname.startsWith("/settings");
   const onAgents = pathname.startsWith("/agents");
+  const onArchive = pathname.startsWith("/archive");
   const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
@@ -716,7 +728,7 @@ export function Root() {
     else fallback();
   };
   const toggleNav = (
-    target: "/library" | "/settings" | "/archive" | "/prompts" | "/agents",
+    target: "/library" | "/archive" | "/prompts" | "/agents",
   ) => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
@@ -903,7 +915,7 @@ export function Root() {
   );
   useCommand("nav.dashboard", () => void navigate({ to: "/" }));
   useCommand("nav.library", () => toggleNav("/library"));
-  useCommand("nav.settings", () => toggleNav("/settings"));
+  useCommand("nav.settings", toggleSettingsPopover);
   useCommand(
     "nav.projectDocs",
     currentProject && isGitProject(currentProject)
@@ -929,8 +941,14 @@ export function Root() {
     "ws.ship",
     gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null,
   );
-  useCommand("search.open", () => toggleSearch());
-  useCommand("prompts.palette", () => togglePromptPalette());
+  useCommand("search.open", () => {
+    closeSettingsPopover();
+    toggleSearch();
+  });
+  useCommand("prompts.palette", () => {
+    closeSettingsPopover();
+    togglePromptPalette();
+  });
   usePromptHotkeys(activeWorkstream ?? null);
   useEscape(
     narrowDrawer
@@ -967,8 +985,9 @@ export function Root() {
           }
         });
       }),
+      // Only fires when the webview did not take ⌘, (useKeybindings prevents the default), so opening is idempotent.
       listen("menu:open-settings", () => {
-        void navigate({ to: "/settings" });
+        openSettingsPopover();
       }),
       listen("menu:save-file", () => {
         triggerActiveFileSave();
@@ -1103,6 +1122,8 @@ export function Root() {
                   </>
                 )}
               </>
+            ) : onSettings ? (
+              <SettingsCrumb section={parseSettingsSection(locationSearch.section)} />
             ) : (
               <span className="truncate font-medium text-ink">
                 {currentSection}
@@ -1111,6 +1132,9 @@ export function Root() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {onSettings && (
+              <SettingsHeaderMeta section={parseSettingsSection(locationSearch.section)} />
+            )}
             {onLibrary && libDocUrl.data && (
               <a
                 href={libDocUrl.data}
@@ -1121,18 +1145,29 @@ export function Root() {
                 View on GitHub ↗
               </a>
             )}
+            {currentProject &&
+              !diffShown &&
+              activeWorkstream &&
+              (activeWorkstream.git.ahead > 0 ||
+                activeWorkstream.git.behind > 0) && (
+                <AheadBehind
+                  ahead={activeWorkstream.git.ahead}
+                  behind={activeWorkstream.git.behind}
+                  className="px-1"
+                />
+              )}
+            <button
+              type="button"
+              onClick={() => toggleNav("/archive")}
+              className={cx(topIconClass, onArchive && "bg-edge/60 text-ink")}
+              title="Archived workstreams"
+              aria-label="Archived workstreams"
+              aria-pressed={onArchive}
+            >
+              <ArchiveIcon size={HEADER_GLYPH} />
+            </button>
             {currentProject && (
               <>
-                {!diffShown &&
-                  activeWorkstream &&
-                  (activeWorkstream.git.ahead > 0 ||
-                    activeWorkstream.git.behind > 0) && (
-                    <AheadBehind
-                      ahead={activeWorkstream.git.ahead}
-                      behind={activeWorkstream.git.behind}
-                      className="px-1"
-                    />
-                  )}
                 <OpenInMenu
                   dir={
                     activeWorkstream?.item.worktreePath ?? currentProject.path
@@ -1245,54 +1280,6 @@ export function Root() {
               aria-label="Agents"
             >
               <AgentIcon size={19} strokeWidth={1.7} />
-            </button>
-          </div>
-          <div className="mt-auto flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={() => toggleNav("/archive")}
-              className={railNavClass(pathname.startsWith("/archive"))}
-              title="Archive"
-              aria-label="Archive"
-            >
-              <ArchiveIcon size={16} />
-            </button>
-            <HostIndicator />
-            <button
-              type="button"
-              onClick={toggleScriptsDock}
-              className={`${
-                scriptsRunning
-                  ? `${RAIL_ICON_BASE} relative bg-ship/15 text-ship ring-[1.5px] ring-inset ring-ship/40`
-                  : `${railNavClass(scriptsDockOpen)} relative`
-              } ${!scriptsActiveWs ? "opacity-50" : ""}`}
-              title={
-                scriptsRunning
-                  ? "Scripts · a Run is active"
-                  : "Terminal & scripts dock"
-              }
-              aria-label="Terminal and scripts dock"
-            >
-              <ScriptPanelIcon size={16} />
-              {scriptsRunning && (
-                <span
-                  aria-hidden
-                  className="absolute right-1 top-1 h-2 w-2 rounded-full bg-ship"
-                  style={{
-                    boxShadow:
-                      "0 0 0 2px var(--color-surface), 0 0 6px var(--color-ship)",
-                  }}
-                />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleNav("/settings")}
-              className={railNavClass(pathname.startsWith("/settings"))}
-              title="Settings"
-              aria-label="Settings"
-            >
-              <GearIcon size={16} />
             </button>
           </div>
         </nav>
@@ -1645,6 +1632,21 @@ export function Root() {
           </Suspense>
         </main>
       </div>
+
+      <StatusBar
+        workstreamId={activeWorkstreamId ?? null}
+        workstream={activeWorkstream ?? null}
+        tools={
+          scriptsActiveWs && (
+            <ScriptsDockButton
+              open={scriptsDockOpen}
+              running={scriptsRunning}
+              onToggle={toggleScriptsDock}
+            />
+          )
+        }
+        settings={<SettingsButton />}
+      />
 
       {itemMenu && (
         <ContextMenu position={itemMenu} onClose={() => setItemMenu(null)}>

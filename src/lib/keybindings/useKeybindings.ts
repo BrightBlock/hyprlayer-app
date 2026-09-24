@@ -6,10 +6,23 @@ import { eventToChord, hasPrimaryModifier } from "./chord";
 import { chordToCommand, type Overrides } from "./resolve";
 import { ESCAPE_COMMAND_ID, runCommand } from "./registry";
 
+const NON_TEXT_INPUTS = new Set([
+  "checkbox",
+  "radio",
+  "button",
+  "submit",
+  "reset",
+  "range",
+  "color",
+  "file",
+  "image",
+]);
+
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (tag === "INPUT") return !NON_TEXT_INPUTS.has((target as HTMLInputElement).type);
+  if (tag === "TEXTAREA" || tag === "SELECT") return true;
   if (target.isContentEditable) return true;
   if (target.closest(".cm-editor")) return true;
   return false;

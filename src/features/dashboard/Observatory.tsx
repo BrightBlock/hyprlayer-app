@@ -312,8 +312,8 @@ function AgentCard({
         <span className="min-w-0 flex-1 truncate font-mono text-2xs text-ink-dim">
           {activity === "review" && git.dirty > 0 ? (
             <>
-              <span className="text-ok">+{git.additions}</span>{" "}
-              <span className="text-bad">−{git.deletions}</span> · {git.dirty}{" "}
+              <span className="text-diff-add">+{git.additions}</span>{" "}
+              <span className="text-diff-del">−{git.deletions}</span> · {git.dirty}{" "}
               {git.dirty === 1 ? "file" : "files"}
             </>
           ) : (

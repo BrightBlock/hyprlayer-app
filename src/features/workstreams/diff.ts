@@ -4,8 +4,8 @@ export type PatchLineKind = "add" | "del" | "hunk" | "context";
 export type PatchLine = { kind: PatchLineKind; text: string };
 
 export const PATCH_LINE_CLASSES: Record<PatchLineKind, string> = {
-  add: "bg-ok/10 text-ok",
-  del: "bg-bad/10 text-bad",
+  add: "bg-ok/10 text-diff-add",
+  del: "bg-bad/10 text-diff-del",
   hunk: "text-brand",
   context: "text-ink-dim",
 };
