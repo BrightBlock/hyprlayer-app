@@ -127,7 +127,8 @@ if [[ $FORCE -eq 0 && -x "$INSTALLED_BIN" && -f "$STAMP" ]] && grep -qx "$SHA" "
 fi
 
 step "Checking out $SHORT — $SUBJECT"
-git -C "$SRC_DIR" checkout --quiet --detach "$SHA"
+# --force: a prior build leaves its +dev version stamp in Cargo.toml/Cargo.lock.
+git -C "$SRC_DIR" checkout --quiet --force --detach "$SHA"
 git -C "$SRC_DIR" reset --hard --quiet "$SHA"
 git -C "$SRC_DIR" clean -qfd
 

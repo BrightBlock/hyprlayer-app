@@ -185,7 +185,8 @@ if ((-not $Force) -and (Test-Path $InstalledExe) -and $StampSha -eq $Sha) {
 }
 
 Step "Checking out $Short - $Subject"
-RunGit @('-C', $SrcDir, 'checkout', '--quiet', '--detach', $Sha) | Out-Null
+# --force: a prior build leaves its +dev version stamp in Cargo.toml/Cargo.lock.
+RunGit @('-C', $SrcDir, 'checkout', '--quiet', '--force', '--detach', $Sha) | Out-Null
 RunGit @('-C', $SrcDir, 'reset', '--hard', '--quiet', $Sha) | Out-Null
 RunGit @('-C', $SrcDir, 'clean', '-qfd') | Out-Null
 
