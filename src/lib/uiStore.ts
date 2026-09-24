@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export const DIFF_SIDEBAR_WIDTH = 420;
 
-export const DIFF_SIDEBAR_MIN = 400;
+export const DIFF_SIDEBAR_MIN = 380;
 export const DIFF_SIDEBAR_MAX = 700;
 
 export const SIDE_PANEL_WIDTH = 288;
@@ -17,6 +17,8 @@ type UiStore = {
   setDiffWidth: (width: number) => void;
   tasksCollapsed: boolean;
   toggleTasks: () => void;
+  asideView: "changes" | "plan";
+  setAsideView: (view: "changes" | "plan") => void;
   docsCollapsed: boolean;
   toggleDocs: () => void;
   libraryWidth: number;
@@ -51,6 +53,8 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
+      asideView: "changes",
+      setAsideView: (view) => set({ asideView: view }),
       docsCollapsed: false,
       toggleDocs: () => set((state) => ({ docsCollapsed: !state.docsCollapsed })),
       libraryWidth: SIDE_PANEL_WIDTH,
@@ -80,6 +84,7 @@ export const useUiStore = create<UiStore>()(
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
+        asideView: s.asideView,
         docsCollapsed: s.docsCollapsed,
         libraryCollapsed: s.libraryCollapsed,
         agentsCollapsed: s.agentsCollapsed,

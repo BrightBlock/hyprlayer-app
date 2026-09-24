@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { planTasksFromItems, type PlanTask } from "./planTasks";
+import { planTaskTimeline, planTasksFromItems, todoPhaseLabel, type PlanTask } from "./planTasks";
 import type { TranscriptItem } from "./transcript";
 
 
@@ -255,5 +255,52 @@ describe("planTasksFromItems", () => {
       { id: "1", subject: "First", status: "in_progress" },
       { id: "2", subject: "Second", status: "pending" },
     ]);
+  });
+});
+
+describe("planTaskTimeline", () => {
+  const read = (id: string) => makeTool("Read", "{}", id, ok("…"));
+
+  it("matches planTasksFromItems and points each task at its first tool call", () => {
+    const items: TranscriptItem[] = [
+      todoWrite("w1", [
+        { content: "Phase 1: Scaffold", status: "in_progress" },
+        { content: "Phase 2: Build", status: "pending" },
+      ]),
+      read("r1"),
+      read("r2"),
+      todoWrite("w2", [
+        { content: "Phase 1: Scaffold", status: "completed" },
+        { content: "Phase 2: Build", status: "in_progress" },
+      ]),
+      read("r3"),
+    ];
+    const timeline = planTaskTimeline(items);
+    expect(timeline.map(({ jumpToolUseId: _, ...t }) => t)).toEqual(planTasksFromItems(items));
+    expect(timeline.map((t) => t.jumpToolUseId)).toEqual(["r1", "r3"]);
+  });
+
+  it("falls back to the tracking call before any work follows it", () => {
+    const timeline = planTaskTimeline([todoWrite("w1", [{ content: "A", status: "in_progress" }])]);
+    expect(timeline[0].jumpToolUseId).toBe("w1");
+  });
+
+  it("is null for a task that never started", () => {
+    const timeline = planTaskTimeline([todoWrite("w1", [{ content: "A", status: "pending" }]), read("r1")]);
+    expect(timeline[0].jumpToolUseId).toBeNull();
+  });
+});
+
+describe("todoPhaseLabel", () => {
+  it("reads phase-level todos", () => {
+    expect(todoPhaseLabel("Phase 2: Build the tracker")).toBe("2");
+    expect(todoPhaseLabel("phase 4b — split")).toBe("4b");
+    expect(todoPhaseLabel("[P3] wire it")).toBe("3");
+  });
+
+  it("ignores task tags and ordinary subjects", () => {
+    expect(todoPhaseLabel("[P3.1] wire it")).toBeNull();
+    expect(todoPhaseLabel("Rephase 2 things")).toBeNull();
+    expect(todoPhaseLabel("Write tests")).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ import {
   MenuSeparator,
   PageError,
   PageSpinner,
+  SegmentedControl,
   TextInput,
 } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -37,6 +38,8 @@ import { DocPreviewTab } from "@/features/session/DocPreviewTab";
 import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
 import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
+import { PlanAside, PlanDocSync } from "@/features/plan/PlanAside";
+import { usePlanAside } from "@/features/plan/usePlanAside";
 import { AgentPtyTab } from "@/features/multiplexer/AgentPtyTab";
 import { EngineGlyph } from "@/components/EngineGlyph";
 import { PtyTabDot } from "@/features/multiplexer/agentStateUi";
@@ -489,6 +492,12 @@ export function ProjectPage() {
   const openFile = useCallback(
     (path: string) => openViewerTab((s) => s.filePath === path, basename(path), { filePath: path }),
     [openViewerTab],
+  );
+
+  const planTabs = wsId ? tabsByWs[wsId] : undefined;
+  const planAside = usePlanAside(
+    planTabs ? activeShellIn(planTabs, focusedPaneId(planTabs))?.sessionId : undefined,
+    narrow,
   );
 
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
@@ -1679,18 +1688,44 @@ export function ProjectPage() {
           className="absolute inset-y-0 right-0 flex flex-col"
           style={{ width: asideWidth }}
         >
-          {!folderProject && <GitPanel view={activeView ?? null} />}
-          <div className="flex min-h-0 flex-1 flex-col">
-            <ChangesPanel
-              workstreamId={activeView?.item.id ?? null}
-              onOpenDoc={openDocPreview}
-              onOpenDiff={openDiff}
-              onOpenFile={openFile}
-              filesOnly={folderProject}
-              baseBranch={activeView?.item.baseBranch ?? null}
-            />
-          </div>
-          <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
+          {planAside.available && (
+            <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
+              <SegmentedControl
+                aria-label="Right panel"
+                value={planAside.view}
+                options={[
+                  { value: "plan", label: "Plan" },
+                  { value: "changes", label: "Changes" },
+                ]}
+                onChange={planAside.setView}
+              />
+            </div>
+          )}
+          {planAside.view === "plan" && activeView && focusedShell ? (
+            <div className="min-h-0 flex-1">
+              <PlanAside
+                view={activeView}
+                shell={focusedShell}
+                onOpenDoc={openDoc}
+                onReviewChanges={() => planAside.setView("changes")}
+              />
+            </div>
+          ) : (
+            <>
+              {!folderProject && <GitPanel view={activeView ?? null} />}
+              <div className="flex min-h-0 flex-1 flex-col">
+                <ChangesPanel
+                  workstreamId={activeView?.item.id ?? null}
+                  onOpenDoc={openDocPreview}
+                  onOpenDiff={openDiff}
+                  onOpenFile={openFile}
+                  filesOnly={folderProject}
+                  baseBranch={activeView?.item.baseBranch ?? null}
+                />
+              </div>
+              <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
+            </>
+          )}
           {rightDock && showAside && (
             <ScriptDock
               key={`${activeView!.item.id}:right`}
@@ -1703,6 +1738,12 @@ export function ProjectPage() {
           {!folderProject && <PrChecksPanel view={activeView ?? null} />}
         </div>
       </aside>
+
+      {tabs?.shells.map((s) =>
+        s.mode === "implement" && s.sessionId ? (
+          <PlanDocSync key={s.sessionId} sessionId={s.sessionId} />
+        ) : null,
+      )}
 
       <Dialog
         open={docsModalShellId !== null}

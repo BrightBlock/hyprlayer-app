@@ -95,6 +95,7 @@ import { formatTokens } from "@/lib/format";
 import { detectHandoffDoc } from "./toolDisplay";
 import { useWrittenDocs } from "./writtenDocs";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
+import { clearTranscriptJump, useTranscriptJumpStore } from "./transcriptJump";
 import {
   allowForSession,
   answerQuestion,
@@ -1001,6 +1002,16 @@ export function SessionChat({
   useCommand("session.togglePlan", toggleTasks);
 
   const transcriptRef = useRef<TranscriptHandle | null>(null);
+  const jumpRequest = useTranscriptJumpStore((s) =>
+    s.pending && s.pending.sessionId === sid ? s.pending : null,
+  );
+  useEffect(() => {
+    if (!jumpRequest) return;
+    clearTranscriptJump();
+    const { target } = jumpRequest;
+    if ("toolUseId" in target) transcriptRef.current?.scrollToTool(target.toolUseId);
+    else transcriptRef.current?.scrollToItem(target.itemId);
+  }, [jumpRequest]);
 
   const HANDOFF_NUDGE_THRESHOLD = 0.6;
   const contextWindow = contextWindowFor(

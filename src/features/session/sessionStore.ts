@@ -32,7 +32,7 @@ import {
   type BackgroundTask,
   type BackgroundTaskStatus,
 } from "./backgroundTask";
-import { planTasksFromItems, type PlanTask, type PlanTaskStatus } from "./planTasks";
+import { planTasksFromItems, todoPhaseLabel, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
 import { permissionModeOption } from "@/lib/domain/permissions";
 import {
@@ -51,12 +51,14 @@ import {
   bindSessionToShell,
   focusedPaneId,
   openCommitTab,
+  openImplementTab,
   openPromptTab,
   openShipTab,
   paneShells,
   setSessionPermissionMode,
   useWorkstreamTabsStore,
   visibleShells,
+  type ShellTab,
 } from "./workstreamTabs";
 import {
   addUserMessage,
@@ -823,6 +825,22 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
   openCommitTab(workstreamId, session.id, defaults);
 }
 
+export async function approvePlanAndBuild(
+  workstreamId: string,
+  planPath: string,
+  from: ShellTab,
+): Promise<void> {
+  const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
+  const session = await startSession({
+    workstreamId,
+    stage: "implement",
+    input: "",
+    attachments: [{ path: planPath, name: docTitle(planPath), kind: "file" }],
+    ...newChatLaunchArgs(settings, from, claudeCatalogSnapshot()),
+  });
+  openImplementTab(workstreamId, session.id, planPath, from);
+}
+
 export async function shipWorkstream(workstreamId: string): Promise<void> {
   const tabs = useWorkstreamTabsStore.getState().byWs[workstreamId];
   const shipTab = tabs?.shells.find((s) => s.mode === "ship");
@@ -1065,6 +1083,22 @@ export function useSessionPlanTasks(sessionId: string | undefined): PlanTask[] {
       }),
     [keys],
   );
+}
+
+// The phase label a live implement session in this workstream is building, from its phase todo.
+export function useWorkstreamBuildPhase(workstreamId: string): string | null {
+  return useSessionStore((s) => {
+    for (const entry of Object.values(s.sessions)) {
+      if (entry.workstreamId !== workstreamId || entry.stage !== "implement") continue;
+      if (!entry.live || !isWorking(entry)) continue;
+      for (const task of planTasksFromItems(entry.items)) {
+        if (task.status !== "in_progress") continue;
+        const label = todoPhaseLabel(task.subject);
+        if (label) return label;
+      }
+    }
+    return null;
+  });
 }
 
 export type { WorkstreamActivity } from "@/lib/domain/activity";

@@ -532,3 +532,34 @@ function openDedicatedTab(
     };
   });
 }
+
+export function openImplementTab(
+  workstreamId: string,
+  sessionId: string,
+  planPath: string,
+  from: ShellTab,
+): void {
+  updateWorkstreamTabs((all) => {
+    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
+    return {
+      ...all,
+      [workstreamId]: appendShell(current, {
+        id: nextShellId(current.shells, current.archived),
+        title: "Implement",
+        mode: "implement",
+        draft: "",
+        docs: [{ path: planPath, role: "plan" }],
+        attachments: [],
+        harness: from.harness,
+        model: from.model,
+        effort: from.effort,
+        opencodeModel: from.opencodeModel,
+        codexModel: from.codexModel,
+        codexEffort: from.codexEffort,
+        permissionMode: from.permissionMode,
+        sessionId,
+        paneId: focusedPaneId(current),
+      }),
+    };
+  });
+}

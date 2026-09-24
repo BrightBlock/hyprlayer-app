@@ -770,7 +770,11 @@ function renderSingle(
     case "permission":
       return <PermissionCard item={item} handlers={permission} />;
     case "error":
-      return <ProtocolErrorBlock detail={item.detail} raw={item.raw} />;
+      return (
+        <div data-item-id={item.id}>
+          <ProtocolErrorBlock detail={item.detail} raw={item.raw} />
+        </div>
+      );
     case "compact":
       return <CompactDivider item={item} />;
     case "rewound":
@@ -790,7 +794,11 @@ function renderSingle(
     case "queuedCommand":
       return <QueuedCommandRow item={item} />;
     case "exit":
-      return <ExitNotice item={item} />;
+      return (
+        <div data-item-id={item.id}>
+          <ExitNotice item={item} />
+        </div>
+      );
     default:
       return null;
   }
@@ -926,6 +934,7 @@ type Props = {
 
 export type TranscriptHandle = {
   scrollToTool: (toolUseId: string) => void;
+  scrollToItem: (itemId: string) => void;
   scrollToBottom: () => void;
 };
 
@@ -974,7 +983,11 @@ export const TranscriptView = memo(
     const jumpNonce = useRef(0);
     const jumping = useRef(false);
     const jumpSettle = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [jump, setJump] = useState<{ toolUseId: string; nonce: number } | null>(null);
+    const [jump, setJump] = useState<{
+      selector: string;
+      toolUseId: string | null;
+      nonce: number;
+    } | null>(null);
 
     const settleJump = useCallback(() => {
       if (jumpSettle.current) clearTimeout(jumpSettle.current);
@@ -991,9 +1004,7 @@ export const TranscriptView = memo(
       let frame = 0;
       let tries = 0;
       const attempt = () => {
-        const el = scrollRef.current?.querySelector(
-          `[data-tooluse-id="${CSS.escape(jump.toolUseId)}"]`,
-        );
+        const el = scrollRef.current?.querySelector(jump.selector);
         if (!el) {
           if (tries++ < JUMP_MAX_FRAMES) frame = requestAnimationFrame(attempt);
           return;
@@ -1031,7 +1042,18 @@ export const TranscriptView = memo(
 
     useImperativeHandle(ref, () => ({
       scrollToTool(toolUseId) {
-        setJump({ toolUseId, nonce: jumpNonce.current++ });
+        setJump({
+          selector: `[data-tooluse-id="${CSS.escape(toolUseId)}"]`,
+          toolUseId,
+          nonce: jumpNonce.current++,
+        });
+      },
+      scrollToItem(itemId) {
+        setJump({
+          selector: `[data-item-id="${CSS.escape(itemId)}"]`,
+          toolUseId: null,
+          nonce: jumpNonce.current++,
+        });
       },
       scrollToBottom() {
         atBottom.current = true;
