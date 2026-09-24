@@ -58,6 +58,12 @@ impl SessionRegistry {
             .and_then(|s| s.permission_mode)
     }
 
+    pub async fn set_permission_mode(&self, id: &str, mode: PermissionMode) {
+        if let Some(session) = self.live.lock().await.get_mut(id) {
+            session.permission_mode = Some(mode);
+        }
+    }
+
     pub async fn remove(&self, id: &str) {
         let gone = self.live.lock().await.remove(id);
         drop(gone);

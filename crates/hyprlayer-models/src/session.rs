@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{Harness, Stage};
+use crate::agent::{Harness, PermissionMode, Stage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -225,6 +225,15 @@ pub enum SessionEvent {
         tool_use_id: Option<String>,
         status: String,
     },
+    // The harness changed its own mode, as Claude does leaving plan mode.
+    PermissionModeChanged {
+        mode: PermissionMode,
+    },
+    // Planning layered over the permission mode: codex's plan collaboration
+    // mode, OpenCode's plan agent.
+    PlanModeChanged {
+        active: bool,
+    },
     Relaunched {},
     Rewound {},
     ProtocolError {
@@ -256,6 +265,8 @@ impl SessionEvent {
             SessionEvent::CompactBoundary { .. } => "compactBoundary",
             SessionEvent::CommandLifecycle { .. } => "commandLifecycle",
             SessionEvent::BackgroundTaskUpdate { .. } => "backgroundTaskUpdate",
+            SessionEvent::PermissionModeChanged { .. } => "permissionModeChanged",
+            SessionEvent::PlanModeChanged { .. } => "planModeChanged",
             SessionEvent::Relaunched { .. } => "relaunched",
             SessionEvent::Rewound { .. } => "rewound",
             SessionEvent::ProtocolError { .. } => "protocolError",

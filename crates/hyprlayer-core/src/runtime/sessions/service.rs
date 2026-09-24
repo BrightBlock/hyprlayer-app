@@ -888,6 +888,10 @@ fn spawn_relay(
             match rx.recv().await {
                 Ok(event) => {
                     let terminal = matches!(event, SessionEvent::Exited { .. });
+                    // Keeps a resume asking for the new mode from relaunching.
+                    if let SessionEvent::PermissionModeChanged { mode } = event {
+                        registry.set_permission_mode(&session_id, mode).await;
+                    }
                     if ingress.send(event).await.is_err() {
                         return;
                     }

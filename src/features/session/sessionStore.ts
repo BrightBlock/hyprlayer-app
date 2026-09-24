@@ -54,6 +54,7 @@ import {
   openPromptTab,
   openShipTab,
   paneShells,
+  setSessionPermissionMode,
   useWorkstreamTabsStore,
   visibleShells,
 } from "./workstreamTabs";
@@ -81,6 +82,8 @@ export type SessionEntry = SessionView & {
   autoAllow: string[];
   live: boolean;
   permissionMode: PermissionMode | null;
+  /** The harness's own plan mode, layered over `permissionMode` (codex, OpenCode). */
+  planning?: boolean;
   reloading?: boolean;
   queued: QueuedMessage[];
   workingSince: number | null;
@@ -212,6 +215,7 @@ function dispatch(sessionId: string, event: SessionEvent): void {
       streaming: false,
       live: false,
       reloading: false,
+      planning: false,
       state: "idle",
     });
     void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
@@ -219,8 +223,11 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   }
 
   const wasNeedsYou = classifyEntry(current) === "needs-you";
-  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event) };
+  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event), ...modeFields(event) };
   setEntry(sessionId, nextEntry);
+  if (event.kind === "permissionModeChanged") {
+    setSessionPermissionMode(current.workstreamId, sessionId, event.mode);
+  }
 
   const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
   const autoApproved =
@@ -244,6 +251,21 @@ function dispatch(sessionId: string, event: SessionEvent): void {
     const latest = entryOf(sessionId);
     if (latest) setEntry(sessionId, { ...latest, live: false });
     void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+  }
+}
+
+// Live-only: the server never persists mode events, so a replayed log has none.
+function modeFields(event: SessionEvent): Partial<SessionEntry> {
+  switch (event.kind) {
+    case "permissionModeChanged":
+      return { permissionMode: event.mode };
+    case "planModeChanged":
+      return { planning: event.active };
+    case "relaunched":
+    case "exited":
+      return { planning: false };
+    default:
+      return {};
   }
 }
 

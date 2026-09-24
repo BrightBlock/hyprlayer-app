@@ -1310,6 +1310,7 @@ export function SessionChat({
           ? { label: effort?.label ?? "Default", activeKey: effort?.key ?? "", items: claudeEffortOptions }
           : null,
       permissionKey: usingOpencode ? null : permissionMode.key,
+      planning: Boolean(session?.live && session.planning),
       context:
         session?.contextTokens != null && contextWindow != null
           ? {

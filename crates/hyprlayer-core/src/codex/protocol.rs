@@ -353,13 +353,19 @@ impl Translator {
                 None => Vec::new(),
             },
             "thread/settings/updated" => {
+                let was_planning = self.collab_mode.as_deref() == Some("plan");
                 self.collab_mode = p
                     .get("threadSettings")
                     .and_then(|s| s.get("collaborationMode"))
                     .and_then(|c| c.get("mode"))
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                Vec::new()
+                let planning = self.collab_mode.as_deref() == Some("plan");
+                if planning == was_planning {
+                    Vec::new()
+                } else {
+                    vec![SessionEvent::PlanModeChanged { active: planning }]
+                }
             }
             _ => {
                 note_unhandled(method);
@@ -1862,13 +1868,14 @@ mod tests {
                 },
             }),
         );
-        assert!(out.is_empty());
+        assert_eq!(out, vec![SessionEvent::PlanModeChanged { active: true }]);
         assert_eq!(t.collab_mode.as_deref(), Some("plan"));
 
-        t.notification(
+        let out = t.notification(
             "thread/settings/updated",
             &json!({ "threadSettings": { "collaborationMode": { "mode": "default" } } }),
         );
+        assert_eq!(out, vec![SessionEvent::PlanModeChanged { active: false }]);
         assert_eq!(t.collab_mode.as_deref(), Some("default"));
     }
 

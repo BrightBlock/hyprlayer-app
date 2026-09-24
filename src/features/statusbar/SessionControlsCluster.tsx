@@ -40,12 +40,16 @@ export function SessionControlsCluster({
           <Divider />
         </>
       )}
-      {controls.permissionKey !== null && (
-        <PermissionPill
-          permissionKey={controls.permissionKey}
-          interactive={controls.interactive}
-          onPick={controls.actions.setPermissionMode}
-        />
+      {controls.planning ? (
+        <PermissionPill permissionKey="plan" interactive={false} setByAgent onPick={() => {}} />
+      ) : (
+        controls.permissionKey !== null && (
+          <PermissionPill
+            permissionKey={controls.permissionKey}
+            interactive={controls.interactive}
+            onPick={controls.actions.setPermissionMode}
+          />
+        )
       )}
       {/* Model and effort read as one setting, so they sit closer than the cluster's gap. */}
       <div className="flex min-w-0 items-center">
@@ -122,10 +126,12 @@ function ContextMeter({
 function PermissionPill({
   permissionKey,
   interactive,
+  setByAgent = false,
   onPick,
 }: {
   permissionKey: string;
   interactive: boolean;
+  setByAgent?: boolean;
   onPick: (key: string) => void;
 }) {
   const [open, setOpen] = useMenuOpen(interactive);
@@ -142,7 +148,7 @@ function PermissionPill({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={name}
-        title={name}
+        title={setByAgent ? `${name}, until the agent finishes planning` : name}
         className={cx(BAR_BUTTON, "bg-accent-soft px-2 font-semibold text-ink enabled:hover:bg-edge")}
       >
         <Dot className={mode.danger ? "bg-bad" : "bg-ink"} />

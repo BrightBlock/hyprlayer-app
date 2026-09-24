@@ -14,6 +14,8 @@ export type SessionControlsSnapshot = {
   effort: { label: string; activeKey: string; items: OptionMenuItem[] } | null;
   /** Null on OpenCode, which has no mode menu. */
   permissionKey: string | null;
+  /** The harness put itself in plan mode; it leaves on its own. */
+  planning: boolean;
   context: { tokens: number; window: number; title: string } | null;
 };
 

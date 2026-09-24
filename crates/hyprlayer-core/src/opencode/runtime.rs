@@ -1048,6 +1048,7 @@ struct Translator {
     tool_done: std::collections::HashSet<String>,
     cost_total: f64,
     context_tokens: Option<u32>,
+    planning: bool,
 }
 
 impl Translator {
@@ -1055,15 +1056,25 @@ impl Translator {
         let p = &ev.properties;
         match ev.kind.as_str() {
             "message.updated" => {
-                if let Some(info) = p.get("info") {
-                    if let (Some(id), Some(role)) = (
-                        info.get("id").and_then(Value::as_str),
-                        info.get("role").and_then(Value::as_str),
-                    ) {
-                        self.roles.insert(id.to_string(), role.to_string());
-                    }
+                let Some(info) = p.get("info") else {
+                    return Vec::new();
+                };
+                if let (Some(id), Some(role)) = (
+                    info.get("id").and_then(Value::as_str),
+                    info.get("role").and_then(Value::as_str),
+                ) {
+                    self.roles.insert(id.to_string(), role.to_string());
                 }
-                Vec::new()
+                // Every message names the agent answering it; `plan` is OpenCode's plan mode.
+                let planning = match info.get("agent").and_then(Value::as_str) {
+                    Some(agent) => agent == "plan",
+                    None => return Vec::new(),
+                };
+                if planning == self.planning {
+                    return Vec::new();
+                }
+                self.planning = planning;
+                vec![SessionEvent::PlanModeChanged { active: planning }]
             }
             "message.part.delta" => {
                 let mid = p

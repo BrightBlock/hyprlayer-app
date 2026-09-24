@@ -460,7 +460,14 @@ impl ActorState {
 
         let unreportable_exit =
             matches!(&event, SessionEvent::Exited { outcome, .. } if !outcome.is_reportable());
-        let ephemeral = matches!(event, SessionEvent::PartialText { .. }) || unreportable_exit;
+        // Modes are live state: a replayed one would be stale, and an older app
+        // cannot decode the row.
+        let ephemeral = matches!(
+            event,
+            SessionEvent::PartialText { .. }
+                | SessionEvent::PermissionModeChanged { .. }
+                | SessionEvent::PlanModeChanged { .. }
+        ) || unreportable_exit;
         let suppress_live = matches!(event, SessionEvent::UserMessage { .. });
         log_lifecycle(&self.session_id, &event);
 

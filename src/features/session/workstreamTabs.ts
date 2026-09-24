@@ -400,6 +400,16 @@ export function bindSessionToShell(
   });
 }
 
+/** Records a mode the harness switched to itself, so a resume relaunches into it. */
+export function setSessionPermissionMode(workstreamId: string, sessionId: string, key: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId];
+    if (!current?.shells.some((s) => s.sessionId === sessionId && s.permissionMode !== key)) return all;
+    const shells = current.shells.map((s) => (s.sessionId === sessionId ? { ...s, permissionMode: key } : s));
+    return { ...all, [workstreamId]: { ...current, shells } };
+  });
+}
+
 export function openPromptTab(workstreamId: string, sessionId: string, title: string): void {
   updateWorkstreamTabs((all) => {
     const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };

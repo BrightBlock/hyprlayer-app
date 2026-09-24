@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
 
+use super::driver::PermissionMode;
+
 #[derive(Debug, Clone)]
 pub enum ParsedLine {
     Init {
@@ -51,6 +53,9 @@ pub enum ParsedLine {
     CommandLifecycle {
         command_uuid: String,
         state: String,
+    },
+    PermissionMode {
+        mode: PermissionMode,
     },
     ControlResponse {
         request_id: String,
@@ -124,6 +129,16 @@ pub fn parse_line(line: &str) -> ParsedLine {
                     },
                     None => ParsedLine::System {
                         subtype: "task_notification".into(),
+                    },
+                },
+                // Sent on every mode change, including an approved ExitPlanMode.
+                "status" => match v
+                    .get("permissionMode")
+                    .and_then(|m| serde_json::from_value(m.clone()).ok())
+                {
+                    Some(mode) => ParsedLine::PermissionMode { mode },
+                    None => ParsedLine::System {
+                        subtype: "status".into(),
                     },
                 },
                 other => ParsedLine::System {

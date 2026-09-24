@@ -615,6 +615,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             detail: "unrecognized stream-json line".into(),
             raw,
         }],
+        ParsedLine::PermissionMode { mode } => vec![SessionEvent::PermissionModeChanged { mode }],
         ParsedLine::ControlResponse { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
