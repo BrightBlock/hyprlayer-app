@@ -13,10 +13,14 @@ import {
   useSetOpencodeDefaultModel,
 } from "@/lib/queries";
 import {
+  SETTINGS_CARD_DESCRIPTION,
+  SETTINGS_CARD_TITLE,
+  SettingsCardTitle,
+} from "@/components/SettingsCard";
+import {
   Badge,
   Button,
   Card,
-  CardTitle,
   DropdownSelect,
   ErrorNote,
   Spinner,
@@ -112,8 +116,8 @@ export function OpenCodeHarnessTab({
               oc
             </div>
             <div>
-              <p className="text-sm font-semibold text-ink">OpenCode</p>
-              <p className="text-xs text-ink-dim">The open source AI coding agent</p>
+              <p className={SETTINGS_CARD_TITLE}>OpenCode</p>
+              <p className={SETTINGS_CARD_DESCRIPTION}>The open source AI coding agent</p>
             </div>
           </div>
           <a className="text-xs text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
@@ -126,12 +130,12 @@ export function OpenCodeHarnessTab({
 
       <Card>
         <div className="flex items-center justify-between">
-          <CardTitle className="mb-0">
+          <SettingsCardTitle className="mb-0">
             Providers{" "}
             <span className="ml-1 font-normal text-ink-dim">
               {configured.size} configured
             </span>
-          </CardTitle>
+          </SettingsCardTitle>
           <Button onClick={() => setProviderOpen(true)}>
             <PlusIcon size={14} /> Add provider
           </Button>
@@ -174,9 +178,9 @@ export function OpenCodeHarnessTab({
 
       <Card>
         <div className="flex items-center justify-between">
-          <CardTitle className="mb-0">
+          <SettingsCardTitle className="mb-0">
             Models <span className="ml-1 font-normal text-ink-dim">{selectedModels.length} selected</span>
-          </CardTitle>
+          </SettingsCardTitle>
           <Button
             onClick={() => {
               refreshCatalog.mutate();
@@ -312,7 +316,7 @@ function AdvancedCard({
         className="flex w-full items-center gap-1.5 text-left"
       >
         {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
-        <span className="text-sm font-semibold text-ink">{title}</span>
+        <span className={SETTINGS_CARD_TITLE}>{title}</span>
       </button>
 
       {open && (

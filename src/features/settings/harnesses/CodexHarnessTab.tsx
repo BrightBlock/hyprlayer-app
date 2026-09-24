@@ -10,10 +10,14 @@ import {
   useSetAppSettings,
 } from "@/lib/queries";
 import {
+  SETTINGS_CARD_DESCRIPTION,
+  SETTINGS_CARD_TITLE,
+  SettingsCardTitle,
+} from "@/components/SettingsCard";
+import {
   Badge,
   Button,
   Card,
-  CardTitle,
   Dialog,
   DropdownSelect,
   ErrorNote,
@@ -101,8 +105,8 @@ export function CodexHarnessTab({
               cx
             </div>
             <div>
-              <p className="text-sm font-semibold text-ink">Codex</p>
-              <p className="text-xs text-ink-dim">OpenAI&apos;s coding agent</p>
+              <p className={SETTINGS_CARD_TITLE}>Codex</p>
+              <p className={SETTINGS_CARD_DESCRIPTION}>OpenAI&apos;s coding agent</p>
             </div>
           </div>
           <a
@@ -122,12 +126,12 @@ export function CodexHarnessTab({
 
       <Card>
         <div className="flex items-center justify-between">
-          <CardTitle className="mb-0">
+          <SettingsCardTitle className="mb-0">
             Models{" "}
             <span className="ml-1 font-normal text-ink-dim">
               {effectiveIds.length} selected
             </span>
-          </CardTitle>
+          </SettingsCardTitle>
           <div className="flex items-center gap-2">
             {!usingAllDefault && selectedModels.length > 0 && (
               <button
@@ -351,7 +355,7 @@ function AuthenticationCard({ probe }: { probe: ReturnType<typeof useCodexProbe>
 
   return (
     <Card>
-      <CardTitle>Authentication</CardTitle>
+      <SettingsCardTitle>Authentication</SettingsCardTitle>
       <div className="mt-2 grid grid-cols-2 gap-3">
         <AuthCard
           label="ChatGPT"
@@ -527,7 +531,7 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
         className="flex w-full items-center gap-1.5 text-left"
       >
         {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
-        <span className="text-sm font-semibold text-ink">{title}</span>
+        <span className={SETTINGS_CARD_TITLE}>{title}</span>
       </button>
 
       {open && (

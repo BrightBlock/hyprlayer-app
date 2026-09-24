@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Card, CardTitle, ErrorNote } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Button, Card, ErrorNote } from "@/components/ui";
 import { useSetAppSettings } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import type { AppSettings } from "@/lib/bindings";
@@ -194,7 +195,7 @@ export function KeyboardSettings({ settings }: { settings: AppSettings }) {
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs text-ink-dim">
+        <p className={SETTINGS_CARD_DESCRIPTION}>
           Customize keyboard shortcuts. Shortcuts only fire in the context shown
           beside each command, and never while you're typing in the composer or an
           editor. Reset restores the default; Unbind clears the shortcut.
@@ -205,7 +206,7 @@ export function KeyboardSettings({ settings }: { settings: AppSettings }) {
 
       {COMMANDS_BY_CATEGORY.map(({ category, commands }) => (
         <Card key={category}>
-          <CardTitle>{category}</CardTitle>
+          <SettingsCardTitle>{category}</SettingsCardTitle>
           <div className="divide-y divide-edge/50">
             {commands.map((cmd) => (
               <CommandRow

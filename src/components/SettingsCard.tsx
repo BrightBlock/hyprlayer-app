@@ -1,6 +1,14 @@
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 
 import { cx } from "./ui";
+
+export const SETTINGS_CARD_TITLE = "text-sm font-bold text-ink";
+export const SETTINGS_CARD_DESCRIPTION = "text-[12.5px] leading-normal text-ink-dim";
+
+/** SettingsCard's title, for settings cards laid out by hand. */
+export function SettingsCardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
+  return <h2 className={cx("mb-3", SETTINGS_CARD_TITLE, className)} {...rest} />;
+}
 
 /** v4 settings card. `flush` hands the body to rows that bring their own padding and rules. */
 export function SettingsCard({
@@ -24,9 +32,9 @@ export function SettingsCard({
       {header && (
         <header className={cx("flex items-start justify-between gap-4 px-4 pt-4", !children && "pb-4")}>
           <div className="min-w-0">
-            {title != null && <h2 className="text-sm font-bold text-ink">{title}</h2>}
+            {title != null && <h2 className={SETTINGS_CARD_TITLE}>{title}</h2>}
             {description != null && (
-              <p className="mt-1 text-[12.5px] leading-normal text-ink-dim">{description}</p>
+              <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>{description}</p>
             )}
           </div>
           {actions != null && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

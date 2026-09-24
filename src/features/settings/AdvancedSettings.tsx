@@ -11,9 +11,11 @@ import {
 } from "@/features/multiplexer/engines";
 import { EngineGlyph } from "@/components/EngineGlyph";
 import { CheckIcon, MultiplexerIcon, PlusIcon, XIcon } from "@/components/icons";
+import { SETTINGS_CARD_DESCRIPTION, SETTINGS_CARD_TITLE } from "@/components/SettingsCard";
 import {
   Button,
   Card,
+  cx,
   Dialog,
   DropdownSelect,
   ErrorNote,
@@ -99,8 +101,8 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
   return (
     <>
       <div>
-        <h1 className="text-base font-semibold text-ink">Advanced</h1>
-        <p className="mt-0.5 text-xs text-ink-dim">
+        <h1 className="text-[19px] font-bold tracking-tight text-ink">Advanced</h1>
+        <p className={cx("mt-0.5", SETTINGS_CARD_DESCRIPTION)}>
           Power-user features. Some change how Hyprlayer runs.
         </p>
       </div>
@@ -114,12 +116,12 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-ink">Multiplexer mode</span>
-              <span className="rounded border border-accent/30 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-accent">
+              <span className={SETTINGS_CARD_TITLE}>Multiplexer mode</span>
+              <span className="rounded border border-accent/30 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold text-accent">
                 ADVANCED
               </span>
             </div>
-            <p className="mt-1 max-w-xl text-xs leading-relaxed text-ink-dim">
+            <p className={cx("mt-1 max-w-xl", SETTINGS_CARD_DESCRIPTION)}>
               Run agents as native CLIs in their own persistent PTYs. With this on, a new agent tab
               launches a CLI instead of the native chat. The <span className="text-ink">+</span>{" "}
               on the agent tab strip lets you choose which.

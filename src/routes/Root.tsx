@@ -108,6 +108,7 @@ import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
 import { HostsDialog } from "@/features/hosts/HostsDialog";
+import { ServerMenu } from "@/features/hosts/ServerMenu";
 import { SettingsButton } from "@/features/settings/SettingsButton";
 import { SettingsCrumb, SettingsHeaderMeta } from "@/features/settings/SettingsHeader";
 import { parseSettingsSection } from "@/features/settings/sections";
@@ -1646,6 +1647,7 @@ export function Root() {
           )
         }
         settings={<SettingsButton />}
+        serverMenu={(anchorRef) => <ServerMenu anchorRef={anchorRef} />}
       />
 
       {itemMenu && (

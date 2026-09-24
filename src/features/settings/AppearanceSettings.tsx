@@ -1,5 +1,6 @@
 import type { OmarchyTheme } from "@/lib/bindings";
-import { Card, CardTitle } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Card, cx } from "@/components/ui";
 import { THEMES, useThemeStore } from "@/lib/theme";
 
 const SWATCHES: Record<string, [string, string, string]> = {
@@ -39,8 +40,8 @@ export function AppearanceSettings() {
 
   return (
     <Card>
-      <CardTitle>Appearance</CardTitle>
-      <p className="mt-1 text-xs text-ink-dim">
+      <SettingsCardTitle>Appearance</SettingsCardTitle>
+      <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>
         “System” follows your OS light/dark setting.
         {showOmarchy &&
           " “Omarchy” follows your Linux desktop's active theme and updates automatically when it changes."}

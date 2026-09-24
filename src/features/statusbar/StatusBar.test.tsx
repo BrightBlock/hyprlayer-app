@@ -158,7 +158,7 @@ const dot = (el: HTMLElement) => el.querySelector("span[aria-hidden]");
 beforeEach(() => {
   mockStatus(CONNECTED);
   mockConfig({ state: "ready", path: "/c", user: "jon tsiros", backendKind: "git", configured: true });
-  useHostsUiStore.setState({ open: false });
+  useHostsUiStore.setState({ open: false, menu: false });
   useReconnectStore.setState({ lostAt: null, attempting: false, halted: false });
   useSessionControlsStore.setState({ byShell: {} });
   useWorkstreamTabsStore.setState({ byWs: {} });
@@ -172,10 +172,10 @@ afterEach(() => {
 });
 
 describe("StatusBar sync status", () => {
-  it("opens the hosts UI on click", () => {
+  it("opens the server menu, not the hosts dialog, on click", () => {
     renderBar();
     fireEvent.click(screen.getByRole("button", { name: "Server: this machine" }));
-    expect(useHostsUiStore.getState().open).toBe(true);
+    expect(useHostsUiStore.getState()).toMatchObject({ menu: true, open: false });
   });
 
   it("reads 'connected' with a green dot when local and connected", () => {

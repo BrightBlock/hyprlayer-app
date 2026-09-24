@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { AppSettings, GitSettings } from "@/lib/bindings";
 import { useGithubUsername, useSetAppSettings } from "@/lib/queries";
 import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
-import { Card, CardTitle, ErrorNote, SettingRow, TextInput, Toggle } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Card, cx, ErrorNote, SettingRow, TextInput, Toggle } from "@/components/ui";
 
 const DEFAULT_GIT: Required<GitSettings> = {
   branchPrefix: null,
@@ -80,8 +81,8 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
 
   return (
     <Card>
-      <CardTitle>Git</CardTitle>
-      <p className="mt-1 text-xs text-ink-dim">
+      <SettingsCardTitle>Git</SettingsCardTitle>
+      <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>
         Branch naming, and what archiving or merging does to a workstream's worktree.
       </p>
 

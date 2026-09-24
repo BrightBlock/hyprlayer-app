@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
@@ -14,11 +14,13 @@ export function StatusBar({
   workstream,
   tools,
   settings,
+  serverMenu,
 }: {
   workstreamId: string | null;
   workstream: WorkstreamView | null;
   tools?: ReactNode;
   settings: ReactNode;
+  serverMenu?: (anchorRef: RefObject<HTMLElement | null>) => ReactNode;
 }) {
   const { compact } = useViewport();
   const repo = workstream ? repoSummary(workstream) : null;
@@ -29,7 +31,7 @@ export function StatusBar({
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
-      <SyncStatus compact={compact} divided={repo !== null} />
+      <SyncStatus compact={compact} divided={repo !== null} menu={serverMenu} />
       <div className="flex-1" />
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
       {tools}

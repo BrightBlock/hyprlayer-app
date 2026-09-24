@@ -1,6 +1,7 @@
 import type { BinaryStatus } from "@/lib/bindings";
 import { useRedetectBinaries } from "@/lib/queries";
-import { Button, Card, CardTitle } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Button, Card, cx } from "@/components/ui";
 import { BinaryCard } from "./BinaryCard";
 
 export function BinariesSettings({ binaries }: { binaries: BinaryStatus[] }) {
@@ -8,12 +9,12 @@ export function BinariesSettings({ binaries }: { binaries: BinaryStatus[] }) {
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">Binaries</CardTitle>
+        <SettingsCardTitle className="mb-0">Binaries</SettingsCardTitle>
         <Button onClick={() => redetect.mutate()} busy={redetect.isPending}>
           Re-detect
         </Button>
       </div>
-      <p className="mt-1 text-xs text-ink-dim">
+      <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>
         The app searches your shell PATH plus common install locations. Set an explicit path if a
         tool isn't found.
       </p>

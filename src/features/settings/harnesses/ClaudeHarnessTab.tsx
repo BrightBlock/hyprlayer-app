@@ -20,17 +20,22 @@ import {
   normalizeVisibleModelKeys,
 } from "@/lib/domain/models";
 import {
+  SETTINGS_CARD_DESCRIPTION,
+  SETTINGS_CARD_TITLE,
+  SettingsCardTitle,
+} from "@/components/SettingsCard";
+import {
   Badge,
   Button,
   Card,
-  CardTitle,
+  cx,
   Dialog,
   DropdownSelect,
   ErrorNote,
+  SettingRow,
   Spinner,
   TextInput,
   Toggle,
-  SettingRow,
 } from "@/components/ui";
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
 import { BinaryCard } from "@/features/settings/BinaryCard";
@@ -67,7 +72,7 @@ export function ClaudeHarnessTab({
       {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
       <Card>
-        <CardTitle>Authentication</CardTitle>
+        <SettingsCardTitle>Authentication</SettingsCardTitle>
         <div className="mt-2 grid grid-cols-2 gap-3">
           <AuthCard
             label="CLI"
@@ -114,8 +119,8 @@ export function ClaudeHarnessTab({
       </Card>
 
       <Card>
-        <CardTitle>Defaults</CardTitle>
-        <p className="mt-1 text-xs text-ink-dim">
+        <SettingsCardTitle>Defaults</SettingsCardTitle>
+        <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>
           Defaults for new chats. Overridable per tab in the composer.
         </p>
         <div className="mt-3 divide-y divide-edge/50">
@@ -195,7 +200,7 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
         className="flex w-full items-center gap-1.5 text-left"
       >
         {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
-        <span className="text-sm font-semibold text-ink">Advanced</span>
+        <span className={SETTINGS_CARD_TITLE}>Advanced</span>
       </button>
 
       {open && (
@@ -432,10 +437,10 @@ function VisibleModelsCard({
   return (
     <Card>
       <div className="flex items-center justify-between">
-        <CardTitle className="mb-0">
+        <SettingsCardTitle className="mb-0">
           Models visible in composer{" "}
           <span className="ml-1 font-normal text-ink-dim">{explicit.length} selected</span>
-        </CardTitle>
+        </SettingsCardTitle>
         <div className="flex items-center gap-2">
           {visible !== null && (
             <button

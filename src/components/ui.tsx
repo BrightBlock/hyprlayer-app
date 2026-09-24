@@ -983,6 +983,12 @@ export function Popover({
 
 export const MenuItem = ContextMenuItem;
 
+/** The status bar's popovers (Settings, Servers): the panel and its link rows. */
+export const BAR_POPOVER = "w-[306px] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.16)]";
+export const BAR_POPOVER_ROW =
+  "flex items-center gap-2.5 rounded-control px-3 py-2 text-[12.5px] text-ink-2 hover:bg-edge/50 " +
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+
 export function MenuSeparator() {
   return <div className="my-1 h-px bg-edge" />;
 }

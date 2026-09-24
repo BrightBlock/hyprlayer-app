@@ -3,7 +3,8 @@ import { useState } from "react";
 import type { AppSettings, NotificationSettings } from "@/lib/bindings";
 import { useSetAppSettings } from "@/lib/queries";
 import { invalidateNotificationSettingsCache, sendTestNotification } from "@/lib/notifications";
-import { Button, Card, CardTitle, ErrorNote, SettingRow, Toggle } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Button, Card, cx, ErrorNote, SettingRow, Toggle } from "@/components/ui";
 
 const DEFAULT_NOTIFICATIONS: Required<NotificationSettings> = {
   enabled: true,
@@ -36,8 +37,8 @@ export function NotificationsSettings({ settings }: { settings: AppSettings }) {
 
   return (
     <Card>
-      <CardTitle>Notifications</CardTitle>
-      <p className="mt-1 text-xs text-ink-dim">Native OS toasts.</p>
+      <SettingsCardTitle>Notifications</SettingsCardTitle>
+      <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>Native OS toasts.</p>
 
       {save.isError && (
         <div className="mt-3">

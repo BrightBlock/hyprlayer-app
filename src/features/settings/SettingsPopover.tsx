@@ -10,7 +10,16 @@ import { IS_MACOS } from "@/lib/platform";
 import { useAgentFiles, useAgentSkills, useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { appearanceSegment, useThemeStore, type AppearanceSegment } from "@/lib/theme";
 import { ICON } from "@/components/lucide";
-import { ChordHint, cx, ErrorNote, Popover, SegmentedControl, Toggle } from "@/components/ui";
+import {
+  BAR_POPOVER,
+  BAR_POPOVER_ROW,
+  ChordHint,
+  cx,
+  ErrorNote,
+  Popover,
+  SegmentedControl,
+  Toggle,
+} from "@/components/ui";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
@@ -24,9 +33,6 @@ const APPEARANCE: Array<{ value: AppearanceSegment; label: string }> = [
 ];
 
 const ROW = "flex items-center justify-between gap-3 px-3 py-2 text-[12.5px] text-ink-2";
-const LINK_ROW =
-  "flex items-center gap-2.5 rounded-control px-3 py-2 text-[12.5px] text-ink-2 hover:bg-edge/50 " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
 export function SettingsPopover({
   open,
@@ -49,7 +55,7 @@ export function SettingsPopover({
       caret
       trapFocus
       aria-labelledby={headingId}
-      className="w-[306px] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.16)]"
+      className={BAR_POPOVER}
     >
       <PopoverBody headingId={headingId} onClose={onClose} />
     </Popover>
@@ -71,7 +77,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
       {settings ? <ServerBackedRows settings={settings} /> : null}
       <div className="mx-1 my-1 h-px bg-edge-2" />
       <WorkshopLink onClose={onClose} />
-      <Link to="/settings" search={{ section: "servers" }} onClick={onClose} className={LINK_ROW}>
+      <Link to="/settings" search={{ section: "servers" }} onClick={onClose} className={BAR_POPOVER_ROW}>
         <Server {...ICON} className="text-ink-dim" />
         <span className="flex-1">Servers</span>
         <Meta>{serversMeta(useServerCounts())}</Meta>
@@ -80,7 +86,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         to="/settings"
         search={{}}
         onClick={onClose}
-        className={cx(LINK_ROW, "mt-0.5 bg-panel-2 font-semibold text-ink hover:bg-panel-2")}
+        className={cx(BAR_POPOVER_ROW, "mt-0.5 bg-panel-2 font-semibold text-ink hover:bg-panel-2")}
       >
         <span className="flex-1">All settings</span>
         <ChevronRight {...ICON} className="text-ink-dim" />
@@ -152,7 +158,7 @@ function WorkshopLink({ onClose }: { onClose: () => void }) {
     ? visibleAgents(files, { tab: "yours", scope: "global", search: "" }).length
     : null;
   return (
-    <Link to="/agents" onClick={onClose} className={LINK_ROW}>
+    <Link to="/agents" onClick={onClose} className={BAR_POPOVER_ROW}>
       <Hammer {...ICON} className="text-ink-dim" />
       <span className="flex-1">Workshop</span>
       <Meta>{workshopMeta(agents, skills?.length ?? null)}</Meta>

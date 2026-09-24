@@ -1,7 +1,8 @@
 import { useState } from "react";
 
 import { CAN_SELF_INSTALL, useUpdate } from "@/lib/updater";
-import { Button, Card, CardTitle } from "@/components/ui";
+import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
+import { Button, Card, cx } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/format";
 
 const LINUX_UPDATE_COMMANDS = [
@@ -35,8 +36,8 @@ export function UpdatesCard() {
     <Card className="p-0">
       <div className="flex items-center justify-between gap-5 p-4">
         <div className="min-w-0">
-          <CardTitle className="mb-0">Updates</CardTitle>
-          <p className="mt-[3px] text-xs text-ink-dim">
+          <SettingsCardTitle className="mb-0">Updates</SettingsCardTitle>
+          <p className={cx("mt-[3px]", SETTINGS_CARD_DESCRIPTION)}>
             {pendingVersion ? (
               <span className="text-warn-ink">{pendingVersion} available</span>
             ) : result === "error" ? (

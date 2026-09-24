@@ -9,17 +9,22 @@ import {
   useSetOllamaModels,
 } from "@/lib/queries";
 import {
+  SETTINGS_CARD_DESCRIPTION,
+  SETTINGS_CARD_TITLE,
+  SettingsCardTitle,
+} from "@/components/SettingsCard";
+import {
   Badge,
   Button,
   Card,
-  CardTitle,
+  cx,
   DropdownSelect,
   ErrorNote,
   Field,
+  SettingRow,
   Spinner,
   TextInput,
   Toggle,
-  SettingRow,
 } from "@/components/ui";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 
@@ -99,8 +104,8 @@ export function OllamaHarnessTab({
               ol
             </div>
             <div>
-              <p className="text-sm font-semibold text-ink">Ollama</p>
-              <p className="text-xs text-ink-dim">
+              <p className={SETTINGS_CARD_TITLE}>Ollama</p>
+              <p className={SETTINGS_CARD_DESCRIPTION}>
                 Run local or self-hosted models through the OpenCode harness
               </p>
             </div>
@@ -121,7 +126,7 @@ export function OllamaHarnessTab({
       )}
 
       <Card>
-        <CardTitle>Server</CardTitle>
+        <SettingsCardTitle>Server</SettingsCardTitle>
         <Field label="Server URL">
           <div className="flex items-center gap-2">
             <TextInput
@@ -173,9 +178,9 @@ export function OllamaHarnessTab({
 
       {reachable && (
         <Card>
-          <CardTitle>
+          <SettingsCardTitle>
             Models <span className="ml-1 font-normal text-ink-dim">{selected.length} selected</span>
-          </CardTitle>
+          </SettingsCardTitle>
           {installedModels.length === 0 ? (
             <p className="mt-3 text-xs text-ink-dim">
               No models installed on this server. Pull one first, e.g.{" "}
@@ -183,7 +188,7 @@ export function OllamaHarnessTab({
             </p>
           ) : (
             <>
-              <p className="mt-1 mb-3 text-xs text-ink-dim">
+              <p className={cx("mt-1 mb-3", SETTINGS_CARD_DESCRIPTION)}>
                 Choose which installed models appear in the composer.
               </p>
               <div className="space-y-1.5">
@@ -260,8 +265,8 @@ export function OllamaHarnessTab({
 
       {status && (
         <Card>
-          <CardTitle>Local install (optional)</CardTitle>
-          <p className="mb-2 text-xs text-ink-dim">
+          <SettingsCardTitle>Local install (optional)</SettingsCardTitle>
+          <p className={cx("mb-2", SETTINGS_CARD_DESCRIPTION)}>
             Only needed for local Ollama installs. Remote setups can ignore this.
           </p>
           <BinaryCard status={status} />
