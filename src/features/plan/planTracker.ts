@@ -38,6 +38,7 @@ export type PlanTracker = {
   status: string | null;
   author: string | null;
   overview: string;
+  body: string;
   phases: TrackedPhase[];
   current: CurrentItem | null;
   currentPhase: number | null;
@@ -93,12 +94,20 @@ function jumpOf(todo: TimelineTask | null): JumpTarget | null {
   return todo?.jumpToolUseId ? { toolUseId: todo.jumpToolUseId } : null;
 }
 
+// `approved` comes from an allowed ExitPlanMode or an approved inline plan, which build in the same session.
+const TRACKING_STATUSES = new Set(["active", "implemented", "approved"]);
+
 // Structure comes only from the doc; todos contribute status, and unmatched ones are appended as `added`.
 export function trackPlan(
   doc: PlanDoc,
-  todos: TimelineTask[],
+  sessionTodos: TimelineTask[],
   session: SessionSignal | null,
 ): PlanTracker {
+  const status = doc.status?.toLowerCase() ?? null;
+  const mode =
+    session?.stage === "implement" || (status !== null && TRACKING_STATUSES.has(status)) ? "tracking" : "draft";
+  // A planning agent's own todos are research steps, not the plan's tasks.
+  const todos = mode === "draft" ? [] : sessionTodos;
   const phases: Phase[] = doc.phases.map((p) => ({
     label: p.label,
     name: p.name,
@@ -214,16 +223,13 @@ export function trackPlan(
     currentPhase = index >= 0 ? index + 1 : tracked.length;
   }
 
-  const status = doc.status?.toLowerCase() ?? null;
   return {
-    mode:
-      session?.stage === "implement" || status === "active" || status === "implemented"
-        ? "tracking"
-        : "draft",
+    mode,
     title: doc.title,
     status: doc.status,
     author: doc.author,
     overview: doc.overview,
+    body: doc.body,
     phases: tracked,
     current,
     currentPhase,

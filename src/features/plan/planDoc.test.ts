@@ -103,6 +103,51 @@ describe("parsePlanDoc", () => {
     expect(doc.phases[1].tasks[0].key).toBe("P4b.1");
   });
 
+  describe("stable task ids", () => {
+    const TAGGED = "## Phase 1: A\n- [ ] [P1.7] Tagged task\n- [ ] Trailing id <!-- id: route-types -->\n- [ ] Untagged\n";
+
+    it("reads a leading [P…] tag or a trailing id comment and strips both from the title", () => {
+      const tasks = parsePlanDoc(TAGGED, PATH).phases[0].tasks;
+      expect(tasks.map((t) => [t.key, t.title, t.explicitId])).toEqual([
+        ["P1.7", "Tagged task", true],
+        ["route-types", "Trailing id", true],
+        ["P1.3", "Untagged", false],
+      ]);
+    });
+
+    it("keeps explicit ids when a task is inserted above them", () => {
+      const inserted = TAGGED.replace("## Phase 1: A\n", "## Phase 1: A\n- [ ] Inserted\n");
+      const keys = parsePlanDoc(inserted, PATH).phases[0].tasks.map((t) => t.key);
+      expect(keys).toEqual(["P1.1", "P1.7", "route-types", "P1.4"]);
+    });
+
+    it("never emits a duplicate key", () => {
+      const clash = "## Phase 1: A\n- [ ] [P1.2] First\n- [ ] Second\n- [ ] [P1.2] Dup\n";
+      const keys = parsePlanDoc(clash, PATH).phases[0].tasks.map((t) => t.key);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(keys[0]).toBe("P1.2");
+    });
+
+    it("toggles by explicit id even after the title changed", () => {
+      const renamed = TAGGED.replace("Tagged task", "Tagged task, reworded");
+      const next = toggleTask(renamed, { key: "P1.7", title: "Tagged task" }, true)!;
+      expect(next).toContain("- [x] [P1.7] Tagged task, reworded");
+    });
+  });
+
+  it("keeps the body of a phase-less plan, minus frontmatter and title", () => {
+    const claude = "# Plan creation flow\n\n## Context\n\nWhy.\n\n### 1. Parser\n- do it\n";
+    const doc = parsePlanDoc(claude, "/Users/jt/.claude/plans/ethereal-leaping-dewdrop.md");
+    expect(doc.title).toBe("Plan creation flow");
+    expect(doc.phases).toEqual([]);
+    expect(doc.body).toBe("## Context\n\nWhy.\n\n### 1. Parser\n- do it");
+    expect(parsePlanDoc("---\nstatus: draft\n---\n# T\n\nBody\n", PATH).body).toBe("Body");
+  });
+
+  it("titles an untitled inline plan 'Plan'", () => {
+    expect(parsePlanDoc("1. Do the thing\n", "").title).toBe("Plan");
+  });
+
   it("parses CRLF input the same as LF", () => {
     const crlf = parsePlanDoc(PLAN.replace(/\n/g, "\r\n"), PATH);
     const lf = parsePlanDoc(PLAN, PATH);

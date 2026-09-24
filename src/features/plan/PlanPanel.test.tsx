@@ -34,7 +34,7 @@ function renderPanel(tracker: ReturnType<typeof trackPlan>, overrides: Partial<P
   const props = {
     tracker,
     diff: { additions: 412, deletions: 18 },
-    onOpenInLibrary: vi.fn(),
+    headerAction: { label: "Open in Library", icon: "external" as const, onClick: vi.fn() },
     onApprove: vi.fn(),
     onReviewChanges: vi.fn(),
     onJump: vi.fn(),
@@ -134,7 +134,7 @@ describe("PlanPanel tracking", () => {
   it("opens the plan in the Library", () => {
     const props = renderPanel(tracker());
     fireEvent.click(screen.getByRole("button", { name: "Open in Library" }));
-    expect(props.onOpenInLibrary).toHaveBeenCalled();
+    expect(props.headerAction!.onClick).toHaveBeenCalled();
   });
 
   it("drops the pulse and the bar transition under reduced motion", () => {
@@ -157,5 +157,84 @@ describe("PlanPanel draft", () => {
     expect(screen.queryByRole("progressbar")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Approve & build" }));
     expect(props.onApprove).toHaveBeenCalled();
+  });
+});
+
+describe("PlanPanel draft preview", () => {
+  const draft = () => trackPlan(DOC("draft", "    "), [], { ...working, stage: "plan" });
+
+  it("renders the spec's chips and non-interactive pending task rows", () => {
+    renderPanel(draft());
+    expect(screen.getByText("Draft").className).toContain("bg-tag-draft-bg");
+    expect(screen.getByText("jt").className).toContain("text-ink-dim");
+    const row = screen.getByText("Add the route").closest("[data-state]")!;
+    expect(row.tagName).toBe("DIV");
+    expect(row.getAttribute("data-state")).toBe("pending");
+    expect(within(row as HTMLElement).getByText("Add the route").className).toContain("text-ink-2");
+    expect(screen.queryByRole("button", { name: /Add the route/ })).toBeNull();
+  });
+
+  it("flashes only the changed sections", () => {
+    renderPanel(draft(), { changed: new Set(["phase:2"]) });
+    expect(screen.getByText("Phase 2 — Build").closest("section")!.className).toContain("animate-plan-flash");
+    expect(screen.getByText("Phase 1 — Scaffold").closest("section")!.className).not.toContain("animate-plan-flash");
+  });
+
+  it("does not flash under reduced motion", () => {
+    setReducedMotion(true);
+    renderPanel(draft(), { changed: new Set(["phase:2", "overview"]) });
+    expect(document.querySelector(".animate-plan-flash")).toBeNull();
+  });
+
+  it("disables Approve & build with a tooltip while the agent is writing", () => {
+    const props = renderPanel(draft(), { approve: { blocked: "Still writing…" } });
+    const approve = screen.getByRole("button", { name: "Approve & build" }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    expect(approve.parentElement!.getAttribute("title")).toBe("Still writing…");
+    fireEvent.click(approve);
+    expect(props.onApprove).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape from inside the panel", () => {
+    const onClose = vi.fn();
+    renderPanel(draft(), { onClose });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Open in Library" }), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PlanPanel for plans without phases", () => {
+  const claude = (status: string | null) => {
+    const doc = parsePlanDoc("# Plan creation flow\n\n## Context\n\nWhy we build it.\n\n### 1. Parser\n", "/Users/jt/.claude/plans/x.md");
+    return trackPlan({ ...doc, status }, [], { ...working, stage: "plan" });
+  };
+
+  it("renders the body instead of an empty phase list", () => {
+    renderPanel(claude(null));
+    expect(screen.getByText(/Why we build it\./)).toBeTruthy();
+    expect(screen.queryByText(/No phases found/)).toBeNull();
+    expect(screen.queryByText(/phases ·/)).toBeNull();
+  });
+
+  it("shows a pending presentation as Awaiting approval, in the attention colour", () => {
+    renderPanel(claude("awaiting approval"));
+    expect(screen.getByText("Awaiting approval").className).toContain("bg-tag-draft-bg");
+  });
+
+  it("shows the source's own header action and hides Approve when there is nothing to approve", () => {
+    const onClick = vi.fn();
+    renderPanel(claude(null), { headerAction: { label: "Show in chat", icon: "chat", onClick }, approve: null });
+    fireEvent.click(screen.getByRole("button", { name: "Show in chat" }));
+    expect(onClick).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Open in Library" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Approve & build" })).toBeNull();
+  });
+
+  it("switches an approved Claude plan to tracking, listing the agent's todos", () => {
+    const doc = parsePlanDoc("# P\n\nBody\n", "/Users/jt/.claude/plans/x.md");
+    const tracker = trackPlan({ ...doc, status: "approved" }, [todo("Write the parser", "in_progress")], working);
+    renderPanel(tracker);
+    expect(tracker.mode).toBe("tracking");
+    expect(screen.getByRole("button", { name: "Write the parser, in progress, added by the agent" })).toBeTruthy();
   });
 });

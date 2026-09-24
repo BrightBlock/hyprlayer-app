@@ -436,8 +436,21 @@ a {
 .animate-plan-pulse {
   animation: plan-pulse 1.4s ease-in-out infinite;
 }
+/* Duration matches FLASH_MS in features/plan/usePlan.ts. */
+@keyframes plan-flash {
+  from {
+    background-color: var(--color-panel-2);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.animate-plan-flash {
+  animation: plan-flash 1s ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
-  .animate-plan-pulse {
+  .animate-plan-pulse,
+  .animate-plan-flash {
     animation: none;
   }
 }

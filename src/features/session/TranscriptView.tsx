@@ -18,7 +18,6 @@ import { HyprlayerMark } from "@/components/Logo";
 import {
   ChevronRightIcon,
   ClipboardIcon,
-  PuzzleIcon,
   RestartIcon,
   RewindIcon,
   ShieldIcon,
@@ -34,9 +33,13 @@ import { PromptCard } from "./PromptCard";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import { formatElapsed, formatRelativeTime, formatTokens } from "@/lib/format";
+import { useTickingNow } from "@/lib/useTickingNow";
+import { PlanCardsContext, planCardComponent } from "./planCardSlot";
+import { SkillChip } from "./SkillChip";
 import {
   baseName,
   editDiffFromTool,
+  parseToolInput,
   prettyToolInput,
   resultPreview,
   toolFilePath,
@@ -53,25 +56,6 @@ export type PromptHandlers = {
   onRewind: (itemId: string, text: string) => void;
 };
 
-
-function useTickingNow(epochMs: number | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (epochMs === null) return;
-    let id: number;
-    const schedule = () => {
-      const ageMs = Date.now() - epochMs;
-      const delay = ageMs < 60_000 ? 10_000 : ageMs < 3_600_000 ? 30_000 : 300_000;
-      id = window.setTimeout(() => {
-        setNow(Date.now());
-        schedule();
-      }, delay);
-    };
-    schedule();
-    return () => window.clearTimeout(id);
-  }, [epochMs]);
-  return now;
-}
 
 function UserMessageToolbar({
   itemId,
@@ -283,31 +267,6 @@ const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   );
 });
 
-const SkillBlock = memo(function SkillBlock({ name, body }: { name: string; body: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={`${STEP_ROW} text-ink-dim`}
-      >
-        <PuzzleIcon size={12} className="shrink-0 text-ink-dim" />
-        <span className="shrink-0 font-medium text-ink">Skill</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={name}>
-          {name}
-        </span>
-        <StepChevron open={open} reveal="hover" size={11} />
-      </button>
-      {open && (
-        <div className="selectable mt-1 border-l border-edge pl-3">
-          <MarkdownPreview body={body} />
-        </div>
-      )}
-    </div>
-  );
-});
-
 // A backgrounded spawn answers with a launch ack in milliseconds, so `result`
 // says nothing about whether its work is still going; only the open-task set does.
 const OpenBackgroundIds = createContext<ReadonlySet<string>>(new Set<string>());
@@ -436,6 +395,29 @@ const ToolBlock = memo(function ToolBlock({
     </div>
   );
 });
+
+function ToolItem({ item, busy }: { item: Extract<TranscriptItem, { kind: "tool" }>; busy: boolean }) {
+  const planCards = useContext(PlanCardsContext);
+  const revision = planCards?.revisions.get(item.toolUseId);
+  const PlanCard = planCardComponent();
+  if (planCards && revision && PlanCard) {
+    return (
+      <PlanCard
+        sessionId={planCards.sessionId}
+        workstreamId={planCards.workstreamId}
+        toolUseId={item.toolUseId}
+        {...revision}
+      />
+    );
+  }
+  if (item.name === "Skill" && !item.result?.isError) {
+    const skill = parseToolInput(item.input)?.skill;
+    if (typeof skill === "string" && skill) {
+      return <SkillChip name={skill} body={item.skillBody ?? null} toolUseId={item.toolUseId} />;
+    }
+  }
+  return <ToolBlock item={item} busy={busy} />;
+}
 
 const PermissionCard = memo(function PermissionCard({
   item,
@@ -666,15 +648,16 @@ type Unit =
 
 const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.kind);
 
-const isFileUnit = (it: TranscriptItem): boolean =>
-  it.kind === "tool" && toolFilePath(it.name, it.input) !== null;
+// File tools and skill chips stay visible rather than folding into a tool group.
+const isStandaloneTool = (it: TranscriptItem): boolean =>
+  it.kind === "tool" && (it.name === "Skill" || toolFilePath(it.name, it.input) !== null);
 
 const parentIdOf = (it: TranscriptItem): string | null =>
   it.kind === "tool" || it.kind === "assistant" || it.kind === "thinking" || it.kind === "skill"
     ? (it.parentId ?? null)
     : null;
 
-function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => boolean): Unit[] {
+function toUnits(items: TranscriptItem[], keepOut: (it: TranscriptItem) => boolean): Unit[] {
   const units: Unit[] = [];
   let run: TranscriptItem[] = [];
   const flush = () => {
@@ -685,8 +668,8 @@ function toUnits(items: TranscriptItem[], hasChildren: (it: TranscriptItem) => b
   for (const item of items) {
     const groupable =
       isQuiet(item.kind) &&
-      !(item.kind === "tool" && hasChildren(item)) &&
-      !isFileUnit(item);
+      !keepOut(item) &&
+      !isStandaloneTool(item);
     if (groupable) {
       run.push(item);
     } else {
@@ -764,9 +747,9 @@ function renderSingle(
     case "thinking":
       return <ThinkingBlock text={item.text} />;
     case "skill":
-      return <SkillBlock name={item.name} body={item.body} />;
+      return <SkillChip name={item.name} body={item.body} />;
     case "tool":
-      return <ToolBlock item={item} busy={busy} />;
+      return <ToolItem item={item} busy={busy} />;
     case "permission":
       return <PermissionCard item={item} handlers={permission} />;
     case "error":
@@ -882,10 +865,12 @@ function ItemList({
   permission: PermissionHandlers;
   prompt: PromptHandlers;
 }) {
-  const hasChildren = (it: TranscriptItem) =>
-    it.kind === "tool" && childrenByParent.has(it.toolUseId);
+  const planCards = useContext(PlanCardsContext);
+  // Subagents and plan cards (a Bash-written plan, a presented one) never fold into a tool group.
+  const keepOut = (it: TranscriptItem) =>
+    it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
   const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
-  const units = toUnits(visible, hasChildren);
+  const units = toUnits(visible, keepOut);
   return (
     <>
       {units.map((unit, i) => {

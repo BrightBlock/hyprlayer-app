@@ -18,6 +18,8 @@ type UiStore = {
   tasksCollapsed: boolean;
   toggleTasks: () => void;
   asideView: "changes" | "plan";
+  // True once the person picks an aside view this run; auto-open never overrides that choice.
+  asideViewChosen: boolean;
   setAsideView: (view: "changes" | "plan") => void;
   docsCollapsed: boolean;
   toggleDocs: () => void;
@@ -54,7 +56,8 @@ export const useUiStore = create<UiStore>()(
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
       asideView: "changes",
-      setAsideView: (view) => set({ asideView: view }),
+      asideViewChosen: false,
+      setAsideView: (view) => set({ asideView: view, asideViewChosen: true }),
       docsCollapsed: false,
       toggleDocs: () => set((state) => ({ docsCollapsed: !state.docsCollapsed })),
       libraryWidth: SIDE_PANEL_WIDTH,

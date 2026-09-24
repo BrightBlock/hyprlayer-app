@@ -284,7 +284,8 @@ function docTail(path: string): string {
   return path.split(/[/\\]+/).slice(-3).join("/");
 }
 
-function canonicalDocPath(path: string, written: WrittenDocs): string {
+// Maps a path written through a worktree's thoughts symlink onto the index's canonical path.
+export function canonicalDocPath(path: string, written: WrittenDocs): string {
   const indexed = written[baseName(path)];
   return indexed && docTail(indexed) === docTail(path) ? indexed : path;
 }

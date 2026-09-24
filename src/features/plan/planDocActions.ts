@@ -4,7 +4,7 @@ import { commands } from "@/lib/bindings";
 import { isAppError, unwrap } from "@/lib/ipc";
 import { queryClient } from "@/lib/queryClient";
 
-import { parsePlanDoc, toggleTask } from "./planDoc";
+import { isDraftStatus, parsePlanDoc, toggleTask } from "./planDoc";
 
 function invalidateDoc(path: string): void {
   void queryClient.invalidateQueries({ queryKey: ["doc", path] });
@@ -13,7 +13,7 @@ function invalidateDoc(path: string): void {
 
 export async function approvePlan(workstreamId: string, planPath: string, from: ShellTab): Promise<void> {
   const doc = await unwrap(commands.getDoc(planPath));
-  if (parsePlanDoc(doc.content, planPath).status?.toLowerCase() === "draft") {
+  if (isDraftStatus(parsePlanDoc(doc.content, planPath).status)) {
     await unwrap(
       commands.patchDocFrontmatter(
         planPath,

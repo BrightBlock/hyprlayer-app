@@ -39,6 +39,7 @@ import { copyDiagnostics } from "@/lib/diagnostics";
 import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
 import { WorkstreamActivityDot, WorkstreamBuildPhase } from "@/features/session/WorkstreamActivity";
+import { WorkstreamPlanning } from "@/features/plan/WorkstreamPlanning";
 import { startEdgeDrag } from "@/lib/resize";
 import {
   isDetachedHead,
@@ -1390,7 +1391,12 @@ export function Root() {
                             </span>
                             <WorkstreamBuildPhase
                               workstreamId={view.item.id}
-                              fallback={<WorkstreamGitChip view={view} />}
+                              fallback={
+                                <WorkstreamPlanning
+                                  workstreamId={view.item.id}
+                                  fallback={<WorkstreamGitChip view={view} />}
+                                />
+                              }
                             />
                           </Link>
                         );
@@ -1578,7 +1584,12 @@ export function Root() {
                             </span>
                             <WorkstreamBuildPhase
                               workstreamId={view.item.id}
-                              fallback={<WorkstreamGitChip view={view} />}
+                              fallback={
+                                <WorkstreamPlanning
+                                  workstreamId={view.item.id}
+                                  fallback={<WorkstreamGitChip view={view} />}
+                                />
+                              }
                             />
                           </Link>
                         );

@@ -64,6 +64,19 @@ function TaskBox({ state, pulse }: { state: TaskState; pulse: boolean }) {
   );
 }
 
+// A draft is read-only, so its rows are not tab stops.
+function DraftTaskRow({ task }: { task: TrackedTask }) {
+  const state = task.state === "done" ? "done" : "pending";
+  return (
+    <div data-state={state} className="flex items-start gap-[9px] text-[13px] leading-[1.5]">
+      <TaskBox state={state} pulse={false} />
+      <span className={cx("min-w-0 flex-1 break-words", state === "done" ? TEXT.done : "text-ink-2")}>
+        {task.title}
+      </span>
+    </div>
+  );
+}
+
 export function TaskRow({
   task,
   pulse,
@@ -113,17 +126,19 @@ export function PhaseSection({
   phase,
   showState,
   pulse,
+  flash = false,
   onJump,
 }: {
   phase: TrackedPhase;
   showState: boolean;
   pulse: boolean;
+  flash?: boolean;
   onJump: (target: JumpTarget) => void;
 }) {
   const suffix = showState ? PHASE_SUFFIX[phase.state] : null;
   const title = phase.label ? `Phase ${phase.label} — ${phase.name}` : phase.name;
   return (
-    <section>
+    <section className={cx("-mx-2 rounded-control px-2", flash && "animate-plan-flash")}>
       <div
         data-phase-label
         className={cx(
@@ -137,7 +152,7 @@ export function PhaseSection({
       <ul className="space-y-2">
         {phase.tasks.map((task) => (
           <li key={task.key}>
-            <TaskRow task={task} pulse={pulse} onJump={onJump} />
+            {showState ? <TaskRow task={task} pulse={pulse} onJump={onJump} /> : <DraftTaskRow task={task} />}
           </li>
         ))}
       </ul>

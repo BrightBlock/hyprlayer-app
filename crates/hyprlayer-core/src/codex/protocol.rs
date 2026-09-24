@@ -332,6 +332,8 @@ impl Translator {
             }
             "item/reasoning/textDelta" | "item/reasoning/summaryTextDelta" => Vec::new(),
             "item/commandExecution/outputDelta" => Vec::new(),
+            // Codex marks plan deltas experimental and may not match the completed item.
+            "item/plan/delta" => Vec::new(),
             "item/started" => self.item_started(p.get("item").unwrap_or(&Value::Null)),
             "item/completed" => self.item_completed(p.get("item").unwrap_or(&Value::Null)),
             "turn/plan/updated" => plan_events(p),
@@ -595,6 +597,7 @@ impl Translator {
                     }]
                 }
             }
+            "plan" => proposed_plan(id, item),
             "contextCompaction" => vec![SessionEvent::CompactBoundary {
                 trigger: "auto".into(),
                 pre_tokens: None,
@@ -745,6 +748,28 @@ fn plan_events(p: &Value) -> Vec<SessionEvent> {
         SessionEvent::ToolResult {
             tool_use_id: id,
             content: "Plan updated".into(),
+            is_error: false,
+            parent_id: None,
+        },
+    ]
+}
+
+// Plan mode's proposed plan, as a tool call the way `update_plan` becomes TodoWrite, so it persists and replays.
+fn proposed_plan(id: String, item: &Value) -> Vec<SessionEvent> {
+    let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
+    if text.trim().is_empty() {
+        return Vec::new();
+    }
+    vec![
+        SessionEvent::ToolUse {
+            id: id.clone(),
+            name: "ProposedPlan".into(),
+            input: json!({ "plan": text }).to_string(),
+            parent_id: None,
+        },
+        SessionEvent::ToolResult {
+            tool_use_id: id,
+            content: "Plan proposed".into(),
             is_error: false,
             parent_id: None,
         },
@@ -1512,6 +1537,40 @@ mod tests {
                 assert_eq!(todos[1]["status"], json!("in_progress"));
             }
             other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codex_plan_item_becomes_a_proposed_plan() {
+        let mut t = Translator::default();
+        assert!(t
+            .notification(
+                "item/plan/delta",
+                &json!({ "itemId": "p1", "turnId": "t1", "delta": "# Pl" }),
+            )
+            .is_empty());
+        let out = t.notification(
+            "item/completed",
+            &json!({ "item": { "type": "plan", "id": "p1", "text": "# Plan\n\n1. Do it" } }),
+        );
+        assert_eq!(ev_names(&out), ["toolUse", "toolResult"]);
+        match (&out[0], &out[1]) {
+            (
+                SessionEvent::ToolUse {
+                    id, name, input, ..
+                },
+                SessionEvent::ToolResult {
+                    tool_use_id,
+                    is_error,
+                    ..
+                },
+            ) => {
+                assert_eq!(name, "ProposedPlan");
+                assert_eq!(parse(input)["plan"], json!("# Plan\n\n1. Do it"));
+                assert_eq!(tool_use_id, id);
+                assert!(!is_error);
+            }
+            other => panic!("unexpected events {other:?}"),
         }
     }
 

@@ -10,6 +10,10 @@ import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore
 import { reconnectBridge } from "./features/hosts/reconnect";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
 import { activeWorkstreamIds, removeSessionsForWorkstream } from "./features/session/sessionStore";
+import { registerPlanCard } from "./features/session/planCardSlot";
+import { registerSendInterceptor } from "./features/session/sendInterceptor";
+import { PlanCard } from "./features/plan/PlanCard";
+import { approveFromChat } from "./features/plan/planApproval";
 import { unwrap } from "./lib/ipc";
 import { installGlobalHandlers, log } from "./lib/log";
 import { onWorkstreamArchived } from "./lib/queries";
@@ -29,6 +33,8 @@ registerEventBridge(scriptRunBridge);
 registerEventBridge(writtenDocsBridge);
 registerEventBridge(reconnectBridge);
 registerActiveWorkstreams(activeWorkstreamIds);
+registerPlanCard(PlanCard);
+registerSendInterceptor(approveFromChat);
 onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();
 void unwrap(commands.listRunningScripts())

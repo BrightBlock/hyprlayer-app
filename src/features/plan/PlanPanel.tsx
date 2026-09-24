@@ -1,12 +1,13 @@
-import { ExternalLink, FileText } from "lucide-react";
+import { ExternalLink, FileText, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ICON } from "@/components/lucide";
-import { Button, cx } from "@/components/ui";
+import { Button } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
 import { PhaseSection } from "./PhaseSection";
+import { PlanPreviewDraft } from "./PlanPreviewDraft";
 import { PlanProgressHeader } from "./PlanProgressHeader";
 import type { JumpTarget, PlanTracker } from "./planTracker";
 
@@ -15,30 +16,22 @@ const MANUAL_SCROLL_HOLD_MS = 10_000;
 type Props = {
   tracker: PlanTracker;
   diff: { additions: number; deletions: number } | null;
-  onOpenInLibrary: () => void;
+  // Open in Library for a thoughts doc, Open file for one outside it, Show in chat for an inline plan.
+  headerAction: { label: string; icon: "external" | "chat"; onClick: () => void } | null;
   onApprove: () => void;
   approving?: boolean;
+  // Null hides the button; `blocked` disables it with that reason as the tooltip.
+  approve?: { blocked: string | null } | null;
+  changed?: ReadonlySet<string>;
+  onClose?: () => void;
   onReviewChanges: () => void;
   onJump: (target: JumpTarget) => void;
 };
 
+const NO_CHANGES: ReadonlySet<string> = new Set();
+
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-
-function Chip({ className, children }: { className: string; children: string }) {
-  return (
-    <span className={cx("rounded-control px-[7px] py-[3px] text-[11.5px] font-semibold leading-none", className)}>
-      {children}
-    </span>
-  );
-}
-
-function statusChip(status: string | null) {
-  if (!status || status.toLowerCase() === "draft") {
-    return <Chip className="bg-tag-draft-bg text-warn-ink">Draft</Chip>;
-  }
-  return <Chip className="bg-panel-2 text-ink-2">{status[0].toUpperCase() + status.slice(1)}</Chip>;
 }
 
 // Announces completions only; an aria-live list would read out every status tick.
@@ -62,9 +55,12 @@ function useCompletionAnnouncement(tracker: PlanTracker): string {
 export function PlanPanel({
   tracker,
   diff,
-  onOpenInLibrary,
+  headerAction,
   onApprove,
   approving,
+  approve = { blocked: null },
+  changed = NO_CHANGES,
+  onClose,
   onReviewChanges,
   onJump,
 }: Props) {
@@ -87,19 +83,28 @@ export function PlanPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-panel">
+    <div
+      className="flex h-full min-h-0 flex-col bg-panel"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape" || !onClose) return;
+        e.stopPropagation();
+        onClose();
+      }}
+    >
       <div className="flex h-[38px] shrink-0 items-center gap-2 border-b border-edge px-[14px]">
         <FileText {...ICON} size={14} className="text-ink-4" />
         <span className="text-[12.5px] font-bold text-ink">Plan preview</span>
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={onOpenInLibrary}
-          className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-[11.5px] font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
-        >
-          Open in Library
-          <ExternalLink {...ICON} size={12} />
-        </button>
+        {headerAction && (
+          <button
+            type="button"
+            onClick={headerAction.onClick}
+            className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-[11.5px] font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
+          >
+            {headerAction.label}
+            {headerAction.icon === "chat" ? <MessageSquare {...ICON} size={12} /> : <ExternalLink {...ICON} size={12} />}
+          </button>
+        )}
       </div>
 
       <div
@@ -111,40 +116,29 @@ export function PlanPanel({
         onKeyDown={markManualScroll}
       >
         {tracking ? (
-          <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
-        ) : (
-          <div className="px-[18px] pt-4">
-            <h2 className="text-[19px] font-bold leading-tight tracking-[-0.01em] text-ink">{tracker.title}</h2>
-            <div className="mt-2 flex items-center gap-1.5">
-              <Chip className="bg-panel-2 text-ink-2">Plan</Chip>
-              {statusChip(tracker.status)}
-              {tracker.author && <span className="ml-1 text-[11.5px] text-ink-4">{tracker.author}</span>}
-            </div>
-            {tracker.overview && (
-              <div className="mt-4">
-                <div className="lbl mb-1.5">Overview</div>
-                <div className="text-[13px] text-ink-2">
-                  <MarkdownPreview body={tracker.overview} />
+          <>
+            <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
+            <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
+              {tracker.phases.map((phase) => (
+                <PhaseSection
+                  key={`${phase.label}:${phase.name}`}
+                  phase={phase}
+                  showState
+                  pulse={tracker.pulsing && !reduceMotion}
+                  flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
+                  onJump={onJump}
+                />
+              ))}
+              {tracker.phases.length === 0 && (
+                <div className="text-[13px] leading-[1.6] text-ink-2">
+                  <MarkdownPreview body={tracker.body} />
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <PlanPreviewDraft tracker={tracker} changed={changed} reduceMotion={reduceMotion} />
         )}
-
-        <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
-          {tracker.phases.map((phase) => (
-            <PhaseSection
-              key={`${phase.label}:${phase.name}`}
-              phase={phase}
-              showState={tracking}
-              pulse={tracker.pulsing && !reduceMotion}
-              onJump={onJump}
-            />
-          ))}
-          {tracker.phases.length === 0 && (
-            <p className="text-[13px] text-ink-4">No phases found. Add “## Phase 1: …” headings to the plan.</p>
-          )}
-        </div>
         <div className="sr-only" aria-live="polite">
           {announcement}
         </div>
@@ -153,9 +147,11 @@ export function PlanPanel({
       <div className="flex shrink-0 items-center gap-2 border-t border-edge-2 px-[18px] py-2.5">
         {tracking ? (
           <>
-            <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
-              {tracker.done} of {plural(tracker.total, "task")} done
-            </span>
+            {tracker.total > 0 && (
+              <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
+                {tracker.done} of {plural(tracker.total, "task")} done
+              </span>
+            )}
             <span className="flex-1" />
             {tracker.allDone ? (
               <Button variant="primary" size="sm" onClick={onReviewChanges}>
@@ -172,13 +168,26 @@ export function PlanPanel({
           </>
         ) : (
           <>
-            <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
-              {plural(tracker.phases.length, "phase")} · {tracker.done} of {plural(tracker.total, "task")} done
-            </span>
+            {tracker.phases.length > 0 && (
+              <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
+                {plural(tracker.phases.length, "phase")} · {tracker.done} of {plural(tracker.total, "task")} done
+              </span>
+            )}
             <span className="flex-1" />
-            <Button variant="primary" size="sm" busy={approving} onClick={onApprove}>
-              Approve &amp; build
-            </Button>
+            {approve && (
+              <span title={approve.blocked ?? undefined}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="h-[26px] text-[11.5px] font-semibold"
+                  busy={approving}
+                  disabled={approve.blocked !== null}
+                  onClick={onApprove}
+                >
+                  Approve &amp; build
+                </Button>
+              </span>
+            )}
           </>
         )}
       </div>

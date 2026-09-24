@@ -94,6 +94,9 @@ import { controlsKey, usePublishSessionControls } from "./sessionControls";
 import { formatTokens } from "@/lib/format";
 import { detectHandoffDoc } from "./toolDisplay";
 import { useWrittenDocs } from "./writtenDocs";
+import { planRevisions } from "./planRevisions";
+import { PlanCardsContext } from "./planCardSlot";
+import { interceptSend } from "./sendInterceptor";
 import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
 import { clearTranscriptJump, useTranscriptJumpStore } from "./transcriptJump";
 import {
@@ -1027,6 +1030,15 @@ export function SessionChat({
     [shell.dismissedSuggestions],
   );
   const writtenDocs = useWrittenDocs(workstreamId);
+  const sessionStage = session?.stage;
+  // An implement session only ticks the plan's checkboxes; those edits are not revisions.
+  const planCards = useMemo(
+    () =>
+      sid && sessionItems && sessionStage !== "implement"
+        ? { sessionId: sid, workstreamId, revisions: planRevisions(sessionItems, writtenDocs) }
+        : null,
+    [sid, workstreamId, sessionItems, sessionStage, writtenDocs],
+  );
   const detectedHandoffPath = useMemo(
     () => (sessionItems ? detectHandoffDoc(sessionItems, writtenDocs, dismissedSet) : null),
     [sessionItems, dismissedSet, writtenDocs],
@@ -1208,6 +1220,15 @@ export function SessionChat({
     if ((!text && attachments.length === 0) || pendingArg || !sid) return;
     setError(null);
     try {
+      const intercepted =
+        attachments.length === 0 &&
+        (await interceptSend({ sessionId: sid, workstreamId: view.item.id, shell, text }));
+      if (intercepted) {
+        onDraftChange("");
+        setHistoryNav(IDLE_NAV);
+        recalledValueRef.current = null;
+        return;
+      }
       const expanded = await expandDraft(text);
       if (!expanded) return;
       await sendMessage(sid, expanded.text, attachments, expanded.title);
@@ -1354,16 +1375,18 @@ export function SessionChat({
         />
       )}
       {started ? (
-        <TranscriptView
-          ref={transcriptRef}
-          items={session?.items ?? []}
-          busy={working}
-          connecting={!session || session.state === "starting"}
-          harnessLabel={harness.label}
-          workingSince={session?.workingSince ?? null}
-          permission={permission}
-          prompt={prompt}
-        />
+        <PlanCardsContext.Provider value={planCards}>
+          <TranscriptView
+            ref={transcriptRef}
+            items={session?.items ?? []}
+            busy={working}
+            connecting={!session || session.state === "starting"}
+            harnessLabel={harness.label}
+            workingSince={session?.workingSince ?? null}
+            permission={permission}
+            prompt={prompt}
+          />
+        </PlanCardsContext.Provider>
       ) : (
         <div className="min-h-0 flex-1" />
       )}

@@ -805,7 +805,7 @@ export function ProjectPage() {
     if (sessionId) dropSession(sessionId);
   };
   const openDoc = (id: string) => {
-    void navigate({ to: "/library", search: { doc: id } });
+    void navigate({ to: "/library", search: { doc: id, from: projectPath } });
   };
   const attachDocToShell = (path: string, _role: string) => {
     if (!docsModalShell) return;
@@ -1707,6 +1707,7 @@ export function ProjectPage() {
                 view={activeView}
                 shell={focusedShell}
                 onOpenDoc={openDoc}
+                onOpenFile={(path) => openDocPreview(path, basename(path).replace(/\.md$/, ""))}
                 onReviewChanges={() => planAside.setView("changes")}
               />
             </div>

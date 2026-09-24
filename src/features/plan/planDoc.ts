@@ -1,6 +1,6 @@
 import { basename } from "@/lib/path";
 
-export type PlanDocTask = { key: string; title: string; checked: boolean; line: number };
+export type PlanDocTask = { key: string; title: string; checked: boolean; line: number; explicitId: boolean };
 export type PlanDocPhase = { label: string; name: string; tasks: PlanDocTask[] };
 export type PlanDoc = {
   title: string;
@@ -8,6 +8,8 @@ export type PlanDoc = {
   author: string | null;
   overview: string;
   phases: PlanDocPhase[];
+  // Everything after the frontmatter and title; what a plan without phases renders.
+  body: string;
 };
 
 const FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?:\r?\n|$)/;
@@ -15,6 +17,12 @@ const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const PHASE = /^(?:.*?\s)?Phase\s+(\d+[a-z]?)\b\s*(?:[:—–-]\s*)?(.*)$/i;
 const CHECKBOX = /^(\s*[-*+]\s+\[)([ xX~])(\]\s+)(.*)$/;
 const FENCE = /^\s*(```|~~~)/;
+const LEAD_ID = /^\[(P\d+[a-z]?\.\d+)\]\s*/i;
+const TRAIL_ID = /<!--\s*id:\s*([\w.-]+)\s*-->/i;
+
+export function isDraftStatus(status: string | null): boolean {
+  return !status || status.toLowerCase() === "draft";
+}
 
 function frontmatterValue(fm: string, key: string): string | null {
   const m = new RegExp(`^${key}:\\s*(.*)$`, "m").exec(fm);
@@ -23,7 +31,30 @@ function frontmatterValue(fm: string, key: string): string | null {
 }
 
 function cleanTitle(text: string): string {
-  return text.replace(/<!--.*?-->/g, "").replace(/`/g, "").trim();
+  return text.replace(LEAD_ID, "").replace(/<!--.*?-->/g, "").replace(/`/g, "").trim();
+}
+
+function explicitTaskId(text: string): string | null {
+  return LEAD_ID.exec(text)?.[1] ?? TRAIL_ID.exec(text)?.[1] ?? null;
+}
+
+// Explicit ids survive edits; positional keys are the fallback and never collide with them.
+function assignKeys(phases: PlanDocPhase[]): void {
+  const taken = new Set<string>();
+  const pending: [PlanDocPhase, PlanDocTask, number][] = [];
+  for (const phase of phases) {
+    phase.tasks.forEach((task, i) => {
+      if (task.explicitId && !taken.has(task.key)) taken.add(task.key);
+      else pending.push([phase, task, i]);
+    });
+  }
+  for (const [phase, task, i] of pending) {
+    let key = `P${phase.label}.${i + 1}`;
+    for (let n = 2; taken.has(key); n++) key = `P${phase.label}.${i + 1}~${n}`;
+    task.key = key;
+    task.explicitId = false;
+    taken.add(key);
+  }
 }
 
 export function parsePlanDoc(content: string, path: string): PlanDoc {
@@ -33,6 +64,7 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
   const bodyStart = fmMatch ? fmMatch[0].split("\n").length - (fmMatch[0].endsWith("\n") ? 1 : 0) : 0;
 
   let h1: string | null = null;
+  let h1Line = -1;
   const phases: PlanDocPhase[] = [];
   let phase: { level: number; phase: PlanDocPhase } | null = null;
   let overview: { level: number; lines: string[] } | null = null;
@@ -62,7 +94,10 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
         continue;
       }
       if (phase && level <= phase.level) phase = null;
-      if (level === 1 && h1 === null) h1 = text;
+      if (level === 1 && h1 === null) {
+        h1 = text;
+        h1Line = i;
+      }
       if (/^overview$/i.test(text) && !overviewText) overview = { level, lines: [] };
       continue;
     }
@@ -70,26 +105,35 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
     if (inFence || !phase) continue;
     const box = CHECKBOX.exec(line);
     if (!box) continue;
-    const tasks = phase.phase.tasks;
-    tasks.push({
-      key: `P${phase.phase.label}.${tasks.length + 1}`,
+    const id = explicitTaskId(box[4]);
+    phase.phase.tasks.push({
+      key: id ?? "",
       title: cleanTitle(box[4]),
       checked: box[2] === "x" || box[2] === "X",
       line: i,
+      explicitId: id !== null,
     });
   }
   if (overview) overviewText = overview.lines.join("\n").trim();
+  assignKeys(phases);
+
+  const body = lines
+    .slice(bodyStart)
+    .filter((_, i) => i + bodyStart !== h1Line)
+    .join("\n")
+    .trim();
 
   return {
-    title: h1 ?? frontmatterValue(fm, "title") ?? basename(path).replace(/\.md$/, ""),
+    title: h1 ?? frontmatterValue(fm, "title") ?? (basename(path).replace(/\.md$/, "") || "Plan"),
     status: frontmatterValue(fm, "status"),
     author: frontmatterValue(fm, "author"),
     overview: overviewText,
     phases,
+    body,
   };
 }
 
-// Finds the task by key, else by title after an edit shifted keys; never guesses past that.
+// Finds the task by explicit id, then key+title, then title after an edit shifted keys; never guesses past that.
 export function toggleTask(
   content: string,
   task: { key: string; title: string },
@@ -97,6 +141,7 @@ export function toggleTask(
 ): string | null {
   const all = parsePlanDoc(content, "").phases.flatMap((p) => p.tasks);
   const target =
+    all.find((t) => t.explicitId && t.key === task.key) ??
     all.find((t) => t.key === task.key && t.title === task.title) ??
     all.find((t) => t.title === task.title);
   if (!target) return null;

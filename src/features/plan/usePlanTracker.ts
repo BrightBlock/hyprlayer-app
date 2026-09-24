@@ -1,16 +1,22 @@
 import { useEffect, useMemo } from "react";
 
-import { planDocForSession } from "@/features/session/planLink";
+import {
+  INLINE_PLAN_KEY,
+  isInlinePlanKey,
+  planKeyForSession,
+  presentationFor,
+  type PlanPresentation,
+} from "@/features/session/planPresentation";
 import { planTaskTimeline } from "@/features/session/planTasks";
 import { useSession, type SessionEntry } from "@/features/session/sessionStore";
 import { describeState, isWorking } from "@/features/session/transcript";
 import { parseToolInput } from "@/features/session/toolDisplay";
 import { useWrittenDocs } from "@/features/session/writtenDocs";
 import { basename } from "@/lib/path";
-import { useDoc } from "@/lib/queries";
 
-import { parsePlanDoc } from "./planDoc";
+import { useResolvedPlanSelection } from "./planPreviewStore";
 import { trackPlan, type PlanTracker, type SessionSignal } from "./planTracker";
+import { usePlan } from "./usePlan";
 
 // Reuses the pane header's status vocabulary so the tracker never contradicts it.
 export function sessionSignalOf(entry: SessionEntry): SessionSignal {
@@ -59,34 +65,60 @@ function planWrites(items: SessionEntry["items"], path: string): number {
   return n;
 }
 
+// A presented plan's state outranks its frontmatter: Claude and codex plans have none.
+export function presentationStatus(p: PlanPresentation | null): string | null {
+  if (!p) return null;
+  if (p.state === "pending") return "awaiting approval";
+  if (p.state === "approved") return "approved";
+  if (p.state === "rejected") return "changes requested";
+  return null;
+}
+
 export type PlanTrackerResult = {
-  path: string | null;
+  key: string | null;
   tracker: PlanTracker | null;
+  presentation: PlanPresentation | null;
+  inline: boolean;
+  indexed: boolean;
   loading: boolean;
   error: unknown;
+  changed: ReadonlySet<string>;
 };
 
-export function usePlanPath(sessionId: string | undefined): string | null {
+// The session's own plan, ignoring any card selection.
+export function useSessionPlanKey(sessionId: string | undefined): string | null {
   const entry = useSession(sessionId);
   const written = useWrittenDocs(entry?.workstreamId ?? null);
   const items = entry?.items;
   const stage = entry?.stage ?? "";
-  return useMemo(() => (items ? planDocForSession(items, stage, written) : null), [items, stage, written]);
+  return useMemo(() => (items ? planKeyForSession(items, stage, written) : null), [items, stage, written]);
+}
+
+// The last clicked card wins over the session's latest plan.
+export function usePlanKey(sessionId: string | undefined): string | null {
+  const own = useSessionPlanKey(sessionId);
+  const workstreamId = useSession(sessionId)?.workstreamId ?? null;
+  return useResolvedPlanSelection(sessionId, workstreamId)?.key ?? own;
 }
 
 export function usePlanTracker(sessionId: string | undefined): PlanTrackerResult {
   const entry = useSession(sessionId);
-  const path = usePlanPath(sessionId);
-  const doc = useDoc(path ?? "");
-  const content = doc.data?.content;
-  const parsed = useMemo(
-    () => (content !== undefined && path ? parsePlanDoc(content, path) : null),
-    [content, path],
-  );
+  const written = useWrittenDocs(entry?.workstreamId ?? null);
+  const key = usePlanKey(sessionId);
   const items = entry?.items;
+  const presentation = useMemo(
+    () => (items && key ? presentationFor(items, written, key) : null),
+    [items, written, key],
+  );
+  const inlineText = useMemo(
+    () => (items && key && isInlinePlanKey(key) ? (presentationFor(items, written, INLINE_PLAN_KEY)?.text ?? null) : null),
+    [items, written, key],
+  );
+  const { plan, inline, indexed, loading, error, refetch, changed } = usePlan(key, inlineText);
+  const status = presentationStatus(presentation);
+  const parsed = useMemo(() => (plan && status ? { ...plan, status } : plan), [plan, status]);
   const timeline = useMemo(() => (items ? planTaskTimeline(items) : []), [items]);
-  const writes = useMemo(() => (items && path ? planWrites(items, path) : 0), [items, path]);
-  const { refetch } = doc;
+  const writes = useMemo(() => (items && key && !inline ? planWrites(items, key) : 0), [items, key, inline]);
   useEffect(() => {
     if (writes > 0) void refetch();
   }, [writes, refetch]);
@@ -97,5 +129,5 @@ export function usePlanTracker(sessionId: string | undefined): PlanTrackerResult
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signal is keyed by value
     [parsed, timeline, signalKey],
   );
-  return { path, tracker, loading: Boolean(path) && doc.isLoading, error: doc.error };
+  return { key, tracker, presentation, inline, indexed, loading, error, changed };
 }
