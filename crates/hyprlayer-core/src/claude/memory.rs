@@ -84,7 +84,7 @@ pub fn resolve(
     (dir, check)
 }
 
-fn canonical(path: &Path) -> String {
+pub(crate) fn canonical(path: &Path) -> String {
     dunce::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
@@ -99,7 +99,7 @@ fn check_key(claude_config_dir: &Path, session_id: &str, cwd: &Path) -> MemoryKe
     if expected.is_file() {
         return MemoryKeyCheck::Verified;
     }
-    match super::driver::transcript_path(session_id, Some(claude_config_dir)) {
+    match super::driver::transcript_path(session_id, Some(claude_config_dir), None) {
         Some(found) if found != expected => MemoryKeyCheck::Mismatch,
         Some(_) => MemoryKeyCheck::Verified,
         None => MemoryKeyCheck::Unverified,

@@ -65,6 +65,7 @@ pub struct ClaudeDriver {
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     killer: Killer,
     claude_config_dir: Option<PathBuf>,
+    cwd: PathBuf,
 }
 
 impl ClaudeDriver {
@@ -197,6 +198,7 @@ impl ClaudeDriver {
                 pending_controls,
                 killer: Killer { pid },
                 claude_config_dir: config.claude_config_dir,
+                cwd: config.cwd,
             },
             primary_rx,
         ))
@@ -296,8 +298,9 @@ impl ClaudeDriver {
     async fn transcript_user_uuids(&self) -> Vec<String> {
         let session_id = self.session_id.clone();
         let claude_config_dir = self.claude_config_dir.clone();
+        let cwd = self.cwd.clone();
         tokio::task::spawn_blocking(move || {
-            transcript_path(&session_id, claude_config_dir.as_deref())
+            transcript_path(&session_id, claude_config_dir.as_deref(), Some(&cwd))
                 .and_then(|p| std::fs::read_to_string(p).ok())
                 .map(|c| parse_transcript_user_uuids(&c))
                 .unwrap_or_default()
@@ -663,12 +666,21 @@ fn rewind_local_start(ordinal: usize, len: usize) -> std::result::Result<usize, 
     Ok(idx)
 }
 
+/// Prefers the copy under `cwd`'s project key: claude appends there, and a
+/// restore to a new path leaves a stale copy under the old key.
 pub(super) fn transcript_path(
     session_id: &str,
     claude_config_dir: Option<&Path>,
+    cwd: Option<&Path>,
 ) -> Option<PathBuf> {
     let projects = claude_config_dir?.join("projects");
     let filename = format!("{session_id}.jsonl");
+    if let Some(cwd) = cwd {
+        let keyed = keyed_transcript(&projects, cwd, &filename);
+        if keyed.is_file() {
+            return Some(keyed);
+        }
+    }
     for entry in std::fs::read_dir(&projects).ok()?.flatten() {
         let candidate = entry.path().join(&filename);
         if candidate.is_file() {
@@ -676,6 +688,34 @@ pub(super) fn transcript_path(
         }
     }
     None
+}
+
+fn keyed_transcript(projects: &Path, cwd: &Path, filename: &str) -> PathBuf {
+    projects
+        .join(super::memory::project_key(&super::memory::canonical(cwd)))
+        .join(filename)
+}
+
+/// Copies a session's transcript under `cwd`'s project key, where
+/// `claude --resume` looks for it; returns whether anything was copied.
+pub fn relocate_transcript(
+    claude_config_dir: &Path,
+    session_id: &str,
+    cwd: &Path,
+) -> std::io::Result<bool> {
+    let projects = claude_config_dir.join("projects");
+    let dest = keyed_transcript(&projects, cwd, &format!("{session_id}.jsonl"));
+    if dest.exists() {
+        return Ok(false);
+    }
+    let Some(source) = transcript_path(session_id, Some(claude_config_dir), None) else {
+        return Ok(false);
+    };
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::copy(source, &dest)?;
+    Ok(true)
 }
 
 fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {

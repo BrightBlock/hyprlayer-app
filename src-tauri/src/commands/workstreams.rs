@@ -13,7 +13,7 @@ use tauri::State;
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-pub use hyprlayer_core::runtime::workstreams::{ProjectMemory, WorkstreamBases};
+pub use hyprlayer_core::runtime::workstreams::{ArchiveInfo, ProjectMemory, WorkstreamBases};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -341,6 +341,7 @@ pub struct ArchivedWorkstreamView {
     pub item: Workstream,
     pub archive_path: String,
     pub archive_exists: bool,
+    pub info: ArchiveInfo,
 }
 
 impl From<rpc::ArchivedWorkstreamView> for ArchivedWorkstreamView {
@@ -349,6 +350,7 @@ impl From<rpc::ArchivedWorkstreamView> for ArchivedWorkstreamView {
             item: v.item,
             archive_path: v.archive_path,
             archive_exists: v.archive_exists,
+            info: v.info,
         }
     }
 }
@@ -376,10 +378,11 @@ pub async fn list_archived_workstreams(
 pub async fn restore_workstream(
     state: State<'_, AppState>,
     id: String,
+    target: Option<String>,
 ) -> CmdResult<WorkstreamView> {
     state
         .client()?
-        .restore_workstream(id)
+        .restore_workstream(id, target)
         .await
         .map(WorkstreamView::from)
         .map_err(AppError::from)
@@ -413,13 +416,33 @@ impl From<core_workstreams::ArchiveCleanupReport> for ArchiveCleanupReport {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn cleanup_archived_workstreams(
+pub async fn refresh_archived_workstreams(state: State<'_, AppState>) -> CmdResult<u32> {
+    state
+        .client()?
+        .refresh_archived_workstreams()
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn keep_archived_workstream(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state
+        .client()?
+        .keep_archived_workstream(id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn purge_archived_workstreams(
     state: State<'_, AppState>,
-    before_ms: Option<f64>,
+    ids: Vec<String>,
 ) -> CmdResult<ArchiveCleanupReport> {
     state
         .client()?
-        .cleanup_archived_workstreams(before_ms)
+        .purge_archived_workstreams(ids)
         .await
         .map(ArchiveCleanupReport::from)
         .map_err(AppError::from)

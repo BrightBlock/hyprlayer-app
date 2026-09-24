@@ -433,6 +433,11 @@ exception like those under "Typography".
 - Its gear and the Scripts dock toggle beside it are 26×24; the permission pill 24px; a meter's track 34×4; the avatar 20px.
 - The Settings nav's rows are 34px, which is not a third `rowClass` tier.
 - Toast sits `STATUS_BAR_HEIGHT + 24` above the window's bottom edge.
+- The header's Archive button is 26×26 beside 28×28 neighbours. Its Archived
+  worktrees popover is 440px with a `0 12px 30px` shadow, and caps its own list
+  at the window height, since `Popover` has no cap. Its only new tokens are
+  `tag-purge-bg` and `destructive-border`; the spec's `tag-purge-text` and
+  `destructive-text` are `warn-ink` and `bad-ink`.
 
 **Icons.** `lucide-react` at 16px and stroke 1.5 (`ICON` in
 `src/components/lucide.ts`) on the v4 surfaces. `icons.tsx` stays everywhere

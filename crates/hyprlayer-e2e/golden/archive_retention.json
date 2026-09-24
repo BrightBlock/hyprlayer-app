@@ -1,0 +1,288 @@
+{
+  "scenario": "archive_retention",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "session": true
+          },
+          "guard": "the kept workstream runs a session",
+          "ok": true
+        }
+      ],
+      "step": "set up four workstreams"
+    },
+    {
+      "guards": [
+        {
+          "evidence": [
+            30,
+            30,
+            30,
+            30
+          ],
+          "guard": "each archive is due to purge 30 days out",
+          "ok": true
+        },
+        {
+          "evidence": [
+            true,
+            true,
+            true,
+            true
+          ],
+          "guard": "each archive's size is measured",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "uncommitted": 0,
+            "unpushed": 0
+          },
+          "guard": "a clean archive has nothing to lose",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "uncommitted": 1,
+            "unpushed": 1
+          },
+          "guard": "uncommitted files and unpushed commits are counted",
+          "ok": true
+        },
+        {
+          "evidence": [
+            {
+              "state": "unknown"
+            },
+            {
+              "state": "unknown"
+            },
+            {
+              "state": "unknown"
+            },
+            {
+              "state": "unknown"
+            }
+          ],
+          "guard": "PR state is unknown until refreshed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "deletesBranch": true
+          },
+          "guard": "deleting an archive the app branched deletes its branch",
+          "ok": true
+        }
+      ],
+      "step": "archive"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pr": {
+              "number": 7,
+              "state": "merged"
+            }
+          },
+          "guard": "refresh records the merged PR",
+          "ok": true
+        },
+        {
+          "evidence": [
+            {
+              "state": "none"
+            },
+            {
+              "state": "none"
+            },
+            {
+              "state": "none"
+            }
+          ],
+          "guard": "refresh records no PR for the rest",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changed": 4
+          },
+          "guard": "refresh counts the rows it changed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changed": 0
+          },
+          "guard": "a settled PR state is not asked for again",
+          "ok": true
+        }
+      ],
+      "step": "refresh PR state"
+    },
+    {
+      "guards": [
+        {
+          "evidence": [
+            false,
+            false,
+            true,
+            false
+          ],
+          "guard": "Keep pins exactly that archive",
+          "ok": true
+        }
+      ],
+      "step": "keep"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the server stops cleanly",
+          "ok": true
+        }
+      ],
+      "step": "thirty days pass"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "archive_exists": false,
+            "listed": false
+          },
+          "guard": "the sweep purges an expired archive",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch": "hyprlayer/dirty-work-$SUFFIX"
+          },
+          "guard": "the sweep leaves an unmerged branch",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listed": true
+          },
+          "guard": "a kept archive survives the sweep",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "purge_days": 7
+          },
+          "guard": "a stale record restarts with a 7-day warning",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "purge_days": 30
+          },
+          "guard": "an untouched archive keeps its deadline",
+          "ok": true
+        }
+      ],
+      "step": "the sweep"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "restore_target_occupied"
+          },
+          "guard": "restoring onto an occupied path is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "restore_target_invalid"
+          },
+          "guard": "a target inside the project is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "head": "hyprlayer/kept-work-$SUFFIX",
+            "worktree": "$SANDBOX/elsewhere/kept-work-$SUFFIX"
+          },
+          "guard": "an existing folder receives the worktree under its slug",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "squatter": {
+              "squatter.txt": null
+            }
+          },
+          "guard": "the squatter is left alone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cwds": [
+              "$SANDBOX/elsewhere/kept-work-$SUFFIX"
+            ]
+          },
+          "guard": "the session follows the worktree",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "copied": true,
+            "original_kept": true
+          },
+          "guard": "claude's transcript is copied to the new project key",
+          "ok": true
+        }
+      ],
+      "step": "restore to a new path"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "deleted": 1,
+            "failed": 0
+          },
+          "guard": "purging by id deletes exactly the requested archive",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "legacy": true,
+            "merged": false
+          },
+          "guard": "only the requested archive is gone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch": "hyprlayer/merged-work-$SUFFIX"
+          },
+          "guard": "a manual purge deletes the branch the app created",
+          "ok": true
+        }
+      ],
+      "step": "purge merged"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

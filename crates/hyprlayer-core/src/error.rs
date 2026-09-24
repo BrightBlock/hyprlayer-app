@@ -214,8 +214,11 @@ pub enum CoreError {
     #[error("The backup directory for this workstream is gone ({path}).")]
     WorkstreamArchiveMissing { path: String },
 
-    #[error("Another workstream took the original path ({path}).")]
+    #[error("Something is already at {path}.")]
     WorkstreamRestoreTargetOccupied { path: String },
+
+    #[error("Can't restore to {path}: {reason}.")]
+    WorkstreamRestoreTargetInvalid { path: String, reason: String },
 
     #[error("This workstream runs in a plain folder, so it has no thoughts links.")]
     WorkstreamFolderNoThoughts,
@@ -539,8 +542,11 @@ impl CoreError {
                 Some("Delete the archived row to remove it from the list.".into())
             }
             CoreError::WorkstreamRestoreTargetOccupied { .. } => Some(
-                "Move or archive the workstream at that path, then try again.".into(),
+                "Restore it somewhere else, or move what is there and try again.".into(),
             ),
+            CoreError::WorkstreamRestoreTargetInvalid { .. } => {
+                Some("Choose an absolute path outside the project and its worktrees.".into())
+            }
             CoreError::NotAGitRepo { .. } => Some(
                 "Choose a directory that contains a `.git` folder, or use \"Create new\" to initialise one."
                     .into(),
@@ -653,6 +659,7 @@ impl CoreError {
             CoreError::WorkstreamNotArchived { .. } => "not_archived",
             CoreError::WorkstreamArchiveMissing { .. } => "archive_missing",
             CoreError::WorkstreamRestoreTargetOccupied { .. } => "restore_target_occupied",
+            CoreError::WorkstreamRestoreTargetInvalid { .. } => "restore_target_invalid",
             CoreError::WorkstreamFolderNoThoughts => "folder_no_thoughts",
             CoreError::WorkstreamWorktreeMissing { .. } => "worktree_missing",
             CoreError::NotAGitRepo { .. } => "not_a_git_repo",

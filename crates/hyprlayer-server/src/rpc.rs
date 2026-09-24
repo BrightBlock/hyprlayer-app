@@ -43,7 +43,9 @@ use hyprlayer_core::runtime::sessions::ActiveSession;
 use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
 };
-use hyprlayer_core::runtime::workstreams::{ArchiveCleanupReport, ProjectMemory, WorkstreamBases};
+use hyprlayer_core::runtime::workstreams::{
+    ArchiveCleanupReport, ArchiveInfo, ProjectMemory, WorkstreamBases,
+};
 use hyprlayer_core::settings::AppSettings;
 use hyprlayer_core::skills::{AgentSkill, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
@@ -70,6 +72,7 @@ pub struct ArchivedWorkstreamView {
     pub item: Workstream,
     pub archive_path: String,
     pub archive_exists: bool,
+    pub info: ArchiveInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,9 +161,12 @@ hyprlayer_proto::commands! {
     SaveProjectMemoryFile: save_project_memory_file(id: String, name: String, content: String, base_mtime_ms: f64) -> ();
     ArchiveWorkstream: archive_workstream(id: String, skip_scripts: bool) -> ();
     ListArchivedWorkstreams: list_archived_workstreams() -> Vec<ArchivedWorkstreamView>;
-    RestoreWorkstream: restore_workstream(id: String) -> WorkstreamView;
+    RestoreWorkstream: restore_workstream(id: String, target: Option<String>) -> WorkstreamView;
     DeleteArchivedWorkstream: delete_archived_workstream(id: String) -> ();
     CleanupArchivedWorkstreams: cleanup_archived_workstreams(before_ms: Option<f64>) -> ArchiveCleanupReport;
+    RefreshArchivedWorkstreams: refresh_archived_workstreams() -> u32;
+    KeepArchivedWorkstream: keep_archived_workstream(id: String) -> ();
+    PurgeArchivedWorkstreams: purge_archived_workstreams(ids: Vec<String>) -> ArchiveCleanupReport;
     ReprovisionWorkstream: reprovision_workstream(id: String) -> WorkstreamView;
     WorktreeGitStatus: worktree_git_status(id: String) -> WorktreeGitStatus;
     WorkstreamPromptContext: workstream_prompt_context(id: String) -> PromptContext;

@@ -1,5 +1,5 @@
 import { lazy } from "react";
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
 
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
@@ -8,7 +8,6 @@ import { RouteError } from "./components/RouteError";
 import { registerAppNav } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
 
-const Archive = lazy(() => import("./routes/Archive").then((m) => ({ default: m.Archive })));
 const Onboarding = lazy(() =>
   import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
 );
@@ -57,10 +56,13 @@ const settingsRoute = createRoute({
   }),
 });
 
+// The archive is a header popover now; a persisted last route may still say /archive.
 const archiveRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/archive",
-  component: Archive,
+  beforeLoad: () => {
+    throw redirect({ to: "/" });
+  },
 });
 
 export type PromptsSearch = {

@@ -53,9 +53,11 @@ export const commands = {
 	saveProjectMemoryFile: (id: string, name: string, content: string, baseMtimeMs: number | null) => typedError<null, AppError>(__TAURI_INVOKE("save_project_memory_file", { id, name, content, baseMtimeMs })),
 	archiveWorkstream: (id: string, skipScripts: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, skipScripts })),
 	listArchivedWorkstreams: () => typedError<ArchivedWorkstreamView[], AppError>(__TAURI_INVOKE("list_archived_workstreams")),
-	restoreWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("restore_workstream", { id })),
+	restoreWorkstream: (id: string, target: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("restore_workstream", { id, target })),
 	deleteArchivedWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_archived_workstream", { id })),
-	cleanupArchivedWorkstreams: (beforeMs: number | null) => typedError<ArchiveCleanupReport, AppError>(__TAURI_INVOKE("cleanup_archived_workstreams", { beforeMs })),
+	refreshArchivedWorkstreams: () => typedError<number, AppError>(__TAURI_INVOKE("refresh_archived_workstreams")),
+	keepArchivedWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("keep_archived_workstream", { id })),
+	purgeArchivedWorkstreams: (ids: string[]) => typedError<ArchiveCleanupReport, AppError>(__TAURI_INVOKE("purge_archived_workstreams", { ids })),
 	reprovisionWorkstream: (id: string) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("reprovision_workstream", { id })),
 	worktreeGitStatus: (id: string) => typedError<WorktreeGitStatus, AppError>(__TAURI_INVOKE("worktree_git_status", { id })),
 	workstreamPromptContext: (id: string) => typedError<PromptContext, AppError>(__TAURI_INVOKE("workstream_prompt_context", { id })),
@@ -451,10 +453,25 @@ export type ArchiveCleanupReport = {
 	failed: number,
 };
 
+export type ArchiveInfo = {
+	/**  By the server's clock, so the countdown and the sweep agree. */
+	purgeInMs: number | null,
+	kept: boolean,
+	sizeBytes: number | null,
+	uncommitted: number | null,
+	unpushed: number | null,
+	/**  Whether deleting it also deletes its branch. */
+	deletesBranch: boolean,
+	pr: ArchivedPr,
+};
+
+export type ArchivedPr = { state: "unknown" } | { state: "none" } | { state: "open"; number: number } | { state: "merged"; number: number } | { state: "closed"; number: number };
+
 export type ArchivedWorkstreamView = {
 	item: Workstream,
 	archivePath: string,
 	archiveExists: boolean,
+	info: ArchiveInfo,
 };
 
 export type Area = { kind: "user"; name: string } | { kind: "shared" } | { kind: "other" };

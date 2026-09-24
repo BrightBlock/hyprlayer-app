@@ -54,7 +54,7 @@ export function ConfirmQuitDialog() {
       confirmVariant="danger"
       onConfirm={quit}
       busy={quitting}
-      autoFocusConfirm
+      autoFocus="confirm"
       error={error}
       onDismissError={() => setError(null)}
     >

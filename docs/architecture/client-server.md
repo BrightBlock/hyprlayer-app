@@ -166,7 +166,7 @@ proto.
 externally tagged so a large body deserializes straight into its type rather
 than through serde's buffered `Content`.
 
-The 153 plain commands are one table — `crates/hyprlayer-server/src/rpc.rs` —
+The 159 plain commands are one table — `crates/hyprlayer-server/src/rpc.rs` —
 expanded by `hyprlayer_proto::commands!` into three things at once: the
 `Request`/`Response` enums, the server's `Dispatch` trait, and the typed methods
 on `RpcClient`. Adding a command is one line in that table plus its `Dispatch`
@@ -524,7 +524,7 @@ name.
 | Concern | File |
 |---|---|
 | Frame codec, control frames, handshake, `WireError` | `crates/hyprlayer-proto/src/{frame.rs,lib.rs}` |
-| The 153-command table | `crates/hyprlayer-server/src/rpc.rs` |
+| The 159-command table | `crates/hyprlayer-server/src/rpc.rs` |
 | One arm per command | `crates/hyprlayer-server/src/dispatch.rs` |
 | The 11 streaming commands | `crates/hyprlayer-server/src/streams.rs` |
 | Accept loop, connection tasks, handshake | `crates/hyprlayer-server/src/lib.rs` |

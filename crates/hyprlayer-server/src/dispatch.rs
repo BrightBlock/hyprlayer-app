@@ -62,7 +62,7 @@ use hyprlayer_core::settings::AppSettings;
 use hyprlayer_core::skills::{self, AgentSkill, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
-use hyprlayer_core::worktree::{self, archive_dir_for, PullOutcome};
+use hyprlayer_core::worktree::{self, PullOutcome};
 use hyprlayer_core::{
     CoreError, HyprlayerRuntime, ProjectSource, ScriptKind, Session, SessionLogEntry, Stage,
     Workstream, WorkstreamDoc, WorktreeMode,
@@ -844,29 +844,35 @@ impl Dispatch for Server {
     }
 
     async fn list_archived_workstreams(&self) -> Result<Vec<ArchivedWorkstreamView>, WireError> {
-        let items = self.runtime.workstreams().list_archived().await.wire()?;
-        blocking("list_archived", move || {
-            items
-                .into_iter()
-                .map(|item| {
-                    let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
-                    let archive_exists = item.shares_project_dir() || archive_path.exists();
-                    ArchivedWorkstreamView {
-                        archive_path: archive_path.display().to_string(),
-                        archive_exists,
-                        item,
-                    }
-                })
-                .collect::<Vec<_>>()
-        })
-        .await
+        let items = self
+            .runtime
+            .workstreams()
+            .list_archived_details()
+            .await
+            .wire()?;
+        Ok(items
+            .into_iter()
+            .map(|a| ArchivedWorkstreamView {
+                item: a.item,
+                archive_path: a.archive_path,
+                archive_exists: a.archive_exists,
+                info: a.info,
+            })
+            .collect())
     }
 
-    async fn restore_workstream(&self, id: String) -> Result<WorkstreamView, WireError> {
+    async fn restore_workstream(
+        &self,
+        id: String,
+        target: Option<String>,
+    ) -> Result<WorkstreamView, WireError> {
         let result = self
             .runtime
             .workstreams()
-            .restore(RestoreWorkstreamRequest { id })
+            .restore(RestoreWorkstreamRequest {
+                id,
+                target: target.map(PathBuf::from),
+            })
             .await
             .wire()?;
         blocking("restore_workstream_status", move || {
@@ -892,6 +898,21 @@ impl Dispatch for Server {
             .cleanup_archived(CleanupArchivedRequest { before_ms })
             .await
             .wire()
+    }
+
+    async fn refresh_archived_workstreams(&self) -> Result<u32, WireError> {
+        self.runtime.workstreams().refresh_archived().await.wire()
+    }
+
+    async fn keep_archived_workstream(&self, id: String) -> Result<(), WireError> {
+        self.runtime.workstreams().keep_archived(&id).await.wire()
+    }
+
+    async fn purge_archived_workstreams(
+        &self,
+        ids: Vec<String>,
+    ) -> Result<ArchiveCleanupReport, WireError> {
+        self.runtime.workstreams().purge_archived(ids).await.wire()
     }
 
     async fn reprovision_workstream(&self, id: String) -> Result<WorkstreamView, WireError> {

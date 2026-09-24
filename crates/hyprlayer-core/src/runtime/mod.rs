@@ -53,6 +53,7 @@ use terminal_registry::TerminalRegistry;
 
 const EVENT_CAP: usize = 256;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const ARCHIVE_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PROVIDER_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct RuntimeOptions {
@@ -283,10 +284,36 @@ impl HyprlayerRuntime {
             env_overlay: self.environment.env_overlay.clone(),
         });
 
+        // A `Weak` for the same reason as startup; a stop mid-sweep drops it
+        // between steps, and the next sweep finishes whatever was left.
+        let sweeper = Arc::downgrade(self);
+        let sweep_task = TrackedTask::spawn(move |stop| async move {
+            loop {
+                {
+                    let Some(runtime) = sweeper.upgrade() else {
+                        return;
+                    };
+                    let workstreams = runtime.workstreams();
+                    tokio::select! {
+                        swept = workstreams.sweep_expired_archives() => {
+                            if let Err(e) = swept {
+                                tracing::warn!("archive sweep failed: {e}");
+                            }
+                        }
+                        _ = stop.notified() => return,
+                    }
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(ARCHIVE_SWEEP_INTERVAL) => {}
+                    _ = stop.notified() => return,
+                }
+            }
+        });
+
         self.tasks
             .lock()
             .await
-            .extend([startup_task, config_task, pr_watcher_task]);
+            .extend([startup_task, config_task, pr_watcher_task, sweep_task]);
 
         Ok(())
     }

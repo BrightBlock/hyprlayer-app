@@ -172,10 +172,10 @@ database, and clears orphan PIDs left by a prior run. It starts no background
 work.
 
 `start` is one-shot: a second call returns `CoreError::RuntimeAlreadyStarted`,
-and a call after shutdown returns `CoreError::RuntimeStopped`. It spawns three
+and a call after shutdown returns `CoreError::RuntimeStopped`. It spawns four
 tracked tasks — a startup task (login-shell PATH enrichment, config migration
-if needed, thoughts index rescan), the config-file poll loop, and the PR
-watcher. Service methods check the same state: calling one on a stopped runtime
+if needed, thoughts index rescan), the config-file poll loop, the PR watcher,
+and the hourly archive sweep. Service methods check the same state: calling one on a stopped runtime
 returns `CoreError::RuntimeStopped`.
 
 `shutdown` is idempotent and safe to call concurrently. Exactly one caller runs
@@ -352,6 +352,8 @@ decision resolves them.
 ### `WorkstreamService`
 
 `find(&str)`, `list(ListWorkstreamsRequest)`, `list_all()`, `list_archived()`,
+`list_archived_details()`, `refresh_archived()`, `keep_archived(&str)`,
+`purge_archived(Vec<String>)`, `sweep_expired_archives()`,
 `documents(WorkstreamDocumentsRequest)`, `attach_doc(&str, &str, role: &str)`,
 `detach_doc(&str, &str)`, `set_base_branch(&str, &str)`,
 `set_pr(&str, Option<u32>)`, `adopt_head_branches(Vec<HeadBranchObservation>)`,
@@ -366,6 +368,18 @@ decision resolves them.
 `find` returns `CoreError::WorkstreamNotFound` rather than `Ok(None)` — unlike
 `ProjectService::find`. Create/archive/restore/purge run under a per-project
 lock and roll back on failure.
+
+Archives are purged 30 days after archiving unless kept (`workstream_archives`).
+A rebuilt record is never due sooner than seven days out, the length of the
+client's warning. `list_archived_details` reads only the database: sizes and
+dirty/unpushed counts are scanned once at archive time, and `refresh_archived`
+scans what never was and asks `gh` about unknown or open PRs, each at most every
+15 minutes. The sweep purges like `purge` but never deletes a remote branch and
+deletes the local one only with `git branch -d`, so it can lose uncommitted
+files, never commits. `restore` with a `target` rewrites the workstream's path
+and its sessions' `cwd` in the unarchive transaction, then copies each Claude
+transcript to the new path's project key for `--resume`. The `archive_retention`
+E2E scenario is their headless test.
 
 `project_memory` resolves the workstream's project to Claude Code's auto-memory
 directory. That is `claude_config_dir/projects/<key>/memory`, or an

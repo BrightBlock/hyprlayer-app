@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatBytes,
   formatCompactAge,
   formatCompactCount,
   formatRelativeTime,
@@ -103,5 +104,30 @@ describe("formatTokens", () => {
     expect(formatTokens(24130)).toBe("24.1k");
     expect(formatTokens(269_500)).toBe("269.5k");
     expect(formatTokens(1_000_000)).toBe("1.0M");
+  });
+});
+
+describe("formatBytes", () => {
+  it("reads whole megabytes below a gigabyte", () => {
+    expect(formatBytes(212e6)).toBe("212 MB");
+    expect(formatBytes(999.4e6)).toBe("999 MB");
+  });
+
+  it("moves to gigabytes, one decimal, once megabytes would round to 1000", () => {
+    expect(formatBytes(999.6e6)).toBe("1.0 GB");
+    expect(formatBytes(1e9)).toBe("1.0 GB");
+    expect(formatBytes(1.4e9)).toBe("1.4 GB");
+    expect(formatBytes(12.34e9)).toBe("12.3 GB");
+  });
+
+  it("uses decimal units, as Finder does", () => {
+    expect(formatBytes(1_000_000)).toBe("1 MB");
+    expect(formatBytes(1_048_576)).toBe("1 MB");
+  });
+
+  it("covers the small end", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(1_500)).toBe("2 KB");
   });
 });

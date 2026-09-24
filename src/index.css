@@ -76,6 +76,9 @@
   --color-bad-ink: var(--color-bad);
   --color-diff-add: var(--color-ok);
   --color-diff-del: var(--color-bad);
+  /* Archived worktrees: the purge-warning tag and the destructive row action. */
+  --color-tag-purge-bg: color-mix(in srgb, var(--color-warn) 22%, var(--color-panel));
+  --color-destructive-border: color-mix(in srgb, var(--color-bad) 30%, var(--color-panel));
 
   --color-ship: #34d399;
   --color-commit: #2dd4bf;
@@ -156,6 +159,8 @@ html.light {
   --color-bad-ink: #b80020;
   --color-diff-add: #2c6f10;
   --color-diff-del: #c4001f;
+  --color-tag-purge-bg: #ffe9b0;
+  --color-destructive-border: #f0cdc7;
   /* The base aliases magenta to accent, which is ink here. */
   --color-ansi-magenta: #c25e3d;
 

@@ -567,6 +567,7 @@ async fn restore_failure_leaves_the_row_archived() {
         .workstreams()
         .restore(RestoreWorkstreamRequest {
             id: created.item.id.clone(),
+            target: None,
         })
         .await;
     match result {

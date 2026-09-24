@@ -51,6 +51,7 @@ import {
   drawerWidth,
   NAV_RAIL_WIDTH,
   projectSidebarWidth,
+  PROJECT_SIDEBAR_DEFAULT,
   PROJECT_SIDEBAR_MAX,
   PROJECT_SIDEBAR_MIN,
 } from "@/lib/layout";
@@ -101,6 +102,8 @@ import {
   WarningTriangleIcon,
   ZapIcon,
 } from "@/components/icons";
+import { ArchivedWorktreesButton } from "@/features/archive/ArchivedWorktreesButton";
+import { closeArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { useMultiplexer } from "@/features/multiplexer/engines";
 import { commands, type EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
@@ -290,26 +293,6 @@ function MainCheckoutIcon() {
   );
 }
 
-function ArchiveIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="3" y="4" width="18" height="4" rx="1" />
-      <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" />
-      <path d="M10 12h4" />
-    </svg>
-  );
-}
-
 function SquareIcon({ size = 16 }: { size?: number }) {
   return (
     <svg
@@ -392,7 +375,6 @@ function routeSection(pathname: string): string {
   if (pathname.startsWith("/prompts")) return "Prompt Library";
   if (pathname.startsWith("/agents")) return "Agents";
   if (pathname.startsWith("/settings")) return "Settings";
-  if (pathname.startsWith("/archive")) return "Archive";
   if (pathname.startsWith("/onboarding")) return "Setup";
   if (pathname === "/") return "Home";
   return "Workspace";
@@ -601,7 +583,7 @@ export function Root() {
     prevNarrowRef.current = narrow;
     prevCompactRef.current = compact;
   }, [narrow, compact, setNarrowDrawer]);
-  const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_MAX);
+  const [sidebarWidth, setSidebarWidth] = useState(PROJECT_SIDEBAR_DEFAULT);
 
   const projects = useMemo(
     () => bootstrap.data?.projects ?? [],
@@ -617,7 +599,6 @@ export function Root() {
   const onPrompts = pathname.startsWith("/prompts");
   const onSettings = pathname.startsWith("/settings");
   const onAgents = pathname.startsWith("/agents");
-  const onArchive = pathname.startsWith("/archive");
   const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
@@ -729,7 +710,7 @@ export function Root() {
     else fallback();
   };
   const toggleNav = (
-    target: "/library" | "/archive" | "/prompts" | "/agents",
+    target: "/library" | "/prompts" | "/agents",
   ) => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
@@ -944,10 +925,12 @@ export function Root() {
   );
   useCommand("search.open", () => {
     closeSettingsPopover();
+    closeArchivedWorktrees();
     toggleSearch();
   });
   useCommand("prompts.palette", () => {
     closeSettingsPopover();
+    closeArchivedWorktrees();
     togglePromptPalette();
   });
   usePromptHotkeys(activeWorkstream ?? null);
@@ -1157,16 +1140,7 @@ export function Root() {
                   className="px-1"
                 />
               )}
-            <button
-              type="button"
-              onClick={() => toggleNav("/archive")}
-              className={cx(topIconClass, onArchive && "bg-edge/60 text-ink")}
-              title="Archived workstreams"
-              aria-label="Archived workstreams"
-              aria-pressed={onArchive}
-            >
-              <ArchiveIcon size={HEADER_GLYPH} />
-            </button>
+            <ArchivedWorktreesButton />
             {currentProject && (
               <>
                 <OpenInMenu

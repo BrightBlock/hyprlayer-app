@@ -81,6 +81,21 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE projects ADD COLUMN position REAL NOT NULL DEFAULT 0;
     ",
+    "
+    CREATE TABLE workstream_archives (
+        workstream_id  TEXT PRIMARY KEY REFERENCES workstreams(id) ON DELETE CASCADE,
+        archived_at    REAL NOT NULL,
+        purge_after    REAL NOT NULL,
+        kept_at        REAL,
+        size_bytes     REAL,
+        uncommitted    INTEGER,
+        unpushed       INTEGER,
+        scanned_at     REAL,
+        pr_number      INTEGER,
+        pr_state       TEXT,
+        pr_checked_at  REAL
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

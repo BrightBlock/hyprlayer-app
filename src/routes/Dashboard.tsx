@@ -5,6 +5,7 @@ import { Button, PageError } from "@/components/ui";
 import { PlusIcon } from "@/components/icons";
 import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "@/lib/queries";
 import type { Project, WorkstreamView } from "@/lib/bindings";
+import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { AddProjectDialog } from "@/features/projects/AddProjectDialog";
 import { DiscoverDialog } from "@/features/dashboard/DiscoverDialog";
 import { buildGraph } from "@/features/dashboard/graph";
@@ -101,7 +102,7 @@ export function Dashboard() {
       at: view.item.archivedAt ?? view.item.updatedAt ?? 0,
       view,
       project: projectName(view.item.projectPath),
-      merged: view.item.prNumber !== null,
+      merged: view.info.pr.state === "merged",
     }));
     return [...active, ...gone].sort((a, b) => b.at - a.at).slice(0, RECENT_LIMIT);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -332,7 +333,7 @@ export function Dashboard() {
               rows={recentRows}
               now={now}
               onOpenActive={(view) => openWorkstream(view)}
-              onOpenArchive={() => void navigate({ to: "/archive" })}
+              onOpenArchive={openArchivedWorktrees}
             />
           </div>
         )}

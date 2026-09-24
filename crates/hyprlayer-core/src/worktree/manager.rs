@@ -90,6 +90,45 @@ pub enum RemovePolicy {
     ForceDiscard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchCleanup {
+    Keep,
+    /// `git branch -d`, which refuses a branch whose commits exist nowhere else.
+    SafeLocal,
+    /// `git branch -D` and the remote branch.
+    Force,
+}
+
+/// What an archived worktree holds; `None` where it could not be read.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ArchiveScan {
+    pub size_bytes: Option<f64>,
+    pub uncommitted: Option<u32>,
+    pub unpushed: Option<u32>,
+}
+
+/// Symlinks are not followed, so the thoughts links never count.
+pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
+    if !dir.is_dir() {
+        return ArchiveScan::default();
+    }
+    let size: u64 = walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|meta| meta.len())
+        .sum();
+    let git = is_live_worktree(dir)
+        .then(|| status(dir, base_branch, None))
+        .filter(|s| s.exists);
+    ArchiveScan {
+        size_bytes: Some(size as f64),
+        uncommitted: git.as_ref().map(|s| s.dirty + s.untracked),
+        unpushed: git.as_ref().map(|s| s.ahead),
+    }
+}
+
 pub struct WorktreeManager {
     root: PathBuf,
     env_overlay: Arc<RwLock<BTreeMap<String, String>>>,
@@ -431,7 +470,7 @@ impl WorktreeManager {
         project_repo: &Path,
         archive: &Path,
         branch: &str,
-        delete_branch: bool,
+        cleanup: BranchCleanup,
     ) -> Result<()> {
         let overlay = self.overlay_pairs();
         // Each step is best effort; the log is the only record of what was left.
@@ -446,13 +485,18 @@ impl WorktreeManager {
         {
             tracing::warn!("worktree prune in {} failed: {e}", project_repo.display());
         }
-        if delete_branch {
-            if let Err(e) = git_in(git, project_repo, &["branch", "-D", branch], &overlay)
-                .run()
-                .await
-            {
-                tracing::warn!("purge kept local branch {branch}: {e}");
-            }
+        let flag = match cleanup {
+            BranchCleanup::Keep => return Ok(()),
+            BranchCleanup::SafeLocal => "-d",
+            BranchCleanup::Force => "-D",
+        };
+        if let Err(e) = git_in(git, project_repo, &["branch", flag, branch], &overlay)
+            .run()
+            .await
+        {
+            tracing::warn!("purge kept local branch {branch}: {e}");
+        }
+        if cleanup == BranchCleanup::Force {
             if let Err(e) = delete_remote_branch(git, project_repo, branch, &overlay).await {
                 tracing::warn!("purge kept remote branch {branch}: {e}");
             }

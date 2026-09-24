@@ -223,6 +223,15 @@ function archivedRow(id: string, title: string, branch: string): ArchivedWorkstr
     },
     archivePath: "/repo/archived-contexts/x",
     archiveExists: true,
+    info: {
+      purgeInMs: 30 * 86_400_000,
+      kept: false,
+      sizeBytes: null,
+      uncommitted: null,
+      unpushed: null,
+      deletesBranch: false,
+      pr: { state: "unknown" },
+    },
   };
 }
 
@@ -242,7 +251,7 @@ describe("CreateWorkstreamDialog checkout-dirty recovery", () => {
 
     expect(screen.getByText("Agent work")).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Unarchive" }));
-    expect(restoreMutate).toHaveBeenCalledWith("newest", expect.anything());
+    expect(restoreMutate).toHaveBeenCalledWith({ id: "newest" }, expect.anything());
   });
 
   it("offers discard alone when no archived row claims the branch", () => {

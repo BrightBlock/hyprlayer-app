@@ -617,7 +617,8 @@ type ConfirmDialogProps = {
   extraActions?: ReactNode;
   cancelLabel?: string;
   size?: keyof typeof DIALOG_SIZE;
-  autoFocusConfirm?: boolean;
+  /** Which button takes focus on open, so Enter acts on it. */
+  autoFocus?: "confirm" | "cancel";
 };
 
 export function ConfirmDialog({
@@ -634,15 +635,15 @@ export function ConfirmDialog({
   extraActions,
   cancelLabel = "Cancel",
   size,
-  autoFocusConfirm = false,
+  autoFocus,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onClose={onClose} title={title} size={size}>
+    <Dialog open={open} onClose={onClose} title={title} size={size} ariaLabel={title}>
       <div className="space-y-3">
         {children}
         {error != null && <ErrorNote error={error} onDismiss={onDismissError} />}
         <div className="flex justify-end gap-2">
-          <Button type="button" onClick={onClose} disabled={busy}>
+          <Button type="button" onClick={onClose} disabled={busy} autoFocus={autoFocus === "cancel"}>
             {cancelLabel}
           </Button>
           {extraActions}
@@ -650,7 +651,7 @@ export function ConfirmDialog({
             type="button"
             variant={confirmVariant}
             busy={busy}
-            autoFocus={autoFocusConfirm}
+            autoFocus={autoFocus === "confirm"}
             onClick={onConfirm}
           >
             {confirmLabel}

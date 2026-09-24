@@ -358,7 +358,7 @@ export function CreateWorkstreamDialog({
               leftBehind={leftBehind}
               busy={recovering}
               onUnarchive={(id) =>
-                restore.mutate(id, {
+                restore.mutate({ id }, {
                   onSuccess: (view) => {
                     reset();
                     onClose();

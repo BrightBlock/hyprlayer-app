@@ -268,7 +268,7 @@ describe("ConfirmDialog", () => {
     expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Archive" }));
   });
 
-  it("focuses the confirm button under autoFocusConfirm, so Enter commits", () => {
+  it("focuses the confirm button under autoFocus=\"confirm\", so Enter commits", () => {
     render(
       <ConfirmDialog
         open
@@ -276,7 +276,7 @@ describe("ConfirmDialog", () => {
         title="Quit Hyprlayer?"
         confirmLabel="Quit"
         onConfirm={vi.fn()}
-        autoFocusConfirm
+        autoFocus="confirm"
       >
         Body
       </ConfirmDialog>,
@@ -567,6 +567,28 @@ describe("Popover focus trap", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "First" }));
     rerender(<TrapHarness open={false} onClose={vi.fn()} />);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Gear" }));
+  });
+
+  it("leaves the anchor unfocused after a pointer closes it, so no focus ring lands there", () => {
+    const { rerender } = render(<TrapHarness open={false} onClose={vi.fn()} />);
+    const gear = screen.getByRole("button", { name: "Gear" });
+    gear.focus();
+    rerender(<TrapHarness open onClose={vi.fn()} />);
+    fireEvent.pointerDown(document.body);
+    rerender(<TrapHarness open={false} onClose={vi.fn()} />);
+    expect(document.activeElement).not.toBe(gear);
+  });
+
+  it("still returns focus when a key comes after the pointer", () => {
+    const { rerender } = render(<TrapHarness open={false} onClose={vi.fn()} />);
+    const gear = screen.getByRole("button", { name: "Gear" });
+    gear.focus();
+    rerender(<TrapHarness open onClose={vi.fn()} />);
+    const first = screen.getByRole("button", { name: "First" });
+    fireEvent.pointerDown(first);
+    fireEvent.keyDown(first, { key: "Escape" });
+    rerender(<TrapHarness open={false} onClose={vi.fn()} />);
+    expect(document.activeElement).toBe(gear);
   });
 
   it("is a labelled modal dialog only when trapping", () => {

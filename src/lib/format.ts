@@ -60,3 +60,22 @@ export function formatTokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
 }
+
+const BYTE_UNITS = [
+  { size: 1e12, suffix: "TB", digits: 1 },
+  { size: 1e9, suffix: "GB", digits: 1 },
+  { size: 1e6, suffix: "MB", digits: 0 },
+  { size: 1e3, suffix: "KB", digits: 0 },
+];
+
+// Decimal units, as Finder reports sizes. A value that would round to 1000 of
+// one unit is shown as the next ("1.0 GB", never "1000 MB").
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 1e3) return `${Math.max(0, Math.round(bytes || 0))} B`;
+  const at = BYTE_UNITS.findIndex((u) => bytes >= u.size);
+  const unit =
+    at > 0 && Number((bytes / BYTE_UNITS[at].size).toFixed(BYTE_UNITS[at].digits)) >= 1000
+      ? BYTE_UNITS[at - 1]
+      : BYTE_UNITS[at];
+  return `${(bytes / unit.size).toFixed(unit.digits)} ${unit.suffix}`;
+}

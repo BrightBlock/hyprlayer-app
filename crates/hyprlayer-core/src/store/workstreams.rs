@@ -3,6 +3,7 @@ use rusqlite::{params, Row};
 use super::{now_ms, Db};
 use crate::error::Result;
 use crate::pipeline::Stage;
+use crate::worktree::ArchiveScan;
 
 pub use hyprlayer_models::workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
 
@@ -40,6 +41,51 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
 
 const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_branch, \
                     worktree_mode, stage, status, pr_number, created_at, updated_at, archived_at";
+
+const DAY_MS: f64 = 86_400_000.0;
+/// An archive is purged this long after it was archived, unless kept.
+pub const ARCHIVE_RETENTION_MS: f64 = 30.0 * DAY_MS;
+/// The least notice any purge gets: the length of the "purges in" warning.
+pub const PURGE_WARNING_MS: f64 = 7.0 * DAY_MS;
+
+/// `pr_state` is `none`, `open`, `merged` or `closed`; NULL until a lookup succeeds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchiveRecord {
+    pub purge_after: f64,
+    pub kept_at: Option<f64>,
+    pub size_bytes: Option<f64>,
+    pub uncommitted: Option<u32>,
+    pub unpushed: Option<u32>,
+    pub scanned_at: Option<f64>,
+    pub pr_number: Option<u32>,
+    pub pr_state: Option<String>,
+    pub pr_checked_at: Option<f64>,
+}
+
+const RECORD_COLS: &str = "a.purge_after, a.kept_at, a.size_bytes, a.uncommitted, a.unpushed, \
+                           a.scanned_at, a.pr_number AS archive_pr_number, a.pr_state, \
+                           a.pr_checked_at";
+
+fn row_to_record(row: &Row<'_>) -> rusqlite::Result<ArchiveRecord> {
+    Ok(ArchiveRecord {
+        purge_after: row.get("purge_after")?,
+        kept_at: row.get("kept_at")?,
+        size_bytes: row.get("size_bytes")?,
+        uncommitted: row.get("uncommitted")?,
+        unpushed: row.get("unpushed")?,
+        scanned_at: row.get("scanned_at")?,
+        pr_number: row.get("archive_pr_number")?,
+        pr_state: row.get("pr_state")?,
+        pr_checked_at: row.get("pr_checked_at")?,
+    })
+}
+
+fn qualified_cols() -> String {
+    COLS.split(", ")
+        .map(|col| format!("w.{col}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
 
 impl Db {
     pub fn insert_workstream(&self, new: NewWorkstream) -> Result<Workstream> {
@@ -186,24 +232,177 @@ impl Db {
         })
     }
 
+    /// Starts a fresh retention record: anything kept or cached from an earlier
+    /// archive of the same row is reset.
     pub fn archive_workstream(&self, id: &str) -> Result<()> {
+        let now = now_ms();
         self.with(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
                 "UPDATE workstreams SET status = 'archived', archived_at = ?2, updated_at = ?2
                  WHERE id = ?1",
+                params![id, now],
+            )?;
+            tx.execute(
+                "INSERT INTO workstream_archives (workstream_id, archived_at, purge_after)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(workstream_id) DO UPDATE SET
+                    archived_at = excluded.archived_at, purge_after = excluded.purge_after,
+                    kept_at = NULL, size_bytes = NULL, uncommitted = NULL, unpushed = NULL,
+                    scanned_at = NULL, pr_number = NULL, pr_state = NULL, pr_checked_at = NULL",
+                params![id, now, now + ARCHIVE_RETENTION_MS],
+            )?;
+            tx.commit()
+        })
+    }
+
+    pub fn unarchive_workstream(&self, id: &str) -> Result<()> {
+        self.unarchive_workstream_at(id, None)
+    }
+
+    /// `relocate` is `(from, to)`: the worktree moved, so its path and the cwd of
+    /// every session that ran there move with it.
+    pub fn unarchive_workstream_at(&self, id: &str, relocate: Option<(&str, &str)>) -> Result<()> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "UPDATE workstreams SET status = 'active', archived_at = NULL, updated_at = ?2
+                 WHERE id = ?1",
                 params![id, now_ms()],
+            )?;
+            if let Some((from, to)) = relocate {
+                tx.execute(
+                    "UPDATE workstreams SET worktree_path = ?2 WHERE id = ?1",
+                    params![id, to],
+                )?;
+                tx.execute(
+                    "UPDATE sessions SET cwd = ?3 WHERE workstream_id = ?1 AND cwd = ?2",
+                    params![id, from, to],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM workstream_archives WHERE workstream_id = ?1",
+                params![id],
+            )?;
+            tx.commit()
+        })
+    }
+
+    /// Drops records whose row is no longer that archive (an older server
+    /// restored or re-archived it) and creates missing ones. A rebuilt deadline
+    /// is never nearer than the warning period.
+    pub fn ensure_archive_records(&self, now: f64) -> Result<()> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM workstream_archives WHERE NOT EXISTS (
+                    SELECT 1 FROM workstreams w
+                    WHERE w.id = workstream_archives.workstream_id AND w.status = 'archived'
+                      AND COALESCE(w.archived_at, w.updated_at) = workstream_archives.archived_at)",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO workstream_archives (workstream_id, archived_at, purge_after)
+                 SELECT w.id, COALESCE(w.archived_at, w.updated_at),
+                        MAX(COALESCE(w.archived_at, w.updated_at) + ?1, ?2 + ?3)
+                 FROM workstreams w
+                 WHERE w.status = 'archived' AND NOT EXISTS (
+                    SELECT 1 FROM workstream_archives a WHERE a.workstream_id = w.id)",
+                params![ARCHIVE_RETENTION_MS, now, PURGE_WARNING_MS],
+            )?;
+            tx.commit()
+        })
+    }
+
+    pub fn archived_with_records(&self) -> Result<Vec<(Workstream, ArchiveRecord)>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {}, {RECORD_COLS} FROM workstreams w
+                 JOIN workstream_archives a ON a.workstream_id = w.id
+                 WHERE w.status = 'archived'
+                 ORDER BY w.archived_at DESC, w.created_at DESC",
+                qualified_cols()
+            ))?;
+            let rows = stmt.query_map([], |row| Ok((row_to_item(row)?, row_to_record(row)?)))?;
+            rows.collect()
+        })
+    }
+
+    pub fn archive_record(&self, id: &str) -> Result<Option<ArchiveRecord>> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!(
+                    "SELECT {RECORD_COLS} FROM workstream_archives a WHERE a.workstream_id = ?1"
+                ),
+                params![id],
+                row_to_record,
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+        })
+    }
+
+    pub fn due_archive_ids(&self, now: f64) -> Result<Vec<String>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT a.workstream_id FROM workstream_archives a
+                 JOIN workstreams w ON w.id = a.workstream_id
+                 WHERE w.status = 'archived' AND a.kept_at IS NULL AND a.purge_after <= ?1
+                 ORDER BY a.purge_after",
+            )?;
+            let rows = stmt.query_map(params![now], |row| row.get(0))?;
+            rows.collect()
+        })
+    }
+
+    /// Returns whether the archive was newly kept.
+    pub fn keep_archive(&self, id: &str, now: f64) -> Result<bool> {
+        self.with(|conn| {
+            let changed = conn.execute(
+                "UPDATE workstream_archives SET kept_at = ?2
+                 WHERE workstream_id = ?1 AND kept_at IS NULL",
+                params![id, now],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    pub fn cache_archive_scan(&self, id: &str, scan: &ArchiveScan, now: f64) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE workstream_archives
+                 SET size_bytes = ?2, uncommitted = ?3, unpushed = ?4, scanned_at = ?5
+                 WHERE workstream_id = ?1",
+                params![id, scan.size_bytes, scan.uncommitted, scan.unpushed, now],
             )?;
             Ok(())
         })
     }
 
-    pub fn unarchive_workstream(&self, id: &str) -> Result<()> {
+    /// `state` of `None` records a lookup that failed: only the time is kept, so
+    /// the next one waits out the backoff.
+    pub fn cache_archive_pr(
+        &self,
+        id: &str,
+        found: Option<(Option<u32>, &str)>,
+        now: f64,
+    ) -> Result<()> {
         self.with(|conn| {
-            conn.execute(
-                "UPDATE workstreams SET status = 'active', archived_at = NULL, updated_at = ?2
-                 WHERE id = ?1",
-                params![id, now_ms()],
-            )?;
+            match found {
+                Some((number, state)) => conn.execute(
+                    "UPDATE workstream_archives
+                     SET pr_number = ?2, pr_state = ?3, pr_checked_at = ?4
+                     WHERE workstream_id = ?1",
+                    params![id, number, state, now],
+                )?,
+                None => conn.execute(
+                    "UPDATE workstream_archives SET pr_checked_at = ?2 WHERE workstream_id = ?1",
+                    params![id, now],
+                )?,
+            };
             Ok(())
         })
     }

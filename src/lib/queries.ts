@@ -653,11 +653,37 @@ export function useArchiveWorkstream() {
   });
 }
 
+const ARCHIVED_KEY = ["workstreams", "@archived"];
+
 export function useArchivedWorkstreams(enabled = true) {
   return useQuery({
-    queryKey: ["workstreams", "@archived"],
+    queryKey: ARCHIVED_KEY,
     queryFn: () => unwrap(commands.listArchivedWorkstreams()),
     enabled,
+  });
+}
+
+/** Measures new archives and re-asks gh about PRs that could still change. */
+export function useRefreshArchivedWorkstreams() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.refreshArchivedWorkstreams()),
+    onSuccess: (changed) => {
+      if (changed > 0) void queryClient.invalidateQueries({ queryKey: ARCHIVED_KEY });
+    },
+  });
+}
+
+export function useKeepArchivedWorkstream() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.keepArchivedWorkstream(id)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ARCHIVED_KEY }),
+  });
+}
+
+export function usePurgeArchivedWorkstreams() {
+  return useMutation({
+    mutationFn: (ids: string[]) => unwrap(commands.purgeArchivedWorkstreams(ids)),
+    onSettled: () => invalidateWorkstreamLists(),
   });
 }
 
@@ -667,10 +693,12 @@ export function useDiscardProjectChanges(projectPath: string) {
   });
 }
 
+/** `target` restores somewhere other than the original path. */
 export function useRestoreWorkstream() {
   return useMutation({
-    mutationFn: (id: string) => unwrap(commands.restoreWorkstream(id)),
-    onSuccess: (_data, id) => invalidateWorkstream(id),
+    mutationFn: ({ id, target = null }: { id: string; target?: string | null }) =>
+      unwrap(commands.restoreWorkstream(id, target)),
+    onSuccess: (_data, { id }) => invalidateWorkstream(id),
   });
 }
 
@@ -688,13 +716,6 @@ export function useReprovisionWorkstream() {
   });
 }
 
-export function useCleanupArchivedWorkstreams() {
-  return useMutation({
-    mutationFn: (beforeMs: number | null) =>
-      unwrap(commands.cleanupArchivedWorkstreams(beforeMs)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workstreams"] }),
-  });
-}
 
 
 const PR_ERROR_RETRY_MS = 60_000;

@@ -2077,6 +2077,7 @@ dependencies = [
  "hyprlayer-core",
  "hyprlayer-proto",
  "hyprlayer-server",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

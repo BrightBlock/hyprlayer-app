@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use hyprlayer_models::RuntimeEvent;
 use serde::{Deserialize, Serialize};
@@ -17,10 +18,12 @@ use crate::repo_settings;
 use crate::runtime::script_registry::RunPhase;
 use crate::runtime::scripts::RunLifecycleRequest;
 use crate::scripts::ScriptKind;
-use crate::store::{NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
+use crate::store::{
+    now_ms, ArchiveRecord, NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+};
 use crate::worktree::seed::SeedReport;
 use crate::worktree::thoughts_links::{self, LinkStatus};
-use crate::worktree::{self, archive_dir_for, CreateMode, CreateSpec, RemovePolicy};
+use crate::worktree::{self, archive_dir_for, BranchCleanup, CreateMode, CreateSpec, RemovePolicy};
 
 use super::HyprlayerRuntime;
 
@@ -79,6 +82,9 @@ pub struct ArchiveWorkstreamRequest {
 
 pub struct RestoreWorkstreamRequest {
     pub id: String,
+    /// Elsewhere than the original path; an existing folder receives the
+    /// worktree under its slug.
+    pub target: Option<PathBuf>,
 }
 
 pub struct RestoreWorkstreamResult {
@@ -151,6 +157,62 @@ pub struct ProjectMemory {
     pub files: Vec<MemoryFile>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum ArchivedPr {
+    Unknown,
+    #[serde(rename = "none")]
+    NoPr,
+    Open {
+        number: u32,
+    },
+    Merged {
+        number: u32,
+    },
+    Closed {
+        number: u32,
+    },
+}
+
+impl ArchivedPr {
+    fn from_record(record: &ArchiveRecord) -> Self {
+        match (record.pr_state.as_deref(), record.pr_number) {
+            (Some("none"), _) => Self::NoPr,
+            (Some("open"), Some(number)) => Self::Open { number },
+            (Some("merged"), Some(number)) => Self::Merged { number },
+            (Some("closed"), Some(number)) => Self::Closed { number },
+            _ => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveInfo {
+    /// By the server's clock, so the countdown and the sweep agree.
+    pub purge_in_ms: f64,
+    pub kept: bool,
+    pub size_bytes: Option<f64>,
+    pub uncommitted: Option<u32>,
+    pub unpushed: Option<u32>,
+    /// Whether deleting it also deletes its branch.
+    pub deletes_branch: bool,
+    pub pr: ArchivedPr,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchivedWorkstream {
+    pub item: Workstream,
+    pub archive_path: String,
+    pub archive_exists: bool,
+    pub info: ArchiveInfo,
+}
+
+const PR_RECHECK_MS: f64 = 15.0 * 60_000.0;
+const PR_LOOKUPS_AT_ONCE: usize = 4;
+
 pub struct WorkstreamService<'a> {
     runtime: &'a HyprlayerRuntime,
 }
@@ -210,6 +272,126 @@ impl WorkstreamService<'_> {
         ensure_running(self.runtime)?;
         let db = self.runtime.db.clone();
         blocking(move || db.list_archived_workstreams()).await
+    }
+
+    pub async fn list_archived_details(&self) -> Result<Vec<ArchivedWorkstream>> {
+        ensure_running(self.runtime)?;
+        let delete_branch = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .git
+            .delete_branch_on_archive;
+        let db = self.runtime.db.clone();
+        blocking(move || {
+            let now = now_ms();
+            db.ensure_archive_records(now)?;
+            Ok(db
+                .archived_with_records()?
+                .into_iter()
+                .map(|(item, record)| archived_view(item, &record, now, delete_branch))
+                .collect())
+        })
+        .await
+    }
+
+    /// Measures archives not yet scanned and asks `gh` about PRs whose state
+    /// could still change. Returns how many rows changed.
+    pub async fn refresh_archived(&self) -> Result<u32> {
+        ensure_running(self.runtime)?;
+        let db = self.runtime.db.clone();
+        let rows = blocking(move || {
+            db.ensure_archive_records(now_ms())?;
+            db.archived_with_records()
+        })
+        .await?;
+        let mut changed = 0u32;
+
+        for (item, _) in rows
+            .iter()
+            .filter(|(item, record)| record.scanned_at.is_none() && !item.shares_project_dir())
+        {
+            let dir = archive_dir_for(Path::new(&item.project_path), &item.slug);
+            let base = item.base_branch.clone();
+            let id = item.id.clone();
+            let db = self.runtime.db.clone();
+            blocking(move || {
+                db.cache_archive_scan(&id, &worktree::scan_archive(&dir, &base), now_ms())
+            })
+            .await?;
+            changed += 1;
+        }
+
+        let now = now_ms();
+        let due: Vec<_> = rows
+            .into_iter()
+            .filter(|(item, record)| pr_lookup_due(item, record, now))
+            .collect();
+        if due.is_empty() {
+            return Ok(changed);
+        }
+        let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
+            return Ok(changed);
+        };
+        let overlay = self.runtime.environment.overlay_env();
+        let permits = Arc::new(tokio::sync::Semaphore::new(PR_LOOKUPS_AT_ONCE));
+        let mut lookups = tokio::task::JoinSet::new();
+        for (item, record) in due {
+            let (gh, overlay, permits) = (gh.clone(), overlay.clone(), permits.clone());
+            lookups.spawn(async move {
+                let _permit = permits.acquire_owned().await;
+                let found = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref(), &overlay).await;
+                (item.id, record, found)
+            });
+        }
+        while let Some(joined) = lookups.join_next().await {
+            let Ok((id, record, found)) = joined else {
+                continue;
+            };
+            let cached = match found {
+                Ok(Some(status)) => Some((Some(status.number), pr_state_name(&status.state))),
+                Ok(None) => Some((None, "none")),
+                Err(e) => {
+                    tracing::debug!("PR lookup for archived workstream {id} failed: {e}");
+                    None
+                }
+            };
+            if cached.is_some_and(|(number, state)| {
+                record.pr_number != number || record.pr_state.as_deref() != Some(state)
+            }) {
+                changed += 1;
+            }
+            let db = self.runtime.db.clone();
+            blocking(move || db.cache_archive_pr(&id, cached, now_ms())).await?;
+        }
+        Ok(changed)
+    }
+
+    /// Exempts an archive from the sweep until it is deleted.
+    pub async fn keep_archived(&self, id: &str) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let peek = self.find(id).await?;
+        let _guard = self
+            .runtime
+            .workstream_locks
+            .lock_pair(&peek.project_path, id)
+            .await;
+        let item = self.find(id).await?;
+        if item.status != WorkstreamStatus::Archived {
+            return Err(CoreError::WorkstreamNotArchived {
+                title: item.title,
+                actionable: false,
+            });
+        }
+        let db = self.runtime.db.clone();
+        let owned = id.to_string();
+        blocking(move || {
+            let now = now_ms();
+            db.ensure_archive_records(now)?;
+            db.keep_archive(&owned, now).map(|_| ())
+        })
+        .await
     }
 
     pub async fn documents(&self, req: WorkstreamDocumentsRequest) -> Result<Vec<WorkstreamDoc>> {
@@ -1145,9 +1327,20 @@ impl WorkstreamService<'_> {
         }
         self.runtime.config.invalidate().await;
 
+        let scan_dir = moved.then(|| archive_path.clone());
+        let base = item.base_branch.clone();
         let db = self.runtime.db.clone();
         let aid = id.clone();
-        blocking(move || db.archive_workstream(&aid)).await?;
+        blocking(move || {
+            // Scanned once: nothing writes to an archive after this.
+            let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base));
+            db.archive_workstream(&aid)?;
+            match scan {
+                Some(scan) => db.cache_archive_scan(&aid, &scan, now_ms()),
+                None => Ok(()),
+            }
+        })
+        .await?;
         self.find(&id).await
     }
 
@@ -1161,7 +1354,7 @@ impl WorkstreamService<'_> {
         req: RestoreWorkstreamRequest,
     ) -> Result<RestoreWorkstreamResult> {
         ensure_running(self.runtime)?;
-        let RestoreWorkstreamRequest { id } = req;
+        let RestoreWorkstreamRequest { id, target } = req;
         let peek = self.find(&id).await?;
         let _guard = self
             .runtime
@@ -1177,6 +1370,12 @@ impl WorkstreamService<'_> {
         }
 
         if item.shares_project_dir() {
+            if let Some(target) = target {
+                return Err(CoreError::WorkstreamRestoreTargetInvalid {
+                    path: target.display().to_string(),
+                    reason: "it has no worktree of its own to move".into(),
+                });
+            }
             let link = if item.is_folder() {
                 None
             } else {
@@ -1194,7 +1393,7 @@ impl WorkstreamService<'_> {
         }
 
         let project_path = Path::new(&item.project_path);
-        let worktree_path = Path::new(&item.worktree_path);
+        let original = PathBuf::from(&item.worktree_path);
         let archive_path = archive_dir_for(project_path, &item.slug);
 
         if !archive_path.exists() {
@@ -1202,44 +1401,141 @@ impl WorkstreamService<'_> {
                 path: archive_path.display().to_string(),
             });
         }
-        if worktree_path.exists() {
+        let destination = match &target {
+            Some(raw) => self.restore_destination(&item, raw).await?,
+            None => original.clone(),
+        };
+        if destination.exists() {
             return Err(CoreError::WorkstreamRestoreTargetOccupied {
-                path: worktree_path.display().to_string(),
+                path: destination.display().to_string(),
             });
         }
 
         let git = self.runtime.binaries.require(BinaryKind::Git).await?;
         self.runtime
             .worktrees
-            .restore(&git, project_path, &archive_path, worktree_path)
+            .restore(&git, project_path, &archive_path, &destination)
             .await?;
 
-        let effective = self.effective_for(&item.project_path).await?;
-        let link = match thoughts_links::provision_thoughts(worktree_path, &effective) {
-            Ok(link) => Some(link),
+        // Committed before the best-effort steps below: a failure there must not
+        // leave a live worktree on a row the sweep still treats as archived.
+        let relocate = (destination != original).then(|| {
+            (
+                original.display().to_string(),
+                destination.display().to_string(),
+            )
+        });
+        let db = self.runtime.db.clone();
+        let rid = id.clone();
+        let moved = relocate.clone();
+        blocking(move || {
+            db.unarchive_workstream_at(
+                &rid,
+                moved
+                    .as_ref()
+                    .map(|(from, to)| (from.as_str(), to.as_str())),
+            )
+        })
+        .await?;
+
+        let link = match self.effective_for(&item.project_path).await {
+            Ok(effective) => {
+                let link = match thoughts_links::provision_thoughts(&destination, &effective) {
+                    Ok(link) => Some(link),
+                    Err(e) => {
+                        tracing::warn!("thoughts re-provision after restore failed: {e}");
+                        None
+                    }
+                };
+                if let Some(mapped) = effective.mapped_name.as_deref() {
+                    if let Err(e) = thoughts_links::add_worktree_mapping(
+                        self.runtime.config.path(),
+                        &destination,
+                        mapped,
+                        effective.profile_name.as_deref(),
+                    ) {
+                        tracing::warn!("could not re-add worktree mapping after restore: {e}");
+                    }
+                }
+                link
+            }
             Err(e) => {
-                tracing::warn!("thoughts re-provision after restore failed: {e}");
+                tracing::warn!("thoughts re-link after restore skipped: {e}");
                 None
             }
         };
-        if let Some(mapped) = effective.mapped_name.as_deref() {
-            if let Err(e) = thoughts_links::add_worktree_mapping(
-                self.runtime.config.path(),
-                worktree_path,
-                mapped,
-                effective.profile_name.as_deref(),
-            ) {
-                tracing::warn!("could not re-add worktree mapping after restore: {e}");
-            }
-        }
         self.runtime.config.invalidate().await;
-
-        let db = self.runtime.db.clone();
-        let rid = id.clone();
-        blocking(move || db.unarchive_workstream(&rid)).await?;
+        if relocate.is_some() {
+            self.relocate_claude_transcripts(&id, &destination).await;
+        }
 
         let item = self.find(&id).await?;
         Ok(RestoreWorkstreamResult { item, link })
+    }
+
+    async fn restore_destination(&self, item: &Workstream, raw: &Path) -> Result<PathBuf> {
+        let invalid = |reason: &str| CoreError::WorkstreamRestoreTargetInvalid {
+            path: raw.display().to_string(),
+            reason: reason.to_string(),
+        };
+        let expanded = crate::repos::expand_user_path(
+            &raw.to_string_lossy(),
+            Some(&self.runtime.environment.home_dir),
+        );
+        // Relative would resolve against the server's working directory.
+        if !expanded.is_absolute() {
+            return Err(invalid("the path is not absolute"));
+        }
+        let resolved = canonical_prefix(&expanded);
+        let destination = if resolved.is_dir() {
+            resolved.join(&item.slug)
+        } else {
+            resolved
+        };
+        if destination.starts_with(canonical_prefix(Path::new(&item.project_path))) {
+            return Err(invalid("it is inside the project"));
+        }
+        let own = PathBuf::from(&item.worktree_path);
+        let db = self.runtime.db.clone();
+        let others = blocking(move || db.list_worktree_paths()).await?;
+        if others
+            .iter()
+            .map(PathBuf::from)
+            .any(|other| other != own && destination.starts_with(&other))
+        {
+            return Err(invalid("it is inside another workstream's worktree"));
+        }
+        Ok(destination)
+    }
+
+    /// Copies each claude session's transcript to the new cwd's project key,
+    /// where `--resume` looks. Never fatal: the worktree is already restored.
+    async fn relocate_claude_transcripts(&self, id: &str, cwd: &Path) {
+        let db = self.runtime.db.clone();
+        let owned = id.to_string();
+        let config_dir = self.runtime.paths.claude_config_dir.clone();
+        let cwd = cwd.to_path_buf();
+        let copied = blocking(move || {
+            for session in db.list_sessions(&owned)? {
+                if session.harness != Harness::Claude {
+                    continue;
+                }
+                let mut ids = vec![session.id.clone()];
+                ids.extend(session.provider_session_id.filter(|p| *p != session.id));
+                for sid in ids {
+                    if let Err(e) =
+                        crate::claude::driver::relocate_transcript(&config_dir, &sid, &cwd)
+                    {
+                        tracing::warn!("claude transcript {sid} not copied: {e}");
+                    }
+                }
+            }
+            Ok(())
+        })
+        .await;
+        if let Err(e) = copied {
+            tracing::warn!("claude transcripts for {id} not copied: {e}");
+        }
     }
 
     pub async fn purge(&self, req: PurgeWorkstreamRequest) -> Result<()> {
@@ -1257,10 +1553,28 @@ impl WorkstreamService<'_> {
             .lock_pair(&peek.project_path, &id)
             .await;
         let item = self.find(&id).await?;
-        self.purge_locked(&item).await
+        let cleanup = self.branch_cleanup(&item, BranchCleanup::Force).await;
+        self.purge_locked(&item, cleanup).await
     }
 
-    async fn purge_locked(&self, item: &Workstream) -> Result<()> {
+    /// `wanted` applies only when the app created the branch and the settings
+    /// ask for it to go with the archive.
+    async fn branch_cleanup(&self, item: &Workstream, wanted: BranchCleanup) -> BranchCleanup {
+        let enabled = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .git
+            .delete_branch_on_archive;
+        if enabled && item.app_owns_branch() {
+            wanted
+        } else {
+            BranchCleanup::Keep
+        }
+    }
+
+    async fn purge_locked(&self, item: &Workstream, cleanup: BranchCleanup) -> Result<()> {
         if item.status != WorkstreamStatus::Archived {
             return Err(CoreError::WorkstreamNotArchived {
                 title: item.title.clone(),
@@ -1276,24 +1590,9 @@ impl WorkstreamService<'_> {
         let git = self.runtime.binaries.require(BinaryKind::Git).await?;
         let project_path = Path::new(&item.project_path);
         let archive_path = archive_dir_for(project_path, &item.slug);
-        let delete_branch = self
-            .runtime
-            .settings
-            .get()
-            .await
-            .git
-            .delete_branch_on_archive
-            && item.app_owns_branch();
-
         self.runtime
             .worktrees
-            .purge_archive(
-                &git,
-                project_path,
-                &archive_path,
-                &item.branch,
-                delete_branch,
-            )
+            .purge_archive(&git, project_path, &archive_path, &item.branch, cleanup)
             .await?;
 
         let db = self.runtime.db.clone();
@@ -1326,7 +1625,8 @@ impl WorkstreamService<'_> {
             let Ok(item) = self.find(&item.id).await else {
                 continue;
             };
-            match self.purge_locked(&item).await {
+            let cleanup = self.branch_cleanup(&item, BranchCleanup::Force).await;
+            match self.purge_locked(&item, cleanup).await {
                 Ok(()) => deleted += 1,
                 Err(e) => {
                     tracing::warn!(
@@ -1339,6 +1639,68 @@ impl WorkstreamService<'_> {
         }
 
         Ok(ArchiveCleanupReport { deleted, failed })
+    }
+
+    pub async fn purge_archived(&self, ids: Vec<String>) -> Result<ArchiveCleanupReport> {
+        ensure_running(self.runtime)?;
+        let mut report = ArchiveCleanupReport {
+            deleted: 0,
+            failed: 0,
+        };
+        for id in ids {
+            match self.purge(PurgeWorkstreamRequest { id }).await {
+                Ok(()) => report.deleted += 1,
+                Err(_) => report.failed += 1,
+            }
+        }
+        Ok(report)
+    }
+
+    /// Purges archives past their deadline. Unlike a manual delete it never
+    /// touches the remote, and removes the local branch only with `-d`.
+    pub async fn sweep_expired_archives(&self) -> Result<ArchiveCleanupReport> {
+        ensure_running(self.runtime)?;
+        let db = self.runtime.db.clone();
+        let due = blocking(move || {
+            let now = now_ms();
+            db.ensure_archive_records(now)?;
+            db.due_archive_ids(now)
+        })
+        .await?;
+        let mut report = ArchiveCleanupReport {
+            deleted: 0,
+            failed: 0,
+        };
+        for id in due {
+            let what = format!("sweep expired archive {id}");
+            match logged(&what, self.sweep_one(&id)).await {
+                Ok(true) => report.deleted += 1,
+                Ok(false) => {}
+                Err(_) => report.failed += 1,
+            }
+        }
+        Ok(report)
+    }
+
+    async fn sweep_one(&self, id: &str) -> Result<bool> {
+        let peek = self.find(id).await?;
+        let _guard = self
+            .runtime
+            .workstream_locks
+            .lock_pair(&peek.project_path, id)
+            .await;
+        let item = self.find(id).await?;
+        let db = self.runtime.db.clone();
+        let owned = id.to_string();
+        let record = blocking(move || db.archive_record(&owned)).await?;
+        let due = item.status == WorkstreamStatus::Archived
+            && record.is_some_and(|r| r.kept_at.is_none() && r.purge_after <= now_ms());
+        if !due || half_restored(&item) {
+            return Ok(false);
+        }
+        let cleanup = self.branch_cleanup(&item, BranchCleanup::SafeLocal).await;
+        self.purge_locked(&item, cleanup).await?;
+        Ok(true)
     }
 
     pub async fn reprovision(
@@ -1378,6 +1740,79 @@ fn pr_dir(item: &Workstream) -> &Path {
         worktree
     } else {
         Path::new(&item.project_path)
+    }
+}
+
+fn archived_view(
+    item: Workstream,
+    record: &ArchiveRecord,
+    now: f64,
+    delete_branch: bool,
+) -> ArchivedWorkstream {
+    let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
+    let archive_exists = item.shares_project_dir() || archive_path.exists();
+    let info = ArchiveInfo {
+        purge_in_ms: record.purge_after - now,
+        kept: record.kept_at.is_some(),
+        size_bytes: record.size_bytes,
+        uncommitted: record.uncommitted,
+        unpushed: record.unpushed,
+        deletes_branch: delete_branch && item.app_owns_branch(),
+        pr: ArchivedPr::from_record(record),
+    };
+    ArchivedWorkstream {
+        archive_path: archive_path.display().to_string(),
+        archive_exists,
+        info,
+        item,
+    }
+}
+
+/// Unknown or open, and not asked recently: a lookup could still change it.
+fn pr_lookup_due(item: &Workstream, record: &ArchiveRecord, now: f64) -> bool {
+    let own_branch = !item.branch.is_empty()
+        && item.branch != item.base_branch
+        && item.base_branch.strip_prefix("origin/") != Some(item.branch.as_str());
+    let settled = matches!(
+        record.pr_state.as_deref(),
+        Some("none" | "merged" | "closed")
+    );
+    let recent = record
+        .pr_checked_at
+        .is_some_and(|at| now - at < PR_RECHECK_MS);
+    own_branch && !settled && !recent
+}
+
+fn pr_state_name(state: &pr::PrState) -> &'static str {
+    match state {
+        pr::PrState::Open => "open",
+        pr::PrState::Merged => "merged",
+        pr::PrState::Closed => "closed",
+    }
+}
+
+/// The worktree went back but the row never flipped, so its files are live.
+fn half_restored(item: &Workstream) -> bool {
+    !item.shares_project_dir()
+        && !archive_dir_for(Path::new(&item.project_path), &item.slug).exists()
+        && worktree::is_live_worktree(Path::new(&item.worktree_path))
+}
+
+/// Canonicalizes the longest existing ancestor and re-appends the rest.
+fn canonical_prefix(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(real) = dunce::canonicalize(existing) {
+            return rest.iter().rev().fold(real, |acc, part| acc.join(part));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
     }
 }
 

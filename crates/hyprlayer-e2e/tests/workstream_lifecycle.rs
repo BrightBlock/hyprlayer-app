@@ -302,7 +302,13 @@ async fn workstream_lifecycle() {
 
     j.step("restore");
     let restored = j
-        .call(&client, Request::RestoreWorkstream { id: id.clone() })
+        .call(
+            &client,
+            Request::RestoreWorkstream {
+                id: id.clone(),
+                target: None,
+            },
+        )
         .await
         .expect("restore_workstream");
     let restored_path = PathBuf::from(text(&restored, "/item/worktreePath"));
