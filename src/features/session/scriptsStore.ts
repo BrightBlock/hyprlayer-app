@@ -36,7 +36,7 @@ export type DockPosition = "bottom" | "right";
 
 const DEFAULT_DOCK: DockState = {
   open: false,
-  tab: "run",
+  tab: { term: 1 },
   terminals: [1],
   nextTerm: 2,
   termIds: {},
