@@ -110,7 +110,6 @@ const libraryRoute = createRoute({
     tag: optionalString(search.tag),
     q: optionalString(search.q),
     doc: optionalString(search.doc),
-    mode: search.mode === "edit" ? "edit" : undefined,
     from: optionalString(search.from),
   }),
 });

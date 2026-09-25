@@ -1,7 +1,8 @@
 use hyprlayer_core::docs::frontmatter::{FmPatch, FmValue};
 use hyprlayer_core::gitops::ThoughtsRepoStatus;
+use hyprlayer_core::index::related::RelatedLink;
 use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
-use hyprlayer_core::runtime::library::{CreateDocumentRequest, Document};
+use hyprlayer_core::runtime::library::{CreateDocumentRequest, Document, FrontmatterEdit};
 use serde::Deserialize;
 use serde::Serialize;
 use tauri::State;
@@ -15,6 +16,10 @@ pub struct DocContent {
     pub meta: DocMeta,
     pub content: String,
     pub mtime_ms: f64,
+    pub body: String,
+    pub frontmatter: Option<String>,
+    pub fm_error: Option<String>,
+    pub fm_keys: Vec<String>,
 }
 
 impl From<Document> for DocContent {
@@ -23,6 +28,10 @@ impl From<Document> for DocContent {
             meta: doc.meta,
             content: doc.content,
             mtime_ms: doc.mtime_ms,
+            body: doc.body,
+            frontmatter: doc.frontmatter,
+            fm_error: doc.fm_error,
+            fm_keys: doc.fm_keys,
         }
     }
 }
@@ -71,6 +80,26 @@ impl From<FmPatchDto> for FmPatch {
                 })
                 .collect(),
             remove: dto.remove,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum FrontmatterEditDto {
+    Patch { patch: FmPatchDto },
+    Raw { text: String },
+}
+
+impl From<FrontmatterEditDto> for FrontmatterEdit {
+    fn from(dto: FrontmatterEditDto) -> Self {
+        match dto {
+            FrontmatterEditDto::Patch { patch } => FrontmatterEdit::Patch(patch.into()),
+            FrontmatterEditDto::Raw { text } => FrontmatterEdit::Raw(text),
         }
     }
 }
@@ -149,6 +178,36 @@ pub async fn patch_doc_frontmatter(
     state
         .client()?
         .patch_doc_frontmatter(id, patch.into(), base_mtime_ms)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn save_doc_parts(
+    state: State<'_, AppState>,
+    id: String,
+    body: String,
+    frontmatter: FrontmatterEditDto,
+    base_mtime_ms: f64,
+) -> CmdResult<DocMeta> {
+    state
+        .client()?
+        .save_doc_parts(id, body, frontmatter.into(), base_mtime_ms)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_related_docs(
+    state: State<'_, AppState>,
+    id: String,
+    values: Vec<String>,
+) -> CmdResult<Vec<RelatedLink>> {
+    state
+        .client()?
+        .resolve_related_docs(id, values)
         .await
         .map_err(AppError::from)
 }

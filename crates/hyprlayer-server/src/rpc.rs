@@ -29,7 +29,9 @@ use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
-use hyprlayer_core::runtime::library::{CreateDocumentRequest, Document};
+use hyprlayer_core::runtime::library::{
+    CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
+};
 use hyprlayer_core::runtime::projects::{
     BackendHealth, BootstrapResult, CreateProjectRequest, DirListing, GithubOwnersOutcome,
     ProjectInspection, ProjectView, SyncThoughtsResult, ThoughtsProbe, ThoughtsSource,
@@ -136,6 +138,8 @@ hyprlayer_proto::commands! {
     GetDoc: get_doc(id: String) -> Document;
     SaveDoc: save_doc(id: String, content: String, base_mtime_ms: f64) -> DocMeta;
     PatchDocFrontmatter: patch_doc_frontmatter(id: String, patch: FmPatch, base_mtime_ms: f64) -> DocMeta;
+    SaveDocParts: save_doc_parts(id: String, body: String, frontmatter: FrontmatterEdit, base_mtime_ms: f64) -> DocMeta;
+    ResolveRelatedDocs: resolve_related_docs(id: String, values: Vec<String>) -> Vec<RelatedLink>;
     CreateDoc: create_doc(input: CreateDocumentRequest) -> DocMeta;
     ResolveDocPath: resolve_doc_path(id: String) -> String;
     DocWebUrl: doc_web_url(id: String) -> Option<String>;

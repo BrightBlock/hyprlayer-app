@@ -10,6 +10,11 @@ export const SIDE_PANEL_WIDTH = 288;
 export const SIDE_PANEL_MIN = 220;
 export const SIDE_PANEL_MAX = 480;
 
+// Matches the left sidebar's default width (SIDE_PANEL_WIDTH) by design.
+export const DOC_RAIL_WIDTH = SIDE_PANEL_WIDTH;
+export const DOC_RAIL_MIN = 220;
+export const DOC_RAIL_MAX = 420;
+
 type UiStore = {
   diffHidden: boolean;
   toggleDiff: () => void;
@@ -44,6 +49,14 @@ type UiStore = {
   // which is why it sits here and not in a host-scoped store.
   showDotFiles: boolean;
   setShowDotFiles: (show: boolean) => void;
+  docRailOpen: boolean;
+  toggleDocRail: () => void;
+  docRailWidth: number;
+  setDocRailWidth: (width: number) => void;
+  docRailContentsCollapsed: boolean;
+  toggleDocRailContents: () => void;
+  docRailPropertiesCollapsed: boolean;
+  toggleDocRailProperties: () => void;
 };
 
 export const useUiStore = create<UiStore>()(
@@ -80,6 +93,16 @@ export const useUiStore = create<UiStore>()(
       setNarrowDrawer: (panel) => set({ narrowDrawer: panel }),
       showDotFiles: false,
       setShowDotFiles: (show) => set({ showDotFiles: show }),
+      docRailOpen: true,
+      toggleDocRail: () => set((state) => ({ docRailOpen: !state.docRailOpen })),
+      docRailWidth: DOC_RAIL_WIDTH,
+      setDocRailWidth: (width) => set({ docRailWidth: width }),
+      docRailContentsCollapsed: false,
+      toggleDocRailContents: () =>
+        set((state) => ({ docRailContentsCollapsed: !state.docRailContentsCollapsed })),
+      docRailPropertiesCollapsed: false,
+      toggleDocRailProperties: () =>
+        set((state) => ({ docRailPropertiesCollapsed: !state.docRailPropertiesCollapsed })),
     }),
     {
       name: "hyprlayer:ui",
@@ -95,6 +118,10 @@ export const useUiStore = create<UiStore>()(
         docWide: s.docWide,
         agentsWidth: s.agentsWidth,
         showDotFiles: s.showDotFiles,
+        docRailOpen: s.docRailOpen,
+        docRailWidth: s.docRailWidth,
+        docRailContentsCollapsed: s.docRailContentsCollapsed,
+        docRailPropertiesCollapsed: s.docRailPropertiesCollapsed,
       }),
     },
   ),

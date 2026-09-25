@@ -27,7 +27,9 @@ use hyprlayer_core::repo_settings::{self, ScriptSettings};
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::attachments::{ImportAttachmentRequest, SaveAttachmentRequest};
-use hyprlayer_core::runtime::library::{CreateDocumentRequest, Document};
+use hyprlayer_core::runtime::library::{
+    CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
+};
 use hyprlayer_core::runtime::projects::{
     BackendHealth, BootstrapResult, CloneProjectRequest, CreateProjectRequest, DirListing,
     GithubOwnersOutcome, ImportFolderRequest, ImportRepositoryRequest, ProjectInspection,
@@ -505,6 +507,32 @@ impl Dispatch for Server {
         self.runtime
             .library()
             .patch_frontmatter(&id, patch, base_mtime_ms)
+            .await
+            .wire()
+    }
+
+    async fn save_doc_parts(
+        &self,
+        id: String,
+        body: String,
+        frontmatter: FrontmatterEdit,
+        base_mtime_ms: f64,
+    ) -> Result<DocMeta, WireError> {
+        self.runtime
+            .library()
+            .save_parts(&id, body, frontmatter, base_mtime_ms)
+            .await
+            .wire()
+    }
+
+    async fn resolve_related_docs(
+        &self,
+        id: String,
+        values: Vec<String>,
+    ) -> Result<Vec<RelatedLink>, WireError> {
+        self.runtime
+            .library()
+            .resolve_related(&id, values)
             .await
             .wire()
     }

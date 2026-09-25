@@ -687,6 +687,45 @@ export function ErrorNote({
   );
 }
 
+export function SaveStatus({
+  saving,
+  dirty,
+  justSaved,
+  readOnly,
+}: {
+  saving: boolean;
+  dirty: boolean;
+  justSaved: boolean;
+  readOnly: boolean;
+}) {
+  if (readOnly) return <span className="text-ui-sm text-ink-dim">read-only</span>;
+  if (saving) {
+    return (
+      <span className="flex items-center gap-1 text-ui-sm text-ink-dim">
+        <Spinner size="xs" />
+        Saving…
+      </span>
+    );
+  }
+  if (dirty) {
+    return (
+      <span className="flex items-center gap-1 text-ui-sm text-warn-ink">
+        <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
+        Unsaved
+      </span>
+    );
+  }
+  if (justSaved) {
+    return (
+      <span className="flex items-center gap-1 text-ui-sm text-ok">
+        <Icon name="check" size="xs" />
+        Saved
+      </span>
+    );
+  }
+  return null;
+}
+
 export function CliOutput({ text }: { text: string }) {
   const trimmed = text.trim();
   if (!trimmed) return null;

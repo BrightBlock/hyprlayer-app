@@ -325,10 +325,15 @@ registered project directory.
 
 `resolve_path(&str)` (sync), `query(ThoughtQuery)`, `get(&str)`,
 `save(&str, String, base_mtime_ms: f64)`, `patch_frontmatter(&str, FmPatch, f64)`,
+`save_parts(&str, String, FrontmatterEdit, f64)`, `resolve_related(&str, Vec<String>)`,
 `create(CreateDocumentRequest)`, `thoughts_git_status(&str)`.
 
-The `base_mtime_ms` argument on `save` and `patch_frontmatter` is the optimistic
-concurrency token: a stale value fails the write rather than clobbering it.
+The `base_mtime_ms` argument on `save`, `patch_frontmatter` and `save_parts` is the
+optimistic concurrency token: a stale value fails the write rather than clobbering
+it. `save_parts` writes nothing when the composed bytes equal the file, and a
+malformed block changes only through `FrontmatterEdit::Raw`. The `doc_round_trip`
+E2E scenario is its headless integration test; it drives the facade through the
+real server without a webview.
 
 ### `AgentService`
 

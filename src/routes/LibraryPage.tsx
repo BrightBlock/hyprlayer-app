@@ -90,11 +90,7 @@ export function LibraryPage() {
 
       <section className="min-w-0 flex-1">
         {search.doc ? (
-          <DocDetail
-            id={search.doc}
-            mode={search.mode ?? "preview"}
-            onSetMode={(mode) => update({ mode: mode === "edit" ? "edit" : undefined })}
-          />
+          <DocDetail id={search.doc} />
         ) : (
           <EmptyState title="Select a document" />
         )}

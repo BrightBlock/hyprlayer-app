@@ -1,0 +1,494 @@
+{
+  "scenario": "doc_round_trip",
+  "steps": [
+    {
+      "guards": [],
+      "step": "set up the fixtures"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "crlf_only": true
+          },
+          "guard": "crlf.md is CRLF throughout, with no lone LF",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "bom_present": true
+          },
+          "guard": "bom.md still starts with the BOM",
+          "ok": true
+        }
+      ],
+      "step": "fixtures reached the sandbox intact"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bom": {
+              "indexed": true
+            },
+            "crlf": {
+              "indexed": true
+            },
+            "dots-closer": {
+              "indexed": true
+            },
+            "empty-block": {
+              "indexed": true
+            },
+            "malformed": {
+              "indexed": true
+            },
+            "mixed-eol": {
+              "indexed": true
+            },
+            "no-frontmatter": {
+              "indexed": true
+            },
+            "plain": {
+              "indexed": true
+            },
+            "related-forms": {
+              "indexed": true
+            },
+            "unknown-keys": {
+              "indexed": true
+            }
+          },
+          "guard": "every fixture id is returned by QueryDocs",
+          "ok": true
+        }
+      ],
+      "step": "every fixture is indexed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bom": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type"
+              ]
+            },
+            "crlf": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type",
+                "date"
+              ]
+            },
+            "dots-closer": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type"
+              ]
+            },
+            "empty-block": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": []
+            },
+            "malformed": {
+              "fmError": true,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "tags"
+              ]
+            },
+            "mixed-eol": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type"
+              ]
+            },
+            "no-frontmatter": {
+              "fmError": false,
+              "frontmatter": false,
+              "keys": []
+            },
+            "plain": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type",
+                "date",
+                "status",
+                "tags",
+                "related"
+              ]
+            },
+            "related-forms": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type",
+                "related"
+              ]
+            },
+            "unknown-keys": {
+              "fmError": false,
+              "frontmatter": true,
+              "keys": [
+                "title",
+                "type",
+                "status",
+                "ticket",
+                "git_commit",
+                "branch",
+                "meta"
+              ]
+            }
+          },
+          "guard": "each fixture's body and fm_error match a fresh split",
+          "ok": true
+        }
+      ],
+      "step": "loading splits each fixture"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bom": {
+              "unchanged": true
+            },
+            "crlf": {
+              "unchanged": true
+            },
+            "dots-closer": {
+              "unchanged": true
+            },
+            "empty-block": {
+              "unchanged": true
+            },
+            "malformed": {
+              "unchanged": true
+            },
+            "mixed-eol": {
+              "unchanged": true
+            },
+            "no-frontmatter": {
+              "unchanged": true
+            },
+            "plain": {
+              "unchanged": true
+            },
+            "related-forms": {
+              "unchanged": true
+            },
+            "unknown-keys": {
+              "unchanged": true
+            }
+          },
+          "guard": "a no-op save changes no file's bytes or mtime",
+          "ok": true
+        }
+      ],
+      "step": "a save with no edits leaves every file byte-identical"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bom": {
+              "byte_identical": true
+            },
+            "crlf": {
+              "byte_identical": true
+            },
+            "dots-closer": {
+              "byte_identical": true
+            },
+            "empty-block": {
+              "byte_identical": true
+            },
+            "malformed": {
+              "byte_identical": true
+            },
+            "mixed-eol": {
+              "body_eol_normalised": true,
+              "frontmatter_unchanged": true
+            },
+            "no-frontmatter": {
+              "byte_identical": true
+            },
+            "plain": {
+              "byte_identical": true
+            },
+            "related-forms": {
+              "byte_identical": true
+            },
+            "unknown-keys": {
+              "byte_identical": true
+            }
+          },
+          "guard": "editing and reverting a body leaves the file byte-identical (mixed-eol excepted)",
+          "ok": true
+        }
+      ],
+      "step": "an edit and its revert are byte-identical"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterKeys": [
+              "title",
+              "type",
+              "status",
+              "tags",
+              "git_commit",
+              "branch",
+              "meta"
+            ],
+            "beforeKeys": [
+              "title",
+              "type",
+              "status",
+              "ticket",
+              "git_commit",
+              "branch",
+              "meta"
+            ],
+            "bodyUnchanged": true,
+            "commentsSurvive": true,
+            "extraUnchanged": true,
+            "newKeysPresent": true,
+            "orderPreserved": true,
+            "status": true,
+            "statusInPlace": true,
+            "tags": true,
+            "ticketRemoved": true
+          },
+          "guard": "unknown-keys.md: status/tags set, ticket removed, unknown keys and comments survive",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "starts_with_block": true
+          },
+          "guard": "no-frontmatter.md: setting a property synthesizes a block",
+          "ok": true
+        }
+      ],
+      "step": "property edits write YAML and keep unknown keys"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "frontmatter_patch"
+          },
+          "guard": "a Patch on malformed.md is refused with frontmatter_patch, file unchanged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": true,
+            "frontmatter_unchanged": true
+          },
+          "guard": "a body-only save on malformed.md is accepted and its frontmatter bytes are untouched",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "frontmatter_patch"
+          },
+          "guard": "an invalid Raw is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "body_unchanged": true,
+            "fm_error_gone": true
+          },
+          "guard": "a valid Raw clears fm_error and leaves the body untouched",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "only_targeted_lines_changed": true
+          },
+          "guard": "a Raw save on a well-formed doc changes only the targeted lines",
+          "ok": true
+        }
+      ],
+      "step": "a malformed block is only replaced explicitly"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "2026-01-01-dup-stem -> demo's copy": {
+              "link": {
+                "raw": "2026-01-01-dup-stem",
+                "target": {
+                  "docType": "note",
+                  "id": "$DEMO_DUP",
+                  "kind": "doc",
+                  "relPath": "repos/demo/shared/notes/2026-01-01-dup-stem.md",
+                  "title": "Dup stem"
+                }
+              },
+              "ok": true
+            },
+            "2026-01-01-twin -> Unresolved, ambiguous": {
+              "link": {
+                "raw": "2026-01-01-twin",
+                "target": {
+                  "ambiguous": true,
+                  "kind": "unresolved"
+                }
+              },
+              "ok": true
+            },
+            "Anchor -> $ANCHOR by title": {
+              "link": {
+                "raw": "Anchor",
+                "target": {
+                  "docType": "note",
+                  "id": "$ANCHOR",
+                  "kind": "doc",
+                  "relPath": "repos/demo/shared/notes/2026-01-01-anchor.md",
+                  "title": "Anchor"
+                }
+              },
+              "ok": true
+            },
+            "[[plain]] -> $PLAIN": {
+              "link": {
+                "raw": "[[plain]]",
+                "target": {
+                  "docType": "note",
+                  "id": "$PLAIN",
+                  "kind": "doc",
+                  "relPath": "repos/demo/shared/notes/plain.md",
+                  "title": "Plain"
+                }
+              },
+              "ok": true
+            },
+            "https url -> External": {
+              "link": {
+                "raw": "https://example.com/spec",
+                "target": {
+                  "kind": "external",
+                  "url": "https://example.com/spec"
+                }
+              },
+              "ok": true
+            },
+            "missing-stem -> Unresolved, not ambiguous": {
+              "link": {
+                "raw": "missing-stem",
+                "target": {
+                  "ambiguous": false,
+                  "kind": "unresolved"
+                }
+              },
+              "ok": true
+            },
+            "other's relPath -> $OTHER_DUP": {
+              "link": {
+                "raw": "repos/other/shared/notes/2026-01-01-dup-stem.md",
+                "target": {
+                  "docType": "note",
+                  "id": "$OTHER_DUP",
+                  "kind": "doc",
+                  "relPath": "repos/other/shared/notes/2026-01-01-dup-stem.md",
+                  "title": "Dup stem"
+                }
+              },
+              "ok": true
+            },
+            "plain -> $PLAIN": {
+              "link": {
+                "raw": "plain",
+                "target": {
+                  "docType": "note",
+                  "id": "$PLAIN",
+                  "kind": "doc",
+                  "relPath": "repos/demo/shared/notes/plain.md",
+                  "title": "Plain"
+                }
+              },
+              "ok": true
+            },
+            "thoughts/shared/notes/plain.md -> $PLAIN": {
+              "link": {
+                "raw": "thoughts/shared/notes/plain.md",
+                "target": {
+                  "docType": "note",
+                  "id": "$PLAIN",
+                  "kind": "doc",
+                  "relPath": "repos/demo/shared/notes/plain.md",
+                  "title": "Plain"
+                }
+              },
+              "ok": true
+            }
+          },
+          "guard": "each related value resolves as expected, matched by raw",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ok": true
+          },
+          "guard": "an absolute path value resolves to $PLAIN",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "count": 3,
+            "ok": true
+          },
+          "guard": "an empty value in the list resolves as Unresolved, not ambiguous",
+          "ok": true
+        }
+      ],
+      "step": "related values resolve by stem, path, URL and title"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "doc_conflict"
+          },
+          "guard": "a save from a stale mtime is refused with doc_conflict",
+          "ok": true
+        }
+      ],
+      "step": "a stale save is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

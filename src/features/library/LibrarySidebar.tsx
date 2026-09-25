@@ -71,7 +71,7 @@ export function LibrarySidebar({
           projects={projects.filter(isGitProject)}
           value={search.project}
           total={result?.total}
-          onChange={(project) => onUpdate({ project, doc: undefined, mode: undefined })}
+          onChange={(project) => onUpdate({ project, doc: undefined })}
         />
         <TextInput
           value={search.q ?? ""}
@@ -116,7 +116,7 @@ export function LibrarySidebar({
                 <button
                   key={doc.id}
                   type="button"
-                  onClick={() => onUpdate({ doc: doc.id, mode: undefined })}
+                  onClick={() => onUpdate({ doc: doc.id })}
                   className={`relative block w-full px-4 py-2 text-left ${
                     selected ? "bg-accent/15" : "hover:bg-edge/40"
                   }`}

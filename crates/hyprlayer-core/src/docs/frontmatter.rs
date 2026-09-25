@@ -155,18 +155,31 @@ fn unquote_key(key: &str) -> String {
     stripped.unwrap_or(key).to_string()
 }
 
+/// 3 if `s` starts with a UTF-8 BOM, 0 otherwise. Both `extract_block` and
+/// `body_offset_bytes` skip this before matching the `---` opener, and count
+/// it into the `body_offset` they return.
+pub fn bom_len(s: &str) -> usize {
+    if s.starts_with('\u{FEFF}') {
+        3
+    } else {
+        0
+    }
+}
+
 pub fn extract_block(content: &str) -> Option<(&str, usize)> {
-    let after_open = content
+    let bom = bom_len(content);
+    let rest = &content[bom..];
+    let after_open = rest
         .strip_prefix("---\r\n")
-        .or_else(|| content.strip_prefix("---\n"))?;
-    let open_len = content.len() - after_open.len();
+        .or_else(|| rest.strip_prefix("---\n"))?;
+    let open_len = rest.len() - after_open.len();
 
     let mut offset = 0usize;
     for line in after_open.split_inclusive('\n') {
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed == "---" || trimmed == "..." {
             let block = &after_open[..offset];
-            let body_offset = open_len + offset + line.len();
+            let body_offset = bom + open_len + offset + line.len();
             return Some((block, body_offset));
         }
         offset += line.len();
@@ -175,20 +188,26 @@ pub fn extract_block(content: &str) -> Option<(&str, usize)> {
 }
 
 pub fn body_offset_bytes(content: &[u8]) -> usize {
-    let after_open = if let Some(rest) = content.strip_prefix(b"---\r\n") {
-        rest
-    } else if let Some(rest) = content.strip_prefix(b"---\n") {
-        rest
+    let bom = if content.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        3
+    } else {
+        0
+    };
+    let rest = &content[bom..];
+    let after_open = if let Some(r) = rest.strip_prefix(b"---\r\n") {
+        r
+    } else if let Some(r) = rest.strip_prefix(b"---\n") {
+        r
     } else {
         return 0;
     };
-    let open_len = content.len() - after_open.len();
+    let open_len = rest.len() - after_open.len();
 
     let mut offset = 0usize;
     for line in after_open.split_inclusive(|&b| b == b'\n') {
         let trimmed = trim_end_cr_lf(line);
         if trimmed == b"---" || trimmed == b"..." {
-            return open_len + offset + line.len();
+            return bom + open_len + offset + line.len();
         }
         offset += line.len();
     }
@@ -376,6 +395,10 @@ pub enum FmError {
     },
     #[error("patched frontmatter failed validation: {0}")]
     Validation(String),
+    #[error("frontmatter YAML is malformed; replace it as raw text")]
+    Malformed,
+    #[error("raw frontmatter is not a YAML mapping: {0}")]
+    InvalidRaw(String),
 }
 
 pub fn patch_frontmatter(original: &str, patch: &FmPatch) -> Result<String, FmError> {
@@ -419,6 +442,11 @@ struct Span {
     lead_start: usize,
     key_start: usize,
     end: usize,
+}
+
+/// The span keys `tokenize_block` finds, in file order.
+pub(crate) fn tokenize_keys(block: &str) -> Vec<String> {
+    tokenize_block(block).0.into_iter().map(|s| s.key).collect()
 }
 
 fn tokenize_block(block: &str) -> (Vec<Span>, usize) {
@@ -485,13 +513,15 @@ fn patch_block(
     patch: &FmPatch,
     eol: &str,
 ) -> Result<String, FmError> {
-    let open_len = if original.starts_with("---\r\n") {
+    let bom = bom_len(original);
+    let open_len = if original[bom..].starts_with("---\r\n") {
         5
     } else {
         4
     };
-    let opening = &original[..open_len];
-    let closing = &original[open_len + block.len()..body_offset];
+    let head = &original[..bom];
+    let opening = &original[bom..bom + open_len];
+    let closing = &original[bom + open_len + block.len()..body_offset];
     let body = &original[body_offset..];
 
     let (spans, tail_start) = tokenize_block(block);
@@ -526,6 +556,7 @@ fn patch_block(
     }
 
     let mut out = String::with_capacity(original.len() + 64);
+    out.push_str(head);
     out.push_str(opening);
     for item in &items {
         out.push_str(item.lead);
@@ -602,13 +633,16 @@ fn synthesize_block(
     }
     entries.sort_by_key(|(k, _)| schema_pos(k).unwrap_or(usize::MAX));
 
-    let mut out = format!("---{eol}");
+    let bom = bom_len(original);
+    let mut out = String::with_capacity(original.len() + 64);
+    out.push_str(&original[..bom]);
+    out.push_str(&format!("---{eol}"));
     for (key, value) in entries {
         out.push_str(&render_span(key, value, eol)?);
     }
     out.push_str("---");
     out.push_str(eol);
-    out.push_str(original);
+    out.push_str(&original[bom..]);
     Ok(out)
 }
 
@@ -714,6 +748,8 @@ mod stub_tests {
             "---\ntitle: x\nno closing delimiter here\n",
             "",
             "---\n",
+            "\u{FEFF}---\ntitle: x\n---\nBody.\n",
+            "\u{FEFF}no frontmatter here\n",
         ];
         for doc in cases {
             let expected = extract_block(doc).map(|(_, o)| o).unwrap_or(0);

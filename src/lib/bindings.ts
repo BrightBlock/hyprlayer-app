@@ -29,6 +29,8 @@ export const commands = {
 	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
 	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),
 	patchDocFrontmatter: (id: string, patch: FmPatchDto, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("patch_doc_frontmatter", { id, patch, baseMtimeMs })),
+	saveDocParts: (id: string, body: string, frontmatter: FrontmatterEditDto, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc_parts", { id, body, frontmatter, baseMtimeMs })),
+	resolveRelatedDocs: (id: string, values: string[]) => typedError<RelatedLink[], AppError>(__TAURI_INVOKE("resolve_related_docs", { id, values })),
 	createDoc: (input: CreateDocInput) => typedError<DocMeta, AppError>(__TAURI_INVOKE("create_doc", { input })),
 	revealDoc: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_doc", { id })),
 	docWebUrl: (id: string) => typedError<string | null, AppError>(__TAURI_INVOKE("doc_web_url", { id })),
@@ -737,6 +739,10 @@ export type DocContent = {
 	meta: DocMeta,
 	content: string,
 	mtimeMs: number | null,
+	body: string,
+	frontmatter: string | null,
+	fmError: string | null,
+	fmKeys: string[],
 };
 
 export type DocMeta = {
@@ -809,6 +815,8 @@ export type Frontmatter = {
 	related?: string[],
 	extra?: { [key in string]: string },
 };
+
+export type FrontmatterEditDto = { kind: "patch"; patch: FmPatchDto } | { kind: "raw"; text: string };
 
 export type FullDiskAccess = "granted" | "denied" | "unknown";
 
@@ -1205,6 +1213,13 @@ export type QuitRequested = null;
 export type QuitSettings = {
 	confirm?: boolean,
 };
+
+export type RelatedLink = {
+	raw: string,
+	target: RelatedTarget,
+};
+
+export type RelatedTarget = { kind: "doc"; id: string; title: string; docType: string | null; relPath: string } | { kind: "external"; url: string } | { kind: "unresolved"; ambiguous: boolean };
 
 export type RepoPathStatus = "missing" | "nonGit" | "bare" | "unborn" | "ready";
 

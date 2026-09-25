@@ -52,6 +52,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::library::get_doc,
             commands::library::save_doc,
             commands::library::patch_doc_frontmatter,
+            commands::library::save_doc_parts,
+            commands::library::resolve_related_docs,
             commands::library::create_doc,
             commands::library::reveal_doc,
             commands::library::doc_web_url,

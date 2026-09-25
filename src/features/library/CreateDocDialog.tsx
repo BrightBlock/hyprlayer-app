@@ -55,7 +55,7 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
       {
         onSuccess: (meta) => {
           onClose();
-          void navigate({ to: "/library", search: { doc: meta.id, mode: "edit" } });
+          void navigate({ to: "/library", search: { doc: meta.id } });
         },
       },
     );

@@ -7,6 +7,5 @@ export type LibrarySearch = {
   tag?: string;
   q?: string;
   doc?: string;
-  mode?: "edit" | "preview";
   from?: string;
 };

@@ -5,7 +5,7 @@ import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
 import { Icon } from "@/components/Icon";
-import { ErrorNote, Spinner } from "@/components/ui";
+import { ErrorNote, SaveStatus, Spinner } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
 import { clearActiveFileSave, setActiveFileSave } from "@/lib/fileSave";
@@ -212,43 +212,4 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
       )}
     </Shell>
   );
-}
-
-function SaveStatus({
-  saving,
-  dirty,
-  justSaved,
-  readOnly,
-}: {
-  saving: boolean;
-  dirty: boolean;
-  justSaved: boolean;
-  readOnly: boolean;
-}) {
-  if (readOnly) return <span className="text-ui-sm text-ink-dim">read-only</span>;
-  if (saving) {
-    return (
-      <span className="flex items-center gap-1 text-ui-sm text-ink-dim">
-        <Spinner size="xs" />
-        Saving…
-      </span>
-    );
-  }
-  if (dirty) {
-    return (
-      <span className="flex items-center gap-1 text-ui-sm text-warn-ink">
-        <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
-        Unsaved
-      </span>
-    );
-  }
-  if (justSaved) {
-    return (
-      <span className="flex items-center gap-1 text-ui-sm text-ok">
-        <Icon name="check" size="xs" />
-        Saved
-      </span>
-    );
-  }
-  return null;
 }

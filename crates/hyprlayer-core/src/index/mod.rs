@@ -1,4 +1,5 @@
 pub mod indexer;
+pub mod related;
 pub mod roots;
 pub mod search;
 pub mod watcher;

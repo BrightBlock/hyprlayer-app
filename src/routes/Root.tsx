@@ -643,6 +643,8 @@ export function Root() {
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
   const agentsCollapsed = useUiStore((state) => state.agentsCollapsed);
   const toggleAgents = useUiStore((state) => state.toggleAgents);
+  const docRailOpen = useUiStore((state) => state.docRailOpen);
+  const toggleDocRail = useUiStore((state) => state.toggleDocRail);
 
   const projectSidebarShown = compact ? narrowDrawer === "project" : !collapsed;
   const projectDrawerWidth = drawerWidth(PROJECT_SIDEBAR_MIN, width - NAV_RAIL_WIDTH);
@@ -895,7 +897,6 @@ export function Root() {
                       search: (prev) => ({
                         ...prev,
                         doc: undefined,
-                        mode: undefined,
                       }),
                     })
                   }
@@ -974,6 +975,18 @@ export function Root() {
                   </button>
                 )}
               </>
+            )}
+            {onLibrary && locationSearch.doc && (
+              <button
+                type="button"
+                onClick={toggleDocRail}
+                className={topIconClass}
+                title={docRailOpen ? "Hide panels" : "Show panels"}
+                aria-label={docRailOpen ? "Hide panels" : "Show panels"}
+                aria-pressed={docRailOpen}
+              >
+                <Icon name="panels" />
+              </button>
             )}
           </div>
         </div>

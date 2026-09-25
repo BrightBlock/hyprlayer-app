@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use hyprlayer_core::config::ConfigService;
 use hyprlayer_core::docs::frontmatter::{self, FmPatch, FmValue};
+use hyprlayer_core::docs::parts::{compose, split, FrontmatterEdit};
 use hyprlayer_core::index::thoughts_roots;
 
 async fn corpus_roots() -> Vec<PathBuf> {
@@ -101,5 +102,67 @@ async fn corpus_status_patch_only_touches_frontmatter() {
             "body changed for {}",
             path.display()
         );
+    }
+}
+
+fn is_uniformly_crlf(text: &str) -> bool {
+    text.contains("\r\n") && !text.replace("\r\n", "").contains('\n')
+}
+
+#[tokio::test]
+async fn corpus_split_and_empty_save_is_identity() {
+    let files = corpus_files().await;
+    if files.is_empty() {
+        eprintln!("corpus not present; skipping");
+        return;
+    }
+
+    let no_op = FrontmatterEdit::Patch(FmPatch::default());
+    let mut fm_errors: Vec<PathBuf> = Vec::new();
+    let mut mixed_eol: Vec<PathBuf> = Vec::new();
+
+    for path in &files {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let parts = split(&content);
+        if parts.fm_error.is_some() {
+            fm_errors.push(path.clone());
+        }
+
+        let body = parts.body(&content).to_string();
+        let out = compose(&content, &body, &no_op)
+            .unwrap_or_else(|e| panic!("compose (no-op) failed for {}: {e}", path.display()));
+        assert_eq!(out, content, "no-op compose mutated {}", path.display());
+
+        let lf_body = body.replace("\r\n", "\n");
+        if !body.contains("\r\n") || is_uniformly_crlf(&content) {
+            let out = compose(&content, &lf_body, &no_op).unwrap_or_else(|e| {
+                panic!(
+                    "compose (LF-normalised body) failed for {}: {e}",
+                    path.display()
+                )
+            });
+            assert_eq!(
+                out,
+                content,
+                "LF-normalised no-op compose mutated {}",
+                path.display()
+            );
+        } else {
+            mixed_eol.push(path.clone());
+        }
+    }
+
+    eprintln!("fm_error: {} files", fm_errors.len());
+    for path in &fm_errors {
+        eprintln!("  {}", path.display());
+    }
+    eprintln!(
+        "mixed-EOL (excluded from the LF-normalised check): {} files",
+        mixed_eol.len()
+    );
+    for path in &mixed_eol {
+        eprintln!("  {}", path.display());
     }
 }

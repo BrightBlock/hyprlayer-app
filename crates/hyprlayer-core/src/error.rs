@@ -586,9 +586,12 @@ impl CoreError {
             CoreError::PromptsSourceChanged => {
                 Some("Choose the file again to review what it holds now.".into())
             }
-            CoreError::Frontmatter(_) => {
-                Some("Edit the frontmatter directly in the editor instead.".into())
+            CoreError::Frontmatter(crate::docs::frontmatter::FmError::InvalidRaw(_)) => {
+                Some("Fix the YAML and save again.".into())
             }
+            CoreError::Frontmatter(_) => Some(
+                "Open the document in the Library and use Properties → Edit raw.".into(),
+            ),
             _ => None,
         }
     }

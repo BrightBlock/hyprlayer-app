@@ -413,15 +413,7 @@ export function collaboratorFor(email: string): {
   return { name: name || email, email, role: "Editor" };
 }
 
-export function initialsOf(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-}
+export { initialsOf } from "@/lib/format";
 
 export type BundleReport = AgentBundleReport & {
   from: string | null;

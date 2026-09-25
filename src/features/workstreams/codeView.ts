@@ -15,6 +15,7 @@ import {
 } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 
+import { CODE_TOKEN_STYLES } from "@/lib/codeHighlight";
 import { basename } from "@/lib/path";
 import { intraLineRanges } from "./diff";
 
@@ -95,19 +96,10 @@ const themeChrome = EditorView.theme({
   },
 });
 
-const highlightStyle = HighlightStyle.define([
-  { tag: [t.keyword, t.modifier, t.operatorKeyword], color: "var(--color-accent)" },
-  { tag: [t.comment], color: "var(--color-ink-dim)", fontStyle: "italic" },
-  { tag: [t.string, t.special(t.string), t.regexp], color: "var(--color-ok)" },
-  { tag: [t.number, t.bool, t.atom], color: "var(--color-warn)" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "var(--color-brand)" },
-  { tag: [t.typeName, t.className, t.namespace], color: "var(--color-brand-soft)" },
-  { tag: [t.propertyName, t.attributeName], color: "var(--color-brand-soft)" },
-  { tag: [t.tagName], color: "var(--color-accent)" },
-  { tag: [t.heading], color: "var(--color-ink)", fontWeight: "bold" },
-  { tag: [t.link, t.url], color: "var(--color-brand)", textDecoration: "underline" },
-  { tag: [t.invalid], color: "var(--color-bad)" },
-]);
+const headingRule = { tag: [t.heading], color: "var(--color-ink)", fontWeight: "bold" };
+const linkRule = { tag: [t.link, t.url], color: "var(--color-brand)", textDecoration: "underline" };
+
+const highlightStyle = HighlightStyle.define([...CODE_TOKEN_STYLES, headingRule, linkRule]);
 
 export const codeBase: Extension[] = [
   lineNumbers(),

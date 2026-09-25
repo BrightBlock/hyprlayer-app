@@ -5,15 +5,20 @@ use hyprlayer_models::RuntimeEvent;
 
 use crate::config::{BackendConfig, EffectiveConfig};
 use crate::docs::frontmatter::{patch_frontmatter, FmPatch};
+use crate::docs::parts::{self, compose};
 use crate::docs::templates::{new_doc, DocTemplate};
 use crate::error::{CoreError, Result};
 use crate::gitops::{self, ThoughtsRepoStatus};
+use crate::index::related;
 use crate::index::{
     thoughts_roots, unindexed_meta, DocMeta, QueryResult, ThoughtQuery, ThoughtsRoot,
 };
 use serde::{Deserialize, Serialize};
 
 use super::HyprlayerRuntime;
+
+pub use crate::docs::parts::FrontmatterEdit;
+pub use crate::index::related::{RelatedLink, RelatedTarget};
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -51,11 +56,36 @@ pub(super) fn ensure_not_stale(abs: &Path, base_mtime_ms: f64) -> Result<()> {
     Ok(())
 }
 
+fn document_from(meta: DocMeta, content: String, mtime_ms: f64) -> Document {
+    let split = parts::split(&content);
+    let body = split.body(&content).to_string();
+    let frontmatter = split.block.map(str::to_string);
+    let fm_error = split.fm_error;
+    let fm_keys = split.keys;
+    Document {
+        meta,
+        content,
+        mtime_ms,
+        body,
+        frontmatter,
+        fm_error,
+        fm_keys,
+    }
+}
+
+// `body`/`frontmatter`/`fm_error`/`fm_keys` are deliberately not
+// `#[serde(default)]`: an app talking to an older server must fail to decode
+// rather than get an empty `body` and later save it over the file.
+// `MIN_SERVER_VERSION` keeps released servers (<= 0.8.4) out.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub meta: DocMeta,
     pub content: String,
     pub mtime_ms: f64,
+    pub body: String,
+    pub frontmatter: Option<String>,
+    pub fm_error: Option<String>,
+    pub fm_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -160,11 +190,8 @@ impl LibraryService<'_> {
                 let content = tokio::fs::read_to_string(&path)
                     .await
                     .map_err(|e| io_context("read doc", e))?;
-                return Ok(Document {
-                    meta,
-                    content,
-                    mtime_ms: file_mtime_ms(&path),
-                });
+                let mtime_ms = file_mtime_ms(&path);
+                return Ok(document_from(meta, content, mtime_ms));
             }
         }
 
@@ -178,11 +205,9 @@ impl LibraryService<'_> {
         let content = tokio::fs::read_to_string(&abs)
             .await
             .map_err(|_| CoreError::DocNotIndexed { id: id.to_string() })?;
-        Ok(Document {
-            meta: unindexed_meta(&abs, &content),
-            content,
-            mtime_ms: file_mtime_ms(&abs),
-        })
+        let meta = unindexed_meta(&abs, &content);
+        let mtime_ms = file_mtime_ms(&abs);
+        Ok(document_from(meta, content, mtime_ms))
     }
 
     pub async fn save(&self, id: &str, content: String, base_mtime_ms: f64) -> Result<DocMeta> {
@@ -210,6 +235,53 @@ impl LibraryService<'_> {
 
         let root = self.root_for_doc(&abs).await?;
         self.write_and_reindex(abs, root, patched).await
+    }
+
+    pub async fn save_parts(
+        &self,
+        id: &str,
+        body: String,
+        edit: FrontmatterEdit,
+        base_mtime_ms: f64,
+    ) -> Result<DocMeta> {
+        ensure_running(self.runtime)?;
+        let abs = self.resolve_path(id)?;
+        ensure_not_stale(&abs, base_mtime_ms)?;
+        let original = tokio::fs::read_to_string(&abs)
+            .await
+            .map_err(|e| io_context("read doc", e))?;
+        let composed = compose(&original, &body, &edit)?;
+        if composed == original {
+            // No write: bytes, mtime and the watcher stay put.
+            let key = abs.to_string_lossy().into_owned();
+            return self
+                .runtime
+                .index
+                .get(&key)
+                .ok_or(CoreError::DocNotIndexed { id: key });
+        }
+        let root = self.root_for_doc(&abs).await?;
+        self.write_and_reindex(abs, root, composed).await
+    }
+
+    pub async fn resolve_related(&self, id: &str, values: Vec<String>) -> Result<Vec<RelatedLink>> {
+        ensure_running(self.runtime)?;
+        let abs = self.resolve_path(id)?;
+        let key = abs.to_string_lossy().into_owned();
+        let source = self
+            .runtime
+            .index
+            .get(&key)
+            .ok_or_else(|| CoreError::DocNotIndexed { id: key.clone() })?;
+        let root = self.root_for_doc(&abs).await?;
+        let index = self.runtime.index.clone();
+        blocking(move || {
+            let docs = index.query(&ThoughtQuery::default()).items;
+            Ok(related::resolve(&source, &root, &values, &docs, |p| {
+                index.resolve_id(&p.to_string_lossy())
+            }))
+        })
+        .await
     }
 
     pub async fn create(&self, req: CreateDocumentRequest) -> Result<DocMeta> {

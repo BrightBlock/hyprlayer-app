@@ -10,8 +10,8 @@ import {
   type BranchPrefix,
   type CliInstallMethodId,
   type CreateDocInput,
-  type FmPatchDto,
   type CreateProjectRequest,
+  type FrontmatterEditDto,
   type Host,
   type HostsFile,
   type MergeMethod,
@@ -194,25 +194,41 @@ export function useDoc(id: string) {
   });
 }
 
-export function useSaveDoc(id: string) {
+export function fetchDocFresh(id: string) {
+  return queryClient.fetchQuery({ queryKey: ["doc", id], queryFn: () => unwrap(commands.getDoc(id)), staleTime: 0 });
+}
+
+export function useSaveDocParts(id: string) {
   return useMutation({
-    mutationFn: ({ content, baseMtimeMs }: { content: string; baseMtimeMs: number | null }) =>
-      unwrap(commands.saveDoc(id, content, baseMtimeMs)),
+    // mtimeMs is `number | null` in the bindings; null (unreadable metadata) is sent as 0.
+    mutationFn: (v: { body: string; frontmatter: FrontmatterEditDto; baseMtimeMs: number }) =>
+      unwrap(commands.saveDocParts(id, v.body, v.frontmatter, v.baseMtimeMs)),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
       void queryClient.invalidateQueries({ queryKey: ["docs"] });
+      void queryClient.invalidateQueries({ queryKey: ["related", id] });
     },
   });
 }
 
-export function usePatchDocFrontmatter(id: string) {
-  return useMutation({
-    mutationFn: ({ patch, baseMtimeMs }: { patch: FmPatchDto; baseMtimeMs: number | null }) =>
-      unwrap(commands.patchDocFrontmatter(id, patch, baseMtimeMs)),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["doc", id] });
-      void queryClient.invalidateQueries({ queryKey: ["docs"] });
-    },
+export function useRelatedDocs(id: string, values: string[]) {
+  return useQuery({
+    queryKey: ["related", id, values],
+    queryFn: () => unwrap(commands.resolveRelatedDocs(id, values)),
+    enabled: id.length > 0 && values.length > 0,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function prefetchDoc(id: string) {
+  void queryClient.prefetchQuery({ queryKey: ["doc", id], queryFn: () => unwrap(commands.getDoc(id)) });
+}
+
+// Used by the related picker to resolve pick candidates against the same
+// ["related", id, values] cache useRelatedDocs reads, without mounting a query.
+export function resolveRelatedOnce(id: string, values: string[]) {
+  return queryClient.fetchQuery({
+    queryKey: ["related", id, values],
+    queryFn: () => unwrap(commands.resolveRelatedDocs(id, values)),
   });
 }
 
