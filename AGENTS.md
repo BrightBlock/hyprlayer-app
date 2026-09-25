@@ -33,7 +33,9 @@ hyprlayer-models → hyprlayer-core → hyprlayer-server → src-tauri (hyprlaye
 
 The frontend mirrors this: routes are wiring, features are content, `src/lib` and
 `src/components` are the shared foundation. Imports only point downward
-(`.claude/rules/frontend-layering.md` loads when you edit `src/`).
+(see `.claude/rules/frontend-layering.md` before editing `src/`, and
+`.claude/rules/ia-vocabulary.md` for the naming glossary; Claude Code loads these
+automatically, other agents should read them).
 
 ## Where things live
 
