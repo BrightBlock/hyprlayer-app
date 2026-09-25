@@ -1,7 +1,6 @@
-import { ExternalLink, FileText, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { useReducedMotion } from "@/lib/useReducedMotion";
@@ -92,7 +91,7 @@ export function PlanPanel({
       }}
     >
       <div className="flex h-[38px] shrink-0 items-center gap-2 border-b border-edge px-[14px]">
-        <FileText {...ICON} size={14} className="text-ink-4" />
+        <Icon name="docText" size="sm" className="text-ink-4" />
         <span className="text-ui font-semibold text-ink">Plan preview</span>
         <span className="flex-1" />
         {headerAction && (
@@ -102,7 +101,7 @@ export function PlanPanel({
             className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-ui-sm font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
           >
             {headerAction.label}
-            {headerAction.icon === "chat" ? <MessageSquare {...ICON} size={12} /> : <ExternalLink {...ICON} size={12} />}
+            <Icon name={headerAction.icon} size="xs" />
           </button>
         )}
       </div>

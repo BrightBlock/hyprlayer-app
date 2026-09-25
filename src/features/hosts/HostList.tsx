@@ -12,7 +12,7 @@ import { toHost, validateDestination, validateHostList } from "@/lib/domain/host
 import { errorMessage } from "@/lib/ipc";
 import { useHostProbes } from "@/lib/queries";
 import { cx, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
-import { CheckIcon, MoreIcon, PlusIcon, XIcon, ZapIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { NO_SERVER, STEP_LABEL } from "./serverInstall";
 import { useHostChecks } from "./useHostChecks";
 
@@ -61,7 +61,7 @@ const DRAG_THRESHOLD_PX = 4;
 export function WorkStatus({ label }: { label: string }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5">
-      <Spinner size={11} />
+      <Spinner size="xs" />
       <span className="text-ui text-ink-dim">{label}…</span>
     </span>
   );
@@ -270,7 +270,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
           title="Add host"
           onClick={() => setAdding(BLANK_ADD)}
         >
-          <PlusIcon size={14} />
+          <Icon name="add" size="sm" />
         </button>
       </div>
       {showEmptyState && (
@@ -341,7 +341,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         }}
                       >
                         <span className="w-4 shrink-0 text-accent">
-                          {isActive && <CheckIcon size={13} />}
+                          {isActive && <Icon name="check" size="sm" />}
                         </span>
                         <span className="shrink-0 truncate text-body text-ink">{row.label}</span>
                         <span className="min-w-0 flex-1 truncate text-meta text-ink-dim">
@@ -382,7 +382,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         title={`Test ${name}`}
                         aria-label={`Test ${name}`}
                       >
-                        {testing === destination ? <Spinner size={13} /> : <ZapIcon size={13} />}
+                        {testing === destination ? <Spinner size="sm" /> : <Icon name="prompt" size="sm" />}
                       </button>
                       <button
                         data-control
@@ -396,7 +396,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                           setMenuFor(i);
                         }}
                       >
-                        <MoreIcon size={14} />
+                        <Icon name="more" size="sm" />
                       </button>
                     </>
                   ) : (
@@ -437,7 +437,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         title="Done"
                         aria-label={`Done editing ${name}`}
                       >
-                        <CheckIcon size={13} />
+                        <Icon name="check" size="sm" />
                       </button>
                       <button
                         type="button"
@@ -451,7 +451,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         title="Cancel"
                         aria-label={`Cancel editing ${name}`}
                       >
-                        <XIcon size={13} />
+                        <Icon name="close" size="sm" />
                       </button>
                     </>
                   )}
@@ -495,7 +495,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                   disabled={disabled}
                   aria-label="Cancel add"
                 >
-                  <XIcon size={12} />
+                  <Icon name="close" size="xs" />
                 </button>
                 <button
                   type="button"
@@ -504,7 +504,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                   disabled={disabled || !canAdd}
                   aria-label="Add"
                 >
-                  <PlusIcon size={12} />
+                  <Icon name="add" size="xs" />
                 </button>
               </div>
               {addError && (
@@ -578,7 +578,7 @@ export function LocalServerList({ servers, active, onSelect, disabled }: LocalSe
                 onClick={() => onSelect(server.dataDir)}
               >
                 <span className="w-4 shrink-0 text-accent">
-                  {isActive && <CheckIcon size={13} />}
+                  {isActive && <Icon name="check" size="sm" />}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-body text-ink">{server.name}</span>
                 <span className="flex shrink-0 items-center gap-1.5">

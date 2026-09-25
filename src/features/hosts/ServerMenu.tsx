@@ -1,6 +1,5 @@
 import { useEffect, useId, type RefObject } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
 
 import type { HostsFile } from "@/lib/bindings";
 import { connectionName, serverRows, type ServerRow } from "@/lib/domain/hosts";
@@ -11,7 +10,7 @@ import {
   useHosts,
   useSaveHosts,
 } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { BAR_POPOVER, BAR_POPOVER_ROW, cx, ErrorNote, Popover } from "@/components/ui";
 import { closeServerMenu, openHostsUi, openServerMenu, useHostsUiStore } from "./hostsUi";
 import { ServerSummary, worktreeCount } from "./ServerSummary";
@@ -77,7 +76,7 @@ export function ServerMenu({ anchorRef }: { anchorRef: RefObject<HTMLElement | n
           className={cx(BAR_POPOVER_ROW, "bg-panel-2 font-semibold text-ink hover:bg-panel-2")}
         >
           <span className="flex-1">Manage servers</span>
-          <ChevronRight {...ICON} className="text-ink-dim" />
+          <Icon name="chevronRight" size="sm" className="text-ink-dim" />
         </Link>
       </Popover>
       <SwitchServerConfirm
@@ -139,7 +138,7 @@ function ServerRows({
       {outdated && (
         <button type="button" onClick={openHostsUi} className={cx(BAR_POPOVER_ROW, "w-full")}>
           <span className="flex-1 text-left text-warn-ink">Server update available</span>
-          <ChevronRight {...ICON} className="text-ink-dim" />
+          <Icon name="chevronRight" size="sm" className="text-ink-dim" />
         </button>
       )}
     </>

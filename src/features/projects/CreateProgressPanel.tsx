@@ -1,6 +1,6 @@
 import type { CreateStep, ProjectCreateProgress, StepStatus } from "@/lib/bindings";
 import { Spinner, cx } from "@/components/ui";
-import { CheckIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 export type StepState = { status: StepStatus; detail: string | null };
 export type ProgressMap = Partial<Record<CreateStep, StepState>>;
@@ -76,13 +76,11 @@ function Row({ step, state }: { step: CreateStep; state: StepState | undefined }
     <div className="flex h-9 items-center gap-2.5 px-3">
       <span className="flex h-4 w-4 shrink-0 items-center justify-center">
         {status === "done" ? (
-          <CheckIcon size={13} className="text-ok" />
+          <Icon name="check" size="sm" className="text-ok" />
         ) : status === "running" ? (
-          <Spinner size={14} />
+          <Spinner size="sm" />
         ) : status === "failed" ? (
-          <span className="text-bad">
-            <XIcon size={12} />
-          </span>
+          <Icon name="close" size="xs" className="text-bad-ink" />
         ) : (
           <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-edge" />
         )}

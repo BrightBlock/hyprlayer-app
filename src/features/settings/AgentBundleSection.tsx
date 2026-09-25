@@ -11,7 +11,7 @@ import {
   Spinner,
   type DropdownOption,
 } from "@/components/ui";
-import { DownloadIcon, WarningTriangleIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import {
   commands,
   type AgentBundleInstall,
@@ -123,7 +123,7 @@ function RowInstallButton({
       aria-label={label}
       className="flex h-6 w-6 items-center justify-center rounded text-accent enabled:hover:bg-accent/15 disabled:cursor-default"
     >
-      {busy ? <Spinner size={12} /> : <DownloadIcon size={14} />}
+      {busy ? <Spinner size="xs" /> : <Icon name="download" size="sm" />}
     </button>
   );
 }
@@ -231,7 +231,7 @@ function UnpairedLayoutNote({ agentTool }: { agentTool?: string | null }) {
   return (
     <div className="mt-1 flex gap-2.5 rounded-md border border-warn/35 bg-warn/8 p-3 text-body">
       <span className="flex pt-0.5 text-warn-ink">
-        <WarningTriangleIcon size={14} />
+        <Icon name="warning" size="sm" />
       </span>
       <div className="min-w-0">
         <p className="text-ui font-semibold text-ink">Bundle versions need Claude and Codex</p>
@@ -250,7 +250,7 @@ function LegacyLayoutNote({ version }: { version?: string | null }) {
   return (
     <div className="mt-1 flex gap-2.5 rounded-md border border-bad/35 bg-bad/8 p-3 text-body">
       <span className="flex pt-0.5 text-bad">
-        <WarningTriangleIcon size={14} />
+        <Icon name="warning" size="sm" />
       </span>
       <div className="min-w-0">
         <p className="text-ui font-semibold text-ink">Migration required for updates</p>
@@ -371,7 +371,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
               update.mutate(behind);
             }}
           >
-            <DownloadIcon size={13} />
+            <Icon name="download" size="sm" />
             <span>Update to {behind}</span>
           </Button>
         )}
@@ -400,7 +400,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
 
         {busy && (
           <p className="mt-2 flex items-center gap-2 text-body text-ink-dim">
-            <Spinner size={14} />
+            <Spinner size="sm" />
             Installing the bundle pair and switching the Claude and Codex links…
           </p>
         )}

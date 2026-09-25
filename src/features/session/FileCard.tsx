@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { DocIcon, PencilIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { PATCH_LINE_CLASSES } from "@/features/workstreams/diff";
 import { baseName, type EditDiff } from "./toolDisplay";
 
@@ -98,7 +98,7 @@ export function FileCard({ path, diff }: { path: string; diff?: EditDiff | null 
       title={path}
     >
       <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-accent/15 text-accent">
-        {diff ? <PencilIcon size={12} /> : <DocIcon size={12} />}
+        <Icon name={diff ? "edit" : "doc"} size="xs" />
       </span>
       <button
         type="button"

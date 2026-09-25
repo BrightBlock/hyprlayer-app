@@ -1,40 +1,26 @@
 import { Link } from "@tanstack/react-router";
-import {
-  Bell,
-  Bot,
-  ExternalLink,
-  GitBranch,
-  Hammer,
-  Keyboard,
-  Palette,
-  Puzzle,
-  Server,
-  SlidersHorizontal,
-  SquareTerminal,
-  type LucideIcon,
-} from "lucide-react";
 
-import { ICON } from "@/components/lucide";
+import { Icon, type IconName } from "@/components/Icon";
 import { cx, RowSpine } from "@/components/ui";
 
 import type { SettingsSection } from "./sections";
 
 type NavEntry =
-  | { id: SettingsSection; label: string; icon: LucideIcon }
-  | { href: "/agents"; label: string; icon: LucideIcon };
+  | { id: SettingsSection; label: string; icon: IconName }
+  | { href: "/agents"; label: string; icon: IconName };
 
 const NAV: NavEntry[] = [
-  { id: "general", label: "General", icon: SlidersHorizontal },
-  { id: "harnesses", label: "Harnesses", icon: Bot },
+  { id: "general", label: "General", icon: "sliders" },
+  { id: "harnesses", label: "Harnesses", icon: "agents" },
   // Workshop is the Agents page; the entry leaves Settings.
-  { href: "/agents", label: "Workshop", icon: Hammer },
-  { id: "git", label: "Git", icon: GitBranch },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "keyboard", label: "Keyboard", icon: Keyboard },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "servers", label: "Servers", icon: Server },
-  { id: "advanced", label: "Advanced", icon: Puzzle },
-  { id: "binaries", label: "Binaries", icon: SquareTerminal },
+  { href: "/agents", label: "Workshop", icon: "workshop" },
+  { id: "git", label: "Git", icon: "branch" },
+  { id: "notifications", label: "Notifications", icon: "notifications" },
+  { id: "keyboard", label: "Keyboard", icon: "keyboard" },
+  { id: "appearance", label: "Appearance", icon: "appearance" },
+  { id: "servers", label: "Servers", icon: "server" },
+  { id: "advanced", label: "Advanced", icon: "plugin" },
+  { id: "binaries", label: "Binaries", icon: "console" },
 ];
 
 const ROW =
@@ -58,14 +44,13 @@ export function SettingsNav({
     >
       <ul className="space-y-0.5">
         {NAV.map((item) => {
-          const Icon = item.icon;
           if ("href" in item) {
             return (
               <li key={item.href}>
                 <Link to={item.href} className={cx(ROW, IDLE)}>
-                  <Icon {...ICON} />
+                  <Icon name={item.icon} />
                   <span className="flex-1 truncate">{item.label}</span>
-                  <ExternalLink {...ICON} size={12} className="text-ink-4" />
+                  <Icon name="external" size="xs" className="text-ink-4" />
                 </Link>
               </li>
             );
@@ -80,7 +65,7 @@ export function SettingsNav({
                 className={cx(ROW, selected ? "bg-accent-soft font-semibold text-ink" : IDLE)}
               >
                 {selected && <RowSpine />}
-                <Icon {...ICON} />
+                <Icon name={item.icon} />
                 <span className="flex-1 truncate">{item.label}</span>
                 {item.id === "servers" && (
                   <span className="text-meta text-ink-dim">{serverCount}</span>

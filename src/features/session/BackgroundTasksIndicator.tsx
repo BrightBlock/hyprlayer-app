@@ -1,7 +1,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Popover, Spinner } from "@/components/ui";
-import { TerminalIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { formatElapsed } from "@/lib/format";
 import type { LiveBackgroundTask } from "./sessionStore";
 
@@ -56,7 +56,7 @@ export function BackgroundTasksIndicator({
         aria-expanded={open}
         className="flex h-6 items-center gap-1.5 rounded px-1.5 text-background hover:bg-edge/60"
       >
-        <TerminalIcon size={14} className="animate-work-pulse" />
+        <Icon name="terminal" size="xs" className="animate-work-pulse" />
         <span className="text-meta">{tasks.length}</span>
       </button>
       <Popover
@@ -85,7 +85,7 @@ export function BackgroundTasksIndicator({
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-ui hover:bg-edge/40"
               title="Jump to transcript"
             >
-              <Spinner size={12} />
+              <Spinner size="xs" />
               <span className="flex-1 truncate font-mono text-ink">{task.label}</span>
               {elapsed !== null && <span className="shrink-0 text-ink-dim">{elapsed}</span>}
               <span className={`shrink-0 ${isAwaiting ? "text-warn-ink" : "text-ink-dim"}`}>

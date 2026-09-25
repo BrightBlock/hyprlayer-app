@@ -1,4 +1,4 @@
-import { DocIcon, ModeIcon, XIcon } from "@/components/icons";
+import { Icon, stageIconName } from "@/components/Icon";
 import type { AttachedDoc } from "@/features/session/workstreamTabs";
 
 export function chipLabel(docPath: string): string {
@@ -8,10 +8,8 @@ export function chipLabel(docPath: string): string {
 }
 
 function RoleIcon({ role }: { role: string }) {
-  if (role === "research" || role === "plan") {
-    return <ModeIcon mode={role} size={12} strokeWidth={2} />;
-  }
-  return <DocIcon />;
+  const name = role === "research" || role === "plan" ? stageIconName(role) : "doc";
+  return <Icon name={name} size="xs" />;
 }
 
 type Props = {
@@ -57,7 +55,7 @@ export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, className }: Pro
               title={doc.suggested ? "Dismiss suggestion" : "Detach from this tab"}
               aria-label={`${verb} ${chipLabel(doc.path)}`}
             >
-              <XIcon size={10} strokeWidth={2.4} />
+              <Icon name="close" size="xs" />
             </button>
           </span>
         );

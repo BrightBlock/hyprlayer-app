@@ -87,22 +87,7 @@ import { RepoAvatar } from "@/components/RepoAvatar";
 import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
 import { ResizeGrips } from "@/components/ResizeGrips";
-import {
-  AgentIcon,
-  BookIcon,
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  ClipboardIcon,
-  CodeIcon,
-  FolderIcon,
-  MultiplexerIcon,
-  PinIcon,
-  PlusIcon,
-  TerminalIcon,
-  WarningTriangleIcon,
-  ZapIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { ArchivedWorktreesButton } from "@/features/archive/ArchivedWorktreesButton";
 import { closeArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { ArchivedAgentsButton } from "@/features/session/ArchivedAgentsButton";
@@ -166,196 +151,12 @@ const LEFT_CLUSTER_WITH_LIGHTS = 92;
 const LEFT_CLUSTER_NO_LIGHTS = 12;
 const LEFT_CLUSTER_ICON = 28;
 const LEFT_CLUSTER_GAP = 4;
-const HEADER_GLYPH = 16;
-const HEADER_TERMINAL = 18;
-const HEADER_FOLDER = 20;
-// macOS app icons pad their art ~10% per side; 20px shows ~16px, matching HEADER_GLYPH.
+// macOS app icons pad their art ~10% per side; 20px shows ~16px, matching the md icon tier.
 const HEADER_APP_IMAGE = 20;
 const HEADER_MARK = 21;
 
 const HEADER_CONTENT_PAD = 16;
 const LEFT_CLUSTER_CLEARANCE = 12;
-
-function PanelRightIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width={HEADER_GLYPH}
-      height={HEADER_GLYPH}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <rect
-        x="3"
-        y="3"
-        width="18"
-        height="18"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M15 3v18" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function EditorGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      width={HEADER_GLYPH}
-      height={HEADER_GLYPH}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <path
-        d="m8.5 4-5.5 8 5.5 8M15.5 4l5.5 8-5.5 8"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function PanelLeftIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width={HEADER_GLYPH}
-      height={HEADER_GLYPH}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <rect
-        x="3"
-        y="3"
-        width="18"
-        height="18"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path d="M9 3v18" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function ForkGlyph({ limbClass }: { limbClass?: string }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      className="shrink-0"
-    >
-      <circle cx="6" cy="5" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-      <circle cx="6" cy="19" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M6 7.5v9" stroke="currentColor" strokeWidth="1.8" />
-      <g className={limbClass}>
-        <circle cx="18" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-        <path
-          d="M18 10.5c0 3-2.5 4.5-5.5 4.5H9.5"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-      </g>
-    </svg>
-  );
-}
-
-function GitBranchIcon() {
-  return <ForkGlyph />;
-}
-
-function BranchedCheckoutIcon() {
-  return <ForkGlyph limbClass="text-accent" />;
-}
-
-function MainCheckoutIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0"
-    >
-      <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
-      <path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </svg>
-  );
-}
-
-function SquareIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-    >
-      <rect
-        x="2.5"
-        y="2.5"
-        width="19"
-        height="19"
-        rx="5.5"
-        stroke="currentColor"
-        strokeWidth="2.5"
-      />
-    </svg>
-  );
-}
-
-function CubeIcon({ size = 19 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
-      <path d="m3.3 7 8.7 5 8.7-5" />
-      <path d="M12 22V12" />
-    </svg>
-  );
-}
-
-function RailBookIcon({ size = 19 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-    </svg>
-  );
-}
 
 function decodePathSegment(value: string): string {
   try {
@@ -389,31 +190,31 @@ const topIconClass =
 const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-accent-ink shadow-sm`;
 
 function headerAppIcon(app: EditorTarget | undefined): ReactNode {
-  if (!app) return <EditorGlyph />;
+  if (!app) return <Icon name="code" />;
   if (app.iconDataUrl) return appIcon(app, HEADER_APP_IMAGE);
-  if (app.kind === "terminal") return <TerminalIcon size={HEADER_TERMINAL} />;
-  if (app.kind === "files") return <FolderIcon size={HEADER_FOLDER} />;
-  return <EditorGlyph />;
+  if (app.kind === "terminal") return <Icon name="terminal" />;
+  if (app.kind === "files") return <Icon name="folder" />;
+  return <Icon name="code" />;
 }
 
-function appIcon(app: EditorTarget, size = 22): ReactNode {
+function appIcon(app: EditorTarget, imageSize = 22): ReactNode {
   if (app.iconDataUrl) {
     return (
       <img
         src={app.iconDataUrl}
         alt=""
         className="block shrink-0 rounded-[4px]"
-        style={{ width: size, height: size }}
+        style={{ width: imageSize, height: imageSize }}
       />
     );
   }
   switch (app.kind) {
     case "files":
-      return <FolderIcon size={size} />;
+      return <Icon name="folder" />;
     case "terminal":
-      return <TerminalIcon size={size} />;
+      return <Icon name="terminal" />;
     default:
-      return <CodeIcon size={size} />;
+      return <Icon name="code" />;
   }
 }
 
@@ -448,7 +249,7 @@ function OpenInMenu({ dir }: { dir: string }) {
       {
         key: "copy-path",
         label: "Copy path",
-        icon: <ClipboardIcon size={20} />,
+        icon: <Icon name="copy" />,
         run: (): void => {
           void navigator.clipboard.writeText(dir);
         },
@@ -483,7 +284,7 @@ function OpenInMenu({ dir }: { dir: string }) {
         aria-expanded={open}
       >
         {headerAppIcon(defaultApp)}
-        <ChevronDownIcon size={12} strokeWidth={1.5} className="shrink-0" />
+        <Icon name="chevronDown" size="xs" />
       </button>
       <Popover
         open={open}
@@ -548,7 +349,7 @@ function ProjectCopyWarning({ projectPath }: { projectPath: string }) {
       title={`Won't be copied to new worktrees:\n${problems.join("\n")}\n\nAdd the file to the repo, or fix the path in Project settings.`}
       aria-label={`Copy file issues: ${problems.join(", ")}`}
     >
-      <WarningTriangleIcon size={14} />
+      <Icon name="warning" size="sm" />
     </span>
   );
 }
@@ -1019,7 +820,7 @@ export function Root() {
             title={sidebarShown ? "Hide sidebar" : "Show sidebar"}
             aria-label={sidebarShown ? "Hide sidebar" : "Show sidebar"}
           >
-            <PanelLeftIcon />
+            <Icon name="panelLeft" />
           </button>
           {currentProject && isGitProject(currentProject) && (
             <button
@@ -1029,7 +830,7 @@ export function Root() {
               title="Project docs"
               aria-label="Project docs"
             >
-              <BookIcon size={HEADER_GLYPH} />
+              <Icon name="library" />
             </button>
           )}
         </div>
@@ -1055,7 +856,7 @@ export function Root() {
                   {currentProject.mappedName}
                 </Link>
                 <span className="text-ink-dim">
-                  <ChevronRightIcon />
+                  <Icon name="chevronRight" />
                 </span>
                 <span className="truncate text-ink-dim">{crumb}</span>
               </>
@@ -1076,13 +877,13 @@ export function Root() {
                       title={`Back to ${backProject.mappedName}`}
                       aria-label={`Back to ${backProject.mappedName}`}
                     >
-                      <ChevronLeftIcon size={14} />
+                      <Icon name="chevronLeft" />
                       <span className="max-w-40 truncate">
                         {backProject.mappedName}
                       </span>
                     </button>
                     <span className="text-ink-dim">
-                      <ChevronRightIcon />
+                      <Icon name="chevronRight" />
                     </span>
                   </>
                 )}
@@ -1105,7 +906,7 @@ export function Root() {
                 {libDocTitle && (
                   <>
                     <span className="text-ink-dim">
-                      <ChevronRightIcon />
+                      <Icon name="chevronRight" />
                     </span>
                     <span className="truncate text-ink-dim">{libDocTitle}</span>
                   </>
@@ -1129,9 +930,9 @@ export function Root() {
                 href={libDocUrl.data}
                 target="_blank"
                 rel="noreferrer"
-                className="text-ui font-medium text-ink-dim hover:text-ink"
+                className="inline-flex items-center gap-1 text-ui font-medium text-ink-dim hover:text-ink"
               >
-                View on GitHub ↗
+                View on GitHub <Icon name="external" size="xs" />
               </a>
             )}
             {currentProject &&
@@ -1169,7 +970,7 @@ export function Root() {
                         : "Show changes sidebar"
                     }
                   >
-                    <PanelRightIcon />
+                    <Icon name="panels" />
                   </button>
                 )}
               </>
@@ -1197,11 +998,7 @@ export function Root() {
               }
               aria-label={mux.enabled ? "Home (Multiplexer mode on)" : "Home"}
             >
-              {mux.enabled ? (
-                <MultiplexerIcon size={16} strokeWidth={2} />
-              ) : (
-                <SquareIcon />
-              )}
+              <Icon name={mux.enabled ? "multiplexer" : "home"} size="rail" />
             </Link>
             <button
               type="button"
@@ -1232,7 +1029,7 @@ export function Root() {
               }
               aria-label="Projects"
             >
-              <CubeIcon />
+              <Icon name="projects" size="rail" />
             </button>
             <button
               type="button"
@@ -1241,7 +1038,7 @@ export function Root() {
               title="Library"
               aria-label="Library"
             >
-              <RailBookIcon />
+              <Icon name="library" size="rail" />
             </button>
             <button
               type="button"
@@ -1250,7 +1047,7 @@ export function Root() {
               title="Prompt library"
               aria-label="Prompt library"
             >
-              <ZapIcon size={19} strokeWidth={1.6} />
+              <Icon name="prompt" size="rail" />
             </button>
             <button
               type="button"
@@ -1259,7 +1056,7 @@ export function Root() {
               title="Agents"
               aria-label="Agents"
             >
-              <AgentIcon size={19} strokeWidth={1.7} />
+              <Icon name="agents" size="rail" />
             </button>
           </div>
         </nav>
@@ -1305,7 +1102,7 @@ export function Root() {
                   title="Add project"
                   aria-label="Add project"
                 >
-                  <PlusIcon size={14} />
+                  <Icon name="add" size="sm" />
                 </button>
               </div>
               <nav className="flex-1 overflow-y-auto px-2 pt-2">
@@ -1342,13 +1139,14 @@ export function Root() {
                           : "Collapse pinned"
                       }
                     >
-                      <ChevronDownIcon
-                        size={12}
-                        className={`shrink-0 transition-transform ${
+                      <Icon
+                        name="chevronDown"
+                        size="xs"
+                        className={`transition-transform ${
                           pinnedSectionCollapsed ? "-rotate-90" : ""
                         }`}
                       />
-                      <PinIcon size={12} className="shrink-0" />
+                      <Icon name="pin" size="xs" />
                       <span>Pinned</span>
                     </button>
                     {!pinnedSectionCollapsed &&
@@ -1390,7 +1188,11 @@ export function Root() {
                               <span className="text-ink-dim/70">
                                 {projectName}
                               </span>
-                              <span className="px-1 text-ink-dim/40">›</span>
+                              <Icon
+                                name="chevronRight"
+                                size="xs"
+                                className="mx-1 inline align-[-1px] text-ink-dim/40"
+                              />
                               {view.item.title}
                             </span>
                             <WorkstreamBuildPhase
@@ -1459,9 +1261,10 @@ export function Root() {
                             title={isProjectCollapsed ? "Expand" : "Collapse"}
                             className="ml-1 flex h-5 w-4 shrink-0 items-center justify-center rounded text-ink-dim hover:text-ink"
                           >
-                            <ChevronDownIcon
-                              size={12}
-                              className={`shrink-0 transition-transform ${
+                            <Icon
+                              name="chevronDown"
+                              size="xs"
+                              className={`transition-transform ${
                                 isProjectCollapsed ? "-rotate-90" : ""
                               }`}
                             />
@@ -1512,7 +1315,7 @@ export function Root() {
                           title={`New workstream in ${p.mappedName}`}
                           aria-label={`New workstream in ${p.mappedName}`}
                         >
-                          <PlusIcon size={14} />
+                          <Icon name="add" size="sm" />
                         </Link>
                       </div>
 
@@ -1579,11 +1382,11 @@ export function Root() {
                               }
                             >
                               {branchedInPlace ? (
-                                <BranchedCheckoutIcon />
+                                <Icon name="worktree" size="xs" className="text-accent" />
                               ) : inplace || folder ? (
-                                <MainCheckoutIcon />
+                                <Icon name="mainCheckout" size="xs" />
                               ) : (
-                                <GitBranchIcon />
+                                <Icon name="branch" size="xs" />
                               )}
                             </span>
                             <WorkstreamBuildPhase
@@ -1620,7 +1423,7 @@ export function Root() {
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
-                <Spinner size={20} />
+                <Spinner size="lg" />
               </div>
             }
           >

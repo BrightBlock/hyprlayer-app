@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 
 import { Badge, DropdownSelect, ErrorNote, Field, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon, FolderIcon, PlusIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import type { Project, QueryResult } from "@/lib/bindings";
 import { isGitProject } from "@/lib/domain/projects";
@@ -61,7 +61,7 @@ export function LibrarySidebar({
             title="New document"
             aria-label="New document"
           >
-            <PlusIcon size={14} />
+            <Icon name="add" size="sm" />
           </button>
         </div>
       </div>
@@ -182,7 +182,7 @@ function ProjectSwitcher({
         {current ? (
           <RepoAvatar source={current.originUrl} name={current.mappedName} size={16} className="rounded" />
         ) : (
-          <FolderIcon size={14} />
+          <Icon name="folder" size="sm" />
         )}
         <span className="min-w-0 flex-1 truncate text-left font-medium text-ink">
           {current?.mappedName ?? "All projects"}
@@ -190,7 +190,7 @@ function ProjectSwitcher({
         {typeof total === "number" && (
           <span className="shrink-0 text-ui tabular-nums text-ink-dim/70">{total}</span>
         )}
-        <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
+        <Icon name="chevronDown" size="xs" className="text-ink-dim" />
       </button>
       <Popover
         open={open}
@@ -200,7 +200,7 @@ function ProjectSwitcher({
         className="max-h-72 overflow-y-auto"
       >
         <SwitcherItem active={!value} onClick={() => choose(undefined)}>
-          <FolderIcon size={14} />
+          <Icon name="folder" size="sm" />
           <span className="flex-1 truncate">All projects</span>
         </SwitcherItem>
         {projects.map((p) => (
@@ -283,7 +283,7 @@ function MoreFilters({
         className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-label text-ink-dim hover:text-ink"
         aria-expanded={open}
       >
-        <ChevronRightIcon size={12} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+        <Icon name="chevronRight" size="xs" className={`transition-transform ${open ? "rotate-90" : ""}`} />
         Filters{active > 0 ? ` · ${active}` : ""}
       </button>
       {open && (

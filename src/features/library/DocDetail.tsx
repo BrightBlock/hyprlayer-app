@@ -4,7 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { useMemo, useState } from "react";
 
 import { Badge, ErrorNote, PageError, PageSpinner, Spinner } from "@/components/ui";
-import { FolderIcon, PencilIcon, SearchIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import type { DocContent } from "@/lib/bindings";
 import {
   useDoc,
@@ -125,7 +125,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
             title={revealLabel}
             aria-label={revealLabel}
           >
-            <FolderIcon size={16} />
+            <Icon name="folder" />
           </button>
           <button
             type="button"
@@ -140,11 +140,11 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
             aria-label={primaryTitle}
           >
             {saveDoc.isPending ? (
-              <Spinner size={14} />
+              <Spinner />
             ) : mode === "edit" ? (
-              <SearchIcon size={15} />
+              <Icon name="preview" />
             ) : (
-              <PencilIcon size={15} />
+              <Icon name="edit" />
             )}
           </button>
         </div>

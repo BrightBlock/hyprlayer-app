@@ -1,8 +1,6 @@
-import { ChartNoAxesColumnIncreasing, ChevronDown } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { ChevronRightIcon } from "@/components/icons";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { MenuPanel, OptionMenuList } from "@/components/OptionMenuList";
 import { MenuItem, MenuSeparator, Popover, cx } from "@/components/ui";
 import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
@@ -196,7 +194,7 @@ function ModelPicker({ controls, compact }: { controls: SessionControls; compact
         className={cx(BAR_BUTTON, "min-w-0 shrink font-medium text-ink", compact && "max-w-32")}
       >
         <span className="truncate">{model.label}</span>
-        <ChevronDown {...ICON} size={12} className="shrink-0 text-ink-4" />
+        <Icon name="chevronDown" size="xs" className="text-ink-4" />
       </button>
       <Popover
         open={open}
@@ -227,7 +225,7 @@ function ModelPicker({ controls, compact }: { controls: SessionControls; compact
             <span className="flex w-full items-center gap-2">
               <span>Harnesses</span>
               <span className="ml-auto shrink-0">
-                <ChevronRightIcon size={14} />
+                <Icon name="chevronRight" size="sm" />
               </span>
             </span>
           </MenuItem>
@@ -262,9 +260,9 @@ function EffortPicker({
         title={`Reasoning effort: ${effort.label}`}
         className={cx(BAR_BUTTON, "pl-1 font-medium text-ink")}
       >
-        <ChartNoAxesColumnIncreasing {...ICON} size={12} className="shrink-0 text-ink-dim" />
+        <Icon name="usage" size="xs" className="text-ink-dim" />
         <span className="whitespace-nowrap">{effort.label}</span>
-        <ChevronDown {...ICON} size={12} className="shrink-0 text-ink-4" />
+        <Icon name="chevronDown" size="xs" className="text-ink-4" />
       </button>
       <Popover
         open={open}

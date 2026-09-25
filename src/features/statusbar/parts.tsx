@@ -1,7 +1,6 @@
-import { GitBranch } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 import { formatCompactCount } from "@/lib/format";
 import { useBootstrap } from "@/lib/queries";
@@ -34,7 +33,7 @@ export function RepoStatus({ repo, compact }: { repo: RepoSummary; compact: bool
   return (
     <div className="flex min-w-0 items-center gap-3">
       <span className="flex min-w-0 items-center gap-1.5" title={repo.branch}>
-        <GitBranch {...ICON} size={14} className="shrink-0 text-ink-dim" />
+        <Icon name="branch" size="xs" className="text-ink-dim" />
         <span className="truncate text-ink-2">{repo.branch}</span>
       </span>
       {!compact && (

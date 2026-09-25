@@ -14,51 +14,12 @@ import { IS_MACOS } from "@/lib/platform";
 import { formatChord } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { ErrorNote, IconButton, Spinner } from "@/components/ui";
-import {
-  ChevronDownIcon,
-  GitCommitIcon,
-  GitPullRequestIcon,
-  SplitIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useWorkstreamGitActions } from "./useGitActions";
 import { AheadBehind } from "./AheadBehind";
 import { PrStatusBar } from "./PrStatusBar";
 import { AttachPrDialog } from "./AttachPrDialog";
 import { ArchiveWorkstreamDialog } from "./ArchiveWorkstreamDialog";
-
-function RefreshIcon({ size = 12 }: { size?: number }) {
-  return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path
-        d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function PullIcon({ size = 13 }: { size?: number }) {
-  return (
-    <svg
-      aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 4v11" />
-      <path d="m7 10 5 5 5-5" />
-      <path d="M5 20h14" />
-    </svg>
-  );
-}
 
 function BranchTargetRow({ view }: { view: WorkstreamView }) {
   const [open, setOpen] = useState(false);
@@ -88,7 +49,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
               : `${view.item.branch} → ${baseShort}`
           }
         >
-          <SplitIcon size={13} className={`shrink-0 ${detached ? "text-warn-ink" : "text-ok"}`} />
+          <Icon name="branch" size="xs" className={detached ? "text-warn-ink" : "text-ok"} />
           <span className="min-w-0 truncate text-meta text-ink">
             {detached ? "detached HEAD" : view.item.branch}
           </span>
@@ -103,9 +64,9 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
             title={`Merge target: ${view.item.baseBranch} , click to change`}
             aria-label="Change target branch"
           >
-            {setBase.isPending && <Spinner size={11} />}
+            {setBase.isPending && <Spinner size="xs" />}
             <span className="max-w-[110px] truncate">{baseShort}</span>
-            <ChevronDownIcon size={11} className="text-ink-dim" />
+            <Icon name="chevronDown" size="xs" className="text-ink-dim" />
           </button>
           {open && (
             <>
@@ -123,13 +84,13 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                     title="Fetch &amp; prune, then refresh branches"
                     aria-label="Refresh branches"
                   >
-                    {refreshing ? <Spinner size={11} /> : <RefreshIcon size={12} />}
+                    {refreshing ? <Spinner size="sm" /> : <Icon name="sync" size="sm" />}
                   </button>
                 </div>
                 <div className="max-h-60 overflow-y-auto">
                   {bases.isLoading ? (
                     <div className="flex justify-center py-3">
-                      <Spinner size={13} />
+                      <Spinner size="sm" />
                     </div>
                   ) : choices.length === 0 ? (
                     <div className="px-2 py-1.5 text-ui text-ink-dim">
@@ -148,7 +109,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                           c.label === baseShort ? "text-ink" : "text-ink-dim"
                         }`}
                       >
-                        <SplitIcon size={12} className="shrink-0" />
+                        <Icon name="branch" size="sm" />
                         <span className="min-w-0 flex-1 truncate">{c.label}</span>
                         {c.label === baseShort && (
                           <span className="shrink-0 text-ui-sm text-ink-dim/70">current</span>
@@ -200,7 +161,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                 title="Fetch remote. Refreshes ahead/behind and PR status"
                 aria-label="Fetch remote"
               >
-                {refresh.isPending ? <Spinner size={14} /> : <RefreshIcon size={14} />}
+                {refresh.isPending ? <Spinner size="sm" /> : <Icon name="sync" size="sm" />}
               </IconButton>
             </div>
           )}
@@ -238,7 +199,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     } in`}
                     aria-label={`Update from ${view.item.baseBranch}`}
                   >
-                    {pull.isPending ? <Spinner size={12} /> : <PullIcon size={14} />}
+                    {pull.isPending ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
                   </button>
                 )}
               </div>
@@ -265,7 +226,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-panel-2 text-body font-medium text-ink hover:bg-edge/50 disabled:opacity-60"
                     title={`Runs the Commit prompt. Commits locally, then asks whether to push${chordHint("ws.commit")}`}
                   >
-                    <GitCommitIcon size={15} />
+                    <Icon name="commit" />
                     Commit · {actions.changedCount}
                   </button>
                 )}
@@ -277,7 +238,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
                     title={`Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`}
                   >
-                    <GitPullRequestIcon size={15} />
+                    <Icon name="pullRequest" />
                     Ship
                   </button>
                 )}

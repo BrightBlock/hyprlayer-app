@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronDown } from "lucide-react";
 
 import type { AppSettings, Bootstrap, TabTitleSettings } from "@/lib/bindings";
 import { claudeModels, modelOptions } from "@/lib/domain/models";
@@ -11,7 +10,7 @@ import {
   useSetAppSettings,
 } from "@/lib/queries";
 import { useUpdate } from "@/lib/updater";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
 import { Button, ErrorNote, SettingRow, Toggle } from "@/components/ui";
 
@@ -142,9 +141,9 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
                   ),
                 )}
               </select>
-              <ChevronDown
-                {...ICON}
-                size={12}
+              <Icon
+                name="chevronDown"
+                size="xs"
                 className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-4"
               />
             </div>

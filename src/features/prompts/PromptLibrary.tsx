@@ -21,15 +21,7 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
-import {
-  BracesIcon,
-  ExportIcon,
-  GitCommitIcon,
-  GitPullRequestIcon,
-  ImportIcon,
-  PlusIcon,
-  ZapIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import {
   eventToChord,
   formatChord,
@@ -606,7 +598,7 @@ export function PromptLibrary({
               title="Import prompts from a .hlprompts file"
               aria-label="Import prompts"
             >
-              <ImportIcon size={14} />
+              <Icon name="import" size="sm" />
             </button>
             <button
               type="button"
@@ -615,7 +607,7 @@ export function PromptLibrary({
               title="Export prompts to share"
               aria-label="Export prompts"
             >
-              <ExportIcon size={14} />
+              <Icon name="export" size="sm" />
             </button>
             <button
               type="button"
@@ -624,7 +616,7 @@ export function PromptLibrary({
               title="New prompt"
               aria-label="New prompt"
             >
-              <PlusIcon size={14} />
+              <Icon name="add" size="sm" />
             </button>
           </div>
         </div>
@@ -648,7 +640,7 @@ export function PromptLibrary({
                 listRow({
                   key: b.id,
                   icon:
-                    b.id === "commit" ? <GitCommitIcon size={14} /> : <GitPullRequestIcon size={14} />,
+                    <Icon name={b.id === "commit" ? "commit" : "pullRequest"} />,
                   name: b.name,
                   chord: effectiveChord(kbOverrides, b.commandId, IS_MACOS),
                   modified: isBuiltinModified(asSettings, defaults, b.id),
@@ -673,7 +665,7 @@ export function PromptLibrary({
                 .map((p) =>
                   listRow({
                     key: p.id ?? "",
-                    icon: <ZapIcon size={14} />,
+                    icon: <Icon name="prompt" />,
                     name: p.name ?? "",
                     chord: p.chord ? normalizeChord(p.chord) : null,
                     hasOverrides: Object.keys(p.overrides ?? {}).length > 0,
@@ -728,15 +720,9 @@ export function PromptLibrary({
           <Card>
           <div className="flex items-center gap-2.5">
             <span className="shrink-0 text-accent">
-              {builtinDef ? (
-                builtinDef.id === "commit" ? (
-                  <GitCommitIcon size={16} />
-                ) : (
-                  <GitPullRequestIcon size={16} />
-                )
-              ) : (
-                <ZapIcon size={16} />
-              )}
+              <Icon
+                name={builtinDef ? (builtinDef.id === "commit" ? "commit" : "pullRequest") : "prompt"}
+              />
             </span>
             {builtinDef ? (
               <>
@@ -765,7 +751,7 @@ export function PromptLibrary({
             {selModified && <Badge tone="warn">Modified</Badge>}
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <Button onClick={() => void exportSelected()} title="Save this prompt as a .hlprompts file">
-                <ExportIcon size={13} />
+                <Icon name="export" size="sm" />
                 Export
               </Button>
               {builtinDef && selModified && (
@@ -829,7 +815,7 @@ export function PromptLibrary({
                     onClick={() => setProjPickerOpen((v) => !v)}
                     className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-ui text-ink-dim hover:border-accent/50 hover:text-ink"
                   >
-                    <PlusIcon size={11} />
+                    <Icon name="add" size="xs" />
                     Project override…
                   </button>
                   <Popover
@@ -927,7 +913,7 @@ export function PromptLibrary({
                 onClick={() => setVarPickerOpen((v) => !v)}
                 className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-ui text-brand hover:border-brand/60"
               >
-                <BracesIcon size={12} />
+                <Icon name="braces" size="xs" />
                 Insert variable
               </button>
               <span className="text-ui text-ink-dim">

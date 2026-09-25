@@ -1,15 +1,15 @@
 
-import { BracesIcon, CodeIcon, DocIcon, HashIcon, ImageIcon } from "./icons";
+import { Icon, type IconName, type IconSize } from "./Icon";
 
 type Category = "code" | "markup" | "style" | "data" | "image" | "doc";
 
-const CATEGORY: Record<Category, { Glyph: typeof DocIcon; cls: string }> = {
-  code: { Glyph: CodeIcon, cls: "text-brand" },
-  markup: { Glyph: CodeIcon, cls: "text-accent" },
-  style: { Glyph: HashIcon, cls: "text-brand-soft" },
-  data: { Glyph: BracesIcon, cls: "text-warn-ink" },
-  image: { Glyph: ImageIcon, cls: "text-ok" },
-  doc: { Glyph: DocIcon, cls: "text-ink-dim" },
+const CATEGORY: Record<Category, { name: IconName; cls: string }> = {
+  code: { name: "code", cls: "text-brand" },
+  markup: { name: "code", cls: "text-accent" },
+  style: { name: "hash", cls: "text-brand-soft" },
+  data: { name: "braces", cls: "text-warn-ink" },
+  image: { name: "image", cls: "text-ok" },
+  doc: { name: "doc", cls: "text-ink-dim" },
 };
 
 const EXT_CATEGORY: Record<string, Category> = {
@@ -77,12 +77,12 @@ function extOf(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-export function FileTypeIcon({ name, size = 13 }: { name: string; size?: number }) {
+export function FileTypeIcon({ name, size = "xs" }: { name: string; size?: IconSize }) {
   const category = EXT_CATEGORY[extOf(name)] ?? "doc";
-  const { Glyph, cls } = CATEGORY[category];
+  const glyph = CATEGORY[category];
   return (
-    <span className={`shrink-0 ${cls}`}>
-      <Glyph size={size} />
+    <span className={`shrink-0 ${glyph.cls}`}>
+      <Icon name={glyph.name} size={size} />
     </span>
   );
 }

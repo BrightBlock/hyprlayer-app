@@ -10,15 +10,7 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
-import {
-  CheckIcon,
-  ChevronRightIcon,
-  DocIcon,
-  ShieldIcon,
-  WarningTriangleIcon,
-  WrenchIcon,
-  XIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useSignedIn } from "@/lib/account";
 import type {
   AgentContextFile,
@@ -182,7 +174,7 @@ export function AgentEditor(props: Props) {
             }}
             className={HEADER_ICON}
           >
-            ⋮
+            <Icon name="more" />
           </button>
         )}
         <button
@@ -192,7 +184,7 @@ export function AgentEditor(props: Props) {
           title="Cancel"
           className={HEADER_ICON}
         >
-          <XIcon size={15} />
+          <Icon name="close" />
         </button>
         {!managed && (
           <button
@@ -211,7 +203,7 @@ export function AgentEditor(props: Props) {
             }
             className={HEADER_ICON_PRIMARY}
           >
-            {saving ? <Spinner size={15} /> : <CheckIcon size={16} strokeWidth={2.2} />}
+            {saving ? <Spinner /> : <Icon name="check" />}
           </button>
         )}
       </div>
@@ -276,7 +268,7 @@ function Breadcrumb({
 }) {
   const sep = (
     <span aria-hidden="true" className="shrink-0 text-ink-dim">
-      <ChevronRightIcon size={12} />
+      <Icon name="chevronRight" size="xs" />
     </span>
   );
   return (
@@ -341,13 +333,13 @@ function SetupTab({
   return (
     <>
       {draft.managed ? (
-        <Callout tone="warn" icon={<ShieldIcon size={14} />}>
+        <Callout tone="warn" icon={<Icon name="permissions" size="sm" />}>
           Hyprlayer manages this linked agent as part of the Claude and Codex bundle. It is
           read-only here so edits cannot change the shared bundle store. Duplicate it from the
           agent menu to create a personal copy.
         </Callout>
       ) : isSystem(draft) ? (
-        <Callout tone="warn" icon={<ShieldIcon size={14} />}>
+        <Callout tone="warn" icon={<Icon name="permissions" size="sm" />}>
           This agent ships with the <span className="font-mono">{draft.plugin}</span> plugin. Edits
           are saved as a copy in your own library and take precedence over the shipped file.{" "}
           <strong className="font-semibold text-ink">Reset to default</strong> removes the copy at
@@ -576,7 +568,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
                   className="flex items-center gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2"
                 >
                   <span className="grid text-ink-dim">
-                    <DocIcon size={14} />
+                    <Icon name="doc" size="sm" />
                   </span>
                   <span className="text-meta text-ink">{c.path}</span>
                   <span className="text-ui-sm text-ink-dim">{c.note}</span>
@@ -629,7 +621,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                   className="flex items-center gap-3 border-b border-edge/45 py-2.5"
                 >
                   <span className={`grid shrink-0 ${on ? "text-accent" : "text-ink-dim/55"}`}>
-                    <WrenchIcon size={13} />
+                    <Icon name="tool" size="sm" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-meta text-ink">{t.key}</div>
@@ -884,7 +876,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
         </div>
         {overlay.permissionMode === "bypassPermissions" && (
           <div className="mt-3">
-            <Callout tone="bad" icon={<WarningTriangleIcon size={14} />}>
+            <Callout tone="bad" icon={<Icon name="warning" size="sm" />}>
               This agent will run every command without asking. Hyprlayer will only launch it inside
               a worktree, never on your main checkout.
             </Callout>
@@ -950,7 +942,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                   }
                   className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-bad"
                 >
-                  <XIcon size={12} />
+                  <Icon name="close" size="xs" />
                 </button>
               </div>
             ))}
@@ -1045,7 +1037,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
                 }
                 className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-panel hover:text-bad"
               >
-                <XIcon size={12} />
+                <Icon name="close" size="xs" />
               </button>
             </div>
           ))}

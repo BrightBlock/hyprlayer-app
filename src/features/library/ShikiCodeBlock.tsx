@@ -4,7 +4,7 @@ import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 
-import { ClipboardIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { highlightToHast, resolveLang } from "./shikiHighlight";
 
@@ -58,7 +58,7 @@ function ShikiCodeBlockImpl({
           className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-label text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100"
           aria-label="Copy code"
         >
-          <ClipboardIcon size={10} />
+          <Icon name="copy" size="xs" />
           <span>{copied ? "copied" : "copy"}</span>
         </button>
       </div>

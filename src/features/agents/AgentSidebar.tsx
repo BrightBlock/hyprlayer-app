@@ -2,20 +2,7 @@
 import { useRef, useState, type ReactNode } from "react";
 
 import { Badge, IconButton, Popover, RefreshButton, Spinner, TextInput, Toggle } from "@/components/ui";
-import {
-  ChevronDownIcon,
-  ChevronLeftIcon,
-  DocTextIcon,
-  DownloadIcon,
-  FolderIcon,
-  LayersIcon,
-  PeopleIcon,
-  PlusIcon,
-  PuzzleIcon,
-  ShieldIcon,
-  WrenchIcon,
-  ZapIcon,
-} from "@/components/icons";
+import { Icon, type IconName } from "@/components/Icon";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { useSignedIn } from "@/lib/account";
 import { formatRelativeTime } from "@/lib/format";
@@ -123,20 +110,20 @@ export function AgentSidebar(props: AgentSidebarProps) {
   const rootNav = (
     <div className="space-y-0.5 border-b border-edge pb-3">
       <RootRow
-        icon={<LayersIcon size={14} />}
+        icon={<Icon name="layers" />}
         label="Agents"
         trailing={<span className="shrink-0 text-ui text-ink-dim opacity-70">{agentsCount}</span>}
         variant={rootVariant("agents")}
         onClick={() => onSection("agents")}
       />
       <RootRow
-        icon={<PuzzleIcon size={14} />}
+        icon={<Icon name="plugin" />}
         label="System agents"
         variant={rootVariant("system")}
         onClick={() => onSection("system")}
       />
       <RootRow
-        icon={<ZapIcon size={14} />}
+        icon={<Icon name="skill" />}
         label="Skills"
         trailing={<SoonBadge />}
         variant={rootVariant("skills")}
@@ -163,7 +150,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
             aria-label="All agents"
             className={HEADER_ICON_BTN}
           >
-            <ChevronLeftIcon size={14} />
+            <Icon name="chevronLeft" size="sm" />
           </button>
           <p className="min-w-0 flex-1 truncate text-title text-ink-dim">
             {selectedAgent.name || "untitled"}
@@ -179,7 +166,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
             aria-label="More actions"
             className={HEADER_ICON_BTN}
           >
-            ⋮
+            <Icon name="more" size="sm" />
           </button>
         </div>
       ) : (
@@ -195,7 +182,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
               aria-label="New folder"
               className={HEADER_ICON_BTN}
             >
-              <FolderIcon size={14} />
+              <Icon name="folder" size="sm" />
             </button>
             <button
               type="button"
@@ -204,7 +191,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
               aria-label="New agent"
               className={HEADER_ICON_BTN}
             >
-              <PlusIcon size={14} />
+              <Icon name="add" size="sm" />
             </button>
             {section === "agents" && (
               <>
@@ -216,7 +203,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
                   aria-label="More options"
                   className={HEADER_ICON_BTN}
                 >
-                  ⋮
+                  <Icon name="more" size="sm" />
                 </button>
                 <Popover
                   open={overflowOpen}
@@ -268,7 +255,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
                 <ConfigSectionRow
                   key={t.key}
                   label={t.label}
-                  icon={editorTabIcon(t.key)}
+                  icon={<Icon name={EDITOR_TAB_ICON[t.key]} />}
                   selected={editorTab === t.key}
                   onClick={() => onEditorTab(t.key)}
                 />
@@ -331,20 +318,13 @@ export function AgentSidebar(props: AgentSidebarProps) {
   );
 }
 
-function editorTabIcon(key: EditorTab) {
-  switch (key) {
-    case "setup":
-      return <WrenchIcon size={14} />;
-    case "prompt":
-      return <DocTextIcon size={14} />;
-    case "capabilities":
-      return <ZapIcon size={14} />;
-    case "permissions":
-      return <ShieldIcon size={14} />;
-    case "collaborators":
-      return <PeopleIcon size={14} />;
-  }
-}
+const EDITOR_TAB_ICON: Record<EditorTab, IconName> = {
+  setup: "tool",
+  prompt: "docText",
+  capabilities: "prompt",
+  permissions: "permissions",
+  collaborators: "users",
+};
 
 function ConfigSectionRow({
   label,
@@ -401,9 +381,7 @@ function RootRow({
       <span className={`shrink-0 ${variant === "plain" ? "text-ink-dim" : "text-accent"}`}>{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {variant === "trail" ? (
-        <span aria-hidden="true" className="shrink-0 text-ink-dim opacity-65">
-          ›
-        </span>
+        <Icon name="chevronRight" size="xs" className="text-ink-dim opacity-65" />
       ) : (
         trailing
       )}
@@ -443,12 +421,12 @@ function ScopePicker({
         {current ? (
           <RepoAvatar source={current.originUrl} name={current.mappedName} size={14} className="rounded" />
         ) : (
-          <LayersIcon size={14} className="text-ink-dim" />
+          <Icon name="layers" size="sm" className="text-ink-dim" />
         )}
         <span className="min-w-0 flex-1 truncate text-left font-medium text-ink">
           {current?.mappedName ?? "Global"}
         </span>
-        <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
+        <Icon name="chevronDown" size="xs" className="text-ink-dim" />
       </button>
       <Popover
         open={open}
@@ -458,7 +436,7 @@ function ScopePicker({
         className="max-h-72 overflow-y-auto"
       >
         <ScopeItem active={!value} onClick={() => choose(null)}>
-          <LayersIcon size={14} />
+          <Icon name="layers" size="sm" />
           <span className="min-w-0 flex-1 truncate">Global</span>
         </ScopeItem>
         {projects.map((p) => (
@@ -521,12 +499,12 @@ function FolderRow({
     >
       <span
         aria-hidden="true"
-        className={`inline-block w-2.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        className={`inline-flex w-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
       >
-        ›
+        <Icon name="chevronRight" size="xs" />
       </span>
       <span className="shrink-0" style={{ color: folderColor(folder) }}>
-        <FolderIcon size={13} />
+        <Icon name="folder" size="sm" />
       </span>
       <span className="min-w-0 flex-1 truncate text-ink">{folder}</span>
       <span className="shrink-0 text-ui font-normal opacity-70">{count}</span>
@@ -596,7 +574,7 @@ function BundleChip({
       <div className="flex shrink-0 items-center gap-2 text-ui text-ink-dim">
         <span>Updating agents…</span>
         <IconButton disabled title="Updating agents…" aria-label="Updating agents">
-          <Spinner size={13} />
+          <Spinner size="sm" />
         </IconButton>
       </div>
     );
@@ -615,7 +593,7 @@ function BundleChip({
           title={`Update agents to ${to}`}
           aria-label={`Update agents to ${to}`}
         >
-          <DownloadIcon size={15} className="text-accent" />
+          <Icon name="download" className="text-accent" />
         </IconButton>
       </div>
     );

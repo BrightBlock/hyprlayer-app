@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { RestartIcon, ShieldIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { Spinner } from "@/components/ui";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
@@ -312,7 +312,7 @@ export function AgentPtyTab({
         {minting && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 backdrop-blur-[1px]">
             <span className="inline-flex items-center gap-2 text-meta text-ink-dim">
-              <Spinner size={13} />
+              <Spinner size="xs" />
               Creating session…
             </span>
           </div>
@@ -338,7 +338,7 @@ export function AgentPtyTab({
             }
             className="inline-flex items-center gap-1.5 rounded-md border border-edge px-2 py-0.5 hover:bg-edge/60 hover:text-ink"
           >
-            <RestartIcon size={11} />
+            <Icon name="retry" size="xs" />
             Restart
           </button>
           {hasBypass && (
@@ -359,7 +359,7 @@ export function AgentPtyTab({
                 bypassOn ? "bg-bad/15" : "hover:bg-bad/10"
               }`}
             >
-              <ShieldIcon size={12} filled={bypassOn} />
+              <Icon name="permissions" size="xs" className={bypassOn ? "fill-current" : undefined} />
             </button>
           )}
         </div>

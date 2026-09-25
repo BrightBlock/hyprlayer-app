@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
-import { DocIcon, ImageIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useAttachmentSrc, useCanOpenAttachment, type Attachment } from "./attachments";
 
 function Glyph({ children }: { children: ReactNode }) {
@@ -21,7 +21,7 @@ function ImageThumb({ path, name }: { path: string; name: string }) {
     return (
       <span title={error ?? (failed ? `Could not display ${name}` : undefined)}>
         <Glyph>
-          <ImageIcon size={12} />
+          <Icon name="image" size="xs" />
         </Glyph>
       </span>
     );
@@ -58,7 +58,7 @@ export function AttachmentCard({
         <ImageThumb path={path} name={name} />
       ) : (
         <Glyph>
-          <DocIcon size={12} />
+          <Icon name="doc" size="xs" />
         </Glyph>
       )}
       <button
@@ -78,7 +78,7 @@ export function AttachmentCard({
           title="Remove attachment"
           aria-label={`Remove ${name}`}
         >
-          <XIcon size={9} strokeWidth={2.4} />
+          <Icon name="close" size="xs" />
         </button>
       )}
     </span>

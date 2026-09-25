@@ -26,7 +26,7 @@ import {
   TextInput,
   SettingRow,
 } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
@@ -110,12 +110,12 @@ export function CodexHarnessTab({
             </div>
           </div>
           <a
-            className="text-ui text-accent hover:underline"
+            className="inline-flex items-center gap-1 text-ui text-accent hover:underline"
             href={DOCS_URL}
             target="_blank"
             rel="noreferrer"
           >
-            Docs ↗
+            Docs <Icon name="external" size="xs" />
           </a>
         </div>
       </Card>
@@ -143,7 +143,7 @@ export function CodexHarnessTab({
               </button>
             )}
             <Button onClick={() => setPickerOpen(true)} disabled={!installed || probe.isLoading}>
-              <PlusIcon size={14} /> Add models
+              <Icon name="add" size="sm" /> Add models
             </Button>
           </div>
         </div>
@@ -152,7 +152,7 @@ export function CodexHarnessTab({
           <p className="mt-3 text-ui text-ink-dim">Install Codex to choose models.</p>
         ) : probe.isLoading ? (
           <p className="mt-3 flex items-center gap-1.5 text-ui text-ink-dim">
-            <Spinner size={12} /> Loading models from Codex…
+            <Spinner size="xs" /> Loading models from Codex…
           </p>
         ) : probe.isError ? (
           <div className="mt-3">
@@ -187,7 +187,7 @@ export function CodexHarnessTab({
                     onClick={() => setSelectedModels(effectiveIds.filter((m) => m !== id))}
                     className="text-ink-dim hover:text-bad"
                   >
-                    <XIcon />
+                    <Icon name="close" size="sm" />
                   </button>
                 </div>
               ))}
@@ -395,7 +395,9 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
       {signedIn && <AuthDetailRows rows={rows} />}
 
       <div className="mt-3">
-        <Button onClick={() => setLoginOpen(true)}>▶ Run codex login</Button>
+        <Button onClick={() => setLoginOpen(true)}>
+          <Icon name="run" size="xs" /> Run codex login
+        </Button>
       </div>
 
       <Dialog
@@ -475,7 +477,7 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
       <div className="mb-2 flex items-center justify-between">
         {probe.isLoading ? (
           <span className="flex items-center gap-2 text-ui text-ink-dim">
-            <Spinner size={12} /> Checking…
+            <Spinner size="xs" /> Checking…
           </span>
         ) : signedIn ? (
           <Badge tone="ok">Connected</Badge>
@@ -496,9 +498,9 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
           <button
             type="button"
             onClick={() => void probe.refetch()}
-            className="text-ui text-ink-dim hover:text-ink"
+            className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
           >
-            ↻ Refresh
+            <Icon name="sync" size="xs" /> Refresh
           </button>
         </div>
       </div>
@@ -530,7 +532,7 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 text-left"
       >
-        {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
         <span className={SETTINGS_CARD_TITLE}>{title}</span>
       </button>
 
@@ -545,26 +547,26 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
             {installed && status?.path && (
               <button
                 type="button"
-                className="text-ui text-ink-dim hover:text-ink"
+                className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
                 onClick={() => void revealItemInDir(status.path as string).catch(() => {})}
               >
-                Open in Finder ↗
+                Open in Finder <Icon name="external" size="xs" />
               </button>
             )}
             <a
-              className="text-ui text-ink-dim hover:text-ink"
+              className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
               href={DOCS_URL}
               target="_blank"
               rel="noreferrer"
             >
-              Docs ↗
+              Docs <Icon name="external" size="xs" />
             </a>
             <button
               type="button"
               className="ml-auto flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
               onClick={() => redetect.mutate()}
             >
-              {redetect.isPending ? <Spinner size={12} /> : "↻"} Refresh
+              {redetect.isPending ? <Spinner size="xs" /> : <Icon name="sync" size="xs" />} Refresh
             </button>
           </div>
 

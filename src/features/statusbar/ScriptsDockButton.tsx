@@ -1,6 +1,4 @@
-import { SquareTerminal } from "lucide-react";
-
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 import { Dot } from "./parts";
 
@@ -26,7 +24,7 @@ export function ScriptsDockButton({
         open && "bg-edge/60 text-ink",
       )}
     >
-      <SquareTerminal {...ICON} />
+      <Icon name="console" size="xs" />
       {running && <Dot className="absolute right-0.5 top-0.5 bg-ship" />}
     </button>
   );

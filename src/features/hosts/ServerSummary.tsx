@@ -56,7 +56,7 @@ export function ServerSummary({
     <>
       <span className="flex h-2.5 w-2.5 shrink-0 items-center justify-center">
         {testing ? (
-          <Spinner size={10} />
+          <Spinner size="xs" />
         ) : (
           <span
             role="img"

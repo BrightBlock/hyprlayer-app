@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import type { CommitEntry } from "@/lib/bindings";
 import { ErrorNote, rowClass, Spinner } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { FileTypeIcon } from "@/components/fileIcon";
 import { formatRelativeTime, shortSha } from "@/lib/format";
 import { useCommitFiles } from "@/lib/queries";
@@ -29,7 +29,7 @@ function CommitRow({
         className={rowClass({ tier: "compact", className: "flex w-full gap-2 pr-1 text-left" })}
         style={{ paddingLeft: 6 }}
       >
-        {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size="xs" />
         <span className="shrink-0 text-meta text-ink-dim">{shortSha(commit.sha)}</span>
         <span className="min-w-0 flex-1 truncate text-ui text-ink" title={commit.subject}>
           {commit.subject}
@@ -43,7 +43,7 @@ function CommitRow({
       {open &&
         (files.isLoading ? (
           <div className="py-1 pl-[26px]">
-            <Spinner size={12} />
+            <Spinner size="xs" />
           </div>
         ) : files.isError ? (
           <div className="px-1 py-1 pl-[26px]">
@@ -75,7 +75,7 @@ function CommitRow({
                 >
                   {glyph.ch}
                 </span>
-                <FileTypeIcon name={entry.path} size={13} />
+                <FileTypeIcon name={entry.path} />
                 <span className="min-w-0 flex-1 truncate text-meta text-ink" title={label}>
                   {label}
                 </span>

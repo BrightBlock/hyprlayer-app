@@ -15,14 +15,7 @@ import {
 import { Button, Spinner } from "@/components/ui";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { HyprlayerMark } from "@/components/Logo";
-import {
-  ChevronRightIcon,
-  ClipboardIcon,
-  RestartIcon,
-  RewindIcon,
-  ShieldIcon,
-  WrenchIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { stageLabel } from "@/lib/domain/stages";
 import { exitLabel, type TranscriptItem } from "./transcript";
@@ -82,7 +75,7 @@ function UserMessageToolbar({
         title={copied ? "Copied" : "Copy prompt"}
         aria-label="Copy prompt"
       >
-        <ClipboardIcon size={12} />
+        <Icon name="copy" size="xs" />
       </button>
       <button
         type="button"
@@ -91,7 +84,7 @@ function UserMessageToolbar({
         title="Rewind to here"
         aria-label="Rewind to here"
       >
-        <RewindIcon size={12} />
+        <Icon name="rewind" size="xs" />
       </button>
       {rel && <span className="ml-1 tabular-nums">{rel}</span>}
     </div>
@@ -234,9 +227,10 @@ function Collapsible({
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-edge/40"
       >
         {header}
-        <ChevronRightIcon
-          size={12}
-          className={`ml-auto shrink-0 text-ink-dim transition-transform ${open ? "rotate-90" : ""}`}
+        <Icon
+          name="chevronRight"
+          size="xs"
+          className={`ml-auto text-ink-dim transition-transform ${open ? "rotate-90" : ""}`}
         />
       </button>
       {open && <div className="border-t border-edge">{children}</div>}
@@ -256,7 +250,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
       >
         <span className="shrink-0 font-medium">Thinking</span>
         {!open && preview && <span className="min-w-0 flex-1 truncate italic">{preview}</span>}
-        <StepChevron open={open} reveal="hover" size={11} />
+        <StepChevron open={open} reveal="hover" />
       </button>
       {open && (
         <div className="selectable mt-1 whitespace-pre-wrap border-l border-edge pl-3 italic leading-prose text-ink-dim">
@@ -286,7 +280,7 @@ function ToolStatusDot({
   busy: boolean;
   running: boolean;
 }) {
-  if (running || (!result && busy)) return <Spinner size={12} />;
+  if (running || (!result && busy)) return <Spinner size="xs" />;
   if (result) {
     return (
       <span
@@ -355,10 +349,10 @@ const ToolBlock = memo(function ToolBlock({
         className={`${STEP_ROW} cursor-pointer`}
       >
         <ToolStatusDot result={result} busy={busy} running={bgRunning} />
-        <WrenchIcon className="shrink-0 text-ink-dim" />
+        <Icon name="tool" size="xs" className="text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
         <ToolArg name={item.name} input={item.input} />
-        <StepChevron open={open} reveal="hover" size={11} />
+        <StepChevron open={open} reveal="hover" />
       </div>
 
       {!open && preview && (
@@ -432,7 +426,7 @@ const PermissionCard = memo(function PermissionCard({
   if (item.decision === "expired") {
     return (
       <div className="flex min-w-0 items-center gap-2 text-ui text-ink-dim">
-        <ShieldIcon size={12} className="shrink-0" />
+        <Icon name="permissions" size="xs" />
         <span className="shrink-0 font-mono text-ink">{item.toolName}</span>
         {summary && <span className="min-w-0 truncate font-mono">{summary}</span>}
         <span className="shrink-0">· expired</span>
@@ -443,7 +437,7 @@ const PermissionCard = memo(function PermissionCard({
     if (item.decision === "allow") return null;
     return (
       <div className="flex items-center gap-2 text-ui text-ink-dim">
-        <ShieldIcon size={12} />
+        <Icon name="permissions" size="xs" />
         <span className="font-mono text-ink">{item.toolName}</span>
         <span>· denied</span>
       </div>
@@ -453,7 +447,7 @@ const PermissionCard = memo(function PermissionCard({
   return (
     <div className="rounded-lg border border-q-card-border bg-q-card-bg p-3 shadow-card">
       <div className="flex items-center gap-2 text-q-label">
-        <ShieldIcon />
+        <Icon name="permissions" size="sm" />
         <span className="text-body font-medium">Permission required</span>
       </div>
       <div className="mt-2 flex items-center gap-1.5 rounded-md border border-warn/20 bg-surface/40 px-2.5 py-2">
@@ -493,7 +487,12 @@ const ProtocolErrorBlock = memo(function ProtocolErrorBlock({
     <Collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}
-      header={<span className="text-ui text-ink-dim">⚠ {detail}</span>}
+      header={
+        <span className="inline-flex items-center gap-1 text-ui text-ink-dim">
+          <Icon name="warning" size="xs" className="text-warn" />
+          {detail}
+        </span>
+      }
     >
       <pre className="selectable max-h-48 overflow-auto px-3 py-2 text-meta text-ink-dim">
         {raw}
@@ -533,9 +532,10 @@ const CompactDivider = memo(function CompactDivider({
               {label}
               {tokens}
             </span>
-            <ChevronRightIcon
-              size={11}
-              className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+            <Icon
+              name="chevronRight"
+              size="xs"
+              className={`transition-transform ${open ? "rotate-90" : ""}`}
             />
           </button>
         ) : (
@@ -585,7 +585,7 @@ const QueuedCommandRow = memo(function QueuedCommandRow({
     <div className="text-ui">
       <div className={STEP_ROW_STATIC}>
         <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
-        <RestartIcon size={13} className="shrink-0 text-ink-dim" />
+        <Icon name="sync" size="xs" className="text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.label}</span>
         {item.detail && (
           <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={item.detail}>
@@ -715,7 +715,7 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
         onClick={() => setOpen((v) => !v)}
         className={`${STEP_ROW} text-ink-dim`}
       >
-        {running ? <Spinner size={12} /> : <WrenchIcon className="shrink-0 text-ink-dim" />}
+        {running ? <Spinner size="xs" /> : <Icon name="tool" size="xs" className="text-ink-dim" />}
         <span className="font-medium text-ink">{label}</span>
         {running && <span className="text-ink-dim">· working…</span>}
         <StepChevron open={open} />
@@ -824,7 +824,7 @@ function SubagentBlock({
     <div className="text-ui" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
-        <WrenchIcon className="shrink-0 text-ink-dim" />
+        <Icon name="tool" size="xs" className="text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">
           {item.name === "Workflow" ? "Workflow" : "Subagent"}
         </span>
@@ -1165,7 +1165,7 @@ export const TranscriptView = memo(
           </OpenBackgroundIds.Provider>
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">
-              <Spinner size={14} />
+              <Spinner size="sm" />
               Connecting to {harnessLabel}…
             </div>
           )}

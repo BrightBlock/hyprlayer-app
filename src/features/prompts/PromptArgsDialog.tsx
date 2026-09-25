@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Button, Dialog, TextInput } from "@/components/ui";
-import { ZapIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { promptInputLabel } from "./prompts";
 import { answerPromptArgs, usePromptArgsStore, type PromptArgsRequest } from "./promptsStore";
 
@@ -16,7 +16,7 @@ export function PromptArgsDialog() {
       title={
         request && (
           <span className="flex min-w-0 items-center gap-2">
-            <ZapIcon size={14} className="shrink-0 text-accent" />
+            <Icon name="prompt" className="text-accent" />
             <span className="min-w-0 truncate">{request.name}</span>
           </span>
         )

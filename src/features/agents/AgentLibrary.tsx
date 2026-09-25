@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button, Card, ContextMenu, ContextMenuItem, Dialog, PageSpinner, TextInput } from "@/components/ui";
-import { LayersIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import {
   commands,
   type AgentFile,
@@ -765,7 +765,7 @@ function AgentsCta({ section, onCreate }: { section: AgentSection; onCreate: () 
         aria-hidden="true"
         className="mb-2 grid h-14 w-14 place-items-center rounded-full border border-edge bg-panel text-ink-dim"
       >
-        <LayersIcon size={24} strokeWidth={1.5} full />
+        <Icon name="layers" size="lg" />
       </span>
       <p className="text-title text-ink">No agent selected</p>
       <div className="max-w-md text-body text-ink-dim">

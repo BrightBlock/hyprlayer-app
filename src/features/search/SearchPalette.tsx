@@ -6,32 +6,17 @@ import { groupResults, flattenGroups, type SearchResult, type SearchGroup } from
 import { useSearchSources } from "./useSearchSources";
 import { selectAgentTab } from "./selectAgentTab";
 import { openDocPreviewTab } from "@/features/session/workstreamTabs";
-import { BookIcon, FolderIcon, TerminalIcon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/Icon";
 import { ActivityDot } from "@/components/ActivityDot";
 import { rowClass } from "@/components/ui";
 
 
-function KindIcon({ kind }: { kind: SearchResult["kind"] }) {
-  const cls = "shrink-0 text-ink-dim";
-  switch (kind) {
-    case "workstream":
-      return (
-        <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" className={cls}>
-          <circle cx="6" cy="5" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-          <circle cx="6" cy="19" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-          <circle cx="18" cy="8" r="2.3" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M6 7.5v9" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M18 10.5c0 3-2.5 4.5-5.5 4.5H9.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
-      );
-    case "agent":
-      return <TerminalIcon size={13} className={cls} />;
-    case "doc":
-      return <BookIcon size={13} />;
-    case "file":
-      return <FolderIcon size={13} className={cls} />;
-  }
-}
+const KIND_ICON: Record<SearchResult["kind"], IconName> = {
+  workstream: "branch",
+  agent: "terminal",
+  doc: "library",
+  file: "folder",
+};
 
 
 function dispatchNav(
@@ -110,7 +95,7 @@ function ResultRow({
         }`,
       })}
     >
-      <KindIcon kind={result.kind} />
+      <Icon name={KIND_ICON[result.kind]} size="sm" className="text-ink-dim" />
       <span className="min-w-0 flex-1 truncate font-medium">{result.title}</span>
       {result.subtitle && (
         <span className="shrink-0 truncate text-ui text-ink-dim/70">{result.subtitle}</span>
@@ -230,17 +215,7 @@ export function SearchPalette() {
         onKeyDown={handleKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
-          <svg
-            aria-hidden="true"
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            className="shrink-0 text-ink-dim"
-          >
-            <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-            <path d="m16.5 16.5 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
+          <Icon name="search" className="text-ink-dim" />
           <input
             ref={inputRef}
             type="text"

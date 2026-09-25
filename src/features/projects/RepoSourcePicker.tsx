@@ -173,7 +173,7 @@ function RecentRepos({
   if (query.isLoading) {
     return (
       <div className="flex items-center gap-2 px-1 py-1 text-ui text-ink-dim">
-        <Spinner size={12} /> Loading your repos…
+        <Spinner size="xs" /> Loading your repos…
       </div>
     );
   }

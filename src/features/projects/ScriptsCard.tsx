@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { ArchiveIcon, CheckIcon, PlayIcon, TerminalIcon, WrenchIcon } from "@/components/icons";
+import { Icon, type IconName } from "@/components/Icon";
 import { Badge, ErrorNote, Spinner } from "@/components/ui";
 import type { BadgeTone } from "@/components/ui";
 import type { ScriptSettings } from "@/lib/bindings";
@@ -17,8 +17,8 @@ type RowMeta = {
   key: ScriptKey;
   name: string;
   trigger: string;
-  icon: ReactNode;
-  pill: { tone: BadgeTone; label: string; icon?: ReactNode };
+  icon: IconName;
+  pill: { tone: BadgeTone; label: string; icon?: IconName };
   placeholder: string;
 };
 
@@ -27,7 +27,7 @@ const ROWS: RowMeta[] = [
     key: "setup",
     name: "Setup",
     trigger: "Runs once when a workstream is created.",
-    icon: <WrenchIcon size={13} />,
+    icon: "tool",
     pill: { tone: "dim", label: "On create" },
     placeholder: "# install deps & prepare the worktree\nnpm install",
   },
@@ -35,15 +35,15 @@ const ROWS: RowMeta[] = [
     key: "run",
     name: "Run",
     trigger: "Runs each time you press ▶. The previous process is stopped first.",
-    icon: <PlayIcon size={12} />,
-    pill: { tone: "accent", label: "On ▶", icon: <PlayIcon size={9} /> },
+    icon: "run",
+    pill: { tone: "accent", label: "On ▶", icon: "run" },
     placeholder: "# start the dev server for this agent\nnpm run dev -- --port $HL_PORT",
   },
   {
     key: "archive",
     name: "Archive",
     trigger: "Runs before a workstream is archived.",
-    icon: <ArchiveIcon size={13} />,
+    icon: "archive",
     pill: { tone: "dim", label: "Before archive" },
     placeholder: "# tear down resources before archiving\ndocker compose down",
   },
@@ -98,11 +98,11 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
           <span className="inline-flex items-center gap-1.5 text-ui text-ink-dim">
             {saving ? (
               <>
-                <Spinner size={12} /> Saving…
+                <Spinner size="xs" /> Saving…
               </>
             ) : (
               <>
-                <CheckIcon size={12} className="text-ok" /> Saved
+                <Icon name="check" size="xs" className="text-ok" /> Saved
               </>
             )}
           </span>
@@ -123,7 +123,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
           <div key={row.key} className={i === 0 ? "" : "mt-4 border-t border-edge pt-4"}>
             <div className="mb-2 flex items-center gap-3">
               <span className="grid h-[26px] w-[26px] shrink-0 place-items-center rounded-lg border border-edge bg-panel-2 text-accent">
-                {row.icon}
+                <Icon name={row.icon} size="sm" />
               </span>
               <div className="min-w-0">
                 <span className="text-body font-semibold text-ink">{row.name}</span>
@@ -132,7 +132,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
               <span className="ml-auto shrink-0">
                 <Badge tone={row.pill.tone}>
                   <span className="flex items-center gap-1">
-                    {row.pill.icon}
+                    {row.pill.icon && <Icon name={row.pill.icon} size="xs" />}
                     {row.pill.label}
                   </span>
                 </Badge>
@@ -146,7 +146,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
               aria-label={`${row.name} script`}
             />
             <div className="mt-2 flex items-center gap-1.5 text-ui text-ink-dim/70">
-              <TerminalIcon size={11} />
+              <Icon name="terminal" size="xs" />
               Runs in the workstream shell
               <span className="ml-auto font-mono">
                 working dir: <span className="text-ink-dim">./</span>

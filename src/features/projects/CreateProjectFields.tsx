@@ -3,7 +3,7 @@ import { type ReactNode } from "react";
 import type { GithubOwner, GitignoreTemplate } from "@/lib/bindings";
 import { DropdownSelect, Field, Spinner, TextInput, Toggle, cx } from "@/components/ui";
 import { PathField } from "@/components/PathField";
-import { CheckIcon, GlobeIcon, LockIcon, UploadCloudIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 export type CreateSpec = {
   name: string;
@@ -151,12 +151,12 @@ export function CreateProjectFields({
 
       <div className="rounded-md border border-edge bg-panel-2/40 px-3.5 py-3">
         <div className="flex items-center gap-2.5">
-          <UploadCloudIcon size={16} className="shrink-0 text-ink-dim" />
+          <Icon name="cloudUpload" className="text-ink-dim" />
           <p className={cx("min-w-0 flex-1 text-body", signedIn ? "text-ink" : "text-ink-dim")}>
             Create on GitHub
           </p>
           {owners.loading ? (
-            <Spinner size={14} />
+            <Spinner size="sm" />
           ) : (
             <Toggle
               aria-label="Create on GitHub"
@@ -209,14 +209,14 @@ export function CreateProjectFields({
                     selected={value.private}
                     disabled={disabled}
                     onClick={() => set({ private: true })}
-                    icon={<LockIcon size={12} />}
+                    icon={<Icon name="lock" size="xs" />}
                   />
                   <VisibilityChip
                     label="Public"
                     selected={!value.private}
                     disabled={disabled}
                     onClick={() => set({ private: false })}
-                    icon={<GlobeIcon size={12} />}
+                    icon={<Icon name="globe" size="xs" />}
                   />
                 </div>
               </div>
@@ -277,9 +277,9 @@ function ScaffoldChip({
       )}
     >
       {checked ? (
-        <CheckIcon size={11} className="text-accent" />
+        <Icon name="check" size="xs" className="text-accent" />
       ) : (
-        <span aria-hidden="true" className="h-[11px] w-[11px] rounded-[3px] border border-edge" />
+        <span aria-hidden="true" className="h-3 w-3 rounded-[3px] border border-edge" />
       )}
       {label}
     </button>

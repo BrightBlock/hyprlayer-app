@@ -9,6 +9,7 @@ import {
   Spinner,
   TextInput,
 } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import {
   useAiStatus,
   useBootstrap,
@@ -57,9 +58,18 @@ function Step1({
           This takes about two minutes. You'll end up with:
         </p>
         <ul className="space-y-1 text-body text-ink-dim">
-          <li>✦ Claude Code and Codex agent workflows linked and ready to use</li>
-          <li>✦ A thoughts repository for your project notes and docs</li>
-          <li>✦ A dashboard where you can add projects and start coding</li>
+          <li className="flex items-center gap-2">
+            <Icon name="check" size="xs" />
+            Claude Code and Codex agent workflows linked and ready to use
+          </li>
+          <li className="flex items-center gap-2">
+            <Icon name="check" size="xs" />
+            A thoughts repository for your project notes and docs
+          </li>
+          <li className="flex items-center gap-2">
+            <Icon name="check" size="xs" />
+            A dashboard where you can add projects and start coding
+          </li>
         </ul>
         <Field label="Your name">
           <TextInput
@@ -156,12 +166,12 @@ function Step2({ onNext }: { onNext: () => void }) {
     >
       {phase.kind === "checking" ? (
         <Card className="flex items-center justify-center gap-2 py-12 text-body text-ink-dim">
-          <Spinner size={14} /> Checking status…
+          <Spinner size="sm" /> Checking status…
         </Card>
       ) : isInstalled ? (
         <Card className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-h3">✓</span>
+            <Icon name="check" size="lg" />
             <p className="text-body font-medium text-ink">
               Claude Code and Codex agents are ready
             </p>
@@ -292,14 +302,16 @@ function Step3({ user }: { user: string }) {
           </p>
           {alreadyConfigured ? (
             <p className="mt-2 text-body text-ink">
-              ✓ Your thoughts repository is already set up. Keep it, or select a
+              <Icon name="check" size="sm" className="mr-1 inline align-[-2px]" />
+              Your thoughts repository is already set up. Keep it, or select a
               different one below and Hyprlayer will switch to it.
             </p>
           ) : (
             foundExisting &&
             source?.mode === "disk" && (
               <p className="mt-2 text-body text-ink">
-                ✓ Using the existing thoughts repo at{" "}
+                <Icon name="check" size="sm" className="mr-1 inline align-[-2px]" />
+                Using the existing thoughts repo at{" "}
                 <span className="break-all text-meta">{defaultLocation}</span>.
               </p>
             )
@@ -360,9 +372,9 @@ export function Onboarding() {
             <button
               type="button"
               onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3 | 4)}
-              className="text-ui text-ink-dim hover:text-ink"
+              className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
             >
-              ← Back
+              <Icon name="chevronLeft" size="sm" /> Back
             </button>
             <button
               type="button"

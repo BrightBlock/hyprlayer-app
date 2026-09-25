@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ChecksState, ReviewDecision, WorkstreamView } from "@/lib/bindings";
 import { useWorkstreamPr } from "@/lib/queries";
 import { Spinner } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 function StatusDot({ state }: { state: ChecksState }) {
   const tone =
@@ -19,18 +19,9 @@ function StatusDot({ state }: { state: ChecksState }) {
 }
 
 function CheckGlyph({ state }: { state: ChecksState }) {
-  if (state === "pending") return <Spinner size={11} />;
-  if (state === "failing") return <span className="text-bad">✕</span>;
-  return <span className="text-ok">✓</span>;
-}
-
-function ExternalLinkIcon() {
-  return (
-    <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" className="shrink-0 opacity-0 group-hover:opacity-60">
-      <path d="M14 4h6v6M20 4l-9 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  if (state === "pending") return <Spinner size="xs" />;
+  if (state === "failing") return <Icon name="close" size="xs" className="text-bad-ink" />;
+  return <Icon name="check" size="xs" className="text-ok" />;
 }
 
 function MergeConflictRow({ url }: { url: string }) {
@@ -44,7 +35,7 @@ function MergeConflictRow({ url }: { url: string }) {
       >
         <span className="w-3 shrink-0 text-center font-mono text-bad">!</span>
         <span className="min-w-0 flex-1 truncate font-medium text-bad">Merge conflict</span>
-        <ExternalLinkIcon />
+        <Icon name="external" size="xs" className="opacity-0 group-hover:opacity-60" />
       </button>
       <p className="mt-1 pl-5 text-ui-sm leading-prose text-ink-dim">
         This branch conflicts with its base branch and must be resolved before it
@@ -74,7 +65,7 @@ function ReviewBlockRow({
         <span className="min-w-0 flex-1 truncate font-medium text-warn-ink">
           {changes ? "Changes requested" : "Review required"}
         </span>
-        <ExternalLinkIcon />
+        <Icon name="external" size="xs" className="opacity-0 group-hover:opacity-60" />
       </button>
       <p className="mt-1 pl-5 text-ui-sm leading-prose text-ink-dim">
         {changes
@@ -114,13 +105,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
         className="flex h-9 shrink-0 items-center gap-2 px-3 text-left disabled:cursor-default"
       >
         <span className="flex w-3 shrink-0 justify-center text-ink-dim">
-          {hasContent ? (
-            open ? (
-              <ChevronDownIcon size={12} />
-            ) : (
-              <ChevronRightIcon size={12} />
-            )
-          ) : null}
+          {hasContent ? <Icon name={open ? "chevronDown" : "chevronRight"} size="xs" /> : null}
         </span>
         <StatusDot state={headerState} />
         <span className="text-label text-ink-dim">CI Checks</span>
@@ -151,7 +136,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
                 <CheckGlyph state={check.state} />
               </span>
               <span className="min-w-0 flex-1 truncate text-ink">{check.name}</span>
-              {check.url && <ExternalLinkIcon />}
+              {check.url && <Icon name="external" size="xs" className="opacity-0 group-hover:opacity-60" />}
             </button>
           ))}
         </div>

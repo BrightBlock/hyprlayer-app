@@ -1,6 +1,5 @@
 import { useId, type ReactNode, type RefObject } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, Hammer, Server } from "lucide-react";
 
 import { visibleAgents } from "@/features/agents/agents";
 import type { AppSettings } from "@/lib/bindings";
@@ -9,7 +8,7 @@ import { invalidateNotificationSettingsCache } from "@/lib/notifications";
 import { IS_MACOS } from "@/lib/platform";
 import { useAgentFiles, useAgentSkills, useBootstrap, useSetAppSettings } from "@/lib/queries";
 import { appearanceSegment, useThemeStore, type AppearanceSegment } from "@/lib/theme";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import {
   BAR_POPOVER,
   BAR_POPOVER_ROW,
@@ -78,7 +77,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
       <div className="mx-1 my-1 h-px bg-edge-2" />
       <WorkshopLink onClose={onClose} />
       <Link to="/settings" search={{ section: "servers" }} onClick={onClose} className={BAR_POPOVER_ROW}>
-        <Server {...ICON} className="text-ink-dim" />
+        <Icon name="server" size="sm" className="text-ink-dim" />
         <span className="flex-1">Servers</span>
         <Meta>{serversMeta(useServerCounts())}</Meta>
       </Link>
@@ -89,7 +88,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         className={cx(BAR_POPOVER_ROW, "mt-0.5 bg-panel-2 font-semibold text-ink hover:bg-panel-2")}
       >
         <span className="flex-1">All settings</span>
-        <ChevronRight {...ICON} className="text-ink-dim" />
+        <Icon name="chevronRight" size="sm" className="text-ink-dim" />
       </Link>
     </>
   );
@@ -159,7 +158,7 @@ function WorkshopLink({ onClose }: { onClose: () => void }) {
     : null;
   return (
     <Link to="/agents" onClick={onClose} className={BAR_POPOVER_ROW}>
-      <Hammer {...ICON} className="text-ink-dim" />
+      <Icon name="workshop" size="sm" className="text-ink-dim" />
       <span className="flex-1">Workshop</span>
       <Meta>{workshopMeta(agents, skills?.length ?? null)}</Meta>
     </Link>

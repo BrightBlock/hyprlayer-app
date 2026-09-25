@@ -1,6 +1,6 @@
 
 import { Spinner } from "@/components/ui";
-import { ChecklistIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useUiStore } from "@/lib/uiStore";
 import { useSession, useSessionPlanTasks } from "./sessionStore";
 import { isWorking } from "./transcript";
@@ -13,23 +13,13 @@ function doneCount(tasks: PlanTask[]): number {
 function StatusGlyph({ status, working }: { status: PlanTask["status"]; working: boolean }) {
   if (status === "in_progress") {
     return working ? (
-      <Spinner size={12} />
+      <Spinner size="xs" />
     ) : (
       <span aria-hidden="true" className="size-2.5 rounded-[3px] bg-accent" />
     );
   }
   if (status === "completed") {
-    return (
-      <svg aria-hidden="true" width={12} height={12} viewBox="0 0 24 24" fill="none" className="text-ok">
-        <path
-          d="m5 12.5 4.5 4.5L19 6.5"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
+    return <Icon name="check" size="xs" className="text-ok" />;
   }
   return <span aria-hidden="true" className="size-3 rounded-[3px] border border-ink-dim/50" />;
 }
@@ -77,9 +67,9 @@ export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined
         className="flex h-9 shrink-0 items-center gap-2 px-3 text-left text-ink-dim hover:text-ink"
       >
         <span className="flex w-3 shrink-0 justify-center">
-          {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+          <Icon name={open ? "chevronDown" : "chevronRight"} size="xs" />
         </span>
-        <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
+        <Icon name="tasks" size="sm" className={active && working ? "animate-work-pulse" : undefined} />
         <span className="text-label">Tasks</span>
         <span className="ml-auto text-meta">
           {done}/{tasks.length}

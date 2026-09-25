@@ -4,7 +4,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
-import { CheckIcon, PencilIcon, SearchIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { ErrorNote, Spinner } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
@@ -177,7 +177,7 @@ function FileEditor({ id, path, initialContent, initialMtimeMs }: EditorProps) {
           title={preview ? "Edit raw" : "Preview"}
           aria-label={preview ? "Edit raw" : "Preview"}
         >
-          {preview ? <PencilIcon size={15} /> : <SearchIcon size={15} />}
+          <Icon name={preview ? "edit" : "preview"} />
         </button>
       )}
     </>
@@ -229,7 +229,7 @@ function SaveStatus({
   if (saving) {
     return (
       <span className="flex items-center gap-1 text-ui-sm text-ink-dim">
-        <Spinner size={12} />
+        <Spinner size="xs" />
         Saving…
       </span>
     );
@@ -245,7 +245,7 @@ function SaveStatus({
   if (justSaved) {
     return (
       <span className="flex items-center gap-1 text-ui-sm text-ok">
-        <CheckIcon size={12} />
+        <Icon name="check" size="xs" />
         Saved
       </span>
     );

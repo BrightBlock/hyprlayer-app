@@ -1,5 +1,4 @@
 import { useState, type FormEvent, type KeyboardEvent } from "react";
-import { Info } from "lucide-react";
 
 import type { ConnectionStatus, Host, HostsFile, ProvisionStep } from "@/lib/bindings";
 import {
@@ -16,7 +15,7 @@ import {
   useHosts,
   useSaveHosts,
 } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
 import { Button, ConfirmDialog, cx, ErrorNote, TextInput } from "@/components/ui";
 import { WorkStatus } from "./HostList";
@@ -152,7 +151,7 @@ export function ServersSettings() {
             </p>
           )}
           <p className="flex gap-2 text-ui leading-4 text-ink-dim">
-            <Info {...ICON} className="shrink-0 text-info" />
+            <Icon name="info" className="text-info" />
             <span>
               Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
               your SSH config and agent, so keys, ports and jump hosts come from ~/.ssh/config. It

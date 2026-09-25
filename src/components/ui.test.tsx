@@ -69,7 +69,7 @@ describe("DropdownSelect", () => {
     expect(screen.queryByRole("option")).toBeNull();
   });
 
-  it("marks the current choice with aria-selected and keeps the ✓ out of the name", () => {
+  it("marks the current choice with aria-selected and keeps the check icon out of the name", () => {
     renderSelect();
     openMenu();
     expect(screen.getByRole("option", { name: "Sonnet 5" }).getAttribute("aria-selected")).toBe(

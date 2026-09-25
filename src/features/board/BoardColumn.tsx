@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ModeIcon } from "@/components/icons";
+import { Icon, stageIconName } from "@/components/Icon";
 import { MODE_STYLES, type StageKey } from "@/lib/domain/stages";
 
 export function BoardColumn({
@@ -20,7 +20,7 @@ export function BoardColumn({
         <span
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-edge bg-panel-2 ${MODE_STYLES[stageKey].text}`}
         >
-          <ModeIcon mode={stageKey} size={18} />
+          <Icon name={stageIconName(stageKey)} />
         </span>
         <div className="min-w-0">
           <span className="block text-title text-ink">{label}</span>

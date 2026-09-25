@@ -26,6 +26,7 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 
 const DOCS_URL = "https://ollama.com";
@@ -110,8 +111,13 @@ export function OllamaHarnessTab({
               </p>
             </div>
           </div>
-          <a className="text-ui text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
-            Docs ↗
+          <a
+            className="inline-flex items-center gap-1 text-ui text-accent hover:underline"
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Docs <Icon name="external" size="xs" />
           </a>
         </div>
       </Card>
@@ -166,7 +172,7 @@ export function OllamaHarnessTab({
             className="ml-auto flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
             onClick={() => void probe.refetch()}
           >
-            {probe.isFetching ? <Spinner size={12} /> : "↻"} Refresh
+            {probe.isFetching ? <Spinner size="xs" /> : <Icon name="sync" size="xs" />} Refresh
           </button>
         </div>
         {!reachable && !probe.isFetching && (

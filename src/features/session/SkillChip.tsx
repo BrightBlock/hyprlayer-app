@@ -1,6 +1,6 @@
 import { memo, useState } from "react";
 
-import { PuzzleIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 
 export const SkillChip = memo(function SkillChip({
@@ -15,7 +15,7 @@ export const SkillChip = memo(function SkillChip({
   const [open, setOpen] = useState(false);
   const label = (
     <>
-      <PuzzleIcon size={12} className="shrink-0" />
+      <Icon name="skill" size="xs" />
       <span className="truncate">{name} · skill</span>
     </>
   );

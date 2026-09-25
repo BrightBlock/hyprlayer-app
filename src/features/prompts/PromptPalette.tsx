@@ -6,7 +6,7 @@ import { useBootstrap } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import { ChordHint, rowClass } from "@/components/ui";
 import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
-import { GitCommitIcon, GitPullRequestIcon, PencilIcon, ZapIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { isFolderWorkstream } from "@/lib/domain/projects";
 import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 import { closePromptPalette, usePromptPaletteStore } from "./promptsStore";
@@ -82,9 +82,9 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         chord: effectiveChord(overrides, def.commandId, IS_MACOS),
         icon:
           id === "commit" ? (
-            <GitCommitIcon size={14} className="shrink-0 text-accent" />
+            <Icon name="commit" size="sm" className="text-accent" />
           ) : (
-            <GitPullRequestIcon size={14} className="shrink-0 text-accent" />
+            <Icon name="pullRequest" size="sm" className="text-accent" />
           ),
         disabled: noWs ?? gate,
         run: () => {
@@ -103,7 +103,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         name,
         desc: promptFirstLine(body),
         chord: p.chord ?? null,
-        icon: <ZapIcon size={14} className="shrink-0 text-accent" />,
+        icon: <Icon name="prompt" size="sm" className="text-accent" />,
         disabled: noWs ?? (isRunnablePrompt(p, projectPath) ? null : "This prompt has no text yet"),
         run: () => {
           if (activeWorkstream) void runCustomPrompt(activeWorkstream, p);
@@ -122,7 +122,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         name: "Manage prompts…",
         desc: "Edit defaults, add custom prompts, assign shortcuts",
         chord: null,
-        icon: <PencilIcon size={13} className="shrink-0 text-ink-dim" />,
+        icon: <Icon name="edit" size="sm" className="text-ink-dim" />,
         disabled: null,
         run: () => void navigate({ to: "/prompts" }),
       });
@@ -170,7 +170,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         onKeyDown={handleKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
-          <ZapIcon size={15} className="shrink-0 text-ink-dim" />
+          <Icon name="prompt" className="text-ink-dim" />
           <input
             ref={inputRef}
             type="text"

@@ -1,7 +1,6 @@
-import { Server } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 import { toggleServerMenu, useHostsUiStore } from "@/features/hosts/hostsUi";
 import { useReconnectStore } from "@/features/hosts/reconnectState";
@@ -13,6 +12,12 @@ const TONE_DOT: Record<SyncTone, string> = {
   ok: "bg-ok",
   warn: "bg-warn",
   bad: "bg-bad",
+};
+
+const TONE_ICON: Record<SyncTone, string | undefined> = {
+  ok: undefined,
+  warn: "text-warn",
+  bad: "text-bad-ink",
 };
 
 /** The server connection: its host in the tooltip, a tone dot, and a drop counter while lost. */
@@ -54,7 +59,7 @@ export function SyncStatus({
         aria-expanded={menuOpen && status.data?.state === "connected"}
         className={cx(BAR_BUTTON, "text-ink-dim hover:text-ink")}
       >
-        <Server {...ICON} size={14} className="shrink-0" />
+        <Icon name="server" size="xs" className={TONE_ICON[label.tone]} />
         {!compact && <span className="whitespace-nowrap">{label.text}</span>}
         <Dot className={TONE_DOT[label.tone]} />
       </button>

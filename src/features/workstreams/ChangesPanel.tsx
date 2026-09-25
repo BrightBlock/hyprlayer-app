@@ -12,14 +12,7 @@ import {
   rowClass,
   Spinner,
 } from "@/components/ui";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  DocIcon,
-  FolderIcon,
-  GlobeIcon,
-  LightbulbIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { FileTypeIcon } from "@/components/fileIcon";
 import { formatCompactAge } from "@/lib/format";
 import { treeIndent } from "@/lib/layout";
@@ -40,34 +33,6 @@ import type { DocKind } from "@/lib/domain/docs";
 import { GLYPH } from "./changeGlyph";
 import { CommitsPanel } from "./CommitsPanel";
 import { renamedLabel } from "./renamedLabel";
-
-function RefreshIcon() {
-  return (
-    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function MoveIcon({ dir }: { dir: "down" | "up" }) {
-  return (
-    <svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path
-        d={dir === "down" ? "M12 5v14M6 13l6 6 6-6" : "M12 19V5M6 11l6-6 6 6"}
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 type RowMenu = { entry: GitFileEntry; staged: boolean; x: number; y: number };
 
@@ -108,7 +73,7 @@ const FileRow = memo(function FileRow({
       >
         {glyph.ch}
       </span>
-      <FileTypeIcon name={entry.path} size={13} />
+      <FileTypeIcon name={entry.path} />
       <span
         className="min-w-0 flex-1 truncate text-meta text-ink"
         title={renamedLabel(entry.path, entry.oldPath)}
@@ -125,7 +90,7 @@ const FileRow = memo(function FileRow({
         }}
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim opacity-0 hover:bg-edge/70 hover:text-ink group-hover:opacity-100"
       >
-        <MoveIcon dir={staged ? "up" : "down"} />
+        <Icon name={staged ? "arrowUp" : "arrowDown"} size="sm" />
       </button>
     </div>
   );
@@ -205,11 +170,7 @@ function TreeLevel({
               className={rowClass({ tier: "compact", className: "flex w-full gap-1 text-left" })}
               style={{ paddingLeft: treeIndent(depth, 6) }}
             >
-              {collapsed.has(child.path) ? (
-                <ChevronRightIcon size={12} />
-              ) : (
-                <ChevronDownIcon size={12} />
-              )}
+              <Icon name={collapsed.has(child.path) ? "chevronRight" : "chevronDown"} size="xs" />
               <span className="truncate text-ui text-ink-dim">{child.name}</span>
             </button>
             {!collapsed.has(child.path) && (
@@ -344,7 +305,7 @@ function DocsSection({
       >
         <span className="text-ui font-semibold">Documents</span>
         <span className="ml-auto flex w-3 shrink-0 justify-center">
-          {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+          <Icon name={open ? "chevronDown" : "chevronRight"} size="xs" />
         </span>
       </button>
       {open && (
@@ -357,7 +318,7 @@ function DocsSection({
               title={doc.path}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
             >
-              <DocIcon size={13} />
+              <Icon name="doc" size="xs" />
               <span className="min-w-0 flex-1 truncate text-ui text-ink">{doc.title}</span>
               <span
                 className={`shrink-0 rounded px-1.5 py-0.5 text-ui-sm font-medium ${DOC_TONE[doc.kind]}`}
@@ -388,7 +349,7 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
             title={a.description ? `${a.description}\n${a.url}` : a.url}
             className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
           >
-            <GlobeIcon size={13} />
+            <Icon name="globe" size="xs" />
             <span className="min-w-0 flex-1 truncate text-ui text-ink">{a.title}</span>
             <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-ui-sm font-medium text-brand">
               artifact
@@ -449,7 +410,7 @@ function MemoryList({
           title={file.path}
           className={rowClass({ tier: "compact", className: "flex w-full gap-2 px-2 text-left" })}
         >
-          <DocIcon size={13} />
+          <Icon name="doc" size="xs" />
           <span className="min-w-0 flex-1 truncate text-ui text-ink">{file.name}</span>
           <span className="shrink-0 text-ui-sm text-ink-dim">{formatCompactAge(file.mtimeMs)}</span>
         </button>
@@ -478,7 +439,7 @@ function DirLevel({
   if (dir.isLoading) {
     return (
       <div className="py-1" style={{ paddingLeft: treeIndent(depth, 8) }}>
-        <Spinner size={12} />
+        <Spinner size="xs" />
       </div>
     );
   }
@@ -503,7 +464,7 @@ function DirLevel({
             className={rowClass({ tier: "compact", className: "flex w-full gap-2 text-left" })}
             style={{ paddingLeft: treeIndent(depth + 1, 8) }}
           >
-            <FileTypeIcon name={entry.name} size={13} />
+            <FileTypeIcon name={entry.name} />
             <span className="min-w-0 flex-1 truncate text-meta text-ink">{entry.name}</span>
           </button>
         ),
@@ -532,9 +493,9 @@ function DirNode({
         className={rowClass({ tier: "compact", className: "flex w-full gap-1.5 text-left" })}
         style={{ paddingLeft: treeIndent(depth, 8) }}
       >
-        {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size="xs" />
         <span className="text-brand">
-          <FolderIcon size={13} />
+          <Icon name="folder" size="xs" />
         </span>
         <span className="truncate text-ui text-ink-dim">{entry.name}</span>
       </button>
@@ -617,7 +578,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 title="Project memory"
                 aria-label="Project memory"
               >
-                <LightbulbIcon />
+                <Icon name="tip" size="sm" />
               </IconButton>
               <IconButton
                 onClick={() => {
@@ -638,7 +599,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                 title="Refresh"
                 aria-label="Refresh"
               >
-                {refreshing ? <Spinner size={14} /> : <RefreshIcon />}
+                {refreshing ? <Spinner size="sm" /> : <Icon name="sync" size="sm" />}
               </IconButton>
             </div>
           )}

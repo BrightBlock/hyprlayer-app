@@ -27,7 +27,7 @@ import {
   SettingRow,
 } from "@/components/ui";
 import { isSupportedOpencodeProvider } from "@/lib/domain/harnessing";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
@@ -120,8 +120,13 @@ export function OpenCodeHarnessTab({
               <p className={SETTINGS_CARD_DESCRIPTION}>The open source AI coding agent</p>
             </div>
           </div>
-          <a className="text-ui text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
-            Docs ↗
+          <a
+            className="inline-flex items-center gap-1 text-ui text-accent hover:underline"
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Docs <Icon name="external" size="xs" />
           </a>
         </div>
       </Card>
@@ -137,7 +142,7 @@ export function OpenCodeHarnessTab({
             </span>
           </SettingsCardTitle>
           <Button onClick={() => setProviderOpen(true)}>
-            <PlusIcon size={14} /> Add provider
+            <Icon name="add" size="sm" /> Add provider
           </Button>
         </div>
 
@@ -167,7 +172,7 @@ export function OpenCodeHarnessTab({
                     onClick={() => removeProvider.mutate(e.provider)}
                     className="text-ink-dim hover:text-bad"
                   >
-                    <XIcon />
+                    <Icon name="close" size="sm" />
                   </button>
                 </div>
               </div>
@@ -188,7 +193,7 @@ export function OpenCodeHarnessTab({
             }}
             disabled={catalog.isLoading}
           >
-            <PlusIcon size={14} /> Add models
+            <Icon name="add" size="sm" /> Add models
           </Button>
         </div>
 
@@ -214,7 +219,7 @@ export function OpenCodeHarnessTab({
                     onClick={() => setSelectedModels(selectedModels.filter((m) => m !== id))}
                     className="text-ink-dim hover:text-bad"
                   >
-                    <XIcon />
+                    <Icon name="close" size="sm" />
                   </button>
                 </div>
               ))}
@@ -315,7 +320,7 @@ function AdvancedCard({
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 text-left"
       >
-        {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
         <span className={SETTINGS_CARD_TITLE}>{title}</span>
       </button>
 
@@ -330,14 +335,19 @@ function AdvancedCard({
             {installed && status?.path && (
               <button
                 type="button"
-                className="text-ui text-ink-dim hover:text-ink"
+                className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
                 onClick={() => void revealItemInDir(status.path as string).catch(() => {})}
               >
-                Open in Finder ↗
+                Open in Finder <Icon name="external" size="xs" />
               </button>
             )}
-            <a className="text-ui text-ink-dim hover:text-ink" href={DOCS_URL} target="_blank" rel="noreferrer">
-              Docs ↗
+            <a
+              className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
+              href={DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Docs <Icon name="external" size="xs" />
             </a>
             <button
               type="button"
@@ -347,7 +357,7 @@ function AdvancedCard({
                 refreshCatalog.mutate();
               }}
             >
-              {redetect.isPending ? <Spinner size={12} /> : "↻"} Refresh
+              {redetect.isPending ? <Spinner size="xs" /> : <Icon name="sync" size="xs" />} Refresh
             </button>
           </div>
 
@@ -360,7 +370,7 @@ function AdvancedCard({
               >
                 {install.isPending ? (
                   <span className="flex items-center gap-1.5">
-                    <Spinner size={12} /> Installing OpenCode…
+                    <Spinner size="xs" /> Installing OpenCode…
                   </span>
                 ) : (
                   "Install OpenCode"

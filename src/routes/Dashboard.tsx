@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Button, PageError } from "@/components/ui";
-import { PlusIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useAllWorkstreams, useArchivedWorkstreams, useBootstrap, useDocs } from "@/lib/queries";
 import type { Project, WorkstreamView } from "@/lib/bindings";
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
@@ -279,7 +279,7 @@ export function Dashboard() {
               onClick={() => setAddProject({ url: null })}
               className="gap-1.5 text-ui"
             >
-              <PlusIcon size={12} />
+              <Icon name="add" size="xs" />
               Add repo
             </Button>
           </div>

@@ -15,7 +15,7 @@ import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRovingRadio } from "@/lib/useRovingRadio";
-import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
+import { Icon, type IconSize } from "./Icon";
 
 // Unregistered names never conflict, so `rounded-card` would survive `rounded-md`, and `text-ui` would be read as a colour and dropped beside `text-ink`.
 const twMerge = extendTailwindMerge({
@@ -76,7 +76,7 @@ export function Button({
       disabled={disabled || busy}
       {...rest}
     >
-      {busy && <Spinner size={size === "sm" ? 12 : 14} />}
+      {busy && <Spinner size={size === "sm" ? "xs" : "sm"} />}
       {children}
     </button>
   );
@@ -107,20 +107,8 @@ export function Badge({ tone = "dim", children }: { tone?: BadgeTone; children: 
   );
 }
 
-export function Spinner({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      className="animate-spin text-ink-dim"
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-label="Loading"
-    >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-    </svg>
-  );
+export function Spinner({ size = "md" }: { size?: IconSize }) {
+  return <Icon name="loading" size={size} label="Loading" className="animate-spin text-ink-dim" />;
 }
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
@@ -290,7 +278,7 @@ export function DropdownSelect({
         >
           {triggerLabel ?? selected?.label ?? placeholder ?? value}
         </span>
-        <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
+        <Icon name="chevronDown" size="xs" className="text-ink-dim" />
       </button>
       {open &&
         createPortal(
@@ -356,9 +344,7 @@ export function DropdownSelect({
                   >
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>
                     {o.value === value && (
-                      <span aria-hidden="true" className="shrink-0 text-ui-sm">
-                        ✓
-                      </span>
+                      <Icon name="check" size="sm" />
                     )}
                   </button>
                 </Fragment>
@@ -590,7 +576,7 @@ export function Dialog({
                   FOCUS_RING,
                 )}
               >
-                <XIcon size={13} />
+                <Icon name="close" size="sm" />
               </button>
             )}
           </div>
@@ -692,7 +678,7 @@ export function ErrorNote({
             FOCUS_RING,
           )}
         >
-          <XIcon size={11} />
+          <Icon name="close" size="xs" />
         </button>
       )}
       <p className={cx("text-bad", onDismiss && "pr-5")}>{errorMessage(error)}</p>
@@ -791,7 +777,7 @@ export function RefreshButton({
       title={title ?? label}
       aria-label={label}
     >
-      {busy ? <Spinner size={12} /> : <RestartIcon size={13} />}
+      {busy ? <Spinner size="sm" /> : <Icon name="sync" size="sm" />}
       {children}
     </button>
   );

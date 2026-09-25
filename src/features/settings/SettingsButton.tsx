@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Settings } from "lucide-react";
 
 import { useConnectionStatus } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 
 import { SettingsPopover } from "./SettingsPopover";
@@ -40,7 +39,7 @@ export function SettingsButton() {
           shown && "bg-edge/60 text-ink",
         )}
       >
-        <Settings {...ICON} />
+        <Icon name="settings" size="xs" />
       </button>
       <SettingsPopover open={shown} onClose={closeSettingsPopover} anchorRef={anchorRef} />
     </>

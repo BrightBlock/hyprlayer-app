@@ -6,7 +6,7 @@ import { unwrap } from "@/lib/ipc";
 import { useConnectionStatus } from "@/lib/queries";
 import { useUiStore } from "@/lib/uiStore";
 import { Badge, Button, Dialog, ErrorNote, Spinner, TextInput, rowClass } from "@/components/ui";
-import { DocIcon, FolderIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 type Props = {
   value: string;
@@ -256,7 +256,7 @@ function ServerPicker({
 
       {!listing && error == null ? (
         <div className="flex items-center gap-2 px-1 py-2 text-ui text-ink-dim">
-          <Spinner size={12} /> Loading…
+          <Spinner size="xs" /> Loading…
         </div>
       ) : (
         // Already sorted server-side: directories first, then case-insensitive name.
@@ -277,7 +277,7 @@ function ServerPicker({
                   className: "flex w-full gap-2 px-2 text-left text-meta text-ink",
                 })}
               >
-                <FolderIcon className="shrink-0 text-ink-dim" />
+                <Icon name="folder" size="xs" className="text-ink-dim" />
                 <span className="min-w-0 flex-1 truncate">
                   <Hit name={entry.name} needle={segment} />
                 </span>
@@ -292,7 +292,7 @@ function ServerPicker({
                   className: "flex gap-2 px-2 text-meta text-ink-dim/70",
                 })}
               >
-                <DocIcon size={13} className="shrink-0" />
+                <Icon name="doc" size="xs" />
                 <span className="min-w-0 flex-1 truncate">
                   <Hit name={entry.name} needle={segment} />
                 </span>

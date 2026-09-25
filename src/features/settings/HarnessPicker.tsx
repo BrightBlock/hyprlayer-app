@@ -1,4 +1,4 @@
-import { harnessIcon } from "@/components/icons";
+import { BrandMark, harnessBrand } from "@/components/BrandMark";
 import { cx, DropdownSelect } from "@/components/ui";
 import { DEFAULT_HARNESS_OPTIONS } from "@/lib/domain/harnessing";
 import { useRovingRadio } from "@/lib/useRovingRadio";
@@ -22,7 +22,6 @@ function HarnessRadio({ value, onChange, disabled }: Omit<HarnessPickerProps, "v
   return (
     <div {...groupProps} aria-label="Default harness" className="grid grid-cols-4 gap-2">
       {DEFAULT_HARNESS_OPTIONS.map((h, i) => {
-        const Icon = harnessIcon(h.key);
         const selected = h.key === value;
         return (
           <button
@@ -38,7 +37,7 @@ function HarnessRadio({ value, onChange, disabled }: Omit<HarnessPickerProps, "v
                 : "border-edge text-ink-2 enabled:hover:bg-panel-2 enabled:hover:text-ink",
             )}
           >
-            <Icon size={16} />
+            <BrandMark brand={harnessBrand(h.key)} />
             <span className="truncate">{h.label}</span>
           </button>
         );

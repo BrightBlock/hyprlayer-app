@@ -20,7 +20,7 @@ describe("AgentModePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Agent mode: Plan" }));
     const menu = screen.getByRole("menu", { name: "Agent mode" });
     const items = within(menu).getAllByRole("menuitemradio");
-    expect(items.map((i) => i.textContent?.replace("✓", "").trim())).toEqual([
+    expect(items.map((i) => i.textContent?.trim())).toEqual([
       "General",
       "Research",
       "Plan",

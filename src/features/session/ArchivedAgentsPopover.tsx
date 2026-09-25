@@ -8,13 +8,12 @@ import {
   type Ref,
   type RefObject,
 } from "react";
-import { Search } from "lucide-react";
 
 import { claudeModels } from "@/lib/domain/models";
 import { formatCompactAge } from "@/lib/format";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useClaudeProbe } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { ConfirmDialog, cx, Popover, ROW_ACTION, ROW_ACTION_DANGER } from "@/components/ui";
 
 import {
@@ -184,9 +183,9 @@ function PopoverBody({
             <label htmlFor={searchId} className="sr-only">
               Filter archived agents
             </label>
-            <Search
-              {...ICON}
-              size={14}
+            <Icon
+              name="search"
+              size="sm"
               className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim"
             />
             <input

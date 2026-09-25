@@ -1,5 +1,5 @@
 
-import { CheckIcon, GitCommitIcon, GitPullRequestIcon, ZapIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 export function ShareCheck({
   checked,
@@ -21,7 +21,7 @@ export function ShareCheck({
         checked ? "border-accent bg-accent text-accent-ink" : "border-edge bg-panel-2 text-transparent"
       }`}
     >
-      <CheckIcon size={10} />
+      <Icon name="check" size="xs" />
     </button>
   );
 }
@@ -35,7 +35,7 @@ export function PromptRowIcon({
   id: string;
   className?: string;
 }) {
-  if (builtin && id === "commit") return <GitCommitIcon size={14} className={className} />;
-  if (builtin && id === "ship") return <GitPullRequestIcon size={14} className={className} />;
-  return <ZapIcon size={14} className={className} />;
+  if (builtin && id === "commit") return <Icon name="commit" size="sm" className={className} />;
+  if (builtin && id === "ship") return <Icon name="pullRequest" size="sm" className={className} />;
+  return <Icon name="prompt" size="sm" className={className} />;
 }

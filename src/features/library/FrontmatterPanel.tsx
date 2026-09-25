@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import type { DocMeta, FmPatchDto } from "@/lib/bindings";
 import { DropdownSelect, TextInput } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import { DOC_STATUSES, DOC_TYPES } from "./constants";
 
 function optionsFor(canonical: readonly string[], current: string) {
@@ -142,7 +143,7 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
                   className="text-ink-dim hover:text-ink"
                   aria-label={`Remove tag ${tag}`}
                 >
-                  ×
+                  <Icon name="close" size="xs" />
                 </button>
               </span>
             ))}

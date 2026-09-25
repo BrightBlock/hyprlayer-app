@@ -13,23 +13,8 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 
 import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
-import {
-  BookIcon,
-  ClaudeMarkIcon,
-  CodeIcon,
-  DocIcon,
-  EraserIcon,
-  HandoffIcon,
-  ImageIcon,
-  ModeIcon,
-  OpenAiIcon,
-  PlusIcon,
-  QuestionIcon,
-  SendIcon,
-  StopIcon,
-  TerminalIcon,
-  XIcon,
-} from "@/components/icons";
+import { BrandMark } from "@/components/BrandMark";
+import { Icon, stageIconName } from "@/components/Icon";
 import { errorMessage } from "@/lib/ipc";
 import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
@@ -171,15 +156,9 @@ export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?
   const working = session ? isWorking(session) : false;
   return (
     <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge} ${working ? "animate-tab-glow" : ""}`}>
-      <ModeIcon mode={mode} />
+      <Icon name={stageIconName(mode)} />
     </span>
   );
-}
-
-function composerMark(key: string, size = 13) {
-  if (key === "codex") return <OpenAiIcon size={size} />;
-  if (key === "opencode") return <CodeIcon size={size} />;
-  return <ClaudeMarkIcon size={size} />;
 }
 
 function AttachMenu({
@@ -195,10 +174,10 @@ function AttachMenu({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const items = [
     ...(onLibrary
-      ? [{ key: "library", label: "Attach from library", icon: <BookIcon size={14} />, run: onLibrary }]
+      ? [{ key: "library", label: "Attach from library", icon: <Icon name="library" size="sm" />, run: onLibrary }]
       : []),
-    { key: "files", label: "Add files…", icon: <DocIcon size={14} />, run: onFiles },
-    { key: "shots", label: "Add screenshots…", icon: <ImageIcon size={14} />, run: onScreenshots },
+    { key: "files", label: "Add files…", icon: <Icon name="doc" size="sm" />, run: onFiles },
+    { key: "shots", label: "Add screenshots…", icon: <Icon name="image" size="sm" />, run: onScreenshots },
   ];
   return (
     <div className="relative">
@@ -210,7 +189,7 @@ function AttachMenu({
         aria-label="Attach context"
         className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
-        <PlusIcon />
+        <Icon name="add" />
       </button>
       <Popover
         open={open}
@@ -265,7 +244,7 @@ function HandoffBanner({
   return (
     <div className="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn/5 px-3 py-2">
       <span className="shrink-0 text-warn-ink">
-        <HandoffIcon size={14} />
+        <Icon name="handoff" size="sm" />
       </span>
       <span className="min-w-0 flex-1 text-ui text-ink-dim">
         {isReady ? (
@@ -294,7 +273,7 @@ function HandoffBanner({
         aria-label="Dismiss"
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
       >
-        <XIcon size={10} strokeWidth={2.4} />
+        <Icon name="close" size="xs" />
       </button>
     </div>
   );
@@ -316,13 +295,19 @@ function QueuedMessages({
           key={i}
           className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
         >
-          <span className="shrink-0 text-label text-ink-dim/70">
+          <span className="flex shrink-0 items-center gap-1 text-label text-ink-dim/70">
+            <Icon name="queued" size="xs" />
             Queued
           </span>
           <span className="flex-1 truncate text-ui text-ink">
             {msg.text || (n > 0 ? `${n} attachment(s)` : "")}
           </span>
-          {n > 0 && msg.text && <span className="shrink-0 text-ui-sm text-ink-dim">📎{n}</span>}
+          {n > 0 && msg.text && (
+            <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-ink-dim">
+              <Icon name="attachment" size="xs" />
+              {n}
+            </span>
+          )}
           <button
             type="button"
             onClick={() => onCancel(i)}
@@ -330,7 +315,7 @@ function QueuedMessages({
             aria-label="Cancel queued message"
             className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
           >
-            <XIcon size={12} />
+            <Icon name="close" size="xs" />
           </button>
         </div>
         );
@@ -426,9 +411,7 @@ function QuestionPrompt({
       aria-hidden="true"
     >
       {otherOpen && (
-        <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-          <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-ink" />
-        </svg>
+        <Icon name="check" size="xs" className="text-accent-ink" />
       )}
     </span>
   );
@@ -436,7 +419,7 @@ function QuestionPrompt({
   return (
     <div className="mb-2 rounded-xl border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
       <div className="mb-2.5 flex items-center gap-2 text-q-label">
-        <QuestionIcon size={15} />
+        <Icon name="question" className="text-warn" />
         <span className="text-body font-medium">The agent is asking</span>
         {total > 1 && (
           <span className="ml-auto text-ui font-normal tabular-nums text-ink-dim">
@@ -477,9 +460,7 @@ function QuestionPrompt({
                 aria-hidden="true"
               >
                 {selected && (
-                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                    <path d="m2.5 6 2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent-ink" />
-                  </svg>
+                  <Icon name="check" size="xs" className="text-accent-ink" />
                 )}
               </span>
               <span className="min-w-0">
@@ -725,7 +706,7 @@ export function SessionChat({
     key: `claude:${m.key}`,
     label: m.label,
     hint: m.disabled ? (m.description ?? "unavailable") : m.hint,
-    icon: composerMark("claude"),
+    icon: <BrandMark brand="claude" size="sm" />,
     ...(m.disabled
       ? { disabled: true, disabledReason: m.description ?? "Unavailable in this CLI version" }
       : lockOther("claude")),
@@ -735,7 +716,7 @@ export function SessionChat({
     {
       key: "claude",
       label: "Claude Code",
-      icon: composerMark("claude"),
+      icon: <BrandMark brand="claude" size="sm" />,
       items: modelItems.filter((m) => !m.unlisted).map(claudeRow),
       more: {
         label: "More models",
@@ -745,23 +726,23 @@ export function SessionChat({
     {
       key: "codex",
       label: "Codex",
-      icon: composerMark("codex"),
+      icon: <BrandMark brand="openai" size="sm" />,
       items: codexModels.map((id) => ({
         key: `codex:${id}`,
         label: id,
-        icon: composerMark("codex"),
+        icon: <BrandMark brand="openai" size="sm" />,
         ...lockOther("codex"),
       })),
     },
     {
       key: "opencode",
       label: "OpenCode",
-      icon: composerMark("opencode"),
+      icon: <BrandMark brand="opencode" size="sm" />,
       items: ocModels.map((id) => ({
         key: `opencode:${id}`,
         label: opencodeModelLabel(id, ocNames),
         hint: ocNames.get(id)?.provider,
-        icon: composerMark("opencode"),
+        icon: <BrandMark brand="opencode" size="sm" />,
         ...lockOther(modelProvider("opencode", id) ?? ""),
       })),
     },
@@ -770,12 +751,12 @@ export function SessionChat({
           {
             key: "ollama",
             label: "Ollama (local)",
-            icon: <TerminalIcon size={13} />,
+            icon: <BrandMark brand="ollama" size="sm" />,
             items: ollamaModels.map((id) => ({
               key: `opencode:${id}`,
               label: id.replace(/^ollama\//, ""),
               hint: "Ollama",
-              icon: <TerminalIcon size={13} />,
+              icon: <BrandMark brand="ollama" size="sm" />,
               ...lockOther(modelProvider("opencode", id) ?? ""),
             })),
           },
@@ -1362,7 +1343,7 @@ export function SessionChat({
       {dragOver && (
         <div className="pointer-events-none absolute inset-0 z-40 m-2 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
           <div className="flex items-center gap-2 rounded-lg bg-panel px-3.5 py-2 text-body font-medium text-ink shadow-lg">
-            <ImageIcon size={16} />
+            <Icon name="image" />
             Drop to attach
           </div>
         </div>
@@ -1541,7 +1522,7 @@ export function SessionChat({
                             : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
                         }
                       >
-                        <EraserIcon />
+                        <Icon name="clear" />
                       </button>
                     )}
                     <AttachMenu
@@ -1557,7 +1538,7 @@ export function SessionChat({
                         aria-label="Stop"
                         className="flex h-8 w-8 items-center justify-center rounded-md border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20"
                       >
-                        <StopIcon />
+                        <Icon name="stop" />
                       </button>
                     )}
                     <button
@@ -1578,7 +1559,7 @@ export function SessionChat({
                       aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}
                       className="flex h-8 w-8 items-center justify-center rounded-md bg-accent text-accent-ink hover:bg-accent/90 disabled:bg-edge/70 disabled:text-ink-dim disabled:hover:bg-edge/70"
                     >
-                      {starting ? <Spinner size={14} /> : <SendIcon size={15} />}
+                      {starting ? <Spinner /> : <Icon name="send" />}
                     </button>
                   </div>
                 </div>

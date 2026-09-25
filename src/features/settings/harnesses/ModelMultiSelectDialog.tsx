@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 
 import { Button, Dialog, TextInput } from "@/components/ui";
-import { SearchIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 export type ModelRow = {
   id: string;
@@ -94,7 +94,7 @@ export function ModelMultiSelectDialog({
     <Dialog open={open} onClose={close} title={title} size="xl">
       <div className="relative mb-3">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
-          <SearchIcon />
+          <Icon name="search" size="sm" />
         </span>
         <TextInput
           autoFocus

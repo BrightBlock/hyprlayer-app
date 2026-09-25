@@ -15,7 +15,7 @@ import {
 } from "@/components/ui";
 import { HyprlayerMark } from "@/components/Logo";
 import { PathField } from "@/components/PathField";
-import { UploadCloudIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { githubRepoRef } from "@/lib/github";
 import { basename } from "@/lib/path";
@@ -520,7 +520,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   <div className="my-1 ml-3 h-3 w-px bg-edge" />
                   <div className="flex items-center gap-2.5">
                     <span className="flex h-6 w-6 items-center justify-center text-ink-dim">
-                      <UploadCloudIcon size={16} />
+                      <Icon name="cloudUpload" />
                     </span>
                     <span className="min-w-0 flex-1 truncate text-meta text-ink">
                       {githubTarget.owner}/{githubTarget.name}
@@ -552,7 +552,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
 
             {profiles.isLoading ? (
               <div className="flex items-center gap-2 py-1 text-ui text-ink-dim">
-                <Spinner size={12} /> Loading profiles…
+                <Spinner size="xs" /> Loading profiles…
               </div>
             ) : profiles.error != null ? (
               <ErrorNote error={profiles.error} />

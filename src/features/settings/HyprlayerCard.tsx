@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Download, FolderOpen, SquarePen, Wrench } from "lucide-react";
 
 import {
   Badge,
@@ -14,8 +13,7 @@ import {
   Popover,
   Spinner,
 } from "@/components/ui";
-import { ICON } from "@/components/lucide";
-import { CheckIcon, WarningTriangleIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import {
   commands,
   type AiStatus,
@@ -96,13 +94,13 @@ function CliRow({
           onClick={() => update.mutate()}
         >
           {update.isPending ? (
-            <Spinner size={13} />
+            <Spinner size="sm" />
           ) : failed ? (
-            <WarningTriangleIcon size={14} />
+            <Icon name="failed" size="sm" />
           ) : updated ? (
-            <CheckIcon size={14} />
+            <Icon name="check" size="sm" />
           ) : (
-            <Download {...ICON} />
+            <Icon name="download" />
           )}
         </IconButton>
       </div>
@@ -146,7 +144,7 @@ function EditorPicker({ path, disabledReason }: { path: string; disabledReason: 
           aria-label="Edit config"
           onClick={() => setOpen((v) => !v)}
         >
-          <SquarePen {...ICON} />
+          <Icon name="edit" />
         </IconButton>
       </span>
       <Popover
@@ -206,7 +204,7 @@ function ConfigRow({ path }: { path: string }) {
           aria-label={revealLabel}
           onClick={() => void revealItemInDir(path).catch(() => {})}
         >
-          <FolderOpen {...ICON} />
+          <Icon name="folderOpen" />
         </IconButton>
         <EditorPicker path={path} disabledReason={disabledReason} />
       </div>
@@ -246,7 +244,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {status.isLoading ? (
           <span className="flex items-center gap-2 text-body text-ink-dim">
-            <Spinner size={12} /> Ensuring Claude Code and Codex agent links…
+            <Spinner size="xs" /> Ensuring Claude Code and Codex agent links…
           </span>
         ) : !installed ? (
           <>
@@ -281,13 +279,13 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
             onClick={() => repair.mutate()}
           >
             {repair.isPending ? (
-              <Spinner size={13} />
+              <Spinner size="sm" />
             ) : failed ? (
-              <WarningTriangleIcon size={14} />
+              <Icon name="failed" size="sm" />
             ) : repaired ? (
-              <CheckIcon size={14} />
+              <Icon name="check" size="sm" />
             ) : (
-              <Wrench {...ICON} />
+              <Icon name="tool" />
             )}
           </IconButton>
         )}
@@ -331,7 +329,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
                 aria-label="Dismiss error"
                 className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded text-bad/70 hover:bg-bad/15 hover:text-bad"
               >
-                <XIcon size={11} />
+                <Icon name="close" size="xs" />
               </button>
               <p className="pr-5 text-bad">
                 The repair failed{failure.exitCode != null && <> (exit {failure.exitCode})</>}. The

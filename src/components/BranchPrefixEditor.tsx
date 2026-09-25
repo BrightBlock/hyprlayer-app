@@ -13,7 +13,7 @@ import {
   type BranchPrefix,
 } from "@/lib/domain/branchPrefix";
 import { cx, IconButton, TextInput } from "@/components/ui";
-import { PencilIcon, PlusIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 type Props = {
   title: ReactNode;
@@ -189,7 +189,7 @@ export function BranchPrefixEditor({
             title="Add branch type"
             onClick={() => setAdding(BLANK_ADD)}
           >
-            <PlusIcon size={15} />
+            <Icon name="add" />
           </IconButton>
         </div>
       </div>
@@ -248,7 +248,7 @@ export function BranchPrefixEditor({
                           disabled={disabled}
                           aria-label={`Edit ${name}`}
                         >
-                          <PencilIcon size={12} />
+                          <Icon name="edit" size="xs" />
                         </button>
                       </>
                     ) : (
@@ -303,7 +303,7 @@ export function BranchPrefixEditor({
                       disabled={disabled || i === 0}
                       aria-label={`Move ${name} up`}
                     >
-                      ↑
+                      <Icon name="arrowUp" size="sm" />
                     </button>
                     <button
                       type="button"
@@ -312,7 +312,7 @@ export function BranchPrefixEditor({
                       disabled={disabled || i === draft.length - 1}
                       aria-label={`Move ${name} down`}
                     >
-                      ↓
+                      <Icon name="arrowDown" size="sm" />
                     </button>
                     <button
                       type="button"
@@ -321,7 +321,7 @@ export function BranchPrefixEditor({
                       disabled={disabled}
                       aria-label={`Remove ${name}`}
                     >
-                      ✕
+                      <Icon name="close" size="sm" />
                     </button>
                   </div>
                   {isEditing && (rowError?.label || rowError?.prefix) && (
@@ -384,7 +384,7 @@ export function BranchPrefixEditor({
                     disabled={disabled}
                     aria-label="Cancel add"
                   >
-                    <XIcon size={12} />
+                    <Icon name="close" size="xs" />
                   </button>
                   <button
                     type="button"
@@ -393,7 +393,7 @@ export function BranchPrefixEditor({
                     disabled={disabled || !canAdd}
                     aria-label="Add"
                   >
-                    <PlusIcon size={12} />
+                    <Icon name="add" size="xs" />
                   </button>
                 </div>
                 {addError && (

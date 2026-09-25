@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
-import { History } from "lucide-react";
 
 import { useCommand } from "@/lib/keybindings/registry";
 import { useConnectionStatus } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 
 import { ArchivedAgentsPopover } from "./ArchivedAgentsPopover";
@@ -43,7 +42,7 @@ export function ArchivedAgentsButton({ workstreamId }: { workstreamId: string })
           shown && "bg-edge/60 text-ink",
         )}
       >
-        <History {...ICON} size={14} className="shrink-0" />
+        <Icon name="history" size="xs" />
         {count > 0 && <span className="tabular-nums">{count}</span>}
       </button>
       <ArchivedAgentsPopover

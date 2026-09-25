@@ -8,7 +8,7 @@ import { commands, type DocContent } from "@/lib/bindings";
 import { isAppError, unwrap } from "@/lib/ipc";
 import { useProjectMemory, useSaveProjectMemoryFile } from "@/lib/queries";
 import { Button, ErrorNote, IconButton, Spinner } from "@/components/ui";
-import { DocIcon, PencilIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { FrontmatterCard } from "@/features/library/FrontmatterCard";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
@@ -77,7 +77,7 @@ export function DocPreviewTab({
     <div className="min-h-0 flex-1 overflow-y-auto p-5">
       <div className="mx-auto w-[90%]">
         <div className="mb-4 flex items-center gap-2 border-b border-edge pb-3">
-          <DocIcon size={15} />
+          <Icon name="doc" />
           <span className="truncate text-body font-medium text-ink" title={path}>
             {doc.data?.meta.relPath ?? title}
           </span>
@@ -98,7 +98,7 @@ export function DocPreviewTab({
               memoryFile &&
               doc.data && (
                 <IconButton aria-label="Edit memory file" title="Edit memory file" onClick={startEdit}>
-                  <PencilIcon size={14} />
+                  <Icon name="edit" size="sm" />
                 </IconButton>
               )
             )}
@@ -124,7 +124,7 @@ export function DocPreviewTab({
           </div>
         ) : doc.isLoading ? (
           <div className="flex items-center gap-2 text-body text-ink-dim">
-            <Spinner size={14} />
+            <Spinner size="sm" />
             Loading document…
           </div>
         ) : doc.isError ? (

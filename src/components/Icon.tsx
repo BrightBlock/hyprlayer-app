@@ -1,0 +1,252 @@
+// The one module that imports lucide-react (ESLint enforces it); components use semantic names.
+import {
+  Archive,
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowRight,
+  ArrowUp,
+  ArrowUpRight,
+  Bell,
+  BookOpen,
+  Bot,
+  Box,
+  Braces,
+  ChartNoAxesColumnIncreasing,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  CircleHelp,
+  Clock,
+  CloudUpload,
+  Code,
+  Columns2,
+  Columns3,
+  Copy,
+  Diff,
+  Download,
+  Ellipsis,
+  EllipsisVertical,
+  Eraser,
+  Eye,
+  File,
+  FileText,
+  Folder,
+  FolderOpen,
+  Forward,
+  GitBranch,
+  GitCommitHorizontal,
+  GitFork,
+  GitPullRequest,
+  Globe,
+  Hammer,
+  Hash,
+  History,
+  House,
+  Image,
+  Import,
+  Info,
+  Keyboard,
+  Lambda,
+  Layers,
+  LayoutGrid,
+  Lightbulb,
+  ListChecks,
+  LoaderCircle,
+  Lock,
+  MessageSquare,
+  Minus,
+  Package,
+  Palette,
+  PanelBottom,
+  PanelLeft,
+  PanelRight,
+  Paperclip,
+  PenLine,
+  Pin,
+  Play,
+  Plus,
+  Puzzle,
+  Rocket,
+  RotateCw,
+  Search,
+  Server,
+  Settings,
+  Share,
+  Shield,
+  SlidersHorizontal,
+  Sparkle,
+  Sparkles,
+  Square,
+  SquareTerminal,
+  Terminal,
+  Text,
+  TriangleAlert,
+  Undo2,
+  Upload,
+  Users,
+  Wrench,
+  X,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+
+import type { StageKey } from "@/lib/domain/stages";
+
+const ICONS = {
+  chat: MessageSquare,
+  agents: Bot,
+  library: BookOpen,
+  search: Search,
+  terminal: Terminal,
+  branch: GitBranch,
+  settings: Settings,
+  skill: Sparkle,
+  edit: PenLine,
+  doc: File,
+  add: Plus,
+  check: Check,
+  close: X,
+  more: EllipsisVertical,
+  sessionMenu: Ellipsis,
+  archive: Archive,
+  sync: RotateCw,
+  retry: RotateCw,
+  panels: PanelRight,
+  folder: Folder,
+  run: Play,
+  send: ArrowRight,
+
+  chevronDown: ChevronDown,
+  chevronLeft: ChevronLeft,
+  chevronRight: ChevronRight,
+  pullRequest: GitPullRequest,
+  question: CircleHelp,
+  failed: TriangleAlert,
+  warning: TriangleAlert,
+  paused: Clock,
+  info: Info,
+  queued: Text,
+  copy: Copy,
+  external: ArrowUpRight,
+  preview: Eye,
+  code: Code,
+  braces: Braces,
+  package: Package,
+  layoutSingle: Square,
+  layoutSplit2: Columns2,
+  layoutSplit3: Columns3,
+  ai: Sparkles,
+
+  appearance: Palette,
+  arrowDown: ArrowDown,
+  attachment: Paperclip,
+  arrowUp: ArrowUp,
+  clear: Eraser,
+  cloudUpload: CloudUpload,
+  commit: GitCommitHorizontal,
+  console: SquareTerminal,
+  diff: Diff,
+  docText: FileText,
+  download: Download,
+  export: Share,
+  folderOpen: FolderOpen,
+  globe: Globe,
+  handoff: Forward,
+  hash: Hash,
+  history: History,
+  home: Lambda,
+  image: Image,
+  import: Import,
+  keyboard: Keyboard,
+  layers: Layers,
+  loading: LoaderCircle,
+  lock: Lock,
+  mainCheckout: House,
+  multiplexer: LayoutGrid,
+  notifications: Bell,
+  panelBottom: PanelBottom,
+  panelLeft: PanelLeft,
+  permissions: Shield,
+  pin: Pin,
+  plugin: Puzzle,
+  projects: Box,
+  prompt: Zap,
+  pull: ArrowDownToLine,
+  rewind: Undo2,
+  server: Server,
+  ship: Rocket,
+  sliders: SlidersHorizontal,
+  stop: Square,
+  tasks: ListChecks,
+  tip: Lightbulb,
+  tool: Wrench,
+  upload: Upload,
+  users: Users,
+  validate: CircleCheck,
+  windowMinimize: Minus,
+  windowMaximize: Square,
+  windowRestore: Copy,
+  workshop: Hammer,
+  worktree: GitFork,
+  usage: ChartNoAxesColumnIncreasing,
+} satisfies Record<string, LucideIcon>;
+
+export type IconName = keyof typeof ICONS;
+
+// Stroke thickens below 14px so small glyphs don't turn to mush, worst light-on-dark.
+export const ICON_SIZES = {
+  xs: { px: 12, stroke: 1.8 },
+  sm: { px: 14, stroke: 1.5 },
+  md: { px: 16, stroke: 1.5 },
+  rail: { px: 18, stroke: 1.5 },
+  lg: { px: 24, stroke: 1.5 },
+} as const;
+
+export type IconSize = keyof typeof ICON_SIZES;
+
+const FILLED: ReadonlySet<IconName> = new Set(["stop"]);
+
+export function Icon({
+  name,
+  size = "md",
+  className,
+  label,
+}: {
+  name: IconName;
+  size?: IconSize;
+  className?: string;
+  // Only for an icon that carries meaning alone; icon-only buttons label the button instead.
+  label?: string;
+}) {
+  const Glyph = ICONS[name];
+  const { px, stroke } = ICON_SIZES[size];
+  return (
+    <Glyph
+      size={px}
+      strokeWidth={stroke}
+      absoluteStrokeWidth={false}
+      fill={FILLED.has(name) ? "currentColor" : "none"}
+      className={className ? `shrink-0 ${className}` : "shrink-0"}
+      aria-hidden={label ? undefined : true}
+      aria-label={label}
+      role={label ? "img" : undefined}
+    />
+  );
+}
+
+const STAGE_ICON: Record<StageKey, IconName> = {
+  research: "search",
+  plan: "tasks",
+  implement: "code",
+  validate: "validate",
+  commit: "commit",
+  ship: "ship",
+  revise: "edit",
+  general: "chat",
+};
+
+export function stageIconName(stage: string | null | undefined): IconName {
+  return (stage && STAGE_ICON[stage as StageKey]) || "chat";
+}

@@ -20,7 +20,7 @@ import {
   TextInput,
 } from "@/components/ui";
 import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
-import { PlusIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import type { CheckStatus, HealthCheck } from "@/lib/bindings";
 import { isGitProject } from "@/lib/domain/projects";
 import { ScriptsCard } from "./ScriptsCard";
@@ -99,7 +99,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
                 disabled={setFiles.isPending}
                 aria-label={`Remove ${p}`}
               >
-                ✕
+                <Icon name="close" size="xs" />
               </button>
             </li>
           ))}
@@ -121,7 +121,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
           aria-label="Add file pattern"
           title="Add file pattern"
         >
-          <PlusIcon size={15} />
+          <Icon name="add" />
         </IconButton>
       </div>
     </SettingsSection>

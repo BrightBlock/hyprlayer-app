@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
-import { ChevronDownIcon, ChevronRightIcon } from "./icons";
+import { Icon } from "./Icon";
 import { MenuItem, MenuSeparator } from "./ui";
 
 export type OptionMenuItem = {
@@ -140,9 +140,7 @@ export function OptionMenuList({
                   <span className="min-w-0 flex-1 truncate">{it.label}</span>
                   {it.hint && <span className="shrink-0 text-ink-dim">{it.hint}</span>}
                   {it.key === activeKey && (
-                    <span aria-hidden="true" className="ml-auto shrink-0">
-                      ✓
-                    </span>
+                    <Icon name="check" size="sm" className="ml-auto" />
                   )}
                 </span>
               </MenuItem>
@@ -171,7 +169,7 @@ export function OptionMenuList({
                   >
                     <span className="flex w-full items-center gap-2">
                       <span className="shrink-0">
-                        {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
+                        <Icon name={showMore ? "chevronDown" : "chevronRight"} size="sm" />
                       </span>
                       <span className="min-w-0 flex-1 truncate">{g.more.label}</span>
                       <span className="ml-auto shrink-0 text-ui-sm text-ink-dim/70">
@@ -222,9 +220,7 @@ export function OptionMenuList({
                   <span>{it.label}</span>
                   {it.hint && <span className="text-ink-dim">{it.hint}</span>}
                   {it.key === activeKey && (
-                    <span aria-hidden="true" className="ml-auto">
-                      ✓
-                    </span>
+                    <Icon name="check" size="sm" className="ml-auto" />
                   )}
                 </span>
               </MenuItem>

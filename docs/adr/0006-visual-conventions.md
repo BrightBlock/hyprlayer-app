@@ -453,9 +453,24 @@ exception like those under "Typography".
   popover opens upward and matches the Archived worktrees popover: 440px wide, a
   `0 12px 30px` shadow, its list capped at the window height.
 
-**Icons.** `lucide-react` at 16px and stroke 1.5 (`ICON` in
-`src/components/lucide.ts`) on the v4 surfaces. `icons.tsx` stays everywhere
-else and for brand marks (`harnessIcon`).
+**Icons.** Superseded by "Icons (2026-09-25)" below.
+
+### Icons (2026-09-25)
+
+One family, Lucide, reached only through `<Icon name size />` in
+`src/components/Icon.tsx`. `name` is a semantic key in its `ICONS` registry
+(`add`, `close`, `sync`, `pullRequest`…); add a key there rather than importing
+a glyph. ESLint rejects `lucide-react` outside `Icon.tsx` and any inline `<svg>`
+outside `BrandMark.tsx` (vendor logos, which Lucide lacks), `Logo.tsx` and
+`KnowledgeGraph.tsx`.
+
+- **Size is a tier, never a number:** `xs` 12 (chips, status bar, tool rows) ·
+  `sm` 14 (inline controls) · `md` 16 (buttons, top bar) · `rail` 18 (left
+  rail) · `lg` 24 (standalone). Stroke is 1.5 from 14px up and 1.8 at 12px.
+- **Colour is `currentColor`.** Status icons take the status token: waiting
+  `text-warn`, failed `text-bad-ink`, paused `text-ink-2`, retrying `text-ink`.
+- **Icon-only buttons carry an `aria-label`.** `Icon` is `aria-hidden` unless
+  given `label`.
 
 ### v4 type scale (2026-09-24)
 

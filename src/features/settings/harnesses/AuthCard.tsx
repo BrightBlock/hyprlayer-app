@@ -1,3 +1,5 @@
+import { Icon } from "@/components/Icon";
+
 export function AuthCard({
   label,
   sublabel,
@@ -19,9 +21,7 @@ export function AuthCard({
       }`}
     >
       {selected && (
-        <span className="absolute right-3 top-3 text-accent" aria-hidden>
-          ✓
-        </span>
+        <Icon name="check" size="sm" className="absolute right-3 top-3 text-accent" />
       )}
       <p className="text-body font-medium text-ink">{label}</p>
       <p className="mt-0.5 text-ui text-ink-dim">{sublabel}</p>

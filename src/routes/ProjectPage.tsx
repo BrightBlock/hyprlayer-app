@@ -22,7 +22,7 @@ import {
 } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { ScrollableTabStrip } from "@/components/ScrollableTabs";
 import { commands, type WorkstreamView } from "@/lib/bindings";
 import { GLASS_BAND } from "@/lib/glass";
@@ -230,7 +230,7 @@ function TabCloseControl({
       title={label}
       aria-label={label}
     >
-      <XIcon />
+      <Icon name="close" size="sm" />
     </button>
   );
 }
@@ -1020,11 +1020,11 @@ export function ProjectPage() {
       <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-body font-medium">
         {shell.diffView ? (
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
-            <DiffIcon size={13} />
+            <Icon name="diff" size="sm" />
           </span>
         ) : isTerminalShell(shell) ? (
           <span className="text-ink-dim">
-            <TerminalIcon size={13} />
+            <Icon name="terminal" size="sm" />
           </span>
         ) : isLivePty(shell) && shell.ptyAgent ? (
           (() => {
@@ -1039,7 +1039,7 @@ export function ProjectPage() {
           })()
         ) : isViewerShell(shell) ? (
           <span className="text-ink-dim">
-            <DocIcon size={13} />
+            <Icon name="doc" size="sm" />
           </span>
         ) : (
           <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
@@ -1086,7 +1086,7 @@ export function ProjectPage() {
               title="New agent"
               aria-label="New agent"
             >
-              <PlusIcon />
+              <Icon name="add" />
             </IconButton>
           }
         >
@@ -1106,7 +1106,7 @@ export function ProjectPage() {
             title="Split pane"
             aria-label="Split pane"
           >
-            <SplitIcon />
+            <Icon name="layoutSplit2" />
           </IconButton>
           {multiPane && (
             <IconButton
@@ -1114,7 +1114,7 @@ export function ProjectPage() {
               title="Close pane and end its agents"
               aria-label="Close pane and end its agents"
             >
-              <XIcon />
+              <Icon name="close" size="sm" />
             </IconButton>
           )}
         </div>
@@ -1599,7 +1599,7 @@ export function ProjectPage() {
                         : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
                     </p>
                     <Button variant="primary" className="mt-4" onClick={() => setCreateOpen(true)}>
-                      <PlusIcon />
+                      <Icon name="add" />
                       New workstream
                     </Button>
                   </div>

@@ -4,7 +4,7 @@ import type { CatalogProvider } from "@/lib/bindings";
 import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
 import { useSetOpencodeProviderKey } from "@/lib/queries";
 import { Button, Dialog, ErrorNote, TextInput } from "@/components/ui";
-import { SearchIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 const FEATURED = 7;
 
@@ -52,7 +52,7 @@ export function ProviderPickerModal({
         <>
           <div className="relative mb-3">
             <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
-              <SearchIcon />
+              <Icon name="search" size="sm" />
             </span>
             <TextInput
               autoFocus
@@ -77,7 +77,7 @@ export function ProviderPickerModal({
                   {configured.has(p.id) ? (
                     <span className="text-ui text-ok">configured</span>
                   ) : (
-                    <span className="text-ink-dim">›</span>
+                    <Icon name="chevronRight" size="xs" className="text-ink-dim" />
                   )}
                 </button>
               </li>
@@ -126,8 +126,12 @@ function KeyEntry({
 
   return (
     <div>
-      <button type="button" onClick={onBack} className="mb-3 text-ui text-ink-dim hover:text-ink">
-        ‹ All providers
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-3 inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
+      >
+        <Icon name="chevronLeft" size="xs" /> All providers
       </button>
       <p className="text-body font-medium text-ink">{provider.name}</p>
       <p className="mt-0.5 text-ui text-ink-dim">
@@ -135,8 +139,13 @@ function KeyEntry({
         {provider.doc && (
           <>
             {" · "}
-            <a className="text-accent hover:underline" href={provider.doc} target="_blank" rel="noreferrer">
-              Docs ↗
+            <a
+              className="inline-flex items-center gap-1 text-accent hover:underline"
+              href={provider.doc}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Docs <Icon name="external" size="xs" />
             </a>
           </>
         )}

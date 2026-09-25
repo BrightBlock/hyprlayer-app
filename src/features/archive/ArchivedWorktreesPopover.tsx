@@ -7,7 +7,6 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
-import { Search } from "lucide-react";
 
 import { formatBytes } from "@/lib/format";
 import { isAppError } from "@/lib/ipc";
@@ -21,7 +20,7 @@ import {
   usePurgeArchivedWorkstreams,
   useRefreshArchivedWorkstreams,
 } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { ConfirmDialog, cx, ErrorNote, Popover, ROW_ACTION } from "@/components/ui";
 
 import { useRestoreAndOpen } from "./archiveActions";
@@ -202,9 +201,9 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
             <label htmlFor={searchId} className="sr-only">
               Filter archived worktrees
             </label>
-            <Search
-              {...ICON}
-              size={14}
+            <Icon
+              name="search"
+              size="sm"
               className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim"
             />
             <input

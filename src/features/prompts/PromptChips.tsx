@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap } from "@/lib/queries";
 import { ChordHint } from "@/components/ui";
-import { ZapIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { customPrompts, isRunnablePrompt } from "./prompts";
 
 export function usePinnedPrompts(projectPath: string): CustomPrompt[] {
@@ -39,7 +39,7 @@ export function PromptChips({
           className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-ui text-ink hover:border-accent/50 hover:bg-accent/10"
         >
           <span className="shrink-0 text-accent">
-            <ZapIcon size={12} />
+            <Icon name="prompt" size="xs" />
           </span>
           <span className="max-w-44 truncate">{p.name || "Prompt"}</span>
           {p.chord && (

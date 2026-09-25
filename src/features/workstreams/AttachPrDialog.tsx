@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { WorkstreamView } from "@/lib/bindings";
 import { Dialog, ErrorNote, Spinner, TextInput } from "@/components/ui";
-import { GitPullRequestIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { useAttachPr, useWorkstreamOpenPrs, useWorkstreamPrPreview } from "@/lib/queries";
 
 type Props = {
@@ -82,7 +82,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
           ) : queryNumber !== null ? (
             preview.isLoading ? (
               <div className="flex justify-center py-6">
-                <Spinner size={16} />
+                <Spinner />
               </div>
             ) : preview.data ? (
               <PrRow
@@ -101,7 +101,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
           ) :
           search.isLoading ? (
             <div className="flex justify-center py-6">
-              <Spinner size={16} />
+              <Spinner />
             </div>
           ) : searchRows.length === 0 ? (
             <p className="py-6 text-center text-body text-ink-dim">No open PRs found</p>
@@ -141,7 +141,7 @@ function PrRow({
       disabled={busy}
       className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-body text-ink-dim hover:bg-edge/60 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
     >
-      <GitPullRequestIcon size={14} className="mt-0.5 shrink-0 self-start" />
+      <Icon name="pullRequest" size="sm" className="mt-0.5 self-start" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ink">{title}</span>
         <span className="block truncate text-ui text-ink-dim">{subtitle}</span>

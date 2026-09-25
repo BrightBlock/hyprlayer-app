@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IS_LINUX, IS_MACOS } from "@/lib/platform";
 import { useIsMaximized } from "@/lib/useMaximized";
+import { Icon } from "./Icon";
 
 export function WindowControls() {
   const maximized = useIsMaximized();
@@ -14,31 +15,18 @@ export function WindowControls() {
       {!IS_LINUX && (
         <>
           <CaptionButton label="Minimize" onClick={() => void win.minimize()}>
-            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-              <path d="M0 5h10" stroke="currentColor" strokeWidth="1" />
-            </svg>
+            <Icon name="windowMinimize" size="xs" />
           </CaptionButton>
           <CaptionButton
             label={maximized ? "Restore" : "Maximize"}
             onClick={() => void win.toggleMaximize()}
           >
-            {maximized ? (
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                <rect x="0.5" y="2.5" width="7" height="7" stroke="currentColor" strokeWidth="1" />
-                <path d="M2.5 2.5V0.5h7v7h-2" stroke="currentColor" strokeWidth="1" />
-              </svg>
-            ) : (
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-                <rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" strokeWidth="1" />
-              </svg>
-            )}
+            <Icon name={maximized ? "windowRestore" : "windowMaximize"} size="xs" />
           </CaptionButton>
         </>
       )}
       <CaptionButton label="Close" onClick={() => void win.close()}>
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-          <path d="M0 0l10 10M10 0L0 10" stroke="currentColor" strokeWidth="1" />
-        </svg>
+        <Icon name="close" size="xs" />
       </CaptionButton>
     </div>
   );

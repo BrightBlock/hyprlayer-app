@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
-import { ArchiveIcon, PlusIcon, SplitIcon, WarningTriangleIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import type { WorktreeMode } from "@/lib/bindings";
 import { previewSlug, suggestPrefix } from "@/lib/domain/branchPrefix";
 import { formatRelativeTime } from "@/lib/format";
@@ -249,7 +249,7 @@ export function CreateWorkstreamDialog({
             />
             <ul className="max-h-48 overflow-y-auto py-1">
               <BranchRow
-                icon={<PlusIcon size={14} />}
+                icon={<Icon name="add" size="sm" />}
                 label="New branch"
                 detail="named from your title"
                 selected={isNew}
@@ -265,7 +265,7 @@ export function CreateWorkstreamDialog({
               {filtered.map((b) => (
                 <BranchRow
                   key={b}
-                  icon={<SplitIcon size={14} />}
+                  icon={<Icon name="branch" size="sm" />}
                   label={b}
                   detail={
                     remoteSet.has(b) ? "remote" : b === currentBranch ? "active" : undefined
@@ -455,7 +455,7 @@ function CheckoutDirtyNotice({
     <div className="overflow-hidden rounded-md border border-edge bg-panel-2 text-body">
       <div className="flex gap-3 p-3">
         <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-attention/30 bg-attention/15 text-attention">
-          <WarningTriangleIcon size={14} />
+          <Icon name="warning" size="sm" />
         </span>
         <div className="min-w-0">
           <p className="font-medium text-ink">Your checkout has uncommitted work</p>
@@ -470,7 +470,7 @@ function CheckoutDirtyNotice({
       </div>
       {leftBehind && (
         <div className="flex items-center gap-3 border-t border-edge px-3 py-2.5">
-          <ArchiveIcon size={15} className="shrink-0 text-ink-dim" />
+          <Icon name="archive" className="text-ink-dim" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-ink">{leftBehind.item.title}</div>
             <div className="truncate text-ui text-ink-dim">

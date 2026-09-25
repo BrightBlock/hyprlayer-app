@@ -1,6 +1,6 @@
 import type { WorkstreamView } from "@/lib/bindings";
 import { Button } from "@/components/ui";
-import { PlusIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { BOARD_COLUMNS, groupByColumn } from "./board";
 import { BoardColumn } from "./BoardColumn";
 import { WorkstreamCard } from "./WorkstreamCard";
@@ -33,7 +33,7 @@ export function ProjectBoard({
                   : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
               </p>
               <Button variant="primary" className="mt-4" onClick={onNewWorkstream}>
-                <PlusIcon />
+                <Icon name="add" />
                 New workstream
               </Button>
             </div>

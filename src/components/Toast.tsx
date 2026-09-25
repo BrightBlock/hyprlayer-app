@@ -2,47 +2,22 @@ import { useEffect, useRef, useState } from "react";
 
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useToast, type ToastTone } from "@/lib/toast";
-import { XIcon } from "./icons";
+import { Icon, type IconName } from "./Icon";
 
 const DURATION_MS = 5000;
 const EXIT_MS = 380;
 
+const TONE_BADGE: Record<ToastTone, { name: IconName; bg: string }> = {
+  ok: { name: "check", bg: "bg-ok" },
+  warn: { name: "warning", bg: "bg-warn" },
+  bad: { name: "close", bg: "bg-bad" },
+};
+
 function ToastIcon({ tone }: { tone: ToastTone }) {
-  const base = "flex h-6 w-6 shrink-0 items-center justify-center rounded-full";
-  if (tone === "ok") {
-    return (
-      <span className={`${base} bg-ok`}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M5 12l5 5 9-9"
-            stroke="var(--color-surface)"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </span>
-    );
-  }
-  if (tone === "warn") {
-    return (
-      <span className={`${base} bg-warn`}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 8v5M12 16h.01" stroke="var(--color-surface)" strokeWidth="2.5" strokeLinecap="round" />
-        </svg>
-      </span>
-    );
-  }
+  const badge = TONE_BADGE[tone];
   return (
-    <span className={`${base} bg-bad`}>
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M6 6l12 12M18 6L6 18"
-          stroke="var(--color-surface)"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-        />
-      </svg>
+    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${badge.bg}`}>
+      <Icon name={badge.name} size="xs" className="text-surface" />
     </span>
   );
 }
@@ -123,7 +98,7 @@ export function Toast() {
         aria-label="Dismiss"
         className="-mr-4 z-10 mt-2 flex h-6 shrink-0 items-center gap-1 rounded-full border border-edge bg-panel-2 px-2 text-ink-dim hover:text-ink"
       >
-        <XIcon size={9} />
+        <Icon name="close" size="xs" />
         {!sticky && <span className="text-ui-sm tabular-nums leading-none">{remaining}s</span>}
       </button>
       <div className="flex min-w-72 max-w-sm items-start gap-3 rounded-lg border border-edge bg-panel px-4 py-3.5 shadow-2xl">

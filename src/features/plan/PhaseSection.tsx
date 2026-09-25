@@ -1,3 +1,4 @@
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 
 import type { JumpTarget, PhaseState, TaskState, TrackedPhase, TrackedTask } from "./planTracker";
@@ -47,15 +48,7 @@ function TaskBox({ state, pulse }: { state: TaskState; pulse: boolean }) {
       )}
     >
       {state === "done" && (
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none">
-          <path
-            d="m5 12.5 4.5 4.5L19 6.5"
-            stroke="currentColor"
-            strokeWidth={3}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <Icon name="check" size="xs" />
       )}
       {state === "in_progress" && (
         <span className={cx("absolute inset-[1.5px] rounded-[1.5px] bg-ink", pulse && "animate-plan-pulse")} />

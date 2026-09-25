@@ -1,4 +1,4 @@
-import { CheckIcon, SyncIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { Spinner } from "@/components/ui";
 import type { ThoughtsSyncState } from "./useThoughtsSync";
 
@@ -42,11 +42,11 @@ export function ThoughtsSyncButton({ sync }: { sync: ThoughtsSyncState }) {
       aria-label="Sync thoughts"
     >
       {syncing ? (
-        <Spinner size={12} />
+        <Spinner size="sm" />
       ) : flash === "ok" ? (
-        <CheckIcon size={13} />
+        <Icon name="check" size="sm" />
       ) : (
-        <SyncIcon size={13} />
+        <Icon name="sync" size="sm" />
       )}
       {!syncing && !failed && flash !== "ok" && pendingParts.length > 0 && (
         <span

@@ -43,6 +43,7 @@ automatically, other agents should read them).
 |---|---|
 | Is a shared vocabulary type (Stage, Harness, DocKind, PermissionMode) | `src/lib/domain/`, derived from Rust bindings, never re-declared |
 | Is a shared UI primitive or visual convention (popover, dialog, row height, hover) | `src/components/ui.tsx` — check there and ADR-0006 before inventing one |
+| Is an icon | `<Icon name size>` from `src/components/Icon.tsx`: add a semantic key to its registry, never import `lucide-react` or draw an `<svg>` |
 | Is a shared formatting / path helper | `src/lib/format.ts` / `src/lib/path.ts` |
 | Is a terminal/PTY concern | `src/lib/terminal/` |
 | Is an agent-bundle (`~/.claude`) backup/restore/diff concern | `crates/hyprlayer-core/src/agent_bundle.rs`; its GitHub probe goes through `ProviderHttp` in `runtime/agents.rs` |

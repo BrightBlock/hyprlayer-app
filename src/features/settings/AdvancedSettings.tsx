@@ -10,7 +10,7 @@ import {
   type ResolvedEngine,
 } from "@/features/multiplexer/engines";
 import { EngineGlyph } from "@/components/EngineGlyph";
-import { CheckIcon, MultiplexerIcon, PlusIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { SETTINGS_CARD_DESCRIPTION, SETTINGS_CARD_TITLE } from "@/components/SettingsCard";
 import {
   Button,
@@ -44,15 +44,16 @@ function EngineChip({
       <button type="button" onClick={onToggle} className="hover:text-ink" aria-pressed={engine.enabled}>
         {engine.label}
       </button>
-      {engine.enabled && <CheckIcon size={11} className="text-accent" />}
+      {engine.enabled && <Icon name="check" size="xs" className="text-accent" />}
       {onRemove && (
         <button
           type="button"
           onClick={onRemove}
           title={`Remove ${engine.label}`}
+          aria-label={`Remove ${engine.label}`}
           className="text-ink-dim hover:text-bad"
         >
-          <XIcon size={11} />
+          <Icon name="close" size="xs" />
         </button>
       )}
     </span>
@@ -112,7 +113,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
       <div className="overflow-hidden rounded-lg border border-accent/40 bg-accent/5">
         <div className="flex items-center gap-3 p-4">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent/15 text-accent">
-            <MultiplexerIcon size={18} />
+            <Icon name="multiplexer" />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -155,7 +156,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
                   onClick={() => setAddOpen(true)}
                   className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-ui text-ink-dim hover:text-ink"
                 >
-                  <PlusIcon size={11} /> Add CLI…
+                  <Icon name="add" size="xs" /> Add CLI…
                 </button>
               </div>
             </div>

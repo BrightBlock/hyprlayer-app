@@ -1,10 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
 
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { IS_MACOS } from "@/lib/platform";
 import { useBootstrap } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { ChordHint } from "@/components/ui";
 
 import type { SettingsSection } from "./sections";
@@ -24,7 +23,7 @@ export function SettingsCrumb({ section }: { section: SettingsSection }) {
         onClick={() => void navigate({ to: "/settings", search: {}, replace: true })}
         className="flex shrink-0 items-center gap-0.5 font-medium text-ink-dim hover:text-ink"
       >
-        <ChevronLeft {...ICON} size={14} />
+        <Icon name="chevronLeft" size="sm" />
         Settings
       </button>
       <span className="text-ink-4">/</span>

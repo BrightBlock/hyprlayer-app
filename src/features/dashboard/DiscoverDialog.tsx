@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { GithubRepo } from "@/lib/bindings";
 import { Dialog, IconButton, RefreshButton, Spinner, TextInput } from "@/components/ui";
-import { DownloadIcon, GlobeIcon, LockIcon, SearchIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { formatCompactAge, formatRelativeTime } from "@/lib/format";
 import { githubRepoRef } from "@/lib/github";
@@ -122,7 +122,7 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
               count={all.length}
               onClick={() => setOwner(ALL_OWNERS)}
             >
-              <GlobeIcon size={16} />
+              <Icon name="globe" />
               <span className="flex-1 truncate text-left">All</span>
             </OrgRow>
             {owners.map((org) => (
@@ -155,8 +155,9 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2 border-b border-edge px-5 py-4">
             <div className="relative flex-1">
-              <SearchIcon
-                size={14}
+              <Icon
+                name="search"
+                size="sm"
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim"
               />
               <TextInput
@@ -169,14 +170,14 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
               />
             </div>
             <IconButton onClick={close} aria-label="Close" className="flex-none">
-              <XIcon size={14} />
+              <Icon name="close" size="sm" />
             </IconButton>
           </div>
 
           <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2">
             {recents.isLoading ? (
               <div className="flex items-center gap-2 px-2.5 py-6 text-body text-ink-dim">
-                <Spinner size={14} /> Loading your GitHub repositories…
+                <Spinner size="sm" /> Loading your GitHub repositories…
               </div>
             ) : all.length === 0 ? (
               <p className="px-2.5 py-6 text-center text-body text-ink-dim">
@@ -268,7 +269,7 @@ function RepoRow({
       </span>
       {repo.private && (
         <span className="flex-none text-ink-dim">
-          <LockIcon size={12} />
+          <Icon name="lock" size="xs" />
           <span className="sr-only">Private</span>
         </span>
       )}
@@ -278,7 +279,7 @@ function RepoRow({
         <>
           <span className="flex-none text-ui-sm text-ink-dim group-hover:hidden">{age}</span>
           <span className="hidden flex-none items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-ui font-semibold text-accent-ink group-hover:flex">
-            <DownloadIcon size={12} strokeWidth={2} />
+            <Icon name="download" size="xs" />
             Clone…
           </span>
         </>

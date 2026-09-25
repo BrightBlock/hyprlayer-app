@@ -1,6 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { Badge, Button, Card, Spinner } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { errorMessage } from "@/lib/ipc";
 import {
@@ -46,7 +47,7 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
       {hlOk ? (
         <Card className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-h3">✓</span>
+            <Icon name="check" size="lg" />
             <p className="text-body font-medium text-ink">Hyprlayer CLI is installed</p>
           </div>
           <p className="text-body text-ink-dim">
@@ -121,7 +122,7 @@ function InstallPicker() {
           </div>
         ) : install.isPending ? (
           <div className="flex items-center gap-2 py-2 text-body text-ink-dim">
-            <Spinner size={14} /> Installing{installingLabel ? ` with ${installingLabel}` : ""}…
+            <Spinner size="sm" /> Installing{installingLabel ? ` with ${installingLabel}` : ""}…
           </div>
         ) : available.length > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-3">

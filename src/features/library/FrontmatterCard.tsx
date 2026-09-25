@@ -2,6 +2,7 @@ import { Fragment } from "react";
 
 import type { DocMeta } from "@/lib/bindings";
 import { Badge, Card } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import { STATUS_TONE } from "./constants";
 
 export function FrontmatterCard({ meta }: { meta: DocMeta }) {
@@ -27,8 +28,12 @@ export function FrontmatterCard({ meta }: { meta: DocMeta }) {
         {fm.status && <Badge tone={STATUS_TONE[fm.status] ?? "dim"}>{fm.status}</Badge>}
         <Badge tone="dim">{meta.scope}</Badge>
         {meta.fmWarnings.length > 0 && (
-          <span className="text-ui text-warn-ink" title={meta.fmWarnings.join("\n")}>
-            ⚠ {meta.fmWarnings.length} frontmatter warning{meta.fmWarnings.length === 1 ? "" : "s"}
+          <span
+            className="inline-flex items-center gap-1 text-ui text-warn-ink"
+            title={meta.fmWarnings.join("\n")}
+          >
+            <Icon name="warning" size="xs" className="text-warn" />
+            {meta.fmWarnings.length} frontmatter warning{meta.fmWarnings.length === 1 ? "" : "s"}
           </span>
         )}
       </div>

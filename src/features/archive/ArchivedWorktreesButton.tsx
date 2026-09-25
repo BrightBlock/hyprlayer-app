@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Archive } from "lucide-react";
 
 import { useConnectionStatus } from "@/lib/queries";
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 
 import { ArchivedWorktreesPopover } from "./ArchivedWorktreesPopover";
@@ -41,7 +40,7 @@ export function ArchivedWorktreesButton() {
           shown && "bg-accent-soft text-ink hover:bg-accent-soft",
         )}
       >
-        <Archive {...ICON} />
+        <Icon name="archive" />
       </button>
       <ArchivedWorktreesPopover open={shown} onClose={closeArchivedWorktrees} anchorRef={anchorRef} />
     </>

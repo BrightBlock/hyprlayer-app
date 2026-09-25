@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Dialog } from "@/components/ui";
-import { DocIcon, ImportIcon, WarningTriangleIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import { promptFirstLine } from "./prompts";
 import type { PromptConflictAction } from "@/lib/bindings";
@@ -61,7 +61,7 @@ export function ImportPromptsDialog({
       onClose={onClose}
       title={
         <span className="flex items-center gap-2.5">
-          <ImportIcon size={15} className="shrink-0 text-accent" />
+          <Icon name="import" className="text-accent" />
           Import prompts
         </span>
       }
@@ -85,7 +85,7 @@ export function ImportPromptsDialog({
       }
     >
       <div className="flex items-center gap-2 border-b border-edge bg-panel-2/40 px-4 py-2.5">
-        <DocIcon size={14} className="shrink-0 text-ink-dim" />
+        <Icon name="doc" size="sm" className="text-ink-dim" />
         <span className="truncate text-meta text-ink">{fileName}</span>
         {source && <span className="shrink-0 text-ui-sm text-ink-dim">from {source}</span>}
         <button
@@ -159,7 +159,7 @@ export function ImportPromptsDialog({
 
               {notes.map((note, i) => (
                 <div key={i} className="flex items-start gap-2 pl-[26px] text-ui-sm leading-prose text-ink-dim">
-                  <WarningTriangleIcon size={12} className="mt-0.5 shrink-0 text-warn-ink" />
+                  <Icon name="warning" size="xs" className="mt-0.5 text-warn-ink" />
                   <span>{note}</span>
                 </div>
               ))}

@@ -2,22 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Popover } from "@/components/ui";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  DockBottomIcon,
-  DockRightIcon,
-  EraserIcon,
-  GlobeIcon,
-  PlayIcon,
-  PlusIcon,
-  StopIcon,
-  TerminalIcon,
-  WrenchIcon,
-  WarningTriangleIcon,
-  XIcon,
-} from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { commands, type ScriptKind, type ScriptStatus } from "@/lib/bindings";
 import {
   forgetScriptOutput,
@@ -55,8 +40,8 @@ const cx = (...parts: Array<string | false | null | undefined>): string =>
   parts.filter(Boolean).join(" ");
 
 const SCRIPTS: { kind: Exclude<ScriptKind, never>; name: string; trigger: string; icon: ReactNode }[] = [
-  { kind: "setup", name: "Setup", trigger: "Runs once when this workstream is created.", icon: <WrenchIcon size={13} /> },
-  { kind: "run", name: "Run", trigger: "Runs each time you press ▶. The previous process is stopped first.", icon: <PlayIcon size={12} /> },
+  { kind: "setup", name: "Setup", trigger: "Runs once when this workstream is created.", icon: <Icon name="tool" size="sm" /> },
+  { kind: "run", name: "Run", trigger: "Runs each time you press ▶. The previous process is stopped first.", icon: <Icon name="run" size="sm" /> },
 ];
 
 type View = { kind: ScriptKind; gen: number; attachId: string | null; exited: boolean };
@@ -185,7 +170,7 @@ export function ScriptDock({
           aria-label={right ? "Toggle scripts dock" : "Minimize scripts dock"}
           className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink"
         >
-          {right && collapsed ? <ChevronRightIcon size={14} /> : <ChevronDownIcon size={14} />}
+          <Icon name={right && collapsed ? "chevronRight" : "chevronDown"} size="sm" />
         </button>
         <button
           type="button"
@@ -194,7 +179,7 @@ export function ScriptDock({
           aria-label="Toggle dock position"
           className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink"
         >
-          {dockPosition === "bottom" ? <DockRightIcon size={13} /> : <DockBottomIcon size={13} />}
+          <Icon name={dockPosition === "bottom" ? "panels" : "panelBottom"} size="sm" />
         </button>
 
         <ScrollableTabStrip
@@ -207,7 +192,7 @@ export function ScriptDock({
               aria-label="New terminal"
               className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink"
             >
-              <PlusIcon size={13} />
+              <Icon name="add" size="sm" />
             </button>
           }
         >
@@ -217,8 +202,8 @@ export function ScriptDock({
             return (
               <DockTab key={s.kind} active={active} onClick={() => selectDockTab(workstreamId, s.kind)} icon={s.icon} label={s.name}>
                 {s.kind === "run" && isRunning && <Dot pulse />}
-                {s.kind !== "run" && st?.phase === "passed" && <CheckIcon size={11} className="text-ok" />}
-                {s.kind !== "run" && st?.phase === "failed" && <WarningTriangleIcon size={11} className="text-bad" />}
+                {s.kind !== "run" && st?.phase === "passed" && <Icon name="check" size="xs" className="text-ok" />}
+                {s.kind !== "run" && st?.phase === "failed" && <Icon name="failed" size="xs" className="text-bad-ink" />}
               </DockTab>
             );
           })}
@@ -228,7 +213,7 @@ export function ScriptDock({
               key={`term-${t}`}
               active={typeof tab === "object" && tab.term === t}
               onClick={() => selectDockTab(workstreamId, { term: t })}
-              icon={<TerminalIcon size={13} />}
+              icon={<Icon name="terminal" size="sm" />}
               label={shellName}
             >
               <span
@@ -241,7 +226,7 @@ export function ScriptDock({
                 }}
                 className="ml-0.5 grid h-4 w-4 place-items-center rounded text-ink-dim/70 hover:bg-panel-2 hover:text-ink"
               >
-                <XIcon size={10} />
+                <Icon name="close" size="xs" />
               </span>
             </DockTab>
           ))}
@@ -254,7 +239,7 @@ export function ScriptDock({
               onClick={openPort}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 text-ui text-ink hover:bg-edge/60"
             >
-              <GlobeIcon size={13} className="text-ink-dim" /> Open{" "}
+              <Icon name="globe" size="sm" className="text-ink-dim" /> Open{" "}
               <span className="font-mono text-brand">:{port}</span>
             </button>
           )}
@@ -267,7 +252,7 @@ export function ScriptDock({
               aria-label="Clear output"
               className="grid h-6 w-6 shrink-0 place-items-center rounded text-ink-dim hover:bg-panel-2 hover:text-ink disabled:pointer-events-none disabled:opacity-40"
             >
-              <EraserIcon size={13} />
+              <Icon name="clear" size="sm" />
             </button>
           )}
           <RunSplit
@@ -413,6 +398,7 @@ function RunSplit({
               ? `${running ? "Stop" : label}${runKey ? ` (${runKey})` : ""}`
               : undefined
         }
+        aria-label={compact ? (running ? "Stop" : label) : undefined}
         className={cx(
           "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-edge bg-panel-2 text-ui font-medium hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50",
           compact ? "px-2" : "px-3",
@@ -420,7 +406,7 @@ function RunSplit({
           open && "rounded-bl-none",
         )}
       >
-        {running ? <StopIcon size={11} /> : <PlayIcon size={11} className="text-ink-dim" />}
+        {running ? <Icon name="stop" size="xs" /> : <Icon name="run" size="xs" className="text-ink-dim" />}
         {!compact && (
           <>
             {running ? "Stop" : label} {runKey && <Kbd>{runKey}</Kbd>}
@@ -437,7 +423,7 @@ function RunSplit({
           open && "rounded-br-none",
         )}
       >
-        <ChevronDownIcon size={12} />
+        <Icon name="chevronDown" size="xs" />
       </button>
       <Popover
         open={open}
@@ -488,18 +474,18 @@ function RunIdle({
             onClick={onEdit}
             className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-ui text-ink hover:bg-edge/60"
           >
-            Edit scripts <span aria-hidden>↗</span>
+            Edit scripts <Icon name="external" size="xs" />
           </button>
         </>
       ) : (
         <>
-          <TerminalIcon size={46} strokeWidth={1.4} className="text-ink-dim/40" />
+          <Icon name="terminal" size="lg" className="text-ink-dim/40" />
           <button
             type="button"
             onClick={onRun}
             className="inline-flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-3.5 py-2 text-body font-medium text-ink hover:bg-edge/60"
           >
-            <PlayIcon size={12} className="text-ink-dim" /> Start Run {runKey && <Kbd>{runKey}</Kbd>}
+            <Icon name="run" size="xs" className="text-ink-dim" /> Start Run {runKey && <Kbd>{runKey}</Kbd>}
           </button>
           <p className="text-ui text-ink-dim/70">Test your changes here.</p>
         </>
@@ -533,15 +519,15 @@ function SetupBody({
   return (
     <div className={cx("flex min-h-0 flex-1 flex-col", bg)}>
       <div className="flex shrink-0 items-center gap-1.5 border-b border-edge px-4 py-2 text-ui text-ink-dim">
-        {status?.phase === "passed" && <CheckIcon size={11} className="text-ok" />}
-        {status?.phase === "failed" && <WarningTriangleIcon size={11} className="text-bad" />}
+        {status?.phase === "passed" && <Icon name="check" size="xs" className="text-ok" />}
+        {status?.phase === "failed" && <Icon name="failed" size="xs" className="text-bad-ink" />}
         <span>{statusText}</span>
         <button
           type="button"
           onClick={onEdit}
           className="ml-auto inline-flex h-6 items-center gap-1 rounded px-1.5 text-ink-dim hover:bg-panel-2 hover:text-ink"
         >
-          Configure <span aria-hidden>↗</span>
+          Configure <Icon name="external" size="xs" />
         </button>
       </div>
       {output ? (

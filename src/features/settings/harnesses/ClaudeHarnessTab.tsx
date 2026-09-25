@@ -37,7 +37,7 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
-import { ChevronDownIcon, ChevronRightIcon, PlusIcon, XIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
 import { ModelMultiSelectDialog } from "./ModelMultiSelectDialog";
@@ -199,7 +199,7 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center gap-1.5 text-left"
       >
-        {open ? <ChevronDownIcon /> : <ChevronRightIcon size={14} />}
+        <Icon name={open ? "chevronDown" : "chevronRight"} size="sm" />
         <span className={SETTINGS_CARD_TITLE}>Advanced</span>
       </button>
 
@@ -248,7 +248,7 @@ function CliAuthPanel() {
       <div className="mb-2 flex items-center justify-between">
         {status.isLoading ? (
           <span className="flex items-center gap-2 text-ui text-ink-dim">
-            <Spinner size={12} /> Checking…
+            <Spinner size="xs" /> Checking…
           </span>
         ) : data?.connected ? (
           <Badge tone="ok">Connected</Badge>
@@ -258,16 +258,18 @@ function CliAuthPanel() {
         <button
           type="button"
           onClick={() => void status.refetch()}
-          className="text-ui text-ink-dim hover:text-ink"
+          className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
         >
-          ↻ Refresh
+          <Icon name="sync" size="xs" /> Refresh
         </button>
       </div>
 
       {data?.connected && <AuthDetailRows rows={rows} />}
 
       <div className="mt-3">
-        <Button onClick={() => setLoginOpen(true)}>▶ Run claude login</Button>
+        <Button onClick={() => setLoginOpen(true)}>
+          <Icon name="run" size="xs" /> Run claude login
+        </Button>
       </div>
 
       <Dialog
@@ -407,8 +409,13 @@ function OpenInEditor({ relPath }: { relPath: string }) {
 
 function DocLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <a className="text-accent hover:underline" href={href} target="_blank" rel="noreferrer">
-      {children} ↗
+    <a
+      className="inline-flex items-center gap-1 text-accent hover:underline"
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {children} <Icon name="external" size="xs" />
     </a>
   );
 }
@@ -452,7 +459,7 @@ function VisibleModelsCard({
             </button>
           )}
           <Button onClick={() => setPickerOpen(true)}>
-            <PlusIcon size={14} /> Add models
+            <Icon name="add" size="sm" /> Add models
           </Button>
         </div>
       </div>
@@ -496,7 +503,7 @@ function VisibleModelsCard({
                 onClick={() => setVisible(explicit.filter((k) => k !== m.key))}
                 className="text-ink-dim hover:text-bad"
               >
-                <XIcon />
+                <Icon name="close" size="sm" />
               </button>
             </div>
           ))}

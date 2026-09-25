@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Dialog } from "@/components/ui";
-import { ExportIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { PromptRowIcon, ShareCheck } from "./promptShareUi";
 import type { ExportEntry, ExportOptions } from "./promptsIo";
 import { DEFAULT_EXPORT_NAME, PROMPTS_FILE_EXT } from "./promptsIo";
@@ -32,7 +32,7 @@ export function ExportPromptsDialog({
       onClose={onClose}
       title={
         <span className="flex items-center gap-2.5">
-          <ExportIcon size={15} className="shrink-0 text-accent" />
+          <Icon name="export" className="text-accent" />
           Export prompts
         </span>
       }

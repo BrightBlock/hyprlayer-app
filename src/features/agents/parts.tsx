@@ -2,7 +2,7 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { MenuItem, Popover, TextInput } from "@/components/ui";
-import { FolderIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import { folderColor } from "./agents";
 
 export type SegmentedOption<T extends string> = {
@@ -145,7 +145,7 @@ export function FolderCombo({
               className={`flex items-center gap-2 ${i === active ? "bg-panel-2" : ""}`}
             >
               <span className="shrink-0" style={{ color: folderColor(f) }}>
-                <FolderIcon size={13} />
+                <Icon name="folder" size="sm" />
               </span>
               <span className="min-w-0 flex-1 truncate">{f}</span>
             </MenuItem>

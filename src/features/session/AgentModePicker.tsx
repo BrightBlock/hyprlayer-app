@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-import { ModeIcon } from "@/components/icons";
+import { Icon, stageIconName } from "@/components/Icon";
 import { MenuPanel, OptionMenuList } from "@/components/OptionMenuList";
 import { Popover } from "@/components/ui";
 import { MODE_STAGES, MODE_STYLES, stageLabel, type StageKey } from "@/lib/domain/stages";
@@ -10,7 +10,7 @@ const ITEMS = MODE_STAGES.map((s) => ({
   label: s.label,
   icon: (
     <span className={MODE_STYLES[s.key].text}>
-      <ModeIcon mode={s.key} size={13} />
+      <Icon name={stageIconName(s.key)} size="sm" />
     </span>
   ),
 }));
@@ -35,7 +35,7 @@ export function AgentModePicker({
   if (started) {
     return (
       <span role="img" aria-label={name} title={name} className={`${TILE} ${tone}`}>
-        <ModeIcon mode={mode} size={15} />
+        <Icon name={stageIconName(mode)} />
       </span>
     );
   }
@@ -52,7 +52,7 @@ export function AgentModePicker({
         title={name}
         className={`${TILE} ${tone} transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60`}
       >
-        <ModeIcon mode={mode} size={15} />
+        <Icon name={stageIconName(mode)} />
       </button>
       <Popover
         open={open}

@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
+import { Icon } from "./Icon";
 
 export function ScrollableTabStrip({
   children,
@@ -62,7 +62,7 @@ export function ScrollableTabStrip({
             aria-label="Scroll tabs left"
             className="absolute inset-y-0 left-0 z-10 flex items-center bg-gradient-to-r from-panel via-panel to-transparent pl-1 pr-6 text-ink-dim hover:text-ink"
           >
-            <ChevronLeftIcon />
+            <Icon name="chevronLeft" />
           </button>
         )}
         <div
@@ -84,7 +84,7 @@ export function ScrollableTabStrip({
             aria-label="Scroll tabs right"
             className="absolute inset-y-0 right-0 z-10 flex items-center bg-gradient-to-l from-panel via-panel to-transparent pl-6 pr-1 text-ink-dim hover:text-ink"
           >
-            <ChevronRightIcon />
+            <Icon name="chevronRight" />
           </button>
         )}
       </div>

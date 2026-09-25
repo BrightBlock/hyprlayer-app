@@ -5,7 +5,7 @@ import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
 import { addressPrFeedback } from "@/features/session/sessionStore";
 import { MenuItem, Popover, Spinner } from "@/components/ui";
-import { GitPullRequestIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 
 const pill =
   "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-body font-medium disabled:cursor-not-allowed disabled:opacity-50";
@@ -82,7 +82,7 @@ export function PrStatusBar({
         title={`${data.title}\n${data.url}`}
         className={`${pill} border-edge bg-edge/40 text-ink-dim hover:bg-edge/70 hover:text-ink`}
       >
-        <GitPullRequestIcon size={14} className="shrink-0" />
+        <Icon name="pullRequest" size="sm" />
         PR #{data.number}
       </button>
 
@@ -114,7 +114,7 @@ export function PrStatusBar({
             className={`${pill} border-ship/50 bg-ship/15 text-ship hover:bg-ship/25`}
             title={mergeTitle()}
           >
-            {merge.isPending ? <Spinner size={12} /> : null}
+            {merge.isPending ? <Spinner size="xs" /> : null}
             {queuesAuto ? "Auto-merge" : "Merge"}
           </button>
           <Popover

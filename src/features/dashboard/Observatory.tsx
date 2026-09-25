@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui";
-import { ChevronRightIcon, SearchIcon } from "@/components/icons";
+import { Icon } from "@/components/Icon";
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { formatChord } from "@/lib/keybindings/chord";
@@ -104,7 +104,7 @@ export function HeroSearch({ total }: { total: number }) {
       className="pointer-events-auto flex w-full max-w-[560px] items-center gap-3 rounded-[13px] border border-edge bg-panel/70 px-[18px] py-3.5 text-left shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl hover:border-ink-dim/50"
     >
       <span className="flex text-ink-dim">
-        <SearchIcon size={15} />
+        <Icon name="search" />
       </span>
       <span className="min-w-0 flex-1 truncate text-body text-ink-dim">
         Search {total > 0 ? `${total} ${total === 1 ? "document" : "documents"}, ` : ""}
@@ -215,7 +215,7 @@ export function SetupPill({ onClick }: { onClick: () => void }) {
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
       <span className="text-ui font-medium text-ink">Get set up</span>
       <span className="flex text-ink-dim">
-        <ChevronRightIcon size={13} />
+        <Icon name="chevronRight" size="sm" />
       </span>
     </button>
   );

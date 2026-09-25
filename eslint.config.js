@@ -3,6 +3,20 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
+const LUCIDE_ONLY_IN_ICON = {
+  name: "lucide-react",
+  message: "Use <Icon name=…> from @/components/Icon; it is the only lucide-react importer.",
+};
+const NO_ROUTE_IMPORTS = {
+  group: ["@/routes/*", "**/routes/**", "@/router", "../router", "../../router"],
+  message:
+    "Shared modules must not import routes or the router singleton. Use lib/appNav's registered seam.",
+};
+const NO_INLINE_SVG = {
+  selector: "JSXOpeningElement[name.name='svg']",
+  message: "No inline <svg> icons; add a semantic name to @/components/Icon.",
+};
+
 export default tseslint.config(
   {
     ignores: ["dist/", "node_modules/", "src-tauri/", "src/lib/bindings.ts"],
@@ -16,6 +30,8 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "no-empty": ["error", { allowEmptyCatch: true }],
+      "no-restricted-imports": ["error", { paths: [LUCIDE_ONLY_IN_ICON] }],
+      "no-restricted-syntax": ["error", NO_INLINE_SVG],
     },
     languageOptions: {
       globals: { ...globals.browser },
@@ -33,12 +49,9 @@ export default tseslint.config(
               message:
                 "src/lib and src/components are the shared foundation — they must not import from src/features. Register a hook from main.tsx instead (see lib/events.registerEventBridge / lib/queries.onWorkstreamArchived).",
             },
-            {
-              group: ["@/routes/*", "**/routes/**", "@/router", "../router", "../../router"],
-              message:
-                "Shared modules must not import routes or the router singleton. Use lib/appNav's registered seam.",
-            },
+            NO_ROUTE_IMPORTS,
           ],
+          paths: [LUCIDE_ONLY_IN_ICON],
         },
       ],
     },
@@ -56,8 +69,35 @@ export default tseslint.config(
                 "Features must not import routes or the router singleton — routes are wiring above features. Move the shared type into the feature, or use lib/appNav.",
             },
           ],
+          paths: [LUCIDE_ONLY_IN_ICON],
         },
       ],
     },
+  },
+  {
+    files: ["src/components/Icon.tsx"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/features/*", "**/features/**"],
+              message: "src/components must not import from src/features.",
+            },
+            NO_ROUTE_IMPORTS,
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Logos and a data chart, not icons.
+    files: [
+      "src/components/BrandMark.tsx",
+      "src/components/Logo.tsx",
+      "src/features/dashboard/KnowledgeGraph.tsx",
+    ],
+    rules: { "no-restricted-syntax": "off" },
   },
 );

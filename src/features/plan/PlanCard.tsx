@@ -1,6 +1,4 @@
-import { FileText } from "lucide-react";
-
-import { ICON } from "@/components/lucide";
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 import type { PlanCardProps } from "@/features/session/planCardSlot";
 import { isInlinePlanKey } from "@/features/session/planPresentation";
@@ -53,7 +51,7 @@ export function PlanCard({ sessionId, workstreamId, toolUseId, planKey, text, su
         active ? "border-ink shadow-ring-active" : "border-edge hover:bg-panel-2",
       )}
     >
-      <FileText {...ICON} className="shrink-0 text-ink-dim" />
+      <Icon name="docText" className="text-ink-dim" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-body font-semibold text-ink">{title}</span>
         <span className="block truncate text-meta tabular-nums text-ink-4">{meta}</span>
