@@ -48,4 +48,4 @@ check `src/components/ui.tsx` and `src/lib/` for existing implementations.
 
 ## See also
 
-@docs/adr/0003-frontend-layering.md
+`docs/adr/0003-frontend-layering.md` (the full decision).

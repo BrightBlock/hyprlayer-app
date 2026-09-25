@@ -41,4 +41,4 @@ rows keep loading.
 - `TerminalEngine` — "engine" means an opaque CLI binary; the frontend `TerminalEngine` is a terminal emulator.
 - Duplicating `basename`/`dirname` — use `src/lib/path.ts` (the one canonical implementation).
 
-@docs/adr/0004-vocabulary-standard.md
+See `docs/adr/0004-vocabulary-standard.md` for the full decision.
