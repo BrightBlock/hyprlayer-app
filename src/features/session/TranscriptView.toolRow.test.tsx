@@ -106,3 +106,42 @@ describe("a still-running background subagent row", () => {
     expect(screen.queryByText(/working…/)).toBeNull();
   });
 });
+
+const askCard = (
+  decision: "expired" | null,
+  toolName = "Bash",
+): Extract<TranscriptItem, { kind: "permission" }> => ({
+  kind: "permission",
+  id: `p-${toolName}`,
+  requestId: "req-1",
+  toolName,
+  input: JSON.stringify({ command: "git status --short" }),
+  decision,
+});
+
+describe("a permission card", () => {
+  it("offers Allow and Deny while its ask is open", () => {
+    renderTranscript([askCard(null)]);
+    expect(screen.getByRole("button", { name: "Allow once" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeTruthy();
+  });
+
+  it("reads as expired, with no actions, once its ask died with the session", () => {
+    renderTranscript([askCard("expired")]);
+    expect(screen.queryByRole("button", { name: /Allow|Deny/ })).toBeNull();
+    expect(screen.queryByText("Permission required")).toBeNull();
+    expect(screen.getByText(/expired/)).toBeTruthy();
+  });
+
+  it("shows an expired question the same way, naming what was asked", () => {
+    renderTranscript([
+      {
+        ...askCard("expired", "AskUserQuestion"),
+        input: JSON.stringify({ questions: [{ question: "Push the branch too?" }] }),
+      },
+    ]);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText(/Push the branch too\?/)).toBeTruthy();
+    expect(screen.getByText(/expired/)).toBeTruthy();
+  });
+});

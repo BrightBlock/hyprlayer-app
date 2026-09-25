@@ -160,6 +160,13 @@ impl HyprlayerRuntime {
             }
         }
 
+        // Nothing is live before this runtime spawns it, so no row may claim to be.
+        match db.settle_stale_sessions() {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} session(s) a previous run left mid-turn are now idle"),
+            Err(e) => tracing::warn!("could not settle sessions a previous run left mid-turn: {e}"),
+        }
+
         let settings_snapshot = settings.get().await;
         let worktree_root = settings_snapshot
             .worktree_root

@@ -429,6 +429,16 @@ const PermissionCard = memo(function PermissionCard({
   const filePath = toolFilePath(item.toolName, item.input);
   const summary = toolSummary(item.toolName, item.input);
 
+  if (item.decision === "expired") {
+    return (
+      <div className="flex min-w-0 items-center gap-2 text-ui text-ink-dim">
+        <ShieldIcon size={12} className="shrink-0" />
+        <span className="shrink-0 font-mono text-ink">{item.toolName}</span>
+        {summary && <span className="min-w-0 truncate font-mono">{summary}</span>}
+        <span className="shrink-0">· expired</span>
+      </div>
+    );
+  }
   if (item.decision !== null) {
     if (item.decision === "allow") return null;
     return (

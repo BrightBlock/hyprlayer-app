@@ -1,0 +1,101 @@
+{
+  "scenario": "stale_session_rows",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true
+          },
+          "guard": "the harness asks for permission",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "$ENDED": "killed",
+            "$PARKED": "awaiting_permission"
+          },
+          "guard": "the rows record a parked and an ended session",
+          "ok": true
+        }
+      ],
+      "step": "park one session on a permission ask and kill another"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the server stops",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "active": 0
+          },
+          "guard": "no session is live on a fresh server",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "$ENDED": "killed",
+            "$PARKED": "idle"
+          },
+          "guard": "the parked row is settled to idle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "$ENDED": "killed",
+            "$PARKED": "idle"
+          },
+          "guard": "the ended row keeps its outcome",
+          "ok": true
+        }
+      ],
+      "step": "restart after a clean shutdown"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "$ENDED": "killed",
+            "$PARKED": "awaiting_permission"
+          },
+          "guard": "the resumed session parks on a new ask",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "gone": true
+          },
+          "guard": "the crashed server stops listening",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "$ENDED": "killed",
+            "$PARKED": "idle"
+          },
+          "guard": "a crash leaves no row claiming to be live",
+          "ok": true
+        }
+      ],
+      "step": "resume, park again, and restart after a crash"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

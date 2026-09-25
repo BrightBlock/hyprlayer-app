@@ -66,7 +66,9 @@ vi.mock("../../lib/bindings", () => ({
 
 const {
   activeWorkstreamIds,
+  agentStillWorking,
   answerQuestion,
+  endSession,
   restoreSessionIfNeeded,
   startSession,
   sendMessage,
@@ -855,10 +857,19 @@ describe("restoring a stored session log", () => {
     };
   }
 
-  async function restoreLog(log: LogEntry[]): Promise<ReturnType<typeof entryOf>> {
+  let restoreSeq = 0;
+
+  // A restore that resumes needs its own id: the channel outlives the store reset.
+  async function restoreLog(
+    log: LogEntry[],
+    opts: { live?: boolean; id?: string } = {},
+  ): Promise<ReturnType<typeof entryOf>> {
+    const live = opts.live ?? false;
+    const id = opts.id ?? (live ? `restored-${(restoreSeq += 1)}` : "stored-1");
     h.getSessionLog.mockResolvedValue({ status: "ok", data: log });
-    await restoreSessionIfNeeded("stored-1", "ws1", "general");
-    return entryOf("stored-1");
+    if (live) h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [{ session: { id } }] });
+    await restoreSessionIfNeeded(id, "ws1", "general");
+    return entryOf(id);
   }
 
   it("attaches to a restored session the server still reports live", async () => {
@@ -881,11 +892,42 @@ describe("restoring a stored session log", () => {
     expect(restored.live).toBe(false);
   });
 
+  const ASK_LOG = () => [
+    entry(0, INIT),
+    entry(1, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null }),
+    entry(2, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" }),
+  ];
+
+  it("restores a dead session parked on an approval as expired, not busy", async () => {
+    const restored = await restoreLog(ASK_LOG());
+    expect(restored.live).toBe(false);
+    expect(restored.state).toBe("idle");
+    expect(isBusy(restored)).toBe(false);
+    expect(classifyEntry(restored)).not.toBe("needs-you");
+    expect(restored.items.find((it) => it.kind === "permission")).toMatchObject({ decision: "expired" });
+  });
+
+  it("continues an expired session with one resume and one send, never the stale decision", async () => {
+    await restoreLog(ASK_LOG(), { id: "expired-continue" });
+
+    await sendMessage("expired-continue", "carry on");
+
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    expect(h.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(h.sendUserMessage).toHaveBeenCalledWith("expired-continue", "carry on", [], null);
+    expect(h.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it("restores a live session parked on an approval with its card answerable", async () => {
+    const restored = await restoreLog(ASK_LOG(), { live: true });
+    expect(restored.live).toBe(true);
+    expect(restored.state).toBe("awaiting_permission");
+    expect(isBusy(restored)).toBe(true);
+    expect(restored.items.find((it) => it.kind === "permission")).toMatchObject({ decision: null });
+  });
+
   it("replays a typed question array straight into the pending question", async () => {
-    const restored = await restoreLog([
-      entry(0, INIT),
-      entry(1, QUESTION_ASK),
-    ]);
+    const restored = await restoreLog([entry(0, INIT), entry(1, QUESTION_ASK)], { live: true });
     expect(restored.pendingQuestion).toEqual({
       requestId: "q-1",
       questions: [
@@ -904,7 +946,7 @@ describe("restoring a stored session log", () => {
           { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
         ]),
       }),
-    ]);
+    ], { live: true });
     expect(restored.pendingQuestion?.questions).toEqual([
       { question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "A", description: "" }] },
     ]);
@@ -916,7 +958,7 @@ describe("restoring a stored session log", () => {
       const restored = await restoreLog([
         entry(0, INIT),
         entry(1, { kind: "questionAsk", requestId: "q-1", questions }),
-      ]);
+      ], { live: true });
       expect(restored.pendingQuestion).toEqual({ requestId: "q-1", questions: [] });
     }
   });
@@ -938,6 +980,66 @@ describe("restoring a stored session log", () => {
     const first = restored.items[0];
     expect(first.kind).toBe("user");
     expect(first.kind === "user" && first.createdAt).toBe(1_700_000_000_001);
+  });
+});
+
+describe("archiving or closing an agent", () => {
+  const ASK: SessionEvent = { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" };
+  const KILLED: SessionEvent = { kind: "exited", outcome: "killed", code: null, stderrTail: "" };
+
+  it("lets an agent waiting on you be archived, but not one still working", async () => {
+    const id = await startBusySession();
+    expect(agentStillWorking(entryOf(id))).toBe(true);
+    emit(INIT);
+    emit(ASK);
+    expect(agentStillWorking(entryOf(id))).toBe(false);
+  });
+
+  it("keeps an idle agent with background work from being archived", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit({ kind: "toolUse", id: "bg", name: "Bash", input: '{"run_in_background":true}', parentId: null });
+    emit({ kind: "toolResult", toolUseId: "bg", content: "Command running in background with ID: b1", isError: false, parentId: null });
+    emit(TURN_DONE);
+    expect(isWorking(entryOf(id))).toBe(false);
+    expect(classifyEntry(entryOf(id))).toBe("background");
+    expect(agentStillWorking(entryOf(id))).toBe(true);
+  });
+
+  it("ends a parked agent's harness, expiring its open ask when the exit lands", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(ASK);
+
+    await endSession(id);
+    emit(KILLED);
+
+    expect(h.killSession).toHaveBeenCalledWith(id);
+    const entry = entryOf(id);
+    expect(entry.items.find((it) => it.kind === "permission")).toMatchObject({ decision: "expired" });
+    expect(isBusy(entry)).toBe(false);
+    expect(h.respondPermission).not.toHaveBeenCalled();
+  });
+
+  it("ends a session the server runs but this window never attached", async () => {
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [{ session: { id: "unattached" } }] });
+    await endSession("unattached");
+    expect(h.killSession).toHaveBeenCalledWith("unattached");
+    expect(useSessionStore.getState().sessions.unattached).toBeUndefined();
+  });
+
+  it("leaves a session that already ended alone", async () => {
+    await restoreSessionIfNeeded("ended-1", "ws1", "general");
+    const before = entryOf("ended-1");
+    await endSession("ended-1");
+    expect(h.killSession).not.toHaveBeenCalled();
+    expect(entryOf("ended-1")).toBe(before);
+  });
+
+  it("does not throw when the server refuses the kill", async () => {
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [{ session: { id: "refused" } }] });
+    h.killSession.mockResolvedValueOnce({ status: "error", error: { code: "session_not_found" } } as never);
+    await expect(endSession("refused")).resolves.toBeUndefined();
   });
 });
 

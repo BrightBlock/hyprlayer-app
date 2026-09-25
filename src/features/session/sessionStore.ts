@@ -723,6 +723,28 @@ export async function killSession(sessionId: string): Promise<void> {
   await unwrap(commands.killSession(sessionId));
 }
 
+// Archiving or closing kills the harness, so running work would be lost; an agent parked on an ask is not working.
+export function agentStillWorking(entry: SessionEntry): boolean {
+  return isWorking(entry) || (entry.live && backgroundTasksFromItems(entry.items).length > 0);
+}
+
+// Ends an archived or closed agent. Its persisted exit expires the asks it left open.
+export async function endSession(sessionId: string): Promise<void> {
+  try {
+    if (channels.has(sessionId)) {
+      await killSession(sessionId);
+      return;
+    }
+    // After a restart the server can still run a tab this window never opened.
+    const active = await unwrap(commands.listActiveSessions());
+    if (active.some((a) => a.session.id === sessionId)) {
+      await unwrap(commands.killSession(sessionId));
+    }
+  } catch (e) {
+    log.warn("session", `ending ${sessionId} failed`, e);
+  }
+}
+
 function commitShipDefaults(): ActionAgentDefaults {
   return actionAgentDefaults(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
 }
@@ -927,7 +949,8 @@ export async function restoreSessionIfNeeded(
         log.warn("session", `restoring ${sessionId} skipped a ${stored.kind} event`, e);
       }
     }
-    view = restoredView(view);
+    const live = active.some((a) => a.session.id === sessionId);
+    view = restoredView(view, live);
     setEntry(sessionId, {
       ...view,
       workstreamId,
@@ -939,7 +962,7 @@ export async function restoreSessionIfNeeded(
       taskStartedAt: {},
       queued: [],
     });
-    if (active.some((a) => a.session.id === sessionId)) await resumeSession(sessionId);
+    if (live) await resumeSession(sessionId);
   } catch (error) {
     log.error("session", `restoring ${sessionId} failed`, error);
   } finally {

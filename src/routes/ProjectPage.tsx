@@ -66,7 +66,9 @@ import { requestRun, setActiveWorkstream, useScriptsStore } from "@/features/ses
 import { openProjectSettings } from "@/features/projects/projectSettingsStore";
 import { useTabDrag, type TabDragHandlers } from "@/features/session/useTabDrag";
 import {
+  agentStillWorking,
   dropSession,
+  endSession,
   killSession,
   stopSession,
   transcriptToText,
@@ -210,7 +212,7 @@ function TabCloseControl({
 }) {
   const session = useSession(shell.sessionId);
   const archivable = isArchivable(shell);
-  const busy = isAgentShell(shell) && session ? isBusy(session) : false;
+  const busy = isAgentShell(shell) && session ? agentStillWorking(session) : false;
   const label = archivable ? (busy ? AGENT_BUSY_HINT : `Archive ${shell.title}`) : `Close ${shell.title}`;
   return (
     <button
@@ -543,7 +545,7 @@ export function ProjectPage() {
     ? useSessionStore.getState().sessions[contextShell.sessionId]
     : undefined;
   const archiveBlockedReason =
-    contextEntry && isBusy(contextEntry)
+    contextEntry && agentStillWorking(contextEntry)
       ? AGENT_BUSY_HINT
       : contextIsLast
         ? "Keep at least one agent in the strip."
@@ -705,7 +707,7 @@ export function ProjectPage() {
     setMaximized(null);
     const closing = paneShells(tabs, paneId);
     for (const s of closing) {
-      if (s.sessionId) void killSession(s.sessionId);
+      if (s.sessionId) void endSession(s.sessionId);
       if (s.terminalView?.terminalId) void commands.terminalClose(s.terminalView.terminalId);
       if (s.ptyAgent && wsId) closeAgent(wsId, s.id);
     }
@@ -739,7 +741,7 @@ export function ProjectPage() {
     const shell = tabs.shells.find((s) => s.id === shellId);
     if (!shell) return;
     if (isLastTab(tabs, shellId)) return;
-    if (shell.sessionId) void killSession(shell.sessionId);
+    if (shell.sessionId) void endSession(shell.sessionId);
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
     if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
     updateTabs((current) => removeShellState(current, shellId));
@@ -765,6 +767,7 @@ export function ProjectPage() {
     if (!shell.ptyAgent && shell.sessionId) {
       const entry = useSessionStore.getState().sessions[shell.sessionId];
       if (entry && !entry.live) dropSession(shell.sessionId);
+      void endSession(shell.sessionId);
     }
   };
   const archiveOrCloseShell = (shellId: number) => {
@@ -777,7 +780,7 @@ export function ProjectPage() {
     const session = isAgentShell(shell) && shell.sessionId
       ? useSessionStore.getState().sessions[shell.sessionId]
       : undefined;
-    if (session && isBusy(session)) return;
+    if (session && agentStillWorking(session)) return;
     archiveShell(shellId);
   };
   const reopenLastClosedShell = () => {

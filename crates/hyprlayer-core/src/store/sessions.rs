@@ -280,6 +280,22 @@ impl Db {
         })
     }
 
+    /// Rows a previous server left mid-turn; their harnesses died with it.
+    pub fn settle_stale_sessions(&self) -> Result<usize> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET state = ?1 WHERE state IN (?2, ?3, ?4, ?5)",
+                params![
+                    SessionState::Idle.as_str(),
+                    SessionState::Starting.as_str(),
+                    SessionState::Running.as_str(),
+                    SessionState::AwaitingPermission.as_str(),
+                    SessionState::AwaitingQuestion.as_str(),
+                ],
+            )
+        })
+    }
+
     pub fn append_session_event(
         &self,
         session_id: &str,

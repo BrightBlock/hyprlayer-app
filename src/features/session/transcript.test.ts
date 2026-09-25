@@ -768,6 +768,16 @@ describe("turn + exit lifecycle", () => {
     expect(isBusy(view)).toBe(false);
   });
 
+  it("an exit expires open permission cards rather than denying them", () => {
+    for (const outcome of ["detached", "crashed", "killed"] as const) {
+      let view = initialSessionView("running");
+      view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+      view = reduceEvent(view, { kind: "exited", outcome, code: null, stderrTail: "" });
+      expect(view.items.find((it) => it.kind === "permission")).toMatchObject({ decision: "expired" });
+      expect(isBusy(view)).toBe(false);
+    }
+  });
+
   it("protocolError surfaces without disrupting state", () => {
     let view = initialSessionView("running");
     view = reduceEvent(view, { kind: "protocolError", detail: "bad line", raw: "{garbage" });
@@ -1016,13 +1026,13 @@ describe("derived helpers", () => {
 });
 
 describe("restoredView (rebuild after an app restart)", () => {
-  it("holds a session parked on a permission instead of faking a running turn", () => {
+  it("holds a live session parked on a permission instead of faking a running turn", () => {
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "claude-opus-4-8" });
     view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
     view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
 
-    const restored = restoredView(view);
+    const restored = restoredView(view, true);
 
     expect(restored.state).toBe("awaiting_permission");
     expect(hasPendingPermission(restored)).toBe(true);
@@ -1032,13 +1042,87 @@ describe("restoredView (rebuild after an app restart)", () => {
     expect(isWorking(restored)).toBe(false);
   });
 
-  it("holds a session parked on a question", () => {
+  it("holds a live session parked on a question", () => {
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
-    const restored = restoredView(view);
+    const restored = restoredView(view, true);
     expect(restored.state).toBe("awaiting_question");
     expect(restored.pendingQuestion?.requestId).toBe("q-1");
     expect(isWorking(restored)).toBe(false);
+  });
+
+  // The shape of the reported codex Commit session: three parallel asks, a stop
+  // that denied one, and an interrupted turn that abandoned the other two.
+  function abandonedParallelAsks(): SessionView {
+    return reduceAll([
+      { kind: "init", claudeSessionId: "thread-1", model: "gpt-5.5" },
+      { kind: "userMessage", text: "/commit", stage: "commit" },
+      ...(["status", "sed", "diff"] as const).flatMap((call): SessionEvent[] => [
+        { kind: "toolUse", id: call, name: "Bash", input: `{"command":"${call}"}`, parentId: null },
+        { kind: "permissionAsk", requestId: `thread-1:${call}`, toolName: "Bash", input: `{"command":"${call}"}` },
+      ]),
+      { kind: "toolResult", toolUseId: "diff", content: "command failed", isError: true, parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus: "interrupted" },
+    ]);
+  }
+
+  it("expires a dead session's unanswered permissions instead of offering them", () => {
+    const restored = restoredView(abandonedParallelAsks(), false);
+
+    expect(hasPendingPermission(restored)).toBe(false);
+    expect(restored.pendingPermission).toBeNull();
+    expect(restored.state).toBe("idle");
+    expect(isBusy(restored)).toBe(false);
+    const decisions = restored.items.flatMap((it) => (it.kind === "permission" ? [it.decision] : []));
+    expect(decisions).toEqual(["expired", "expired", "allow"]);
+  });
+
+  it("keeps a live session's unanswered permissions answerable", () => {
+    const restored = restoredView(abandonedParallelAsks(), true);
+    expect(hasPendingPermission(restored)).toBe(true);
+    expect(isBusy(restored)).toBe(true);
+  });
+
+  it("expires a dead session's question, freeing the composer and leaving an expired trace", () => {
+    let view = initialSessionView("starting");
+    view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
+    view = reduceEvent(view, { kind: "questionAsk", requestId: "q-1", questions: TABS_QUESTION });
+
+    const restored = restoredView(view, false);
+
+    expect(restored.pendingQuestion).toBeNull();
+    expect(restored.state).toBe("idle");
+    expect(isBusy(restored)).toBe(false);
+    expect(restored.items[restored.items.length - 1]).toMatchObject({
+      kind: "permission",
+      requestId: "q-1",
+      toolName: "AskUserQuestion",
+      decision: "expired",
+    });
+  });
+
+  it("a late tool result does not turn an expired card into an allowed one", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    view = restoredView(view, false);
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
+    expect(view.items.find((it) => it.kind === "permission")).toMatchObject({ decision: "expired" });
+    expect(hasPendingPermission(view)).toBe(false);
+  });
+
+  it("replays a session that exited mid-approval with its card expired", () => {
+    const view = restoredView(
+      reduceAll([
+        { kind: "init", claudeSessionId: "c1", model: "m" },
+        { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null },
+        { kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" },
+        { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" },
+      ]),
+      false,
+    );
+    expect(view.state).toBe("crashed");
+    expect(view.items.find((it) => it.kind === "permission")).toMatchObject({ decision: "expired" });
   });
 
   it("settles a session cut off mid-stream to idle (no fake working)", () => {
@@ -1047,7 +1131,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     view = reduceEvent(view, { kind: "partialText", text: "thinking…", parentId: null });
     expect(view.streaming).toBe(true);
 
-    const restored = restoredView(view);
+    const restored = restoredView(view, false);
     expect(restored.state).toBe("idle");
     expect(restored.streaming).toBe(false);
     expect(isBusy(restored)).toBe(false);
@@ -1058,7 +1142,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "init", claudeSessionId: "c1", model: "m" });
     view = reduceEvent(view, { kind: "exited", outcome: "completed", code: 0, stderrTail: "" });
-    const restored = restoredView(view);
+    const restored = restoredView(view, false);
     expect(restored.state).toBe("completed");
     expect(isTerminal(restored.state)).toBe(true);
     expect(isWorking(restored)).toBe(false);
@@ -1078,7 +1162,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     view = reduceEvent(view, { kind: "assistantText", text: "All five answered.", parentId: null });
     view = reduceEvent(view, { kind: "turnDone", costUsd: 0.1, numTurns: 1, contextTokens: 29400 });
 
-    const restored = restoredView(view);
+    const restored = restoredView(view, false);
     expect(restored.pendingQuestion).toBeNull();
     expect(restored.state).toBe("idle");
     expect(isBusy(restored)).toBe(false);
@@ -1092,7 +1176,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "ok", isError: false, parentId: null });
     view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: 1, contextTokens: null });
 
-    const restored = restoredView(view);
+    const restored = restoredView(view, false);
     expect(hasPendingPermission(restored)).toBe(false);
     expect(restored.pendingPermission).toBeNull();
     expect(restored.state).toBe("idle");
@@ -1109,7 +1193,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     view = reduceEvent(view, { kind: "assistantText", text: "Going deeper.", parentId: null });
     view = reduceEvent(view, { kind: "turnDone", costUsd: null, numTurns: 2, contextTokens: null });
 
-    const restored = restoredView(view);
+    const restored = restoredView(view, false);
     const speakers = restored.items.map((i) => i.kind);
     expect(speakers).toEqual(["user", "assistant", "user", "assistant"]);
     expect(restored.items[0]).toMatchObject({
@@ -1130,7 +1214,7 @@ describe("restoredView (rebuild after an app restart)", () => {
       promptName: "Refactor for testability",
     });
 
-    expect(restoredView(view).items[0]).toMatchObject({
+    expect(restoredView(view, false).items[0]).toMatchObject({
       kind: "user",
       text: "Refactor this module.\nStep 1…\nStep 2…",
       promptName: "Refactor for testability",
@@ -1141,7 +1225,7 @@ describe("restoredView (rebuild after an app restart)", () => {
     let view = initialSessionView("starting");
     view = reduceEvent(view, { kind: "userMessage", text: "hello", stage: null });
 
-    expect(restoredView(view).items[0]).toMatchObject({
+    expect(restoredView(view, false).items[0]).toMatchObject({
       kind: "user",
       text: "hello",
       promptName: null,

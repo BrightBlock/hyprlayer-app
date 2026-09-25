@@ -11,7 +11,8 @@ import { parseToolInput } from "./toolDisplay";
 
 export type { Question, QuestionOption, SessionState };
 
-export type PermissionDecision = "allow" | "deny";
+// "expired": the ask died with its harness process, so no answer can reach it.
+export type PermissionDecision = "allow" | "deny" | "expired";
 
 export type PendingQuestion = { requestId: string; questions: Question[] };
 
@@ -263,13 +264,14 @@ export function parkedState(view: SessionView): SessionState {
   return "running";
 }
 
-export function restoredView(view: SessionView): SessionView {
+export function restoredView(view: SessionView, live: boolean): SessionView {
   if (isTerminal(view.state)) return { ...view, streaming: false };
-  if (view.pendingQuestion !== null || hasPendingPermission(view)) {
-    return { ...view, state: parkedState(view), streaming: false };
+  const settled = live ? view : expirePendingPrompts(view);
+  if (settled.pendingQuestion !== null || hasPendingPermission(settled)) {
+    return { ...settled, state: parkedState(settled), streaming: false };
   }
   return {
-    ...view,
+    ...settled,
     state: "idle",
     streaming: false,
     pendingPermission: null,
@@ -671,9 +673,9 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     }
 
     case "exited": {
-      const closed = { ...view, items: closeOpenAssistant(view.items) };
+      const closed = expirePendingPrompts({ ...view, items: closeOpenAssistant(view.items) });
       if (event.outcome === "detached") {
-        return { ...cancelPendingPrompts(closed), streaming: false, state: "idle" };
+        return { ...closed, streaming: false, state: "idle" };
       }
       return {
         ...closed,
@@ -801,6 +803,26 @@ export function resolveQuestion(view: SessionView, requestId: string): SessionVi
   if (view.pendingQuestion?.requestId !== requestId) return view;
   const next = { ...view, pendingQuestion: null };
   return { ...next, state: parkedState(next), streaming: true };
+}
+
+export function expirePendingPrompts(view: SessionView): SessionView {
+  const items: TranscriptItem[] = view.items.map((it) =>
+    it.kind === "permission" && it.decision === null ? { ...it, decision: "expired" as const } : it,
+  );
+  let counter = view.counter;
+  // A question has no transcript card of its own, so it leaves one behind.
+  if (view.pendingQuestion) {
+    items.push({
+      kind: "permission",
+      id: `i${counter}`,
+      requestId: view.pendingQuestion.requestId,
+      toolName: "AskUserQuestion",
+      input: JSON.stringify({ questions: view.pendingQuestion.questions }),
+      decision: "expired",
+    });
+    counter += 1;
+  }
+  return { ...view, items, counter, pendingPermission: null, pendingQuestion: null };
 }
 
 export function cancelPendingPrompts(view: SessionView): SessionView {
