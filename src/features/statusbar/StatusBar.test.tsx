@@ -456,6 +456,38 @@ describe("StatusBar trailing items", () => {
     expect(terminal.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
   });
 
+  it("puts the archive slot between the branch and the Server button, one divider each side", () => {
+    render(
+      <StatusBar
+        workstreamId="w1"
+        workstream={makeView()}
+        archive={<button type="button">Archived agents</button>}
+        settings={null}
+      />,
+    );
+    const archive = screen.getByRole("button", { name: "Archived agents" });
+    const before = archive.previousElementSibling!;
+    expect(before.getAttribute("aria-hidden")).toBe("true");
+    expect(before.previousElementSibling?.textContent).toContain("feat/status-bar");
+    const after = archive.nextElementSibling!;
+    expect(after.getAttribute("aria-hidden")).toBe("true");
+    expect(after.nextElementSibling).toBe(screen.getByRole("button", { name: "Server: this machine" }));
+  });
+
+  it("leads with the archive slot when there is no repo cluster", () => {
+    render(
+      <StatusBar
+        workstreamId="w1"
+        workstream={makeView({ worktreeMode: "folder" })}
+        archive={<button type="button">Archived agents</button>}
+        settings={null}
+      />,
+    );
+    const archive = screen.getByRole("button", { name: "Archived agents" });
+    expect(archive.previousElementSibling).toBeNull();
+    expect(archive.nextElementSibling?.getAttribute("aria-hidden")).toBe("true");
+  });
+
 
   it("renders the settings slot and the handle's initials", () => {
     renderBar();

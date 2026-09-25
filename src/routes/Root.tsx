@@ -105,6 +105,8 @@ import {
 } from "@/components/icons";
 import { ArchivedWorktreesButton } from "@/features/archive/ArchivedWorktreesButton";
 import { closeArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
+import { ArchivedAgentsButton } from "@/features/session/ArchivedAgentsButton";
+import { closeArchivedAgents } from "@/features/session/archivedAgentsStore";
 import { useMultiplexer } from "@/features/multiplexer/engines";
 import { commands, type EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
@@ -927,11 +929,13 @@ export function Root() {
   useCommand("search.open", () => {
     closeSettingsPopover();
     closeArchivedWorktrees();
+    closeArchivedAgents();
     toggleSearch();
   });
   useCommand("prompts.palette", () => {
     closeSettingsPopover();
     closeArchivedWorktrees();
+    closeArchivedAgents();
     togglePromptPalette();
   });
   usePromptHotkeys(activeWorkstream ?? null);
@@ -1628,6 +1632,8 @@ export function Root() {
       <StatusBar
         workstreamId={activeWorkstreamId ?? null}
         workstream={activeWorkstream ?? null}
+        // ProjectPage's resolved workstream: the key its tabs live under.
+        archive={scriptsActiveWs ? <ArchivedAgentsButton workstreamId={scriptsActiveWs} /> : null}
         tools={
           scriptsActiveWs && (
             <ScriptsDockButton

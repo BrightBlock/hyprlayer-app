@@ -22,10 +22,10 @@ import {
   useRefreshArchivedWorkstreams,
 } from "@/lib/queries";
 import { ICON } from "@/components/lucide";
-import { ConfirmDialog, cx, ErrorNote, Popover } from "@/components/ui";
+import { ConfirmDialog, cx, ErrorNote, Popover, ROW_ACTION } from "@/components/ui";
 
 import { useRestoreAndOpen } from "./archiveActions";
-import { ArchivedWorktreeRow, ROW_ACTION } from "./ArchivedWorktreeRow";
+import { ArchivedWorktreeRow } from "./ArchivedWorktreeRow";
 import {
   filterArchived,
   lossOnDelete,

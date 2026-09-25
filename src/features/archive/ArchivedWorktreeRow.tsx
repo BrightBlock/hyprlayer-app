@@ -1,20 +1,10 @@
 import type { KeyboardEvent, Ref } from "react";
 
 import { formatBytes, formatCompactAge } from "@/lib/format";
-import { cx } from "@/components/ui";
+import { cx, ROW_ACTION, ROW_ACTION_DANGER } from "@/components/ui";
 
 import type { ArchiveRow } from "./archiveStatus";
 import { STATUS_DOT, StatusTag } from "./StatusTag";
-
-const FOCUS = "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
-
-export const ROW_ACTION = cx(
-  "inline-flex h-6 shrink-0 items-center rounded-control border border-edge bg-panel px-2",
-  "text-ui-sm font-semibold text-ink-2 hover:bg-edge/50 disabled:opacity-50 disabled:hover:bg-panel",
-  FOCUS,
-);
-
-const DESTRUCTIVE_ACTION = cx(ROW_ACTION, "border-destructive-border text-bad-ink hover:bg-bad/10");
 
 type Props = {
   row: ArchiveRow;
@@ -102,7 +92,7 @@ export function ArchivedWorktreeRow({
             onClick={onDelete}
             disabled={busy}
             aria-label={`Delete ${branch}`}
-            className={DESTRUCTIVE_ACTION}
+            className={ROW_ACTION_DANGER}
           >
             Delete
           </button>

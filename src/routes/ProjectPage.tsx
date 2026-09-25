@@ -22,7 +22,7 @@ import {
 } from "@/components/ui";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { ArchiveIcon, DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "@/components/icons";
+import { DiffIcon, DocIcon, PlusIcon, SplitIcon, TerminalIcon, XIcon } from "@/components/icons";
 import { ScrollableTabStrip } from "@/components/ScrollableTabs";
 import { commands, type WorkstreamView } from "@/lib/bindings";
 import { GLASS_BAND } from "@/lib/glass";
@@ -33,7 +33,7 @@ import { PrChecksPanel } from "@/features/workstreams/PrChecksPanel";
 import { DiffTab } from "@/features/workstreams/DiffTab";
 import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
-import { ArchivedAgentsView } from "@/features/session/ArchivedAgentsView";
+import { restoreArchivedAgent } from "@/features/session/archivedAgents";
 import { DocPreviewTab } from "@/features/session/DocPreviewTab";
 import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
@@ -87,7 +87,6 @@ import {
   activeShellIn,
   appendShell,
   archiveShellState,
-  clearArchiveOnRefocus,
   closePaneState,
   cycleActiveTab,
   defaultTabState,
@@ -105,7 +104,6 @@ import {
   selectTabAt,
   setFocusedPane,
   splitPaneState,
-  unarchiveShellState,
   updateWorkstreamTabs,
   useWorkstreamTabsStore,
   type ArchivedStatus,
@@ -269,7 +267,6 @@ function ProjectCommands(props: {
   onNewWorkstream: () => void;
   onToggleRun: (() => void) | null;
   onCycleStage: (() => void) | null;
-  onToggleArchived: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
   const running = Boolean(props.sessionId && session && isBusy(session));
@@ -292,7 +289,6 @@ function ProjectCommands(props: {
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
-  useCommand("view.toggleArchivedAgents", props.onToggleArchived);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return (
@@ -451,7 +447,7 @@ export function ProjectPage() {
       if (!wsId) return;
       updateWorkstreamTabs((all) => {
         const current = all[wsId] ?? defaultTabState();
-        return { ...all, [wsId]: clearArchiveOnRefocus(current, updater(current)) };
+        return { ...all, [wsId]: updater(current) };
       });
     },
     [wsId],
@@ -542,10 +538,6 @@ export function ProjectPage() {
   const ptySessionIds = [...shells, ...archivedShells.map((a) => a.shell)]
     .map((s) => s.ptyAgent?.sessionId)
     .filter((id): id is string => !!id);
-  const archiveViewOpen = tabs?.archiveOpen ?? false;
-  const toggleArchived = wsId
-    ? () => updateTabs((c) => ({ ...c, archiveOpen: !c.archiveOpen }))
-    : null;
   const contextIsLast = !!tabs && !!contextShell && isLastTab(tabs, contextShell.id);
   const contextEntry = contextShell?.sessionId
     ? useSessionStore.getState().sessions[contextShell.sessionId]
@@ -775,10 +767,6 @@ export function ProjectPage() {
       if (entry && !entry.live) dropSession(shell.sessionId);
     }
   };
-  const unarchiveShell = (shellId: number) => {
-    updateTabs((current) => unarchiveShellState(current, shellId));
-    requestComposerFocus(shellId);
-  };
   const archiveOrCloseShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
@@ -794,15 +782,7 @@ export function ProjectPage() {
   };
   const reopenLastClosedShell = () => {
     const newest = tabs?.archived?.[0];
-    if (newest) unarchiveShell(newest.shell.id);
-  };
-  const removeArchivedShell = (shellId: number) => {
-    const sessionId = tabs?.archived?.find((a) => a.shell.id === shellId)?.shell.sessionId;
-    updateTabs((current) => ({
-      ...current,
-      archived: (current.archived ?? []).filter((a) => a.shell.id !== shellId),
-    }));
-    if (sessionId) dropSession(sessionId);
+    if (newest && wsId) restoreArchivedAgent(wsId, newest.shell.id);
   };
   const openDoc = (id: string) => {
     void navigate({ to: "/library", search: { doc: id, from: projectPath } });
@@ -1118,25 +1098,6 @@ export function ProjectPage() {
           )}
         </ScrollableTabStrip>
         <div className="flex shrink-0 items-center gap-1">
-          {first && (
-            <button
-              type="button"
-              onClick={() => toggleArchived?.()}
-              title="Archived agents"
-              aria-label="Archived agents"
-              aria-pressed={archiveViewOpen}
-              className={`inline-flex h-8 items-center gap-1 rounded-md px-2 transition-colors hover:bg-panel-2 hover:text-ink ${
-                archiveViewOpen ? "bg-panel-2 text-ink" : "text-ink-dim"
-              }`}
-            >
-              <ArchiveIcon size={15} />
-              {archivedShells.length > 0 && (
-                <span className="text-meta leading-none">
-                  {archivedShells.length}
-                </span>
-              )}
-            </button>
-          )}
           <IconButton
             onClick={(e) => openSplitMenu(e, paneId)}
             title="Split pane"
@@ -1314,7 +1275,6 @@ export function ProjectPage() {
             ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
             : null
         }
-        onToggleArchived={toggleArchived}
       />
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex min-h-0 flex-1">
@@ -1553,91 +1513,78 @@ export function ProjectPage() {
             />
 
             {activeView && tabs ? (
-              archiveViewOpen ? (
-                <>
-                  {renderLeafStrip(paneIds[0])}
-                  <ArchivedAgentsView
-                    workstreamTitle={activeView.item.title}
-                    branch={activeView.item.branch}
-                    archived={archivedShells}
-                    onUnarchive={unarchiveShell}
-                    onRemove={removeArchivedShell}
-                  />
-                </>
-              ) : (
-                <div ref={splitRowRef} className="relative min-h-0 flex-1">
-                  {[...paneIds].sort(byPaneIdSuffix).map((paneId) => {
-                    const zoomedAway = zoomedPaneId !== null && zoomedPaneId !== paneId;
-                    const r = zoomedPaneId === paneId ? FULL_RECT : rects[paneId];
+              <div ref={splitRowRef} className="relative min-h-0 flex-1">
+                {[...paneIds].sort(byPaneIdSuffix).map((paneId) => {
+                  const zoomedAway = zoomedPaneId !== null && zoomedPaneId !== paneId;
+                  const r = zoomedPaneId === paneId ? FULL_RECT : rects[paneId];
+                  return (
+                    <div
+                      key={paneId}
+                      data-pane={paneId}
+                      className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden ${zoomedAway ? "hidden" : ""} ${
+                        r.x > 1e-6 ? "border-l border-edge" : ""
+                      } ${r.y > 1e-6 ? "border-t border-edge" : ""}`}
+                      style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
+                      onPointerDownCapture={() => {
+                        if (paneIds.length > 1 && focusedPaneId(tabs) !== paneId) {
+                          updateTabs((current) => setFocusedPane(current, paneId));
+                        }
+                      }}
+                    >
+                      {renderLeafStrip(paneId)}
+                      <div
+                        data-pane-content
+                        className={`relative flex min-h-0 flex-1 flex-col ${
+                          dropTarget?.paneId === paneId && dropTarget.edge === null
+                            ? "ring-2 ring-inset ring-accent/60"
+                            : ""
+                        }`}
+                      >
+                        {renderPaneContent(activeShellIn(tabs, paneId))}
+                        {dropTarget?.paneId === paneId && dropTarget.edge && (
+                          <div
+                            className={`pointer-events-none absolute bg-accent/15 ring-2 ring-inset ring-accent/60 ${
+                              EDGE_OVERLAY_CLASS[dropTarget.edge]
+                            }`}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {zoomedPaneId === null &&
+                  splits.map((split) => {
+                    const { rect, node } = split;
+                    const row = node.dir === "row";
                     return (
                       <div
-                        key={paneId}
-                        data-pane={paneId}
-                        className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden ${zoomedAway ? "hidden" : ""} ${
-                          r.x > 1e-6 ? "border-l border-edge" : ""
-                        } ${r.y > 1e-6 ? "border-t border-edge" : ""}`}
-                        style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
-                        onPointerDownCapture={() => {
-                          if (paneIds.length > 1 && focusedPaneId(tabs) !== paneId) {
-                            updateTabs((current) => setFocusedPane(current, paneId));
-                          }
-                        }}
-                      >
-                        {renderLeafStrip(paneId)}
-                        <div
-                          data-pane-content
-                          className={`relative flex min-h-0 flex-1 flex-col ${
-                            dropTarget?.paneId === paneId && dropTarget.edge === null
-                              ? "ring-2 ring-inset ring-accent/60"
-                              : ""
-                          }`}
-                        >
-                          {renderPaneContent(activeShellIn(tabs, paneId))}
-                          {dropTarget?.paneId === paneId && dropTarget.edge && (
-                            <div
-                              className={`pointer-events-none absolute bg-accent/15 ring-2 ring-inset ring-accent/60 ${
-                                EDGE_OVERLAY_CLASS[dropTarget.edge]
-                              }`}
-                            />
-                          )}
-                        </div>
-                      </div>
+                        key={split.path.join("") || "root"}
+                        role="separator"
+                        aria-orientation={row ? "vertical" : "horizontal"}
+                        aria-label="Resize agent split"
+                        className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
+                          row
+                            ? "w-2 -translate-x-1/2 cursor-col-resize"
+                            : "h-2 -translate-y-1/2 cursor-row-resize"
+                        }`}
+                        style={
+                          row
+                            ? {
+                                left: pct(rect.x + rect.w * node.ratio),
+                                top: pct(rect.y),
+                                height: pct(rect.h),
+                              }
+                            : {
+                                left: pct(rect.x),
+                                top: pct(rect.y + rect.h * node.ratio),
+                                width: pct(rect.w),
+                              }
+                        }
+                        onPointerDown={(e) => startSplitResize(split, e)}
+                      />
                     );
                   })}
-                  {zoomedPaneId === null &&
-                    splits.map((split) => {
-                      const { rect, node } = split;
-                      const row = node.dir === "row";
-                      return (
-                        <div
-                          key={split.path.join("") || "root"}
-                          role="separator"
-                          aria-orientation={row ? "vertical" : "horizontal"}
-                          aria-label="Resize agent split"
-                          className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
-                            row
-                              ? "w-2 -translate-x-1/2 cursor-col-resize"
-                              : "h-2 -translate-y-1/2 cursor-row-resize"
-                          }`}
-                          style={
-                            row
-                              ? {
-                                  left: pct(rect.x + rect.w * node.ratio),
-                                  top: pct(rect.y),
-                                  height: pct(rect.h),
-                                }
-                              : {
-                                  left: pct(rect.x),
-                                  top: pct(rect.y + rect.h * node.ratio),
-                                  width: pct(rect.w),
-                                }
-                          }
-                          onPointerDown={(e) => startSplitResize(split, e)}
-                        />
-                      );
-                    })}
-                </div>
-              )
+              </div>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto p-5">
                 <div className="mx-auto max-w-3xl space-y-4">

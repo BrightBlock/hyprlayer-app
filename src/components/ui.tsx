@@ -998,6 +998,14 @@ export const BAR_POPOVER_ROW =
   "flex items-center gap-2.5 rounded-control px-3 py-2 text-ui text-ink-2 hover:bg-edge/50 " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
+/** Archive popovers' row buttons (Restore, Delete, Keep). */
+export const ROW_ACTION = cx(
+  "inline-flex h-6 shrink-0 items-center rounded-control border border-edge bg-panel px-2",
+  "text-ui-sm font-semibold text-ink-2 hover:bg-edge/50 disabled:opacity-50 disabled:hover:bg-panel",
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+);
+export const ROW_ACTION_DANGER = cx(ROW_ACTION, "border-destructive-border text-bad-ink hover:bg-bad/10");
+
 export function MenuSeparator() {
   return <div className="my-1 h-px bg-edge" />;
 }

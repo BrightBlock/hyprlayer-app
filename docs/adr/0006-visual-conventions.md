@@ -2,7 +2,8 @@
 
 **Status:** accepted · 2026-08-21 · amended 2026-09-24 (v4 light palette and radii, native-checkbox
 `Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes) ·
-amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale")
+amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale") ·
+amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover)
 
 ## Decision
 
@@ -68,10 +69,11 @@ Left unmigrated, by design, not oversight:
   `LibrarySidebar.tsx`'s theme/profile switcher rows, and
   `ComposerAutocomplete.tsx`'s autocomplete row (`:396-398`). A third row tier
   would defeat the two-tier point; these stay hand-rolled.
-- **The multi-line rows** — `WorkstreamDocsPanel`'s doc row (~63px),
-  `LibrarySidebar`'s doc row (~73px), `ArchivedAgentsView`'s row (~70px).
-  None of these are single-line content, so the 28/36px vocabulary doesn't
-  apply to them.
+- **The multi-line rows** — `WorkstreamDocsPanel`'s doc row (~63px) and
+  `LibrarySidebar`'s doc row (~73px) (`ArchivedAgentsView`'s ~70px row was a
+  third, until the view was deleted on 2026-09-25 in favour of the status-bar
+  popover). None of these are single-line content, so the 28/36px vocabulary
+  doesn't apply to them.
 - **`CommitsPanel`'s 20px indent step** (`pl-[26px]`, e.g. `:41`) — see
   "Tree indent" below.
 - **`Root.tsx`'s hand-tuned `pl-10`** (`style={{ paddingLeft: 40 }}` at
@@ -138,14 +140,20 @@ exception above, however similar its `h-6 w-6 rounded` shape looks.
 
 Container-level `divide-y divide-edge/60`, never a per-row `border-b`.
 `Archive.tsx:191`, `WorkstreamDocsPanel.tsx:104`, and `ArchivedAgentsView.tsx:145`
-all use it (a fourth example, `AgentList.tsx:252`, is gone along with the rest
-of that file — see "Agents: sidebar shell" below; its replacement is
+(since deleted) all use it (a fourth example, `AgentList.tsx:252`, is gone along
+with the rest of that file — see "Agents: sidebar shell" below; its replacement is
 gap-based, `space-y-0.5`/`space-y-4`, the dividerless camp named below, not
 this one). The reason: a per-row border needs a
 `last:border-b-0` or an index guard to avoid a trailing rule after the final
 row, and both hacks existed independently in the tree before this — a
 container-level divider can't produce a trailing rule in the first place, so
 there's nothing to guard.
+
+The one deliberate exception is the two archive popovers
+(`ArchivedWorktreeRow.tsx`, `ArchivedAgentsPopover.tsx`): each row, and each
+empty or no-match `<p>`, carries its own `border-t border-edge-2`. That draws a
+rule above every row, including one under the filter row, and never leaves one
+after the last row.
 
 "One mechanism" means *when a list wants dividers, use this one* — lists that
 use gaps instead of rules (`Root`'s workstream tree, `ChangesPanel`,
@@ -439,6 +447,10 @@ exception like those under "Typography".
   at the window height, since `Popover` has no cap. Its only new tokens are
   `tag-purge-bg` and `destructive-border`; the spec's `tag-purge-text` and
   `destructive-text` are `warn-ink` and `bad-ink`.
+- The status bar's Archived agents button is 24px tall and at least 26px wide,
+  widening for its count. It sits between the branch and the Server button. Its
+  popover opens upward and matches the Archived worktrees popover: 440px wide, a
+  `0 12px 30px` shadow, its list capped at the window height.
 
 **Icons.** `lucide-react` at 16px and stroke 1.5 (`ICON` in
 `src/components/lucide.ts`) on the v4 surfaces. `icons.tsx` stays everywhere

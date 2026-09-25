@@ -67,7 +67,6 @@ export type WsTabState = {
   panes: Record<PaneId, { activeId: number }>;
   activePaneId: PaneId;
   archived?: ArchivedShell[];
-  archiveOpen?: boolean;
 };
 
 export type ArchivedStatus = "done" | "stopped" | "idle";
@@ -259,15 +258,6 @@ export function unarchiveShellState(state: WsTabState, shellId: number): WsTabSt
   );
 }
 
-export function clearArchiveOnRefocus(prev: WsTabState, next: WsTabState): WsTabState {
-  const paneIds = new Set([...Object.keys(prev.panes), ...Object.keys(next.panes)]);
-  const refocused =
-    next.shells.length >= prev.shells.length &&
-    (next.activePaneId !== prev.activePaneId ||
-      [...paneIds].some((id) => prev.panes[id]?.activeId !== next.panes[id]?.activeId));
-  return refocused && next.archiveOpen ? { ...next, archiveOpen: false } : next;
-}
-
 type TabsStore = { byWs: Record<string, WsTabState> };
 
 function normalizePersistedShell(shell: ShellTab): ShellTab {
@@ -291,6 +281,7 @@ type LegacyWs = Partial<WsTabState> & {
   rightSplit?: boolean;
   rightActiveId?: number;
   activePane?: "main" | "right";
+  archiveOpen?: boolean;
 };
 
 function migrateWorkstream(ws: LegacyWs): void {
@@ -342,6 +333,7 @@ function migrateWorkstream(ws: LegacyWs): void {
   delete ws.rightSplit;
   delete ws.rightActiveId;
   delete ws.activePane;
+  delete ws.archiveOpen;
   for (const s of shells) delete s.panel;
   for (const a of archived) delete (a.shell as LegacyShell).panel;
 }
@@ -359,7 +351,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: scopedKey("hyprlayer:workstream-tabs"),
     storage: debouncedJSONStorage(),
-    version: 7,
+    version: 8,
     migrate: migratePersistedWorkstreamTabs,
   }),
 );
@@ -396,7 +388,7 @@ export function bindSessionToShell(
       ...current,
       shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId } : s)),
     };
-    return { ...all, [workstreamId]: { ...focusShell(bound, shellId), archiveOpen: false } };
+    return { ...all, [workstreamId]: focusShell(bound, shellId) };
   });
 }
 
@@ -412,7 +404,7 @@ export function setSessionPermissionMode(workstreamId: string, sessionId: string
 
 export function openPromptTab(workstreamId: string, sessionId: string, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
+    const current = all[workstreamId] ?? defaultTabState();
     return {
       ...all,
       [workstreamId]: appendShell(current, {
@@ -432,7 +424,7 @@ export function openPromptTab(workstreamId: string, sessionId: string, title: st
 
 export function openDocPreviewTab(workstreamId: string, path: string, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
+    const current = all[workstreamId] ?? defaultTabState();
     const existing = current.shells.find((s) => s.docPreviewPath === path);
     return {
       ...all,
@@ -540,7 +532,7 @@ export function openImplementTab(
   from: ShellTab,
 ): void {
   updateWorkstreamTabs((all) => {
-    const current = { ...(all[workstreamId] ?? defaultTabState()), archiveOpen: false };
+    const current = all[workstreamId] ?? defaultTabState();
     return {
       ...all,
       [workstreamId]: appendShell(current, {

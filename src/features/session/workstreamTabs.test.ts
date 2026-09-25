@@ -4,7 +4,6 @@ import { leaf, leaves, type LayoutNode, type PaneId } from "./paneTree";
 import {
   activeShellIn,
   archiveShellState,
-  clearArchiveOnRefocus,
   closePaneState,
   consumeComposerFocus,
   cycleActiveTab,
@@ -350,6 +349,11 @@ describe("persisted workstream migration", () => {
     expect(activeShellIn(ws, "p2")?.id).toBe(3);
     expect(visibleShells(ws).map((s) => s.id)).toEqual([2, 3]);
   });
+
+  it("drops the retired archiveOpen flag", () => {
+    const migrated = migratePersistedWorkstreamTabs({ byWs: { ws: { ...onePane(1, 1), archiveOpen: true } } });
+    expect(migrated.byWs.ws).not.toHaveProperty("archiveOpen");
+  });
 });
 
 describe("nextShellId", () => {
@@ -669,40 +673,6 @@ describe("unarchiveShellState", () => {
   it("is a no-op for an id that isn't archived", () => {
     const state: WsTabState = { ...onePane(1, 1), archived: [archived(5)] };
     expect(unarchiveShellState(state, 9)).toBe(state);
-  });
-});
-
-describe("clearArchiveOnRefocus", () => {
-  const open = (s: WsTabState): WsTabState => ({ ...s, archiveOpen: true });
-
-  it("closes the view when a tab is refocused (select/cycle/open)", () => {
-    const prev = open(onePane(1, 1, 2));
-    const next: WsTabState = { ...prev, panes: { p1: { activeId: 2 } } };
-    expect(clearArchiveOnRefocus(prev, next).archiveOpen).toBe(false);
-  });
-
-  it("keeps the view open when a shell is removed (close/archive shrinks the strip)", () => {
-    const prev = open(onePane(2, 1, 2, 3));
-    const next: WsTabState = { ...prev, shells: [shell(1), shell(3)], panes: { p1: { activeId: 3 } } };
-    expect(clearArchiveOnRefocus(prev, next).archiveOpen).toBe(true);
-  });
-
-  it("keeps the view open for a background patch that doesn't move focus", () => {
-    const prev = open(onePane(1, 1, 2));
-    const next: WsTabState = { ...prev, shells: [{ ...shell(1), title: "renamed" }, shell(2)] };
-    expect(clearArchiveOnRefocus(prev, next).archiveOpen).toBe(true);
-  });
-
-  it("leaves a toggle that opens the view (focus unchanged) intact", () => {
-    const prev = onePane(1, 1, 2);
-    expect(clearArchiveOnRefocus(prev, { ...prev, archiveOpen: true }).archiveOpen).toBe(true);
-  });
-
-  it("counts a pane focus change as a refocus but not a ratio change", () => {
-    const prev = open(twoPanes({ p1: { active: 1, ids: [1] }, p2: { active: 2, ids: [2] }, focus: "p1" }));
-    expect(clearArchiveOnRefocus(prev, { ...prev, activePaneId: "p2" }).archiveOpen).toBe(false);
-    const resized: WsTabState = { ...prev, layout: { ...twoLeaves, ratio: 0.3 } };
-    expect(clearArchiveOnRefocus(prev, resized).archiveOpen).toBe(true);
   });
 });
 

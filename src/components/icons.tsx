@@ -969,28 +969,6 @@ export function ArchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconPro
   );
 }
 
-export function UnarchiveIcon({ size = 16, strokeWidth = 1.5, className }: IconProps) {
-  return (
-    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="none" className={className}>
-      <rect x="2" y="2.6" width="12" height="3" rx="0.9" stroke="currentColor" strokeWidth={strokeWidth} strokeLinejoin="round" />
-      <path
-        d="M3 5.6v6.1c0 .77.63 1.4 1.4 1.4h7.2c.77 0 1.4-.63 1.4-1.4V5.6"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8 11.4V7.6M8 7.6 6.4 9.2M8 7.6l1.6 1.6"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 export function PlayIcon({ size = 13, className }: IconProps) {
   return (
     <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" fill="currentColor" className={className}>

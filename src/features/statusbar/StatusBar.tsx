@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from "react";
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useViewport } from "@/lib/useViewport";
-import { Avatar, RepoStatus } from "./parts";
+import { Avatar, Divider, RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
@@ -12,12 +12,14 @@ import { SyncStatus } from "./SyncStatus";
 export function StatusBar({
   workstreamId,
   workstream,
+  archive,
   tools,
   settings,
   serverMenu,
 }: {
   workstreamId: string | null;
   workstream: WorkstreamView | null;
+  archive?: ReactNode;
   tools?: ReactNode;
   settings: ReactNode;
   serverMenu?: (anchorRef: RefObject<HTMLElement | null>) => ReactNode;
@@ -31,7 +33,13 @@ export function StatusBar({
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
-      <SyncStatus compact={compact} divided={repo !== null} menu={serverMenu} />
+      {archive && (
+        <>
+          {repo && <Divider />}
+          {archive}
+        </>
+      )}
+      <SyncStatus compact={compact} divided={repo !== null || Boolean(archive)} menu={serverMenu} />
       <div className="flex-1" />
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
       {tools}
