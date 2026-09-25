@@ -69,6 +69,8 @@ function DocBody({ id, doc }: BodyProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const headingsTimerRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
+  // Scrollspy would walk the highlight through every heading a jump passes.
+  const jumpingRef = useRef(false);
 
   // Each history entry gets its own remembered scroll position, restored on Back.
   const historyKey = useRouterState({
@@ -107,7 +109,7 @@ function DocBody({ id, doc }: BodyProps) {
       const scroller = scrollerRef.current;
       if (!scroller) return;
       rememberScroll(historyKeyRef.current, scroller.scrollTop);
-      if (view) setActiveIndex(activeHeading(view, headings, scroller));
+      if (view && !jumpingRef.current) setActiveIndex(activeHeading(view, headings, scroller));
     });
   }, [view, headings]);
 
@@ -116,7 +118,10 @@ function DocBody({ id, doc }: BodyProps) {
       const heading = headings[index];
       if (!heading || !view || !scrollerRef.current) return;
       setActiveIndex(index);
-      jumpToHeading(view, scrollerRef.current, heading.from, !reducedMotion);
+      jumpingRef.current = true;
+      jumpToHeading(view, scrollerRef.current, heading.from, !reducedMotion, () => {
+        jumpingRef.current = false;
+      });
     },
     [headings, view, reducedMotion],
   );

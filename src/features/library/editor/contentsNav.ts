@@ -1,4 +1,4 @@
-import type { EditorView } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 
 import type { DocHeading } from "./headings";
 
@@ -16,27 +16,56 @@ export function activeHeading(view: EditorView, headings: DocHeading[], scroller
   return active;
 }
 
-function targetTop(view: EditorView, scroller: HTMLElement, pos: number): number {
-  return view.documentTop + view.lineBlockAt(pos).top - scroller.getBoundingClientRect().top + scroller.scrollTop - SCROLL_MARGIN;
+let jumpToken = 0;
+
+export function jumpToHeading(
+  view: EditorView,
+  scroller: HTMLElement,
+  from: number,
+  smooth: boolean,
+  onLanded: () => void,
+) {
+  const pos = Math.min(from, view.state.doc.length);
+  const token = ++jumpToken;
+  // WebKit scrolls to the editor's stale DOM caret on focus despite
+  // preventScroll, so focus after landing with the caret parked on the heading.
+  const land = () => {
+    if (token !== jumpToken) return;
+    const { node, offset } = view.domAtPos(pos);
+    document.getSelection()?.collapse(node, offset);
+    view.focus();
+    onLanded();
+  };
+
+  // An undrawn heading only has an estimated position (null coords), so let
+  // CodeMirror draw and measure it before scrolling there.
+  const coords = smooth ? view.coordsAtPos(pos) : null;
+  if (coords) {
+    view.dispatch({ selection: { anchor: pos } });
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    const top = Math.min(max, coords.top - scroller.getBoundingClientRect().top + scroller.scrollTop - SCROLL_MARGIN);
+    if (Math.abs(top - scroller.scrollTop) < 1) {
+      land();
+    } else {
+      afterScrollEnd(scroller, land);
+      scroller.scrollTo({ top, behavior: "smooth" });
+    }
+  } else {
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: SCROLL_MARGIN }),
+    });
+    // Queued after CodeMirror's measure frame, which applies the scroll.
+    requestAnimationFrame(land);
+  }
 }
 
-export function jumpToHeading(view: EditorView, scroller: HTMLElement, from: number, smooth: boolean) {
-  const pos = Math.min(from, view.state.doc.length);
-
-  // CodeMirror only has a real measurement for lines it has drawn; a heading
-  // outside the current viewport gets an estimated position (our headings
-  // vary a lot in height, so the estimate is often well off) until that area
-  // is actually rendered. An instant jump there forces the measurement, then
-  // a second pass corrects the position with the requested scroll behavior —
-  // otherwise the first click lands short/long and only a second click (now
-  // starting from a measured position) is accurate.
-  scroller.scrollTo({ top: targetTop(view, scroller, pos), behavior: "auto" });
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      scroller.scrollTo({ top: targetTop(view, scroller, pos), behavior: smooth ? "smooth" : "auto" });
-    });
-  });
-
-  view.dispatch({ selection: { anchor: pos } });
-  view.focus();
+function afterScrollEnd(scroller: HTMLElement, fn: () => void) {
+  const done = () => {
+    clearTimeout(timer);
+    scroller.removeEventListener("scrollend", done);
+    fn();
+  };
+  const timer = setTimeout(done, 1000);
+  scroller.addEventListener("scrollend", done);
 }
