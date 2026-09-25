@@ -49,10 +49,11 @@ type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
 
 const TRACKING_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TodoWrite"]);
 
-function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem): void {
+// `newBatchClears`: a create after everything finished starts a fresh list, as the Tasks panel shows it.
+function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem, newBatchClears = true): void {
   switch (item.name) {
     case "TaskCreate": {
-      if (tasks.size > 0 && [...tasks.values()].every((t) => t.status === "completed")) {
+      if (newBatchClears && tasks.size > 0 && [...tasks.values()].every((t) => t.status === "completed")) {
         tasks.clear();
       }
       const subject = str(parseToolInput(item.input)?.subject);
@@ -116,19 +117,25 @@ export type TimelineTask = PlanTask & { jumpToolUseId: string | null };
 
 // A task's jump target is the first top-level tool call after it went in_progress,
 // else the tracking call itself while nothing has followed it yet.
-export function planTaskTimeline(items: TranscriptItem[]): TimelineTask[] {
+// With `since`, tasks that existed at that tool call are dropped; they predate the plan it presented.
+export function planTaskTimeline(items: TranscriptItem[], since: string | null = null): TimelineTask[] {
   const tasks = new Map<string, PlanTask>();
   const started = new Map<string, string>();
+  const stale = new Set<string>();
   let awaitingWork: string[] = [];
   for (const item of items) {
     if (item.kind !== "tool") continue;
+    if (item.toolUseId === since) for (const key of tasks.keys()) stale.add(key);
     if (!TRACKING_TOOLS.has(item.name)) {
       if (item.parentId) continue;
       for (const subject of awaitingWork) started.set(subject, item.toolUseId);
       awaitingWork = [];
       continue;
     }
-    applyTrackingTool(tasks, item);
+    // TodoWrite replaces the list and reuses positional ids, so nothing it writes is stale.
+    if (item.name === "TodoWrite") stale.clear();
+    // A plan's finished phases stay finished when the next phase's task is created.
+    applyTrackingTool(tasks, item, false);
     for (const t of tasks.values()) {
       if (t.status === "in_progress" && !started.has(t.subject)) {
         started.set(t.subject, item.toolUseId);
@@ -136,7 +143,9 @@ export function planTaskTimeline(items: TranscriptItem[]): TimelineTask[] {
       }
     }
   }
-  return Array.from(tasks.values(), (t) => ({ ...t, jumpToolUseId: started.get(t.subject) ?? null }));
+  return Array.from(tasks)
+    .filter(([key]) => !stale.has(key))
+    .map(([, t]) => ({ ...t, jumpToolUseId: started.get(t.subject) ?? null }));
 }
 
 // `Phase 2: …` (implement_plan's one-todo-per-phase) or a `[P2]` tag; `[P2.3]` names a task instead.

@@ -270,13 +270,23 @@ function heredocScriptVars(stripped: string): Set<string> {
   return out;
 }
 
+const writeTargetsCache = new Map<string, string[]>();
+
+// Transcript scans rerun on every streamed delta; a command's targets never change.
 function shellWriteTargets(command: string): string[] {
+  const cached = writeTargetsCache.get(command);
+  if (cached) return cached;
   const stripped = stripHeredocBodies(command);
   const scriptVars = heredocScriptVars(stripped);
   const out: string[] = [];
   for (const simple of stripped.split(/;|&&|\|\||\||\n/)) {
     out.push(...simpleCommandTargets(simple, scriptVars));
   }
+  if (writeTargetsCache.size >= PARSED_CACHE_MAX) {
+    const oldest = writeTargetsCache.keys().next().value;
+    if (oldest !== undefined) writeTargetsCache.delete(oldest);
+  }
+  writeTargetsCache.set(command, out);
   return out;
 }
 

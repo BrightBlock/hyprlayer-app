@@ -186,6 +186,39 @@ describe("mode", () => {
     expect(trackPlan(plan(undefined, "draft"), [], building).mode).toBe("tracking");
     expect(trackPlan(plan(undefined, "active"), [], { ...building, stage: "plan" }).mode).toBe("tracking");
   });
+
+  it("drafts a presented plan awaiting approval or sent back, even in an implement session", () => {
+    expect(trackPlan(plan(undefined, "awaiting approval"), [], building).mode).toBe("draft");
+    expect(trackPlan(plan(undefined, "changes requested"), [], building).mode).toBe("draft");
+    expect(trackPlan(plan(undefined, "approved"), [], building).mode).toBe("tracking");
+  });
+});
+
+describe("a plan whose phases have no tasks", () => {
+  const bare = parsePlanDoc(
+    `---\nstatus: approved\n---\n# Greeting\n\n## Phase 1: Greet\n- Say hello\n\n## Phase 2: Sign off\n- Say goodbye\n`,
+    PATH,
+  );
+
+  it("starts at zero", () => {
+    const t = trackPlan(bare, [], building);
+    expect([t.progress, t.allDone, t.currentPhase]).toEqual([0, false, 1]);
+  });
+
+  it("measures progress in phases", () => {
+    const t = trackPlan(bare, [todo("Phase 1: Greet", "completed"), todo("Phase 2: Sign off", "in_progress")], building);
+    expect([t.progress, t.allDone, t.currentPhase]).toEqual([0.75, false, 2]);
+  });
+
+  it("is done once every phase is", () => {
+    const t = trackPlan(bare, [todo("Phase 1: Greet", "completed"), todo("Phase 2: Sign off", "completed")], building);
+    expect([t.progress, t.allDone, t.current]).toEqual([1, true, null]);
+  });
+
+  it("is never done while it is a draft", () => {
+    const draft = parsePlanDoc(`---\nstatus: draft\n---\n# G\n\n## Phase 1: Greet\n- Say hello\n`, PATH);
+    expect(trackPlan(draft, [todo("Phase 1: Greet", "completed")], null).allDone).toBe(false);
+  });
 });
 
 describe("jump targets", () => {

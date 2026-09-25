@@ -51,10 +51,11 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&["Write", "Edit"]),
             disallowed_tools: deny(&["Bash(git push:*)"]),
         },
+        // The plan skill has its own approval gate; Claude's plan mode would move the plan out of thoughts.
         Stage::Plan => StagePolicy {
             permission_mode: PermissionMode::AcceptEdits,
             allowed_tools: allow(&["Write", "Edit"]),
-            disallowed_tools: deny(&["Bash(git push:*)"]),
+            disallowed_tools: deny(&["Bash(git push:*)", "EnterPlanMode"]),
         },
         Stage::Implement => StagePolicy {
             permission_mode: PermissionMode::AcceptEdits,
@@ -782,6 +783,20 @@ improvise one."
             ),
             ship_prompt("main")
         );
+    }
+
+    #[test]
+    fn only_the_plan_stage_denies_claudes_own_plan_mode() {
+        let plan = policy_for(Stage::Plan);
+        assert!(plan.disallowed_tools.iter().any(|t| t == "EnterPlanMode"));
+        // A plan-mode session must still be able to present its plan and leave.
+        assert!(!plan.disallowed_tools.iter().any(|t| t == "ExitPlanMode"));
+        for stage in [Stage::General, Stage::Research, Stage::Implement] {
+            assert!(!policy_for(stage)
+                .disallowed_tools
+                .iter()
+                .any(|t| t == "EnterPlanMode"));
+        }
     }
 
     #[test]

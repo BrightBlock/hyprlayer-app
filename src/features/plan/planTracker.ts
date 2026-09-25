@@ -96,6 +96,8 @@ function jumpOf(todo: TimelineTask | null): JumpTarget | null {
 
 // `approved` comes from an allowed ExitPlanMode or an approved inline plan, which build in the same session.
 const TRACKING_STATUSES = new Set(["active", "implemented", "approved"]);
+// A presented plan not yet approved outranks the implement stage: nothing has been built from it.
+const UNAPPROVED_STATUSES = new Set(["awaiting approval", "changes requested"]);
 
 // Structure comes only from the doc; todos contribute status, and unmatched ones are appended as `added`.
 export function trackPlan(
@@ -105,7 +107,11 @@ export function trackPlan(
 ): PlanTracker {
   const status = doc.status?.toLowerCase() ?? null;
   const mode =
-    session?.stage === "implement" || (status !== null && TRACKING_STATUSES.has(status)) ? "tracking" : "draft";
+    status !== null && UNAPPROVED_STATUSES.has(status)
+      ? "draft"
+      : session?.stage === "implement" || (status !== null && TRACKING_STATUSES.has(status))
+        ? "tracking"
+        : "draft";
   // A planning agent's own todos are research steps, not the plan's tasks.
   const todos = mode === "draft" ? [] : sessionTodos;
   const phases: Phase[] = doc.phases.map((p) => ({
@@ -213,8 +219,11 @@ export function trackPlan(
   const all = tracked.flatMap((p) => p.tasks);
   const total = all.length;
   const done = all.filter((t) => t.state === "done").length;
-  const half = all.filter((t) => t.state === "in_progress" || t.state === "waiting").length;
-  const allDone = total > 0 && done === total;
+  // Phases stand in for tasks when no phase has any.
+  const units: (TaskState | PhaseState)[] = total > 0 ? all.map((t) => t.state) : tracked.map((p) => p.state);
+  const unitsDone = units.filter((s) => s === "done").length;
+  const half = units.filter((s) => s === "in_progress" || s === "waiting").length;
+  const allDone = units.length > 0 && unitsDone === units.length;
   if (allDone) current = null;
 
   let currentPhase: number | null = null;
@@ -235,7 +244,7 @@ export function trackPlan(
     currentPhase,
     done,
     total,
-    progress: total > 0 ? (done + 0.5 * half) / total : 0,
+    progress: units.length > 0 ? (unitsDone + 0.5 * half) / units.length : 0,
     allDone,
     pulsing: activity === "working" && current?.state === "in_progress",
     writeBacks: slots

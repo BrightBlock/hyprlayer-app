@@ -117,7 +117,8 @@ export function usePlanTracker(sessionId: string | undefined): PlanTrackerResult
   const { plan, inline, indexed, loading, error, refetch, changed } = usePlan(key, inlineText);
   const status = presentationStatus(presentation);
   const parsed = useMemo(() => (plan && status ? { ...plan, status } : plan), [plan, status]);
-  const timeline = useMemo(() => (items ? planTaskTimeline(items) : []), [items]);
+  const presentedAt = presentation?.toolUseId ?? null;
+  const timeline = useMemo(() => (items ? planTaskTimeline(items, presentedAt) : []), [items, presentedAt]);
   const writes = useMemo(() => (items && key && !inline ? planWrites(items, key) : 0), [items, key, inline]);
   useEffect(() => {
     if (writes > 0) void refetch();

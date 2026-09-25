@@ -289,6 +289,74 @@ describe("planTaskTimeline", () => {
     const timeline = planTaskTimeline([todoWrite("w1", [{ content: "A", status: "pending" }]), read("r1")]);
     expect(timeline[0].jumpToolUseId).toBeNull();
   });
+
+  describe("since a plan was presented", () => {
+    const present = makeTool("ExitPlanMode", "{}", "plan", ok("approved"));
+    const subjects = (items: TranscriptItem[]) => planTaskTimeline(items, "plan").map((t) => t.subject);
+
+    it("drops tasks that existed before the plan", () => {
+      const items = [taskCreate("c1", "Research", { id: 1 }), taskUpdate("u1", { taskId: "1", status: "completed" }), present];
+      expect(subjects(items)).toEqual([]);
+    });
+
+    it("keeps tasks created after the plan, with their jump targets", () => {
+      const items = [
+        taskCreate("c1", "Research", { id: 1 }),
+        present,
+        taskCreate("c2", "Build", { id: 2 }),
+        taskUpdate("u2", { taskId: "2", status: "in_progress" }),
+        read("r1"),
+      ];
+      const timeline = planTaskTimeline(items, "plan");
+      expect(timeline.map((t) => t.subject)).toEqual(["Build"]);
+      expect(timeline[0].jumpToolUseId).toBe("r1");
+    });
+
+    it("keeps an old task out when a later TaskList or TaskUpdate names it", () => {
+      const items = [
+        taskCreate("c1", "Research", { id: 1 }),
+        present,
+        taskCreate("c2", "Build", { id: 2 }),
+        taskList("l1", "#1 [completed] Research\n#2 [pending] Build"),
+        taskUpdate("u1", { taskId: "1", status: "completed" }),
+      ];
+      expect(subjects(items)).toEqual(["Build"]);
+    });
+
+    it("keeps a TodoWrite list written after the plan, though its positional ids repeat", () => {
+      const items = [
+        todoWrite("w1", [{ content: "Research", status: "completed" }]),
+        present,
+        todoWrite("w2", [{ content: "Build", status: "pending" }]),
+      ];
+      expect(subjects(items)).toEqual(["Build"]);
+    });
+
+    it("drops a TodoWrite list that was never rewritten after the plan", () => {
+      expect(subjects([todoWrite("w1", [{ content: "Research", status: "completed" }]), present])).toEqual([]);
+    });
+
+    it("keeps a finished task when the next one is created after it", () => {
+      const items = [
+        present,
+        taskCreate("c1", "Phase 1: Greet", { id: 1 }),
+        taskUpdate("u1", { taskId: "1", status: "completed" }),
+        taskCreate("c2", "Phase 2: Sign off", { id: 2 }),
+      ];
+      const timeline = planTaskTimeline(items, "plan");
+      expect(timeline.map((t) => [t.subject, t.status])).toEqual([
+        ["Phase 1: Greet", "completed"],
+        ["Phase 2: Sign off", "pending"],
+      ]);
+      expect(planTaskTimeline(items.slice(1)).map((t) => t.subject)).toEqual(["Phase 1: Greet", "Phase 2: Sign off"]);
+    });
+
+    it("keeps everything when the plan's tool call is not in the transcript", () => {
+      const items = [taskCreate("c1", "Research", { id: 1 })];
+      expect(planTaskTimeline(items, "missing").map((t) => t.subject)).toEqual(["Research"]);
+      expect(planTaskTimeline(items, null).map((t) => t.subject)).toEqual(["Research"]);
+    });
+  });
 });
 
 describe("todoPhaseLabel", () => {
