@@ -43,7 +43,7 @@ export function Segmented<T extends string>({
             onClick={() => onChange(o.key)}
             className={[
               "rounded-md font-medium transition-colors disabled:cursor-default",
-              size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1 text-sm",
+              size === "sm" ? "px-2.5 py-1 text-ui" : "px-3 py-1 text-body",
               o.mono ? "font-mono" : "",
               active ? "bg-panel text-ink" : "text-ink-dim enabled:hover:text-ink",
             ].join(" ")}
@@ -178,7 +178,7 @@ export function RadioRow({
   return (
     <label
       className={[
-        "flex items-start gap-2.5 rounded-md p-2 text-sm",
+        "flex items-start gap-2.5 rounded-md p-2 text-body",
         disabled ? "cursor-default opacity-70" : "cursor-pointer",
         checked && description ? "bg-panel-2" : disabled ? "" : "hover:bg-panel-2",
       ].join(" ")}
@@ -203,9 +203,9 @@ export function RadioRow({
       <span className="min-w-0">
         <span className="flex items-baseline gap-2">
           <span className={labelClassName ?? "text-ink"}>{label}</span>
-          {hint && <span className="font-mono text-2xs text-ink-dim">{hint}</span>}
+          {hint && <span className="text-meta text-ink-dim">{hint}</span>}
         </span>
-        {description && <span className="mt-0.5 block text-xs text-ink-dim">{description}</span>}
+        {description && <span className="mt-0.5 block text-ui text-ink-dim">{description}</span>}
       </span>
     </label>
   );
@@ -213,7 +213,7 @@ export function RadioRow({
 
 export function SoonBadge() {
   return (
-    <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
+    <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-tag text-brand">
       Soon
     </span>
   );
@@ -222,7 +222,7 @@ export function SoonBadge() {
 export function CardGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2.5">
-      <h2 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">{label}</h2>
+      <h2 className="text-label text-ink-dim">{label}</h2>
       <div className="flex flex-col gap-3.5">{children}</div>
     </section>
   );
@@ -250,8 +250,8 @@ export function EditorCard({
       {(title || action) && (
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            {title && <h3 className="text-sm font-semibold text-ink">{title}</h3>}
-            {description && <p className="mt-0.5 text-xs text-ink-dim">{description}</p>}
+            {title && <h3 className="text-body font-semibold text-ink">{title}</h3>}
+            {description && <p className="mt-0.5 text-ui text-ink-dim">{description}</p>}
           </div>
           {action && <div className="flex shrink-0 gap-1.5">{action}</div>}
         </div>
@@ -272,7 +272,7 @@ export function Callout({
 }) {
   const tint = tone === "bad" ? "border-bad/35 bg-bad/10" : "border-warn/35 bg-warn/10";
   return (
-    <div className={`flex gap-2.5 rounded-lg border p-3 text-xs text-ink-dim ${tint}`}>
+    <div className={`flex gap-2.5 rounded-lg border p-3 text-ui text-ink-dim ${tint}`}>
       <span className={`shrink-0 pt-px ${tone === "bad" ? "text-bad" : "text-warn-ink"}`}>{icon}</span>
       <span className="text-pretty">{children}</span>
     </div>

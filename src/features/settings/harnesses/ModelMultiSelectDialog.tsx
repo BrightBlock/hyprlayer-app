@@ -126,14 +126,14 @@ export function ModelMultiSelectDialog({
 
       <div className="max-h-[24rem] overflow-y-auto">
         {filtered.length === 0 && (
-          <p className="px-1 py-6 text-center text-sm text-ink-dim">
+          <p className="px-1 py-6 text-center text-body text-ink-dim">
             {query ? `No models match “${query}”.` : emptyLabel}
           </p>
         )}
         {filtered.map((group) => (
           <div key={group.key} className="mb-3">
             {group.label && (
-              <p className="px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-dim">
+              <p className="px-1 py-1 text-label text-ink-dim">
                 {group.label}
               </p>
             )}
@@ -148,8 +148,8 @@ export function ModelMultiSelectDialog({
                       onChange={(e) => toggle(m.id, e.target.checked)}
                     />
                     <span className="min-w-0">
-                      <span className="text-sm text-ink">{m.name}</span>
-                      <span className="block font-mono text-xs text-ink-dim">
+                      <span className="text-body text-ink">{m.name}</span>
+                      <span className="block text-meta text-ink-dim">
                         {m.detail ?? m.id}
                       </span>
                     </span>
@@ -163,7 +163,7 @@ export function ModelMultiSelectDialog({
 
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-ink-dim">{chosen.size} selected</span>
+          <span className="text-ui text-ink-dim">{chosen.size} selected</span>
           {bulkActions?.((ids) => setChosen(new Set(ids)))}
         </div>
         <div className="flex gap-2">

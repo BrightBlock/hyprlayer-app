@@ -257,10 +257,10 @@ export function CreateWorkstreamDialog({
                 onSelect={() => setSelectedBranch(null)}
               />
               {bases.isLoading && (
-                <li className="px-3 py-2 text-sm text-ink-dim">Loading branches…</li>
+                <li className="px-3 py-2 text-body text-ink-dim">Loading branches…</li>
               )}
               {!bases.isLoading && filtered.length === 0 && query.trim() !== "" && (
-                <li className="px-3 py-2 text-sm text-ink-dim">No branches match “{query}”.</li>
+                <li className="px-3 py-2 text-body text-ink-dim">No branches match “{query}”.</li>
               )}
               {filtered.map((b) => (
                 <BranchRow
@@ -276,7 +276,7 @@ export function CreateWorkstreamDialog({
                 />
               ))}
               {refreshRemote.isPending && (
-                <li className="px-3 py-2 text-xs text-ink-dim">Fetching remote branches…</li>
+                <li className="px-3 py-2 text-ui text-ink-dim">Fetching remote branches…</li>
               )}
             </ul>
           </div>
@@ -298,7 +298,7 @@ export function CreateWorkstreamDialog({
                 ...typeList.map((p) => ({ value: p.prefix, label: p.label })),
               ]}
             />
-            <p className="mt-1.5 text-xs text-ink-dim">
+            <p className="mt-1.5 text-ui text-ink-dim">
               Preview:{" "}
               <span className="font-mono text-ink">
                 {typePrefix ?? defaultPrefix}
@@ -346,7 +346,7 @@ export function CreateWorkstreamDialog({
           </Field>
         )}
 
-        <p className="text-xs leading-relaxed text-ink-dim">{hint}</p>
+        <p className="text-ui leading-prose text-ink-dim">{hint}</p>
         {!folder && bases.isError && <ErrorNote error={bases.error} />}
         {!folder && isNew && prefixes.isError && <ErrorNote error={prefixes.error} />}
         {create.isError &&
@@ -404,7 +404,7 @@ export function CreateWorkstreamDialog({
       onClose={() => setConfirmDiscard(false)}
       title="Discard changes?"
     >
-      <p className="text-sm leading-relaxed text-ink-dim">
+      <p className="text-body leading-prose text-ink-dim">
         Discard {changeCount(dirtyChanges)} in{" "}
         <span className="font-mono text-ink">{basename(projectPath)}</span>? Modified files go
         back to the last commit; untracked files are left alone. This cannot be undone.
@@ -452,17 +452,17 @@ function CheckoutDirtyNotice({
   onUnarchive: (id: string) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-md border border-edge bg-panel-2 text-sm">
+    <div className="overflow-hidden rounded-md border border-edge bg-panel-2 text-body">
       <div className="flex gap-3 p-3">
         <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-attention/30 bg-attention/15 text-attention">
           <WarningTriangleIcon size={14} />
         </span>
         <div className="min-w-0">
           <p className="font-medium text-ink">Your checkout has uncommitted work</p>
-          <p className="mt-0.5 truncate font-mono text-xs text-ink-dim">
+          <p className="mt-0.5 truncate text-meta text-ink-dim">
             {changeCount(count)} on {onBranch || "this branch"}
           </p>
-          <p className="mt-2 leading-relaxed text-ink-dim">
+          <p className="mt-2 leading-prose text-ink-dim">
             Switching it to <span className="font-mono text-ink">{target}</span> would carry that
             work across, so nothing was created.
           </p>
@@ -473,7 +473,7 @@ function CheckoutDirtyNotice({
           <ArchiveIcon size={15} className="shrink-0 text-ink-dim" />
           <div className="min-w-0 flex-1">
             <div className="truncate text-ink">{leftBehind.item.title}</div>
-            <div className="truncate text-xs text-ink-dim">
+            <div className="truncate text-ui text-ink-dim">
               left it here · archived {formatRelativeTime(leftBehind.item.archivedAt)}
             </div>
           </div>
@@ -513,13 +513,13 @@ function BranchRow({
         onClick={onSelect}
         disabled={disabled}
         aria-pressed={selected}
-        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-body disabled:cursor-not-allowed disabled:opacity-50 ${
           selected ? "bg-accent/15 text-ink ring-1 ring-inset ring-accent/30" : "hover:bg-edge/40"
         }`}
       >
         <span className="shrink-0 text-ink-dim">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-ink">{label}</span>
-        {detail && <span className="shrink-0 text-xs text-ink-dim">{detail}</span>}
+        {detail && <span className="shrink-0 text-ui text-ink-dim">{detail}</span>}
       </button>
     </li>
   );
@@ -548,7 +548,7 @@ function Segmented<T extends string>({
             disabled={disabled || opt.disabled}
             title={opt.title}
             aria-pressed={active}
-            className={`rounded px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`rounded px-3 py-1 text-body disabled:cursor-not-allowed disabled:opacity-50 ${
               active ? "bg-accent/20 text-ink ring-1 ring-inset ring-accent/30" : "text-ink-dim hover:text-ink"
             }`}
           >

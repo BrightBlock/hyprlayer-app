@@ -88,7 +88,7 @@ export function CreateProjectFields({
           autoFocus
           disabled={disabled}
         />
-        <p className="mt-1 font-mono text-xs text-ink-dim">
+        <p className="mt-1 text-meta text-ink-dim">
           {value.location.trim().replace(/[/\\]+$/, "") || "~"}/
           <span className="text-ink">{name || "<name>"}</span>
         </p>
@@ -110,12 +110,12 @@ export function CreateProjectFields({
           onChange={(e) => set({ branch: e.target.value })}
           placeholder="main"
           disabled={disabled}
-          className="font-mono text-xs"
+          className="text-meta"
         />
       </Field>
 
       <div>
-        <span className="mb-1 block text-xs font-medium text-ink-dim">Start with</span>
+        <span className="mb-1 block text-ui font-medium text-ink-dim">Start with</span>
         <div className="flex flex-wrap items-center gap-1.5">
           <ScaffoldChip
             label="README.md"
@@ -136,12 +136,12 @@ export function CreateProjectFields({
               onChange={(v) => set({ gitignore: v as GitignoreTemplate })}
               disabled={disabled}
               options={GITIGNORE_TEMPLATES}
-              className="w-auto px-2.5 py-1 text-xs"
+              className="w-auto px-2.5 py-1 text-ui"
             />
           )}
         </div>
         {!value.readme && value.gitignore === null && (
-          <p className="mt-1.5 text-xs text-ink-dim">
+          <p className="mt-1.5 text-ui text-ink-dim">
             An empty first commit is made either way, so{" "}
             <span className="font-mono text-ink">{value.branch.trim() || "main"}</span> exists and
             can be pushed.
@@ -152,7 +152,7 @@ export function CreateProjectFields({
       <div className="rounded-md border border-edge bg-panel-2/40 px-3.5 py-3">
         <div className="flex items-center gap-2.5">
           <UploadCloudIcon size={16} className="shrink-0 text-ink-dim" />
-          <p className={cx("min-w-0 flex-1 text-sm", signedIn ? "text-ink" : "text-ink-dim")}>
+          <p className={cx("min-w-0 flex-1 text-body", signedIn ? "text-ink" : "text-ink-dim")}>
             Create on GitHub
           </p>
           {owners.loading ? (
@@ -168,7 +168,7 @@ export function CreateProjectFields({
         </div>
 
         {!signedIn && !owners.loading && (
-          <p className="mt-2 text-xs leading-relaxed text-ink-dim">
+          <p className="mt-2 text-ui leading-prose text-ink-dim">
             {owners.unreachable ? (
               <>
                 GitHub could not be reached, so this project will be created locally only. Check
@@ -202,7 +202,7 @@ export function CreateProjectFields({
                 </Field>
               </div>
               <div className="shrink-0">
-                <span className="mb-1 block text-xs font-medium text-ink-dim">Visibility</span>
+                <span className="mb-1 block text-ui font-medium text-ink-dim">Visibility</span>
                 <div className="flex gap-0.5 rounded-md border border-edge bg-panel p-0.5">
                   <VisibilityChip
                     label="Private"
@@ -223,21 +223,21 @@ export function CreateProjectFields({
             </div>
             {remoteNameOk ? (
               <>
-                <p className="mt-2.5 font-mono text-xs text-ink-dim">
+                <p className="mt-2.5 text-meta text-ink-dim">
                   github.com/
                   <span className="text-ink">
                     {owner ?? "owner"}/{remoteName || "<name>"}
                   </span>
                 </p>
                 {remoteName !== name && name !== "" && (
-                  <p className="mt-1 text-xs text-ink-dim">
+                  <p className="mt-1 text-ui text-ink-dim">
                     GitHub only allows letters, digits, dots, dashes and underscores, so the
                     repository is named <span className="font-mono text-ink">{remoteName}</span>.
                   </p>
                 )}
               </>
             ) : (
-              <p className="mt-2.5 text-xs text-warn-ink">
+              <p className="mt-2.5 text-ui text-warn-ink">
                 GitHub can't name a repository after{" "}
                 <span className="font-mono">{value.name.trim()}</span>. Use letters, digits, dots,
                 dashes or underscores.
@@ -269,7 +269,7 @@ function ScaffoldChip({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-xs font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-meta font-medium transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
         checked
           ? "border-accent/30 bg-accent/10 text-ink"
@@ -306,7 +306,7 @@ function VisibilityChip({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-ui font-medium transition-colors",
         "disabled:cursor-not-allowed disabled:opacity-50",
         selected
           ? "border-edge bg-panel-2 text-ink"

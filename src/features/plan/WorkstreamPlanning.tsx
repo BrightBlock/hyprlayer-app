@@ -31,5 +31,5 @@ export function WorkstreamPlanning({ workstreamId, fallback }: { workstreamId: s
   const { plan } = usePlan(key && !state && !isInlinePlanKey(key) ? key : null);
   const planning = state ? state !== "approved" : plan !== null && isDraftStatus(plan.status);
   if (!planning) return fallback;
-  return <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-4">planning</span>;
+  return <span className="shrink-0 text-meta tabular-nums text-ink-4">planning</span>;
 }

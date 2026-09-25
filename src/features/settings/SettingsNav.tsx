@@ -38,7 +38,7 @@ const NAV: NavEntry[] = [
 ];
 
 const ROW =
-  "relative flex h-[34px] w-full items-center gap-2.5 overflow-hidden rounded-control px-3 text-left text-[13px] transition-colors " +
+  "relative flex h-[34px] w-full items-center gap-2.5 overflow-hidden rounded-control px-3 text-left text-body transition-colors " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 const IDLE = "text-ink-2 hover:bg-edge/50 hover:text-ink";
 
@@ -83,7 +83,7 @@ export function SettingsNav({
                 <Icon {...ICON} />
                 <span className="flex-1 truncate">{item.label}</span>
                 {item.id === "servers" && (
-                  <span className="font-mono text-2xs text-ink-dim">{serverCount}</span>
+                  <span className="text-meta text-ink-dim">{serverCount}</span>
                 )}
               </button>
             </li>

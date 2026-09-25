@@ -37,11 +37,11 @@ const WHEN_HINT: Record<CommandWhen, string> = {
 
 function ChordPill({ chord }: { chord: Chord | null }) {
   if (!chord) {
-    return <span className="text-xs italic text-ink-dim">Unbound</span>;
+    return <span className="text-ui italic text-ink-dim">Unbound</span>;
   }
   return (
     <kbd
-      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm font-medium text-ink"
+      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body font-medium text-ink"
       style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
     >
       {formatChord(chord, IS_MACOS)}
@@ -109,8 +109,8 @@ function CommandRow({
   return (
     <div className="flex items-start justify-between gap-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm text-ink">{cmd.label}</p>
-        <p className="mt-0.5 text-xs text-ink-dim">{WHEN_HINT[cmd.when]}</p>
+        <p className="text-body text-ink">{cmd.label}</p>
+        <p className="mt-0.5 text-ui text-ink-dim">{WHEN_HINT[cmd.when]}</p>
       </div>
 
       <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -120,7 +120,7 @@ function CommandRow({
               {candidate ? (
                 <ChordPill chord={candidate} />
               ) : (
-                <span className="text-xs text-ink-dim">Press a shortcut…</span>
+                <span className="text-ui text-ink-dim">Press a shortcut…</span>
               )}
               <Button
                 variant="primary"
@@ -132,13 +132,13 @@ function CommandRow({
               <Button onClick={onCancel}>Cancel</Button>
             </div>
             {conflicts.length > 0 && (
-              <p className="text-right text-xs text-warn-ink">
+              <p className="text-right text-ui text-warn-ink">
                 Already used by{" "}
                 {conflicts.map((id) => commandById(id)?.label ?? id).join(", ")}
               </p>
             )}
             {reserved && (
-              <p className="text-right text-xs text-warn-ink">
+              <p className="text-right text-ui text-warn-ink">
                 This is a system shortcut, so the OS may intercept it.
               </p>
             )}
@@ -146,7 +146,7 @@ function CommandRow({
         ) : (
           <div className="flex items-center gap-2">
             {alternates.map((alt) => (
-              <span key={alt} className="flex items-center gap-2 text-xs text-ink-dim">
+              <span key={alt} className="flex items-center gap-2 text-ui text-ink-dim">
                 <ChordPill chord={alt} />
                 or
               </span>

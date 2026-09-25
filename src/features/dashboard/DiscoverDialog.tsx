@@ -110,10 +110,10 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
     >
       <div className="flex h-full bg-panel">
         <div className="flex w-52 flex-none flex-col border-r border-edge bg-surface px-3 py-4">
-          <div className="px-2.5 pb-3.5 pt-1 text-[13px] font-semibold tracking-[0.02em] text-ink">
+          <div className="px-2.5 pb-3.5 pt-1 text-body font-semibold text-ink">
             Discover repositories
           </div>
-          <div className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-dim">
+          <div className="px-2.5 pb-1.5 text-label text-ink-dim">
             Organizations
           </div>
           <div className="flex flex-col gap-0.5 overflow-y-auto">
@@ -142,7 +142,7 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
             onClick={() => void recents.refetch()}
             busy={recents.isFetching}
             label="Refresh repositories"
-            className="mt-auto px-2.5 py-1.5 text-[11px]"
+            className="mt-auto px-2.5 py-1.5 text-ui-sm"
           >
             {recents.isFetching
               ? "Syncing…"
@@ -175,16 +175,16 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
 
           <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2">
             {recents.isLoading ? (
-              <div className="flex items-center gap-2 px-2.5 py-6 text-sm text-ink-dim">
+              <div className="flex items-center gap-2 px-2.5 py-6 text-body text-ink-dim">
                 <Spinner size={14} /> Loading your GitHub repositories…
               </div>
             ) : all.length === 0 ? (
-              <p className="px-2.5 py-6 text-center text-sm text-ink-dim">
+              <p className="px-2.5 py-6 text-center text-body text-ink-dim">
                 No repositories found. Sign in with <span className="font-mono">gh auth login</span>{" "}
                 to browse yours here, then refresh.
               </p>
             ) : repos.length === 0 ? (
-              <p className="px-2.5 py-6 text-center text-sm text-ink-dim">
+              <p className="px-2.5 py-6 text-center text-body text-ink-dim">
                 No repositories match “{filter}”.
               </p>
             ) : (
@@ -199,7 +199,7 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t border-edge px-5 py-2.5 text-[11px] text-ink-dim">
+          <div className="flex items-center justify-between border-t border-edge px-5 py-2.5 text-ui-sm text-ink-dim">
             <span>
               {scoped.length} {scoped.length === 1 ? "repository" : "repositories"}
             </span>
@@ -227,12 +227,12 @@ function OrgRow({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[13px] ${
+      className={`flex items-center gap-2 rounded-md px-2.5 py-1.5 text-body ${
         active ? "bg-panel-2 font-medium text-ink" : "text-ink-dim hover:bg-panel-2"
       }`}
     >
       {children}
-      <span className="flex-none text-[11px] text-ink-dim">{count}</span>
+      <span className="flex-none text-ui-sm text-ink-dim">{count}</span>
     </button>
   );
 }
@@ -258,12 +258,12 @@ function RepoRow({
     >
       <RepoAvatar source={repo.nameWithOwner} name={owner} size={22} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden whitespace-nowrap">
-        <span className="flex-none text-[13px]">
+        <span className="flex-none text-body">
           <span className="text-ink-dim">{owner}/</span>
           <span className="font-semibold text-ink">{name}</span>
         </span>
         {repo.description && (
-          <span className="truncate text-xs text-ink-dim">{repo.description}</span>
+          <span className="truncate text-ui text-ink-dim">{repo.description}</span>
         )}
       </span>
       {repo.private && (
@@ -273,11 +273,11 @@ function RepoRow({
         </span>
       )}
       {cloned ? (
-        <span className="flex-none text-[11px] text-ink-dim">Cloned</span>
+        <span className="flex-none text-ui-sm text-ink-dim">Cloned</span>
       ) : (
         <>
-          <span className="flex-none text-[11px] text-ink-dim group-hover:hidden">{age}</span>
-          <span className="hidden flex-none items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-xs font-semibold text-accent-ink group-hover:flex">
+          <span className="flex-none text-ui-sm text-ink-dim group-hover:hidden">{age}</span>
+          <span className="hidden flex-none items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-ui font-semibold text-accent-ink group-hover:flex">
             <DownloadIcon size={12} strokeWidth={2} />
             Clone…
           </span>

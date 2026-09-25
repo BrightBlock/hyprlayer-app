@@ -66,7 +66,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
       role="radio"
       aria-checked={mode === m}
       onClick={() => pickMode(m)}
-      className="flex items-center gap-2 text-left text-sm text-ink"
+      className="flex items-center gap-2 text-left text-body text-ink"
     >
       <span
         className={`flex h-4 w-4 items-center justify-center rounded-full border ${
@@ -94,7 +94,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
 
       <div className="mt-3 divide-y divide-edge/50">
         <div className="py-3.5">
-          <p className="text-sm text-ink">Branch name prefix</p>
+          <p className="text-body text-ink">Branch name prefix</p>
           <div className="mt-3 space-y-2.5">
             {radio("default", <span>Default ({DEFAULT_PREFIX})</span>)}
             {radio(
@@ -121,7 +121,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
                 }}
                 className="max-w-xs"
               />
-              <p className="mt-1.5 text-xs text-ink-dim">
+              <p className="mt-1.5 text-ui text-ink-dim">
                 Preview:{" "}
                 <span className="font-mono text-ink">
                   {effectivePrefix}
@@ -134,7 +134,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
 
         <div className="py-3.5">
           <BranchPrefixEditor
-            title={<p className="text-sm text-ink">Branch types</p>}
+            title={<p className="text-body text-ink">Branch types</p>}
             description="Customize the branch types for what you're working on. Picking one replaces the prefix above for that workstream."
             value={git.prefixes ?? []}
             onChange={(next) => patch({ prefixes: next.length ? next : null })}
@@ -194,8 +194,8 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
           }
         >
           Remove git-ignored files when archiving. Files in{" "}
-          <code className="font-mono text-xs">worktree.copy</code> (e.g.{" "}
-          <code className="font-mono text-xs">.env</code>) are kept.
+          <code className="text-meta">worktree.copy</code> (e.g.{" "}
+          <code className="text-meta">.env</code>) are kept.
         </SettingRow>
       </div>
     </Card>

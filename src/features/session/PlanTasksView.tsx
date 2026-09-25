@@ -42,7 +42,7 @@ function TaskRow({ task, working }: { task: PlanTask; working: boolean }) {
         ? "text-ink font-medium"
         : "text-ink-dim";
   return (
-    <li className="flex items-start gap-2 px-1.5 py-1 text-xs">
+    <li className="flex items-start gap-2 px-1.5 py-1 text-ui">
       <span className="mt-0.5 flex size-3 shrink-0 items-center justify-center">
         <StatusGlyph status={task.status} working={working} />
       </span>
@@ -80,8 +80,8 @@ export function SidebarTasksPanel({ sessionId }: { sessionId: string | undefined
           {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
         <ChecklistIcon size={14} className={active && working ? "animate-work-pulse" : undefined} />
-        <span className="text-xs font-semibold uppercase tracking-wide">Tasks</span>
-        <span className="ml-auto font-mono text-xs">
+        <span className="text-label">Tasks</span>
+        <span className="ml-auto text-meta">
           {done}/{tasks.length}
         </span>
       </button>

@@ -21,12 +21,12 @@ export function CurrentTaskCard({
             pulse && "animate-plan-pulse",
           )}
         />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{current.title}</span>
+        <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{current.title}</span>
       </div>
       {current.reason && (
         <div
           className={cx(
-            "mt-1 font-mono text-[10.5px]",
+            "mt-1 text-meta",
             current.state === "waiting" ? "text-warn-ink" : "text-bad-ink",
           )}
         >
@@ -47,18 +47,18 @@ export function PlanProgressHeader({
   const pct = Math.round(tracker.progress * 100);
   return (
     <div className="px-[18px] pt-4">
-      <h2 className="text-[19px] font-bold leading-tight tracking-[-0.01em] text-ink">{tracker.title}</h2>
+      <h2 className="text-h3 text-ink">{tracker.title}</h2>
       <div className="mt-2 flex items-center gap-2">
         <span
           className={cx(
-            "rounded-control px-[9px] py-[3px] text-[11.5px] font-semibold leading-none text-white",
+            "rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none text-white",
             tracker.allDone ? "bg-ok" : "bg-info",
           )}
         >
           {tracker.allDone ? "Done" : "Build"}
         </span>
         {tracker.currentPhase !== null && (
-          <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
+          <span className="text-meta tabular-nums text-ink-4">
             Phase {tracker.currentPhase} of {tracker.phases.length}
           </span>
         )}

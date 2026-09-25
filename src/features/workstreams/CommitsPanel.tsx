@@ -30,12 +30,12 @@ function CommitRow({
         style={{ paddingLeft: 6 }}
       >
         {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
-        <span className="shrink-0 font-mono text-xs text-ink-dim">{shortSha(commit.sha)}</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-ink" title={commit.subject}>
+        <span className="shrink-0 text-meta text-ink-dim">{shortSha(commit.sha)}</span>
+        <span className="min-w-0 flex-1 truncate text-ui text-ink" title={commit.subject}>
           {commit.subject}
         </span>
       </button>
-      <div className="flex items-center gap-1 pb-1 pl-[26px] text-[11px] text-ink-dim">
+      <div className="flex items-center gap-1 pb-1 pl-[26px] text-ui-sm text-ink-dim">
         <span>{commit.author}</span>
         <span>·</span>
         <span>{formatRelativeTime(commit.timeMs)}</span>
@@ -50,7 +50,7 @@ function CommitRow({
             <ErrorNote error={files.error} />
           </div>
         ) : (files.data ?? []).length === 0 ? (
-          <p className="px-1 pb-1 pl-[26px] text-xs text-ink-dim/70">No files changed.</p>
+          <p className="px-1 pb-1 pl-[26px] text-ui text-ink-dim/70">No files changed.</p>
         ) : (
           (files.data ?? []).map((entry) => {
             const glyph = GLYPH[entry.change] ?? {
@@ -70,13 +70,13 @@ function CommitRow({
                 })}
               >
                 <span
-                  className={`w-3 shrink-0 text-center font-mono text-xs font-semibold ${glyph.cls}`}
+                  className={`w-3 shrink-0 text-center text-meta font-semibold ${glyph.cls}`}
                   title={glyph.label}
                 >
                   {glyph.ch}
                 </span>
                 <FileTypeIcon name={entry.path} size={13} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink" title={label}>
+                <span className="min-w-0 flex-1 truncate text-meta text-ink" title={label}>
                   {label}
                 </span>
               </button>

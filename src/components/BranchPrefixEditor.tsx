@@ -54,7 +54,7 @@ const INVALID_FIELD = "border-bad/60 focus:border-bad";
 const COMPACT_FIELD = "py-1";
 
 const ROW_BUTTON =
-  "shrink-0 rounded px-1 py-0.5 text-xs text-ink-dim hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50";
+  "shrink-0 rounded px-1 py-0.5 text-ui text-ink-dim hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50";
 
 const BLANK_ADD: AddDraft = { label: "", prefix: "", keywords: "" };
 
@@ -175,7 +175,7 @@ export function BranchPrefixEditor({
         {title}
         <div className="flex shrink-0 items-center gap-2">
           {showEmptyState && (
-            <span className="flex items-center gap-1.5 text-xs text-ink-dim">
+            <span className="flex items-center gap-1.5 text-ui text-ink-dim">
               <span
                 aria-hidden="true"
                 className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-dim/60"
@@ -194,20 +194,20 @@ export function BranchPrefixEditor({
         </div>
       </div>
       {description && showEmptyState && (
-        <p className="mb-3 mt-1.5 max-w-xl text-xs leading-relaxed text-ink-dim">
+        <p className="mb-3 mt-1.5 max-w-xl text-ui leading-prose text-ink-dim">
           {description}
         </p>
       )}
       {(draft.length > 0 || adding) && (
         <>
           <div className="mb-1 flex items-center gap-2 px-2.5">
-            <span className="w-32 text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+            <span className="w-32 text-label text-ink-dim">
               Label
             </span>
-            <span className="w-28 text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+            <span className="w-28 text-label text-ink-dim">
               Prefix
             </span>
-            <span className="min-w-0 flex-1 text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+            <span className="min-w-0 flex-1 text-label text-ink-dim">
               Keywords
             </span>
           </div>
@@ -222,19 +222,19 @@ export function BranchPrefixEditor({
                     {!isEditing ? (
                       <>
                         <span
-                          className="w-32 truncate px-2.5 py-1 text-sm text-ink"
+                          className="w-32 truncate px-2.5 py-1 text-body text-ink"
                           title={row.label}
                         >
                           {row.label}
                         </span>
                         <span
-                          className="w-28 truncate px-2.5 py-1 font-mono text-sm text-ink"
+                          className="w-28 truncate px-2.5 py-1 text-meta text-ink"
                           title={row.prefix}
                         >
                           {row.prefix}
                         </span>
                         <span
-                          className="min-w-0 flex-1 truncate px-2.5 py-1 text-sm text-ink-dim"
+                          className="min-w-0 flex-1 truncate px-2.5 py-1 text-body text-ink-dim"
                           title={row.keywords}
                         >
                           {row.keywords || "—"}
@@ -325,7 +325,7 @@ export function BranchPrefixEditor({
                     </button>
                   </div>
                   {isEditing && (rowError?.label || rowError?.prefix) && (
-                    <p role="alert" className="mt-1 pl-1 text-xs text-bad">
+                    <p role="alert" className="mt-1 pl-1 text-ui text-bad">
                       {rowError.label ?? rowError.prefix}
                     </p>
                   )}
@@ -397,7 +397,7 @@ export function BranchPrefixEditor({
                   </button>
                 </div>
                 {addError && (
-                  <p role="alert" className="mt-1 pl-1 text-xs text-bad">
+                  <p role="alert" className="mt-1 pl-1 text-ui text-bad">
                     {addError}
                   </p>
                 )}

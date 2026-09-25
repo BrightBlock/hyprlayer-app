@@ -95,9 +95,9 @@ function ServerInstall({ host, onWork }: { host: Host; onWork: (work: string | n
 
   return (
     <div className="space-y-3">
-      {note && <p className="text-sm text-ink-dim">{note}</p>}
+      {note && <p className="text-body text-ink-dim">{note}</p>}
       {done ? (
-        <p className="text-sm text-ink">Installed. Relaunch to connect.</p>
+        <p className="text-body text-ink">Installed. Relaunch to connect.</p>
       ) : running ? null : (
         <Button variant="primary" onClick={start}>
           Install server {data.version}
@@ -164,7 +164,7 @@ function ServerUpdate({
     <div className="space-y-3">
       {/* Blocked, the header's error already names both versions. */}
       {connected && (
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           {release ? `The server is running ${release}` : "The server is running an older version"};
           this app ships a newer one.
         </p>
@@ -184,7 +184,7 @@ function ServerUpdate({
         error={error}
         onDismissError={() => setError(null)}
       >
-        <p className="text-sm leading-relaxed text-ink-dim">
+        <p className="text-body leading-prose text-ink-dim">
           Every agent and terminal running on <span className="text-ink">{where}</span> will stop.
           Hyprlayer reconnects once the updated server is up.
         </p>
@@ -269,11 +269,11 @@ export function HostsDialog() {
           <div>
             <div className="flex items-center gap-2">
               <Badge tone={badge.tone}>{badge.label}</Badge>
-              <span className="min-w-0 truncate text-sm text-ink">{where}</span>
+              <span className="min-w-0 truncate text-body text-ink">{where}</span>
               {work && !connection?.host && <WorkStatus label={work} />}
             </div>
-            {message && <p className="mt-2 text-sm text-ink-dim">{message}</p>}
-            {remedy && <p className="mt-1 text-sm text-ink-dim">{remedy}</p>}
+            {message && <p className="mt-2 text-body text-ink-dim">{message}</p>}
+            {remedy && <p className="mt-1 text-body text-ink-dim">{remedy}</p>}
           </div>
 
           {showInstall && connection?.host && <ServerInstall host={connection.host} onWork={setInstallWork} />}

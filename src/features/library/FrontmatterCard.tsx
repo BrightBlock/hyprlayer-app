@@ -27,13 +27,13 @@ export function FrontmatterCard({ meta }: { meta: DocMeta }) {
         {fm.status && <Badge tone={STATUS_TONE[fm.status] ?? "dim"}>{fm.status}</Badge>}
         <Badge tone="dim">{meta.scope}</Badge>
         {meta.fmWarnings.length > 0 && (
-          <span className="text-xs text-warn-ink" title={meta.fmWarnings.join("\n")}>
+          <span className="text-ui text-warn-ink" title={meta.fmWarnings.join("\n")}>
             ⚠ {meta.fmWarnings.length} frontmatter warning{meta.fmWarnings.length === 1 ? "" : "s"}
           </span>
         )}
       </div>
       {rows.length > 0 && (
-        <dl className="selectable mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
+        <dl className="selectable mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-ui">
           {rows.map((row, i) => (
             <Fragment key={`${row.label}:${i}`}>
               <dt className="text-ink-dim">{row.label}</dt>
@@ -45,14 +45,14 @@ export function FrontmatterCard({ meta }: { meta: DocMeta }) {
       {tags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">
           {tags.map((tag) => (
-            <span key={tag} className="rounded bg-panel-2 px-1.5 py-0.5 text-[11px] text-ink-dim">
+            <span key={tag} className="rounded bg-panel-2 px-1.5 py-0.5 text-ui-sm text-ink-dim">
               #{tag}
             </span>
           ))}
         </div>
       )}
       {related.length > 0 && (
-        <p className="selectable mt-2 text-xs text-ink-dim">Related: {related.join(", ")}</p>
+        <p className="selectable mt-2 text-ui text-ink-dim">Related: {related.join(", ")}</p>
       )}
     </Card>
   );

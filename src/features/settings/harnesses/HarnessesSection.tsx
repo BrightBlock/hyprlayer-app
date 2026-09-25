@@ -36,7 +36,7 @@ export function HarnessesSection({
 
   return (
     <div className="space-y-4">
-      <h1 className="text-[19px] font-bold tracking-tight text-ink">Harnesses</h1>
+      <h1 className="text-h3 text-ink">Harnesses</h1>
 
       <div className="flex items-center gap-5 border-b border-edge">
         {TABS.map((tab) => {
@@ -47,7 +47,7 @@ export function HarnessesSection({
               type="button"
               onClick={() => setActive(tab.id)}
               aria-current={isActive}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-0.5 pb-2.5 text-sm transition-colors ${
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-0.5 pb-2.5 text-body transition-colors ${
                 isActive
                   ? "border-accent text-ink"
                   : "border-transparent text-ink-dim hover:text-ink"
@@ -55,7 +55,7 @@ export function HarnessesSection({
             >
               {tab.label}
               {tab.badge && (
-                <span className="rounded bg-accent/15 px-1 py-0.5 font-mono text-[9.5px] font-semibold uppercase text-accent">
+                <span className="rounded bg-accent/15 px-1 py-0.5 text-tag text-accent">
                   {tab.badge}
                 </span>
               )}

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 
 export function SectionHeading({ children }: { children: ReactNode }) {
-  return <p className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">{children}</p>;
+  return <p className="text-label text-ink-dim">{children}</p>;
 }
 
 export function SettingsSection({ first, children }: { first?: boolean; children: ReactNode }) {

@@ -124,19 +124,19 @@ export function Toast() {
         className="-mr-4 z-10 mt-2 flex h-6 shrink-0 items-center gap-1 rounded-full border border-edge bg-panel-2 px-2 text-ink-dim hover:text-ink"
       >
         <XIcon size={9} />
-        {!sticky && <span className="text-2xs tabular-nums leading-none">{remaining}s</span>}
+        {!sticky && <span className="text-ui-sm tabular-nums leading-none">{remaining}s</span>}
       </button>
       <div className="flex min-w-72 max-w-sm items-start gap-3 rounded-lg border border-edge bg-panel px-4 py-3.5 shadow-2xl">
         <ToastIcon tone={tone} />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">{title}</p>
-          <p className="mt-0.5 text-xs text-ink-dim">{message}</p>
+          <p className="text-body font-semibold text-ink">{title}</p>
+          <p className="mt-0.5 text-ui text-ink-dim">{message}</p>
           {action && (
             <button
               type="button"
               onClick={() => void runAction()}
               disabled={acting}
-              className="mt-2.5 inline-flex items-center rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-60"
+              className="mt-2.5 inline-flex items-center rounded-md bg-accent px-2.5 py-1 text-ui font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-60"
             >
               {acting ? (action.busyLabel ?? action.label) : action.label}
             </button>

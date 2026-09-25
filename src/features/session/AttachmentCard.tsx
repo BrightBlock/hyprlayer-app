@@ -51,7 +51,7 @@ export function AttachmentCard({
 
   return (
     <span
-      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-xs text-ink"
+      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-ui text-ink"
       title={name}
     >
       {kind === "image" ? (

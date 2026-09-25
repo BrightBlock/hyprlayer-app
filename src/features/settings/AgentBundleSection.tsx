@@ -43,7 +43,7 @@ import {
 function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpinned: boolean }) {
   if (!result.ok) {
     return (
-      <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+      <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-body">
         <p className="text-bad">
           The reinstall failed
           {result.exitCode != null && <> (exit {result.exitCode})</>}. The CLI did not confirm a
@@ -56,7 +56,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
   if (result.source === "fallback") {
     if (unpinned) {
       return (
-        <div className="selectable mt-2 rounded-md border border-edge bg-panel-2 p-3 text-sm">
+        <div className="selectable mt-2 rounded-md border border-edge bg-panel-2 p-3 text-body">
           <p className="text-ink-dim">
             The pin was cleared. No release publishes a bundle for this CLI&rsquo;s own version,
             so it linked Claude and Codex to the repository&rsquo;s current bundle instead.
@@ -66,7 +66,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
       );
     }
     return (
-      <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
+      <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-body">
         <p className="text-warn-ink">
           That version has no published bundle pair, so the CLI linked Claude and Codex to the
           repository fallback instead. What is active no longer matches the version shown.
@@ -78,7 +78,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
   if (result.source === "unknown") {
     if (!unpinned) {
       return (
-        <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
+        <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-body">
           <p className="text-warn-ink">
             The reinstall finished, but its output did not confirm the published release asset
             was used, so treat the installed files as unverified.
@@ -88,7 +88,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
       );
     }
     return (
-      <div className="selectable mt-2 rounded-md border border-edge bg-panel-2 p-3 text-sm">
+      <div className="selectable mt-2 rounded-md border border-edge bg-panel-2 p-3 text-body">
         <p className="text-ink-dim">
           The reinstall finished, but its output did not say which source it used. Its own words:
         </p>
@@ -97,7 +97,7 @@ function InstallOutcome({ result, unpinned }: { result: AgentBundleInstall; unpi
     );
   }
   return (
-    <p className="mt-2 text-sm text-ok">
+    <p className="mt-2 text-body text-ok">
       {unpinned
         ? "Pin cleared — the bundle now tracks the CLI again."
         : "Claude and Codex linked to the published bundle."}
@@ -131,13 +131,13 @@ function RowInstallButton({
 function UpdateOutcome({ report, target }: { report: AgentBundleReport; target: string }) {
   if (report.source === "releaseAsset") {
     return (
-      <p className="mt-2 text-sm text-ok">
+      <p className="mt-2 text-body text-ok">
         Updated to {target} — Claude and Codex now point to the published bundle.
       </p>
     );
   }
   return (
-    <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-sm">
+    <div className="selectable mt-2 rounded-md border border-warn/30 bg-warn/10 p-3 text-body">
       <p className="text-warn-ink">
         {report.source === "fallback"
           ? `Claude and Codex were linked to a fallback bundle instead of ${target}.`
@@ -172,13 +172,13 @@ export function CliUpdateOutcome({
         </div>
       )}
       {result && !result.ok && (
-        <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+        <div className="selectable mt-2 rounded-md border border-bad/30 bg-bad/10 p-3 text-body">
           <p className="text-bad">
             The update failed{result.exitCode != null && <> (exit {result.exitCode})</>}.
             {hint && (
               <>
                 {" "}
-                Run <span className="font-mono text-xs">{hint}</span> in a terminal — your package
+                Run <span className="text-meta">{hint}</span> in a terminal — your package
                 manager may need to prompt.
               </>
             )}
@@ -187,7 +187,7 @@ export function CliUpdateOutcome({
         </div>
       )}
       {result?.ok && (
-        <p className="mt-2 text-sm text-ok">hyprlayer updated. Re-open Settings to pick it up.</p>
+        <p className="mt-2 text-body text-ok">hyprlayer updated. Re-open Settings to pick it up.</p>
       )}
     </>
   );
@@ -205,7 +205,7 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
   if (!latest && !stale && !attempted) return null;
 
   return (
-    <div className="mt-2 text-sm text-ink-dim">
+    <div className="mt-2 text-body text-ink-dim">
       <div className="flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
         <span>hyprlayer {installed ?? `pre-${SKILLS_CLI_FLOOR}`}</span>
         {latest ? (
@@ -229,13 +229,13 @@ export function CliUpdateNote({ version }: { version?: string | null }) {
 
 function UnpairedLayoutNote({ agentTool }: { agentTool?: string | null }) {
   return (
-    <div className="mt-1 flex gap-2.5 rounded-md border border-warn/35 bg-warn/8 p-3 text-sm">
+    <div className="mt-1 flex gap-2.5 rounded-md border border-warn/35 bg-warn/8 p-3 text-body">
       <span className="flex pt-0.5 text-warn-ink">
         <WarningTriangleIcon size={14} />
       </span>
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-ink">Bundle versions need Claude and Codex</p>
-        <p className="mt-1.5 text-xs leading-relaxed text-pretty text-ink-dim">
+        <p className="text-ui font-semibold text-ink">Bundle versions need Claude and Codex</p>
+        <p className="mt-1.5 text-ui leading-prose text-pretty text-ink-dim">
           One bundle is linked into <span className="font-mono">~/.claude</span> and{" "}
           <span className="font-mono">~/.codex</span> together, so switching versions needs both
           provisioned. This install reports {agentTool ?? "a single target"} only. Run{" "}
@@ -248,13 +248,13 @@ function UnpairedLayoutNote({ agentTool }: { agentTool?: string | null }) {
 
 function LegacyLayoutNote({ version }: { version?: string | null }) {
   return (
-    <div className="mt-1 flex gap-2.5 rounded-md border border-bad/35 bg-bad/8 p-3 text-sm">
+    <div className="mt-1 flex gap-2.5 rounded-md border border-bad/35 bg-bad/8 p-3 text-body">
       <span className="flex pt-0.5 text-bad">
         <WarningTriangleIcon size={14} />
       </span>
       <div className="min-w-0">
-        <p className="text-xs font-semibold text-ink">Migration required for updates</p>
-        <p className="mt-1.5 text-xs leading-relaxed text-pretty text-ink-dim">
+        <p className="text-ui font-semibold text-ink">Migration required for updates</p>
+        <p className="mt-1.5 text-ui leading-prose text-pretty text-ink-dim">
           Agent files were copied straight into each target before {SKILLS_CLI_FLOOR}, so
           Hyprlayer cannot update them in place. A newer CLI moves them into one managed
           directory and links them back into <span className="font-mono">~/.claude</span> and{" "}
@@ -333,7 +333,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 disabled={busy}
                 aria-label="Agent bundle version"
                 triggerLabel={value || sha || "unknown"}
-                className="w-auto px-1.5 py-0.5 text-xs"
+                className="w-auto px-1.5 py-0.5 text-ui"
               />
               {behind ? (
                 <Badge tone="warn">{behind} available</Badge>
@@ -341,7 +341,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
                 !pending && <Badge tone="ok">Latest</Badge>
               )}
               {pin.kind === "pinned" && pin.drifted && pin.binary && (
-                <span className="text-xs text-warn-ink">this CLI ships {pin.binary}</span>
+                <span className="text-ui text-warn-ink">this CLI ships {pin.binary}</span>
               )}
             </>
           ) : layout === "legacy" ? (
@@ -351,7 +351,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
           )}
         </div>
         {(sha || lastChecked != null) && (
-          <span className="font-mono text-xs text-ink-dim">
+          <span className="text-meta text-ink-dim">
             {sha}
             {lastChecked != null && <> · checked {formatRelativeTime(lastChecked * 1000)}</>}
           </span>
@@ -386,7 +386,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
             Clear pin
           </Button>
         )}
-        <Link to="/agents" className="shrink-0 px-1 text-xs text-accent hover:underline">
+        <Link to="/agents" className="shrink-0 px-1 text-ui text-accent hover:underline">
           Manage
         </Link>
       </div>
@@ -399,20 +399,20 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
         )}
 
         {busy && (
-          <p className="mt-2 flex items-center gap-2 text-sm text-ink-dim">
+          <p className="mt-2 flex items-center gap-2 text-body text-ink-dim">
             <Spinner size={14} />
             Installing the bundle pair and switching the Claude and Codex links…
           </p>
         )}
 
         {versioned && !busy && versions.isError && (
-          <p className="mt-2 text-sm text-ink-dim">
+          <p className="mt-2 text-body text-ink-dim">
             Could not reach GitHub for the version list, so there is nothing to choose from right
             now. The installed version above is still accurate.
           </p>
         )}
         {versioned && !busy && versions.data && listOptions.length === 0 && (
-          <p className="mt-2 text-sm text-ink-dim">
+          <p className="mt-2 text-body text-ink-dim">
             No recent release publishes an agent bundle for this tool.
           </p>
         )}

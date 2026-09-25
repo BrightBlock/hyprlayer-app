@@ -186,11 +186,11 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
               }
             }}
             placeholder="Run a prompt…"
-            className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-dim/50"
+            className="flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim/50"
             aria-autocomplete="list"
             aria-controls="prompt-palette-results"
           />
-          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] font-medium text-ink-dim">
+          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm font-medium text-ink-dim">
             esc
           </kbd>
         </div>
@@ -202,7 +202,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
           className="max-h-80 overflow-y-auto py-1"
         >
           {rows.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-ink-dim">
+            <div className="px-4 py-8 text-center text-body text-ink-dim">
               No prompts match “{query}”.
             </div>
           ) : (
@@ -218,18 +218,18 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
                 onClick={() => select(row)}
                 className={rowClass({
                   tier: "standard",
-                  className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
+                  className: `flex w-full gap-2 rounded-none px-4 text-left text-body transition-colors ${
                     clampedActive === i ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
                   } ${row.disabled ? "opacity-50" : ""}`,
                 })}
               >
                 {row.icon}
                 <span className="shrink-0 font-medium">{row.name}</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-dim/70">{row.desc}</span>
+                <span className="min-w-0 flex-1 truncate text-ui text-ink-dim/70">{row.desc}</span>
                 {row.chord && (
                   <ChordHint
                     chord={row.chord}
-                    className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-xs text-ink-dim"
+                    className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui text-ink-dim"
                   />
                 )}
               </button>
@@ -237,12 +237,12 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
           )}
         </div>
 
-        <div className="flex items-center gap-3 border-t border-edge px-4 py-2 text-[11px] text-ink-dim">
+        <div className="flex items-center gap-3 border-t border-edge px-4 py-2 text-ui-sm text-ink-dim">
           <span>
-            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-[10px]">↑↓</kbd> navigate
+            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-ui-sm">↑↓</kbd> navigate
           </span>
           <span>
-            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-[10px]">↵</kbd> run
+            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-ui-sm">↵</kbd> run
           </span>
           <span className="ml-auto text-ink-dim/60">
             {activeWorkstream

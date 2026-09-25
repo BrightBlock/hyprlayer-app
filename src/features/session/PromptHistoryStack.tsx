@@ -24,7 +24,7 @@ export function PromptHistoryStack({
       className="pointer-events-none absolute right-4 top-3 z-10 flex flex-col items-end gap-[3px] opacity-60 transition-opacity hover:opacity-100"
     >
       {hasMore && (
-        <span className="pointer-events-none select-none text-[9px] leading-none text-ink-dim/40">
+        <span className="pointer-events-none select-none text-tag leading-none text-ink-dim/40">
           ···
         </span>
       )}
@@ -37,7 +37,7 @@ export function PromptHistoryStack({
         return (
           <div key={idx} className="relative">
             {isHovered && (
-              <div className="pointer-events-none absolute right-full top-0 mr-2 w-72 max-h-40 overflow-hidden rounded-lg border border-edge bg-panel p-2 text-xs text-ink shadow-xl whitespace-pre-wrap break-words">
+              <div className="pointer-events-none absolute right-full top-0 mr-2 w-72 max-h-40 overflow-hidden rounded-lg border border-edge bg-panel p-2 text-ui text-ink shadow-xl whitespace-pre-wrap break-words">
                 {prompts[idx]}
               </div>
             )}

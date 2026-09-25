@@ -27,14 +27,14 @@ export function AgentUpdateReport({
     <Dialog open={open} onClose={onClose} title="Agents updated" size="lg">
       <div className="flex flex-col gap-3.5">
         {report.to !== null && (
-          <p className="font-mono text-xs text-ink-dim">
+          <p className="text-meta text-ink-dim">
             {report.from ? `${report.from} → ` : ""}
             {report.to}
           </p>
         )}
 
         <p
-          className={`rounded-md border px-2.5 py-2 text-sm ${
+          className={`rounded-md border px-2.5 py-2 text-body ${
             caution
               ? "border-warn/30 bg-warn/10 text-warn-ink"
               : "border-ok/30 bg-ok/10 text-ok"
@@ -70,7 +70,7 @@ export function AgentUpdateFailed({
   return (
     <Dialog open={open} onClose={onClose} title="Agent update failed" size="lg">
       <div className="flex flex-col gap-3.5">
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           Your agents are most likely unchanged
           {failure.stillOn ? (
             <>
@@ -82,7 +82,7 @@ export function AgentUpdateFailed({
         </p>
 
         <details className="group">
-          <summary className="cursor-pointer select-none text-xs text-ink-dim hover:text-ink">
+          <summary className="cursor-pointer select-none text-ui text-ink-dim hover:text-ink">
             Technical details
           </summary>
           <CliOutput text={failure.message} />

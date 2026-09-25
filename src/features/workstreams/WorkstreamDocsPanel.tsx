@@ -72,7 +72,7 @@ export function WorkstreamDocsPanel({
         />
       </div>
       {targetTitle && (
-        <p className="text-xs text-ink-dim">
+        <p className="text-ui text-ink-dim">
           Attachments become context for <span className="font-medium text-ink">{targetTitle}</span>.
         </p>
       )}
@@ -84,7 +84,7 @@ export function WorkstreamDocsPanel({
         </div>
       )}
       {docs.data && docs.data.items.length === 0 && (
-        <p className="rounded-lg border border-edge bg-panel p-4 text-sm text-ink-dim">
+        <p className="rounded-lg border border-edge bg-panel p-4 text-body text-ink-dim">
           No documents yet. Research and plan docs created in this workstream's worktree will
           appear here.
         </p>
@@ -103,8 +103,8 @@ export function WorkstreamDocsPanel({
                   onClick={() => onOpenDoc(doc.id)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <p className="truncate text-sm font-medium text-ink">{docTitle(doc)}</p>
-                  <p className="selectable mt-0.5 truncate font-mono text-xs text-ink-dim">
+                  <p className="truncate text-body font-medium text-ink">{docTitle(doc)}</p>
+                  <p className="selectable mt-0.5 truncate text-meta text-ink-dim">
                     {doc.relPath}
                   </p>
                 </button>
@@ -117,7 +117,7 @@ export function WorkstreamDocsPanel({
                     onClick={() =>
                       isAttached ? onDetach(doc.id) : onAttach(doc.id, roleForDoc(doc))
                     }
-                    className="px-2 py-1 text-xs"
+                    className="px-2 py-1 text-ui"
                   >
                     {isAttached ? "Detach" : "Attach"}
                   </Button>

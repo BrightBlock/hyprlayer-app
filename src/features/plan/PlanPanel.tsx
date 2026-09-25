@@ -93,13 +93,13 @@ export function PlanPanel({
     >
       <div className="flex h-[38px] shrink-0 items-center gap-2 border-b border-edge px-[14px]">
         <FileText {...ICON} size={14} className="text-ink-4" />
-        <span className="text-[12.5px] font-bold text-ink">Plan preview</span>
+        <span className="text-ui font-semibold text-ink">Plan preview</span>
         <span className="flex-1" />
         {headerAction && (
           <button
             type="button"
             onClick={headerAction.onClick}
-            className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-[11.5px] font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
+            className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-ui-sm font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
           >
             {headerAction.label}
             {headerAction.icon === "chat" ? <MessageSquare {...ICON} size={12} /> : <ExternalLink {...ICON} size={12} />}
@@ -130,7 +130,7 @@ export function PlanPanel({
                 />
               ))}
               {tracker.phases.length === 0 && (
-                <div className="text-[13px] leading-[1.6] text-ink-2">
+                <div className="text-body leading-prose text-ink-2">
                   <MarkdownPreview body={tracker.body} />
                 </div>
               )}
@@ -148,7 +148,7 @@ export function PlanPanel({
         {tracking ? (
           <>
             {tracker.total > 0 && (
-              <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
+              <span className="text-meta tabular-nums text-ink-4">
                 {tracker.done} of {plural(tracker.total, "task")} done
               </span>
             )}
@@ -159,7 +159,7 @@ export function PlanPanel({
               </Button>
             ) : (
               diff && (
-                <span className="flex items-center gap-1.5 font-mono text-[10.5px] tabular-nums">
+                <span className="flex items-center gap-1.5 text-meta tabular-nums">
                   <span className="text-diff-add">+{diff.additions}</span>
                   <span className="text-diff-del">−{diff.deletions}</span>
                 </span>
@@ -169,7 +169,7 @@ export function PlanPanel({
         ) : (
           <>
             {tracker.phases.length > 0 && (
-              <span className="font-mono text-[10.5px] tabular-nums text-ink-4">
+              <span className="text-meta tabular-nums text-ink-4">
                 {plural(tracker.phases.length, "phase")} · {tracker.done} of {plural(tracker.total, "task")} done
               </span>
             )}
@@ -179,7 +179,7 @@ export function PlanPanel({
                 <Button
                   variant="primary"
                   size="sm"
-                  className="h-[26px] text-[11.5px] font-semibold"
+                  className="h-[26px] text-ui-sm font-semibold"
                   busy={approving}
                   disabled={approve.blocked !== null}
                   onClick={onApprove}

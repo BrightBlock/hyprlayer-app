@@ -44,7 +44,7 @@ const ROW_BUTTON = "h-6 w-6";
 
 function StatusPill({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-edge py-0.5 pl-2 pr-2.5 font-mono text-xs">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-edge py-0.5 pl-2 pr-2.5 text-meta">
       <span className={`h-1.5 w-1.5 rounded-full ${ok ? "bg-ok" : "bg-bad"}`} />
       {children}
     </span>
@@ -79,10 +79,10 @@ function CliRow({
     <CardRow label="CLI">
       <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs">{version ?? "—"}</span>
+          <span className="text-meta">{version ?? "—"}</span>
           {latest && <Badge tone="warn">{latest} available</Badge>}
         </div>
-        <span className="truncate font-mono text-2xs text-ink-dim">
+        <span className="truncate text-meta text-ink-dim">
           {binary?.path ?? "not found on PATH"}
         </span>
       </div>
@@ -169,7 +169,7 @@ function EditorPicker({ path, disabledReason }: { path: string; disabledReason: 
             onClick={() => pick(t.name, t.openWith)}
           >
             <span>{t.name}</span>
-            <span className="font-mono text-2xs text-ink-dim">{t.openWith}</span>
+            <span className="text-meta text-ink-dim">{t.openWith}</span>
           </MenuItem>
         ))}
       </Popover>
@@ -191,11 +191,11 @@ function ConfigRow({ path }: { path: string }) {
           type="button"
           onClick={() => trigger(path)}
           title="Click to copy"
-          className="-ml-1.5 min-w-0 truncate rounded-sm px-1.5 py-0.5 text-left font-mono text-xs text-ink hover:bg-panel-2"
+          className="-ml-1.5 min-w-0 truncate rounded-sm px-1.5 py-0.5 text-left text-meta text-ink hover:bg-panel-2"
         >
           {path}
         </button>
-        {copied && <span className="shrink-0 text-2xs text-ok">Copied</span>}
+        {copied && <span className="shrink-0 text-ui-sm text-ok">Copied</span>}
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -245,15 +245,15 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
     <CardRow label="Agent targets">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         {status.isLoading ? (
-          <span className="flex items-center gap-2 text-sm text-ink-dim">
+          <span className="flex items-center gap-2 text-body text-ink-dim">
             <Spinner size={12} /> Ensuring Claude Code and Codex agent links…
           </span>
         ) : !installed ? (
           <>
-            <span className="rounded-control bg-bad/10 px-1.5 py-0.5 font-mono text-3xs font-semibold text-bad-ink">
+            <span className="rounded-control bg-bad/10 px-1.5 py-0.5 text-meta font-semibold text-bad-ink">
               NEEDS REPAIR
             </span>
-            <span className="text-[12.5px] text-ink-2">
+            <span className="text-ui text-ink-2">
               {broken.length > 0 ? broken.join(" and ") : "Claude Code and Codex"} agent links were
               not fully installed.
             </span>
@@ -267,7 +267,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
         ) : fallback ? (
           <StatusPill ok>{fallback}</StatusPill>
         ) : (
-          <span className="text-sm text-ink-dim">{status.data?.agentTool ?? "AI agents"}</span>
+          <span className="text-body text-ink-dim">{status.data?.agentTool ?? "AI agents"}</span>
         )}
       </div>
 
@@ -295,17 +295,17 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
 
       {repaired && moved && resolved && (
         <div className={CARD_ROW_SPAN}>
-          <div className="mt-1 rounded-md border border-edge bg-panel-2 p-3 text-sm">
+          <div className="mt-1 rounded-md border border-edge bg-panel-2 p-3 text-body">
             <p className="text-ok">Relinked Claude and Codex.</p>
             {resolved.replaced.length > 0 && (
-              <p className="mt-1.5 text-xs text-ink-dim">
+              <p className="mt-1.5 text-ui text-ink-dim">
                 Removed {resolved.replaced.length} stale{" "}
                 {resolved.replaced.length === 1 ? "copy" : "copies"} that already matched the
                 bundle.
               </p>
             )}
             {resolved.backedUp.length > 0 && (
-              <p className="mt-1.5 text-xs text-ink-dim">
+              <p className="mt-1.5 text-ui text-ink-dim">
                 Kept {resolved.backedUp.length} edited{" "}
                 {resolved.backedUp.length === 1 ? "copy" : "copies"} — moved aside as{" "}
                 <span className="font-mono">.bak-</span>, not deleted.
@@ -324,7 +324,7 @@ function AgentTargetsRow({ status }: { status: ReturnType<typeof useAiStatus> })
             </div>
           )}
           {failure && (
-            <div className="selectable relative mt-1 rounded-md border border-bad/30 bg-bad/10 p-3 text-sm">
+            <div className="selectable relative mt-1 rounded-md border border-bad/30 bg-bad/10 p-3 text-body">
               <button
                 type="button"
                 onClick={reset}
@@ -356,9 +356,9 @@ export function HyprlayerCard({ data }: { data: Bootstrap }) {
     <Card className="divide-y divide-edge-2 p-0">
       <header className="flex items-center gap-2.5 px-4 py-3.5">
         <span className="h-2 w-2 shrink-0 bg-ink" aria-hidden="true" />
-        <span className="text-[13.5px] font-bold text-ink">Hyprlayer</span>
+        <span className="text-body font-semibold text-ink">Hyprlayer</span>
         {config.state === "ready" && (
-          <span className="flex min-w-0 items-center gap-2 font-mono text-xs text-ink-dim">
+          <span className="flex min-w-0 items-center gap-2 text-meta text-ink-dim">
             <span>{config.backendKind}</span>
             {!config.configured && <Badge tone="warn">incomplete</Badge>}
             <span aria-hidden="true">·</span>
@@ -378,8 +378,8 @@ export function HyprlayerCard({ data }: { data: Bootstrap }) {
         <CardRow label="Config">
           <div className="min-w-0 space-y-1.5">
             <Badge tone="warn">Not set up yet</Badge>
-            <p className="text-sm text-ink-dim">
-              No config found at <span className="selectable font-mono text-xs">{config.path}</span>
+            <p className="text-body text-ink-dim">
+              No config found at <span className="selectable text-meta">{config.path}</span>
               . Add your first project from the dashboard.
             </p>
           </div>

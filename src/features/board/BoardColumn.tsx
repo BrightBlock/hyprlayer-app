@@ -23,8 +23,8 @@ export function BoardColumn({
           <ModeIcon mode={stageKey} size={18} />
         </span>
         <div className="min-w-0">
-          <span className="block text-base font-semibold text-ink">{label}</span>
-          <span className="mt-0.5 block text-xs text-ink-dim">{subtitle}</span>
+          <span className="block text-title text-ink">{label}</span>
+          <span className="mt-0.5 block text-ui text-ink-dim">{subtitle}</span>
         </div>
       </div>
       <div

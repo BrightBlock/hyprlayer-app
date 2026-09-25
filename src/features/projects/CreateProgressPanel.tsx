@@ -89,7 +89,7 @@ function Row({ step, state }: { step: CreateStep; state: StepState | undefined }
       </span>
       <span
         className={cx(
-          "min-w-0 flex-1 truncate text-sm",
+          "min-w-0 flex-1 truncate text-body",
           status === "running" || status === "failed" ? "text-ink" : "text-ink-dim",
           status === undefined || status === "skipped" ? "opacity-60" : null,
         )}
@@ -99,7 +99,7 @@ function Row({ step, state }: { step: CreateStep; state: StepState | undefined }
       {detail && (
         <span
           className={cx(
-            "shrink-0 truncate text-xs",
+            "shrink-0 truncate text-ui",
             status === "failed" ? "font-mono text-bad" : "font-mono text-ink-dim",
             status === "skipped" && "font-sans opacity-60",
           )}

@@ -50,7 +50,7 @@ export function RestoreTargetDialog({
           if (path.trim()) onRestore(path.trim());
         }}
       >
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           <span className="font-mono text-ink-2">{original}</span> is taken. Choose an existing folder
           to restore into, or type a new path.
         </p>

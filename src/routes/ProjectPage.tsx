@@ -1034,7 +1034,7 @@ export function ProjectPage() {
           aria-hidden="true"
         />
       )}
-      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-sm font-medium">
+      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-body font-medium">
         {shell.diffView ? (
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <DiffIcon size={13} />
@@ -1050,7 +1050,7 @@ export function ProjectPage() {
               <EngineGlyph
                 glyph={e.glyph}
                 accentToken={e.accentToken}
-                className="text-[11px] leading-none"
+                className="text-ui-sm leading-none"
               />
             );
           })()
@@ -1131,7 +1131,7 @@ export function ProjectPage() {
             >
               <ArchiveIcon size={15} />
               {archivedShells.length > 0 && (
-                <span className="font-mono text-[11px] leading-none">
+                <span className="text-meta leading-none">
                   {archivedShells.length}
                 </span>
               )}
@@ -1161,7 +1161,7 @@ export function ProjectPage() {
   const renderPaneContent = (shell: ShellTab | null) => {
     if (!activeView || !shell) {
       return (
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-ink-dim">
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-body text-ink-dim">
           No agent in this pane
         </div>
       );
@@ -1473,7 +1473,7 @@ export function ProjectPage() {
                 const spawn = (engineId?: string) => addShellToPane(menu.pane, engineId);
                 return (
                   <ContextMenu position={menu} onClose={() => setNewAgentMenu(null)}>
-                    <div className="px-2 pb-1 pt-0.5 text-xs text-ink-dim">
+                    <div className="px-2 pb-1 pt-0.5 text-ui text-ink-dim">
                       New agent in {activeView?.item.title ?? "workstream"}
                     </div>
                     {enabledEngines(multiplexer).map((engine) => (
@@ -1488,11 +1488,11 @@ export function ProjectPage() {
                           <EngineGlyph
                             glyph={engine.glyph}
                             accentToken={engine.accentToken}
-                            className="text-[13px] leading-none"
+                            className="text-body leading-none"
                           />
                           <span className="min-w-0 flex-1 truncate">{engine.label}</span>
                           {engine.id === def?.id && (
-                            <span className="font-mono text-[11px] text-ink-dim">⌘T</span>
+                            <span className="text-meta text-ink-dim">⌘T</span>
                           )}
                         </span>
                       </ContextMenuItem>
@@ -1642,8 +1642,8 @@ export function ProjectPage() {
               <div className="min-h-0 flex-1 overflow-y-auto p-5">
                 <div className="mx-auto max-w-3xl space-y-4">
                   <div className="rounded-lg border border-edge bg-panel p-6 text-center">
-                    <p className="text-base font-medium text-ink">Create your first workstream</p>
-                    <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
+                    <p className="text-title text-ink">Create your first workstream</p>
+                    <p className="mx-auto mt-1 max-w-md text-body leading-prose text-ink-dim">
                       {folderProject
                         ? "Each workstream is its own conversation, all running in this folder. Start as many as you need."
                         : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
@@ -1764,7 +1764,7 @@ export function ProjectPage() {
 
       {drag && (
         <div
-          className="pointer-events-none fixed z-50 scale-105 rounded-md border border-accent/70 bg-panel-2 px-2.5 py-1.5 text-xs font-medium text-ink shadow-2xl ring-2 ring-accent/30"
+          className="pointer-events-none fixed z-50 scale-105 rounded-md border border-accent/70 bg-panel-2 px-2.5 py-1.5 text-ui font-medium text-ink shadow-2xl ring-2 ring-accent/30"
           style={{ left: drag.x + 12, top: drag.y + 12 }}
         >
           {drag.title}

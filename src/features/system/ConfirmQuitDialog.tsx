@@ -58,12 +58,12 @@ export function ConfirmQuitDialog() {
       error={error}
       onDismissError={() => setError(null)}
     >
-      <p className="text-sm leading-relaxed text-ink-dim">
+      <p className="text-body leading-prose text-ink-dim">
         Running agents, terminals, and lifecycle scripts all stop when the app quits.
       </p>
 
       <label
-        className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-dim hover:text-ink"
+        className="flex cursor-pointer items-center gap-1.5 text-ui text-ink-dim hover:text-ink"
         title={`${IS_MACOS ? "⌘Q" : "Closing the window"} quits immediately. Re-enable in Settings → General.`}
       >
         <input

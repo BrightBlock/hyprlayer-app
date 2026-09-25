@@ -51,7 +51,7 @@ export function LibrarySidebar({
     >
       <div className="absolute inset-y-0 left-0 flex flex-col" style={{ width }}>
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-edge px-4">
-        <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Library</p>
+        <p className="text-title text-ink-dim">Library</p>
         <div className="flex items-center gap-1">
           <ThoughtsSyncButton sync={sync} />
           <button
@@ -94,15 +94,15 @@ export function LibrarySidebar({
           </div>
         )}
         {result && result.items.length === 0 && (
-          <p className="px-4 py-6 text-sm text-ink-dim">No documents match the current filters.</p>
+          <p className="px-4 py-6 text-body text-ink-dim">No documents match the current filters.</p>
         )}
         {groups.map((group) => (
           <div key={group.type || "untyped"} className="mb-1">
             <div className="flex items-center justify-between px-4 pb-1 pt-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim/70">
+              <span className="text-label text-ink-dim/70">
                 {group.label}
               </span>
-              <span className="text-[10px] text-ink-dim/50">
+              <span className="text-ui-sm text-ink-dim/50">
                 {formatRelativeTime(group.newestMs, now).replace(" ago", "")}
               </span>
             </div>
@@ -125,14 +125,14 @@ export function LibrarySidebar({
                     <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />
                   )}
                   <p
-                    className={`truncate text-sm ${selected ? "font-semibold text-ink" : "font-medium text-ink"}`}
+                    className={`truncate text-body ${selected ? "font-semibold text-ink" : "font-medium text-ink"}`}
                   >
                     {docTitle(doc)}
                   </p>
                   {subtitle && (
-                    <p className="mt-0.5 truncate text-xs text-ink-dim">{subtitle}</p>
+                    <p className="mt-0.5 truncate text-ui text-ink-dim">{subtitle}</p>
                   )}
-                  <div className="mt-1 flex items-center gap-2 text-[11px] text-ink-dim">
+                  <div className="mt-1 flex items-center gap-2 text-ui-sm text-ink-dim">
                     {related > 0 && <span>≡ {related}</span>}
                     {doc.fm.status && (
                       <Badge tone={STATUS_TONE[doc.fm.status] ?? "dim"}>{doc.fm.status}</Badge>
@@ -175,7 +175,7 @@ function ProjectSwitcher({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm hover:bg-edge/40"
+        className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body hover:bg-edge/40"
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -188,7 +188,7 @@ function ProjectSwitcher({
           {current?.mappedName ?? "All projects"}
         </span>
         {typeof total === "number" && (
-          <span className="shrink-0 text-xs tabular-nums text-ink-dim/70">{total}</span>
+          <span className="shrink-0 text-ui tabular-nums text-ink-dim/70">{total}</span>
         )}
         <ChevronDownIcon size={12} className="shrink-0 text-ink-dim" />
       </button>
@@ -249,7 +249,7 @@ function TypeTabs({
       key={label}
       type="button"
       onClick={onClick}
-      className={`shrink-0 rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wider ${
+      className={`shrink-0 rounded px-2 py-1 text-label ${
         active ? "bg-accent/20 text-accent" : "text-ink-dim hover:bg-edge/40 hover:text-ink"
       }`}
     >
@@ -280,7 +280,7 @@ function MoreFilters({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium uppercase tracking-wider text-ink-dim hover:text-ink"
+        className="flex w-full items-center gap-1 rounded px-1 py-0.5 text-label text-ink-dim hover:text-ink"
         aria-expanded={open}
       >
         <ChevronRightIcon size={12} className={`transition-transform ${open ? "rotate-90" : ""}`} />

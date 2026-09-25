@@ -58,7 +58,7 @@ export function UpdatesCard() {
       {pendingVersion && (
         <div className="mx-4 mb-4 rounded-md border border-accent/40 bg-accent/10 p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-sm font-medium text-ink">
+            <span className="text-body font-medium text-ink">
               Version <span className="font-mono">{pendingVersion}</span> is available
             </span>
             {CAN_SELF_INSTALL && (
@@ -67,9 +67,9 @@ export function UpdatesCard() {
               </Button>
             )}
           </div>
-          {entry?.summary && <p className="mt-2 text-sm text-ink-dim">{entry.summary}</p>}
+          {entry?.summary && <p className="mt-2 text-body text-ink-dim">{entry.summary}</p>}
           {entry?.notes && entry.notes.length > 0 && (
-            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-ink-dim">
+            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-body text-ink-dim">
               {entry.notes.map((note, i) => (
                 <li key={i}>{note}</li>
               ))}
@@ -77,12 +77,12 @@ export function UpdatesCard() {
           )}
           {!CAN_SELF_INSTALL && (
             <div className="mt-3 border-t border-edge/60 pt-2">
-              <p className="text-sm text-ink-dim">Install it with your package manager:</p>
+              <p className="text-body text-ink-dim">Install it with your package manager:</p>
               <dl className="mt-1.5 space-y-1">
                 {LINUX_UPDATE_COMMANDS.map(([distro, command]) => (
                   <div key={distro} className="flex flex-wrap items-baseline gap-x-2">
-                    <dt className="text-xs text-ink-dim">{distro}</dt>
-                    <dd className="font-mono text-xs text-ink">{command}</dd>
+                    <dt className="text-ui text-ink-dim">{distro}</dt>
+                    <dd className="text-meta text-ink">{command}</dd>
                   </div>
                 ))}
               </dl>

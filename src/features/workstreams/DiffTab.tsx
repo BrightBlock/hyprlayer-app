@@ -84,11 +84,11 @@ export function DiffTab({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-edge px-4">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={heading}>
+        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim" title={heading}>
           {heading}
         </span>
         <span
-          className={`shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] font-medium text-ink-dim ${
+          className={`shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm font-medium text-ink-dim ${
             sha ? "font-mono" : ""
           }`}
           title={sha}
@@ -102,7 +102,7 @@ export function DiffTab({
               type="button"
               disabled={oneSided}
               onClick={() => setModePersist(m)}
-              className={`px-2 py-0.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`px-2 py-0.5 text-ui font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 effectiveMode === m ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2"
               }`}
             >

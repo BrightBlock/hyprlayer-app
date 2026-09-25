@@ -95,7 +95,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
       <div className="flex items-center justify-between gap-3">
         <SectionHeading>Scripts</SectionHeading>
         {draft && (
-          <span className="inline-flex items-center gap-1.5 text-xs text-ink-dim">
+          <span className="inline-flex items-center gap-1.5 text-ui text-ink-dim">
             {saving ? (
               <>
                 <Spinner size={12} /> Saving…
@@ -108,7 +108,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
           </span>
         )}
       </div>
-      <p className="mb-3 mt-1.5 max-w-xl text-xs leading-relaxed text-ink-dim">
+      <p className="mb-3 mt-1.5 max-w-xl text-ui leading-prose text-ink-dim">
         Commands that run automatically in <span className="text-ink">every workstream</span>.
       </p>
 
@@ -126,8 +126,8 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
                 {row.icon}
               </span>
               <div className="min-w-0">
-                <span className="text-sm font-semibold text-ink">{row.name}</span>
-                <span className="ml-2 text-xs text-ink-dim/70">{row.trigger}</span>
+                <span className="text-body font-semibold text-ink">{row.name}</span>
+                <span className="ml-2 text-ui text-ink-dim/70">{row.trigger}</span>
               </div>
               <span className="ml-auto shrink-0">
                 <Badge tone={row.pill.tone}>
@@ -145,7 +145,7 @@ export function ScriptsCard({ projectPath }: { projectPath: string }) {
               placeholder={row.placeholder}
               aria-label={`${row.name} script`}
             />
-            <div className="mt-2 flex items-center gap-1.5 text-xs text-ink-dim/70">
+            <div className="mt-2 flex items-center gap-1.5 text-ui text-ink-dim/70">
               <TerminalIcon size={11} />
               Runs in the workstream shell
               <span className="ml-auto font-mono">

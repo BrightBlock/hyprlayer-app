@@ -23,7 +23,7 @@ export function CardRow({
         className,
       )}
     >
-      <div className={cx("text-xs text-ink-dim", align === "start" && "pt-0.5")}>{label}</div>
+      <div className={cx("text-ui text-ink-dim", align === "start" && "pt-0.5")}>{label}</div>
       {children}
     </div>
   );

@@ -25,6 +25,12 @@ import { router } from "./router";
 import { initTheme } from "./lib/theme";
 import { useUpdate } from "./lib/updater";
 import { setupNotificationActions } from "./lib/notifications";
+import "@fontsource-variable/inter/wght.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
+import "@fontsource/instrument-serif/400.css";
+import "@fontsource/instrument-serif/400-italic.css";
 import "./index.css";
 
 installGlobalHandlers();

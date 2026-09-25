@@ -49,7 +49,7 @@ export function WorkstreamBuildPhase({
   const phase = useWorkstreamBuildPhase(workstreamId);
   if (!phase) return fallback;
   return (
-    <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-ink-4" title={`building · phase ${phase}`}>
+    <span className="shrink-0 text-meta tabular-nums text-ink-4" title={`building · phase ${phase}`}>
       <span className="sr-only">building · </span>phase {phase}
     </span>
   );

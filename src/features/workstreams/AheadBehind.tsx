@@ -8,7 +8,7 @@ export function AheadBehind({
   className?: string;
 }) {
   return (
-    <span className={`flex items-center gap-2 font-mono text-xs tabular-nums ${className}`}>
+    <span className={`flex items-center gap-2 text-meta tabular-nums ${className}`}>
       <span
         className={ahead > 0 ? "text-accent" : "text-ink-dim/60"}
         title={`${ahead} commit(s) ahead of base`}

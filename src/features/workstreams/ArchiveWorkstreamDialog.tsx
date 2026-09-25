@@ -55,14 +55,14 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
         )
       }
     >
-      <p className="text-sm leading-relaxed text-ink-dim">
+      <p className="text-body leading-prose text-ink-dim">
         {target && (
           <>
             <span className="font-medium text-ink">{target.item.title}</span>
             {!folder && (
               <>
                 {" "}
-                <span className="font-mono text-xs">({target.item.branch})</span>
+                <span className="text-meta">({target.item.branch})</span>
               </>
             )}{" "}
             :{" "}
@@ -72,7 +72,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
           "the folder is left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
         ) : (
           <>
-            the worktree moves to <span className="font-mono text-xs">archived-contexts/</span>{" "}
+            the worktree moves to <span className="text-meta">archived-contexts/</span>{" "}
             and the branch is preserved. You can unarchive it later from the Archive view.
           </>
         )}

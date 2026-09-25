@@ -252,7 +252,7 @@ export function ScriptDock({
             <button
               type="button"
               onClick={openPort}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 text-xs text-ink hover:bg-edge/60"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2.5 text-ui text-ink hover:bg-edge/60"
             >
               <GlobeIcon size={13} className="text-ink-dim" /> Open{" "}
               <span className="font-mono text-brand">:{port}</span>
@@ -348,7 +348,7 @@ function DockTab({
       type="button"
       onClick={onClick}
       className={cx(
-        "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-xs whitespace-nowrap",
+        "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-ui whitespace-nowrap",
         active
           ? "border-edge bg-panel-2 font-semibold text-ink"
           : "border-transparent font-medium text-ink-dim hover:text-ink",
@@ -372,7 +372,7 @@ function Dot({ pulse }: { pulse?: boolean }) {
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <span className="rounded border border-edge bg-surface px-1 py-px font-mono text-2xs text-ink-dim">
+    <span className="rounded border border-edge bg-surface px-1 py-px text-meta text-ink-dim">
       {children}
     </span>
   );
@@ -414,7 +414,7 @@ function RunSplit({
               : undefined
         }
         className={cx(
-          "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-edge bg-panel-2 text-xs font-medium hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50",
+          "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-edge bg-panel-2 text-ui font-medium hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50",
           compact ? "px-2" : "px-3",
           running ? "text-bad" : "text-ink",
           open && "rounded-bl-none",
@@ -455,7 +455,7 @@ function RunSplit({
               setOpen(false);
               onConfigure();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[12.5px] text-ink hover:bg-edge/60"
+            className="block w-full px-3 py-1.5 text-left text-ui text-ink hover:bg-edge/60"
           >
             Configure
           </button>
@@ -482,11 +482,11 @@ function RunIdle({
     <div className={cx("flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center", bg)}>
       {empty ? (
         <>
-          <p className="text-sm text-ink-dim">No Run script configured for this project.</p>
+          <p className="text-body text-ink-dim">No Run script configured for this project.</p>
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-edge/60"
+            className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-3 py-1.5 text-ui text-ink hover:bg-edge/60"
           >
             Edit scripts <span aria-hidden>↗</span>
           </button>
@@ -497,11 +497,11 @@ function RunIdle({
           <button
             type="button"
             onClick={onRun}
-            className="inline-flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-3.5 py-2 text-sm font-medium text-ink hover:bg-edge/60"
+            className="inline-flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-3.5 py-2 text-body font-medium text-ink hover:bg-edge/60"
           >
             <PlayIcon size={12} className="text-ink-dim" /> Start Run {runKey && <Kbd>{runKey}</Kbd>}
           </button>
-          <p className="text-xs text-ink-dim/70">Test your changes here.</p>
+          <p className="text-ui text-ink-dim/70">Test your changes here.</p>
         </>
       )}
     </div>
@@ -532,7 +532,7 @@ function SetupBody({
         }${status.at != null ? ` · ran ${formatRelativeTime(status.at)}` : ""}`;
   return (
     <div className={cx("flex min-h-0 flex-1 flex-col", bg)}>
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-edge px-4 py-2 text-xs text-ink-dim">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-edge px-4 py-2 text-ui text-ink-dim">
         {status?.phase === "passed" && <CheckIcon size={11} className="text-ok" />}
         {status?.phase === "failed" && <WarningTriangleIcon size={11} className="text-bad" />}
         <span>{statusText}</span>
@@ -547,7 +547,7 @@ function SetupBody({
       {output ? (
         <ScriptOutputView output={output} />
       ) : (
-        <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-ink-dim/70">
+        <div className="flex flex-1 items-center justify-center px-6 text-center text-body text-ink-dim/70">
           {loading
             ? ""
             : "Setup hasn't run in this session yet. It runs automatically when a workstream is created."}

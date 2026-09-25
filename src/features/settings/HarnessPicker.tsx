@@ -30,7 +30,7 @@ function HarnessRadio({ value, onChange, disabled }: Omit<HarnessPickerProps, "v
             type="button"
             {...itemProps(i)}
             className={cx(
-              "flex h-[38px] min-w-0 items-center justify-center gap-2 rounded-control border bg-panel px-2 text-[13px] transition-colors",
+              "flex h-[38px] min-w-0 items-center justify-center gap-2 rounded-control border bg-panel px-2 text-body transition-colors",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
               "disabled:cursor-not-allowed disabled:opacity-50",
               selected
@@ -55,7 +55,7 @@ function HarnessDropdown({ value, onChange, disabled }: Omit<HarnessPickerProps,
       options={OPTIONS}
       onChange={onChange}
       disabled={disabled}
-      className="h-6 w-auto gap-1.5 bg-panel px-2 py-0 text-xs"
+      className="h-6 w-auto gap-1.5 bg-panel px-2 py-0 text-ui"
     />
   );
 }

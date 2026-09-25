@@ -47,7 +47,7 @@ export function WorkstreamCard({
       }
     >
       <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{item.title}</span>
+        <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">{item.title}</span>
         <WorkstreamActivityDot workstreamId={item.id} />
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -55,7 +55,7 @@ export function WorkstreamCard({
           <Badge tone="dim">folder</Badge>
         ) : (
           <>
-            <span className="max-w-full truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-xs text-ink-dim">
+            <span className="max-w-full truncate rounded bg-edge/60 px-1.5 py-0.5 text-meta text-ink-dim">
               {detached ? "detached HEAD" : item.branch}
             </span>
             {inplace && <Badge tone="dim">no worktree</Badge>}

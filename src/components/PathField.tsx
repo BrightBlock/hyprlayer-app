@@ -52,7 +52,7 @@ export function PathField({
           spellCheck={false}
           autoFocus={autoFocus}
           disabled={disabled}
-          className="font-mono text-xs"
+          className="text-meta"
         />
         <Button type="button" onClick={() => void browse()} disabled={disabled}>
           Browse
@@ -183,7 +183,7 @@ function ServerPicker({
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate text-2xs text-ink-dim">
+          <span className="min-w-0 truncate text-ui-sm text-ink-dim">
             {matches.length} of {listing?.entries.length ?? 0}
             {hiddenCount > 0 && ` · ${hiddenCount} hidden`}
             {lead && " · Tab completes"}
@@ -211,7 +211,7 @@ function ServerPicker({
             leaving the only way out of a directory a backspaced path. */}
         <Button
           type="button"
-          className="px-2 py-1 text-xs"
+          className="px-2 py-1 text-ui"
           disabled={!listing?.parent}
           onClick={() => {
             const up = listing?.parent;
@@ -230,12 +230,12 @@ function ServerPicker({
             placeholder="Type a path, or a name to filter this folder"
             spellCheck={false}
             autoFocus
-            className="font-mono text-xs"
+            className="text-meta"
           />
           {ghost && (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-[7px] whitespace-pre bg-accent/35 font-mono text-xs text-ink"
+              className="pointer-events-none absolute top-[7px] whitespace-pre bg-accent/35 text-meta text-ink"
               style={{ left: `calc(11px + ${value.length}ch)` }}
             >
               {ghost}
@@ -244,7 +244,7 @@ function ServerPicker({
         </div>
         <Button
           type="button"
-          className="px-2 py-1 text-xs"
+          className="px-2 py-1 text-ui"
           onClick={() => setShowDotFiles(!showDotFiles)}
           title={showDotFiles ? "Hide dot files" : "Show dot files"}
         >
@@ -255,14 +255,14 @@ function ServerPicker({
       <ErrorNote error={error} />
 
       {!listing && error == null ? (
-        <div className="flex items-center gap-2 px-1 py-2 text-xs text-ink-dim">
+        <div className="flex items-center gap-2 px-1 py-2 text-ui text-ink-dim">
           <Spinner size={12} /> Loading…
         </div>
       ) : (
         // Already sorted server-side: directories first, then case-insensitive name.
         <div className={`${LIST_HEIGHT} space-y-0.5 overflow-y-auto`}>
           {matches.length === 0 && (
-            <p className="px-1 py-2 text-xs text-ink-dim">
+            <p className="px-1 py-2 text-ui text-ink-dim">
               {segment ? `Nothing here matches “${segment}”.` : "This folder is empty."}
             </p>
           )}
@@ -274,7 +274,7 @@ function ServerPicker({
                 onClick={() => descend(entry)}
                 className={rowClass({
                   tier: "compact",
-                  className: "flex w-full gap-2 px-2 text-left font-mono text-xs text-ink",
+                  className: "flex w-full gap-2 px-2 text-left text-meta text-ink",
                 })}
               >
                 <FolderIcon className="shrink-0 text-ink-dim" />
@@ -289,7 +289,7 @@ function ServerPicker({
                 className={rowClass({
                   tier: "compact",
                   interactive: false,
-                  className: "flex gap-2 px-2 font-mono text-xs text-ink-dim/70",
+                  className: "flex gap-2 px-2 text-meta text-ink-dim/70",
                 })}
               >
                 <DocIcon size={13} className="shrink-0" />
@@ -300,7 +300,7 @@ function ServerPicker({
             ),
           )}
           {overflow > 0 && (
-            <p className="px-1 py-2 text-2xs text-ink-dim">
+            <p className="px-1 py-2 text-ui-sm text-ink-dim">
               {overflow} more — keep typing to narrow.
             </p>
           )}

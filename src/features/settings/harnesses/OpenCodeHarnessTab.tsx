@@ -112,7 +112,7 @@ export function OpenCodeHarnessTab({
       <Card>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-sm font-bold text-ink">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-body font-bold text-ink">
               oc
             </div>
             <div>
@@ -120,7 +120,7 @@ export function OpenCodeHarnessTab({
               <p className={SETTINGS_CARD_DESCRIPTION}>The open source AI coding agent</p>
             </div>
           </div>
-          <a className="text-xs text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
+          <a className="text-ui text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
             Docs ↗
           </a>
         </div>
@@ -143,7 +143,7 @@ export function OpenCodeHarnessTab({
 
         <div className="mt-3 space-y-1.5">
           {configured.size === 0 && (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               No supported providers configured yet. Add one to use its models with OpenCode.
             </p>
           )}
@@ -154,7 +154,7 @@ export function OpenCodeHarnessTab({
                 key={e.provider}
                 className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2"
               >
-                <span className="min-w-0 truncate text-sm text-ink">
+                <span className="min-w-0 truncate text-body text-ink">
                   {providerName.get(e.provider.toLowerCase()) ?? e.provider}
                 </span>
                 <div className="flex shrink-0 items-center gap-3">
@@ -193,7 +193,7 @@ export function OpenCodeHarnessTab({
         </div>
 
         {selectedModels.length === 0 ? (
-          <p className="mt-3 text-xs text-ink-dim">
+          <p className="mt-3 text-ui text-ink-dim">
             No models selected yet. Add the models you want available in the composer.
           </p>
         ) : (
@@ -205,8 +205,8 @@ export function OpenCodeHarnessTab({
                   className="flex items-center justify-between rounded-md border border-edge bg-panel-2 px-3 py-2"
                 >
                   <span className="min-w-0">
-                    <span className="text-sm text-ink">{modelName.get(id) ?? id}</span>
-                    <span className="block font-mono text-xs text-ink-dim">{id}</span>
+                    <span className="text-body text-ink">{modelName.get(id) ?? id}</span>
+                    <span className="block text-meta text-ink-dim">{id}</span>
                   </span>
                   <button
                     type="button"
@@ -330,18 +330,18 @@ function AdvancedCard({
             {installed && status?.path && (
               <button
                 type="button"
-                className="text-xs text-ink-dim hover:text-ink"
+                className="text-ui text-ink-dim hover:text-ink"
                 onClick={() => void revealItemInDir(status.path as string).catch(() => {})}
               >
                 Open in Finder ↗
               </button>
             )}
-            <a className="text-xs text-ink-dim hover:text-ink" href={DOCS_URL} target="_blank" rel="noreferrer">
+            <a className="text-ui text-ink-dim hover:text-ink" href={DOCS_URL} target="_blank" rel="noreferrer">
               Docs ↗
             </a>
             <button
               type="button"
-              className="ml-auto flex items-center gap-1 text-xs text-ink-dim hover:text-ink"
+              className="ml-auto flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
               onClick={() => {
                 redetect.mutate();
                 refreshCatalog.mutate();
@@ -367,7 +367,7 @@ function AdvancedCard({
                 )}
               </Button>
               {install.isPending && (
-                <p className="text-xs text-ink-dim">
+                <p className="text-ui text-ink-dim">
                   Downloading and installing. This can take a minute.
                 </p>
               )}
@@ -378,13 +378,13 @@ function AdvancedCard({
           )}
 
           <div>
-            <p className="mb-2 text-xs text-ink-dim">
+            <p className="mb-2 text-ui text-ink-dim">
               Override the auto-detected OpenCode executable.
             </p>
             {status ? (
               <BinaryCard status={status} />
             ) : (
-              <p className="text-xs text-ink-dim">OpenCode status unavailable.</p>
+              <p className="text-ui text-ink-dim">OpenCode status unavailable.</p>
             )}
           </div>
         </div>

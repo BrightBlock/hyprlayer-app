@@ -72,7 +72,7 @@ export function ImportPromptsDialog({
       closable
       footer={
         <div className="flex items-center gap-2.5">
-          <span className="text-[11px] text-ink-dim">
+          <span className="text-ui-sm text-ink-dim">
             {willImport} of {rows.length} will be imported
           </span>
           <div className="ml-auto flex items-center gap-2">
@@ -86,12 +86,12 @@ export function ImportPromptsDialog({
     >
       <div className="flex items-center gap-2 border-b border-edge bg-panel-2/40 px-4 py-2.5">
         <DocIcon size={14} className="shrink-0 text-ink-dim" />
-        <span className="truncate font-mono text-[11px] text-ink">{fileName}</span>
-        {source && <span className="shrink-0 text-[11px] text-ink-dim">from {source}</span>}
+        <span className="truncate text-meta text-ink">{fileName}</span>
+        {source && <span className="shrink-0 text-ui-sm text-ink-dim">from {source}</span>}
         <button
           type="button"
           onClick={onChooseAnother}
-          className="ml-auto shrink-0 text-[11px] text-ink-dim underline underline-offset-2 hover:text-ink"
+          className="ml-auto shrink-0 text-ui-sm text-ink-dim underline underline-offset-2 hover:text-ink"
         >
           Choose another file
         </button>
@@ -117,9 +117,9 @@ export function ImportPromptsDialog({
                   label={`Import ${c.name}`}
                 />
                 <PromptRowIcon builtin={false} id="" className="shrink-0 text-ink-dim" />
-                <span className="truncate text-sm font-medium text-ink">{c.name}</span>
+                <span className="truncate text-body font-medium text-ink">{c.name}</span>
                 {c.chord && (
-                  <span className="shrink-0 rounded border border-edge bg-surface px-1 font-mono text-[10px] text-ink-dim">
+                  <span className="shrink-0 rounded border border-edge bg-surface px-1 text-meta text-ink-dim">
                     {chordLabel(c.chord)}
                   </span>
                 )}
@@ -128,13 +128,13 @@ export function ImportPromptsDialog({
                 </span>
               </div>
 
-              <p className="truncate pl-[26px] text-[11px] text-ink-dim">
+              <p className="truncate pl-[26px] text-ui-sm text-ink-dim">
                 {promptFirstLine(c.body) || "No prompt text"}
               </p>
 
               {showConflict && (
                 <div className="flex flex-wrap items-center gap-2 pl-[26px]">
-                  <span className="text-[11px] text-warn-ink">“{c.name}” already exists:</span>
+                  <span className="text-ui-sm text-warn-ink">“{c.name}” already exists:</span>
                   <div className="inline-flex gap-1">
                     {RESOLUTIONS.map((r) => {
                       const active = d.resolution === r.value;
@@ -143,7 +143,7 @@ export function ImportPromptsDialog({
                           key={r.value}
                           type="button"
                           onClick={() => setDecision(c.key, { resolution: r.value })}
-                          className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                          className={`rounded px-2 py-0.5 text-ui-sm font-medium transition-colors ${
                             active
                               ? "border border-accent bg-accent text-accent-ink"
                               : "border border-edge bg-panel text-ink-dim hover:text-ink"
@@ -158,7 +158,7 @@ export function ImportPromptsDialog({
               )}
 
               {notes.map((note, i) => (
-                <div key={i} className="flex items-start gap-2 pl-[26px] text-[11px] leading-relaxed text-ink-dim">
+                <div key={i} className="flex items-start gap-2 pl-[26px] text-ui-sm leading-prose text-ink-dim">
                   <WarningTriangleIcon size={12} className="mt-0.5 shrink-0 text-warn-ink" />
                   <span>{note}</span>
                 </div>

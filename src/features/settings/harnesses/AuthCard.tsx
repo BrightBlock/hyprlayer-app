@@ -23,8 +23,8 @@ export function AuthCard({
           ✓
         </span>
       )}
-      <p className="text-sm font-medium text-ink">{label}</p>
-      <p className="mt-0.5 text-xs text-ink-dim">{sublabel}</p>
+      <p className="text-body font-medium text-ink">{label}</p>
+      <p className="mt-0.5 text-ui text-ink-dim">{sublabel}</p>
     </button>
   );
 }
@@ -35,7 +35,7 @@ export function AuthDetailRows({ rows }: { rows: Array<[string, string | null | 
       {rows.map(([k, v], i) => (
         <div
           key={k}
-          className={`flex items-center justify-between px-3 py-2 text-sm ${
+          className={`flex items-center justify-between px-3 py-2 text-body ${
             i > 0 ? "border-t border-edge/60" : ""
           }`}
         >

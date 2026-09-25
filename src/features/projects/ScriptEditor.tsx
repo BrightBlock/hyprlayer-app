@@ -49,7 +49,7 @@ export function ScriptEditor({
   const rows = Math.max(minRows, lines.length);
 
   return (
-    <div className="flex overflow-hidden rounded-lg border border-edge bg-surface font-mono text-[12.5px] leading-[22px]">
+    <div className="flex overflow-hidden rounded-lg border border-edge bg-surface text-meta leading-[22px]">
       <div
         aria-hidden
         className="shrink-0 select-none border-r border-edge bg-white/[0.015] py-2 pl-2 pr-2.5 text-right text-ink-dim/50"

@@ -21,9 +21,9 @@ export const SkillChip = memo(function SkillChip({
   );
   const chip =
     "inline-flex max-w-full items-center gap-1.5 rounded-control bg-accent-soft px-2.5 py-1 " +
-    "font-mono text-[11px] font-semibold text-ink-2";
+    "text-meta font-semibold text-ink-2";
   return (
-    <div className="text-xs" data-tooluse-id={toolUseId}>
+    <div className="text-ui" data-tooluse-id={toolUseId}>
       {body ? (
         <button
           type="button"

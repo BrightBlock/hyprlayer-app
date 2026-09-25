@@ -698,13 +698,13 @@ export function AgentLibrary({
 
       <Dialog open={dialog === "delete"} onClose={() => setDialog(null)} title="Delete agent">
         <div className="flex flex-col gap-3.5">
-          <p className="text-sm leading-relaxed text-ink-dim">This deletes the file from disk:</p>
+          <p className="text-body leading-prose text-ink-dim">This deletes the file from disk:</p>
           {actionTarget && (
             <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-              <li className="truncate font-mono text-xs text-ink">{actionTarget.path}</li>
+              <li className="truncate text-meta text-ink">{actionTarget.path}</li>
             </ul>
           )}
-          <p className="text-xs text-ink-dim">
+          <p className="text-ui text-ink-dim">
             Sessions already running are unaffected; a modified system agent goes back to the
             version its plugin ships.
           </p>
@@ -745,12 +745,12 @@ function AgentsCta({ section, onCreate }: { section: AgentSection; onCreate: () 
     return (
       <div className="mx-auto w-full max-w-5xl px-7 py-8">
         <div className="mb-4 flex items-center gap-2">
-          <h1 className="text-lg font-semibold tracking-tight text-ink">Skills</h1>
+          <h1 className="text-h3 text-ink">Skills</h1>
           <SoonBadge />
         </div>
         <Card>
-          <h3 className="text-sm font-semibold text-ink">Not shipped yet</h3>
-          <p className="mt-1 text-xs text-ink-dim">
+          <h3 className="text-body font-semibold text-ink">Not shipped yet</h3>
+          <p className="mt-1 text-ui text-ink-dim">
             Skills will live beside agents on this page and drill in the same way. Reserving the
             section now is what keeps the nav from being rebuilt when they land.
           </p>
@@ -767,8 +767,8 @@ function AgentsCta({ section, onCreate }: { section: AgentSection; onCreate: () 
       >
         <LayersIcon size={24} strokeWidth={1.5} full />
       </span>
-      <p className="text-base font-medium text-ink">No agent selected</p>
-      <div className="max-w-md text-sm text-ink-dim">
+      <p className="text-title text-ink">No agent selected</p>
+      <div className="max-w-md text-body text-ink-dim">
         Pick one from the sidebar to edit its prompt, model, tools and permissions — or create a
         new agent so a workstream can start the same way every time.
       </div>

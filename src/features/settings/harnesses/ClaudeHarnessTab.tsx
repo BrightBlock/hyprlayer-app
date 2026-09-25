@@ -207,8 +207,8 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
         <div className="mt-3 space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm text-ink">Claude settings</p>
-              <p className="mt-0.5 truncate font-mono text-xs text-ink-dim">
+              <p className="text-body text-ink">Claude settings</p>
+              <p className="mt-0.5 truncate text-meta text-ink-dim">
                 ~/{CLAUDE_SETTINGS_REL}
               </p>
             </div>
@@ -216,13 +216,13 @@ function ClaudeAdvancedCard({ status }: { status?: BinaryStatus }) {
           </div>
 
           <div className="border-t border-edge/50 pt-4">
-            <p className="mb-2 text-xs text-ink-dim">
+            <p className="mb-2 text-ui text-ink-dim">
               Override the auto-detected Claude Code executable.
             </p>
             {status ? (
               <BinaryCard status={status} />
             ) : (
-              <p className="text-xs text-ink-dim">Claude Code status unavailable.</p>
+              <p className="text-ui text-ink-dim">Claude Code status unavailable.</p>
             )}
           </div>
         </div>
@@ -247,7 +247,7 @@ function CliAuthPanel() {
     <div>
       <div className="mb-2 flex items-center justify-between">
         {status.isLoading ? (
-          <span className="flex items-center gap-2 text-xs text-ink-dim">
+          <span className="flex items-center gap-2 text-ui text-ink-dim">
             <Spinner size={12} /> Checking…
           </span>
         ) : data?.connected ? (
@@ -258,7 +258,7 @@ function CliAuthPanel() {
         <button
           type="button"
           onClick={() => void status.refetch()}
-          className="text-xs text-ink-dim hover:text-ink"
+          className="text-ui text-ink-dim hover:text-ink"
         >
           ↻ Refresh
         </button>
@@ -276,7 +276,7 @@ function CliAuthPanel() {
         title="Sign in to Claude Code"
         size="2xl"
       >
-        <p className="mb-3 text-xs text-ink-dim">
+        <p className="mb-3 text-ui text-ink-dim">
           Runs <code className="font-mono">claude auth login</code> in a terminal.
         </p>
         <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
@@ -309,7 +309,7 @@ function ApiKeyAuthPanel({
   return (
     <div className="space-y-3">
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-dim">Anthropic API key</label>
+        <label className="mb-1 block text-ui font-medium text-ink-dim">Anthropic API key</label>
         <div className="flex gap-2">
           <TextInput
             type="password"
@@ -326,13 +326,13 @@ function ApiKeyAuthPanel({
             Save
           </Button>
         </div>
-        <p className="mt-1 text-xs text-ink-dim">
+        <p className="mt-1 text-ui text-ink-dim">
           Injected as <code className="font-mono">ANTHROPIC_API_KEY</code>. Stored locally.
         </p>
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-dim">
+        <label className="mb-1 block text-ui font-medium text-ink-dim">
           Base URL <span className="text-ink-dim/70">(optional, for a proxy/gateway)</span>
         </label>
         <TextInput
@@ -445,7 +445,7 @@ function VisibleModelsCard({
           {visible !== null && (
             <button
               type="button"
-              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              className="rounded px-2 py-1 text-ui text-ink-dim hover:bg-edge/60 hover:text-ink"
               onClick={() => patchClaude({ visibleModels: null })}
             >
               Reset to default
@@ -458,7 +458,7 @@ function VisibleModelsCard({
       </div>
 
       {shown.length === 0 ? (
-        <p className="mt-3 text-xs text-ink-dim">
+        <p className="mt-3 text-ui text-ink-dim">
           No models selected, so the composer&apos;s Claude group is empty.
         </p>
       ) : (
@@ -469,7 +469,7 @@ function VisibleModelsCard({
               className="flex items-center justify-between rounded-md border border-edge bg-panel-2 px-3 py-2"
             >
               <span className="min-w-0">
-                <span className="text-sm text-ink">
+                <span className="text-body text-ink">
                   {m.label}
                   {m.hint ? ` ${m.hint}` : ""}
                   {!known.has(m.key) && (
@@ -488,7 +488,7 @@ function VisibleModelsCard({
                     </span>
                   )}
                 </span>
-                <span className="block font-mono text-xs text-ink-dim">{m.flag ?? m.key}</span>
+                <span className="block text-meta text-ink-dim">{m.flag ?? m.key}</span>
               </span>
               <button
                 type="button"
@@ -551,14 +551,14 @@ function VisibleModelsCard({
           <>
             <button
               type="button"
-              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              className="rounded px-2 py-1 text-ui text-ink-dim hover:bg-edge/60 hover:text-ink"
               onClick={() => apply([...catalogKeys, ...customKeys])}
             >
               All
             </button>
             <button
               type="button"
-              className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+              className="rounded px-2 py-1 text-ui text-ink-dim hover:bg-edge/60 hover:text-ink"
               onClick={() => apply([])}
             >
               None

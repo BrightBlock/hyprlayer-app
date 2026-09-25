@@ -55,11 +55,11 @@ export function PlanCard({ sessionId, workstreamId, toolUseId, planKey, text, su
     >
       <FileText {...ICON} className="shrink-0 text-ink-dim" />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-semibold text-ink">{title}</span>
-        <span className="block truncate font-mono text-[10.5px] tabular-nums text-ink-4">{meta}</span>
+        <span className="block truncate text-body font-semibold text-ink">{title}</span>
+        <span className="block truncate text-meta tabular-nums text-ink-4">{meta}</span>
       </span>
       {!active && (
-        <span className="hidden shrink-0 font-mono text-[10px] text-ink-4 @[340px]:inline">click to preview →</span>
+        <span className="hidden shrink-0 text-meta text-ink-4 @[340px]:inline">click to preview →</span>
       )}
     </button>
   );

@@ -21,11 +21,11 @@ export function UsageMeter({
       title={title}
       className="flex shrink-0 items-center gap-1.5"
     >
-      <span className="text-3xs text-ink-4">{label}</span>
+      <span className="text-ui-sm text-ink-4">{label}</span>
       <span className="h-1 w-[34px] overflow-hidden rounded-full bg-edge">
         <span className={cx("block h-full rounded-full", fill)} style={{ width: `${percent}%` }} />
       </span>
-      <span className={cx("text-3xs", text)}>{percent}%</span>
+      <span className={cx("text-ui-sm", text)}>{percent}%</span>
     </div>
   );
 }

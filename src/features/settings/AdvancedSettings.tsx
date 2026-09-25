@@ -36,7 +36,7 @@ function EngineChip({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-ui ${
         engine.enabled ? "border-edge bg-panel-2 text-ink" : "border-edge/60 text-ink-dim"
       }`}
     >
@@ -101,7 +101,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
   return (
     <>
       <div>
-        <h1 className="text-[19px] font-bold tracking-tight text-ink">Advanced</h1>
+        <h1 className="text-h3 text-ink">Advanced</h1>
         <p className={cx("mt-0.5", SETTINGS_CARD_DESCRIPTION)}>
           Power-user features. Some change how Hyprlayer runs.
         </p>
@@ -117,7 +117,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className={SETTINGS_CARD_TITLE}>Multiplexer mode</span>
-              <span className="rounded border border-accent/30 px-1.5 py-0.5 font-mono text-[9.5px] font-semibold text-accent">
+              <span className="rounded border border-accent/30 px-1.5 py-0.5 text-tag text-accent">
                 ADVANCED
               </span>
             </div>
@@ -138,8 +138,8 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
           <div className="divide-y divide-edge/50 border-t border-accent/20 px-4">
             <div className="flex items-start justify-between gap-4 py-3.5">
               <div className="min-w-0">
-                <div className="text-sm text-ink">Available engines</div>
-                <p className="mt-0.5 text-xs text-ink-dim">Which CLIs appear in the + menu.</p>
+                <div className="text-body text-ink">Available engines</div>
+                <p className="mt-0.5 text-ui text-ink-dim">Which CLIs appear in the + menu.</p>
               </div>
               <div className="flex max-w-[60%] flex-wrap items-center justify-end gap-1.5">
                 {cfg.engines.map((engine) => (
@@ -153,7 +153,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
                 <button
                   type="button"
                   onClick={() => setAddOpen(true)}
-                  className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-xs text-ink-dim hover:text-ink"
+                  className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-ui text-ink-dim hover:text-ink"
                 >
                   <PlusIcon size={11} /> Add CLI…
                 </button>

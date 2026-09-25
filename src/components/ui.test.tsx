@@ -122,7 +122,7 @@ describe("DropdownSelect", () => {
   });
 
   it("keeps w-full when the caller sets no width", () => {
-    renderSelect({ className: "text-xs" });
+    renderSelect({ className: "text-ui" });
     expect(trigger().className).toMatch(/(^|\s)w-full(\s|$)/);
   });
 

@@ -474,7 +474,7 @@ describe("AgentBundleSection", () => {
     });
     // no size class here inherits the 16px root, twice the card's other rows
     const note = (await screen.findByText(/hyprlayer 1\.5\.9/)).closest("div")?.parentElement;
-    expect(note?.className).toContain("text-sm");
+    expect(note?.className).toContain("text-body");
   });
 
   it("still asks a pre-floor CLI to update", async () => {

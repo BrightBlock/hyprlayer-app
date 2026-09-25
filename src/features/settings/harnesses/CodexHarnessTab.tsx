@@ -101,7 +101,7 @@ export function CodexHarnessTab({
       <Card>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-sm font-bold text-ink">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-body font-bold text-ink">
               cx
             </div>
             <div>
@@ -110,7 +110,7 @@ export function CodexHarnessTab({
             </div>
           </div>
           <a
-            className="text-xs text-accent hover:underline"
+            className="text-ui text-accent hover:underline"
             href={DOCS_URL}
             target="_blank"
             rel="noreferrer"
@@ -136,7 +136,7 @@ export function CodexHarnessTab({
             {!usingAllDefault && selectedModels.length > 0 && (
               <button
                 type="button"
-                className="rounded px-2 py-1 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+                className="rounded px-2 py-1 text-ui text-ink-dim hover:bg-edge/60 hover:text-ink"
                 onClick={() => patchCodex({ selectedModels: NO_MODELS })}
               >
                 Reset to default
@@ -149,9 +149,9 @@ export function CodexHarnessTab({
         </div>
 
         {!installed ? (
-          <p className="mt-3 text-xs text-ink-dim">Install Codex to choose models.</p>
+          <p className="mt-3 text-ui text-ink-dim">Install Codex to choose models.</p>
         ) : probe.isLoading ? (
-          <p className="mt-3 flex items-center gap-1.5 text-xs text-ink-dim">
+          <p className="mt-3 flex items-center gap-1.5 text-ui text-ink-dim">
             <Spinner size={12} /> Loading models from Codex…
           </p>
         ) : probe.isError ? (
@@ -159,14 +159,14 @@ export function CodexHarnessTab({
             <ErrorNote error={probe.error} />
           </div>
         ) : available.length === 0 ? (
-          <p className="mt-3 text-xs text-ink-dim">
+          <p className="mt-3 text-ui text-ink-dim">
             Codex didn&apos;t return any models. Sign in with{" "}
             <code className="font-mono">codex login</code>, then refresh.
           </p>
         ) : (
           <>
             {usingAllDefault && (
-              <p className="mt-3 text-xs text-ink-dim">
+              <p className="mt-3 text-ui text-ink-dim">
                 Every model Codex offers is available in the composer by default. Remove any you
                 don&apos;t want, or reset to restore the full list.
               </p>
@@ -178,8 +178,8 @@ export function CodexHarnessTab({
                   className="flex items-center justify-between rounded-md border border-edge bg-panel-2 px-3 py-2"
                 >
                   <span className="min-w-0">
-                    <span className="text-sm text-ink">{displayName.get(id) ?? id}</span>
-                    <span className="block font-mono text-xs text-ink-dim">{id}</span>
+                    <span className="text-body text-ink">{displayName.get(id) ?? id}</span>
+                    <span className="block text-meta text-ink-dim">{id}</span>
                   </span>
                   <button
                     type="button"
@@ -404,7 +404,7 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
         title="Sign in to Codex"
         size="2xl"
       >
-        <p className="mb-3 text-xs text-ink-dim">
+        <p className="mb-3 text-ui text-ink-dim">
           Runs <code className="font-mono">codex login</code> in a terminal; it opens a
           browser to finish signing in.
         </p>
@@ -435,7 +435,7 @@ function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
       <AuthStatusRow probe={probe} />
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-ink-dim">OpenAI API key</label>
+        <label className="mb-1 block text-ui font-medium text-ink-dim">OpenAI API key</label>
         <div className="flex gap-2">
           <TextInput
             type="password"
@@ -455,7 +455,7 @@ function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
             Sign in
           </Button>
         </div>
-        <p className="mt-1 text-xs text-ink-dim">
+        <p className="mt-1 text-ui text-ink-dim">
           Handed to <code className="font-mono">codex login --with-api-key</code> and stored by
           Codex in <code className="font-mono">~/.codex/auth.json</code>. Hyprlayer keeps no copy.
         </p>
@@ -474,7 +474,7 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
     <>
       <div className="mb-2 flex items-center justify-between">
         {probe.isLoading ? (
-          <span className="flex items-center gap-2 text-xs text-ink-dim">
+          <span className="flex items-center gap-2 text-ui text-ink-dim">
             <Spinner size={12} /> Checking…
           </span>
         ) : signedIn ? (
@@ -488,7 +488,7 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
               type="button"
               disabled={logout.isPending}
               onClick={() => logout.mutate()}
-              className="text-xs text-ink-dim hover:text-ink disabled:opacity-50"
+              className="text-ui text-ink-dim hover:text-ink disabled:opacity-50"
             >
               {logout.isPending ? "Signing out…" : "Sign out"}
             </button>
@@ -496,7 +496,7 @@ function AuthStatusRow({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
           <button
             type="button"
             onClick={() => void probe.refetch()}
-            className="text-xs text-ink-dim hover:text-ink"
+            className="text-ui text-ink-dim hover:text-ink"
           >
             ↻ Refresh
           </button>
@@ -545,14 +545,14 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
             {installed && status?.path && (
               <button
                 type="button"
-                className="text-xs text-ink-dim hover:text-ink"
+                className="text-ui text-ink-dim hover:text-ink"
                 onClick={() => void revealItemInDir(status.path as string).catch(() => {})}
               >
                 Open in Finder ↗
               </button>
             )}
             <a
-              className="text-xs text-ink-dim hover:text-ink"
+              className="text-ui text-ink-dim hover:text-ink"
               href={DOCS_URL}
               target="_blank"
               rel="noreferrer"
@@ -561,7 +561,7 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
             </a>
             <button
               type="button"
-              className="ml-auto flex items-center gap-1 text-xs text-ink-dim hover:text-ink"
+              className="ml-auto flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
               onClick={() => redetect.mutate()}
             >
               {redetect.isPending ? <Spinner size={12} /> : "↻"} Refresh
@@ -569,7 +569,7 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
           </div>
 
           {!installed && (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               Install with <code className="font-mono">npm i -g @openai/codex</code> or{" "}
               <code className="font-mono">brew install codex</code>, then run{" "}
               <code className="font-mono">codex login</code> and hit Refresh.
@@ -577,13 +577,13 @@ function AdvancedCard({ status }: { status?: BinaryStatus }) {
           )}
 
           <div>
-            <p className="mb-2 text-xs text-ink-dim">
+            <p className="mb-2 text-ui text-ink-dim">
               Override the auto-detected Codex executable.
             </p>
             {status ? (
               <BinaryCard status={status} />
             ) : (
-              <p className="text-xs text-ink-dim">Codex status unavailable.</p>
+              <p className="text-ui text-ink-dim">Codex status unavailable.</p>
             )}
           </div>
         </div>

@@ -25,7 +25,7 @@ export function StatusTag({ tone, label }: { tone: ArchiveTone; label: string })
   return (
     <span
       className={cx(
-        "shrink-0 whitespace-nowrap rounded-card px-[7px] py-0.5 font-mono text-[9.5px] font-semibold leading-none",
+        "shrink-0 whitespace-nowrap rounded-card px-[7px] py-0.5 text-tag leading-none",
         TAG[tone],
       )}
     >

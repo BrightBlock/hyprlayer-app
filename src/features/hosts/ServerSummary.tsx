@@ -67,15 +67,15 @@ export function ServerSummary({
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[13px] text-ink">{row.name}</span>
+          <span className="truncate text-body text-ink">{row.name}</span>
           {row.isDefault && (
-            <span className="shrink-0 rounded-control bg-accent-soft px-1.5 font-mono text-[9.5px] font-semibold text-ink">
+            <span className="shrink-0 rounded-control bg-accent-soft px-1.5 text-tag text-ink">
               DEFAULT
             </span>
           )}
         </div>
         <div
-          className={cx("truncate font-mono text-2xs", unreachable ? "text-warn-ink" : "text-ink-dim")}
+          className={cx("truncate text-meta", unreachable ? "text-warn-ink" : "text-ink-dim")}
           title={tooltip}
         >
           {detail}

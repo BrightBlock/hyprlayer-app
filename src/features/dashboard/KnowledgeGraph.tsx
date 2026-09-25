@@ -340,7 +340,7 @@ export function KnowledgeGraph({ graph: full }: Props) {
                       x={r + 4 / scale}
                       y={3 / scale}
                       className="fill-ink"
-                      fontSize={9 / scale}
+                      fontSize={9.5 / scale}
                       style={{
                         paintOrder: "stroke",
                         stroke: "var(--color-nebula-bg-1)",

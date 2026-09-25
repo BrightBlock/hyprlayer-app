@@ -14,7 +14,7 @@ export const PromptCard = memo(function PromptCard({
   const lines = body.split("\n").length;
 
   return (
-    <div className="text-xs">
+    <div className="text-ui">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -31,7 +31,7 @@ export const PromptCard = memo(function PromptCard({
         <StepChevron open={open} size={11} />
       </button>
       {open && (
-        <p className="selectable mt-1 whitespace-pre-wrap break-words border-l border-edge pl-3 text-sm text-ink">
+        <p className="selectable mt-1 whitespace-pre-wrap break-words border-l border-edge pl-3 text-body text-ink">
           {body}
         </p>
       )}

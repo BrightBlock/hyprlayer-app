@@ -349,16 +349,16 @@ export function AutocompleteDropdown({
   const showLoading = state.suggestions.length === 0 && state.loading;
 
   return (
-    <div className="absolute bottom-full left-0 z-50 mb-1 w-full max-w-md overflow-hidden rounded-lg border border-edge bg-panel text-sm shadow-lg">
-      <div className="border-b border-edge/60 px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-ink-dim/70">
+    <div className="absolute bottom-full left-0 z-50 mb-1 w-full max-w-md overflow-hidden rounded-lg border border-edge bg-panel text-body shadow-lg">
+      <div className="border-b border-edge/60 px-3 py-1.5 text-label text-ink-dim/70">
         {state.mode === "command" ? "Skills & commands" : "Files"}
       </div>
       <ul className="max-h-64 overflow-y-auto py-1">
         {showLoading && (
-          <li className="px-3 py-2 text-sm text-ink-dim">Searching…</li>
+          <li className="px-3 py-2 text-body text-ink-dim">Searching…</li>
         )}
         {!showLoading && state.suggestions.length === 0 && (
-          <li className="px-3 py-2 text-sm text-ink-dim">{emptyHint ?? "No matches"}</li>
+          <li className="px-3 py-2 text-body text-ink-dim">{emptyHint ?? "No matches"}</li>
         )}
         {state.suggestions.map((s, i) => {
           const active = i === state.activeIndex;
@@ -380,10 +380,10 @@ export function AutocompleteDropdown({
                   {state.mode === "command" ? `${s.sigil}${s.label}` : s.label}
                 </span>
                 {s.detail && (
-                  <span className="truncate text-xs text-ink-dim">{s.detail}</span>
+                  <span className="truncate text-ui text-ink-dim">{s.detail}</span>
                 )}
                 {s.badge && (
-                  <span className="ml-auto shrink-0 rounded bg-edge/60 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+                  <span className="ml-auto shrink-0 rounded bg-edge/60 px-1 py-0.5 text-label text-ink-dim">
                     {s.badge}
                   </span>
                 )}
@@ -444,7 +444,7 @@ export function HighlightBackdrop({
     <div
       ref={ref}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2.5 text-sm text-transparent"
+      className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2.5 text-body text-transparent"
     >
       {segments.map((seg, i) =>
         seg.skill ? (

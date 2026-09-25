@@ -37,14 +37,14 @@ function HealthRow({ check }: { check: HealthCheck }) {
     <div className="flex items-start gap-3 py-1.5">
       <Badge tone={CHECK_TONE[check.status]}>{check.status}</Badge>
       <div className="min-w-0">
-        <p className="text-sm">{check.label}</p>
+        <p className="text-body">{check.label}</p>
         {check.detail && (
-          <p className="selectable truncate font-mono text-xs text-ink-dim" title={check.detail}>
+          <p className="selectable truncate text-meta text-ink-dim" title={check.detail}>
             {check.detail}
           </p>
         )}
         {check.remedy && check.status !== "pass" && (
-          <p className="mt-0.5 text-xs text-warn-ink">{check.remedy}</p>
+          <p className="mt-0.5 text-ui text-warn-ink">{check.remedy}</p>
         )}
       </div>
     </div>
@@ -81,7 +81,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
   return (
     <SettingsSection>
       <SectionHeading>Files copied into new worktrees</SectionHeading>
-      <p className="mb-3 mt-1.5 max-w-xl text-xs leading-relaxed text-ink-dim">
+      <p className="mb-3 mt-1.5 max-w-xl text-ui leading-prose text-ink-dim">
         Copied into every new worktree. Glob patterns supported.
       </p>
       {files.isLoading && <Spinner />}
@@ -91,10 +91,10 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
         <ul ref={listRef} className="mb-3 max-h-40 space-y-1 overflow-y-auto pr-1">
           {list.map((p) => (
             <li key={p} className="flex items-center gap-2">
-              <span className="selectable flex-1 font-mono text-sm text-ink">{p}</span>
+              <span className="selectable flex-1 text-meta text-ink">{p}</span>
               <button
                 type="button"
-                className="shrink-0 rounded px-1 py-0.5 text-xs text-ink-dim hover:bg-edge/60 hover:text-bad"
+                className="shrink-0 rounded px-1 py-0.5 text-ui text-ink-dim hover:bg-edge/60 hover:text-bad"
                 onClick={() => remove(p)}
                 disabled={setFiles.isPending}
                 aria-label={`Remove ${p}`}
@@ -173,7 +173,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
         <>
           {heading}
           {detail.data && (
-            <span className="selectable mt-0.5 block font-mono text-2xs font-normal tracking-normal text-ink-dim">
+            <span className="selectable mt-0.5 block text-meta font-normal text-ink-dim">
               {detail.data.project.path}
             </span>
           )}
@@ -188,7 +188,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
         <div className="flex flex-col">
           <SettingsSection first>
             <SectionHeading>Storage</SectionHeading>
-            <div className="mt-2 text-sm">
+            <div className="mt-2 text-body">
               <div className="flex min-w-0 items-center gap-2">
                 <Badge tone={detail.data!.storage ? "accent" : "dim"}>
                   {detail.data!.storage?.backend ?? "local folder"}
@@ -199,7 +199,7 @@ export function ProjectSettingsDialog({ projectPath, onClose }: Props) {
                   </span>
                 )}
                 {detail.data!.thoughtsRoot && (
-                  <span className="selectable min-w-0 truncate font-mono text-xs text-ink-dim">
+                  <span className="selectable min-w-0 truncate text-meta text-ink-dim">
                     {detail.data!.thoughtsRoot}
                   </span>
                 )}

@@ -40,7 +40,7 @@ function ArgsForm({ request }: { request: PromptArgsRequest }) {
       <div className="space-y-3">
         {request.inputs.map((input, i) => (
           <label key={input.token} className="block space-y-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+            <span className="text-label text-ink-dim">
               {promptInputLabel(input)}
             </span>
             <TextInput

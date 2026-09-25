@@ -140,7 +140,7 @@ export function AgentEditor(props: Props) {
       <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-8 pt-1.5`}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-semibold tracking-tight text-ink">
+            <h1 className="truncate text-h3 text-ink">
               {isNew
                 ? "New Agent"
                 : managed
@@ -157,7 +157,7 @@ export function AgentEditor(props: Props) {
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate font-mono text-xs text-ink-dim">
+          <div className="mt-0.5 truncate text-meta text-ink-dim">
             {`${draft.name || "untitled"} · ${modelLabel(draft.model, catalog)} · ${
               isAllProjects(draft) ? "all projects" : (props.projectName ?? "this project")
             }`}
@@ -180,7 +180,7 @@ export function AgentEditor(props: Props) {
               const at = e.currentTarget.getBoundingClientRect();
               setMenuAt({ x: at.right - 150, y: at.bottom + 6 });
             }}
-            className={`${HEADER_ICON} tracking-widest`}
+            className={HEADER_ICON}
           >
             ⋮
           </button>
@@ -282,7 +282,7 @@ function Breadcrumb({
   return (
     <nav
       aria-label="Breadcrumb"
-      className={`${COLUMN} flex min-w-0 items-center gap-1.5 px-7 pt-4 text-xs`}
+      className={`${COLUMN} flex min-w-0 items-center gap-1.5 px-7 pt-4 text-ui`}
     >
       <button
         type="button"
@@ -369,14 +369,14 @@ function SetupTab({
             value={draft.description}
             onChange={(e) => patch({ description: e.target.value })}
             placeholder="When should this agent be used? Claude reads this to decide."
-            className="selectable w-full resize-none rounded-md border border-edge bg-panel-2 px-2.5 py-2 text-sm text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
+            className="selectable w-full resize-none rounded-md border border-edge bg-panel-2 px-2.5 py-2 text-body text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
           />
         </Labeled>
 
         <div>
           <div className="mb-2 flex items-baseline gap-2">
-            <span className="text-xs font-medium text-ink-dim">Model</span>
-            <span className="text-2xs text-ink-dim opacity-70">Fixed when a session spawns</span>
+            <span className="text-ui font-medium text-ink-dim">Model</span>
+            <span className="text-ui-sm text-ink-dim opacity-70">Fixed when a session spawns</span>
           </div>
           <div className="grid grid-cols-2 gap-x-6">
             <RadioRow
@@ -401,8 +401,8 @@ function SetupTab({
 
         <div>
           <div className="mb-2 flex items-baseline gap-2">
-            <span className="text-xs font-medium text-ink-dim">Persistent memory</span>
-            <span className="text-2xs text-ink-dim opacity-70">
+            <span className="text-ui font-medium text-ink-dim">Persistent memory</span>
+            <span className="text-ui-sm text-ink-dim opacity-70">
               What this agent still knows next time it runs
             </span>
           </div>
@@ -426,7 +426,7 @@ function SetupTab({
             ))}
           </div>
           {hasUnknownMemoryScope(draft.memory) && (
-            <p className="mt-1.5 text-2xs text-warn-ink">
+            <p className="mt-1.5 text-ui-sm text-warn-ink">
               This file sets <code>memory: {draft.memory}</code>, a scope this editor doesn&apos;t
               know. It is left untouched unless you pick one above.
             </p>
@@ -435,7 +435,7 @@ function SetupTab({
 
         <div className="flex flex-wrap gap-8">
           <div>
-            <div className="mb-1.5 text-xs font-medium text-ink-dim">Reasoning effort</div>
+            <div className="mb-1.5 text-ui font-medium text-ink-dim">Reasoning effort</div>
             <Segmented
               size="sm"
               aria-label="Reasoning effort"
@@ -445,7 +445,7 @@ function SetupTab({
             />
           </div>
           <div>
-            <div className="mb-1.5 text-xs font-medium text-ink-dim">Harness</div>
+            <div className="mb-1.5 text-ui font-medium text-ink-dim">Harness</div>
             <Segmented
               size="sm"
               aria-label="Harness"
@@ -526,7 +526,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
         title="System prompt"
         description="Prepended to every session this agent starts, after the harness's own system prompt."
         action={
-          <span className="font-mono text-2xs text-ink-dim">{promptStats(draft.prompt)}</span>
+          <span className="text-meta text-ink-dim">{promptStats(draft.prompt)}</span>
         }
         className="flex min-h-0 flex-1 flex-col"
       >
@@ -534,10 +534,10 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
           value={draft.prompt}
           spellCheck={false}
           onChange={(e) => patch({ prompt: e.target.value })}
-          className="selectable min-h-75 w-full flex-1 resize-y rounded-lg border border-edge bg-panel-2 p-3.5 font-mono text-xs leading-relaxed text-ink focus:border-ink-dim/70 focus:outline-none"
+          className="selectable min-h-75 w-full flex-1 resize-y rounded-lg border border-edge bg-panel-2 p-3.5 text-meta leading-prose text-ink focus:border-ink-dim/70 focus:outline-none"
         />
         <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
-          <span className="text-2xs text-ink-dim">Insert variable</span>
+          <span className="text-ui-sm text-ink-dim">Insert variable</span>
           {PROMPT_VARS.map((v) => (
             <button
               key={v.token}
@@ -549,7 +549,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
                     draft.prompt + (draft.prompt && !draft.prompt.endsWith("\n") ? " " : "") + v.token,
                 })
               }
-              className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim hover:border-ink-dim hover:text-ink"
+              className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim hover:border-ink-dim hover:text-ink"
             >
               {v.token}
             </button>
@@ -562,7 +562,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
         description="Docs and rules stitched onto the prompt at launch, in this order."
       >
         {contextFiles.length === 0 ? (
-          <p className="text-xs text-ink-dim">
+          <p className="text-ui text-ink-dim">
             No CLAUDE.md, <span className="font-mono">.claude/rules</span> or ADRs found in this
             project.
           </p>
@@ -578,8 +578,8 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
                   <span className="grid text-ink-dim">
                     <DocIcon size={14} />
                   </span>
-                  <span className="font-mono text-xs text-ink">{c.path}</span>
-                  <span className="text-2xs text-ink-dim">{c.note}</span>
+                  <span className="text-meta text-ink">{c.path}</span>
+                  <span className="text-ui-sm text-ink-dim">{c.note}</span>
                   <div className="flex-1" />
                   <Toggle
                     checked={on}
@@ -632,8 +632,8 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                     <WrenchIcon size={13} />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <div className="font-mono text-xs text-ink">{t.key}</div>
-                    <div className="truncate text-2xs text-ink-dim">{t.desc}</div>
+                    <div className="text-meta text-ink">{t.key}</div>
+                    <div className="truncate text-ui-sm text-ink-dim">{t.desc}</div>
                   </div>
                   <Toggle
                     checked={on}
@@ -646,11 +646,11 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           </div>
           {extras.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-2xs text-ink-dim">Also in the file</span>
+              <span className="text-ui-sm text-ink-dim">Also in the file</span>
               {extras.map((t) => (
                 <span
                   key={t}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim"
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
                 >
                   {t}
                 </span>
@@ -664,7 +664,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           description="Servers Claude Code is configured with. Turn one on to expose its tools to this agent."
         >
           {mcpServers.length === 0 ? (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               No MCP servers in <span className="font-mono">~/.claude.json</span> or this project&apos;s{" "}
               <span className="font-mono">.mcp.json</span>.
             </p>
@@ -680,8 +680,8 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                         aria-hidden="true"
                         className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
                       />
-                      <span className="font-mono text-xs text-ink">{s.name}</span>
-                      <span className="text-2xs text-ink-dim">
+                      <span className="text-meta text-ink">{s.name}</span>
+                      <span className="text-ui-sm text-ink-dim">
                         {s.transport} · {s.scope}
                       </span>
                       <div className="flex-1" />
@@ -696,7 +696,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                         {chips.map((t) => (
                           <span
                             key={t}
-                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 font-mono text-2xs text-ink"
+                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-meta text-ink"
                           >
                             {t}
                           </span>
@@ -717,9 +717,9 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           description="Preloaded into this agent when it runs."
           action={
             <>
-              <span className="font-mono text-2xs text-ink-dim">{skillSummary(draft, skills)}</span>
+              <span className="text-meta text-ink-dim">{skillSummary(draft, skills)}</span>
               <Toggle
-                className="text-2xs text-ink-dim"
+                className="text-ui-sm text-ink-dim"
                 checked={skillsRestricted(overlay.rules)}
                 onChange={(next) =>
                   patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
@@ -731,7 +731,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           }
         >
           {skills.length === 0 ? (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               No skills found in <span className="font-mono">.claude/skills</span> or{" "}
               <span className="font-mono">~/.claude/skills</span>.
             </p>
@@ -752,18 +752,18 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate text-xs text-ink">{s.name}</span>
+                        <span className="truncate text-ui text-ink">{s.name}</span>
                         {s.userOnly && (
                           <span title="Reserved for direct user invocation, but still preloaded into this agent">
                             <Badge tone="dim">user-only</Badge>
                           </span>
                         )}
                       </div>
-                      <div className="truncate text-2xs text-ink-dim">
+                      <div className="truncate text-ui-sm text-ink-dim">
                         {shortDescription(s.description)}
                       </div>
                     </div>
-                    <div className="shrink-0 text-right text-2xs text-ink-dim">
+                    <div className="shrink-0 text-right text-ui-sm text-ink-dim">
                       <div>{s.source}</div>
                       <div className="font-mono">~{(s.chars / 3.8 / 1000).toFixed(1)}k tokens</div>
                     </div>
@@ -785,11 +785,11 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           )}
           {extraSkillNames.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-2xs text-ink-dim">Also in the file</span>
+              <span className="text-ui-sm text-ink-dim">Also in the file</span>
               {extraSkillNames.map((name) => (
                 <span
                   key={name}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 font-mono text-2xs text-ink-dim"
+                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
                 >
                   {name}
                 </span>
@@ -809,7 +809,7 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
           }
         >
           {peers.length === 0 ? (
-            <p className="text-xs text-ink-dim">No other agents to delegate to yet.</p>
+            <p className="text-ui text-ink-dim">No other agents to delegate to yet.</p>
           ) : (
             <div className="flex flex-col">
               {peers.map((p, i) => {
@@ -826,8 +826,8 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
                       className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-ink">{p.name}</div>
-                      <div className="truncate text-2xs text-ink-dim">
+                      <div className="truncate text-ui text-ink">{p.name}</div>
+                      <div className="truncate text-ui-sm text-ink-dim">
                         {shortDescription(p.description)}
                       </div>
                     </div>
@@ -907,7 +907,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
         }
       >
         {overlay.rules.length === 0 ? (
-          <p className="text-xs text-ink-dim">
+          <p className="text-ui text-ink-dim">
             No rules yet. Every tool call follows the mode above.
           </p>
         ) : (
@@ -924,7 +924,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                       type="button"
                       title={a.key}
                       onClick={() => setRule(r.id, { action: a.key })}
-                      className="rounded px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide"
+                      className="rounded px-1.5 py-0.5 text-label"
                       style={
                         r.action === a.key
                           ? { background: `color-mix(in oklab, ${a.tone} 18%, transparent)`, color: a.tone }
@@ -940,7 +940,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                   spellCheck={false}
                   onChange={(e) => setRule(r.id, { pattern: e.target.value })}
                   aria-label="Rule pattern"
-                  className="selectable w-full border-0 bg-transparent font-mono text-xs text-ink outline-none"
+                  className="selectable w-full border-0 bg-transparent text-meta text-ink outline-none"
                 />
                 <button
                   type="button"
@@ -1023,18 +1023,18 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
               className="flex items-center gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2"
             >
               <span
-                className={`grid h-6 w-6 place-items-center rounded-full text-2xs font-semibold text-accent-ink ${
+                className={`grid h-6 w-6 place-items-center rounded-full text-ui-sm font-semibold text-accent-ink ${
                   i % 2 ? "bg-research" : "bg-accent"
                 }`}
               >
                 {initialsOf(c.name)}
               </span>
               <div className="min-w-0">
-                <div className="truncate text-xs text-ink">{c.name}</div>
-                <div className="truncate font-mono text-2xs text-ink-dim">{c.email}</div>
+                <div className="truncate text-ui text-ink">{c.name}</div>
+                <div className="truncate text-meta text-ink-dim">{c.email}</div>
               </div>
               <div className="flex-1" />
-              <span className="text-2xs text-ink-dim">{c.role}</span>
+              <span className="text-ui-sm text-ink-dim">{c.role}</span>
               <button
                 type="button"
                 aria-label={`Remove ${c.email}`}
@@ -1095,7 +1095,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
 function Labeled({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-medium text-ink-dim">{label}</div>
+      <div className="mb-1.5 text-ui font-medium text-ink-dim">{label}</div>
       {children}
     </div>
   );
@@ -1117,8 +1117,8 @@ function Row({
       className={`flex items-start justify-between gap-4 py-3.5 ${last ? "" : "border-b border-edge/60"}`}
     >
       <div className="min-w-0">
-        <div className="text-sm text-ink">{title}</div>
-        <p className="mt-0.5 text-xs text-ink-dim">{hint}</p>
+        <div className="text-body text-ink">{title}</div>
+        <p className="mt-0.5 text-ui text-ink-dim">{hint}</p>
       </div>
       <div className="shrink-0 pt-0.5">{control}</div>
     </div>
@@ -1130,7 +1130,7 @@ function MiniButton({ onClick, children }: { onClick: () => void; children: Reac
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-2xs text-ink-dim hover:text-ink"
+      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-ui-sm text-ink-dim hover:text-ink"
     >
       {children}
     </button>

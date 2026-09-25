@@ -105,10 +105,10 @@ function useChordRecorder(
 }
 
 function ChordPill({ chord }: { chord: Chord | null }) {
-  if (!chord) return <span className="text-xs italic text-ink-dim">Not set</span>;
+  if (!chord) return <span className="text-ui italic text-ink-dim">Not set</span>;
   return (
     <kbd
-      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm font-medium text-ink"
+      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body font-medium text-ink"
       style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
     >
       {formatChord(chord, IS_MACOS)}
@@ -396,7 +396,7 @@ export function PromptLibrary({
       type="button"
       onClick={opts.onSelect}
       aria-current={opts.selected}
-      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-body transition-colors ${
         opts.selected
           ? "border-accent/30 bg-accent/10 text-ink"
           : "border-transparent text-ink hover:bg-edge/40"
@@ -413,11 +413,11 @@ export function PromptLibrary({
         />
       )}
       {opts.hasOverrides && (
-        <span className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
+        <span className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-tag text-brand">
           proj
         </span>
       )}
-      {opts.chord && <ChordHint chord={opts.chord} className="shrink-0 text-[13px] text-ink-dim" />}
+      {opts.chord && <ChordHint chord={opts.chord} className="shrink-0 text-body text-ink-dim" />}
     </button>
   );
 
@@ -597,7 +597,7 @@ export function PromptLibrary({
         style={{ width: narrow ? SIDE_PANEL_MIN : promptsWidth }}
       >
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
-          <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">Prompts</p>
+          <p className="text-title text-ink-dim">Prompts</p>
           <div className="flex items-center gap-0.5">
             <button
               type="button"
@@ -638,7 +638,7 @@ export function PromptLibrary({
         </div>
         <nav className="flex-1 space-y-4 overflow-y-auto px-2 pb-3 pt-2" aria-label="Prompts">
           <div>
-            <div className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+            <div className="px-1.5 pb-1 text-label text-ink-dim">
               Built-in
             </div>
             <div className="space-y-0.5">
@@ -659,7 +659,7 @@ export function PromptLibrary({
             </div>
           </div>
           <div>
-            <div className="px-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+            <div className="px-1.5 pb-1 text-label text-ink-dim">
               Custom
             </div>
             <div className="space-y-0.5">
@@ -682,7 +682,7 @@ export function PromptLibrary({
                   }),
                 )}
               {custom.length === 0 && (
-                <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-xs leading-relaxed text-ink-dim">
+                <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-ui leading-prose text-ink-dim">
                   No custom prompts yet.
                 </div>
               )}
@@ -690,10 +690,10 @@ export function PromptLibrary({
           </div>
         </nav>
         <div className="shrink-0 border-t border-edge px-4 py-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+          <p className="text-label text-ink-dim">
             Invoke anywhere
           </p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+          <p className="mt-1 text-ui leading-prose text-ink-dim">
             Composer chips · the{" "}
             <ChordHint
               chord={effectiveChord(kbOverrides, "prompts.palette", IS_MACOS) ?? "mod+k"}
@@ -740,7 +740,7 @@ export function PromptLibrary({
             </span>
             {builtinDef ? (
               <>
-                <h2 className="text-sm font-semibold text-ink">{selName}</h2>
+                <h2 className="text-body font-semibold text-ink">{selName}</h2>
                 <Badge tone="dim">Built-in</Badge>
               </>
             ) : (
@@ -756,7 +756,7 @@ export function PromptLibrary({
             )}
             {selPrompt && promptSlug(selName) && (
               <code
-                className="shrink-0 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-[11px] text-ink-dim"
+                className="shrink-0 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-ui-sm text-ink-dim"
                 title="Type this in a session composer to run the prompt. Text after it fills {{input}}."
               >
                 /{promptSlug(selName)}
@@ -782,11 +782,11 @@ export function PromptLibrary({
           </div>
 
           <div className="mt-4 space-y-1.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+            <div className="text-label text-ink-dim">
               Scope
             </div>
             {builtinDef ? (
-              <p className="text-xs text-ink-dim">
+              <p className="text-ui text-ink-dim">
                 Built-in prompts are global, so they apply to every project and can't be scoped.
               </p>
             ) : (
@@ -798,7 +798,7 @@ export function PromptLibrary({
                       setScope("global");
                       setProjPickerOpen(false);
                     }}
-                    className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                    className={`rounded-md border px-2.5 py-1 text-ui font-medium ${
                       !isProjScope
                         ? "border-accent/40 bg-accent/15 text-accent"
                         : "border-edge bg-panel-2 text-ink-dim hover:text-ink"
@@ -814,7 +814,7 @@ export function PromptLibrary({
                         setScope(path);
                         setProjPickerOpen(false);
                       }}
-                      className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
+                      className={`rounded-md border px-2.5 py-1 text-ui font-medium ${
                         scope === path
                           ? "border-accent/40 bg-accent/15 text-accent"
                           : "border-edge bg-panel-2 text-ink-dim hover:text-ink"
@@ -827,7 +827,7 @@ export function PromptLibrary({
                     ref={projPickerTriggerRef}
                     type="button"
                     onClick={() => setProjPickerOpen((v) => !v)}
-                    className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-xs text-ink-dim hover:border-accent/50 hover:text-ink"
+                    className="inline-flex items-center gap-1 rounded-md border border-dashed border-edge px-2 py-1 text-ui text-ink-dim hover:border-accent/50 hover:text-ink"
                   >
                     <PlusIcon size={11} />
                     Project override…
@@ -838,7 +838,7 @@ export function PromptLibrary({
                     anchorRef={projPickerTriggerRef}
                     className="min-w-44"
                   >
-                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+                    <div className="px-2 py-1 text-label text-ink-dim">
                       Add override for…
                     </div>
                     {availableOverrideProjects.map((p) => (
@@ -862,13 +862,13 @@ export function PromptLibrary({
                       </MenuItem>
                     ))}
                     {availableOverrideProjects.length === 0 && (
-                      <div className="px-2 py-1.5 text-xs text-ink-dim">
+                      <div className="px-2 py-1.5 text-ui text-ink-dim">
                         Every project already has an override.
                       </div>
                     )}
                   </Popover>
                 </div>
-                <p className="text-xs text-ink-dim">
+                <p className="text-ui text-ink-dim">
                   {isProjScope
                     ? `Editing the override used only in ${projectName(scope)}. The global prompt stays untouched.`
                     : "Used by every project unless a project override exists."}
@@ -879,12 +879,12 @@ export function PromptLibrary({
 
           <div className="mt-4 space-y-1.5">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+              <span className="text-label text-ink-dim">
                 Prompt text
               </span>
               {selPrompt && isProjScope && hasScopeOverride && (
                 <>
-                  <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
+                  <span className="rounded bg-brand/15 px-1.5 py-0.5 text-tag text-brand">
                     Overrides global in {projectName(scope)}
                   </span>
                   <button
@@ -903,7 +903,7 @@ export function PromptLibrary({
                       );
                       setScope("global");
                     }}
-                    className="text-[11px] text-ink-dim underline underline-offset-2 hover:text-bad"
+                    className="text-ui-sm text-ink-dim underline underline-offset-2 hover:text-bad"
                   >
                     Remove override
                   </button>
@@ -918,19 +918,19 @@ export function PromptLibrary({
               rows={8}
               spellCheck={false}
               placeholder="What should the agent do when this prompt runs?"
-              className="selectable min-h-40 w-full resize-y rounded-md border border-edge bg-panel-2 px-3 py-2.5 font-mono text-xs leading-relaxed text-ink focus:border-accent focus:outline-none"
+              className="selectable min-h-40 w-full resize-y rounded-md border border-edge bg-panel-2 px-3 py-2.5 text-meta leading-prose text-ink focus:border-accent focus:outline-none"
             />
             <div className="flex items-center gap-2.5">
               <button
                 ref={varPickerTriggerRef}
                 type="button"
                 onClick={() => setVarPickerOpen((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-xs text-brand hover:border-brand/60"
+                className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-panel-2 px-2 py-1 text-ui text-brand hover:border-brand/60"
               >
                 <BracesIcon size={12} />
                 Insert variable
               </button>
-              <span className="text-xs text-ink-dim">
+              <span className="text-ui text-ink-dim">
                 Variables resolve from the worktree; <code>{"{{input}}"}</code> asks you when
                 the prompt runs.
               </span>
@@ -944,25 +944,25 @@ export function PromptLibrary({
                 {PROMPT_VARS.map((v) => (
                   <MenuItem key={v.token} onClick={() => insertVariable(v.token)}>
                     <span className="flex w-full items-center gap-2.5">
-                      <code className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-[11px] text-brand">
+                      <code className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-ui-sm text-brand">
                         {v.token}
                       </code>
-                      <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">{v.desc}</span>
+                      <span className="min-w-0 flex-1 truncate text-ui text-ink-dim">{v.desc}</span>
                     </span>
                   </MenuItem>
                 ))}
                 <MenuSeparator />
                 <MenuItem onClick={() => insertVariable(PROMPT_INPUT_TOKEN)}>
                   <span className="flex w-full items-center gap-2.5">
-                    <code className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[11px] text-accent">
+                    <code className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-ui-sm text-accent">
                       {PROMPT_INPUT_TOKEN}
                     </code>
-                    <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
+                    <span className="min-w-0 flex-1 truncate text-ui text-ink-dim">
                       Ask me for a value when it runs
                     </span>
                   </span>
                 </MenuItem>
-                <p className="px-2.5 pb-1 pt-0.5 text-[11px] leading-relaxed text-ink-dim/80">
+                <p className="px-2.5 pb-1 pt-0.5 text-ui-sm leading-prose text-ink-dim/80">
                   Name the field with <code>{"{{input:which module}}"}</code>. Repeat a token to
                   fill it once and use it twice.
                 </p>
@@ -972,7 +972,7 @@ export function PromptLibrary({
 
           <div className="mt-4 grid grid-cols-2 gap-5 border-t border-edge/50 pt-4">
             <div className="space-y-1.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+              <div className="text-label text-ink-dim">
                 Keyboard shortcut
               </div>
               {recording ? (
@@ -981,7 +981,7 @@ export function PromptLibrary({
                     {candidate ? (
                       <ChordPill chord={candidate} />
                     ) : (
-                      <span className="text-xs text-ink-dim">Press a shortcut…</span>
+                      <span className="text-ui text-ink-dim">Press a shortcut…</span>
                     )}
                     <Button
                       variant="primary"
@@ -993,12 +993,12 @@ export function PromptLibrary({
                     <Button onClick={() => setRecording(false)}>Cancel</Button>
                   </div>
                   {conflictLabels.length > 0 && (
-                    <p className="text-xs text-warn-ink">
+                    <p className="text-ui text-warn-ink">
                       Already used by {conflictLabels.join(", ")}
                     </p>
                   )}
                   {reserved && (
-                    <p className="text-xs text-warn-ink">
+                    <p className="text-ui text-warn-ink">
                       This is a system shortcut, so the OS may intercept it.
                     </p>
                   )}
@@ -1012,18 +1012,18 @@ export function PromptLibrary({
                   </Button>
                 </div>
               )}
-              <p className="text-xs leading-relaxed text-ink-dim">
+              <p className="text-ui leading-prose text-ink-dim">
                 Works anywhere in the app; runs in the focused workstream.
               </p>
             </div>
             <div className="space-y-1.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+              <div className="text-label text-ink-dim">
                 {builtinDef ? "Availability" : "Pin to composer"}
               </div>
               {builtinDef ? (
                 <>
-                  <p className="text-sm text-ink">Available in every project</p>
-                  <p className="text-xs leading-relaxed text-ink-dim">
+                  <p className="text-body text-ink">Available in every project</p>
+                  <p className="text-ui leading-prose text-ink-dim">
                     Built-ins are always at hand. Run them from the git panel, the ⌘K palette, or
                     their shortcut.
                   </p>
@@ -1041,11 +1041,11 @@ export function PromptLibrary({
                       }
                       aria-label="Pin to composer"
                     />
-                    <span className="text-sm text-ink">
+                    <span className="text-body text-ink">
                       {selPrompt?.pinned ? "Shown in the composer bar" : "Hidden from the composer bar"}
                     </span>
                   </div>
-                  <p className="text-xs leading-relaxed text-ink-dim">
+                  <p className="text-ui leading-prose text-ink-dim">
                     Pinned prompts show as one-click chips above the message box in every session.
                   </p>
                 </>

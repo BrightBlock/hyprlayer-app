@@ -32,7 +32,7 @@ const APPEARANCE: Array<{ value: AppearanceSegment; label: string }> = [
   { value: "system", label: "Auto" },
 ];
 
-const ROW = "flex items-center justify-between gap-3 px-3 py-2 text-[12.5px] text-ink-2";
+const ROW = "flex items-center justify-between gap-3 px-3 py-2 text-ui text-ink-2";
 
 export function SettingsPopover({
   open,
@@ -71,7 +71,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         <span id={headingId} className="lbl">
           Settings
         </span>
-        {chord && <ChordHint chord={chord} className="font-mono text-2xs text-ink-dim" />}
+        {chord && <ChordHint chord={chord} className="text-meta text-ink-dim" />}
       </div>
       <AppearanceRow />
       {settings ? <ServerBackedRows settings={settings} /> : null}
@@ -167,5 +167,5 @@ function WorkshopLink({ onClose }: { onClose: () => void }) {
 }
 
 function Meta({ children }: { children: ReactNode }) {
-  return <span className="font-mono text-3xs text-ink-dim">{children}</span>;
+  return <span className="text-meta text-ink-dim">{children}</span>;
 }

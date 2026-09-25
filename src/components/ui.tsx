@@ -17,8 +17,16 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRovingRadio } from "@/lib/useRovingRadio";
 import { ChevronDownIcon, RestartIcon, XIcon } from "./icons";
 
-// Unregistered radius names never conflict, so `rounded-card` would survive a caller's `rounded-md`.
-const twMerge = extendTailwindMerge({ extend: { theme: { radius: ["card", "control"] } } });
+// Unregistered names never conflict, so `rounded-card` would survive `rounded-md`, and `text-ui` would be read as a colour and dropped beside `text-ink`.
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      radius: ["card", "control"],
+      text: ["display", "h1", "h2", "h3", "title", "body-lg", "body", "ui", "ui-sm", "meta", "label", "tag"],
+      leading: ["prose"],
+    },
+  },
+});
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
@@ -55,8 +63,8 @@ export function Button({
   return (
     <button
       className={cx(
-        "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-sm font-medium transition-colors",
-        size === "sm" && "h-6 gap-1.5 px-2 py-0 text-xs",
+        "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-body font-medium transition-colors",
+        size === "sm" && "h-6 gap-1.5 px-2 py-0 text-ui",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         variant === "primary" && "border border-accent bg-accent text-accent-ink hover:bg-accent/90",
@@ -78,7 +86,7 @@ export function Card({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
 }
 
 export function CardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={cx("mb-3 text-sm font-semibold tracking-wide text-ink", className)} {...rest} />;
+  return <h2 className={cx("mb-3 text-body font-semibold text-ink", className)} {...rest} />;
 }
 
 export type BadgeTone = "ok" | "warn" | "bad" | "dim" | "accent";
@@ -92,7 +100,7 @@ export function Badge({ tone = "dim", children }: { tone?: BadgeTone; children: 
     accent: "border border-edge bg-panel-2 text-ink",
   };
   return (
-    <span className={cx("inline-flex items-center rounded-control px-1.5 py-0.5 text-xs font-medium", tones[tone])}>
+    <span className={cx("inline-flex items-center rounded-control px-1.5 py-0.5 text-ui font-medium", tones[tone])}>
       {children}
     </span>
   );
@@ -117,8 +125,8 @@ export function Spinner({ size = 16 }: { size?: number }) {
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-12 text-center">
-      <p className="text-base font-medium text-ink">{title}</p>
-      {children && <div className="max-w-md text-sm text-ink-dim">{children}</div>}
+      <p className="text-title text-ink">{title}</p>
+      {children && <div className="max-w-md text-body text-ink-dim">{children}</div>}
     </div>
   );
 }
@@ -127,7 +135,7 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
   return (
     <input
       className={cx(
-        "selectable w-full rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-sm text-ink",
+        "selectable w-full rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-body text-ink",
         "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -266,7 +274,7 @@ export function DropdownSelect({
           }
         }}
         className={cx(
-          "flex w-full items-center justify-between gap-2 rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-sm text-ink",
+          "flex w-full items-center justify-between gap-2 rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-body text-ink",
           "focus:border-ink-dim/70",
           FOCUS_RING,
           "disabled:cursor-not-allowed disabled:opacity-50",
@@ -321,7 +329,7 @@ export function DropdownSelect({
                   {o.group && o.group !== options[i - 1]?.group && (
                     <div
                       role="presentation"
-                      className="px-2.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wide text-ink-dim first:pt-1"
+                      className="px-2.5 pb-1 pt-2 text-label text-ink-dim first:pt-1"
                     >
                       {o.group}
                     </div>
@@ -336,7 +344,7 @@ export function DropdownSelect({
                       close();
                     }}
                     className={cx(
-                      "flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm",
+                      "flex w-full items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-body",
                       "focus:outline-none enabled:hover:bg-panel-2 enabled:focus-visible:bg-panel-2",
                       o.disabled
                         ? "cursor-not-allowed text-ink-dim/50"
@@ -347,7 +355,7 @@ export function DropdownSelect({
                   >
                     <span className="min-w-0 flex-1 truncate">{o.label}</span>
                     {o.value === value && (
-                      <span aria-hidden="true" className="shrink-0 text-2xs">
+                      <span aria-hidden="true" className="shrink-0 text-ui-sm">
                         ✓
                       </span>
                     )}
@@ -374,8 +382,8 @@ export function SettingRow({
   return (
     <div className="flex items-start justify-between gap-4 py-3.5">
       <div className="min-w-0">
-        <div className="flex items-center gap-2 text-sm text-ink">{title}</div>
-        {children && <p className="mt-0.5 text-xs text-ink-dim">{children}</p>}
+        <div className="flex items-center gap-2 text-body text-ink">{title}</div>
+        {children && <p className="mt-0.5 text-ui text-ink-dim">{children}</p>}
       </div>
       <div className="shrink-0 pt-0.5">{control}</div>
     </div>
@@ -384,8 +392,8 @@ export function SettingRow({
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block text-sm">
-      <span className="mb-1 block text-xs font-medium text-ink-dim">{label}</span>
+    <label className="block text-body">
+      <span className="mb-1 block text-ui font-medium text-ink-dim">{label}</span>
       {children}
     </label>
   );
@@ -481,7 +489,7 @@ export function SegmentedControl<T extends string>({
           type="button"
           {...itemProps(i)}
           className={cx(
-            "rounded-[2px] px-2.5 py-0.5 text-xs transition-colors",
+            "rounded-[2px] px-2.5 py-0.5 text-ui transition-colors",
             FOCUS_RING,
             "disabled:cursor-not-allowed disabled:opacity-50",
             o.value === value
@@ -567,7 +575,7 @@ export function Dialog({
             )}
           >
             {title ? (
-              <h2 className="min-w-0 text-sm font-semibold tracking-wide text-ink">{title}</h2>
+              <h2 className="min-w-0 text-body font-semibold text-ink">{title}</h2>
             ) : (
               <span />
             )}
@@ -672,7 +680,7 @@ export function ErrorNote({
   if (error == null) return null;
   const remedy = errorRemedy(error);
   return (
-    <div className="selectable relative break-words rounded-control border border-bad/30 bg-bad/10 p-3 text-sm">
+    <div className="selectable relative break-words rounded-control border border-bad/30 bg-bad/10 p-3 text-body">
       {onDismiss && (
         <button
           type="button"
@@ -696,7 +704,7 @@ export function CliOutput({ text }: { text: string }) {
   const trimmed = text.trim();
   if (!trimmed) return null;
   return (
-    <pre className="selectable mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-control border border-edge bg-panel-2 p-2.5 font-mono text-xs text-ink-dim">
+    <pre className="selectable mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-control border border-edge bg-panel-2 p-2.5 text-meta text-ink-dim">
       {trimmed}
     </pre>
   );
@@ -846,7 +854,7 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       type="button"
       role="menuitem"
       className={cx(
-        "block w-full rounded-control px-2.5 py-1.5 text-left text-sm",
+        "block w-full rounded-control px-2.5 py-1.5 text-left text-body",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         danger ? "text-bad hover:bg-bad/10" : "text-ink hover:bg-panel-2",
@@ -855,7 +863,7 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       {...rest}
     >
       {children}
-      {hint && <span className="mt-0.5 block text-xs text-warn-ink">{hint}</span>}
+      {hint && <span className="mt-0.5 block text-ui text-warn-ink">{hint}</span>}
     </button>
   );
 }
@@ -987,7 +995,7 @@ export const MenuItem = ContextMenuItem;
 /** The status bar's popovers (Settings, Servers): the panel and its link rows. */
 export const BAR_POPOVER = "w-[306px] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.16)]";
 export const BAR_POPOVER_ROW =
-  "flex items-center gap-2.5 rounded-control px-3 py-2 text-[12.5px] text-ink-2 hover:bg-edge/50 " +
+  "flex items-center gap-2.5 rounded-control px-3 py-2 text-ui text-ink-2 hover:bg-edge/50 " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
 export function MenuSeparator() {

@@ -55,7 +55,7 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
       error={remove.isError ? remove.error : null}
       onDismissError={() => remove.reset()}
     >
-      <p className="text-sm leading-relaxed text-ink-dim">
+      <p className="text-body leading-prose text-ink-dim">
         {target && <span className="font-medium text-ink">{target.mappedName}</span>} will be
         removed from the sidebar. Its workstreams stop showing in hyprlayer.
       </p>
@@ -69,18 +69,18 @@ export function RemoveProjectDialog({ target, onClose, onRemoved }: Props) {
             onChange={(e) => setDeleteFiles(e.target.checked)}
             disabled={remove.isPending}
           />
-          <span className="min-w-0 text-sm">
+          <span className="min-w-0 text-body">
             <span className="text-ink">Also delete the directory from disk</span>
-            <span className="mt-0.5 block truncate font-mono text-xs text-ink-dim">
+            <span className="mt-0.5 block truncate text-meta text-ink-dim">
               {target?.path}
             </span>
-            <span className={`mt-1 block text-xs ${userOwned ? "text-bad" : "text-ink-dim"}`}>
+            <span className={`mt-1 block text-ui ${userOwned ? "text-bad" : "text-ink-dim"}`}>
               {userOwned ? "Your own directory. Can't be undone." : "Permanent."}
             </span>
           </span>
         </label>
       ) : (
-        <p className="text-xs text-ink-dim">
+        <p className="text-ui text-ink-dim">
           This project's directory is already gone from disk. Only the hyprlayer entry remains to
           remove.
         </p>

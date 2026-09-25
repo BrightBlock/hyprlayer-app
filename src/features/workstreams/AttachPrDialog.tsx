@@ -76,7 +76,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
 
         <div className="max-h-72 overflow-y-auto">
           {query.length === 0 ? (
-            <p className="py-6 text-center text-sm text-ink-dim">
+            <p className="py-6 text-center text-body text-ink-dim">
               Search by title, or enter a PR number.
             </p>
           ) : queryNumber !== null ? (
@@ -96,7 +96,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
             ) : attach.isError ? (
               null
             ) : (
-              <p className="py-6 text-center text-sm text-ink-dim">No PR #{queryNumber} found</p>
+              <p className="py-6 text-center text-body text-ink-dim">No PR #{queryNumber} found</p>
             )
           ) :
           search.isLoading ? (
@@ -104,7 +104,7 @@ export function AttachPrDialog({ target, onClose }: Props) {
               <Spinner size={16} />
             </div>
           ) : searchRows.length === 0 ? (
-            <p className="py-6 text-center text-sm text-ink-dim">No open PRs found</p>
+            <p className="py-6 text-center text-body text-ink-dim">No open PRs found</p>
           ) : (
             searchRows.map((pr) => (
               <PrRow
@@ -139,12 +139,12 @@ function PrRow({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-ink-dim hover:bg-edge/60 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-body text-ink-dim hover:bg-edge/60 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
     >
       <GitPullRequestIcon size={14} className="mt-0.5 shrink-0 self-start" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ink">{title}</span>
-        <span className="block truncate text-xs text-ink-dim">{subtitle}</span>
+        <span className="block truncate text-ui text-ink-dim">{subtitle}</span>
       </span>
     </button>
   );

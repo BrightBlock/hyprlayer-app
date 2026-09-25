@@ -40,13 +40,13 @@ function MergeConflictRow({ url }: { url: string }) {
         type="button"
         onClick={() => void openUrl(url)}
         title="Open the PR on GitHub to resolve the conflict"
-        className="group flex w-full items-center gap-2 text-left text-xs"
+        className="group flex w-full items-center gap-2 text-left text-ui"
       >
         <span className="w-3 shrink-0 text-center font-mono text-bad">!</span>
         <span className="min-w-0 flex-1 truncate font-medium text-bad">Merge conflict</span>
         <ExternalLinkIcon />
       </button>
-      <p className="mt-1 pl-5 text-[11px] leading-relaxed text-ink-dim">
+      <p className="mt-1 pl-5 text-ui-sm leading-prose text-ink-dim">
         This branch conflicts with its base branch and must be resolved before it
         can be merged. Open the PR on GitHub to resolve the conflicts.
       </p>
@@ -68,7 +68,7 @@ function ReviewBlockRow({
         type="button"
         onClick={() => void openUrl(url)}
         title="Open the PR on GitHub"
-        className="group flex w-full items-center gap-2 text-left text-xs"
+        className="group flex w-full items-center gap-2 text-left text-ui"
       >
         <span className="w-3 shrink-0 text-center font-mono text-warn-ink">!</span>
         <span className="min-w-0 flex-1 truncate font-medium text-warn-ink">
@@ -76,7 +76,7 @@ function ReviewBlockRow({
         </span>
         <ExternalLinkIcon />
       </button>
-      <p className="mt-1 pl-5 text-[11px] leading-relaxed text-ink-dim">
+      <p className="mt-1 pl-5 text-ui-sm leading-prose text-ink-dim">
         {changes
           ? "A reviewer requested changes. Address the feedback and get an approval before this can be merged."
           : "At least one approving review is required before this can be merged. The Merge button unlocks once the PR is approved."}
@@ -123,8 +123,8 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
           ) : null}
         </span>
         <StatusDot state={headerState} />
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink-dim">CI Checks</span>
-        <span className="ml-auto text-xs text-ink-dim">
+        <span className="text-label text-ink-dim">CI Checks</span>
+        <span className="ml-auto text-ui text-ink-dim">
           {isConflicting
             ? "conflict"
             : reviewWaiting
@@ -145,7 +145,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
               disabled={!check.url}
               onClick={() => check.url && void openUrl(check.url)}
               title={check.url ?? check.name}
-              className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-edge/50 disabled:cursor-default disabled:hover:bg-transparent"
+              className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui hover:bg-edge/50 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span className="w-3 shrink-0 text-center font-mono">
                 <CheckGlyph state={check.state} />

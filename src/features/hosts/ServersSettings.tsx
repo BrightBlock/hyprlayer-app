@@ -147,11 +147,11 @@ export function ServersSettings() {
             </Button>
           </div>
           {addProblem && (
-            <p role="alert" className="text-xs text-bad-ink">
+            <p role="alert" className="text-ui text-bad-ink">
               {addProblem}
             </p>
           )}
-          <p className="flex gap-2 text-xs leading-4 text-ink-dim">
+          <p className="flex gap-2 text-ui leading-4 text-ink-dim">
             <Info {...ICON} className="shrink-0 text-info" />
             <span>
               Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
@@ -221,7 +221,7 @@ export function ServersSettings() {
         </ul>
       </SettingsCard>
 
-      <p className="font-mono text-[10.5px] text-ink-dim">
+      <p className="text-meta text-ink-dim">
         servers are per machine · sessions keep running on the server they started on
       </p>
 
@@ -234,7 +234,7 @@ export function ServersSettings() {
         onConfirm={() => removing && void remove(removing)}
         busy={save.isPending}
       >
-        <p className="text-sm leading-relaxed text-ink-dim">
+        <p className="text-body leading-prose text-ink-dim">
           Hyprlayer forgets <span className="text-ink">{removing?.name}</span>. Nothing on it is
           stopped or deleted; adding it again brings its layout back.
         </p>
@@ -410,12 +410,12 @@ function ServerEditor({
           </Button>
         </div>
         {problem && (
-          <p role="alert" className="text-xs text-bad-ink">
+          <p role="alert" className="text-ui text-bad-ink">
             {problem}
           </p>
         )}
         {!row.isDefault && (
-          <p className="text-xs text-ink-dim">
+          <p className="text-ui text-ink-dim">
             Changing the destination starts this server with a fresh layout.
           </p>
         )}

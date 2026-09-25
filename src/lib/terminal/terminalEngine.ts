@@ -64,10 +64,10 @@ class XtermEngine implements TerminalEngine {
   constructor(opts: { fontSize: number; theme: TerminalTheme; cursorBlink?: boolean }) {
     this.term = new Terminal({
       fontSize: opts.fontSize,
-      fontFamily:
-        '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
       fontWeight: 400,
-      fontWeightBold: 700,
+      // Only 400/500/600 are bundled; 700 would be synthesized.
+      fontWeightBold: 600,
       lineHeight: 1.0,
       theme: opts.theme,
       cursorBlink: opts.cursorBlink ?? true,

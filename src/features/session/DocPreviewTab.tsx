@@ -78,7 +78,7 @@ export function DocPreviewTab({
       <div className="mx-auto w-[90%]">
         <div className="mb-4 flex items-center gap-2 border-b border-edge pb-3">
           <DocIcon size={15} />
-          <span className="truncate text-sm font-medium text-ink" title={path}>
+          <span className="truncate text-body font-medium text-ink" title={path}>
             {doc.data?.meta.relPath ?? title}
           </span>
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -123,7 +123,7 @@ export function DocPreviewTab({
             />
           </div>
         ) : doc.isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-ink-dim">
+          <div className="flex items-center gap-2 text-body text-ink-dim">
             <Spinner size={14} />
             Loading document…
           </div>

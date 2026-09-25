@@ -84,9 +84,9 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-edge bg-panel px-6">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="selectable truncate font-mono text-xs text-ink-dim">{meta.relPath}</span>
+          <span className="selectable truncate text-meta text-ink-dim">{meta.relPath}</span>
           {mode === "edit" && (
-            <span className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-accent">
+            <span className="shrink-0 text-label text-accent">
               • Editing
             </span>
           )}
@@ -107,7 +107,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
                 type="button"
                 onClick={() => setDocWide(wide)}
                 aria-pressed={docWide === wide}
-                className={`rounded px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                className={`rounded px-2.5 py-0.5 text-ui font-medium transition-colors ${
                   docWide === wide
                     ? "bg-accent/20 text-accent"
                     : "text-ink-dim hover:text-ink"
@@ -164,7 +164,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className={`mx-auto px-8 py-6 ${docWide ? "max-w-none" : "max-w-3xl"}`}>
-          <h1 className="selectable mb-5 text-2xl font-semibold text-ink">{docTitle(meta)}</h1>
+          <h1 className="selectable mb-5 text-h1 text-ink">{docTitle(meta)}</h1>
 
           <FrontmatterPanel
             meta={meta}
@@ -173,7 +173,7 @@ function DocBody({ id, doc, mode, onSetMode }: BodyProps) {
             onApply={(patch) => patchFrontmatter.mutate({ patch, baseMtimeMs: mtimeMs })}
           />
           {dirty && (
-            <p className="mt-2 text-xs text-warn-ink">
+            <p className="mt-2 text-ui text-warn-ink">
               Save or discard editor changes before patching frontmatter fields.
             </p>
           )}

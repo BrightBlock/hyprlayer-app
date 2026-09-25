@@ -311,14 +311,14 @@ export function AgentPtyTab({
         <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
         {minting && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 backdrop-blur-[1px]">
-            <span className="inline-flex items-center gap-2 font-mono text-xs text-ink-dim">
+            <span className="inline-flex items-center gap-2 text-meta text-ink-dim">
               <Spinner size={13} />
               Creating session…
             </span>
           </div>
         )}
       </div>
-      <div className="flex h-7 shrink-0 items-center gap-3 border-t border-edge px-3 font-mono text-[11px] text-ink-dim">
+      <div className="flex h-7 shrink-0 items-center gap-3 border-t border-edge px-3 text-meta text-ink-dim">
         <span className="inline-flex items-center gap-1.5">
           <EngineGlyph glyph={engine.glyph} accentToken={engine.accentToken} />
           <span style={{ color: `var(${engine.accentToken})` }}>{engine.label}</span>

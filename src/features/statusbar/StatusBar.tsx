@@ -27,7 +27,7 @@ export function StatusBar({
   return (
     <footer
       aria-label="Status bar"
-      className="flex shrink-0 items-center gap-3 border-t border-edge bg-panel px-3 font-mono text-[11px] tabular-nums"
+      className="flex shrink-0 items-center gap-3 border-t border-edge bg-panel px-3 text-meta tabular-nums"
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}

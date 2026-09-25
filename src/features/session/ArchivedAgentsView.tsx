@@ -45,7 +45,7 @@ function ArchivedMeta({
   catalog: readonly ModelOption[];
 }) {
   return (
-    <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-ink-dim">
+    <div className="mt-0.5 flex min-w-0 items-center gap-2 text-ui text-ink-dim">
       <span className="inline-flex shrink-0 items-center gap-1">
         <span className="h-1.5 w-1.5 rounded-full bg-brand" />
         {modelLabel(shell, catalog)}
@@ -101,11 +101,11 @@ export function ArchivedAgentsView({
         <div className="min-w-0">
           <div className="flex items-center gap-2.5">
             <ArchiveIcon size={18} className="text-accent" />
-            <h1 className="text-base font-semibold text-ink">Archived agents</h1>
-            <span className="truncate text-sm text-ink-dim">· {workstreamTitle}</span>
+            <h1 className="text-title text-ink">Archived agents</h1>
+            <span className="truncate text-body text-ink-dim">· {workstreamTitle}</span>
             <Badge tone="dim">{archived.length}</Badge>
           </div>
-          <p className="mt-1.5 max-w-xl text-xs leading-relaxed text-ink-dim">
+          <p className="mt-1.5 max-w-xl text-ui leading-prose text-ink-dim">
             Agents you archive in this workstream leave the tab strip but keep their branch,
             transcript and worktree. Unarchive any time to pick up where it left off.
           </p>
@@ -153,7 +153,7 @@ export function ArchivedAgentsView({
                   <ModeIcon mode={a.shell.mode} size={15} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-ink" title={a.shell.title}>
+                  <div className="truncate text-body font-medium text-ink" title={a.shell.title}>
                     {a.shell.title}
                   </div>
                   <ArchivedMeta
@@ -188,7 +188,7 @@ export function ArchivedAgentsView({
         onClose={() => setConfirmRemove(null)}
         title="Delete archived agent?"
       >
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           <span className="text-ink">{confirmRemove?.shell.title}</span> will be deleted from this
           workstream's archive and can no longer be unarchived. Its branch and worktree belong to
           the workstream and stay put.

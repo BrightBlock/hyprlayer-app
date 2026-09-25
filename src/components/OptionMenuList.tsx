@@ -26,7 +26,7 @@ export type OptionMenuGroup = {
 const ITEM = '[role^="menuitem"]:not([disabled])';
 const LOCKED_REASON =
   "Locked to this session's provider. Start a new agent to use a different provider";
-const HEADING = "flex items-center gap-2 px-2.5 py-1 text-[11px] font-medium text-ink-dim/70";
+const HEADING = "flex items-center gap-2 px-2.5 py-1 text-ui-sm font-medium text-ink-dim/70";
 
 /** A menu body: focus starts on the checked (else first) item, arrows move it, and it returns on close. */
 export function MenuPanel({
@@ -122,9 +122,9 @@ export function OptionMenuList({
                 <span className="flex w-full items-center gap-2 text-ink-dim/40">
                   {it.icon && <span className="shrink-0">{it.icon}</span>}
                   <span className="min-w-0 flex-1 truncate">{it.label}</span>
-                  {it.hint && <span className="shrink-0 text-[10px] text-ink-dim/70">{it.hint}</span>}
+                  {it.hint && <span className="shrink-0 text-ui-sm text-ink-dim/70">{it.hint}</span>}
                   {g.disabled && (
-                    <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide">soon</span>
+                    <span className="ml-auto shrink-0 text-label">soon</span>
                   )}
                 </span>
               </MenuItem>
@@ -174,7 +174,7 @@ export function OptionMenuList({
                         {showMore ? <ChevronDownIcon size={14} /> : <ChevronRightIcon size={14} />}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{g.more.label}</span>
-                      <span className="ml-auto shrink-0 text-[10px] text-ink-dim/70">
+                      <span className="ml-auto shrink-0 text-ui-sm text-ink-dim/70">
                         {g.more.items.length}
                       </span>
                     </span>

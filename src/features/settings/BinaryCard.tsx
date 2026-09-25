@@ -33,22 +33,22 @@ export function BinaryCard({ status }: { status: BinaryStatus }) {
     <div className="flex items-start justify-between gap-4 rounded-md border border-edge bg-panel-2 p-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm text-ink">{status.name}</span>
+          <span className="text-meta text-ink">{status.name}</span>
           <Badge tone={tone}>{label}</Badge>
-          {status.version && <span className="text-xs text-ink-dim">v{status.version}</span>}
+          {status.version && <span className="text-ui text-ink-dim">v{status.version}</span>}
           {status.overridden && <Badge tone="accent">manual path</Badge>}
         </div>
-        <p className="mt-1 text-xs text-ink-dim">{DESCRIPTIONS[status.kind]}</p>
+        <p className="mt-1 text-ui text-ink-dim">{DESCRIPTIONS[status.kind]}</p>
         {status.path && (
-          <p className="selectable mt-1 truncate font-mono text-xs text-ink-dim" title={status.path}>
+          <p className="selectable mt-1 truncate text-meta text-ink-dim" title={status.path}>
             {status.path}
           </p>
         )}
         {status.state.state === "tooOld" && (
-          <p className="mt-1 text-xs text-warn-ink">Minimum supported version: {status.state.min}</p>
+          <p className="mt-1 text-ui text-warn-ink">Minimum supported version: {status.state.min}</p>
         )}
         {override.isError && (
-          <p className="selectable mt-1 text-xs text-bad">
+          <p className="selectable mt-1 text-ui text-bad">
             Couldn't save the override: {errorMessage(override.error)}
           </p>
         )}

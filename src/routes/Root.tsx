@@ -502,7 +502,7 @@ function OpenInMenu({ dir }: { dir: string }) {
               <span className="shrink-0">{it.icon}</span>
               <span className="min-w-0 flex-1 truncate">{it.label}</span>
               {i < 9 && (
-                <span className="shrink-0 font-mono text-[10px] text-ink-dim/60">
+                <span className="shrink-0 text-meta text-ink-dim/60">
                   {i + 1}
                 </span>
               )}
@@ -1038,7 +1038,7 @@ export function Root() {
           {...dragRegion()}
         >
           <div
-            className="flex min-w-0 items-center gap-2 text-sm"
+            className="flex min-w-0 items-center gap-2 text-body"
             {...dragRegion()}
           >
             {currentProject ? (
@@ -1125,7 +1125,7 @@ export function Root() {
                 href={libDocUrl.data}
                 target="_blank"
                 rel="noreferrer"
-                className="text-xs font-medium text-ink-dim hover:text-ink"
+                className="text-ui font-medium text-ink-dim hover:text-ink"
               >
                 View on GitHub ↗
               </a>
@@ -1291,7 +1291,7 @@ export function Root() {
               }}
             >
               <div className="flex h-9 shrink-0 items-center justify-between pl-4 pr-3">
-                <p className="text-xs font-medium uppercase tracking-wider text-ink-dim">
+                <p className="text-title text-ink-dim">
                   Projects
                 </p>
                 <button
@@ -1311,7 +1311,7 @@ export function Root() {
                   </div>
                 )}
                 {!bootstrap.isLoading && projects.length === 0 && (
-                  <p className="px-2 py-1 text-sm text-ink-dim">
+                  <p className="px-2 py-1 text-body text-ink-dim">
                     {configReady ? (
                       "No projects mapped yet."
                     ) : (
@@ -1330,7 +1330,7 @@ export function Root() {
                     <button
                       type="button"
                       onClick={togglePinnedSection}
-                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium uppercase tracking-wider text-ink-dim hover:text-ink"
+                      className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-label text-ink-dim hover:text-ink"
                       aria-expanded={!pinnedSectionCollapsed}
                       title={
                         pinnedSectionCollapsed
@@ -1367,7 +1367,7 @@ export function Root() {
                               setProjectMenu(null);
                               setItemMenu({ x: e.clientX, y: e.clientY, view });
                             }}
-                            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-edge/50 hover:text-ink ${
+                            className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-body hover:bg-edge/50 hover:text-ink ${
                               isActiveItem
                                 ? "bg-accent/15 text-ink"
                                 : "text-ink-dim"
@@ -1472,7 +1472,7 @@ export function Root() {
                           onClick={(e) => {
                             if (projectDragSuppress.current) e.preventDefault();
                           }}
-                          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-1.5 pr-2.5 text-sm text-ink ${
+                          className={`flex min-w-0 flex-1 items-center gap-2 py-2 pl-1.5 pr-2.5 text-body text-ink ${
                             projectHighlight ? "font-semibold" : "font-medium"
                           }`}
                           title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
@@ -1495,7 +1495,7 @@ export function Root() {
                           <ProjectCopyWarning projectPath={p.path} />
                         </span>
                         {children.length > 0 && (
-                          <span className="shrink-0 px-1.5 text-xs tabular-nums text-ink-dim/60 group-hover:hidden">
+                          <span className="shrink-0 px-1.5 text-ui tabular-nums text-ink-dim/60 group-hover:hidden">
                             {children.length}
                           </span>
                         )}
@@ -1535,7 +1535,7 @@ export function Root() {
                               tier: "standard",
                               selected: isActiveItem ? "spine" : "none",
                               interactive: !isActiveItem,
-                              className: `flex gap-2.5 overflow-hidden pr-2 text-sm ${
+                              className: `flex gap-2.5 overflow-hidden pr-2 text-body ${
                                 isActiveItem ? "text-ink" : "text-ink-dim hover:text-ink"
                               }`,
                             })}

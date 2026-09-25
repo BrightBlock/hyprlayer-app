@@ -68,7 +68,7 @@ function TaskBox({ state, pulse }: { state: TaskState; pulse: boolean }) {
 function DraftTaskRow({ task }: { task: TrackedTask }) {
   const state = task.state === "done" ? "done" : "pending";
   return (
-    <div data-state={state} className="flex items-start gap-[9px] text-[13px] leading-[1.5]">
+    <div data-state={state} className="flex items-start gap-[9px] text-body">
       <TaskBox state={state} pulse={false} />
       <span className={cx("min-w-0 flex-1 break-words", state === "done" ? TEXT.done : "text-ink-2")}>
         {task.title}
@@ -95,7 +95,7 @@ export function TaskRow({
       aria-label={taskAriaLabel(task)}
       onClick={() => task.jump && onJump(task.jump)}
       className={cx(
-        "flex w-full items-start gap-[9px] text-left text-[13px] leading-[1.5]",
+        "flex w-full items-start gap-[9px] text-left text-body",
         active && "-mx-2 w-[calc(100%+16px)] rounded-control bg-panel-2 px-2 py-1.5",
       )}
     >
@@ -103,14 +103,14 @@ export function TaskRow({
       <span className="min-w-0 flex-1 break-words">
         <span className={TEXT[task.state]}>{task.title}</span>
         {task.added && (
-          <span className="ml-1.5 rounded-control border border-edge px-1 align-[1px] font-mono text-[10px] text-ink-4">
+          <span className="ml-1.5 rounded-control border border-edge px-1 align-[1px] text-meta text-ink-4">
             added
           </span>
         )}
         {task.reason && (task.state === "waiting" || task.state === "failed") && (
           <span
             className={cx(
-              "mt-0.5 block font-mono text-[10.5px]",
+              "mt-0.5 block text-meta",
               task.state === "waiting" ? "text-warn-ink" : "text-bad-ink",
             )}
           >
@@ -142,7 +142,7 @@ export function PhaseSection({
       <div
         data-phase-label
         className={cx(
-          "mb-2 font-mono text-3xs font-semibold uppercase tracking-[0.07em]",
+          "mb-2 text-label",
           showState && phase.state === "done" ? "text-ok" : "text-ink-4",
         )}
       >

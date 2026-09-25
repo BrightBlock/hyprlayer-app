@@ -103,14 +103,14 @@ const FileRow = memo(function FileRow({
       role="button"
     >
       <span
-        className={`w-3 shrink-0 text-center font-mono text-xs font-semibold ${glyph.cls}`}
+        className={`w-3 shrink-0 text-center text-meta font-semibold ${glyph.cls}`}
         title={glyph.label}
       >
         {glyph.ch}
       </span>
       <FileTypeIcon name={entry.path} size={13} />
       <span
-        className="min-w-0 flex-1 truncate font-mono text-xs text-ink"
+        className="min-w-0 flex-1 truncate text-meta text-ink"
         title={renamedLabel(entry.path, entry.oldPath)}
       >
         {label}
@@ -210,7 +210,7 @@ function TreeLevel({
               ) : (
                 <ChevronDownIcon size={12} />
               )}
-              <span className="truncate text-xs text-ink-dim">{child.name}</span>
+              <span className="truncate text-ui text-ink-dim">{child.name}</span>
             </button>
             {!collapsed.has(child.path) && (
               <TreeLevel
@@ -266,21 +266,21 @@ function ChangeSection({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between px-1">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink-dim">
+        <span className="text-label text-ink-dim">
           {title} {entries.length}
         </span>
         {entries.length > 0 && (
           <button
             type="button"
             onClick={onActionAll}
-            className="rounded px-1.5 py-0.5 text-xs text-ink-dim hover:bg-edge/60 hover:text-ink"
+            className="rounded px-1.5 py-0.5 text-ui text-ink-dim hover:bg-edge/60 hover:text-ink"
           >
             {actionLabel}
           </button>
         )}
       </div>
       {entries.length === 0 ? (
-        <p className="px-1 pb-1 text-xs text-ink-dim/70">Nothing here.</p>
+        <p className="px-1 pb-1 text-ui text-ink-dim/70">Nothing here.</p>
       ) : tree ? (
         <TreeLevel
           node={tree}
@@ -342,7 +342,7 @@ function DocsSection({
           open ? "pb-1.5" : ""
         }`}
       >
-        <span className="text-xs font-semibold">Documents</span>
+        <span className="text-ui font-semibold">Documents</span>
         <span className="ml-auto flex w-3 shrink-0 justify-center">
           {open ? <ChevronDownIcon size={12} /> : <ChevronRightIcon size={12} />}
         </span>
@@ -358,9 +358,9 @@ function DocsSection({
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
             >
               <DocIcon size={13} />
-              <span className="min-w-0 flex-1 truncate text-xs text-ink">{doc.title}</span>
+              <span className="min-w-0 flex-1 truncate text-ui text-ink">{doc.title}</span>
               <span
-                className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${DOC_TONE[doc.kind]}`}
+                className={`shrink-0 rounded px-1.5 py-0.5 text-ui-sm font-medium ${DOC_TONE[doc.kind]}`}
               >
                 {doc.kind}
               </span>
@@ -378,7 +378,7 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
   if (artifacts.length === 0) return null;
   return (
     <div className="rounded-lg border border-edge bg-panel-2 p-2">
-      <h3 className="px-1 pb-1.5 text-xs font-semibold text-ink-dim">Artifacts</h3>
+      <h3 className="px-1 pb-1.5 text-ui font-semibold text-ink-dim">Artifacts</h3>
       <div className="space-y-0.5">
         {artifacts.map((a) => (
           <button
@@ -389,8 +389,8 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
             className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
           >
             <GlobeIcon size={13} />
-            <span className="min-w-0 flex-1 truncate text-xs text-ink">{a.title}</span>
-            <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
+            <span className="min-w-0 flex-1 truncate text-ui text-ink">{a.title}</span>
+            <span className="shrink-0 rounded bg-brand/10 px-1.5 py-0.5 text-ui-sm font-medium text-brand">
               artifact
             </span>
           </button>
@@ -419,8 +419,8 @@ function MemoryList({
   if (keyCheck === "mismatch") {
     return (
       <div className="rounded-lg border border-edge bg-panel-2 p-3">
-        <p className="text-sm font-medium text-warn-ink">Memory unavailable</p>
-        <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+        <p className="text-body font-medium text-warn-ink">Memory unavailable</p>
+        <p className="mt-1 text-ui leading-prose text-ink-dim">
           This Claude Code version keeps project files somewhere hyprlayer does not compute, so
           memory is hidden here and codex tabs get none. Claude tabs still read and write it.
         </p>
@@ -430,8 +430,8 @@ function MemoryList({
   if (files.length === 0) {
     return (
       <div className="rounded-lg border border-edge bg-panel-2 p-3">
-        <p className="text-sm font-medium">No memory yet</p>
-        <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+        <p className="text-body font-medium">No memory yet</p>
+        <p className="mt-1 text-ui leading-prose text-ink-dim">
           When auto-memory is on, Claude Code writes notes to{" "}
           <span className="break-all font-mono">{dir}</span>, and codex tabs read the index when
           they start.
@@ -450,8 +450,8 @@ function MemoryList({
           className={rowClass({ tier: "compact", className: "flex w-full gap-2 px-2 text-left" })}
         >
           <DocIcon size={13} />
-          <span className="min-w-0 flex-1 truncate text-xs text-ink">{file.name}</span>
-          <span className="shrink-0 text-2xs text-ink-dim">{formatCompactAge(file.mtimeMs)}</span>
+          <span className="min-w-0 flex-1 truncate text-ui text-ink">{file.name}</span>
+          <span className="shrink-0 text-ui-sm text-ink-dim">{formatCompactAge(file.mtimeMs)}</span>
         </button>
       ))}
     </div>
@@ -504,7 +504,7 @@ function DirLevel({
             style={{ paddingLeft: treeIndent(depth + 1, 8) }}
           >
             <FileTypeIcon name={entry.name} size={13} />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">{entry.name}</span>
+            <span className="min-w-0 flex-1 truncate text-meta text-ink">{entry.name}</span>
           </button>
         ),
       )}
@@ -536,7 +536,7 @@ function DirNode({
         <span className="text-brand">
           <FolderIcon size={13} />
         </span>
-        <span className="truncate text-xs text-ink-dim">{entry.name}</span>
+        <span className="truncate text-ui text-ink-dim">{entry.name}</span>
       </button>
       {open && <DirLevel id={id} relPath={entry.path} depth={depth + 1} onOpenFile={onOpenFile} />}
     </div>
@@ -594,7 +594,7 @@ export const ChangesPanel = memo(function ChangesPanel({
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`rounded-md px-2 py-1 text-xs font-medium capitalize ${
+              className={`rounded-md px-2 py-1 text-ui font-medium capitalize ${
                 tab === t ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
               }`}
             >
@@ -648,8 +648,8 @@ export const ChangesPanel = memo(function ChangesPanel({
       <div className="h-[calc(100%-36px)] overflow-y-auto p-3">
         {workstreamId === null ? (
           <div className="rounded-lg border border-edge bg-panel-2 p-3">
-            <p className="text-sm font-medium">No workstream selected</p>
-            <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+            <p className="text-body font-medium">No workstream selected</p>
+            <p className="mt-1 text-ui leading-prose text-ink-dim">
               Create a workstream to see its changes here.
             </p>
           </div>
@@ -662,8 +662,8 @@ export const ChangesPanel = memo(function ChangesPanel({
             <ErrorNote error={commits.error} />
           ) : (commits.data ?? []).length === 0 ? (
             <div className="rounded-lg border border-edge bg-panel-2 p-3">
-              <p className="text-sm font-medium">No commits yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+              <p className="text-body font-medium">No commits yet</p>
+              <p className="mt-1 text-ui leading-prose text-ink-dim">
                 Commits this workstream adds on top of{" "}
                 <span className="font-mono">{baseBranch ?? "its base branch"}</span> show up here.
               </p>
@@ -687,8 +687,8 @@ export const ChangesPanel = memo(function ChangesPanel({
               <ErrorNote error={status.error} />
             ) : changedCount === 0 ? (
               <div className="rounded-lg border border-edge bg-panel-2 p-3">
-                <p className="text-sm font-medium">No changes yet</p>
-                <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+                <p className="text-body font-medium">No changes yet</p>
+                <p className="mt-1 text-ui leading-prose text-ink-dim">
                   Edits in this workstream&apos;s worktree show up here.
                 </p>
               </div>
@@ -701,7 +701,7 @@ export const ChangesPanel = memo(function ChangesPanel({
                         key={v}
                         type="button"
                         onClick={() => setView(v)}
-                        className={`px-2 py-0.5 text-xs font-medium capitalize ${
+                        className={`px-2 py-0.5 text-ui font-medium capitalize ${
                           view === v ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2"
                         }`}
                       >
@@ -775,7 +775,7 @@ export const ChangesPanel = memo(function ChangesPanel({
           discard.mutate([confirmDiscard.path], { onSettled: () => setConfirmDiscard(null) });
         }}
       >
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           Discard working-tree changes to{" "}
           <span className="font-mono text-ink">
             {confirmDiscard ? basename(confirmDiscard.path) : ""}

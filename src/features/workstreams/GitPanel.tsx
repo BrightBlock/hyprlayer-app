@@ -89,7 +89,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           }
         >
           <SplitIcon size={13} className={`shrink-0 ${detached ? "text-warn-ink" : "text-ok"}`} />
-          <span className="min-w-0 truncate font-mono text-xs text-ink">
+          <span className="min-w-0 truncate text-meta text-ink">
             {detached ? "detached HEAD" : view.item.branch}
           </span>
         </span>
@@ -99,7 +99,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
             type="button"
             onClick={() => setOpen((o) => !o)}
             disabled={setBase.isPending}
-            className="inline-flex items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 font-mono text-xs text-ink hover:bg-edge/50 disabled:opacity-60"
+            className="inline-flex items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 text-meta text-ink hover:bg-edge/50 disabled:opacity-60"
             title={`Merge target: ${view.item.baseBranch} , click to change`}
             aria-label="Change target branch"
           >
@@ -112,7 +112,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
               <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
               <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-edge bg-panel p-1 shadow-2xl">
                 <div className="flex items-center justify-between gap-2 px-2 py-1">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+                  <span className="text-label text-ink-dim">
                     Target branch
                   </span>
                   <button
@@ -132,7 +132,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                       <Spinner size={13} />
                     </div>
                   ) : choices.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-ink-dim">
+                    <div className="px-2 py-1.5 text-ui text-ink-dim">
                       No remote branches{refreshing ? "" : ", try refreshing"}.
                     </div>
                   ) : (
@@ -144,14 +144,14 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
                           setOpen(false);
                           if (c.ref !== view.item.baseBranch) setBase.mutate(c.ref);
                         }}
-                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-mono text-xs hover:bg-edge/50 hover:text-ink ${
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-meta hover:bg-edge/50 hover:text-ink ${
                           c.label === baseShort ? "text-ink" : "text-ink-dim"
                         }`}
                       >
                         <SplitIcon size={12} className="shrink-0" />
                         <span className="min-w-0 flex-1 truncate">{c.label}</span>
                         {c.label === baseShort && (
-                          <span className="shrink-0 text-[10px] text-ink-dim/70">current</span>
+                          <span className="shrink-0 text-ui-sm text-ink-dim/70">current</span>
                         )}
                       </button>
                     ))
@@ -190,7 +190,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
     <>
       <div className="shrink-0 border-b border-edge">
         <div className="flex h-9 items-center justify-between px-3">
-          <span className="text-xs font-semibold uppercase tracking-wide text-ink-dim">Git</span>
+          <span className="text-label text-ink-dim">Git</span>
           {view && (
             <div className="flex items-center gap-1.5">
               <AheadBehind ahead={view.git.ahead} behind={view.git.behind} />
@@ -209,7 +209,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
         {view && (
           <div className="space-y-2.5 px-3 pb-3">
             <div className="space-y-2 rounded-lg border border-edge bg-panel-2 p-2.5">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-dim">
+              <div className="text-label text-ink-dim">
                 Pull Request
               </div>
               <BranchTargetRow view={view} />
@@ -221,7 +221,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     <button
                       type="button"
                       onClick={() => setAttachTarget(view)}
-                      className="text-xs font-medium text-accent hover:underline"
+                      className="text-ui font-medium text-accent hover:underline"
                     >
                       Attach an existing PR…
                     </button>
@@ -243,14 +243,14 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                 )}
               </div>
               {conflicts && (
-                <p className="rounded-md border border-bad/40 bg-bad/10 px-2 py-1.5 text-[11px] leading-relaxed text-bad">
+                <p className="rounded-md border border-bad/40 bg-bad/10 px-2 py-1.5 text-ui-sm leading-prose text-bad">
                   Merge conflicts in {conflicts.files.length} file
                   {conflicts.files.length === 1 ? "" : "s"} , resolve them in the Changes panel
                   below, then commit.
                 </p>
               )}
               {pull.data?.kind === "upToDate" && (
-                <p className="px-1 text-[11px] text-ink-dim">Already up to date.</p>
+                <p className="px-1 text-ui-sm text-ink-dim">Already up to date.</p>
               )}
               {pull.isError && <ErrorNote error={pull.error} onDismiss={() => pull.reset()} />}
             </div>
@@ -262,7 +262,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     type="button"
                     disabled={actions.committing}
                     onClick={actions.doCommit}
-                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-panel-2 text-sm font-medium text-ink hover:bg-edge/50 disabled:opacity-60"
+                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md border border-edge bg-panel-2 text-body font-medium text-ink hover:bg-edge/50 disabled:opacity-60"
                     title={`Runs the Commit prompt. Commits locally, then asks whether to push${chordHint("ws.commit")}`}
                   >
                     <GitCommitIcon size={15} />
@@ -274,7 +274,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     type="button"
                     disabled={actions.shipping}
                     onClick={actions.doShip}
-                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-white hover:bg-accent/90 disabled:opacity-60"
                     title={`Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`}
                   >
                     <GitPullRequestIcon size={15} />

@@ -30,7 +30,7 @@ export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, className }: Pro
         return (
           <span
             key={doc.path}
-            className={`inline-flex max-w-56 items-center gap-1 rounded-md border bg-panel-2 pl-1.5 text-xs text-ink-dim ${
+            className={`inline-flex max-w-56 items-center gap-1 rounded-md border bg-panel-2 pl-1.5 text-ui text-ink-dim ${
               doc.suggested ? "border-dashed border-edge/70" : "border-edge"
             }`}
           >
@@ -46,7 +46,7 @@ export function WorkstreamDocChips({ docs, onOpenDoc, onDetach, className }: Pro
               {chipLabel(doc.path)}
             </button>
             {doc.suggested && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] leading-none text-ink-dim/60">
+              <span className="shrink-0 rounded px-1 py-0.5 text-ui-sm leading-none text-ink-dim/60">
                 Suggested
               </span>
             )}

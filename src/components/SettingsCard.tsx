@@ -2,8 +2,8 @@ import type { HTMLAttributes, ReactNode } from "react";
 
 import { cx } from "./ui";
 
-export const SETTINGS_CARD_TITLE = "text-sm font-bold text-ink";
-export const SETTINGS_CARD_DESCRIPTION = "text-[12.5px] leading-normal text-ink-dim";
+export const SETTINGS_CARD_TITLE = "text-title text-ink";
+export const SETTINGS_CARD_DESCRIPTION = "text-ui leading-prose text-ink-dim";
 
 /** SettingsCard's title, for settings cards laid out by hand. */
 export function SettingsCardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {

@@ -125,7 +125,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
       <RootRow
         icon={<LayersIcon size={14} />}
         label="Agents"
-        trailing={<span className="shrink-0 text-xs text-ink-dim opacity-70">{agentsCount}</span>}
+        trailing={<span className="shrink-0 text-ui text-ink-dim opacity-70">{agentsCount}</span>}
         variant={rootVariant("agents")}
         onClick={() => onSection("agents")}
       />
@@ -165,7 +165,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
           >
             <ChevronLeftIcon size={14} />
           </button>
-          <p className="min-w-0 flex-1 truncate text-xs font-medium uppercase tracking-wider text-ink-dim">
+          <p className="min-w-0 flex-1 truncate text-title text-ink-dim">
             {selectedAgent.name || "untitled"}
           </p>
           <button
@@ -177,14 +177,14 @@ export function AgentSidebar(props: AgentSidebarProps) {
             }}
             title="More actions"
             aria-label="More actions"
-            className={`${HEADER_ICON_BTN} tracking-widest`}
+            className={HEADER_ICON_BTN}
           >
             ⋮
           </button>
         </div>
       ) : (
         <div className="flex h-9 shrink-0 items-center justify-between border-b border-edge pl-4 pr-3">
-          <p className="min-w-0 truncate text-xs font-medium uppercase tracking-wider text-ink-dim">
+          <p className="min-w-0 truncate text-title text-ink-dim">
             Agents
           </p>
           <div className="flex items-center gap-0.5">
@@ -214,7 +214,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
                   onClick={() => setOverflowOpen((v) => !v)}
                   title="More options"
                   aria-label="More options"
-                  className={`${HEADER_ICON_BTN} tracking-widest`}
+                  className={HEADER_ICON_BTN}
                 >
                   ⋮
                 </button>
@@ -225,7 +225,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
                   align="end"
                   className="min-w-56"
                 >
-                  <div className="flex items-center justify-between gap-3 rounded px-2.5 py-1.5 text-sm text-ink">
+                  <div className="flex items-center justify-between gap-3 rounded px-2.5 py-1.5 text-body text-ink">
                     <span>Group uncategorized</span>
                     <Toggle
                       checked={groupUncategorized}
@@ -260,7 +260,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
 
         {drilled ? (
           <div>
-            <p className="px-1.5 pb-1 text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+            <p className="px-1.5 pb-1 text-label text-ink-dim">
               {selectedAgent.name || "untitled"}
             </p>
             <div className="space-y-0.5">
@@ -278,7 +278,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
         ) : (
           <>
             {section === "skills" && (
-              <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-xs leading-relaxed text-ink-dim">
+              <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-ui leading-prose text-ink-dim">
                 No skills yet. They will be filed under the same folders agents use.
               </div>
             )}
@@ -309,7 +309,7 @@ export function AgentSidebar(props: AgentSidebarProps) {
                   ),
                 )}
                 {rows.length === 0 && !loading && (
-                  <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-xs leading-relaxed text-ink-dim">
+                  <div className="mx-0.5 rounded-md border border-dashed border-edge px-2.5 py-2.5 text-ui leading-prose text-ink-dim">
                     {search.trim()
                       ? `No agents match “${search.trim()}”`
                       : section === "system"
@@ -362,7 +362,7 @@ function ConfigSectionRow({
       type="button"
       onClick={onClick}
       aria-current={selected}
-      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-body transition-colors ${
         selected ? "border-accent/30 bg-accent/10 text-ink" : "border-transparent text-ink hover:bg-edge/40"
       }`}
     >
@@ -390,7 +390,7 @@ function RootRow({
       type="button"
       onClick={onClick}
       aria-current={variant !== "plain"}
-      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-sm transition-colors ${
+      className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-body transition-colors ${
         variant === "filled"
           ? "border-accent/30 bg-accent/10 text-ink"
           : variant === "trail"
@@ -438,7 +438,7 @@ function ScopePicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Agent scope"
-        className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-sm hover:bg-edge/40"
+        className="flex w-full items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body hover:bg-edge/40"
       >
         {current ? (
           <RepoAvatar source={current.originUrl} name={current.mappedName} size={14} className="rounded" />
@@ -487,7 +487,7 @@ function ScopeItem({
       role="menuitem"
       onClick={onClick}
       aria-current={active}
-      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm ${
+      className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-body ${
         active ? "bg-accent/10 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink"
       }`}
     >
@@ -517,7 +517,7 @@ function FolderRow({
         e.preventDefault();
         onMenu({ x: e.clientX, y: e.clientY });
       }}
-      className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-semibold text-ink-dim hover:bg-edge/40"
+      className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-body font-semibold text-ink-dim hover:bg-edge/40"
     >
       <span
         aria-hidden="true"
@@ -529,7 +529,7 @@ function FolderRow({
         <FolderIcon size={13} />
       </span>
       <span className="min-w-0 flex-1 truncate text-ink">{folder}</span>
-      <span className="shrink-0 text-xs font-normal opacity-70">{count}</span>
+      <span className="shrink-0 text-ui font-normal opacity-70">{count}</span>
     </button>
   );
 }
@@ -560,7 +560,7 @@ function TreeAgentRow({
         onMenu({ x: e.clientX, y: e.clientY });
       }}
       style={{ paddingLeft: AGENT_ROW_BASE + indent }}
-      className="flex w-full items-center gap-2 rounded-md border border-transparent py-2 pr-2.5 text-left text-sm text-ink transition-colors hover:bg-edge/40"
+      className="flex w-full items-center gap-2 rounded-md border border-transparent py-2 pr-2.5 text-left text-body text-ink transition-colors hover:bg-edge/40"
     >
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: dot }} />
       <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
@@ -593,7 +593,7 @@ function BundleChip({
 }) {
   if (updating) {
     return (
-      <div className="flex shrink-0 items-center gap-2 text-xs text-ink-dim">
+      <div className="flex shrink-0 items-center gap-2 text-ui text-ink-dim">
         <span>Updating agents…</span>
         <IconButton disabled title="Updating agents…" aria-label="Updating agents">
           <Spinner size={13} />
@@ -607,7 +607,7 @@ function BundleChip({
     return (
       <div className="flex shrink-0 items-center gap-2">
         <Badge tone="warn">New agents available</Badge>
-        <span className="hidden font-mono text-xs text-ink-dim sm:inline">
+        <span className="hidden text-meta text-ink-dim sm:inline">
           {state.from ? `${state.from} → ${to}` : to}
         </span>
         <IconButton
@@ -628,7 +628,7 @@ function BundleChip({
         busy={checking}
         label="Check for agent updates"
         title={state.detail}
-        className="shrink-0 text-xs"
+        className="shrink-0 text-ui"
       >
         <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-ink-dim/50" />
         <span className="whitespace-nowrap">Bundle unknown</span>
@@ -650,7 +650,7 @@ function BundleChip({
         busy={checking}
         label="Check for agent updates"
         title={`Update the hyprlayer CLI for current skills${detail ? ` · ${detail}` : ""}`}
-        className="shrink-0 text-xs"
+        className="shrink-0 text-ui"
       >
         <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
         <span className="whitespace-nowrap">CLI out of date</span>
@@ -664,7 +664,7 @@ function BundleChip({
       busy={checking}
       label="Check for agent updates"
       title={detail ? `Agent bundle ${detail} · click to check for updates` : undefined}
-      className="shrink-0 text-xs"
+      className="shrink-0 text-ui"
     >
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-ok" />
       <span className="whitespace-nowrap">Up to date</span>

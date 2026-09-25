@@ -12,7 +12,7 @@ function optionsFor(canonical: readonly string[], current: string) {
 function Labeled({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-ink-dim">
+      <span className="mb-1 block text-label text-ink-dim">
         {label}
       </span>
       {children}
@@ -75,10 +75,10 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
   return (
     <section aria-label="Frontmatter">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-dim">
+        <h2 className="text-label text-ink-dim">
           Frontmatter
         </h2>
-        <span className="text-[11px] text-ink-dim/70">YAML · git-tracked</span>
+        <span className="text-ui-sm text-ink-dim/70">YAML · git-tracked</span>
       </div>
       <fieldset
         disabled={locked}
@@ -126,14 +126,14 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
         </div>
 
         <div className="mt-3">
-          <span className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-ink-dim">
+          <span className="mb-1 block text-label text-ink-dim">
             Tags
           </span>
           <div className="flex flex-wrap items-center gap-1.5">
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="inline-flex items-center gap-1 rounded bg-panel px-1.5 py-0.5 text-xs text-ink"
+                className="inline-flex items-center gap-1 rounded bg-panel px-1.5 py-0.5 text-ui text-ink"
               >
                 {tag}
                 <button
@@ -162,13 +162,13 @@ export function FrontmatterPanel({ meta, disabled, busy, onApply }: Props) {
                   }
                 }}
                 placeholder="new tag"
-                className="w-24 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-xs text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
+                className="w-24 rounded border border-edge bg-panel-2 px-1.5 py-0.5 text-ui text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
               />
             ) : (
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="rounded border border-dashed border-edge px-1.5 py-0.5 text-xs text-ink-dim hover:border-ink-dim/70 hover:text-ink"
+                className="rounded border border-dashed border-edge px-1.5 py-0.5 text-ui text-ink-dim hover:border-ink-dim/70 hover:text-ink"
               >
                 + add
               </button>

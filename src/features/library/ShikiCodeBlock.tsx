@@ -49,20 +49,20 @@ function ShikiCodeBlockImpl({
   return (
     <div className="group relative my-3 overflow-hidden rounded-md border border-edge bg-panel">
       <div className="flex items-center justify-between border-b border-edge bg-panel-2/40 px-3 py-1">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-ink-dim">
+        <span className="text-label text-ink-dim">
           {langLabel}
         </span>
         <button
           type="button"
           onClick={() => handleCopy(code)}
-          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100"
+          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-label text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100"
           aria-label="Copy code"
         >
           <ClipboardIcon size={10} />
           <span>{copied ? "copied" : "copy"}</span>
         </button>
       </div>
-      <div className="overflow-x-auto px-3 py-2 font-mono text-xs leading-relaxed [&_code]:!bg-transparent [&_code]:!p-0 [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0">
+      <div className="overflow-x-auto px-3 py-2 text-meta [&_code]:!bg-transparent [&_code]:!p-0 [&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0">
         {tree ?? (
           <pre>
             <code>{code}</code>

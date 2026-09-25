@@ -8,7 +8,7 @@ import { MenuItem, Popover, Spinner } from "@/components/ui";
 import { GitPullRequestIcon } from "@/components/icons";
 
 const pill =
-  "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-body font-medium disabled:cursor-not-allowed disabled:opacity-50";
 
 function PillButton({
   tint,

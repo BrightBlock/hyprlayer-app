@@ -71,11 +71,11 @@ export function ProviderPickerModal({
                   onClick={() => setPicked(p)}
                   className="flex w-full items-center justify-between rounded-md border border-edge px-3 py-2.5 text-left hover:bg-edge/40"
                 >
-                  <span className="flex items-center gap-2 text-sm text-ink">
+                  <span className="flex items-center gap-2 text-body text-ink">
                     {p.name}
                   </span>
                   {configured.has(p.id) ? (
-                    <span className="text-xs text-ok">configured</span>
+                    <span className="text-ui text-ok">configured</span>
                   ) : (
                     <span className="text-ink-dim">›</span>
                   )}
@@ -83,7 +83,7 @@ export function ProviderPickerModal({
               </li>
             ))}
             {filtered.length === 0 && (
-              <li className="px-1 py-6 text-center text-sm text-ink-dim">
+              <li className="px-1 py-6 text-center text-body text-ink-dim">
                 No providers match “{query}”.
               </li>
             )}
@@ -93,7 +93,7 @@ export function ProviderPickerModal({
             <button
               type="button"
               onClick={() => setShowAll(true)}
-              className="mt-3 w-full text-center text-sm text-ink-dim hover:text-ink"
+              className="mt-3 w-full text-center text-body text-ink-dim hover:text-ink"
             >
               View all providers ({providers.length})
             </button>
@@ -126,11 +126,11 @@ function KeyEntry({
 
   return (
     <div>
-      <button type="button" onClick={onBack} className="mb-3 text-xs text-ink-dim hover:text-ink">
+      <button type="button" onClick={onBack} className="mb-3 text-ui text-ink-dim hover:text-ink">
         ‹ All providers
       </button>
-      <p className="text-sm font-medium text-ink">{provider.name}</p>
-      <p className="mt-0.5 text-xs text-ink-dim">
+      <p className="text-body font-medium text-ink">{provider.name}</p>
+      <p className="mt-0.5 text-ui text-ink-dim">
         {provider.models.length} model{provider.models.length === 1 ? "" : "s"} available
         {provider.doc && (
           <>
@@ -143,14 +143,14 @@ function KeyEntry({
       </p>
 
       {hasFreeModels && (
-        <p className="mt-3 rounded-md border border-edge bg-panel-2 px-3 py-2 text-xs text-ink-dim">
+        <p className="mt-3 rounded-md border border-edge bg-panel-2 px-3 py-2 text-ui text-ink-dim">
           {provider.name}’s <span className="text-ink">free</span> models need no key, so pick them
           straight from <span className="text-ink">Add models</span>. A key is only required for its
           paid models.
         </p>
       )}
 
-      <label className="mb-1 mt-4 block text-xs font-medium text-ink-dim">
+      <label className="mb-1 mt-4 block text-ui font-medium text-ink-dim">
         API key{envHint ? ` (${envHint})` : ""}
       </label>
       <TextInput
@@ -163,7 +163,7 @@ function KeyEntry({
           if (e.key === "Enter") void submit();
         }}
       />
-      <p className="mt-1 text-xs text-ink-dim">
+      <p className="mt-1 text-ui text-ink-dim">
         Saved to OpenCode’s <code className="font-mono">auth.json</code> (0600) so the opencode CLI
         uses it.
       </p>

@@ -26,8 +26,8 @@ export function GeneralSettings({ data }: { data: Bootstrap }) {
   return (
     <>
       <div className="flex items-baseline justify-between gap-4">
-        <h1 className="text-[19px] font-bold tracking-tight text-ink">General</h1>
-        <span className="font-mono text-xs text-ink-dim">Hyprlayer {currentVersion || "—"}</span>
+        <h1 className="text-h3 text-ink">General</h1>
+        <span className="text-meta text-ink-dim">Hyprlayer {currentVersion || "—"}</span>
       </div>
       {!IS_MACOS && <UpdatesCard />}
       <HyprlayerCard data={data} />
@@ -122,7 +122,7 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
                 disabled={!enabled}
                 value={titleModelValue(pinned)}
                 onChange={(e) => patch({ model: titleModelFromValue(e.target.value) })}
-                className="h-7 w-full appearance-none truncate rounded-control border border-edge bg-panel-2 pl-2.5 pr-7 text-xs text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-7 w-full appearance-none truncate rounded-control border border-edge bg-panel-2 pl-2.5 pr-7 text-ui text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {groups.map((g) =>
                   g.label ? (

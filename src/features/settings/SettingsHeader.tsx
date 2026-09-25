@@ -37,11 +37,11 @@ export function SettingsHeaderMeta({ section }: { section: SettingsSection }) {
   const overrides = useBootstrap().data?.settings.keybindings?.overrides ?? {};
   const chord = effectiveChord(overrides, "nav.settings", IS_MACOS);
   if (section === "servers") return <ServersHeadline />;
-  return chord ? <ChordHint chord={chord} className="font-mono text-xs text-ink-dim" /> : null;
+  return chord ? <ChordHint chord={chord} className="text-meta text-ink-dim" /> : null;
 }
 
 function ServersHeadline() {
   return (
-    <span className="font-mono text-xs text-ink-dim">{serversHeadline(useServerCounts())}</span>
+    <span className="text-meta text-ink-dim">{serversHeadline(useServerCounts())}</span>
   );
 }

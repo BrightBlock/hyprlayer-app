@@ -47,13 +47,13 @@ const themeChrome = EditorView.theme({
   "&": {
     backgroundColor: "transparent",
     color: "var(--color-ink)",
-    fontSize: "12px",
+    fontSize: "var(--text-meta)",
     height: "100%",
   },
   ".cm-scroller": {
-    fontFamily:
-      '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
-    lineHeight: "1.5",
+    fontFamily: "var(--font-mono)",
+    fontVariantNumeric: "tabular-nums",
+    lineHeight: "var(--text-meta--line-height)",
   },
   "&.cm-focused": { outline: "none" },
   ".cm-gutters": {

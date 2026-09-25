@@ -1,7 +1,8 @@
 # ADR 0006: Visual conventions — row tiers, hover, dividers, dialogs
 
 **Status:** accepted · 2026-08-21 · amended 2026-09-24 (v4 light palette and radii, native-checkbox
-`Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes)
+`Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes) ·
+amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale")
 
 ## Decision
 
@@ -442,6 +443,24 @@ exception like those under "Typography".
 **Icons.** `lucide-react` at 16px and stroke 1.5 (`ICON` in
 `src/components/lucide.ts`) on the v4 surfaces. `icons.tsx` stays everywhere
 else and for brand marks (`harnessIcon`).
+
+### v4 type scale (2026-09-24)
+
+Supersedes "Typography" above and the v4 section's `--text-3xs` and arbitrary sizes.
+`src/index.css` sets `--text-*: initial`, so Tailwind's `text-xs`…`text-3xl` no longer
+exist and a stray one renders at the inherited size. The twelve tokens are `text-display`,
+`h1`, `h2`, `h3`, `title`, `body-lg`, `body`, `ui`, `ui-sm`, `meta`, `label` and `tag`,
+each carrying its own line height, and tracking and weight where the spec fixes them.
+`meta`, `label` and `tag` also set JetBrains Mono and tabular nums, and `label`/`tag`
+uppercase, in the base layer so an explicit utility still wins. Register a new token in
+`cx()`'s tailwind-merge config, or it is read as a colour and dropped beside `text-ink`.
+
+Families are self-hosted through Fontsource: Inter (variable), JetBrains Mono
+400/500/600, and Instrument Serif for `text-display` only. Prose line height is
+`leading-prose` (1.65). Left alone: the chord glyph `letterSpacing` in `ChordHint`,
+`KeyboardSettings` and `PromptLibrary`, the logo wordmark, `ScriptEditor`'s
+`leading-[22px]` gutter, inline code's relative `0.85em`, the harness-tab letter
+avatars' `font-bold`, and the terminal's user-zoomable size.
 
 ## Rationale
 

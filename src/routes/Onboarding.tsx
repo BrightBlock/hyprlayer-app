@@ -53,10 +53,10 @@ function Step1({
       }
     >
       <Card className="space-y-4">
-        <p className="text-sm text-ink-dim">
+        <p className="text-body text-ink-dim">
           This takes about two minutes. You'll end up with:
         </p>
-        <ul className="space-y-1 text-sm text-ink-dim">
+        <ul className="space-y-1 text-body text-ink-dim">
           <li>✦ Claude Code and Codex agent workflows linked and ready to use</li>
           <li>✦ A thoughts repository for your project notes and docs</li>
           <li>✦ A dashboard where you can add projects and start coding</li>
@@ -71,7 +71,7 @@ function Step1({
               if (e.key === "Enter" && user.trim()) onNext();
             }}
           />
-          <p className="mt-1 text-xs text-ink-dim">
+          <p className="mt-1 text-ui text-ink-dim">
             Used to attribute your thought documents.
           </p>
         </Field>
@@ -105,7 +105,7 @@ function Step2({ onNext }: { onNext: () => void }) {
   if (aiStatus.isLoading) {
     return (
       <Step number={3} total={TOTAL_STEPS} title="AI agents">
-        <Card className="flex items-center justify-center gap-2 py-12 text-sm text-ink-dim">
+        <Card className="flex items-center justify-center gap-2 py-12 text-body text-ink-dim">
           <Spinner /> Setting up Claude Code and Codex agents…
         </Card>
       </Step>
@@ -126,7 +126,7 @@ function Step2({ onNext }: { onNext: () => void }) {
       >
         <div className="space-y-3">
           <Card>
-            <p className="text-sm text-ink-dim">
+            <p className="text-body text-ink-dim">
               Repairing the shared Claude Code and Codex agent installation. This step checks the
               result when the command finishes.
             </p>
@@ -155,19 +155,19 @@ function Step2({ onNext }: { onNext: () => void }) {
       }
     >
       {phase.kind === "checking" ? (
-        <Card className="flex items-center justify-center gap-2 py-12 text-sm text-ink-dim">
+        <Card className="flex items-center justify-center gap-2 py-12 text-body text-ink-dim">
           <Spinner size={14} /> Checking status…
         </Card>
       ) : isInstalled ? (
         <Card className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-lg">✓</span>
-            <p className="text-sm font-medium text-ink">
+            <span className="text-h3">✓</span>
+            <p className="text-body font-medium text-ink">
               Claude Code and Codex agents are ready
             </p>
           </div>
           {agentPaths.length > 0 ? (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               {agentPaths.map((location, i) => (
                 <span key={location}>
                   {i > 0 && " · "}
@@ -176,18 +176,18 @@ function Step2({ onNext }: { onNext: () => void }) {
               ))}
             </p>
           ) : (
-            <p className="text-xs text-ink-dim">
+            <p className="text-ui text-ink-dim">
               {aiStatus.data?.agentTool ?? "Agent files"} reported ready. Update the Hyprlayer CLI
               to see separate Claude Code and Codex link status.
             </p>
           )}
-          <Button type="button" onClick={startRepair} className="text-sm">
+          <Button type="button" onClick={startRepair} className="text-body">
             Repair installation
           </Button>
         </Card>
       ) : (
         <Card className="space-y-3">
-          <p className="text-sm text-ink-dim">
+          <p className="text-body text-ink-dim">
             Automatic setup did not finish. Repair the shared installation to link Hyprlayer's
             agents into both Claude Code and Codex.
           </p>
@@ -287,20 +287,20 @@ function Step3({ user }: { user: string }) {
     >
       <div className="space-y-3">
         <Card>
-          <p className="text-sm text-ink-dim">
+          <p className="text-body text-ink-dim">
             Hyprlayer stores your project notes, plans, and research in a git repository.
           </p>
           {alreadyConfigured ? (
-            <p className="mt-2 text-sm text-ink">
+            <p className="mt-2 text-body text-ink">
               ✓ Your thoughts repository is already set up. Keep it, or select a
               different one below and Hyprlayer will switch to it.
             </p>
           ) : (
             foundExisting &&
             source?.mode === "disk" && (
-              <p className="mt-2 text-sm text-ink">
+              <p className="mt-2 text-body text-ink">
                 ✓ Using the existing thoughts repo at{" "}
-                <span className="break-all font-mono text-xs">{defaultLocation}</span>.
+                <span className="break-all text-meta">{defaultLocation}</span>.
               </p>
             )
           )}
@@ -360,14 +360,14 @@ export function Onboarding() {
             <button
               type="button"
               onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3 | 4)}
-              className="text-xs text-ink-dim hover:text-ink"
+              className="text-ui text-ink-dim hover:text-ink"
             >
               ← Back
             </button>
             <button
               type="button"
               onClick={exit}
-              className="text-xs text-ink-dim hover:text-ink"
+              className="text-ui text-ink-dim hover:text-ink"
             >
               Exit setup
             </button>

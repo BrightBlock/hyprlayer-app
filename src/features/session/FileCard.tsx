@@ -32,18 +32,18 @@ function DiffPopover({
       style={{ left: anchor.left, top: anchor.top, bottom: anchor.bottom, width: anchor.width }}
     >
       <div className="flex items-center gap-2 border-b border-edge px-2.5 py-1.5">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-dim" title={path}>
+        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim" title={path}>
           {path}
         </span>
         {diff.additions > 0 && (
-          <span className="shrink-0 font-mono text-[11px] text-ok">+{diff.additions}</span>
+          <span className="shrink-0 text-meta text-ok">+{diff.additions}</span>
         )}
         {diff.deletions > 0 && (
-          <span className="shrink-0 font-mono text-[11px] text-bad">-{diff.deletions}</span>
+          <span className="shrink-0 text-meta text-bad">-{diff.deletions}</span>
         )}
       </div>
       <pre
-        className="selectable overflow-auto p-2 font-mono text-[11px] leading-relaxed"
+        className="selectable overflow-auto p-2 text-meta"
         style={{ maxHeight: POPOVER_MAX_H - 32 }}
       >
         {diff.lines.map((line, index) => (
@@ -94,7 +94,7 @@ export function FileCard({ path, diff }: { path: string; diff?: EditDiff | null 
       ref={ref}
       onMouseEnter={show}
       onMouseLeave={diff ? scheduleHide : undefined}
-      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-xs text-ink"
+      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-ui text-ink"
       title={path}
     >
       <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-accent/15 text-accent">

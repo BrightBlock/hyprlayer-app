@@ -6,7 +6,7 @@ import type { PlanTracker } from "./planTracker";
 
 export function PlanChip({ className, children }: { className: string; children: string }) {
   return (
-    <span className={cx("rounded-control px-[9px] py-[3px] text-[11.5px] font-semibold leading-none", className)}>
+    <span className={cx("rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none", className)}>
       {children}
     </span>
   );
@@ -40,7 +40,7 @@ export function PlanPreviewDraft({
   return (
     <div className="px-[18px] py-5">
       <div className={cx("-mx-2 rounded-control px-2", flash("header") && "animate-plan-flash")}>
-        <h2 className="mb-2.5 text-[20px] font-bold leading-[1.2] tracking-[-0.01em] text-ink">{tracker.title}</h2>
+        <h2 className="mb-2.5 text-h3 text-ink">{tracker.title}</h2>
         <div className="mb-[18px] flex flex-wrap gap-1.5">
           <PlanChip className="bg-panel-2 text-ink">Plan</PlanChip>
           {statusChip(tracker.status)}
@@ -51,7 +51,7 @@ export function PlanPreviewDraft({
       {tracker.phases.length === 0 ? (
         <div
           className={cx(
-            "-mx-2 rounded-control px-2 text-[13px] leading-[1.6] text-ink-2",
+            "-mx-2 rounded-control px-2 text-body leading-prose text-ink-2",
             flash("body") && "animate-plan-flash",
           )}
         >
@@ -62,7 +62,7 @@ export function PlanPreviewDraft({
           {tracker.overview && (
             <div className={cx("-mx-2 mb-[18px] rounded-control px-2", flash("overview") && "animate-plan-flash")}>
               <div className="lbl mb-1.5">Overview</div>
-              <div className="text-[13px] leading-[1.6] text-ink-2">
+              <div className="text-body leading-prose text-ink-2">
                 <MarkdownPreview body={tracker.overview} />
               </div>
             </div>

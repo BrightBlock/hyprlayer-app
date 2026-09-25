@@ -402,7 +402,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
       title={
         <span className="flex items-baseline justify-between gap-3">
           <span>Add project</span>
-          <span className="text-xs font-normal tracking-normal text-ink-dim">
+          <span className="text-ui font-normal text-ink-dim">
             {stalled
               ? `${displayLabel} · local only`
               : createProject.isPending
@@ -448,13 +448,13 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               diskPlaceholder="/path/to/repo-or-folder"
               diskFooter={
                 needsInit ? (
-                  <p className="mt-1 text-xs text-ink-dim">
+                  <p className="mt-1 text-ui text-ink-dim">
                     {asFolder
                       ? "Added as a plain folder. No git, no thoughts."
                       : "Not a git repository. One will be initialized here."}
                   </p>
                 ) : isBare ? (
-                  <p className="mt-1 text-xs text-bad">
+                  <p className="mt-1 text-ui text-bad">
                     This is a bare repository. Choose a normal working copy instead.
                   </p>
                 ) : undefined
@@ -463,7 +463,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
 
             {needsInit && (
               <div className="flex items-center justify-between gap-4">
-                <p className="min-w-0 text-sm text-ink">Set up a git repository</p>
+                <p className="min-w-0 text-body text-ink">Set up a git repository</p>
                 <Toggle
                   aria-label="Set up a git repository"
                   checked={setUpGit}
@@ -480,7 +480,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   onChange={(e) => setInitBranch(e.target.value)}
                   placeholder="main"
                   disabled={pending}
-                  className="font-mono text-xs"
+                  className="text-meta"
                 />
               </Field>
             )}
@@ -493,7 +493,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   placeholder="e.g. jane"
                   disabled={pending}
                 />
-                <p className="mt-1 text-xs text-ink-dim">
+                <p className="mt-1 text-ui text-ink-dim">
                   Attributes your thought documents (one-time, first-run setup).
                 </p>
               </Field>
@@ -510,7 +510,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   name={displayLabel}
                   size={24}
                 />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
                   {displayLabel}
                 </span>
                 {isCreate && <Badge tone="dim">new</Badge>}
@@ -522,7 +522,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                     <span className="flex h-6 w-6 items-center justify-center text-ink-dim">
                       <UploadCloudIcon size={16} />
                     </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+                    <span className="min-w-0 flex-1 truncate text-meta text-ink">
                       {githubTarget.owner}/{githubTarget.name}
                     </span>
                     <Badge tone="dim">{githubTarget.private ? "private" : "public"}</Badge>
@@ -534,7 +534,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                   <div className="my-1 ml-3 h-3 w-px bg-edge" />
                   <div className="flex items-center gap-2.5">
                     <HyprlayerMark size={24} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                    <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
                       {previewPath}
                     </span>
                     {folderIsNew && <Badge tone="dim">new</Badge>}
@@ -544,14 +544,14 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
             </div>
 
             <div>
-              <p className="text-sm font-medium text-ink">Thoughts</p>
-              <p className="mt-0.5 text-xs text-ink-dim">
+              <p className="text-body font-medium text-ink">Thoughts</p>
+              <p className="mt-0.5 text-ui text-ink-dim">
                 Choose where research, plans & notes for this repo are kept.
               </p>
             </div>
 
             {profiles.isLoading ? (
-              <div className="flex items-center gap-2 py-1 text-xs text-ink-dim">
+              <div className="flex items-center gap-2 py-1 text-ui text-ink-dim">
                 <Spinner size={12} /> Loading profiles…
               </div>
             ) : profiles.error != null ? (
@@ -599,7 +599,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                     ]}
                   />
                   {selectedProfile?.foldersError && (
-                    <p className="mt-1 text-xs text-warn-ink">
+                    <p className="mt-1 text-ui text-warn-ink">
                       Couldn't read existing folders: {selectedProfile.foldersError}
                     </p>
                   )}
@@ -626,7 +626,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                         browseTitle="Choose the thoughts repository"
                       />
                     </Field>
-                    <p className="font-mono text-xs text-ink-dim/80">
+                    <p className="text-meta text-ink-dim/80">
                       repos dir: repos · global dir: global
                     </p>
                     {createProfile.error != null && (
@@ -635,7 +635,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                     <div className="flex justify-end gap-2">
                       <Button
                         type="button"
-                        className="px-2 py-1 text-xs"
+                        className="px-2 py-1 text-ui"
                         onClick={cancelNewProfile}
                         disabled={createProfile.isPending}
                       >
@@ -644,7 +644,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                       <Button
                         type="button"
                         variant="primary"
-                        className="px-2 py-1 text-xs"
+                        className="px-2 py-1 text-ui"
                         busy={createProfile.isPending}
                         disabled={!npName.trim()}
                         onClick={submitNewProfile}
@@ -699,7 +699,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                     onDismiss={() => publishToGithub.reset()}
                   />
                 )}
-                <p className="text-xs leading-relaxed text-ink-dim">
+                <p className="text-ui leading-prose text-ink-dim">
                   The project is added and usable — only the GitHub step is outstanding.
                 </p>
                 <div className="flex items-end gap-2">
@@ -725,7 +725,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
                         onChange={(e) => setRetry((cur) => ({ ...cur, name: e.target.value }))}
                         spellCheck={false}
                         disabled={publishToGithub.isPending}
-                        className="font-mono text-xs"
+                        className="text-meta"
                       />
                     </Field>
                   </div>
@@ -751,7 +751,7 @@ function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
               </>
             ) : (
               <>
-                <p className="text-xs leading-relaxed text-ink-dim">
+                <p className="text-ui leading-prose text-ink-dim">
                   Everything up to this point is already on disk. Closing now leaves the repository
                   where it is.
                 </p>

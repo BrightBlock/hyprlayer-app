@@ -64,7 +64,7 @@ function Shell({ path, controls, children }: { path: string; controls?: ReactNod
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-edge px-4">
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-dim" title={path}>
+        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim" title={path}>
           {path}
         </span>
         {controls}
@@ -225,10 +225,10 @@ function SaveStatus({
   justSaved: boolean;
   readOnly: boolean;
 }) {
-  if (readOnly) return <span className="text-[11px] text-ink-dim">read-only</span>;
+  if (readOnly) return <span className="text-ui-sm text-ink-dim">read-only</span>;
   if (saving) {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-ink-dim">
+      <span className="flex items-center gap-1 text-ui-sm text-ink-dim">
         <Spinner size={12} />
         Saving…
       </span>
@@ -236,7 +236,7 @@ function SaveStatus({
   }
   if (dirty) {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-warn-ink">
+      <span className="flex items-center gap-1 text-ui-sm text-warn-ink">
         <span className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
         Unsaved
       </span>
@@ -244,7 +244,7 @@ function SaveStatus({
   }
   if (justSaved) {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-ok">
+      <span className="flex items-center gap-1 text-ui-sm text-ok">
         <CheckIcon size={12} />
         Saved
       </span>

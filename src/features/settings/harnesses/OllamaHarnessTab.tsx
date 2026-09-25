@@ -100,7 +100,7 @@ export function OllamaHarnessTab({
       <Card>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-sm font-bold text-ink">
+            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-edge bg-panel-2 text-body font-bold text-ink">
               ol
             </div>
             <div>
@@ -110,7 +110,7 @@ export function OllamaHarnessTab({
               </p>
             </div>
           </div>
-          <a className="text-xs text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
+          <a className="text-ui text-accent hover:underline" href={DOCS_URL} target="_blank" rel="noreferrer">
             Docs ↗
           </a>
         </div>
@@ -119,7 +119,7 @@ export function OllamaHarnessTab({
       {!opencodeInstalled && (
         <Card>
           <Badge tone="warn">OpenCode required</Badge>
-          <p className="mt-2 text-xs text-ink-dim">
+          <p className="mt-2 text-ui text-ink-dim">
             Ollama models require OpenCode. Install it from the OpenCode tab.
           </p>
         </Card>
@@ -148,7 +148,7 @@ export function OllamaHarnessTab({
             </Button>
           </div>
         </Field>
-        <p className="mt-1 text-xs text-ink-dim">
+        <p className="mt-1 text-ui text-ink-dim">
           Default <span className="font-mono">{DEFAULT_ENDPOINT}</span>. Point at any reachable host (e.g. <span className="font-mono">http://nexus:11434</span>).
         </p>
 
@@ -163,14 +163,14 @@ export function OllamaHarnessTab({
           {localBinary && <Badge tone="dim">Ollama CLI detected locally</Badge>}
           <button
             type="button"
-            className="ml-auto flex items-center gap-1 text-xs text-ink-dim hover:text-ink"
+            className="ml-auto flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
             onClick={() => void probe.refetch()}
           >
             {probe.isFetching ? <Spinner size={12} /> : "↻"} Refresh
           </button>
         </div>
         {!reachable && !probe.isFetching && (
-          <p className="mt-2 text-xs text-ink-dim">
+          <p className="mt-2 text-ui text-ink-dim">
             Can't reach Ollama. Make sure it's running (<span className="font-mono">ollama serve</span>).
           </p>
         )}
@@ -182,7 +182,7 @@ export function OllamaHarnessTab({
             Models <span className="ml-1 font-normal text-ink-dim">{selected.length} selected</span>
           </SettingsCardTitle>
           {installedModels.length === 0 ? (
-            <p className="mt-3 text-xs text-ink-dim">
+            <p className="mt-3 text-ui text-ink-dim">
               No models installed on this server. Pull one first, e.g.{" "}
               <span className="font-mono">ollama pull qwen2.5-coder</span>, then Refresh.
             </p>
@@ -198,9 +198,9 @@ export function OllamaHarnessTab({
                     className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2"
                   >
                     <span className="min-w-0">
-                      <span className="font-mono text-sm text-ink">{m.id}</span>
+                      <span className="text-meta text-ink">{m.id}</span>
                       {(m.parameterSize || m.family) && (
-                        <span className="block text-xs text-ink-dim">
+                        <span className="block text-ui text-ink-dim">
                           {[m.parameterSize, m.family].filter(Boolean).join(" · ")}
                         </span>
                       )}

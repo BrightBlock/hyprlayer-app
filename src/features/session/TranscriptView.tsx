@@ -74,7 +74,7 @@ function UserMessageToolbar({
   const btn =
     "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100";
   return (
-    <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-ink-dim">
+    <div className="mt-1 flex items-center justify-end gap-1 text-ui-sm text-ink-dim">
       <button
         type="button"
         onClick={() => trigger(text)}
@@ -119,7 +119,7 @@ const UserMessage = memo(function UserMessage({
     <div className="group flex flex-col items-end">
       <div className="max-w-[85%] rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
         {stage && stage !== "general" && (
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-ink-dim">
+          <span className="mb-1 block text-label text-ink-dim">
             {stageLabel(stage)}
           </span>
         )}
@@ -127,7 +127,7 @@ const UserMessage = memo(function UserMessage({
           (promptName ? (
             <PromptCard name={promptName} body={text} />
           ) : (
-            <p className="selectable whitespace-pre-wrap break-words text-sm text-ink">{text}</p>
+            <p className="selectable whitespace-pre-wrap break-words text-body text-ink">{text}</p>
           ))}
         <AttachmentCards attachments={attachments} className={text ? "mt-2" : ""} />
       </div>
@@ -188,7 +188,7 @@ const AssistantMessage = memo(function AssistantMessage({
         {shown ? (
           <MarkdownPreview body={shown} />
         ) : (
-          <span className="text-sm leading-relaxed text-ink-dim">…</span>
+          <span className="text-body leading-prose text-ink-dim">…</span>
         )}
         <StreamCursor />
       </div>
@@ -206,7 +206,7 @@ const AssistantMessage = memo(function AssistantMessage({
 function ToolResultOutput({ result }: { result: { content: string; isError: boolean } }) {
   return (
     <pre
-      className={`selectable max-h-96 overflow-auto rounded p-2 font-mono text-[11px] leading-relaxed ${
+      className={`selectable max-h-96 overflow-auto rounded p-2 text-meta ${
         result.isError ? "bg-bad/10 text-bad" : "bg-surface/60 text-ink-dim"
       }`}
     >
@@ -248,7 +248,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const preview = text.split("\n").find((line) => line.trim() !== "") ?? "";
   return (
-    <div className="text-xs">
+    <div className="text-ui">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -259,7 +259,7 @@ const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
         <StepChevron open={open} reveal="hover" size={11} />
       </button>
       {open && (
-        <div className="selectable mt-1 whitespace-pre-wrap border-l border-edge pl-3 italic leading-relaxed text-ink-dim">
+        <div className="selectable mt-1 whitespace-pre-wrap border-l border-edge pl-3 italic leading-prose text-ink-dim">
           {text}
         </div>
       )}
@@ -301,7 +301,7 @@ function ToolStatusDot({
 function FileChip({ path }: { path: string }) {
   return (
     <span
-      className="min-w-0 shrink truncate rounded bg-edge/60 px-1.5 py-0.5 font-mono text-[11px] text-ink-dim"
+      className="min-w-0 shrink truncate rounded bg-edge/60 px-1.5 py-0.5 text-meta text-ink-dim"
       title={path}
     >
       {baseName(path)}
@@ -341,7 +341,7 @@ const ToolBlock = memo(function ToolBlock({
       : null;
 
   return (
-    <div className="text-xs" data-tooluse-id={item.toolUseId}>
+    <div className="text-ui" data-tooluse-id={item.toolUseId}>
       <div
         role="button"
         tabIndex={0}
@@ -367,7 +367,7 @@ const ToolBlock = memo(function ToolBlock({
             ⎿
           </span>
           <span
-            className={`truncate font-mono text-[11px] ${result?.isError ? "text-bad/90" : ""}`}
+            className={`truncate text-meta ${result?.isError ? "text-bad/90" : ""}`}
           >
             {preview}
           </span>
@@ -377,13 +377,13 @@ const ToolBlock = memo(function ToolBlock({
       {open && (
         <div className="mt-1 space-y-2 border-l border-edge pl-3">
           {item.input && item.input !== "{}" && (
-            <pre className="selectable max-h-48 overflow-auto rounded bg-surface/60 p-2 font-mono text-[11px] leading-relaxed text-ink-dim">
+            <pre className="selectable max-h-48 overflow-auto rounded bg-surface/60 p-2 text-meta text-ink-dim">
               {prettyToolInput(item.input)}
             </pre>
           )}
           {item.skillBody && (
             <div className="selectable">
-              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+              <div className="mb-1 text-label text-ink-dim/70">
                 Skill instructions
               </div>
               <MarkdownPreview body={item.skillBody} />
@@ -432,7 +432,7 @@ const PermissionCard = memo(function PermissionCard({
   if (item.decision !== null) {
     if (item.decision === "allow") return null;
     return (
-      <div className="flex items-center gap-2 text-xs text-ink-dim">
+      <div className="flex items-center gap-2 text-ui text-ink-dim">
         <ShieldIcon size={12} />
         <span className="font-mono text-ink">{item.toolName}</span>
         <span>· denied</span>
@@ -444,15 +444,15 @@ const PermissionCard = memo(function PermissionCard({
     <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">
       <div className="flex items-center gap-2 text-warn-ink">
         <ShieldIcon />
-        <span className="text-sm font-medium">Permission required</span>
+        <span className="text-body font-medium">Permission required</span>
       </div>
       <div className="mt-2 flex items-center gap-1.5 rounded-md border border-warn/20 bg-surface/40 px-2.5 py-2">
-        <span className="shrink-0 font-mono text-xs font-medium text-ink">{item.toolName}</span>
+        <span className="shrink-0 text-meta font-medium text-ink">{item.toolName}</span>
         {filePath ? (
           <FileChip path={filePath} />
         ) : (
           summary && (
-            <span className="min-w-0 break-all font-mono text-xs text-ink-dim">{summary}</span>
+            <span className="min-w-0 break-all text-meta text-ink-dim">{summary}</span>
           )
         )}
       </div>
@@ -483,9 +483,9 @@ const ProtocolErrorBlock = memo(function ProtocolErrorBlock({
     <Collapsible
       open={open}
       onToggle={() => setOpen((v) => !v)}
-      header={<span className="text-xs text-ink-dim">⚠ {detail}</span>}
+      header={<span className="text-ui text-ink-dim">⚠ {detail}</span>}
     >
-      <pre className="selectable max-h-48 overflow-auto px-3 py-2 font-mono text-[11px] text-ink-dim">
+      <pre className="selectable max-h-48 overflow-auto px-3 py-2 text-meta text-ink-dim">
         {raw}
       </pre>
     </Collapsible>
@@ -509,14 +509,14 @@ const CompactDivider = memo(function CompactDivider({
   const tokens = item.preTokens != null ? ` · ${formatTokens(item.preTokens)} before` : "";
   const { summary } = item;
   return (
-    <div className="text-[11px] text-ink-dim/70">
-      <div className="flex items-center gap-2 uppercase tracking-wide">
+    <div className="text-label text-ink-dim/70">
+      <div className="flex items-center gap-2">
         <span className="h-px flex-1 bg-edge" aria-hidden />
         {summary ? (
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 uppercase tracking-wide transition hover:bg-panel-2 hover:text-ink"
+            className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition hover:bg-panel-2 hover:text-ink"
             title="claude summarized the prior turns; expand to read the summary."
           >
             <span>
@@ -540,7 +540,7 @@ const CompactDivider = memo(function CompactDivider({
         <span className="h-px flex-1 bg-edge" aria-hidden />
       </div>
       {open && summary && (
-        <div className="selectable mt-2 max-h-96 overflow-auto rounded-md border border-edge bg-panel-2 p-3 normal-case tracking-normal text-ink-dim">
+        <div className="selectable mt-2 max-h-96 overflow-auto rounded-md border border-edge bg-panel-2 p-3 font-sans normal-case tracking-normal text-ink-dim">
           <MarkdownPreview body={summary} />
         </div>
       )}
@@ -556,7 +556,7 @@ const BoundaryDivider = memo(function BoundaryDivider({
   hint: string;
 }) {
   return (
-    <div className="flex items-center gap-2 text-[11px] uppercase tracking-wide text-ink-dim/70">
+    <div className="flex items-center gap-2 text-label text-ink-dim/70">
       <span className="h-px flex-1 bg-edge" aria-hidden />
       <span className="shrink-0" title={hint}>
         {label}
@@ -572,7 +572,7 @@ const QueuedCommandRow = memo(function QueuedCommandRow({
   item: Extract<TranscriptItem, { kind: "queuedCommand" }>;
 }) {
   return (
-    <div className="text-xs">
+    <div className="text-ui">
       <div className={STEP_ROW_STATIC}>
         <span className="h-2 w-2 shrink-0 rounded-full bg-accent" aria-hidden="true" />
         <RestartIcon size={13} className="shrink-0 text-ink-dim" />
@@ -600,13 +600,13 @@ const ExitNotice = memo(function ExitNotice({
         bad ? "border-bad/30 bg-bad/10" : "border-edge bg-panel-2"
       }`}
     >
-      <p className={`text-center text-xs font-medium ${bad ? "text-bad" : "text-ink-dim"}`}>
+      <p className={`text-center text-ui font-medium ${bad ? "text-bad" : "text-ink-dim"}`}>
         {exitLabel(item.outcome)}
         {item.code !== null && item.code !== 0 ? ` (exit ${item.code})` : ""}
       </p>
-      {remedy && <p className="mt-1 text-center text-xs text-ink-dim">{remedy}</p>}
+      {remedy && <p className="mt-1 text-center text-ui text-ink-dim">{remedy}</p>}
       {bad && !remedy && item.stderrTail && (
-        <pre className="selectable mt-2 max-h-40 overflow-auto rounded bg-surface/60 p-2 font-mono text-[11px] text-ink-dim">
+        <pre className="selectable mt-2 max-h-40 overflow-auto rounded bg-surface/60 p-2 text-meta text-ink-dim">
           {item.stderrTail}
         </pre>
       )}
@@ -622,7 +622,7 @@ function ElapsedCounter({ since }: { since: number }) {
     return () => clearInterval(id);
   }, [since]);
   return (
-    <div className="mt-3 flex items-center gap-1.5 font-mono text-xs tabular-nums text-ink-dim">
+    <div className="mt-3 flex items-center gap-1.5 text-meta tabular-nums text-ink-dim">
       <HyprlayerMark size={14} animated />
       {formatElapsed(now - since)}
     </div>
@@ -699,7 +699,7 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
       ? `${tools.length} tool call${tools.length === 1 ? "" : "s"}`
       : `${items.length} steps`;
   return (
-    <div className="text-xs">
+    <div className="text-ui">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -811,7 +811,7 @@ function SubagentBlock({
   const bgRunning = useBackgroundRunning(item.toolUseId);
   const running = bgRunning || (busy && result === null);
   return (
-    <div className="text-xs" data-tooluse-id={item.toolUseId}>
+    <div className="text-ui" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
         <WrenchIcon className="shrink-0 text-ink-dim" />
@@ -840,7 +840,7 @@ function SubagentBlock({
           />
           {result && (
             <div>
-              <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+              <div className="mb-1 text-label text-ink-dim/70">
                 Result
               </div>
               <ToolResultOutput result={result} />
@@ -1154,7 +1154,7 @@ export const TranscriptView = memo(
             </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
           {connecting && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-ink-dim">
+            <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">
               <Spinner size={14} />
               Connecting to {harnessLabel}…
             </div>

@@ -26,8 +26,8 @@ export function ProjectBoard({
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-3xl space-y-4">
             <div className="rounded-lg border border-edge bg-panel p-6 text-center">
-              <p className="text-base font-medium text-ink">Create your first workstream</p>
-              <p className="mx-auto mt-1 max-w-md text-sm leading-relaxed text-ink-dim">
+              <p className="text-title text-ink">Create your first workstream</p>
+              <p className="mx-auto mt-1 max-w-md text-body leading-prose text-ink-dim">
                 {folder
                   ? "Each workstream is its own conversation, all running in this folder. Start as many as you need."
                   : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}

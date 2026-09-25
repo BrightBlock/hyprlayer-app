@@ -104,7 +104,7 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
               onChange={setProjectPath}
             />
             {projects.length === 0 && (
-              <p className="mt-1 text-xs text-warn-ink">
+              <p className="mt-1 text-ui text-warn-ink">
                 Add a project first, or pick the global scope.
               </p>
             )}

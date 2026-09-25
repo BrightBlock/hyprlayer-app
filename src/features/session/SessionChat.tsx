@@ -267,7 +267,7 @@ function HandoffBanner({
       <span className="shrink-0 text-warn-ink">
         <HandoffIcon size={14} />
       </span>
-      <span className="min-w-0 flex-1 text-xs text-ink-dim">
+      <span className="min-w-0 flex-1 text-ui text-ink-dim">
         {isReady ? (
           <>Handoff ready. Clear context to start a fresh session with the handoff attached.</>
         ) : suggestRequested ? (
@@ -283,7 +283,7 @@ function HandoffBanner({
         type="button"
         disabled={disabled}
         onClick={isReady ? onClearAndResume : onCreateHandoff}
-        className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-xs font-medium text-warn-ink hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-warn/10"
+        className="shrink-0 rounded-md border border-warn/40 bg-warn/10 px-2 py-1 text-ui font-medium text-warn-ink hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-warn/10"
       >
         {actionLabel}
       </button>
@@ -316,13 +316,13 @@ function QueuedMessages({
           key={i}
           className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
         >
-          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-ink-dim/70">
+          <span className="shrink-0 text-label text-ink-dim/70">
             Queued
           </span>
-          <span className="flex-1 truncate text-xs text-ink">
+          <span className="flex-1 truncate text-ui text-ink">
             {msg.text || (n > 0 ? `${n} attachment(s)` : "")}
           </span>
-          {n > 0 && msg.text && <span className="shrink-0 text-[10px] text-ink-dim">📎{n}</span>}
+          {n > 0 && msg.text && <span className="shrink-0 text-ui-sm text-ink-dim">📎{n}</span>}
           <button
             type="button"
             onClick={() => onCancel(i)}
@@ -363,7 +363,7 @@ function QuestionPrompt({
   if (!question) {
     return (
       <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
-        <span className="text-sm text-ink-dim">
+        <span className="text-body text-ink-dim">
           The agent asked a question that couldn’t be displayed.
         </span>
         <Button disabled={submitted} onClick={() => send({})}>
@@ -437,22 +437,22 @@ function QuestionPrompt({
     <div className="mb-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
       <div className="mb-2.5 flex items-center gap-2 text-brand">
         <QuestionIcon size={15} />
-        <span className="text-sm font-medium">The agent is asking</span>
+        <span className="text-body font-medium">The agent is asking</span>
         {total > 1 && (
-          <span className="ml-auto text-xs font-normal tabular-nums text-ink-dim">
+          <span className="ml-auto text-ui font-normal tabular-nums text-ink-dim">
             {step + 1} of {total}
           </span>
         )}
       </div>
 
       {question.header && (
-        <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-ink-dim">
+        <span className="mb-1 block text-label text-ink-dim">
           {question.header}
         </span>
       )}
-      <p className="text-sm font-medium text-ink">{question.question}</p>
+      <p className="text-body font-medium text-ink">{question.question}</p>
       {question.multiSelect && (
-        <p className="mt-0.5 text-xs text-ink-dim">Select all that apply.</p>
+        <p className="mt-0.5 text-ui text-ink-dim">Select all that apply.</p>
       )}
       <div className="mt-2 space-y-1.5">
         {question.options.map((opt) => {
@@ -483,9 +483,9 @@ function QuestionPrompt({
                 )}
               </span>
               <span className="min-w-0">
-                <span className="block text-sm text-ink">{opt.label}</span>
+                <span className="block text-body text-ink">{opt.label}</span>
                 {opt.description && (
-                  <span className="mt-0.5 block text-xs leading-snug text-ink-dim">
+                  <span className="mt-0.5 block text-ui text-ink-dim">
                     {opt.description}
                   </span>
                 )}
@@ -527,7 +527,7 @@ function QuestionPrompt({
                   }
                 }}
                 placeholder="Type your answer…"
-                className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-ink-dim focus:outline-none disabled:opacity-50"
+                className="min-w-0 flex-1 bg-transparent text-body text-ink placeholder:text-ink-dim focus:outline-none disabled:opacity-50"
               />
             </div>
           ) : (
@@ -540,8 +540,8 @@ function QuestionPrompt({
             >
               {otherDot("mt-0.5")}
               <span className="min-w-0">
-                <span className="block text-sm text-ink">Other…</span>
-                <span className="mt-0.5 block text-xs leading-snug text-ink-dim">
+                <span className="block text-body text-ink">Other…</span>
+                <span className="mt-0.5 block text-ui text-ink-dim">
                   Write a custom answer
                 </span>
               </span>
@@ -1361,7 +1361,7 @@ export function SessionChat({
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
       {dragOver && (
         <div className="pointer-events-none absolute inset-0 z-40 m-2 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
-          <div className="flex items-center gap-2 rounded-lg bg-panel px-3.5 py-2 text-sm font-medium text-ink shadow-lg">
+          <div className="flex items-center gap-2 rounded-lg bg-panel px-3.5 py-2 text-body font-medium text-ink shadow-lg">
             <ImageIcon size={16} />
             Drop to attach
           </div>
@@ -1401,7 +1401,7 @@ export function SessionChat({
 
           {terminal ? (
             <div className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2.5">
-              <span className="text-sm text-ink-dim">
+              <span className="text-body text-ink-dim">
                 {resuming
                   ? "Resuming the previous session…"
                   : "This session has ended. Resume to continue, or start fresh."}
@@ -1517,7 +1517,7 @@ export function SessionChat({
                       onScroll={(e) => setComposerScroll(e.currentTarget.scrollTop)}
                       rows={1}
                       disabled={Boolean(pendingQuestion)}
-                      className="selectable relative block w-full resize-none bg-transparent px-3 py-2.5 text-sm text-ink focus:outline-none disabled:cursor-not-allowed"
+                      className="selectable relative block w-full resize-none bg-transparent px-3 py-2.5 text-body text-ink focus:outline-none disabled:cursor-not-allowed"
                     />
                   </div>
                   <div className="flex shrink-0 items-center gap-1 pb-1">

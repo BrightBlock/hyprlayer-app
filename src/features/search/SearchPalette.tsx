@@ -72,7 +72,7 @@ function dispatchNav(
 
 function EmptyHint() {
   return (
-    <div className="px-4 py-8 text-center text-sm text-ink-dim">
+    <div className="px-4 py-8 text-center text-body text-ink-dim">
       Type to search workstreams, documents, and agents
     </div>
   );
@@ -105,7 +105,7 @@ function ResultRow({
       onClick={onClick}
       className={rowClass({
         tier: "standard",
-        className: `flex w-full gap-2 rounded-none px-4 text-left text-sm transition-colors ${
+        className: `flex w-full gap-2 rounded-none px-4 text-left text-body transition-colors ${
           active ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
         }`,
       })}
@@ -113,11 +113,11 @@ function ResultRow({
       <KindIcon kind={result.kind} />
       <span className="min-w-0 flex-1 truncate font-medium">{result.title}</span>
       {result.subtitle && (
-        <span className="shrink-0 truncate text-xs text-ink-dim/70">{result.subtitle}</span>
+        <span className="shrink-0 truncate text-ui text-ink-dim/70">{result.subtitle}</span>
       )}
       {result.activity && result.activity !== "idle" && <ActivityDot activity={result.activity} />}
       {result.tag && (
-        <span className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] text-ink-dim">
+        <span className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm text-ink-dim">
           {result.tag}
         </span>
       )}
@@ -141,7 +141,7 @@ function Section({
 }) {
   return (
     <div>
-      <div className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-ink-dim/60">
+      <div className="px-4 pb-1 pt-2 text-label text-ink-dim/60">
         {group.label}
       </div>
       {group.results.map((result, i) => (
@@ -256,11 +256,11 @@ export function SearchPalette() {
               }
             }}
             placeholder="Search workstreams, documents, agents…"
-            className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-dim/50"
+            className="flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim/50"
             aria-autocomplete="list"
             aria-controls="search-palette-results"
           />
-          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-[10px] font-medium text-ink-dim">
+          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm font-medium text-ink-dim">
             esc
           </kbd>
         </div>

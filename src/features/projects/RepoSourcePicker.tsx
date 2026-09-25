@@ -75,7 +75,7 @@ export function RepoSourcePicker({
   return (
     <div className="space-y-3">
       {modes.length > 1 && (
-        <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-sm">
+        <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-body">
           {modes.map((m) => (
             <button
               key={m}
@@ -152,7 +152,7 @@ export function RepoSourcePicker({
             disabled={disabled}
             browseTitle="Choose where to create the repo"
           />
-          <p className="mt-1 text-xs leading-relaxed text-ink-dim">
+          <p className="mt-1 text-ui leading-prose text-ink-dim">
             A new git repository will be initialised at this path.
           </p>
         </Field>
@@ -172,7 +172,7 @@ function RecentRepos({
 }) {
   if (query.isLoading) {
     return (
-      <div className="flex items-center gap-2 px-1 py-1 text-xs text-ink-dim">
+      <div className="flex items-center gap-2 px-1 py-1 text-ui text-ink-dim">
         <Spinner size={12} /> Loading your repos…
       </div>
     );
@@ -181,7 +181,7 @@ function RecentRepos({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-ink-dim">Recent repos</p>
+        <p className="text-ui font-medium text-ink-dim">Recent repos</p>
         <RefreshButton
           onClick={() => void query.refetch()}
           busy={query.isFetching}
@@ -189,7 +189,7 @@ function RecentRepos({
         />
       </div>
       {repos.length === 0 ? (
-        <p className="rounded-md border border-edge bg-panel-2 px-3 py-2 text-xs text-ink-dim">
+        <p className="rounded-md border border-edge bg-panel-2 px-3 py-2 text-ui text-ink-dim">
           None found. Sign in with <span className="font-mono">gh auth login</span>, then refresh.
         </p>
       ) : (
@@ -205,9 +205,9 @@ function RecentRepos({
             >
               <RepoAvatar source={repo.nameWithOwner} name={repo.nameWithOwner} size={24} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-ink">{repo.nameWithOwner}</span>
+                <span className="block truncate text-body text-ink">{repo.nameWithOwner}</span>
                 {repo.description && (
-                  <span className="block truncate text-xs text-ink-dim">{repo.description}</span>
+                  <span className="block truncate text-ui text-ink-dim">{repo.description}</span>
                 )}
               </span>
             </button>

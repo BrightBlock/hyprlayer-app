@@ -99,15 +99,15 @@ function ContextMeter({
         className="w-64 p-3"
       >
         <div className="flex items-baseline justify-between">
-          <span className="text-sm font-medium text-ink">Context</span>
-          <span className="font-mono text-xs text-ink-dim">
+          <span className="text-body font-medium text-ink">Context</span>
+          <span className="text-meta text-ink-dim">
             {formatTokens(context.tokens)} / {formatTokens(context.window)}
           </span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-edge">
           <div className={cx("h-full rounded-full", fill)} style={{ width: `${used * 100}%` }} />
         </div>
-        <dl className="mt-2.5 space-y-1 text-xs">
+        <dl className="mt-2.5 space-y-1 text-ui">
           <div className="flex justify-between">
             <dt className="text-ink-dim">Used</dt>
             <dd className="text-ink">{(used * 100).toFixed(1)}%</dd>

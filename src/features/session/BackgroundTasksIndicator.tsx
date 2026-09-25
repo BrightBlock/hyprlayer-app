@@ -57,7 +57,7 @@ export function BackgroundTasksIndicator({
         className="flex h-6 items-center gap-1.5 rounded px-1.5 text-background hover:bg-edge/60"
       >
         <TerminalIcon size={14} className="animate-work-pulse" />
-        <span className="font-mono text-[11px]">{tasks.length}</span>
+        <span className="text-meta">{tasks.length}</span>
       </button>
       <Popover
         open={open}
@@ -67,7 +67,7 @@ export function BackgroundTasksIndicator({
         align="end"
         className="w-72 p-1.5"
       >
-        <div className="px-1.5 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-ink-dim/60">
+        <div className="px-1.5 pb-1 pt-0.5 text-label text-ink-dim/60">
           {countLabel}
         </div>
         {tasks.map((task) => {
@@ -82,7 +82,7 @@ export function BackgroundTasksIndicator({
                 onJumpTo(task.toolUseId);
                 setOpen(false);
               }}
-              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-xs hover:bg-edge/40"
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-ui hover:bg-edge/40"
               title="Jump to transcript"
             >
               <Spinner size={12} />

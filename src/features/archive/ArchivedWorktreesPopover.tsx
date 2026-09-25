@@ -191,7 +191,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
             Archived worktrees
           </span>
           {rows.length > 0 && (
-            <span className="font-mono text-[10.5px] tabular-nums text-ink-dim">
+            <span className="text-meta tabular-nums text-ink-dim">
               {`${rows.length} · ${formatBytes(totalBytes(rows))}`}
             </span>
           )}
@@ -217,7 +217,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
               spellCheck={false}
               autoComplete="off"
               className={cx(
-                "h-7 w-full rounded-control border border-edge bg-surface pl-7 pr-2 text-xs text-ink",
+                "h-7 w-full rounded-control border border-edge bg-surface pl-7 pr-2 text-ui text-ink",
                 "placeholder:text-ink-dim focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
               )}
             />
@@ -239,11 +239,11 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         )}
 
         {archived.data === undefined ? null : rows.length === 0 ? (
-          <p className="border-t border-edge-2 px-3 py-6 text-center text-xs text-ink-dim">
+          <p className="border-t border-edge-2 px-3 py-6 text-center text-ui text-ink-dim">
             No archived worktrees.
           </p>
         ) : visible.length === 0 ? (
-          <p className="border-t border-edge-2 px-3 py-6 text-center text-xs text-ink-dim">
+          <p className="border-t border-edge-2 px-3 py-6 text-center text-ui text-ink-dim">
             <span>{query.trim() ? `No matches for "${query.trim()}"` : "No merged worktrees."}</span>{" "}
             <button
               type="button"
@@ -380,8 +380,8 @@ function DeleteConfirm({
       onDismissError={onDismissError}
       onConfirm={onConfirm}
     >
-      <p className="text-sm text-ink-2">{what}</p>
-      {loss && <p className="text-sm text-bad-ink">{lossText(loss)}</p>}
+      <p className="text-body text-ink-2">{what}</p>
+      {loss && <p className="text-body text-bad-ink">{lossText(loss)}</p>}
     </ConfirmDialog>
   );
 }
@@ -430,9 +430,9 @@ function PurgeConfirm({
       onDismissError={onDismissError}
       onConfirm={onConfirm}
     >
-      <p className="text-sm text-ink-2">Their work is merged. Kept archives are left alone.</p>
+      <p className="text-body text-ink-2">Their work is merged. Kept archives are left alone.</p>
       {dirty > 0 && (
-        <p className="text-sm text-bad-ink">
+        <p className="text-body text-bad-ink">
           {dirty === 1 ? "1 of them has" : `${dirty} of them have`} uncommitted changes, which will
           be lost.
         </p>

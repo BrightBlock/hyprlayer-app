@@ -78,11 +78,11 @@ export function SwitchServerConfirm({
       onConfirm={onConfirm}
       busy={busy}
     >
-      <p className="text-sm leading-relaxed text-ink-dim">
+      <p className="text-body leading-prose text-ink-dim">
         Hyprlayer will restart on <span className="text-ink">{joining}</span>.
       </p>
       {live && (
-        <p className="text-sm leading-relaxed text-ink-dim">
+        <p className="text-body leading-prose text-ink-dim">
           Agents and terminals on {leaving} keep running — they live on the server, not in this
           window, and are still there when you switch back.
         </p>

@@ -50,7 +50,7 @@ export function ExportPromptsDialog({
                 onToggle={() => setIncludeChords((v) => !v)}
                 label="Include keyboard shortcuts"
               />
-              <span className="text-xs text-ink">Include keyboard shortcuts</span>
+              <span className="text-ui text-ink">Include keyboard shortcuts</span>
             </label>
             <div className="space-y-1">
               <label className="flex cursor-pointer items-center gap-2.5">
@@ -59,15 +59,15 @@ export function ExportPromptsDialog({
                   onToggle={() => setIncludeOverrides((v) => !v)}
                   label="Include project overrides"
                 />
-                <span className="text-xs text-ink">Include project overrides</span>
+                <span className="text-ui text-ink">Include project overrides</span>
               </label>
-              <p className="pl-[26px] text-[11px] leading-relaxed text-ink-dim">
+              <p className="pl-[26px] text-ui-sm leading-prose text-ink-dim">
                 Overrides only apply if the importer has a project with the same name.
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2.5 border-t border-edge pt-3">
-            <span className="truncate font-mono text-[11px] text-ink-dim">
+            <span className="truncate text-meta text-ink-dim">
               {DEFAULT_EXPORT_NAME}
             </span>
             <div className="ml-auto flex items-center gap-2">
@@ -85,14 +85,14 @@ export function ExportPromptsDialog({
       }
     >
       <div className="border-b border-edge px-4 pb-3 pt-0.5">
-        <p className="text-xs leading-relaxed text-ink-dim">
+        <p className="text-ui leading-prose text-ink-dim">
           Writes a .{PROMPTS_FILE_EXT} file anyone on Hyprlayer desktop can import.
         </p>
       </div>
 
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-3">
         {entries.length === 0 && (
-          <div className="rounded-md border border-dashed border-edge px-3 py-5 text-center text-xs leading-relaxed text-ink-dim">
+          <div className="rounded-md border border-dashed border-edge px-3 py-5 text-center text-ui leading-prose text-ink-dim">
             Nothing to export yet. Add a custom prompt or customize a built-in first.
           </div>
         )}
@@ -113,16 +113,16 @@ export function ExportPromptsDialog({
               />
               <PromptRowIcon builtin={e.builtin} id={e.id} className="shrink-0 text-ink-dim" />
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <span className="truncate text-sm text-ink">{e.name}</span>
+                <span className="truncate text-body text-ink">{e.name}</span>
                 {e.builtin && <Badge tone="dim">Built-in</Badge>}
                 {overrideCount > 0 && (
-                  <span className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-brand">
+                  <span className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-tag text-brand">
                     {overrideCount} override
                   </span>
                 )}
               </div>
               {e.chord && (
-                <span className="ml-2 shrink-0 font-mono text-[11px] text-ink-dim">
+                <span className="ml-2 shrink-0 text-meta text-ink-dim">
                   {chordLabel(e.chord)}
                 </span>
               )}

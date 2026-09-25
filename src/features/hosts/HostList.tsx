@@ -39,7 +39,7 @@ const INVALID_FIELD = "border-bad/60 focus:border-bad";
 const COMPACT_FIELD = "py-1";
 
 const ROW_BUTTON =
-  "shrink-0 rounded px-1 py-0.5 text-xs text-ink-dim hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50";
+  "shrink-0 rounded px-1 py-0.5 text-ui text-ink-dim hover:bg-edge/60 disabled:cursor-not-allowed disabled:opacity-50";
 
 // The bordered-row anatomy the Prompts sidebar uses (ADR-0006, "Agents: sidebar
 // shell"), not rowClass — these rows carry several controls.
@@ -62,7 +62,7 @@ export function WorkStatus({ label }: { label: string }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5">
       <Spinner size={11} />
-      <span className="text-xs text-ink-dim">{label}…</span>
+      <span className="text-ui text-ink-dim">{label}…</span>
     </span>
   );
 }
@@ -261,7 +261,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
       <div
         className={`flex items-center justify-between gap-3 border border-transparent ${ROW_INSET_RIGHT}`}
       >
-        <h3 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">Hosts</h3>
+        <h3 className="text-label text-ink-dim">Hosts</h3>
         <button
           type="button"
           className={ROW_BUTTON}
@@ -274,7 +274,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
         </button>
       </div>
       {showEmptyState && (
-        <p className="mt-1 text-xs text-ink-dim">No hosts yet.</p>
+        <p className="mt-1 text-ui text-ink-dim">No hosts yet.</p>
       )}
       {(draft.length > 0 || adding) && (
         <ul ref={listRef} className="mt-1.5 space-y-0.5">
@@ -343,8 +343,8 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                         <span className="w-4 shrink-0 text-accent">
                           {isActive && <CheckIcon size={13} />}
                         </span>
-                        <span className="shrink-0 truncate text-sm text-ink">{row.label}</span>
-                        <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink-dim">
+                        <span className="shrink-0 truncate text-body text-ink">{row.label}</span>
+                        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim">
                           {row.destination}
                         </span>
                         {work ? (
@@ -356,7 +356,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                               title={status.detail ?? undefined}
                             >
                               <span className={cx("h-1.5 w-1.5 rounded-full", status.dot)} />
-                              <span className={cx("text-xs", status.tone)}>{status.label}</span>
+                              <span className={cx("text-ui", status.tone)}>{status.label}</span>
                             </span>
                           )
                         )}
@@ -457,7 +457,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                   )}
                 </div>
                 {isEditing && (rowError?.label || rowError?.destination) && (
-                  <p role="alert" className="mt-1 pl-1 text-xs text-bad">
+                  <p role="alert" className="mt-1 pl-1 text-ui text-bad">
                     {rowError.label ?? rowError.destination}
                   </p>
                 )}
@@ -508,7 +508,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
                 </button>
               </div>
               {addError && (
-                <p role="alert" className="mt-1 pl-1 text-xs text-bad">
+                <p role="alert" className="mt-1 pl-1 text-ui text-bad">
                   {addError}
                 </p>
               )}
@@ -559,7 +559,7 @@ export function LocalServerList({ servers, active, onSelect, disabled }: LocalSe
   return (
     <div>
       <div className={`border border-transparent ${ROW_INSET_RIGHT}`}>
-        <h3 className="text-2xs font-semibold uppercase tracking-wider text-ink-dim">
+        <h3 className="text-label text-ink-dim">
           On this machine
         </h3>
       </div>
@@ -580,10 +580,10 @@ export function LocalServerList({ servers, active, onSelect, disabled }: LocalSe
                 <span className="w-4 shrink-0 text-accent">
                   {isActive && <CheckIcon size={13} />}
                 </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-ink">{server.name}</span>
+                <span className="min-w-0 flex-1 truncate text-body text-ink">{server.name}</span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   <span className={cx("h-1.5 w-1.5 rounded-full", problem ? "bg-bad" : "bg-ok")} />
-                  <span className={cx("text-xs", problem ? "text-bad" : "text-ink-dim")}>
+                  <span className={cx("text-ui", problem ? "text-bad" : "text-ink-dim")}>
                     {problem ? "Version mismatch" : "Running"}
                   </span>
                 </span>
