@@ -24,6 +24,7 @@ const twMerge = extendTailwindMerge({
       radius: ["card", "control"],
       text: ["display", "h1", "h2", "h3", "title", "body-lg", "body", "ui", "ui-sm", "meta", "label", "tag"],
       leading: ["prose"],
+      shadow: ["card", "pop", "ring-active"],
     },
   },
 });
@@ -67,7 +68,7 @@ export function Button({
         size === "sm" && "h-6 gap-1.5 px-2 py-0 text-ui",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "border border-accent bg-accent text-accent-ink hover:bg-accent/90",
+        variant === "primary" && "border border-accent bg-accent text-accent-ink hover:bg-accent-hover",
         variant === "ghost" && "border border-edge bg-panel-2 hover:bg-edge/60",
         variant === "danger" && "border border-bad/25 text-bad-ink hover:bg-bad/10",
         className,
@@ -314,7 +315,7 @@ export function DropdownSelect({
                 e.preventDefault();
                 moveFocus(move);
               }}
-              className="fixed z-50 overflow-y-auto rounded-card border border-edge bg-panel p-1 shadow-2xl"
+              className="fixed z-50 overflow-y-auto rounded-card border border-edge bg-panel p-1 shadow-pop"
               style={{
                 top: pos.top,
                 bottom: pos.bottom,
@@ -493,7 +494,7 @@ export function SegmentedControl<T extends string>({
             FOCUS_RING,
             "disabled:cursor-not-allowed disabled:opacity-50",
             o.value === value
-              ? "bg-panel font-semibold text-ink shadow-xs"
+              ? "bg-panel font-semibold text-ink shadow-sm"
               : "text-ink-2 enabled:hover:text-ink",
           )}
         >
@@ -834,7 +835,7 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      className="fixed z-50 min-w-44 rounded-card border border-edge bg-panel p-1 shadow-2xl"
+      className="fixed z-50 min-w-44 rounded-card border border-edge bg-panel p-1 shadow-pop"
       style={{ left: pos.x, top: pos.y }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -967,7 +968,7 @@ export function Popover({
         tabIndex={trapFocus ? -1 : undefined}
         onKeyDown={onTrapKeyDown}
         className={cx(
-          "fixed z-50 rounded-card border border-edge bg-panel p-1 shadow-2xl outline-none",
+          "fixed z-50 rounded-card border border-edge bg-panel p-1 shadow-pop outline-none",
           className,
         )}
         style={{ top: pos.top, bottom: pos.bottom, left: pos.left, minWidth: pos.minWidth }}
@@ -993,7 +994,7 @@ export function Popover({
 export const MenuItem = ContextMenuItem;
 
 /** The status bar's popovers (Settings, Servers): the panel and its link rows. */
-export const BAR_POPOVER = "w-[306px] p-1.5 shadow-[0_10px_26px_rgba(0,0,0,0.16)]";
+export const BAR_POPOVER = "w-[306px] p-1.5 shadow-pop";
 export const BAR_POPOVER_ROW =
   "flex items-center gap-2.5 rounded-control px-3 py-2 text-ui text-ink-2 hover:bg-edge/50 " +
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";

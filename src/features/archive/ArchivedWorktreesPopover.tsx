@@ -70,7 +70,7 @@ export function ArchivedWorktreesPopover({
       caret
       trapFocus
       aria-labelledby={headingId}
-      className="w-[440px] max-w-[calc(100vw-16px)] p-0 shadow-[0_12px_30px_rgba(0,0,0,0.18)]"
+      className="w-[440px] max-w-[calc(100vw-16px)] p-0 shadow-pop"
     >
       <PopoverBody headingId={headingId} onClose={onClose} />
     </Popover>

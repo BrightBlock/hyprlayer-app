@@ -9,7 +9,7 @@ const PHASE_SUFFIX: Record<PhaseState, string | null> = {
 };
 
 const BOX: Record<TaskState, string> = {
-  done: "bg-ok text-white",
+  done: "bg-ok text-accent-ink",
   in_progress: "border-[1.5px] border-ink",
   pending: "border-[1.5px] border-edge",
   waiting: "border-[1.5px] border-warn",

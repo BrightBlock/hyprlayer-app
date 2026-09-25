@@ -4,8 +4,8 @@ import { Card, cx } from "@/components/ui";
 import { THEMES, useThemeStore } from "@/lib/theme";
 
 const SWATCHES: Record<string, [string, string, string]> = {
-  system: ["#0c0c0c", "#1c1c1c", "#d97757"],
-  dark: ["#0c0c0c", "#1c1c1c", "#d97757"],
+  system: ["#111113", "#222226", "#ececee"],
+  dark: ["#111113", "#222226", "#ececee"],
   light: ["#f7f7f7", "#f5f5f5", "#111111"],
   claude: ["#1f1e1d", "#2a2926", "#d97757"],
   cobalt: ["#193549", "#234a6a", "#66c4ff"],

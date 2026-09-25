@@ -386,7 +386,7 @@ function routeSection(pathname: string): string {
 const topIconClass =
   "inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink";
 
-const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-white shadow-sm`;
+const railHomeClass = `${RAIL_ICON_BASE} bg-accent text-accent-ink shadow-sm`;
 
 function headerAppIcon(app: EditorTarget | undefined): ReactNode {
   if (!app) return <EditorGlyph />;

@@ -91,6 +91,25 @@
   --color-tag-purge-bg: color-mix(in srgb, var(--color-warn) 22%, var(--color-panel));
   --color-destructive-border: color-mix(in srgb, var(--color-bad) 30%, var(--color-panel));
   --color-tag-draft-bg: color-mix(in srgb, var(--color-warn) 12%, var(--color-panel));
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 90%, var(--color-panel));
+  --color-line-strong: var(--color-edge);
+  --color-radio-border: color-mix(in srgb, var(--color-ink-dim) 50%, transparent);
+  /* Status tints: question (waiting on you) and failed. */
+  --color-q-chip-bg: color-mix(in srgb, var(--color-warn) 18%, var(--color-panel));
+  --color-q-chip-text: var(--color-warn-ink);
+  --color-q-card-bg: color-mix(in srgb, var(--color-warn) 6%, var(--color-panel));
+  --color-q-card-border: color-mix(in srgb, var(--color-warn) 28%, var(--color-panel));
+  --color-q-label: var(--color-warn-ink);
+  --color-fail-chip-bg: color-mix(in srgb, var(--color-bad) 18%, var(--color-panel));
+  --color-fail-chip-text: var(--color-diff-del);
+  --color-fail-card-bg: color-mix(in srgb, var(--color-bad) 6%, var(--color-panel));
+  --color-fail-card-border: color-mix(in srgb, var(--color-bad) 28%, var(--color-panel));
+
+  /* Tailwind inlines literal shadows into the utility, so theme overrides go through var(). */
+  --shadow-sm: var(--elevation-sm);
+  --shadow-card: var(--elevation-card);
+  --shadow-pop: var(--elevation-pop);
+  --shadow-ring-active: var(--ring-active);
 
   --color-ship: #34d399;
   --color-commit: #2dd4bf;
@@ -132,6 +151,52 @@
 
 :root {
   color-scheme: dark;
+  --elevation-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --elevation-pop: 0 8px 20px rgba(0, 0, 0, 0.6);
+  --ring-active: 0 0 0 3px color-mix(in srgb, var(--color-ink) 13.3%, transparent);
+}
+
+/* Dark+ gets its own class so the named themes and Omarchy keep the derived base palette. */
+html.dark {
+  --color-surface: #111113;
+  --color-panel: #18181b;
+  /* v4's --muted; ADR-0006 maps it to panel-2. */
+  --color-panel-2: #222226;
+  --color-edge: #2c2c31;
+  --color-edge-2: #232327;
+  --color-line-strong: #3a3a40;
+  --color-ink: #ececee;
+  --color-ink-2: #c6c6cb;
+  --color-ink-dim: #9a9aa3;
+  --color-ink-4: #6f6f78;
+  /* v4 is grayscale: the ink accent flips to near-white. */
+  --color-accent: #ececee;
+  --color-accent-hover: #ffffff;
+  --color-accent-soft: #27272c;
+  --color-accent-ink: #111113;
+  --color-radio-border: #48484f;
+
+  --color-info: #5b9dff;
+  --color-ok: #57c23a;
+  --color-warn: #f2b92f;
+  --color-bad: #ff4d68;
+  --color-bad-ink: #ff7389;
+  --color-diff-add: #6ccf45;
+  --color-diff-del: #ff7389;
+
+  --color-q-chip-bg: #3a3013;
+  --color-q-chip-text: #f2c14e;
+  --color-q-card-bg: #1d1a11;
+  --color-q-card-border: #4a3d1d;
+  --color-q-label: #f2c14e;
+  --color-fail-chip-bg: #3d1720;
+  --color-fail-card-bg: #211315;
+  --color-fail-card-border: #5a2330;
+
+  /* The base aliases magenta to accent, which is near-white here. */
+  --color-ansi-magenta: #d97757;
+  color-scheme: dark;
 }
 
 html.light {
@@ -153,7 +218,9 @@ html.light {
   --color-accent: #111111;
 
   --color-accent-ink: #ffffff;
+  --color-accent-hover: #000000;
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 6.3%, var(--color-panel));
+  --color-radio-border: #c9c9c9;
   --color-track: color-mix(in srgb, var(--color-ink-dim) 26.7%, var(--color-panel));
 
   --color-ship: #047857;
@@ -174,6 +241,15 @@ html.light {
   --color-tag-purge-bg: #ffe9b0;
   --color-tag-draft-bg: #fff8e3;
   --color-destructive-border: #f0cdc7;
+  --color-q-chip-bg: #fff6da;
+  --color-q-card-bg: #fffdf5;
+  --color-q-card-border: #f0e2b4;
+  --color-fail-chip-bg: #ffe8ec;
+  --color-fail-card-bg: #fff7f8;
+  --color-fail-card-border: #f6c9d1;
+  --elevation-sm: 0 1px 2px rgba(0, 0, 0, 0.07);
+  --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --elevation-pop: 0 8px 20px rgba(0, 0, 0, 0.12);
   /* The base aliases magenta to accent, which is ink here. */
   --color-ansi-magenta: #c25e3d;
 

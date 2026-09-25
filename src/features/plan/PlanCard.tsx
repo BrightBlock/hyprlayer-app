@@ -50,7 +50,7 @@ export function PlanCard({ sessionId, workstreamId, toolUseId, planKey, text, su
       className={cx(
         "@container flex w-full max-w-[420px] items-center gap-2.5 rounded-card border bg-panel px-[13px] py-[11px] text-left",
         "focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent/60",
-        active ? "border-ink shadow-[0_0_0_3px_#11111110]" : "border-edge hover:bg-panel-2",
+        active ? "border-ink shadow-ring-active" : "border-edge hover:bg-panel-2",
       )}
     >
       <FileText {...ICON} className="shrink-0 text-ink-dim" />

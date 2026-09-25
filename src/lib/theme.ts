@@ -1,4 +1,6 @@
 
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -36,7 +38,7 @@ export const THEMES: ReadonlyArray<{ id: ThemeMode; label: string }> = [
 
 const VALID_MODES: ReadonlyArray<ThemeMode> = THEMES.map((t) => t.id);
 const THEME_CLASSES = VALID_MODES.filter(
-  (id): id is ResolvedTheme => id !== "system" && id !== "dark" && id !== "omarchy",
+  (id): id is ResolvedTheme => id !== "system" && id !== "omarchy",
 );
 
 const prefersDark = () =>
@@ -113,9 +115,25 @@ export const useThemeStore = create<ThemeStore>()(
 
 let appliedTokens: string[] = [];
 
+const followsOs = ({ mode, omarchy }: Pick<ThemeStore, "mode" | "omarchy">) =>
+  mode === "system" || (mode === "omarchy" && omarchy === null);
+
+// Inactive traffic lights draw from the window's appearance, not the page's. Following the
+// OS must pass null: WKWebView's prefers-color-scheme tracks the window, so pinning would freeze it.
+function syncWindowTheme(theme: "light" | "dark" | null): void {
+  if (!isTauri()) return;
+  void getCurrentWindow().setTheme(theme).catch(() => {});
+}
+
 export function applyTheme(): void {
   if (typeof document === "undefined") return;
-  const { mode, omarchy } = useThemeStore.getState();
+  const state = useThemeStore.getState();
+  applyThemeClass(state);
+  const light = document.documentElement.classList.contains("light");
+  syncWindowTheme(followsOs(state) ? null : light ? "light" : "dark");
+}
+
+function applyThemeClass({ mode, omarchy }: Pick<ThemeStore, "mode" | "omarchy">): void {
   const resolved = resolveTheme(mode);
   const el = document.documentElement;
 
@@ -124,13 +142,12 @@ export function applyTheme(): void {
   el.classList.remove(...THEME_CLASSES);
 
   if (resolved !== "omarchy") {
-    if (resolved !== "dark") el.classList.add(resolved);
+    el.classList.add(resolved);
     return;
   }
 
   if (omarchy === null) {
-    const fallback = prefersDark() ? "dark" : "light";
-    if (fallback !== "dark") el.classList.add(fallback);
+    el.classList.add(prefersDark() ? "dark" : "light");
     return;
   }
 
@@ -166,7 +183,7 @@ export function initTheme(): void {
     window
       .matchMedia("(prefers-color-scheme: dark)")
       .addEventListener("change", () => {
-        if (useThemeStore.getState().mode === "system") applyTheme();
+        if (followsOs(useThemeStore.getState())) applyTheme();
       });
   }
   void refreshOmarchyTheme();

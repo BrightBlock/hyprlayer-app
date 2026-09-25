@@ -274,7 +274,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     type="button"
                     disabled={actions.shipping}
                     onClick={actions.doShip}
-                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+                    className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
                     title={`Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`}
                   >
                     <GitPullRequestIcon size={15} />

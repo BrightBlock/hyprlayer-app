@@ -51,7 +51,7 @@ export function PlanProgressHeader({
       <div className="mt-2 flex items-center gap-2">
         <span
           className={cx(
-            "rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none text-white",
+            "rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none text-accent-ink",
             tracker.allDone ? "bg-ok" : "bg-info",
           )}
         >

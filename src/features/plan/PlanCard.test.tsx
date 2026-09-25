@@ -61,7 +61,7 @@ describe("PlanCard", () => {
     const latest = card("t2");
     expect(latest.getAttribute("aria-expanded")).toBe("true");
     expect(latest.className).toContain("border-ink");
-    expect(latest.className).toContain("shadow-[0_0_0_3px_#11111110]");
+    expect(latest.className).toContain("shadow-ring-active");
     expect(latest.textContent).not.toContain("click to preview");
     expect(useUiStore.getState().asideView).toBe("plan");
     expect(card("t1").getAttribute("aria-expanded")).toBe("false");

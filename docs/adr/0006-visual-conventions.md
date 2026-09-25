@@ -3,7 +3,8 @@
 **Status:** accepted · 2026-08-21 · amended 2026-09-24 (v4 light palette and radii, native-checkbox
 `Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes) ·
 amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale") ·
-amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover)
+amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover) ·
+amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dark")
 
 ## Decision
 
@@ -473,6 +474,24 @@ Families are self-hosted through Fontsource: Inter (variable), JetBrains Mono
 `KeyboardSettings` and `PromptLibrary`, the logo wordmark, `ScriptEditor`'s
 `leading-[22px]` gutter, inline code's relative `0.85em`, the harness-tab letter
 avatars' `font-bold`, and the terminal's user-zoomable size.
+
+### v4 dark (2026-09-25)
+
+Supersedes "Dark and the named themes keep their palettes" for Dark+. Dark+ now gets an
+`html.dark` class (`applyTheme`) whose block pins the v4 dark hexes, so the named themes and
+Omarchy keep deriving from the base `@theme`. The accent flips to `#ececee`; anything on it
+uses `accent-ink` (v4's `--on-accent`). v4's `--ok-text`/`--bad-text` are `diff-add`/`diff-del`,
+and `bad-ink` takes `--bad-text` on dark.
+
+New tokens, each with a base derivation for the other themes: `accent-hover`, `line-strong`
+(`edge` except on dark), `radio-border`, and the status tints `q-{chip-bg,chip-text,card-bg,card-border,label}`
+and `fail-{chip-bg,chip-text,card-bg,card-border}`. The question and permission cards use
+`q-*`, the failed exit card `fail-*`, the neutral exit card `panel` + `line-strong`.
+
+Shadows are `shadow-sm` (small controls), `shadow-card` (status cards), `shadow-pop`
+(`Popover`, menus, listbox, `BAR_POPOVER`, both archived popovers) and `shadow-ring-active`.
+Tailwind inlines a literal `--shadow-*` into its utility, so each maps to a per-theme
+`--elevation-*`/`--ring-active` variable instead. Dialogs keep `shadow-2xl`.
 
 ## Rationale
 

@@ -362,7 +362,7 @@ function QuestionPrompt({
 
   if (!question) {
     return (
-      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
         <span className="text-body text-ink-dim">
           The agent asked a question that couldn’t be displayed.
         </span>
@@ -422,7 +422,7 @@ function QuestionPrompt({
     <span
       className={`flex h-4 w-4 shrink-0 items-center justify-center border ${mt} ${
         question.multiSelect ? "rounded" : "rounded-full"
-      } ${otherOpen ? "border-accent bg-accent" : "border-ink-dim/50"}`}
+      } ${otherOpen ? "border-accent bg-accent" : "border-radio-border"}`}
       aria-hidden="true"
     >
       {otherOpen && (
@@ -434,8 +434,8 @@ function QuestionPrompt({
   );
 
   return (
-    <div className="mb-2 rounded-xl border border-brand/30 bg-brand/[0.06] p-3.5">
-      <div className="mb-2.5 flex items-center gap-2 text-brand">
+    <div className="mb-2 rounded-xl border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
+      <div className="mb-2.5 flex items-center gap-2 text-q-label">
         <QuestionIcon size={15} />
         <span className="text-body font-medium">The agent is asking</span>
         {total > 1 && (
@@ -473,7 +473,7 @@ function QuestionPrompt({
               <span
                 className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border ${
                   question.multiSelect ? "rounded" : "rounded-full"
-                } ${selected ? "border-accent bg-accent" : "border-ink-dim/50"}`}
+                } ${selected ? "border-accent bg-accent" : "border-radio-border"}`}
                 aria-hidden="true"
               >
                 {selected && (

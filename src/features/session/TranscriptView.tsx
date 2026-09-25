@@ -451,8 +451,8 @@ const PermissionCard = memo(function PermissionCard({
   }
 
   return (
-    <div className="rounded-lg border border-warn/40 bg-warn/10 p-3">
-      <div className="flex items-center gap-2 text-warn-ink">
+    <div className="rounded-lg border border-q-card-border bg-q-card-bg p-3 shadow-card">
+      <div className="flex items-center gap-2 text-q-label">
         <ShieldIcon />
         <span className="text-body font-medium">Permission required</span>
       </div>
@@ -606,11 +606,11 @@ const ExitNotice = memo(function ExitNotice({
   const remedy = bad ? exitRemedy(item.stderrTail) : null;
   return (
     <div
-      className={`rounded-md border px-3 py-2 ${
-        bad ? "border-bad/30 bg-bad/10" : "border-edge bg-panel-2"
+      className={`rounded-md border px-3 py-2 shadow-card ${
+        bad ? "border-fail-card-border bg-fail-card-bg" : "border-line-strong bg-panel"
       }`}
     >
-      <p className={`text-center text-ui font-medium ${bad ? "text-bad" : "text-ink-dim"}`}>
+      <p className={`text-center text-ui font-medium ${bad ? "text-bad-ink" : "text-ink-dim"}`}>
         {exitLabel(item.outcome)}
         {item.code !== null && item.code !== 0 ? ` (exit ${item.code})` : ""}
       </p>
