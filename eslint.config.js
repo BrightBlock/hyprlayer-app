@@ -100,4 +100,9 @@ export default tseslint.config(
     ],
     rules: { "no-restricted-syntax": "off" },
   },
+  {
+    // Node-run memory benches and the tests that spawn them.
+    files: ["src/**/*.mjs"],
+    languageOptions: { globals: { ...globals.node } },
+  },
 );

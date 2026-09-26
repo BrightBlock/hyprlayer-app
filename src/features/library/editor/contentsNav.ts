@@ -2,15 +2,43 @@ import { EditorView } from "@codemirror/view";
 
 export const SCROLL_MARGIN = 16;
 
+// Runs every scroll frame: heading tops ascend, so binary search keeps layout reads to log n.
 export function activeHeading(count: number, topOf: (i: number) => number, scroller: HTMLElement): number {
   if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) return count - 1;
   const line = scroller.getBoundingClientRect().top + SCROLL_MARGIN + 1;
+  let lo = 0;
+  let hi = count - 1;
   let active = -1;
-  for (let i = 0; i < count; i++) {
-    if (topOf(i) > line) break;
-    active = i;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (topOf(mid) <= line) {
+      active = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
   return active;
+}
+
+export type ActiveHeading = ReturnType<typeof createActiveHeading>;
+
+// Lets the contents list follow the scrollspy without re-rendering the whole doc view.
+export function createActiveHeading() {
+  let index = -1;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => index,
+    set(next: number) {
+      if (next === index) return;
+      index = next;
+      listeners.forEach((l) => l());
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
 }
 
 let jumpToken = 0;

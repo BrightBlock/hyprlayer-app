@@ -430,6 +430,55 @@ body {
   cursor: auto;
 }
 
+/* MarkdownPreview sets rendered HTML directly, so its element styles live here. */
+@layer components {
+  .md h1 {
+    @apply mb-3 mt-6 border-b border-edge pb-1 text-h2 first:mt-0;
+  }
+  .md h2 {
+    @apply mb-2 mt-6 text-h3 first:mt-0;
+  }
+  .md h3 {
+    @apply mb-2 mt-4 text-title first:mt-0;
+  }
+  .md h4 {
+    @apply mb-1 mt-4 text-body font-semibold first:mt-0;
+  }
+  .md p {
+    @apply my-3;
+  }
+  .md ul {
+    @apply my-3 list-disc space-y-1 pl-6;
+  }
+  .md ol {
+    @apply my-3 list-decimal space-y-1 pl-6;
+  }
+  .md a {
+    @apply text-ink underline decoration-ink-dim/50 hover:decoration-ink;
+  }
+  .md blockquote {
+    @apply my-3 border-l-2 border-edge pl-3 text-ink-dim;
+  }
+  .md :not(pre) > code {
+    @apply rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.85em];
+  }
+  .md hr {
+    @apply my-6 border-edge;
+  }
+  .md .md-table {
+    @apply my-3 overflow-x-auto;
+  }
+  .md table {
+    @apply w-full border-collapse text-body;
+  }
+  .md th {
+    @apply border border-edge bg-panel-2 px-2 py-1 text-left font-medium;
+  }
+  .md td {
+    @apply border border-edge px-2 py-1 align-top;
+  }
+}
+
 * {
   -webkit-user-drag: none;
 }

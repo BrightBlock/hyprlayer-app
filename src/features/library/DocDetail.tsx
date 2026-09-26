@@ -1,5 +1,3 @@
-import { markdownLanguage } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { useRouterState } from "@tanstack/react-router";
 import CodeMirror from "@uiw/react-codemirror";
@@ -14,7 +12,7 @@ import { IS_MACOS } from "@/lib/platform";
 import { startEdgeDrag } from "@/lib/resize";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { DOC_RAIL_MAX, DOC_RAIL_MIN, useUiStore } from "@/lib/uiStore";
-import { activeHeading, jumpToElement, jumpToHeading } from "./editor/contentsNav";
+import { activeHeading, createActiveHeading, jumpToElement, jumpToHeading } from "./editor/contentsNav";
 import { docEditorExtensions } from "./editor/docEditor";
 import { extractHeadings } from "./editor/headings";
 import { recalledScroll, rememberScroll } from "./docScroll";
@@ -27,14 +25,6 @@ const HEADINGS_DEBOUNCE_MS = 150;
 type Props = { id: string };
 
 type Anchor = { line: number; offset: number };
-
-function headingsOf(body: string) {
-  const state = EditorState.create({ doc: body });
-  return extractHeadings(state, markdownLanguage.parser.parse(body)).map((h) => ({
-    ...h,
-    line: state.doc.lineAt(h.from).number,
-  }));
-}
 
 const lineOf = (el: Element) => Number(el.getAttribute("data-line"));
 
@@ -78,8 +68,9 @@ function DocBody({ id, doc }: BodyProps) {
 
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<EditorView | null>(null);
-  const [headings, setHeadings] = useState(() => headingsOf(body));
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [headings, setHeadings] = useState(() => extractHeadings(body));
+  const headingsBodyRef = useRef(body);
+  const [active] = useState(createActiveHeading);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
@@ -96,7 +87,11 @@ function DocBody({ id, doc }: BodyProps) {
   historyKeyRef.current = historyKey;
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setHeadings(headingsOf(body)), HEADINGS_DEBOUNCE_MS);
+    if (body === headingsBodyRef.current) return;
+    const timer = window.setTimeout(() => {
+      headingsBodyRef.current = body;
+      setHeadings(extractHeadings(body));
+    }, HEADINGS_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [body]);
 
@@ -172,13 +167,13 @@ function DocBody({ id, doc }: BodyProps) {
       if (editing && view) {
         const topOf = (i: number) =>
           view.documentTop + view.lineBlockAt(Math.min(headings[i].from, view.state.doc.length)).top;
-        setActiveIndex(activeHeading(headings.length, topOf, scroller));
+        active.set(activeHeading(headings.length, topOf, scroller));
       } else if (!editing) {
         const topOf = (i: number) => headingEl(headings[i])?.getBoundingClientRect().top ?? -Infinity;
-        setActiveIndex(activeHeading(headings.length, topOf, scroller));
+        active.set(activeHeading(headings.length, topOf, scroller));
       }
     });
-  }, [editing, view, headings, headingEl]);
+  }, [editing, view, headings, headingEl, active]);
 
   const handleJumpToHeading = useCallback(
     (index: number) => {
@@ -189,18 +184,18 @@ function DocBody({ id, doc }: BodyProps) {
         jumpingRef.current = false;
       };
       if (editing && view) {
-        setActiveIndex(index);
+        active.set(index);
         jumpingRef.current = true;
         jumpToHeading(view, scroller, heading.from, !reducedMotion, landed);
       } else if (!editing) {
         const el = headingEl(heading);
         if (!el) return;
-        setActiveIndex(index);
+        active.set(index);
         jumpingRef.current = true;
         jumpToElement(el, scroller, !reducedMotion, landed);
       }
     },
-    [editing, headings, view, reducedMotion, headingEl],
+    [editing, headings, view, reducedMotion, headingEl, active],
   );
 
   const saveRef = useRef<() => void>(() => {});
@@ -376,7 +371,7 @@ function DocBody({ id, doc }: BodyProps) {
               setRaw={setRaw}
               disabled={saving}
               headings={headings}
-              activeHeading={activeIndex}
+              active={active}
               onJumpToHeading={handleJumpToHeading}
               width={docRailWidth}
             />
