@@ -1,16 +1,13 @@
 import { EditorView } from "@codemirror/view";
 
-import type { DocHeading } from "./headings";
-
 export const SCROLL_MARGIN = 16;
 
-export function activeHeading(view: EditorView, headings: DocHeading[], scroller: HTMLElement): number {
-  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) return headings.length - 1;
+export function activeHeading(count: number, topOf: (i: number) => number, scroller: HTMLElement): number {
+  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) return count - 1;
   const line = scroller.getBoundingClientRect().top + SCROLL_MARGIN + 1;
   let active = -1;
-  for (let i = 0; i < headings.length; i++) {
-    const pos = Math.min(headings[i].from, view.state.doc.length);
-    if (view.documentTop + view.lineBlockAt(pos).top > line) break;
+  for (let i = 0; i < count; i++) {
+    if (topOf(i) > line) break;
     active = i;
   }
   return active;
@@ -24,6 +21,7 @@ export function jumpToHeading(
   from: number,
   smooth: boolean,
   onLanded: () => void,
+  margin = SCROLL_MARGIN,
 ) {
   const pos = Math.min(from, view.state.doc.length);
   const token = ++jumpToken;
@@ -42,21 +40,37 @@ export function jumpToHeading(
   const coords = smooth ? view.coordsAtPos(pos) : null;
   if (coords) {
     view.dispatch({ selection: { anchor: pos } });
-    const max = scroller.scrollHeight - scroller.clientHeight;
-    const top = Math.min(max, coords.top - scroller.getBoundingClientRect().top + scroller.scrollTop - SCROLL_MARGIN);
-    if (Math.abs(top - scroller.scrollTop) < 1) {
-      land();
-    } else {
-      afterScrollEnd(scroller, land);
-      scroller.scrollTo({ top, behavior: "smooth" });
-    }
+    smoothScrollTo(scroller, coords.top, land);
   } else {
     view.dispatch({
       selection: { anchor: pos },
-      effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: SCROLL_MARGIN }),
+      effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: margin }),
     });
     // Queued after CodeMirror's measure frame, which applies the scroll.
     requestAnimationFrame(land);
+  }
+}
+
+export function jumpToElement(el: Element, scroller: HTMLElement, smooth: boolean, onLanded: () => void) {
+  const token = ++jumpToken;
+  const land = () => {
+    if (token === jumpToken) onLanded();
+  };
+  if (smooth) smoothScrollTo(scroller, el.getBoundingClientRect().top, land);
+  else {
+    scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - SCROLL_MARGIN;
+    land();
+  }
+}
+
+function smoothScrollTo(scroller: HTMLElement, viewportTop: number, onLanded: () => void) {
+  const max = scroller.scrollHeight - scroller.clientHeight;
+  const top = Math.min(max, viewportTop - scroller.getBoundingClientRect().top + scroller.scrollTop - SCROLL_MARGIN);
+  if (Math.abs(top - scroller.scrollTop) < 1) {
+    onLanded();
+  } else {
+    afterScrollEnd(scroller, onLanded);
+    scroller.scrollTo({ top, behavior: "smooth" });
   }
 }
 

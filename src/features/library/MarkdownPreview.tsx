@@ -17,25 +17,40 @@ function readFencedCode(inner: Element): { code: string; lang: string | undefine
   return { code, lang: langClass?.slice("language-".length) };
 }
 
+// DocDetail maps a click in the rendered doc back to its source line.
+const line = (node: Element | undefined) => node?.position?.start.line;
+
 const components: Components = {
-  h1: ({ children }) => (
-    <h1 className="mb-3 mt-6 border-b border-edge pb-1 text-h2 first:mt-0">
+  h1: ({ children, node }) => (
+    <h1 data-line={line(node)} className="mb-3 mt-6 border-b border-edge pb-1 text-h2 first:mt-0">
       {children}
     </h1>
   ),
-  h2: ({ children }) => (
-    <h2 className="mb-2 mt-6 text-h3 first:mt-0">{children}</h2>
+  h2: ({ children, node }) => (
+    <h2 data-line={line(node)} className="mb-2 mt-6 text-h3 first:mt-0">{children}</h2>
   ),
-  h3: ({ children }) => (
-    <h3 className="mb-2 mt-4 text-title first:mt-0">{children}</h3>
+  h3: ({ children, node }) => (
+    <h3 data-line={line(node)} className="mb-2 mt-4 text-title first:mt-0">{children}</h3>
   ),
-  h4: ({ children }) => (
-    <h4 className="mb-1 mt-4 text-body font-semibold first:mt-0">{children}</h4>
+  h4: ({ children, node }) => (
+    <h4 data-line={line(node)} className="mb-1 mt-4 text-body font-semibold first:mt-0">{children}</h4>
   ),
-  p: ({ children }) => <p className="my-3">{children}</p>,
-  ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
-  li: ({ children }) => <li>{children}</li>,
+  p: ({ children, node }) => (
+    <p data-line={line(node)} className="my-3">
+      {children}
+    </p>
+  ),
+  ul: ({ children, node }) => (
+    <ul data-line={line(node)} className="my-3 list-disc space-y-1 pl-6">
+      {children}
+    </ul>
+  ),
+  ol: ({ children, node }) => (
+    <ol data-line={line(node)} className="my-3 list-decimal space-y-1 pl-6">
+      {children}
+    </ol>
+  ),
+  li: ({ children, node }) => <li data-line={line(node)}>{children}</li>,
   a: ({ children, href }) => (
     <a
       href={href}
@@ -46,8 +61,8 @@ const components: Components = {
       {children}
     </a>
   ),
-  blockquote: ({ children }) => (
-    <blockquote className="my-3 border-l-2 border-edge pl-3 text-ink-dim">{children}</blockquote>
+  blockquote: ({ children, node }) => (
+    <blockquote data-line={line(node)} className="my-3 border-l-2 border-edge pl-3 text-ink-dim">{children}</blockquote>
   ),
   code: ({ children }) => (
     <code className="rounded bg-panel-2 px-1 py-0.5 font-mono text-[0.85em]">{children}</code>
@@ -58,17 +73,21 @@ const components: Components = {
     );
     if (inner) {
       const { code, lang } = readFencedCode(inner);
-      return <ShikiCodeBlock code={code} lang={lang} />;
+      return (
+        <div data-line={line(node)}>
+          <ShikiCodeBlock code={code} lang={lang} />
+        </div>
+      );
     }
     return (
-      <pre className="my-3 overflow-x-auto rounded-md border border-edge bg-panel p-3 text-meta">
+      <pre data-line={line(node)} className="my-3 overflow-x-auto rounded-md border border-edge bg-panel p-3 text-meta">
         {children}
       </pre>
     );
   },
-  hr: () => <hr className="my-6 border-edge" />,
-  table: ({ children }) => (
-    <div className="my-3 overflow-x-auto">
+  hr: ({ node }) => <hr data-line={line(node)} className="my-6 border-edge" />,
+  table: ({ children, node }) => (
+    <div data-line={line(node)} className="my-3 overflow-x-auto">
       <table className="w-full border-collapse text-body">{children}</table>
     </div>
   ),

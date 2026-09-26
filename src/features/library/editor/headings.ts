@@ -1,6 +1,8 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 
+type Tree = ReturnType<typeof syntaxTree>;
+
 const LEVEL: Record<string, 2 | 3 | 4> = { ATXHeading2: 2, ATXHeading3: 3, ATXHeading4: 4, SetextHeading2: 2 };
 const MARKS = new Set(["HeaderMark", "EmphasisMark", "CodeMark", "LinkMark", "URL"]);
 
@@ -22,8 +24,10 @@ function textWithoutMarks(
   return text;
 }
 
-export function extractHeadings(state: EditorState): DocHeading[] {
-  const tree = ensureSyntaxTree(state, state.doc.length, 50) ?? syntaxTree(state);
+export function extractHeadings(
+  state: EditorState,
+  tree: Tree = ensureSyntaxTree(state, state.doc.length, 50) ?? syntaxTree(state),
+): DocHeading[] {
   const out: DocHeading[] = [];
   tree.iterate({
     enter: (node) => {

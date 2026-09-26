@@ -1,9 +1,9 @@
-import { syntaxTree } from "@codemirror/language";
-import type { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { markdownLanguage } from "@codemirror/lang-markdown";
+import { EditorState } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { useRouterState } from "@tanstack/react-router";
 import CodeMirror from "@uiw/react-codemirror";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { Button, ConfirmDialog, ErrorNote, PageError, PageSpinner, SaveStatus } from "@/components/ui";
 import { Icon } from "@/components/Icon";
@@ -14,16 +14,29 @@ import { IS_MACOS } from "@/lib/platform";
 import { startEdgeDrag } from "@/lib/resize";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { DOC_RAIL_MAX, DOC_RAIL_MIN, useUiStore } from "@/lib/uiStore";
-import { activeHeading, jumpToHeading } from "./editor/contentsNav";
+import { activeHeading, jumpToElement, jumpToHeading } from "./editor/contentsNav";
 import { docEditorExtensions } from "./editor/docEditor";
-import { extractHeadings, type DocHeading } from "./editor/headings";
+import { extractHeadings } from "./editor/headings";
 import { recalledScroll, rememberScroll } from "./docScroll";
 import { DocRail } from "./DocRail";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { useDocSave } from "./useDocSave";
 
 const HEADINGS_DEBOUNCE_MS = 150;
 
 type Props = { id: string };
+
+type Anchor = { line: number; offset: number };
+
+function headingsOf(body: string) {
+  const state = EditorState.create({ doc: body });
+  return extractHeadings(state, markdownLanguage.parser.parse(body)).map((h) => ({
+    ...h,
+    line: state.doc.lineAt(h.from).number,
+  }));
+}
+
+const lineOf = (el: Element) => Number(el.getAttribute("data-line"));
 
 export function DocDetail({ id }: Props) {
   const doc = useDoc(id);
@@ -63,12 +76,15 @@ function DocBody({ id, doc }: BodyProps) {
   const setDocRailWidth = useUiStore((s) => s.setDocRailWidth);
   const reducedMotion = useReducedMotion();
 
+  const [editing, setEditing] = useState(false);
   const [view, setView] = useState<EditorView | null>(null);
-  const [headings, setHeadings] = useState<DocHeading[]>([]);
+  const [headings, setHeadings] = useState(() => headingsOf(body));
   const [activeIndex, setActiveIndex] = useState(-1);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const headingsTimerRef = useRef<number | null>(null);
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
+  const editAnchorRef = useRef<Anchor | null>(null);
+  const previewAnchorRef = useRef<Anchor | null>(null);
   // Scrollspy would walk the highlight through every heading a jump passes.
   const jumpingRef = useRef(false);
 
@@ -79,28 +95,71 @@ function DocBody({ id, doc }: BodyProps) {
   const historyKeyRef = useRef(historyKey);
   historyKeyRef.current = historyKey;
 
-  const scheduleHeadings = useCallback((state: EditorState) => {
-    if (headingsTimerRef.current) window.clearTimeout(headingsTimerRef.current);
-    headingsTimerRef.current = window.setTimeout(() => setHeadings(extractHeadings(state)), HEADINGS_DEBOUNCE_MS);
-  }, []);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setHeadings(headingsOf(body)), HEADINGS_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [body]);
 
   useEffect(
     () => () => {
-      if (headingsTimerRef.current) window.clearTimeout(headingsTimerRef.current);
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
     },
     [],
   );
 
-  const extensions = useMemo(
-    () => [
-      ...docEditorExtensions,
-      EditorView.updateListener.of((u) => {
-        if (u.docChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) scheduleHeadings(u.state);
-      }),
-    ],
-    [scheduleHeadings],
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollTop = recalledScroll(historyKeyRef.current) ?? 0;
+  }, []);
+
+  const headingEl = useCallback(
+    (heading: { line: number }) =>
+      previewRef.current?.querySelector(`:is(h2, h3, h4)[data-line="${heading.line}"]`) ?? null,
+    [],
   );
+
+  const enterEdit = (target: Element | null) => {
+    const scroller = scrollerRef.current;
+    const preview = previewRef.current;
+    if (!scroller || !preview) return;
+    const top = scroller.getBoundingClientRect().top;
+    const block =
+      target?.closest("[data-line]") ??
+      [...preview.querySelectorAll("[data-line]")].find((b) => b.getBoundingClientRect().bottom > top);
+    editAnchorRef.current = block ? { line: lineOf(block), offset: block.getBoundingClientRect().top - top } : null;
+    setEditing(true);
+  };
+
+  const exitEdit = () => {
+    const scroller = scrollerRef.current;
+    if (view && scroller) {
+      const top = scroller.getBoundingClientRect().top;
+      const block = view.lineBlockAtHeight(top - view.documentTop);
+      previewAnchorRef.current = {
+        line: view.state.doc.lineAt(block.from).number,
+        offset: view.documentTop + block.top - top,
+      };
+    }
+    setView(null);
+    setEditing(false);
+  };
+
+  // Keeps the line that was at the top of the editor at the same height in the rendered doc.
+  useLayoutEffect(() => {
+    const anchor = previewAnchorRef.current;
+    const scroller = scrollerRef.current;
+    const preview = previewRef.current;
+    if (editing || !anchor || !scroller || !preview) return;
+    previewAnchorRef.current = null;
+    let target: Element | null = null;
+    for (const block of preview.querySelectorAll("[data-line]")) {
+      if (lineOf(block) > anchor.line) break;
+      target = block;
+    }
+    if (target) {
+      scroller.scrollTop += target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - anchor.offset;
+    }
+  }, [editing]);
 
   const handleScroll = useCallback(() => {
     if (scrollRafRef.current) return;
@@ -109,21 +168,39 @@ function DocBody({ id, doc }: BodyProps) {
       const scroller = scrollerRef.current;
       if (!scroller) return;
       rememberScroll(historyKeyRef.current, scroller.scrollTop);
-      if (view && !jumpingRef.current) setActiveIndex(activeHeading(view, headings, scroller));
+      if (jumpingRef.current) return;
+      if (editing && view) {
+        const topOf = (i: number) =>
+          view.documentTop + view.lineBlockAt(Math.min(headings[i].from, view.state.doc.length)).top;
+        setActiveIndex(activeHeading(headings.length, topOf, scroller));
+      } else if (!editing) {
+        const topOf = (i: number) => headingEl(headings[i])?.getBoundingClientRect().top ?? -Infinity;
+        setActiveIndex(activeHeading(headings.length, topOf, scroller));
+      }
     });
-  }, [view, headings]);
+  }, [editing, view, headings, headingEl]);
 
   const handleJumpToHeading = useCallback(
     (index: number) => {
       const heading = headings[index];
-      if (!heading || !view || !scrollerRef.current) return;
-      setActiveIndex(index);
-      jumpingRef.current = true;
-      jumpToHeading(view, scrollerRef.current, heading.from, !reducedMotion, () => {
+      const scroller = scrollerRef.current;
+      if (!heading || !scroller) return;
+      const landed = () => {
         jumpingRef.current = false;
-      });
+      };
+      if (editing && view) {
+        setActiveIndex(index);
+        jumpingRef.current = true;
+        jumpToHeading(view, scroller, heading.from, !reducedMotion, landed);
+      } else if (!editing) {
+        const el = headingEl(heading);
+        if (!el) return;
+        setActiveIndex(index);
+        jumpingRef.current = true;
+        jumpToElement(el, scroller, !reducedMotion, landed);
+      }
     },
-    [headings, view, reducedMotion],
+    [editing, headings, view, reducedMotion, headingEl],
   );
 
   const saveRef = useRef<() => void>(() => {});
@@ -191,6 +268,13 @@ function DocBody({ id, doc }: BodyProps) {
           >
             <Icon name="folder" />
           </button>
+          <Button
+            size="sm"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => (editing ? exitEdit() : enterEdit(null))}
+          >
+            {editing ? "Done" : "Edit"}
+          </Button>
           <SaveStatus saving={saving} dirty={dirty} justSaved={justSaved} readOnly={false} />
           <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={() => void save()}>
             Save
@@ -215,30 +299,56 @@ function DocBody({ id, doc }: BodyProps) {
       <div className="flex min-h-0 flex-1">
         <div ref={scrollerRef} className="min-w-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
           <div className={`mx-auto px-8 py-6 ${docWide ? "max-w-none" : "max-w-[600px]"}`}>
-            <CodeMirror
-              value={body}
-              minHeight="60vh"
-              theme="none"
-              extensions={extensions}
-              basicSetup={{
-                lineNumbers: false,
-                foldGutter: false,
-                highlightActiveLine: false,
-                syntaxHighlighting: false,
-              }}
-              onChange={setBody}
-              onCreateEditor={(v) => {
-                setView(v);
-                setHeadings(extractHeadings(v.state));
-                // Runs after CodeMirror's first measure, so the scroller has real content height.
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
+            {editing ? (
+              <div
+                onBlur={(e) => {
+                  // Leaving the window blurs the editor too; only a click elsewhere in the app ends editing.
+                  if (!e.currentTarget.contains(e.relatedTarget) && document.hasFocus()) exitEdit();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && !e.defaultPrevented) exitEdit();
+                }}
+              >
+                <CodeMirror
+                  value={body}
+                  minHeight="60vh"
+                  theme="none"
+                  extensions={docEditorExtensions}
+                  basicSetup={{
+                    lineNumbers: false,
+                    foldGutter: false,
+                    highlightActiveLine: false,
+                    syntaxHighlighting: false,
+                  }}
+                  onChange={setBody}
+                  onCreateEditor={(v) => {
+                    setView(v);
+                    const anchor = editAnchorRef.current;
+                    editAnchorRef.current = null;
                     const scroller = scrollerRef.current;
-                    if (scroller) scroller.scrollTop = recalledScroll(historyKeyRef.current) ?? 0;
-                  });
-                });
-              }}
-            />
+                    if (!anchor || !scroller) return v.focus();
+                    const pos = v.state.doc.line(Math.min(anchor.line, v.state.doc.lines)).from;
+                    jumpToHeading(v, scroller, pos, false, () => {}, Math.max(0, anchor.offset));
+                  }}
+                />
+              </div>
+            ) : (
+              <div
+                ref={previewRef}
+                className="min-h-[60vh] cursor-text"
+                onClick={(e) => {
+                  const target = e.target as Element;
+                  if (target.closest("a, button") || !document.getSelection()?.isCollapsed) return;
+                  enterEdit(target);
+                }}
+              >
+                {body.trim() ? (
+                  <MarkdownPreview body={body} />
+                ) : (
+                  <p className="text-body-lg text-ink-4">Empty document. Click to start writing.</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
         {docRailOpen && (
