@@ -1,6 +1,24 @@
 {
   "versions": [
     {
+      "version": "0.8.5",
+      "date": "2026-09-28",
+      "summary": "A plan view beside every agent, sessions shared across devices, and a new status bar.",
+      "notes": [
+        "Plans now open in an aside next to the agent: phase-by-phase progress, plan cards in the transcript, and Approve & build to hand off to implementation. Works with Claude, Codex, and OpenCode plans.",
+        "Agent sessions, titles, and archives now live on the server, so every connected device sees the same list. The sessions popover has an Archived view (⌘⇧A) with Archive and Delete.",
+        "Settings moved into a popover, and a new status bar shows plan mode, switches servers, and holds archived worktrees.",
+        "Archived worktrees are kept for 30 days, with Keep, Purge, and restore to a different location.",
+        "Library docs render as markdown and switch to editing on click, with a properties rail for frontmatter fields and related-doc links.",
+        "Dark mode moves to a new grayscale palette, alongside a refreshed type scale.",
+        "Stopping a working agent now asks first. Session titles generate faster and retry once on failure.",
+        "Fixed launch hanging on an asleep remote host; it now fails within 15 seconds.",
+        "Fixed sessions left mid-turn by a server restart still looking live, with permission prompts that could never resolve.",
+        "Fixed plan-mode progress showing 0% for phase-only plans and tasks from an earlier plan carrying into a new one.",
+        "This version needs hyprlayer-server 0.8.5. Hosts on an older server show an \"Update server\" action."
+      ]
+    },
+    {
       "version": "0.8.4",
       "date": "2026-09-22",
       "summary": "Fixed a slow server start-up race and a stale-connection hang; test suite cleanup.",
