@@ -444,7 +444,7 @@ export function HighlightBackdrop({
     <div
       ref={ref}
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2.5 text-body text-transparent"
+      className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2.5 text-body leading-5 text-transparent"
     >
       {segments.map((seg, i) =>
         seg.skill ? (
