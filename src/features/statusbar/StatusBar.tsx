@@ -13,6 +13,7 @@ export function StatusBar({
   workstreamId,
   workstream,
   archive,
+  sessions,
   tools,
   settings,
   serverMenu,
@@ -20,6 +21,7 @@ export function StatusBar({
   workstreamId: string | null;
   workstream: WorkstreamView | null;
   archive?: ReactNode;
+  sessions?: ReactNode;
   tools?: ReactNode;
   settings: ReactNode;
   serverMenu?: (anchorRef: RefObject<HTMLElement | null>) => ReactNode;
@@ -39,7 +41,12 @@ export function StatusBar({
           {archive}
         </>
       )}
-      <SyncStatus compact={compact} divided={repo !== null || Boolean(archive)} menu={serverMenu} />
+      <SyncStatus
+        compact={compact}
+        divided={repo !== null || Boolean(archive)}
+        menu={serverMenu}
+        leading={sessions}
+      />
       <div className="flex-1" />
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
       {tools}

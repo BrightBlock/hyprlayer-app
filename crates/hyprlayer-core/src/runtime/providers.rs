@@ -515,7 +515,7 @@ impl ProviderService<'_> {
         })
         .await?;
 
-        driver.send_user_turn(prompt, None, None)?;
+        driver.send_user_turn(prompt, None, None, None)?;
         let collected = drain_title(&mut rx).await;
         driver.kill();
 
@@ -532,7 +532,7 @@ impl ProviderService<'_> {
             .await
             .map_err(|detail| CoreError::Opencode { detail })?;
 
-        driver.send_user_turn(prompt, None, None)?;
+        driver.send_user_turn(prompt, None, None, None)?;
         let collected = drain_title(&mut rx).await;
         driver.kill();
         driver.delete_session().await;

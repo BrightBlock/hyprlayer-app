@@ -120,6 +120,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::get_session_log,
             commands::sessions::attach_session,
             commands::sessions::list_active_sessions,
+            commands::sessions::set_session_title,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
             commands::attachments::read_attachment,
@@ -228,10 +229,16 @@ fn specta_builder() -> Builder<tauri::Wry> {
 }
 
 /// The vars a daemonized server has none of on its own (ADR-0009 §7):
-/// `SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, and any `LC_*`.
-fn env_overlay_from_desktop() -> BTreeMap<String, String> {
+/// `SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, and any `LC_*`. A remote
+/// target omits `SSH_AUTH_SOCK`/`DISPLAY` — both name things on this machine,
+/// and a remote server can use neither.
+fn env_overlay_from_desktop(target: &hosts::Target) -> BTreeMap<String, String> {
+    let local = !matches!(target, hosts::Target::Remote(_));
     let mut overlay = BTreeMap::new();
     for key in ["SSH_AUTH_SOCK", "DISPLAY", "TERM", "LANG"] {
+        if !local && matches!(key, "SSH_AUTH_SOCK" | "DISPLAY") {
+            continue;
+        }
         if let Ok(value) = std::env::var(key) {
             overlay.insert(key.to_string(), value);
         }
@@ -248,16 +255,22 @@ fn env_overlay_from_desktop() -> BTreeMap<String, String> {
 /// reconnect (plan Phase 8 §2). Asset-scope registration deliberately does not
 /// repeat: it derives from `client.worktree_root()`, and a host that has not
 /// changed has an unchanged root.
-pub(crate) async fn attach_client(handle: &tauri::AppHandle, client: Arc<client::RpcClient>) {
+pub(crate) async fn attach_client(
+    handle: &tauri::AppHandle,
+    client: Arc<client::RpcClient>,
+    target: &hosts::Target,
+) {
     // Re-injected on every connect (ADR-0009 §7): a daemonized server has none
     // of these on its own — a respawned local server least of all — and without
     // SSH_AUTH_SOCK every `git push`/`gh` call would fail as ADR-0005 predicts.
-    let overlay = env_overlay_from_desktop();
+    let overlay = env_overlay_from_desktop(target);
     log::info!(
         "sending the server {} ({})",
         overlay.keys().cloned().collect::<Vec<_>>().join(", "),
         if overlay.contains_key("SSH_AUTH_SOCK") {
             "with an SSH agent"
+        } else if matches!(target, hosts::Target::Remote(_)) {
+            "no SSH agent: remote, sends neither SSH_AUTH_SOCK nor DISPLAY"
         } else {
             "no SSH agent: git and gh cannot authenticate over SSH"
         }
@@ -442,7 +455,7 @@ pub fn run() {
             }
 
             if let Some(live) = client.clone() {
-                tauri::async_runtime::block_on(attach_client(app.handle(), live));
+                tauri::async_runtime::block_on(attach_client(app.handle(), live, &target));
             }
 
             if let Some(window) = app.get_webview_window("main") {

@@ -63,6 +63,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
             "Reply with exactly the word: pong. Nothing else.",
             None,
             None,
+            None,
         )
         .expect("send turn");
 
@@ -133,6 +134,7 @@ async fn tool_calls_and_usage_reach_the_transcript() {
     driver
         .send_user_turn(
             "Run the shell command `echo hyprlayer-smoke` and then reply with just: done",
+            None,
             None,
             None,
         )
@@ -376,6 +378,7 @@ async fn interrupt_status_is_recorded() {
             "Count slowly from 1 to 100, one number per line, pausing between each one.",
             None,
             None,
+            None,
         )
         .expect("send turn");
 
@@ -487,7 +490,9 @@ async fn run_turn(
     events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
     text: &str,
 ) -> String {
-    driver.send_user_turn(text, None, None).expect("send turn");
+    driver
+        .send_user_turn(text, None, None, None)
+        .expect("send turn");
     let mut finalized = String::new();
     let mut streamed = String::new();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
@@ -519,7 +524,9 @@ async fn run_turn_answering(
     text: &str,
     label: &str,
 ) -> Option<String> {
-    driver.send_user_turn(text, None, None).expect("send turn");
+    driver
+        .send_user_turn(text, None, None, None)
+        .expect("send turn");
     let mut answered = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     loop {
@@ -570,7 +577,9 @@ async fn run_turn_with_timeout(
     text: &str,
     timeout: Duration,
 ) -> String {
-    driver.send_user_turn(text, None, None).expect("send turn");
+    driver
+        .send_user_turn(text, None, None, None)
+        .expect("send turn");
     let mut finalized = String::new();
     let mut streamed = String::new();
     let deadline = tokio::time::Instant::now() + timeout;

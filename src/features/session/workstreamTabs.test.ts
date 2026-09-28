@@ -1,17 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import type { Session } from "@/lib/bindings";
 
 import { leaf, leaves, type LayoutNode, type PaneId } from "./paneTree";
+import { takeSeenTitle } from "./titleSeen";
 import {
   activeShellIn,
   archiveShellState,
   closePaneState,
   consumeComposerFocus,
   cycleActiveTab,
+  focusShell,
   isLastTab,
   mergePaneState,
   migratePersistedWorkstreamTabs,
   moveShellState,
   nextShellId,
+  openSessionTab,
   removeShellState,
   requestComposerFocus,
   selectLastTab,
@@ -19,6 +24,7 @@ import {
   splitPaneState,
   unarchiveShellState,
   useComposerFocusStore,
+  useWorkstreamTabsStore,
   visibleShells,
   type ArchivedShell,
   type ShellTab,
@@ -689,5 +695,124 @@ describe("composer focus signal", () => {
     expect(consumeComposerFocus(7)).toBe(true);
     expect(useComposerFocusStore.getState().pendingShellId).toBeNull();
     expect(consumeComposerFocus(7)).toBe(false);
+  });
+});
+
+describe("openSessionTab", () => {
+  const WS = "ws-open";
+
+  const session = (overrides: Partial<Session> = {}): Session => ({
+    id: "sess-1",
+    workstreamId: WS,
+    stage: "general",
+    harness: "claude",
+    claudeSessionId: null,
+    cwd: "/tmp/ws-open",
+    state: "completed",
+    model: null,
+    costUsd: null,
+    startedAt: 1000,
+    endedAt: null,
+    exitSummary: null,
+    title: null,
+    preview: null,
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    useWorkstreamTabsStore.setState({ byWs: {} });
+  });
+
+  it("focuses an existing tab bound to the session instead of appending a duplicate", () => {
+    openSessionTab(WS, session());
+    const opened = useWorkstreamTabsStore.getState().byWs[WS].shells.find((s) => s.sessionId === "sess-1")!;
+    // Defocus the session's tab so the second open must actively refocus it, not just find it already active.
+    useWorkstreamTabsStore.setState((s) => ({ byWs: { ...s.byWs, [WS]: focusShell(s.byWs[WS], 1) } }));
+    expect(activeShellIn(useWorkstreamTabsStore.getState().byWs[WS], "p1")?.id).toBe(1);
+
+    openSessionTab(WS, session());
+
+    const ws = useWorkstreamTabsStore.getState().byWs[WS];
+    expect(ws.shells.filter((s) => s.sessionId === "sess-1")).toHaveLength(1);
+    expect(activeShellIn(ws, "p1")?.id).toBe(opened.id);
+  });
+
+  it("unarchives a session parked in this device's archive instead of appending a second tab", () => {
+    openSessionTab(WS, session());
+    const shellId = useWorkstreamTabsStore.getState().byWs[WS].shells.find((s) => s.sessionId === "sess-1")!.id;
+    const parked = archiveShellState(useWorkstreamTabsStore.getState().byWs[WS], shellId, "done", 1);
+    useWorkstreamTabsStore.setState((s) => ({ byWs: { ...s.byWs, [WS]: parked } }));
+    expect(useWorkstreamTabsStore.getState().byWs[WS].archived).toHaveLength(1);
+
+    openSessionTab(WS, session());
+
+    const ws = useWorkstreamTabsStore.getState().byWs[WS];
+    expect(ws.shells.filter((s) => s.sessionId === "sess-1")).toHaveLength(1);
+    expect(ws.archived ?? []).toHaveLength(0);
+  });
+
+  it("opens a ship/commit/revise session as a general tab, never a second dedicated tab", () => {
+    for (const stage of ["ship", "commit", "revise"] as const) {
+      const dedicated: WsTabState = {
+        shells: [
+          {
+            id: 1,
+            title: "Dedicated",
+            mode: stage,
+            draft: "",
+            docs: [],
+            attachments: [],
+            sessionId: "current",
+            paneId: "p1",
+          },
+        ],
+        layout: leaf("p1"),
+        panes: { p1: { activeId: 1 } },
+        activePaneId: "p1",
+      };
+      useWorkstreamTabsStore.setState({ byWs: { [WS]: dedicated } });
+
+      openSessionTab(WS, session({ id: "picked", stage }));
+
+      const ws = useWorkstreamTabsStore.getState().byWs[WS];
+      const opened = ws.shells.find((s) => s.sessionId === "picked")!;
+      expect(opened.mode).toBe("general");
+      expect(opened.sessionStage).toBe(stage);
+      expect(ws.shells.filter((s) => s.mode === stage)).toHaveLength(1);
+      expect(ws.shells.find((s) => s.mode === stage)?.sessionId).toBe("current");
+    }
+  });
+
+  it("locks the title only for a real session title, never a fallback, and marks it seen", () => {
+    openSessionTab(WS, session({ id: "fallback-1", title: null, preview: "do the thing" }));
+    const withFallback = useWorkstreamTabsStore
+      .getState()
+      .byWs[WS].shells.find((s) => s.sessionId === "fallback-1")!;
+    expect(withFallback.title).toBe("do the thing");
+    expect(withFallback.titleLocked).toBe(false);
+    expect(takeSeenTitle("fallback-1")).toBeUndefined();
+
+    openSessionTab(WS, session({ id: "real-1", title: "Renamed elsewhere" }));
+    const withTitle = useWorkstreamTabsStore
+      .getState()
+      .byWs[WS].shells.find((s) => s.sessionId === "real-1")!;
+    expect(withTitle.title).toBe("Renamed elsewhere");
+    expect(withTitle.titleLocked).toBe(true);
+    expect(takeSeenTitle("real-1")).toBe("Renamed elsewhere");
+  });
+
+  it("creates tab state for a workstream that has none yet, instead of throwing or dropping the open", () => {
+    expect(useWorkstreamTabsStore.getState().byWs[WS]).toBeUndefined();
+    expect(() => openSessionTab(WS, session())).not.toThrow();
+    const ws = useWorkstreamTabsStore.getState().byWs[WS];
+    expect(ws.shells.some((s) => s.sessionId === "sess-1")).toBe(true);
+  });
+
+  it("gives the tab the session's own mode, harness, and stage when the stage isn't dedicated", () => {
+    openSessionTab(WS, session({ id: "plan-1", stage: "plan", harness: "codex" }));
+    const opened = useWorkstreamTabsStore.getState().byWs[WS].shells.find((s) => s.sessionId === "plan-1")!;
+    expect(opened.mode).toBe("plan");
+    expect(opened.sessionStage).toBe("plan");
+    expect(opened.harness).toBe("codex");
   });
 });

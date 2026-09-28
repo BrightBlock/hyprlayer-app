@@ -11,7 +11,8 @@ use crate::claude::{ExitOutcome, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::store::session_event_codec::encode_raw_event;
 use crate::store::{
-    ApplySessionEventOutcome, Db, FieldOp, SessionLogEntry, SessionRowMutation, StoredEvent,
+    ApplySessionEventOutcome, Db, FieldOp, LogCursor, SessionLogEntry, SessionRowMutation,
+    StoredEvent,
 };
 
 use super::delivery::{LiveAttachment, SessionAttachment, SessionDelivery, INGRESS_CAPACITY};
@@ -26,6 +27,7 @@ pub(crate) struct RewindOutcome {
 
 pub(crate) enum Control {
     Attach {
+        echo_user_messages: bool,
         reply: oneshot::Sender<Result<SessionAttachment>>,
     },
     LogAfter {
@@ -36,6 +38,12 @@ pub(crate) enum Control {
     AttachAfter {
         caller_epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
+        reply: oneshot::Sender<Result<SessionAttachment>>,
+    },
+    AttachFrom {
+        cursor: LogCursor,
+        echo_user_messages: bool,
         reply: oneshot::Sender<Result<SessionAttachment>>,
     },
     Rewind {
@@ -64,10 +72,13 @@ pub(crate) struct ActorHandle {
 }
 
 impl ActorHandle {
-    pub(crate) async fn attach(&self) -> Result<SessionAttachment> {
+    pub(crate) async fn attach(&self, echo_user_messages: bool) -> Result<SessionAttachment> {
         let (reply, reply_rx) = oneshot::channel();
         self.control
-            .send(Control::Attach { reply })
+            .send(Control::Attach {
+                echo_user_messages,
+                reply,
+            })
             .map_err(|_| actor_gone())?;
         reply_rx.await.map_err(|_| actor_gone())?
     }
@@ -92,12 +103,30 @@ impl ActorHandle {
         &self,
         caller_epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let (reply, reply_rx) = oneshot::channel();
         self.control
             .send(Control::AttachAfter {
                 caller_epoch,
                 after_seq,
+                echo_user_messages,
+                reply,
+            })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())?
+    }
+
+    pub(crate) async fn attach_from(
+        &self,
+        cursor: LogCursor,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::AttachFrom {
+                cursor,
+                echo_user_messages,
                 reply,
             })
             .map_err(|_| actor_gone())?;
@@ -205,14 +234,17 @@ async fn run(
             biased;
             ctrl = control_rx.recv() => {
                 match ctrl {
-                    Some(Control::Attach { reply }) => {
-                        let _ = reply.send(state.attach().await);
+                    Some(Control::Attach { echo_user_messages, reply }) => {
+                        let _ = reply.send(state.attach(echo_user_messages).await);
                     }
                     Some(Control::LogAfter { caller_epoch, after_seq, reply }) => {
                         let _ = reply.send(state.log_after(caller_epoch, after_seq).await);
                     }
-                    Some(Control::AttachAfter { caller_epoch, after_seq, reply }) => {
-                        let _ = reply.send(state.attach_after(caller_epoch, after_seq).await);
+                    Some(Control::AttachAfter { caller_epoch, after_seq, echo_user_messages, reply }) => {
+                        let _ = reply.send(state.attach_after(caller_epoch, after_seq, echo_user_messages).await);
+                    }
+                    Some(Control::AttachFrom { cursor, echo_user_messages, reply }) => {
+                        let _ = reply.send(state.attach_from(cursor, echo_user_messages).await);
                     }
                     Some(Control::Rewind { cutoff, live, reply }) => {
                         let _ = reply.send(state.rewind(cutoff, live).await);
@@ -289,12 +321,12 @@ impl ActorState {
         }
     }
 
-    async fn attach(&mut self) -> Result<SessionAttachment> {
+    async fn attach(&mut self, echo_user_messages: bool) -> Result<SessionAttachment> {
         let sid = self.session_id.clone();
         let db = self.db.clone();
         let replay = blocking(move || db.session_log(&sid)).await?;
 
-        let (attachment, live) = LiveAttachment::new();
+        let (attachment, live) = LiveAttachment::new(echo_user_messages);
         let id = self.next_attach_id;
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
@@ -324,14 +356,54 @@ impl ActorState {
         &mut self,
         caller_epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let replay = self.log_after(caller_epoch, after_seq).await?;
+        Ok(self.register_after(replay, after_seq, echo_user_messages))
+    }
+
+    /// A client's own cursor, not a caller epoch: the check is the row's
+    /// `(seq, created_at)` still matching what the client folded, so a
+    /// rewind that reused the seq is caught but a failed relaunch (which
+    /// restores the original timestamp) is not a false positive.
+    async fn attach_from(
+        &mut self,
+        cursor: LogCursor,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        let after_seq = match cursor {
+            LogCursor::Empty => None,
+            LogCursor::After { seq, created_at } => {
+                let (sid, db) = (self.session_id.clone(), self.db.clone());
+                let held = blocking(move || db.session_event_created_at(&sid, seq)).await?;
+                if held != Some(created_at) {
+                    return Err(CoreError::SessionEpochAdvanced {
+                        session_id: self.session_id.clone(),
+                        epoch: self.epoch,
+                    });
+                }
+                Some(seq)
+            }
+        };
+        let (sid, db) = (self.session_id.clone(), self.db.clone());
+        let replay = blocking(move || db.session_log_after(&sid, after_seq)).await?;
+        Ok(self.register_after(replay, after_seq, echo_user_messages))
+    }
+
+    /// The tail `attach_after` and `attach_from` share: register a new
+    /// attachment that resumes exactly where its replay ends.
+    fn register_after(
+        &mut self,
+        replay: Vec<SessionLogEntry>,
+        after_seq: Option<i64>,
+        echo_user_messages: bool,
+    ) -> SessionAttachment {
         let resume_seq = replay.last().map(|entry| entry.seq).or(after_seq);
-        let (attachment, live) = LiveAttachment::resuming_after(resume_seq);
+        let (attachment, live) = LiveAttachment::resuming_after(resume_seq, echo_user_messages);
         let id = self.next_attach_id;
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
-        Ok(SessionAttachment { replay, live })
+        SessionAttachment { replay, live }
     }
 
     fn set_workflow(&mut self, workflow: WorkflowChannel) {
@@ -531,10 +603,6 @@ impl ActorState {
             });
         }
 
-        if suppress_live {
-            return;
-        }
-
         let delivery = SessionDelivery {
             epoch: self.epoch,
             delivery_ordinal: ordinal,
@@ -548,7 +616,10 @@ impl ActorState {
             "fanning out session delivery"
         );
         self.attachments.retain(|_, attachment| {
-            attachment.deliver(delivery.clone());
+            // Released clients render their own prompt optimistically and never dedupe an echo.
+            if !suppress_live || attachment.echo_user_messages {
+                attachment.deliver(delivery.clone());
+            }
             !attachment.detached()
         });
     }

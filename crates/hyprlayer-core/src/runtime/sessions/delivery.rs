@@ -39,20 +39,26 @@ pub(crate) struct LiveAttachment {
     pending_partial: Option<SessionDelivery>,
     last_persisted_seq: Option<i64>,
     detached: bool,
+    /// Only a client built from this branch sets this; a released desktop
+    /// renders its own prompt optimistically and never dedupes an echo.
+    pub(crate) echo_user_messages: bool,
 }
 
 impl LiveAttachment {
-    pub(crate) fn new() -> (
+    pub(crate) fn new(
+        echo_user_messages: bool,
+    ) -> (
         Self,
         mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
     ) {
-        Self::resuming_after(None)
+        Self::resuming_after(None, echo_user_messages)
     }
 
     /// Starts from the last seq the reader already holds, so lagging again
     /// before any persisted delivery resumes there instead of replaying the log.
     pub(crate) fn resuming_after(
         last_persisted_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> (
         Self,
         mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
@@ -64,6 +70,7 @@ impl LiveAttachment {
                 pending_partial: None,
                 last_persisted_seq,
                 detached: false,
+                echo_user_messages,
             },
             receiver,
         )
@@ -152,7 +159,7 @@ mod tests {
 
     #[test]
     fn a_resumed_attachment_that_lags_before_any_persisted_delivery_keeps_its_resume_point() {
-        let (mut attachment, mut rx) = LiveAttachment::resuming_after(Some(41));
+        let (mut attachment, mut rx) = LiveAttachment::resuming_after(Some(41), false);
         for _ in 0..=ATTACH_QUEUE_CAPACITY {
             attachment.deliver(unpersisted_turn());
         }

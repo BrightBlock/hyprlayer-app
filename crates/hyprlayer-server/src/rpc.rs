@@ -194,7 +194,7 @@ hyprlayer_proto::commands! {
     DetachWorkstreamPr: detach_workstream_pr(id: String) -> ();
     MergeWorkstreamPr: merge_workstream_pr(id: String, method: MergeMethod) -> ();
 
-    SendUserMessage: send_user_message(session_id: String, text: String, attached_docs: Vec<String>, prompt_name: Option<String>) -> ();
+    SendUserMessage: send_user_message(session_id: String, text: String, attached_docs: Vec<String>, prompt_name: Option<String>, client_message_id: Option<String>) -> ();
     RespondPermission: respond_permission(session_id: String, request_id: String, allow: bool, message: Option<String>) -> ();
     AnswerQuestion: answer_question(session_id: String, request_id: String, answers: QuestionAnswers) -> ();
     InterruptSession: interrupt_session(session_id: String) -> ();
@@ -204,6 +204,7 @@ hyprlayer_proto::commands! {
     ListSessions: list_sessions(workstream_id: String) -> Vec<Session>;
     GetSessionLog: get_session_log(session_id: String) -> Vec<SessionLogEntry>;
     ListActiveSessions: list_active_sessions() -> Vec<ActiveSession>;
+    SetSessionTitle: set_session_title(session_id: String, title: Option<String>) -> ();
     LaunchAndConverse: launch_and_converse(session_id: String) -> ();
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;

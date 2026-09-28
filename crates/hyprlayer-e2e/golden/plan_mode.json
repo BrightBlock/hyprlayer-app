@@ -96,6 +96,34 @@
         },
         {
           "evidence": {
+            "running": "default"
+          },
+          "guard": "the resume reports the harness's own mode",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawns": [
+              "spawn plan"
+            ]
+          },
+          "guard": "no relaunch",
+          "ok": true
+        }
+      ],
+      "step": "a different mode attaches to the running harness"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "restarted": true
+          },
+          "guard": "the restart is accepted",
+          "ok": true
+        },
+        {
+          "evidence": {
             "spawns": [
               "spawn plan",
               "spawn acceptEdits"
@@ -105,7 +133,7 @@
           "ok": true
         }
       ],
-      "step": "a different mode still relaunches"
+      "step": "restart applies a different mode"
     },
     {
       "guards": [

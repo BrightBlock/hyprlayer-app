@@ -110,7 +110,9 @@ reconnect:
   these, so without this every `git push` and every `gh` call fails exactly the
   way ADR-0005 exists to prevent. The server merges the overlay over
   `process_env` at each child spawn — terminals, harness drivers, lifecycle and
-  Run scripts, and every `git`/`gh` shell-out.
+  Run scripts, and every `git`/`gh` shell-out. The server merges per key, drops
+  an `SSH_AUTH_SOCK` that is not a socket on its host, and a remote client sends
+  no `SSH_AUTH_SOCK` or `DISPLAY`.
 - **`WorktreeRoot`** — read once, to register the asset-protocol scope. This
   one does *not* repeat on reconnect: it derives from the host, and an unchanged
   host has an unchanged root.
@@ -374,10 +376,13 @@ The server recovers on the client's behalf (`run_stream`): on
 re-sends the recovered entries under the same stream id, and re-attaches. The
 client is never told a lag happened.
 
-The replay rule is narrower than it looks: only `attach_session` carries a
-replay. `start`/`resume`/`restart`/`rewind` hand the stream an empty replay,
-because the shell had only ever replayed on attach, and replaying on the others
-duplicates the transcript for a client that restored before resuming.
+The replay rule is narrower than it looks: only `attach_session`, and a
+`resume` carrying a cursor, replay. The cursor names the last row a client's
+restore folded; the server verifies that row's `(seq, createdAt)` still
+matches before replaying after it, and refuses (`session_epoch_advanced`) if a
+rewind rewrote it. `start`/`restart`/`rewind`, and a cursor-less `resume`, hand
+the stream an empty replay, because a client that already restored would
+otherwise see its transcript duplicated.
 
 ### Talking back
 

@@ -15,7 +15,7 @@ use hyprlayer_models::RuntimeEvent;
 use crate::agent::AgentDriver;
 use crate::claude::SessionEvent;
 use crate::error::Result;
-use crate::store::{Db, SessionLogEntry};
+use crate::store::{Db, LogCursor, SessionLogEntry};
 
 pub use delivery::{SessionAttachment, SessionStreamError};
 pub use service::{
@@ -52,7 +52,11 @@ impl SessionActors {
         sender
     }
 
-    pub(crate) async fn attach(&self, session_id: &str) -> Result<SessionAttachment> {
+    pub(crate) async fn attach(
+        &self,
+        session_id: &str,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
             handles.insert(
@@ -61,7 +65,7 @@ impl SessionActors {
             );
         }
         let handle = handles.get(session_id).expect("just inserted above");
-        handle.attach().await
+        handle.attach(echo_user_messages).await
     }
 
     pub(crate) async fn log_after(
@@ -86,6 +90,7 @@ impl SessionActors {
         session_id: &str,
         caller_epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
@@ -95,7 +100,26 @@ impl SessionActors {
             );
         }
         let handle = handles.get(session_id).expect("just inserted above");
-        handle.attach_after(caller_epoch, after_seq).await
+        handle
+            .attach_after(caller_epoch, after_seq, echo_user_messages)
+            .await
+    }
+
+    pub(crate) async fn attach_from(
+        &self,
+        session_id: &str,
+        cursor: LogCursor,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        let mut handles = self.handles.lock().await;
+        if !handles.contains_key(session_id) {
+            handles.insert(
+                session_id.to_string(),
+                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
+            );
+        }
+        let handle = handles.get(session_id).expect("just inserted above");
+        handle.attach_from(cursor, echo_user_messages).await
     }
 
     pub(crate) async fn rewind(
@@ -172,8 +196,12 @@ impl SessionRuntimeHandle {
         self.actors.ingress(session_id).await
     }
 
-    pub async fn attach(&self, session_id: &str) -> Result<SessionAttachment> {
-        self.actors.attach(session_id).await
+    pub async fn attach(
+        &self,
+        session_id: &str,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        self.actors.attach(session_id, echo_user_messages).await
     }
 
     pub async fn attachment_count(&self, session_id: &str) -> usize {
@@ -196,9 +224,10 @@ impl SessionRuntimeHandle {
         session_id: &str,
         caller_epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         self.actors
-            .attach_after(session_id, caller_epoch, after_seq)
+            .attach_after(session_id, caller_epoch, after_seq, echo_user_messages)
             .await
     }
 

@@ -20,7 +20,7 @@ use crate::pipeline::{self, Stage};
 use crate::process::binaries::BinaryKind;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
-use crate::store::{NewSession, Session, SessionLogEntry, Workstream};
+use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
 use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
@@ -54,6 +54,7 @@ pub struct StartStageSessionRequest {
     pub effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
+    pub client_message_id: Option<String>,
 }
 
 pub struct StartedStageSession {
@@ -68,6 +69,7 @@ pub struct LaunchAndConverseParams {
     wire_prompt: String,
     stage: Stage,
     prompt_name: Option<String>,
+    client_message_id: Option<String>,
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<PermissionMode>,
@@ -125,14 +127,18 @@ impl SessionService<'_> {
         text: &str,
         attached_docs: &[String],
         prompt_name: Option<&str>,
+        client_message_id: Option<&str>,
     ) -> Result<()> {
         let op = self.op_lock(session_id).await;
         let _op_guard = op.lock().await;
 
         let prompt = pipeline::append_docs(text.to_string(), attached_docs);
-        self.require_live(session_id)
-            .await?
-            .send_user_turn(&prompt, None, prompt_name)
+        self.require_live(session_id).await?.send_user_turn(
+            &prompt,
+            None,
+            prompt_name,
+            client_message_id,
+        )
     }
 
     pub async fn respond_permission(
@@ -229,6 +235,19 @@ impl SessionService<'_> {
         blocking(move || db.get_session(&id)).await
     }
 
+    /// A blank title clears the row rather than storing whitespace; a missing
+    /// session id updates nothing and succeeds.
+    pub async fn set_title(&self, session_id: &str, title: Option<String>) -> Result<()> {
+        let title = title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string);
+        let id = session_id.to_string();
+        let db = self.runtime.db.clone();
+        blocking(move || db.set_session_title(&id, title.as_deref())).await
+    }
+
     pub async fn list(&self, workstream_id: &str) -> Result<Vec<Session>> {
         let id = workstream_id.to_string();
         let db = self.runtime.db.clone();
@@ -275,8 +294,15 @@ impl SessionService<'_> {
         .await
     }
 
-    pub async fn attach(&self, session_id: &str) -> Result<SessionAttachment> {
-        self.runtime.session_actors.attach(session_id).await
+    pub async fn attach(
+        &self,
+        session_id: &str,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        self.runtime
+            .session_actors
+            .attach(session_id, echo_user_messages)
+            .await
     }
 
     pub async fn log_after(
@@ -298,10 +324,25 @@ impl SessionService<'_> {
         session_id: &str,
         epoch: u64,
         after_seq: Option<i64>,
+        echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         self.runtime
             .session_actors
-            .attach_after(session_id, epoch, after_seq)
+            .attach_after(session_id, epoch, after_seq, echo_user_messages)
+            .await
+    }
+
+    /// The cursor-verified replay and a live attachment from that row, in one
+    /// actor turn: closes the gap between a client's log read and its attach.
+    pub async fn attach_from(
+        &self,
+        session_id: &str,
+        cursor: LogCursor,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        self.runtime
+            .session_actors
+            .attach_from(session_id, cursor, echo_user_messages)
             .await
     }
 
@@ -447,6 +488,7 @@ impl SessionService<'_> {
             effort,
             permission_mode,
             prompt_name,
+            client_message_id,
         } = request;
 
         let harness = harness.unwrap_or_default();
@@ -476,6 +518,7 @@ impl SessionService<'_> {
                 wire_prompt,
                 stage,
                 prompt_name,
+                client_message_id,
                 model,
                 effort,
                 permission_mode,
@@ -491,6 +534,7 @@ impl SessionService<'_> {
             wire_prompt,
             stage,
             prompt_name,
+            client_message_id,
             model,
             effort,
             permission_mode,
@@ -519,7 +563,12 @@ impl SessionService<'_> {
             if matches!(followup, Some(Followup::CodexExecute(_))) {
                 driver.set_collab_mode(Some(CollabMode::Plan));
             }
-            driver.send_user_turn(&wire_prompt, Some(stage.as_str()), prompt_name.as_deref())
+            driver.send_user_turn(
+                &wire_prompt,
+                Some(stage.as_str()),
+                prompt_name.as_deref(),
+                client_message_id.as_deref(),
+            )
         };
         first_send?;
         if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {

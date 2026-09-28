@@ -330,9 +330,18 @@ impl HyprlayerRuntime {
         self.focus_changed.notify_waiters();
     }
 
-    /// Replaces the per-attach environment overlay (`SSH_AUTH_SOCK` and
-    /// friends) merged over every child spawn — last attach wins (ADR-0009).
-    pub fn set_env_overlay(&self, overlay: std::collections::BTreeMap<String, String>) {
+    /// Merges a client's overlay (`SSH_AUTH_SOCK` and friends) over every child spawn, per key (ADR-0009).
+    pub fn set_env_overlay(&self, mut overlay: std::collections::BTreeMap<String, String>) {
+        if overlay
+            .get("SSH_AUTH_SOCK")
+            .is_some_and(|sock| !is_agent_socket(std::path::Path::new(sock)))
+        {
+            // A client-side path (a remote laptop's agent) would replace one that works here.
+            tracing::info!(
+                "dropping a client's SSH_AUTH_SOCK: no socket at that path on this host"
+            );
+            overlay.remove("SSH_AUTH_SOCK");
+        }
         // Names only; whether an agent socket arrived decides if git and gh
         // can authenticate over SSH (ADR-0005).
         tracing::info!(
@@ -344,7 +353,7 @@ impl HyprlayerRuntime {
                 "no SSH agent"
             }
         );
-        self.environment.set_env_overlay(overlay);
+        self.environment.merge_env_overlay(overlay);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RuntimeEvent> {
@@ -488,6 +497,18 @@ impl HyprlayerRuntime {
             ids: Vec::new(),
         });
     }
+}
+
+#[cfg(unix)]
+fn is_agent_socket(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path).is_ok_and(|m| m.file_type().is_socket())
+}
+
+// Windows agents are named pipes; there is nothing to stat.
+#[cfg(not(unix))]
+fn is_agent_socket(_: &std::path::Path) -> bool {
+    true
 }
 
 #[cfg(any(test, feature = "test-support"))]

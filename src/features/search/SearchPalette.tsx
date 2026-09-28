@@ -39,7 +39,7 @@ function dispatchNav(
         params: { projectPath: nav.projectPath },
         search: { item: nav.workstreamId },
       });
-      selectAgentTab(nav.workstreamId, nav.sessionId);
+      void selectAgentTab(nav.workstreamId, nav.sessionId);
       break;
     case "doc":
       if (activeWorkstreamId) {

@@ -974,13 +974,17 @@ mod tests {
         let stop = server.stop_handle();
         let serving = tokio::spawn(server.run());
 
+        // A real socket: the overlay now drops an SSH_AUTH_SOCK that names nothing here.
+        let agent_sock = root.path().join("a.sock");
+        let _agent = std::os::unix::net::UnixListener::bind(&agent_sock).expect("bind agent.sock");
+
         let client = RpcClient::connect_socket(&socket_path)
             .await
             .expect("connect");
         client
             .set_env_overlay(BTreeMap::from([(
                 "SSH_AUTH_SOCK".to_string(),
-                "/tmp/probe".to_string(),
+                agent_sock.display().to_string(),
             )]))
             .await
             .expect("set the env overlay");
@@ -998,7 +1002,7 @@ mod tests {
                         .decode(data)
                         .unwrap_or_default();
                     seen.push_str(&String::from_utf8_lossy(&decoded));
-                    if seen.contains("/tmp/probe") {
+                    if seen.contains(&agent_sock.display().to_string()) {
                         return true;
                     }
                 }

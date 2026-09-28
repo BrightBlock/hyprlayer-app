@@ -838,9 +838,14 @@ export function SessionChat({
   const restorePermissionFlag = permissionModeOption(shell.permissionMode).flag;
   useEffect(() => {
     if (shell.sessionId && !hasEntry) {
-      void restoreSessionIfNeeded(shell.sessionId, view.item.id, shell.mode, restorePermissionFlag);
+      void restoreSessionIfNeeded(
+        shell.sessionId,
+        view.item.id,
+        shell.sessionStage ?? shell.mode,
+        restorePermissionFlag,
+      );
     }
-  }, [shell.sessionId, hasEntry, view.item.id, shell.mode, restorePermissionFlag]);
+  }, [shell.sessionId, hasEntry, view.item.id, shell.sessionStage, shell.mode, restorePermissionFlag]);
 
   const autoResumedRef = useRef<string | null>(null);
   useEffect(() => {

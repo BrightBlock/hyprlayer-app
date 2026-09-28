@@ -302,11 +302,13 @@ impl CodexDriver {
         text: &str,
         stage: Option<&str>,
         prompt_name: Option<&str>,
+        client_message_id: Option<&str>,
     ) -> Result<()> {
         let _ = self.events.send(SessionEvent::UserMessage {
             text: text.to_string(),
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
+            client_message_id: client_message_id.map(str::to_string),
         });
 
         let model = self.model.lock().ok().and_then(|m| m.clone());

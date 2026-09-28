@@ -141,7 +141,7 @@ export function Dashboard() {
       params: { projectPath: view.item.projectPath },
       search: { item: view.item.id },
     });
-    if (sessionId) selectAgentTab(view.item.id, sessionId);
+    if (sessionId) void selectAgentTab(view.item.id, sessionId);
   };
 
   const livePins = fleet.live.slice(0, 3).map<GraphPin>((item) => {

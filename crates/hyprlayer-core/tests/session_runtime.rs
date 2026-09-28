@@ -103,7 +103,7 @@ async fn legacy_raw_row_reaches_attach_replay() {
         .unwrap();
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
 
     assert_eq!(attachment.replay.len(), 1);
     match &attachment.replay[0].event {
@@ -155,7 +155,7 @@ async fn attach_observes_a_consistent_view_around_an_in_flight_durable_commit() 
     let ingress = handle.ingress("s1").await;
     ingress.send(turn_done(1.0)).await.unwrap();
 
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
 
     let seen_in_replay = !attachment.replay.is_empty();
@@ -179,7 +179,7 @@ async fn an_ephemeral_event_generated_after_attach_reaches_the_live_receiver() {
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     assert!(attachment.replay.is_empty());
     let mut live = attachment.live;
 
@@ -216,7 +216,7 @@ async fn replay_never_duplicates_already_committed_durable_events() {
     }
     wait_for_log_len(&db, "s1", 5).await;
 
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     assert_eq!(attachment.replay.len(), 5);
     for (i, entry) in attachment.replay.iter().enumerate() {
         match entry.event {
@@ -306,7 +306,7 @@ async fn a_stalled_attachment_lags_detaches_and_the_store_still_has_everything()
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
 
     let ingress = handle.ingress("s1").await;
@@ -338,7 +338,7 @@ async fn a_stalled_attachment_lags_detaches_and_the_store_still_has_everything()
         "a lagged attachment must be detached (channel closed) afterwards"
     );
 
-    let fresh = handle.attach("s1").await.unwrap();
+    let fresh = handle.attach("s1", false).await.unwrap();
     assert_eq!(fresh.replay.len(), TOTAL);
 }
 
@@ -348,7 +348,7 @@ async fn attach_after_resumes_a_lagged_reader_with_no_gap_or_duplicate() {
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let mut live = handle.attach("s1").await.unwrap().live;
+    let mut live = handle.attach("s1", false).await.unwrap().live;
     let ingress = handle.ingress("s1").await;
     const TOTAL: usize = 520;
     for i in 0..TOTAL {
@@ -368,7 +368,10 @@ async fn attach_after_resumes_a_lagged_reader_with_no_gap_or_duplicate() {
         }
     };
 
-    let mut resumed = handle.attach_after("s1", epoch, last_seq).await.unwrap();
+    let mut resumed = handle
+        .attach_after("s1", epoch, last_seq, false)
+        .await
+        .unwrap();
     assert_eq!(
         seen + resumed.replay.len(),
         TOTAL,
@@ -391,7 +394,7 @@ async fn a_non_coalescible_ephemeral_event_is_never_silently_dropped() {
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
 
     let ingress = handle.ingress("s1").await;
@@ -475,7 +478,7 @@ async fn a_persistence_failure_prevents_fanout_to_live_attachments() {
     db.set_session_event_gate(|_, _| SessionEventGateAction::FailRowMutation);
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
 
     let ingress = handle.ingress("s1").await;
@@ -494,7 +497,7 @@ async fn live_delivery_preserves_the_order_events_were_ingressed() {
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
     let ingress = handle.ingress("s1").await;
 
@@ -534,7 +537,7 @@ async fn repeated_attach_and_drop_does_not_leak_attachment_state() {
 
     let handle = SessionRuntimeHandle::new(db.clone());
     for _ in 0..20 {
-        let attachment = handle.attach("s1").await.unwrap();
+        let attachment = handle.attach("s1", false).await.unwrap();
         drop(attachment.live);
     }
 
@@ -555,13 +558,13 @@ async fn repeated_attach_and_drop_does_not_leak_attachment_state() {
 }
 
 #[tokio::test]
-async fn a_user_message_is_durable_but_never_fanned_out_live() {
+async fn a_user_message_reaches_only_attachments_that_opted_in() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
-    let mut live = attachment.live;
+    let mut opted_in = handle.attach("s1", true).await.unwrap().live;
+    let mut opted_out = handle.attach("s1", false).await.unwrap().live;
 
     let ingress = handle.ingress("s1").await;
     ingress
@@ -569,20 +572,32 @@ async fn a_user_message_is_durable_but_never_fanned_out_live() {
             text: "hi".into(),
             stage: None,
             prompt_name: None,
+            client_message_id: Some("m1".into()),
         })
         .await
         .unwrap();
     wait_for_log_len(&db, "s1", 1).await;
 
-    let nothing_arrived = tokio::time::timeout(Duration::from_millis(300), live.recv())
+    let received = tokio::time::timeout(Duration::from_secs(2), opted_in.recv())
+        .await
+        .expect("an opted-in attachment must receive the message live")
+        .expect("live receiver closed early");
+    match received {
+        Ok(SessionEvent::UserMessage {
+            client_message_id, ..
+        }) => assert_eq!(client_message_id.as_deref(), Some("m1")),
+        other => panic!("expected a user-message delivery, got {other:?}"),
+    }
+
+    let nothing_arrived = tokio::time::timeout(Duration::from_millis(300), opted_out.recv())
         .await
         .is_err();
     assert!(
         nothing_arrived,
-        "a user message must never reach a live attachment"
+        "an attachment that did not opt in must never receive a user message live"
     );
 
-    let fresh = handle.attach("s1").await.unwrap();
+    let fresh = handle.attach("s1", false).await.unwrap();
     assert_eq!(fresh.replay.len(), 1);
     assert!(matches!(
         fresh.replay[0].event,
@@ -624,7 +639,13 @@ impl AgentDriver for FakeDriver {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
         broadcast::channel(1).1
     }
-    fn send_user_turn(&self, _: &str, _: Option<&str>, _: Option<&str>) -> CoreResult<()> {
+    fn send_user_turn(
+        &self,
+        _: &str,
+        _: Option<&str>,
+        _: Option<&str>,
+        _: Option<&str>,
+    ) -> CoreResult<()> {
         self.sent_turns.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -786,7 +807,7 @@ async fn rewind_concurrent_with_attach_reflects_post_truncation_rows_with_no_sta
         tokio::spawn(async move { rewind_handle.rewind("s1", 1, Some((driver, 1usize))).await });
 
     rewind_started.notified().await;
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
 
     let outcome = rewind_task.await.unwrap().unwrap();
     assert!(outcome.live_rewound);
@@ -809,7 +830,7 @@ async fn lag_then_rewind_then_log_after_with_the_stale_epoch_reports_epoch_advan
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
-    let attachment = handle.attach("s1").await.unwrap();
+    let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
 
     let ingress = handle.ingress("s1").await;
@@ -843,7 +864,7 @@ async fn lag_then_rewind_then_log_after_with_the_stale_epoch_reports_epoch_advan
         "a log_after call at the stale epoch must report SessionEpochAdvanced, got {stale:?}"
     );
 
-    let fresh = handle.attach("s1").await.unwrap();
+    let fresh = handle.attach("s1", false).await.unwrap();
     assert!(
         fresh
             .replay

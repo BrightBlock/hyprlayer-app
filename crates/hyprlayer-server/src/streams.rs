@@ -17,8 +17,8 @@ use hyprlayer_core::runtime::sessions::{
 use hyprlayer_core::runtime::terminals as core_terminals;
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_core::{
-    CoreError, Harness, HyprlayerRuntime, PermissionMode, ScriptKind, Session, SessionEvent,
-    SessionLogEntry, Stage,
+    CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
+    SessionEvent, SessionLogEntry, Stage,
 };
 use hyprlayer_proto::{frame, WireError};
 use serde::{Deserialize, Serialize};
@@ -35,6 +35,7 @@ pub struct StreamStartOpts {
     pub effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
+    pub client_message_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -77,26 +78,37 @@ pub enum StreamRequest {
         input: String,
         attached_docs: Vec<String>,
         opts: StreamStartOpts,
+        #[serde(default)]
+        echo_user_messages: bool,
     },
     ResumeSession {
         session_id: String,
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<PermissionMode>,
+        cursor: Option<LogCursor>,
+        #[serde(default)]
+        echo_user_messages: bool,
     },
     RestartSession {
         session_id: String,
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<PermissionMode>,
+        #[serde(default)]
+        echo_user_messages: bool,
     },
     RewindSession {
         session_id: String,
         user_turn: u32,
         permission_mode: Option<PermissionMode>,
+        #[serde(default)]
+        echo_user_messages: bool,
     },
     AttachSession {
         session_id: String,
+        #[serde(default)]
+        echo_user_messages: bool,
     },
 }
 
@@ -114,6 +126,8 @@ pub enum StreamResponse {
     Session {
         session: Session,
         stream_id: u64,
+        #[serde(default)]
+        permission_mode: Option<PermissionMode>,
     },
     StartStageSession {
         session: Session,
@@ -266,11 +280,12 @@ pub(crate) enum StreamSource {
     Terminal(mpsc::Receiver<TerminalEvent>),
     Session {
         session_id: String,
-        /// Filled only by `attach_session`: the shell never replayed the log
-        /// on start/resume/restart/rewind, and doing so duplicates the
-        /// transcript a client restored before resuming.
+        /// Filled by `attach_session`, and by a resume that names the row
+        /// its client folded last.
         replay: Vec<SessionLogEntry>,
         live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+        /// Carried into a lag recovery's re-attach, so it keeps this stream's opt-in.
+        echo_user_messages: bool,
     },
 }
 
@@ -440,6 +455,7 @@ pub(crate) async fn prepare_stream(
             input,
             attached_docs,
             opts,
+            echo_user_messages,
         } => {
             let workstream = runtime.workstreams().find(&workstream_id).await.wire()?;
             let StreamStartOpts {
@@ -448,6 +464,7 @@ pub(crate) async fn prepare_stream(
                 effort,
                 permission_mode,
                 prompt_name,
+                client_message_id,
             } = opts;
             let prepared = runtime
                 .sessions()
@@ -461,13 +478,18 @@ pub(crate) async fn prepare_stream(
                     effort,
                     permission_mode,
                     prompt_name,
+                    client_message_id,
                 })
                 .await
                 .wire()?;
             let session = prepared.session.clone();
             let prompt = prepared.prompt.clone();
             let session_id = session.id.clone();
-            let attachment = runtime.sessions().attach(&session_id).await.wire()?;
+            let attachment = runtime
+                .sessions()
+                .attach(&session_id, echo_user_messages)
+                .await
+                .wire()?;
             stash_pending_launch(server, session_id.clone(), prepared.launch);
             let stream_id = server.streams().next_id();
             Ok((
@@ -480,6 +502,7 @@ pub(crate) async fn prepare_stream(
                     session_id,
                     replay: Vec::new(),
                     live: attachment.live,
+                    echo_user_messages,
                 }),
             ))
         }
@@ -488,6 +511,8 @@ pub(crate) async fn prepare_stream(
             model,
             effort,
             permission_mode,
+            cursor,
+            echo_user_messages,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -495,20 +520,38 @@ pub(crate) async fn prepare_stream(
             let sessions = runtime.sessions();
 
             if sessions.is_live(&session_id).await {
+                // Another client may be mid-turn; changing modes is restart_session's job.
+                let (replay, live) = match cursor {
+                    Some(c) => {
+                        let a = sessions
+                            .attach_from(&session_id, c, echo_user_messages)
+                            .await
+                            .wire()?;
+                        (a.replay, a.live)
+                    }
+                    None => {
+                        let a = sessions
+                            .attach(&session_id, echo_user_messages)
+                            .await
+                            .wire()?;
+                        (Vec::new(), a.live)
+                    }
+                };
                 let running = sessions.permission_mode(&session_id).await;
-                if permission_mode.is_none() || permission_mode == running {
-                    let attachment = sessions.attach(&session_id).await.wire()?;
-                    let stream_id = server.streams().next_id();
-                    return Ok((
-                        StreamResponse::Session { session, stream_id },
-                        Some(StreamSource::Session {
-                            session_id,
-                            replay: Vec::new(),
-                            live: attachment.live,
-                        }),
-                    ));
-                }
-                sessions.kill_and_await_exit(&session_id).await;
+                let stream_id = server.streams().next_id();
+                return Ok((
+                    StreamResponse::Session {
+                        session,
+                        stream_id,
+                        permission_mode: running,
+                    },
+                    Some(StreamSource::Session {
+                        session_id,
+                        replay,
+                        live,
+                        echo_user_messages,
+                    }),
+                ));
             }
 
             let workstream = runtime
@@ -516,7 +559,25 @@ pub(crate) async fn prepare_stream(
                 .find(&session.workstream_id)
                 .await
                 .wire()?;
-            let attachment = sessions.attach(&session_id).await.wire()?;
+            // The relaunch replays too, for uniformity: a session that exited in
+            // the gap between the client's log read and this resume ends with
+            // `Exited` on the stream rather than silently vanishing.
+            let (replay, live) = match cursor {
+                Some(c) => {
+                    let a = sessions
+                        .attach_from(&session_id, c, echo_user_messages)
+                        .await
+                        .wire()?;
+                    (a.replay, a.live)
+                }
+                None => {
+                    let a = sessions
+                        .attach(&session_id, echo_user_messages)
+                        .await
+                        .wire()?;
+                    (Vec::new(), a.live)
+                }
+            };
             let stream_id = server.streams().next_id();
             sessions
                 .launch(LaunchSessionParams {
@@ -530,12 +591,18 @@ pub(crate) async fn prepare_stream(
                 })
                 .await
                 .wire()?;
+            let running = sessions.permission_mode(&session_id).await;
             Ok((
-                StreamResponse::Session { session, stream_id },
+                StreamResponse::Session {
+                    session,
+                    stream_id,
+                    permission_mode: running,
+                },
                 Some(StreamSource::Session {
                     session_id,
-                    replay: Vec::new(),
-                    live: attachment.live,
+                    replay,
+                    live,
+                    echo_user_messages,
                 }),
             ))
         }
@@ -544,6 +611,7 @@ pub(crate) async fn prepare_stream(
             model,
             effort,
             permission_mode,
+            echo_user_messages,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -556,7 +624,10 @@ pub(crate) async fn prepare_stream(
                 .find(&session.workstream_id)
                 .await
                 .wire()?;
-            let attachment = sessions.attach(&session_id).await.wire()?;
+            let attachment = sessions
+                .attach(&session_id, echo_user_messages)
+                .await
+                .wire()?;
             let stream_id = server.streams().next_id();
             sessions
                 .launch(LaunchSessionParams {
@@ -570,12 +641,18 @@ pub(crate) async fn prepare_stream(
                 })
                 .await
                 .wire()?;
+            let running = sessions.permission_mode(&session_id).await;
             Ok((
-                StreamResponse::Session { session, stream_id },
+                StreamResponse::Session {
+                    session,
+                    stream_id,
+                    permission_mode: running,
+                },
                 Some(StreamSource::Session {
                     session_id,
                     replay: Vec::new(),
                     live: attachment.live,
+                    echo_user_messages,
                 }),
             ))
         }
@@ -583,6 +660,7 @@ pub(crate) async fn prepare_stream(
             session_id,
             user_turn,
             permission_mode,
+            echo_user_messages,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -593,7 +671,10 @@ pub(crate) async fn prepare_stream(
                 .await
                 .wire()?;
             let sessions = runtime.sessions();
-            let attachment = sessions.attach(&session_id).await.wire()?;
+            let attachment = sessions
+                .attach(&session_id, echo_user_messages)
+                .await
+                .wire()?;
             let stream_id = server.streams().next_id();
             let outcome = sessions
                 .rewind(RewindSessionRequest {
@@ -614,11 +695,19 @@ pub(crate) async fn prepare_stream(
                     session_id,
                     replay: Vec::new(),
                     live: attachment.live,
+                    echo_user_messages,
                 }),
             ))
         }
-        StreamRequest::AttachSession { session_id } => {
-            let attachment = runtime.sessions().attach(&session_id).await.wire()?;
+        StreamRequest::AttachSession {
+            session_id,
+            echo_user_messages,
+        } => {
+            let attachment = runtime
+                .sessions()
+                .attach(&session_id, echo_user_messages)
+                .await
+                .wire()?;
             let stream_id = server.streams().next_id();
             Ok((
                 StreamResponse::AttachSession { stream_id },
@@ -626,6 +715,7 @@ pub(crate) async fn prepare_stream(
                     session_id,
                     replay: attachment.replay,
                     live: attachment.live,
+                    echo_user_messages,
                 }),
             ))
         }
@@ -660,7 +750,19 @@ async fn run_stream(
             session_id,
             replay,
             live,
-        } => forward_session(&runtime, stream_id, &session_id, replay, live, &tx).await,
+            echo_user_messages,
+        } => {
+            forward_session(
+                &runtime,
+                stream_id,
+                &session_id,
+                replay,
+                live,
+                echo_user_messages,
+                &tx,
+            )
+            .await
+        }
     };
     tracing::debug!("stream {stream_id} ended: {ended}");
     registry.remove(stream_id);
@@ -687,6 +789,7 @@ async fn forward_session(
     session_id: &str,
     replay: Vec<SessionLogEntry>,
     mut live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    echo_user_messages: bool,
     tx: &mpsc::Sender<Vec<u8>>,
 ) -> &'static str {
     for entry in replay {
@@ -711,7 +814,7 @@ async fn forward_session(
             })) => {
                 match runtime
                     .sessions()
-                    .attach_after(session_id, epoch, last_persisted_seq)
+                    .attach_after(session_id, epoch, last_persisted_seq, echo_user_messages)
                     .await
                 {
                     Ok(resumed) => {
@@ -950,6 +1053,8 @@ impl RpcClient {
                 input,
                 attached_docs,
                 opts,
+                // Only this branch's client sets this; a released 0.8.4 desktop never does.
+                echo_user_messages: true,
             })
             .await?;
         match response {
@@ -973,18 +1078,34 @@ impl RpcClient {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<PermissionMode>,
-    ) -> Result<(Session, u64, EventStream<SessionEvent>), WireError> {
+        cursor: Option<LogCursor>,
+    ) -> Result<
+        (
+            Session,
+            Option<PermissionMode>,
+            u64,
+            EventStream<SessionEvent>,
+        ),
+        WireError,
+    > {
         let (response, rx) = self
             .call_stream(StreamRequest::ResumeSession {
                 session_id,
                 model,
                 effort,
                 permission_mode,
+                cursor,
+                echo_user_messages: true,
             })
             .await?;
         match response {
-            StreamResponse::Session { session, stream_id } => Ok((
+            StreamResponse::Session {
                 session,
+                stream_id,
+                permission_mode,
+            } => Ok((
+                session,
+                permission_mode,
                 stream_id,
                 EventStream::new(expect_stream(rx, "resume_session")?),
             )),
@@ -998,18 +1119,32 @@ impl RpcClient {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<PermissionMode>,
-    ) -> Result<(Session, u64, EventStream<SessionEvent>), WireError> {
+    ) -> Result<
+        (
+            Session,
+            Option<PermissionMode>,
+            u64,
+            EventStream<SessionEvent>,
+        ),
+        WireError,
+    > {
         let (response, rx) = self
             .call_stream(StreamRequest::RestartSession {
                 session_id,
                 model,
                 effort,
                 permission_mode,
+                echo_user_messages: true,
             })
             .await?;
         match response {
-            StreamResponse::Session { session, stream_id } => Ok((
+            StreamResponse::Session {
                 session,
+                stream_id,
+                permission_mode,
+            } => Ok((
+                session,
+                permission_mode,
                 stream_id,
                 EventStream::new(expect_stream(rx, "restart_session")?),
             )),
@@ -1028,6 +1163,7 @@ impl RpcClient {
                 session_id,
                 user_turn,
                 permission_mode,
+                echo_user_messages: true,
             })
             .await?;
         match response {
@@ -1050,7 +1186,10 @@ impl RpcClient {
         session_id: String,
     ) -> Result<(u64, EventStream<SessionEvent>), WireError> {
         let (response, rx) = self
-            .call_stream(StreamRequest::AttachSession { session_id })
+            .call_stream(StreamRequest::AttachSession {
+                session_id,
+                echo_user_messages: true,
+            })
             .await?;
         match response {
             StreamResponse::AttachSession { stream_id } => Ok((

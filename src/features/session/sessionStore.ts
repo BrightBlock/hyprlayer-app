@@ -10,13 +10,15 @@ import {
   type Bootstrap,
   type ClaudeProbe,
   type Harness,
+  type LogCursorDto,
   type PermissionMode,
   type Stage,
   type Session,
   type SessionEvent,
+  type SessionLogEntryDto,
 } from "@/lib/bindings";
 import type { WorkstreamActivity } from "@/lib/domain/activity";
-import { unwrap } from "@/lib/ipc";
+import { isAppError, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
@@ -76,6 +78,7 @@ import {
   restoredView,
   viewToText,
   type SessionView,
+  type TranscriptItem,
 } from "./transcript";
 
 export type SessionEntry = SessionView & {
@@ -314,6 +317,7 @@ export async function startSession(args: {
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
+  const clientMessageId = crypto.randomUUID();
 
   const { session, prompt } = await unwrap(
     commands.startStageSession(
@@ -327,6 +331,7 @@ export async function startSession(args: {
         effort: args.effort ?? null,
         permissionMode: args.permissionMode ?? null,
         promptName: args.promptName ?? null,
+        clientMessageId,
       },
       channel,
     ),
@@ -336,7 +341,15 @@ export async function startSession(args: {
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };
-  view = addUserMessage(view, prompt, args.stage, attachments, Date.now(), args.promptName ?? null);
+  view = addUserMessage(
+    view,
+    prompt,
+    args.stage,
+    attachments,
+    Date.now(),
+    args.promptName ?? null,
+    clientMessageId,
+  );
   setEntry(session.id, {
     ...view,
     workstreamId: args.workstreamId,
@@ -353,24 +366,119 @@ export async function startSession(args: {
   return session;
 }
 
-export async function resumeSession(sessionId: string): Promise<void> {
+// "Auto" (null) never disagrees; only an explicit tab mode can be stale.
+function adoptRunningMode(sessionId: string, running: PermissionMode | null | undefined): void {
+  const entry = entryOf(sessionId);
+  if (!running || !entry || entry.permissionMode === null || entry.permissionMode === running) return;
+  setEntry(sessionId, { ...entry, permissionMode: running });
+  setSessionPermissionMode(entry.workstreamId, sessionId, running);
+}
+
+// A cursor is only ever valid right after folding the log: live events carry
+// no seq, so nothing else in the client can produce one.
+function foldLog(
+  entries: SessionLogEntryDto[],
+  previousItems: TranscriptItem[] = [],
+): { view: SessionView; cursor: LogCursorDto } {
+  // The log stores no attachments; recover them from the optimistic item this
+  // device already rendered, matched by the nonce both share.
+  const attachmentsById = new Map(
+    previousItems
+      .filter((it): it is Extract<TranscriptItem, { kind: "user" }> => it.kind === "user" && !!it.clientMessageId)
+      .map((it) => [it.clientMessageId as string, it.attachments]),
+  );
+  let view = initialSessionView("starting");
+  for (const stored of entries) {
+    try {
+      view = reduceEvent(view, stored.event);
+      const last = view.items[view.items.length - 1];
+      if (stored.kind === "userMessage" && last?.kind === "user") {
+        const createdAt = last.createdAt === null ? stored.createdAt : last.createdAt;
+        const attachments = (last.clientMessageId && attachmentsById.get(last.clientMessageId)) || last.attachments;
+        if (createdAt !== last.createdAt || attachments !== last.attachments) {
+          view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt, attachments }] };
+        }
+      }
+    } catch (e) {
+      log.warn("session", `folding a ${stored.kind} event`, e);
+    }
+  }
+  const lastRow = entries[entries.length - 1];
+  const cursor: LogCursorDto = lastRow
+    ? { kind: "after", seq: lastRow.seq, createdAt: lastRow.createdAt }
+    : { kind: "empty" };
+  return { view, cursor };
+}
+
+// Re-reads and re-folds the log into the existing entry, in place (no
+// dropSession, so a mounted SessionChat's restore effect does not refire).
+// Returns the cursor the fold ended at, or null if the entry disappeared
+// while the log was in flight.
+async function foldAndWriteEntry(sessionId: string): Promise<LogCursorDto | null> {
+  const entries = await unwrap(commands.getSessionLog(sessionId));
   const current = entryOf(sessionId);
-  if (!current || channels.has(sessionId)) return;
+  if (!current) return null;
+  const { view, cursor } = foldLog(entries, current.items);
+  setEntry(sessionId, { ...current, ...view, live: true, state: "starting" });
+  return cursor;
+}
 
-  const { channel, activate } = bufferedChannel();
-  channels.set(sessionId, channel);
-  setEntry(sessionId, { ...current, live: true, state: "starting" });
+function isSessionEpochAdvanced(e: unknown): boolean {
+  return isAppError(e) && e.code === "session_epoch_advanced";
+}
 
-  try {
-    await unwrap(commands.resumeSession(sessionId, null, null, current.permissionMode, channel));
-  } catch (e) {
-    channels.delete(sessionId);
-    const latest = entryOf(sessionId);
-    if (latest) setEntry(sessionId, { ...latest, live: false, state: "idle" });
-    throw e;
+export async function resumeSession(
+  sessionId: string,
+  opts: { cursor?: LogCursorDto; flush?: boolean } = {},
+): Promise<void> {
+  if (!entryOf(sessionId) || channels.has(sessionId)) return;
+
+  // Every channel-less resume folds the log first: the cursor it produces is
+  // the only valid one, since live events carry no seq.
+  let cursor: LogCursorDto | null;
+  if (opts.cursor) {
+    cursor = opts.cursor;
+    const current = entryOf(sessionId);
+    if (current) setEntry(sessionId, { ...current, live: true, state: "starting" });
+  } else {
+    cursor = await foldAndWriteEntry(sessionId);
+    if (!cursor || !entryOf(sessionId)) return;
   }
 
-  activate(sessionId);
+  let permissionMode: PermissionMode | null = null;
+  for (let attempt = 1; ; attempt += 1) {
+    const entry = entryOf(sessionId);
+    if (!entry) return;
+    // A Tauri Channel serves one invoke, so a retry needs a fresh one.
+    const { channel, activate } = bufferedChannel();
+    channels.set(sessionId, channel);
+    try {
+      const result = await unwrap(
+        commands.resumeSession(sessionId, null, null, entry.permissionMode, cursor, channel),
+      );
+      permissionMode = result.permissionMode;
+      activate(sessionId);
+      break;
+    } catch (e) {
+      channels.delete(sessionId);
+      let failure = e;
+      if (attempt === 1 && isSessionEpochAdvanced(e)) {
+        // A failed re-fold must still reach the rollback, or the tab stays live with no channel.
+        try {
+          cursor = await foldAndWriteEntry(sessionId);
+          if (!cursor || !entryOf(sessionId)) return;
+          continue;
+        } catch (refold) {
+          failure = refold;
+        }
+      }
+      const latest = entryOf(sessionId);
+      if (latest) setEntry(sessionId, { ...latest, live: false, state: "idle" });
+      throw failure;
+    }
+  }
+
+  adoptRunningMode(sessionId, permissionMode);
 
   // A quiet Claude resume emits no init event.
   const after = entryOf(sessionId);
@@ -381,7 +489,7 @@ export async function resumeSession(sessionId: string): Promise<void> {
       streaming: false,
       state: parkedState(after),
     });
-    flushQueuedMessage(sessionId);
+    if (opts.flush !== false) flushQueuedMessage(sessionId);
   }
 }
 
@@ -554,12 +662,18 @@ async function deliverMessage(
   attachments: Attachment[] = [],
   promptName: string | null = null,
 ): Promise<void> {
+  if (!entryOf(sessionId)) return;
+  // Resume before adding the optimistic item: a session another device drove
+  // in the meantime replays those turns first, so they land above this
+  // prompt instead of after it. `flush: false` keeps the settle from sending
+  // a queued message ahead of the one being delivered right now.
+  if (!channels.has(sessionId)) await resumeSession(sessionId, { flush: false });
   const current = entryOf(sessionId);
   if (!current) return;
-  const withUser = addUserMessage(current, text, null, attachments, Date.now(), promptName);
+  const clientMessageId = crypto.randomUUID();
+  const withUser = addUserMessage(current, text, null, attachments, Date.now(), promptName, clientMessageId);
   const optimisticId = withUser.items[withUser.items.length - 1].id;
   setEntry(sessionId, { ...current, ...withUser });
-  if (!channels.has(sessionId)) await resumeSession(sessionId);
   try {
     await unwrap(
       commands.sendUserMessage(
@@ -567,6 +681,7 @@ async function deliverMessage(
         text,
         attachments.map((a) => a.path),
         promptName,
+        clientMessageId,
       ),
     );
   } catch (e) {
@@ -785,7 +900,7 @@ export async function runPromptTextInWorkstream(
       await restoreSessionIfNeeded(
         active.sessionId,
         workstreamId,
-        active.mode ?? "general",
+        active.sessionStage ?? active.mode,
         permissionModeOption(active.permissionMode).flag,
       );
     }
@@ -937,20 +1052,9 @@ export async function restoreSessionIfNeeded(
     ]);
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
-    let view = initialSessionView("starting");
-    for (const stored of entries) {
-      try {
-        view = reduceEvent(view, stored.event);
-        const last = view.items[view.items.length - 1];
-        if (stored.kind === "userMessage" && last?.kind === "user" && last.createdAt === null) {
-          view = { ...view, items: [...view.items.slice(0, -1), { ...last, createdAt: stored.createdAt }] };
-        }
-      } catch (e) {
-        log.warn("session", `restoring ${sessionId} skipped a ${stored.kind} event`, e);
-      }
-    }
+    const { view: folded, cursor } = foldLog(entries);
     const live = active.some((a) => a.session.id === sessionId);
-    view = restoredView(view, live);
+    const view = restoredView(folded, live);
     setEntry(sessionId, {
       ...view,
       workstreamId,
@@ -962,7 +1066,7 @@ export async function restoreSessionIfNeeded(
       taskStartedAt: {},
       queued: [],
     });
-    if (live) await resumeSession(sessionId);
+    if (live) await resumeSession(sessionId, { cursor });
   } catch (error) {
     log.error("session", `restoring ${sessionId} failed`, error);
   } finally {

@@ -1,0 +1,56 @@
+{
+  "scenario": "shared_env_overlay",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "seen": "sock=$SANDBOX/agent.sock display=:b|end\r\n"
+          },
+          "guard": "a nonexistent agent socket never replaces a working one",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "seen": "sock=$SANDBOX/agent.sock display=:b|end\r\n"
+          },
+          "guard": "a later attach still wins the keys it sends",
+          "ok": true
+        }
+      ],
+      "step": "two clients attach with different overlays"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "seen": "sock=$SANDBOX/agent.sock display=:b|end\r\n"
+          },
+          "guard": "the working agent socket is still there",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "seen": "sock=$SANDBOX/agent.sock display=:b|end\r\n"
+          },
+          "guard": "the last DISPLAY sent is still there",
+          "ok": true
+        }
+      ],
+      "step": "a client with no agent keeps the one that works"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

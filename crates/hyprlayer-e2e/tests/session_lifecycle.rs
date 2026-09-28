@@ -194,6 +194,7 @@ async fn session_lifecycle() {
             text: "ASK_PERMISSION please".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await
@@ -237,6 +238,7 @@ async fn session_lifecycle() {
             text: "ASK_QUESTION please".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await
@@ -379,6 +381,7 @@ async fn session_lifecycle() {
             text: "E2E_PROMPT_THREE".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await

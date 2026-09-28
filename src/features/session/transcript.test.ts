@@ -1233,6 +1233,56 @@ describe("restoredView (rebuild after an app restart)", () => {
   });
 });
 
+describe("userMessage echo dedupe (clientMessageId)", () => {
+  it("drops the sender's own echo instead of duplicating the optimistic bubble", () => {
+    let view = initialSessionView("running");
+    view = addUserMessage(view, "hello", null, [], null, null, "cmid-1");
+    view = reduceEvent(view, { kind: "userMessage", text: "hello", stage: null, clientMessageId: "cmid-1" });
+    expect(view.items.filter((it) => it.kind === "user")).toHaveLength(1);
+  });
+
+  it("renders a different client's message even though this device has an unrelated id", () => {
+    let view = initialSessionView("running");
+    view = addUserMessage(view, "mine", null, [], null, null, "cmid-mine");
+    view = reduceEvent(view, { kind: "userMessage", text: "theirs", stage: null, clientMessageId: "cmid-theirs" });
+    expect(view.items.filter((it) => it.kind === "user")).toHaveLength(2);
+  });
+
+  it("renders a userMessage with no clientMessageId (an old server, or a restored legacy row)", () => {
+    let view = initialSessionView("running");
+    view = addUserMessage(view, "mine", null, [], null, null, "cmid-mine");
+    view = reduceEvent(view, { kind: "userMessage", text: "no id on this one", stage: null });
+    expect(view.items.filter((it) => it.kind === "user")).toHaveLength(2);
+  });
+
+  it("a dropped echo leaves the view exactly as the optimistic add left it", () => {
+    let view = initialSessionView("running");
+    view = addUserMessage(view, "hello", null, [], null, null, "cmid-1");
+    view = reduceEvent(view, { kind: "partialText", text: "thinking", parentId: null });
+    const before = view;
+
+    const after = reduceEvent(before, {
+      kind: "userMessage",
+      text: "hello",
+      stage: null,
+      clientMessageId: "cmid-1",
+    });
+
+    expect(after).toBe(before);
+  });
+
+  it("replaying a persisted log whose rows all carry ids drops nothing", () => {
+    const events: SessionEvent[] = [
+      { kind: "userMessage", text: "first", stage: null, clientMessageId: "cmid-a" },
+      { kind: "assistantText", text: "ok", parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null },
+      { kind: "userMessage", text: "second", stage: null, clientMessageId: "cmid-b" },
+    ];
+    const view = reduceAll(events, initialSessionView("starting"));
+    expect(kinds(view).filter((k) => k === "user")).toHaveLength(2);
+  });
+});
+
 describe("display + actions", () => {
   it("describeState refines running by streaming", () => {
     expect(describeState("running", true).label).toBe("working");

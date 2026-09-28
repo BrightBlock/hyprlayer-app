@@ -131,6 +131,7 @@ export type TranscriptItem =
       attachments: Attachment[];
       createdAt: number | null;
       promptName: string | null;
+      clientMessageId?: string | null;
     }
   | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
   | ({ kind: "thinking"; id: string; text: string } & Parented)
@@ -424,24 +425,29 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         contextWindow: event.model && event.model !== view.model ? null : view.contextWindow,
       };
 
-    case "userMessage":
+    case "userMessage": {
+      // The sender already shows this turn optimistically; only its own echo is dropped.
+      const id = event.clientMessageId;
+      if (id && view.items.some((it) => it.kind === "user" && it.clientMessageId === id)) return view;
       return {
         ...view,
         ...appended(
           view,
-          (id) => ({
+          (itemId) => ({
             kind: "user",
-            id,
+            id: itemId,
             text: event.text,
             stage: event.stage,
             attachments: [],
             createdAt: null,
             promptName: event.promptName ?? null,
+            clientMessageId: id ?? null,
           }),
           true,
         ),
         streaming: true,
       };
+    }
 
     case "partialText": {
       if (event.parentId || !event.text) return view;
@@ -771,12 +777,13 @@ export function addUserMessage(
   attachments: Attachment[] = [],
   createdAt: number | null = null,
   promptName: string | null = null,
+  clientMessageId: string | null = null,
 ): SessionView {
   return {
     ...view,
     ...appended(
       view,
-      (id) => ({ kind: "user", id, text, stage, attachments, createdAt, promptName }),
+      (id) => ({ kind: "user", id, text, stage, attachments, createdAt, promptName, clientMessageId }),
       true,
     ),
     streaming: true,

@@ -4,7 +4,9 @@
 deleted — the runtime reads no provider credentials) · amended 2026-09-19 (OpenCode
 config I/O moves to the server) · amended 2026-09-19 (the server writes its own log
 files; a spawned server's stderr goes to a file, not a pipe) · amended 2026-09-19
-(the server is versioned and released apart from the app; the app sets a minimum)
+(the server is versioned and released apart from the app; the app sets a minimum) ·
+amended 2026-09-26 (the environment overlay merges per key and validates the agent
+socket)
 
 ## Decision
 
@@ -97,8 +99,12 @@ Two consequences follow, accepted rather than designed around:
 - **`set_foreground` is last-writer-wins.** It is a single `AtomicBool`
   (`crates/hyprlayer-core/src/runtime/mod.rs`) feeding the PR watcher's cadence, so a
   backgrounded client throttles polling for a foregrounded one.
-- **The environment overlay is one overlay, last attach wins.** Two clients with
-  different agent sockets means the second attach's socket is used for both.
+- **The environment overlay is one overlay, merged per key.** Each attach overwrites
+  only the keys it sends. A key is never cleared, so a departed client's value stays
+  until another sends a valid one — the same staleness the opencode section already
+  accepts. `SSH_AUTH_SOCK` is dropped unless it names a socket on the server, and a
+  remote client sends neither `SSH_AUTH_SOCK` nor `DISPLAY`, so a laptop attaching
+  over SSH no longer replaces a working agent.
 
 ### The environment overlay: the exception to freeze-at-construction
 
@@ -117,11 +123,12 @@ server needs its own agent access (`ssh -A`, or a key on the server).
 
 #### opencode takes the overlay of whoever started it
 
-Every other spawn reads the overlay at spawn time, so the newest attach wins. opencode
-cannot: one `opencode serve` is started lazily and cached for the profile's lifetime
-(`opencode/runtime.rs`, `OpenCodeManager::ensure`), and its sessions are HTTP calls into
-that one process — there is no per-session child to hand an environment to. The overlay
-is therefore baked into `OpenCodeServerConfig` at spawn, and **first attach wins**:
+Every other spawn reads the overlay at spawn time, so each key takes its newest valid
+value. opencode cannot: one `opencode serve` is started lazily and cached for the
+profile's lifetime (`opencode/runtime.rs`, `OpenCodeManager::ensure`), and its sessions
+are HTTP calls into that one process — there is no per-session child to hand an
+environment to. The overlay is therefore baked into `OpenCodeServerConfig` at spawn,
+and **first attach wins**:
 a server outliving the client that started it keeps that client's `SSH_AUTH_SOCK`.
 
 Invalidating and respawning when the overlay changes was considered and rejected. A

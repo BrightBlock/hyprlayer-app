@@ -122,8 +122,8 @@ async fn stale_session_rows() {
     );
 
     j.step("resume, park again, and restart after a crash");
-    let (_, _, mut resumed) = client
-        .resume_session_stream(parked.0.clone(), None, None, None)
+    let (_, _, _, mut resumed) = client
+        .resume_session_stream(parked.0.clone(), None, None, None, None)
         .await
         .expect("resume_session");
     j.call(
@@ -133,6 +133,7 @@ async fn stale_session_rows() {
             text: "ASK_PERMISSION again".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await

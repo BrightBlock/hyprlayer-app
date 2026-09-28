@@ -1,13 +1,14 @@
 //! A harness that leaves plan mode on its own: claude's approved ExitPlanMode
 //! reaches the client as a mode change, stays out of the stored log, and the
-//! server adopts it so a resume in the new mode does not relaunch.
+//! server adopts it so a resume in the new mode does not relaunch. A resume
+//! never relaunches; restart does.
 #![cfg(unix)]
 
 use std::time::Duration;
 
 use hyprlayer_core::{Harness, PermissionMode, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
+use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_server::client::EventStream;
 use hyprlayer_server::streams::StreamStartOpts;
 
@@ -117,6 +118,7 @@ async fn plan_mode() {
             text: "EXIT_PLAN now".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await
@@ -189,6 +191,7 @@ async fn plan_mode() {
             None,
             None,
             Some(PermissionMode::Default),
+            None,
         )
         .await;
     j.guard(
@@ -196,7 +199,7 @@ async fn plan_mode() {
         resumed.is_ok(),
         json!({ "resumed": resumed.is_ok() }),
     );
-    let mut events = resumed.expect("a resumed session").2;
+    let mut events = resumed.expect("a resumed session").3;
     j.call(
         &client,
         Request::SendUserMessage {
@@ -204,6 +207,7 @@ async fn plan_mode() {
             text: "E2E_PROMPT_THREE".into(),
             attached_docs: vec![],
             prompt_name: None,
+            client_message_id: None,
         },
     )
     .await
@@ -224,9 +228,41 @@ async fn plan_mode() {
     );
     drop(events);
 
-    j.step("a different mode still relaunches");
-    let relaunched = client
+    j.step("a different mode attaches to the running harness");
+    let attached = client
         .resume_session_stream(
+            session.id.clone(),
+            None,
+            None,
+            Some(PermissionMode::AcceptEdits),
+            None,
+        )
+        .await;
+    j.guard(
+        "the resume is accepted",
+        attached.is_ok(),
+        json!({ "resumed": attached.is_ok() }),
+    );
+    let running = match &attached {
+        Ok((_, mode, ..)) => *mode,
+        Err(_) => None,
+    };
+    j.guard(
+        "the resume reports the harness's own mode",
+        running == Some(PermissionMode::Default),
+        json!({ "running": running }),
+    );
+    let relaunched = eventually(Duration::from_secs(2), || spawns().len() > 1).await;
+    j.guard(
+        "no relaunch",
+        !relaunched && spawns() == ["spawn plan"],
+        json!({ "spawns": spawns() }),
+    );
+    drop(attached);
+
+    j.step("restart applies a different mode");
+    let restarted = client
+        .restart_session_stream(
             session.id.clone(),
             None,
             None,
@@ -234,11 +270,11 @@ async fn plan_mode() {
         )
         .await;
     j.guard(
-        "the resume is accepted",
-        relaunched.is_ok(),
-        json!({ "resumed": relaunched.is_ok() }),
+        "the restart is accepted",
+        restarted.is_ok(),
+        json!({ "restarted": restarted.is_ok() }),
     );
-    // The stub logs its spawn from its own process, after the resume returns.
+    // The stub logs its spawn from its own process, after the restart returns.
     let _ = tokio::time::timeout(IO, async {
         while spawns().len() < 2 {
             tokio::time::sleep(Duration::from_millis(50)).await;

@@ -565,10 +565,16 @@ export function useAllWorkstreams(enabled = true) {
   });
 }
 
-export function useWorkstreamSessions(workstreamId: string, enabled = true) {
-  return useQuery({
+export function workstreamSessionsQuery(workstreamId: string) {
+  return {
     queryKey: ["workstream-sessions", workstreamId],
     queryFn: () => unwrap(commands.listSessions(workstreamId)),
+  };
+}
+
+export function useWorkstreamSessions(workstreamId: string, enabled = true) {
+  return useQuery({
+    ...workstreamSessionsQuery(workstreamId),
     enabled: enabled && Boolean(workstreamId),
   });
 }

@@ -1180,10 +1180,17 @@ impl Dispatch for Server {
         text: String,
         attached_docs: Vec<String>,
         prompt_name: Option<String>,
+        client_message_id: Option<String>,
     ) -> Result<(), WireError> {
         self.runtime
             .sessions()
-            .send(&session_id, &text, &attached_docs, prompt_name.as_deref())
+            .send(
+                &session_id,
+                &text,
+                &attached_docs,
+                prompt_name.as_deref(),
+                client_message_id.as_deref(),
+            )
             .await
             .wire()
     }
@@ -1257,6 +1264,18 @@ impl Dispatch for Server {
 
     async fn list_active_sessions(&self) -> Result<Vec<ActiveSession>, WireError> {
         self.runtime.sessions().list_active().await.wire()
+    }
+
+    async fn set_session_title(
+        &self,
+        session_id: String,
+        title: Option<String>,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .sessions()
+            .set_title(&session_id, title)
+            .await
+            .wire()
     }
 
     async fn import_attachment(
@@ -2135,7 +2154,7 @@ mod tests {
 
         let attachment = runtime
             .sessions()
-            .attach(&session_id)
+            .attach(&session_id, false)
             .await
             .expect("attach");
         let ingress = runtime.test_session_ingress(&session_id).await;
@@ -2151,6 +2170,7 @@ mod tests {
                 session_id: session_id.clone(),
                 replay: attachment.replay,
                 live: attachment.live,
+                echo_user_messages: false,
             },
             tx,
             registry.clone(),

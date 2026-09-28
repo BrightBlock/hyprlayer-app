@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { scopedKey } from "@/lib/hostScope";
+import type { Session } from "@/lib/bindings";
 
 import type { Attachment } from "./attachments";
 import { debouncedJSONStorage } from "@/lib/persistedStorage";
@@ -10,7 +11,8 @@ import {
   isSupportedOpencodeModel,
   type ActionAgentDefaults,
 } from "@/lib/domain/harnessing";
-import type { StageKey } from "@/lib/domain/stages";
+import { MODE_STAGES, stageLabel, type StageKey } from "@/lib/domain/stages";
+import { markTitleSeen } from "./titleSeen";
 
 import {
   leaf,
@@ -34,6 +36,8 @@ export type ShellTab = {
   title: string;
   titleLocked?: boolean;
   mode: StageKey;
+  /** The session's real stage when `mode` is downgraded to "general" (a picked ship/commit/revise session). */
+  sessionStage?: StageKey;
   draft: string;
   docs: AttachedDoc[];
   dismissedSuggestions?: string[];
@@ -399,6 +403,46 @@ export function setSessionPermissionMode(workstreamId: string, sessionId: string
     if (!current?.shells.some((s) => s.sessionId === sessionId && s.permissionMode !== key)) return all;
     const shells = current.shells.map((s) => (s.sessionId === sessionId ? { ...s, permissionMode: key } : s));
     return { ...all, [workstreamId]: { ...current, shells } };
+  });
+}
+
+const tabMode = (stage: StageKey): StageKey =>
+  MODE_STAGES.some((s) => s.key === stage) ? stage : "general";
+
+export function openSessionTab(workstreamId: string, session: Session): void {
+  if (session.title != null) markTitleSeen(session.id, session.title);
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const open = current.shells.find((s) => s.sessionId === session.id);
+    if (open) return { ...all, [workstreamId]: focusShell(current, open.id) };
+    const parked = current.archived?.find((a) => a.shell.sessionId === session.id);
+    if (parked) {
+      const restored = unarchiveShellState(current, parked.shell.id);
+      if (session.title == null) return { ...all, [workstreamId]: restored };
+      // The server's title may be a rename made elsewhere after this tab was parked.
+      const shells = restored.shells.map((s) =>
+        s.id === parked.shell.id ? { ...s, title: session.title as string, titleLocked: true } : s,
+      );
+      return { ...all, [workstreamId]: { ...restored, shells } };
+    }
+    return {
+      ...all,
+      [workstreamId]: appendShell(current, {
+        id: nextShellId(current.shells, current.archived),
+        title: session.title ?? session.preview ?? stageLabel(session.stage),
+        // Locked only for a server title, so a fallback never syncs back as one.
+        titleLocked: session.title != null,
+        mode: tabMode(session.stage),
+        // The entry's stage must stay the server's, or a picked ship session is invisible to workstreamShipBusy.
+        sessionStage: session.stage,
+        harness: session.harness,
+        draft: "",
+        docs: [],
+        attachments: [],
+        sessionId: session.id,
+        paneId: focusedPaneId(current),
+      }),
+    };
   });
 }
 

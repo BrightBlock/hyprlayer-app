@@ -32,18 +32,16 @@ impl RuntimeEnvironment {
     }
 
     pub fn with_env_overlay(self, overlay: BTreeMap<String, String>) -> Self {
-        self.set_env_overlay(overlay);
+        self.merge_env_overlay(overlay);
         self
     }
 
-    /// Replaces the live overlay — last attach wins (ADR-0009). Takes `&self`
-    /// because the overlay is the one mutable exception on an otherwise
-    /// frozen-at-construction value, shared through the `Arc` every clone holds.
-    pub fn set_env_overlay(&self, overlay: BTreeMap<String, String>) {
-        *self
-            .env_overlay
+    /// Merges an attach's keys over the live overlay; a key is never cleared (ADR-0009).
+    pub fn merge_env_overlay(&self, overlay: BTreeMap<String, String>) {
+        self.env_overlay
             .write()
-            .unwrap_or_else(PoisonError::into_inner) = overlay;
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(overlay);
     }
 
     /// A snapshot of the overlay, for merging over a spawned child's environment.
@@ -294,13 +292,20 @@ mod tests {
     }
 
     #[test]
-    fn set_env_overlay_replaces_the_overlay_through_a_shared_reference() {
+    fn merge_env_overlay_keeps_keys_a_later_attach_omits() {
         let env = environment("/tmp/hl-home", &[]);
         let clone = env.clone();
-        env.set_env_overlay(BTreeMap::from([("DISPLAY".into(), ":0".into())]));
+        env.merge_env_overlay(BTreeMap::from([
+            ("DISPLAY".into(), ":0".into()),
+            ("SSH_AUTH_SOCK".into(), "/a".into()),
+        ]));
+        env.merge_env_overlay(BTreeMap::from([("DISPLAY".into(), ":1".into())]));
         assert_eq!(
             clone.overlay_env(),
-            vec![("DISPLAY".to_string(), ":0".to_string())]
+            vec![
+                ("DISPLAY".to_string(), ":1".to_string()),
+                ("SSH_AUTH_SOCK".to_string(), "/a".to_string())
+            ]
         );
     }
 }

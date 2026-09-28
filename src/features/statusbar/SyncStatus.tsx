@@ -25,10 +25,13 @@ export function SyncStatus({
   compact,
   divided,
   menu,
+  leading,
 }: {
   compact: boolean;
   divided: boolean;
   menu?: (anchorRef: RefObject<HTMLElement | null>) => ReactNode;
+  /** Sits flush against the Server button, sharing the divider to its left. */
+  leading?: ReactNode;
 }) {
   const status = useConnectionStatus();
   const reconnect = useReconnectStore();
@@ -46,23 +49,33 @@ export function SyncStatus({
   }, [ticking]);
 
   if (!label) return null;
+  const server = (
+    <button
+      ref={anchorRef}
+      type="button"
+      onClick={toggleServerMenu}
+      title={label.title}
+      aria-label={label.title}
+      aria-haspopup="dialog"
+      aria-expanded={menuOpen && status.data?.state === "connected"}
+      className={cx(BAR_BUTTON, "text-ink-dim hover:text-ink")}
+    >
+      <Icon name="server" size="xs" className={TONE_ICON[label.tone]} />
+      {!compact && <span className="whitespace-nowrap">{label.text}</span>}
+      <Dot className={TONE_DOT[label.tone]} />
+    </button>
+  );
   return (
     <>
       {divided && <Divider />}
-      <button
-        ref={anchorRef}
-        type="button"
-        onClick={toggleServerMenu}
-        title={label.title}
-        aria-label={label.title}
-        aria-haspopup="dialog"
-        aria-expanded={menuOpen && status.data?.state === "connected"}
-        className={cx(BAR_BUTTON, "text-ink-dim hover:text-ink")}
-      >
-        <Icon name="server" size="xs" className={TONE_ICON[label.tone]} />
-        {!compact && <span className="whitespace-nowrap">{label.text}</span>}
-        <Dot className={TONE_DOT[label.tone]} />
-      </button>
+      {leading ? (
+        <div className="flex items-center">
+          {leading}
+          {server}
+        </div>
+      ) : (
+        server
+      )}
       {menu?.(anchorRef)}
     </>
   );

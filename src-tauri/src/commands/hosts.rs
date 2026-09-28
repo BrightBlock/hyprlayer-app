@@ -163,7 +163,7 @@ pub async fn reconnect_server(
             // still reports itself lost rather than sitting there as `Connected`.
             state.reconnected(client.clone(), outdated);
             log::info!("reconnected to {}", configured.name());
-            crate::attach_client(&app, client).await;
+            crate::attach_client(&app, client, &configured).await;
             Ok(state.status())
         }
         supervisor::Outcome::Blocked { error, .. } => Err(error),

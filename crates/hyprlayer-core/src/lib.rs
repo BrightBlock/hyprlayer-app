@@ -64,8 +64,8 @@ pub use hyprlayer_models as models;
 
 pub use env::{RuntimeEnvironment, RuntimePaths};
 pub use models::{
-    Harness, PermissionMode, ProjectRecord, ProjectSource, RuntimeEvent, ScriptKind, Session,
-    SessionEvent, SessionLogEntry, SessionState, Stage, Workstream, WorkstreamDoc,
+    Harness, LogCursor, PermissionMode, ProjectRecord, ProjectSource, RuntimeEvent, ScriptKind,
+    Session, SessionEvent, SessionLogEntry, SessionState, Stage, Workstream, WorkstreamDoc,
     WorkstreamStatus, WorktreeMode,
 };
 pub use runtime::shutdown::ShutdownReport;

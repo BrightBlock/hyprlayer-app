@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use hyprlayer_core::agent::Harness;
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
-use hyprlayer_core::models::session::{QuestionAnswers, SessionLogEntry};
+use hyprlayer_core::models::session::{LogCursor, QuestionAnswers, SessionLogEntry};
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::store::Session;
 use hyprlayer_server::client::{EventStream, RpcClient};
@@ -22,6 +22,7 @@ pub struct StartOpts {
     pub effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
+    pub client_message_id: Option<String>,
 }
 
 impl From<StartOpts> for StreamStartOpts {
@@ -32,6 +33,7 @@ impl From<StartOpts> for StreamStartOpts {
             effort: opts.effort,
             permission_mode: opts.permission_mode,
             prompt_name: opts.prompt_name,
+            client_message_id: opts.client_message_id,
         }
     }
 }
@@ -41,6 +43,13 @@ impl From<StartOpts> for StreamStartOpts {
 pub struct StartedSession {
     pub session: Session,
     pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumedSession {
+    pub session: Session,
+    pub permission_mode: Option<PermissionMode>,
 }
 
 /// Pumps one server-side session stream into the Tauri channel the frontend
@@ -123,6 +132,31 @@ fn emit_start_failure(channel: &Channel<SessionEvent>, reason: &str) {
     });
 }
 
+/// A cursor crossing the Tauri boundary: `seq` is `f64` because a specta `i64`
+/// exports as a BigInt the TS generator rejects.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LogCursorDto {
+    Empty,
+    After { seq: f64, created_at: f64 },
+}
+
+impl From<LogCursorDto> for LogCursor {
+    fn from(dto: LogCursorDto) -> Self {
+        match dto {
+            LogCursorDto::Empty => LogCursor::Empty,
+            LogCursorDto::After { seq, created_at } => LogCursor::After {
+                seq: seq as i64,
+                created_at,
+            },
+        }
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn resume_session(
@@ -131,15 +165,25 @@ pub async fn resume_session(
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<PermissionMode>,
+    cursor: Option<LogCursorDto>,
     on_event: Channel<SessionEvent>,
-) -> CmdResult<Session> {
-    let (session, stream_id, events) = state
+) -> CmdResult<ResumedSession> {
+    let (session, permission_mode, stream_id, events) = state
         .client()?
-        .resume_session_stream(session_id, model, effort, permission_mode)
+        .resume_session_stream(
+            session_id,
+            model,
+            effort,
+            permission_mode,
+            cursor.map(LogCursor::from),
+        )
         .await
         .map_err(AppError::from)?;
     spawn_live_pump(state.client()?.clone(), stream_id, events, on_event);
-    Ok(session)
+    Ok(ResumedSession {
+        session,
+        permission_mode,
+    })
 }
 
 #[tauri::command]
@@ -152,7 +196,7 @@ pub async fn restart_session(
     permission_mode: Option<PermissionMode>,
     on_event: Channel<SessionEvent>,
 ) -> CmdResult<Session> {
-    let (session, stream_id, events) = state
+    let (session, _permission_mode, stream_id, events) = state
         .client()?
         .restart_session_stream(session_id, model, effort, permission_mode)
         .await
@@ -197,10 +241,31 @@ pub async fn send_user_message(
     text: String,
     attached_docs: Vec<String>,
     prompt_name: Option<String>,
+    client_message_id: Option<String>,
 ) -> CmdResult<()> {
     state
         .client()?
-        .send_user_message(session_id, text, attached_docs, prompt_name)
+        .send_user_message(
+            session_id,
+            text,
+            attached_docs,
+            prompt_name,
+            client_message_id,
+        )
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_session_title(
+    state: State<'_, AppState>,
+    session_id: String,
+    title: Option<String>,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .set_session_title(session_id, title)
         .await
         .map_err(AppError::from)
 }

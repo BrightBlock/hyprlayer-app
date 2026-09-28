@@ -52,7 +52,7 @@ Two related, harness-aware seams sit alongside it:
 - **`CodexPosture`** (`crates/hyprlayer-core/src/codex/protocol.rs`) is codex's
   guardrail primitive — `approval_policy` + `sandbox` + `network_access`. It is
   resolved once, at launch, into `CodexDriver::SpawnConfig`; a mid-session
-  permission-mode change kills and relaunches (`ResumeSession` in
+  permission-mode change kills and relaunches (`RestartSession` in
   `crates/hyprlayer-server/src/streams.rs`), so there is no second path to keep in
   sync.
 

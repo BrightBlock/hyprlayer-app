@@ -109,7 +109,13 @@ mod tests {
         fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
             broadcast::channel(1).1
         }
-        fn send_user_turn(&self, _: &str, _: Option<&str>, _: Option<&str>) -> Result<()> {
+        fn send_user_turn(
+            &self,
+            _: &str,
+            _: Option<&str>,
+            _: Option<&str>,
+            _: Option<&str>,
+        ) -> Result<()> {
             Ok(())
         }
         fn respond_permission(&self, _: &str, _: bool, _: Option<&str>) -> Result<()> {

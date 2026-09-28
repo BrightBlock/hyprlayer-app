@@ -4,7 +4,8 @@
 `Toggle`, `SegmentedControl`, `Popover` focus trap and caret, the status bar and Settings sizes) ·
 amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale") ·
 amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover) ·
-amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dark")
+amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dark") ·
+amended 2026-09-28 (the Agent sessions status-bar button and popover)
 
 ## Decision
 
@@ -150,11 +151,11 @@ row, and both hacks existed independently in the tree before this — a
 container-level divider can't produce a trailing rule in the first place, so
 there's nothing to guard.
 
-The one deliberate exception is the two archive popovers
-(`ArchivedWorktreeRow.tsx`, `ArchivedAgentsPopover.tsx`): each row, and each
-empty or no-match `<p>`, carries its own `border-t border-edge-2`. That draws a
-rule above every row, including one under the filter row, and never leaves one
-after the last row.
+The one deliberate exception is the two archive popovers and the Agent
+sessions popover (`ArchivedWorktreeRow.tsx`, `ArchivedAgentsPopover.tsx`,
+`AgentSessionsPopover.tsx`): each row, and each empty or no-match `<p>`,
+carries its own `border-t border-edge-2`. That draws a rule above every row,
+including one under the filter row, and never leaves one after the last row.
 
 "One mechanism" means *when a list wants dividers, use this one* — lists that
 use gaps instead of rules (`Root`'s workstream tree, `ChangesPanel`,
@@ -449,9 +450,14 @@ exception like those under "Typography".
   `tag-purge-bg` and `destructive-border`; the spec's `tag-purge-text` and
   `destructive-text` are `warn-ink` and `bad-ink`.
 - The status bar's Archived agents button is 24px tall and at least 26px wide,
-  widening for its count. It sits between the branch and the Server button. Its
+  widening for its count. It sits between the branch and the Agent sessions button. Its
   popover opens upward and matches the Archived worktrees popover: 440px wide, a
   `0 12px 30px` shadow, its list capped at the window height.
+- Inside a workstream, the Agent sessions button sits flush against the Server
+  button, with no divider or gap between them and the usual divider to its left.
+  It is the Archived agents button's size, icon only, and its popover opens
+  upward like that one's: 440px wide, `shadow-pop`, its list capped at the
+  window height.
 
 **Icons.** Superseded by "Icons (2026-09-25)" below.
 
@@ -504,7 +510,8 @@ and `fail-{chip-bg,chip-text,card-bg,card-border}`. The question and permission 
 `q-*`, the failed exit card `fail-*`, the neutral exit card `panel` + `line-strong`.
 
 Shadows are `shadow-sm` (small controls), `shadow-card` (status cards), `shadow-pop`
-(`Popover`, menus, listbox, `BAR_POPOVER`, both archived popovers) and `shadow-ring-active`.
+(`Popover`, menus, listbox, `BAR_POPOVER`, both archived popovers, and the Agent sessions
+popover) and `shadow-ring-active`.
 Tailwind inlines a literal `--shadow-*` into its utility, so each maps to a per-theme
 `--elevation-*`/`--ring-active` variable instead. Dialogs keep `shadow-2xl`.
 

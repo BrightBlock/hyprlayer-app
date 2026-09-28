@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use super::session_event_codec::decode_raw_event;
 use super::{now_ms, Db};
 use crate::agent::Harness;
-use crate::claude::SessionState;
+use crate::claude::{SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::pipeline::Stage;
 
-pub use hyprlayer_models::session::{Session, SessionLogEntry};
+pub use hyprlayer_models::session::{LogCursor, Session, SessionLogEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -185,7 +185,7 @@ fn apply_row_mutation(
 }
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
-                    cost_usd, started_at, ended_at, exit_summary";
+                    cost_usd, started_at, ended_at, exit_summary, title";
 
 fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
@@ -201,7 +201,24 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         started_at: row.get("started_at")?,
         ended_at: row.get("ended_at")?,
         exit_summary: row.get("exit_summary")?,
+        title: row.get("title")?,
+        preview: None,
     })
+}
+
+const PREVIEW_CHARS: usize = 120;
+
+/// Flattens a `userMessage` payload's text to one line, capped at `PREVIEW_CHARS`.
+fn preview_of(payload: &str) -> Option<String> {
+    let SessionEvent::UserMessage { text, .. } = decode_raw_event(payload).ok()? else {
+        return None;
+    };
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut cut: String = flat.chars().take(PREVIEW_CHARS).collect();
+    if cut.len() < flat.len() {
+        cut.push('…');
+    }
+    (!cut.is_empty()).then_some(cut)
 }
 
 impl Db {
@@ -219,6 +236,8 @@ impl Db {
             started_at: now_ms(),
             ended_at: None,
             exit_summary: None,
+            title: None,
+            preview: None,
         };
         self.with(|conn| {
             conn.execute(
@@ -260,12 +279,26 @@ impl Db {
         })
     }
 
+    /// A `General` session's preview is its first prompt; every other stage's
+    /// first turn is `compose_prompt`'s wrapped text, so it stays `None` and the
+    /// caller falls back to the stage label.
     pub fn list_sessions(&self, workstream_id: &str) -> Result<Vec<Session>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {COLS} FROM sessions WHERE workstream_id = ?1 ORDER BY started_at"
+                "SELECT {COLS}, (SELECT payload FROM session_events e
+                                  WHERE e.session_id = sessions.id AND e.kind = 'userMessage'
+                                  ORDER BY e.seq LIMIT 1) AS first_prompt
+                   FROM sessions WHERE workstream_id = ?1 ORDER BY started_at"
             ))?;
-            let rows = stmt.query_map(params![workstream_id], row_to_session)?;
+            let rows = stmt.query_map(params![workstream_id], |row| {
+                let mut session = row_to_session(row)?;
+                // Strict: `Stage::parse` reads a newer server's stage as General.
+                if Stage::try_parse(&row.get::<_, String>("stage")?) == Some(Stage::General) {
+                    let first_prompt: Option<String> = row.get("first_prompt")?;
+                    session.preview = first_prompt.as_deref().and_then(preview_of);
+                }
+                Ok(session)
+            })?;
             rows.collect()
         })
     }
@@ -275,6 +308,16 @@ impl Db {
             conn.execute(
                 "UPDATE sessions SET state = ?2 WHERE id = ?1",
                 params![id, state.as_str()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn set_session_title(&self, id: &str, title: Option<&str>) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET title = ?2 WHERE id = ?1",
+                params![id, title],
             )?;
             Ok(())
         })
@@ -341,6 +384,21 @@ impl Db {
             rows.collect()
         })?;
         Ok(decode_session_log(session_id, rows))
+    }
+
+    pub(crate) fn session_event_created_at(
+        &self,
+        session_id: &str,
+        seq: i64,
+    ) -> Result<Option<f64>> {
+        self.with(|conn| {
+            conn.query_row(
+                "SELECT created_at FROM session_events WHERE session_id = ?1 AND seq = ?2",
+                params![session_id, seq],
+                |row| row.get(0),
+            )
+            .optional()
+        })
     }
 
     pub fn next_session_seq(&self, session_id: &str) -> Result<i64> {
@@ -671,6 +729,53 @@ mod tests {
                 (6, "assistantText".into()),
             ],
         );
+    }
+
+    #[test]
+    fn only_a_strictly_general_session_gets_a_preview() {
+        let db = Db::open_in_memory().unwrap();
+        seed_dialog(&db, "anchor");
+        let ws = db.list_active_workstreams().unwrap().pop().unwrap().id;
+        for (id, stage) in [
+            ("general", Stage::General),
+            ("plan", Stage::Plan),
+            ("future", Stage::General),
+        ] {
+            db.insert_session(NewSession {
+                id: id.into(),
+                workstream_id: ws.clone(),
+                stage,
+                harness: Harness::Claude,
+                cwd: "/wt".into(),
+            })
+            .unwrap();
+            db.append_session_event(
+                id,
+                0,
+                "userMessage",
+                r#"{"kind":"userMessage","text":"the first prompt","stage":null}"#,
+            )
+            .unwrap();
+        }
+        // A stage from a newer server that this build cannot parse.
+        db.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET stage = 'review' WHERE id = 'future'",
+                [],
+            )
+        })
+        .unwrap();
+
+        let sessions = db.list_sessions(&ws).unwrap();
+        let preview = |id: &str| {
+            sessions
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.preview.clone())
+        };
+        assert_eq!(preview("general").as_deref(), Some("the first prompt"));
+        assert_eq!(preview("plan"), None);
+        assert_eq!(preview("future"), None);
     }
 
     #[test]

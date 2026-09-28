@@ -96,6 +96,9 @@ const MIGRATIONS: &[&str] = &[
         pr_checked_at  REAL
     );
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN title TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

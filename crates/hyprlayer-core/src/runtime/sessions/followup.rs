@@ -56,7 +56,8 @@ pub(crate) async fn run_followup(
     match followup {
         Followup::ShipDescribe => {
             tracing::info!("session {session_id}: sending the ship describe follow-up");
-            if let Err(e) = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None) {
+            if let Err(e) = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None, None)
+            {
                 tracing::warn!("session {session_id}: the describe follow-up was not sent: {e}");
             }
         }
@@ -83,7 +84,7 @@ pub(crate) async fn run_followup(
             let _guard = op_lock.lock().await;
             driver.set_collab_mode(Some(CollabMode::Default));
             tracing::info!("session {session_id}: starting phase two");
-            if let Err(e) = driver.send_user_turn(prompt, None, None) {
+            if let Err(e) = driver.send_user_turn(prompt, None, None, None) {
                 tracing::warn!("session {session_id}: phase two was not sent: {e}");
             }
         }

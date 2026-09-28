@@ -761,9 +761,18 @@ async fn the_attach_overlay_reaches_a_lifecycle_script() {
         .await
         .unwrap();
 
+    // A real socket, kept alive for the test: the overlay now drops an
+    // SSH_AUTH_SOCK that names nothing here.
+    #[cfg(unix)]
+    let agent_sock = f.paths.app_data_dir.join("a.sock");
+    #[cfg(unix)]
+    let _agent = std::os::unix::net::UnixListener::bind(&agent_sock).unwrap();
+    #[cfg(not(unix))]
+    let agent_sock = PathBuf::from("/tmp/overlay-probe.sock");
+
     f.runtime.set_env_overlay(BTreeMap::from([(
         "SSH_AUTH_SOCK".to_string(),
-        "/tmp/overlay-probe.sock".to_string(),
+        agent_sock.display().to_string(),
     )]));
 
     let result = f
@@ -779,7 +788,8 @@ async fn the_attach_overlay_reaches_a_lifecycle_script() {
 
     let seen = std::fs::read_to_string(&probe).unwrap_or_default();
     assert_eq!(
-        seen, "/tmp/overlay-probe.sock",
+        seen,
+        agent_sock.display().to_string(),
         "a lifecycle script must inherit the attaching client's SSH_AUTH_SOCK"
     );
 
@@ -844,6 +854,7 @@ async fn project_memory_lists_the_projects_claude_memory() {
             effort: None,
             permission_mode: None,
             prompt_name: None,
+            client_message_id: None,
         })
         .await
         .unwrap();

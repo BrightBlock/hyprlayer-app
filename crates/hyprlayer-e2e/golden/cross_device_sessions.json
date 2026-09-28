@@ -1,0 +1,184 @@
+{
+  "scenario": "cross_device_sessions",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "spawns": [
+              "spawn default"
+            ]
+          },
+          "guard": "the harness is launched once, in the requested mode",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "init",
+              "assistantText",
+              "turnDone"
+            ],
+            "nonce": "cmid-start"
+          },
+          "guard": "the first turn carries its nonce",
+          "ok": true
+        }
+      ],
+      "step": "A starts a session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true
+          },
+          "guard": "A's turn is parked on a permission ask",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "resumed": true
+          },
+          "guard": "the resume is accepted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "running": "default"
+          },
+          "guard": "it reports the running mode",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawns": [
+              "spawn default"
+            ]
+          },
+          "guard": "no second spawn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_2"
+          },
+          "guard": "A's turn completes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_2"
+          },
+          "guard": "B watches the same turn",
+          "ok": true
+        }
+      ],
+      "step": "B opens the session mid-turn in another mode"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "createdAt": "$TIME",
+            "seq": 7
+          },
+          "guard": "B folded a log row to resume from",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "E2E_REPLY_3"
+          },
+          "guard": "A's gap turn is persisted before B re-attaches",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "session_epoch_advanced"
+          },
+          "guard": "a cursor whose row was rewritten is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "assistantText",
+              "turnDone"
+            ]
+          },
+          "guard": "B's stream carries the events persisted between its log read and its attach",
+          "ok": true
+        }
+      ],
+      "step": "B restores across the log-then-attach gap"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "nonce": "cmid-four"
+          },
+          "guard": "B sees A's prompt live",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "nonce": "cmid-four"
+          },
+          "guard": "A's echo carries the same nonce",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "nonce": "cmid-four"
+          },
+          "guard": "the stored row keeps the nonce",
+          "ok": true
+        }
+      ],
+      "step": "a prompt reaches every viewer"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "title": "Cross-device work"
+          },
+          "guard": "the title crosses devices",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "preview": "E2E_PROMPT_ONE"
+          },
+          "guard": "the preview is the first prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "title": null
+          },
+          "guard": "a blank title clears it",
+          "ok": true
+        }
+      ],
+      "step": "B sees A's title and first prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

@@ -175,12 +175,12 @@ describe("conversation steering (mid-turn message queue)", () => {
     emit(INIT);
     emit(TURN_DONE);
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null);
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null, expect.any(String));
     expect(queued(id)).toEqual(["B"]);
 
     emit(TURN_DONE);
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null);
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null, expect.any(String));
     expect(queued(id)).toEqual([]);
   });
 
@@ -399,7 +399,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     await applyPermissionMode(id, "acceptEdits");
     await Promise.resolve();
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null, expect.any(String));
     expect(queued(id)).toEqual([]);
   });
 
@@ -481,7 +481,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await resumeSession(id);
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String));
     expect(queued(id)).toEqual([]);
   });
 
@@ -493,7 +493,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await sendMessage(id, "new turn");
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "new turn", [], null);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "new turn", [], null, expect.any(String));
     expect(isWorking(entryOf(id))).toBe(true);
     expect(isBusy(entryOf(id))).toBe(true);
 
@@ -531,7 +531,7 @@ describe("resuming a silent process settles out of `starting`", () => {
     resumeEmitting(INIT);
     await resumeSession(id);
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null);
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String));
     expect(queued(id)).toEqual([]);
   });
 
@@ -550,6 +550,96 @@ describe("resuming a silent process settles out of `starting`", () => {
     await resumeSession(id);
 
     expect(isWorking(entryOf(id))).toBe(true);
+  });
+});
+
+describe("resuming after a rewind moved the log under the cursor", () => {
+  const EPOCH = { status: "error", error: { code: "session_epoch_advanced", message: "stale cursor" } };
+  const LOG_DOWN = { status: "error", error: { code: "log_unavailable", message: "log read failed" } };
+  const row = (seq: number, event: SessionEvent) => ({
+    seq,
+    kind: event.kind,
+    event,
+    createdAt: 1_700_000_000_000 + seq,
+  });
+
+  async function exitedSession(): Promise<string> {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    emit(EXITED);
+    return id;
+  }
+
+  it("re-folds once and retries from the fresh log's cursor", async () => {
+    const id = await exitedSession();
+    h.resumeSession.mockResolvedValueOnce(EPOCH as never);
+    h.getSessionLog
+      .mockResolvedValueOnce({ status: "ok", data: [row(0, INIT)] })
+      .mockResolvedValueOnce({ status: "ok", data: [row(0, INIT), row(1, TURN_DONE)] });
+
+    await resumeSession(id);
+
+    expect(h.resumeSession).toHaveBeenCalledTimes(2);
+    expect((h.resumeSession.mock.calls[1] as unknown[] | undefined)?.[4]).toEqual({
+      kind: "after",
+      seq: 1,
+      createdAt: 1_700_000_000_001,
+    });
+    expect(entryOf(id).live).toBe(true);
+  });
+
+  it("rolls back and stays resumable when the re-fold's log read fails", async () => {
+    const id = await exitedSession();
+    h.resumeSession.mockResolvedValueOnce(EPOCH as never);
+    h.getSessionLog
+      .mockResolvedValueOnce({ status: "ok", data: [row(0, INIT)] })
+      .mockResolvedValueOnce(LOG_DOWN as never);
+
+    await expect(resumeSession(id)).rejects.toMatchObject({ code: "log_unavailable" });
+
+    expect(entryOf(id).live).toBe(false);
+    expect(entryOf(id).state).toBe("idle");
+    await resumeSession(id);
+    expect(h.resumeSession).toHaveBeenCalledTimes(2);
+    expect(entryOf(id).live).toBe(true);
+  });
+
+  it("gives up after a second refusal instead of retrying again", async () => {
+    const id = await exitedSession();
+    h.resumeSession.mockResolvedValueOnce(EPOCH as never).mockResolvedValueOnce(EPOCH as never);
+
+    await expect(resumeSession(id)).rejects.toMatchObject({ code: "session_epoch_advanced" });
+
+    expect(h.resumeSession).toHaveBeenCalledTimes(2);
+    expect(entryOf(id).live).toBe(false);
+    expect(entryOf(id).state).toBe("idle");
+  });
+
+  it("does not re-fold for any other failure", async () => {
+    const id = await exitedSession();
+    h.resumeSession.mockResolvedValueOnce(LOG_DOWN as never);
+
+    await expect(resumeSession(id)).rejects.toMatchObject({ code: "log_unavailable" });
+
+    expect(h.getSessionLog).toHaveBeenCalledTimes(1);
+    expect(entryOf(id).live).toBe(false);
+  });
+
+  it("returns quietly when the tab is dropped during the re-fold", async () => {
+    const id = await exitedSession();
+    h.resumeSession.mockResolvedValueOnce(EPOCH as never);
+    h.getSessionLog
+      .mockResolvedValueOnce({ status: "ok", data: [row(0, INIT)] })
+      .mockImplementationOnce(async () => {
+        dropSession(id);
+        return { status: "ok", data: [row(0, INIT)] };
+      });
+
+    await resumeSession(id);
+
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().sessions[id]).toBeUndefined();
   });
 });
 
@@ -881,7 +971,14 @@ describe("restoring a stored session log", () => {
     });
     await restoreSessionIfNeeded("live-1", "ws1", "general");
     const restored = entryOf("live-1");
-    expect(h.resumeSession).toHaveBeenCalledWith("live-1", null, null, null, expect.anything());
+    expect(h.resumeSession).toHaveBeenCalledWith(
+      "live-1",
+      null,
+      null,
+      null,
+      { kind: "after", seq: 0, createdAt: entry(0, INIT).createdAt },
+      expect.anything(),
+    );
     expect(restored.live).toBe(true);
     expect(isTerminal(restored.state)).toBe(false);
   });
@@ -914,7 +1011,7 @@ describe("restoring a stored session log", () => {
 
     expect(h.resumeSession).toHaveBeenCalledTimes(1);
     expect(h.sendUserMessage).toHaveBeenCalledTimes(1);
-    expect(h.sendUserMessage).toHaveBeenCalledWith("expired-continue", "carry on", [], null);
+    expect(h.sendUserMessage).toHaveBeenCalledWith("expired-continue", "carry on", [], null, expect.any(String));
     expect(h.respondPermission).not.toHaveBeenCalled();
   });
 

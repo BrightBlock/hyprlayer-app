@@ -163,6 +163,8 @@ pub enum SessionEvent {
         stage: Option<String>,
         #[serde(default)]
         prompt_name: Option<String>,
+        #[serde(default)]
+        client_message_id: Option<String>,
     },
     PartialText {
         text: String,
@@ -292,6 +294,10 @@ pub struct Session {
     pub started_at: f64,
     pub ended_at: Option<f64>,
     pub exit_summary: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +308,18 @@ pub struct SessionLogEntry {
     pub kind: String,
     pub event: SessionEvent,
     pub created_at: f64,
+}
+
+/// What a client folded before resuming. `Empty` still needs a replay: it holds no rows.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum LogCursor {
+    Empty,
+    After { seq: i64, created_at: f64 },
 }
 
 #[cfg(test)]
@@ -355,6 +373,8 @@ mod tests {
             started_at: 0.0,
             ended_at: None,
             exit_summary: None,
+            title: None,
+            preview: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

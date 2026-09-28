@@ -57,6 +57,7 @@ pub trait AgentDriver: Send + Sync {
         text: &str,
         stage: Option<&str>,
         prompt_name: Option<&str>,
+        client_message_id: Option<&str>,
     ) -> Result<()>;
 
     fn set_model(&self, _model: Option<String>) {}
@@ -105,8 +106,9 @@ impl AgentDriver for ClaudeDriver {
         text: &str,
         stage: Option<&str>,
         prompt_name: Option<&str>,
+        client_message_id: Option<&str>,
     ) -> Result<()> {
-        self.send_user_turn(text, stage, prompt_name)
+        self.send_user_turn(text, stage, prompt_name, client_message_id)
     }
     fn respond_permission(
         &self,
@@ -151,8 +153,9 @@ impl AgentDriver for CodexDriver {
         text: &str,
         stage: Option<&str>,
         prompt_name: Option<&str>,
+        client_message_id: Option<&str>,
     ) -> Result<()> {
-        self.send_user_turn(text, stage, prompt_name)
+        self.send_user_turn(text, stage, prompt_name, client_message_id)
     }
     fn set_model(&self, model: Option<String>) {
         self.set_model(model)

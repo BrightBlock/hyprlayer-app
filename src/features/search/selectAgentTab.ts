@@ -1,10 +1,25 @@
-import { focusShell, updateWorkstreamTabs } from "@/features/session/workstreamTabs";
+import {
+  focusShell,
+  openSessionTab,
+  updateWorkstreamTabs,
+  useWorkstreamTabsStore,
+} from "@/features/session/workstreamTabs";
+import { workstreamSessionsQuery } from "@/lib/queries";
+import { queryClient } from "@/lib/queryClient";
 
-export function selectAgentTab(workstreamId: string, sessionId: string): void {
-  updateWorkstreamTabs((all) => {
-    const ws = all[workstreamId];
-    const shell = ws?.shells.find((s) => s.sessionId === sessionId);
-    if (!ws || !shell) return all;
-    return { ...all, [workstreamId]: focusShell(ws, shell.id) };
-  });
+export async function selectAgentTab(workstreamId: string, sessionId: string): Promise<void> {
+  const local = useWorkstreamTabsStore
+    .getState()
+    .byWs[workstreamId]?.shells.find((s) => s.sessionId === sessionId);
+  if (local) {
+    updateWorkstreamTabs((all) => {
+      const ws = all[workstreamId];
+      return ws ? { ...all, [workstreamId]: focusShell(ws, local.id) } : all;
+    });
+    return;
+  }
+
+  const sessions = await queryClient.fetchQuery(workstreamSessionsQuery(workstreamId)).catch(() => []);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (session) openSessionTab(workstreamId, session);
 }

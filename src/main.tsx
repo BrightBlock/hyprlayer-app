@@ -12,6 +12,7 @@ import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session
 import { activeWorkstreamIds, removeSessionsForWorkstream } from "./features/session/sessionStore";
 import { registerPlanCard } from "./features/session/planCardSlot";
 import { registerSendInterceptor } from "./features/session/sendInterceptor";
+import { startSessionTitleSync } from "./features/session/sessionTitleSync";
 import { PlanCard } from "./features/plan/PlanCard";
 import { approveFromChat } from "./features/plan/planApproval";
 import { unwrap } from "./lib/ipc";
@@ -48,6 +49,7 @@ void unwrap(commands.listRunningScripts())
   .catch((e) => log.warn("startup", "running scripts did not load", e));
 useUpdate.getState().init();
 setupNotificationActions();
+startSessionTitleSync();
 setupQueryFocus();
 setupMotionGate();
 setupDragRegion();
