@@ -298,6 +298,14 @@ pub struct Session {
     pub title: Option<String>,
     #[serde(default)]
     pub preview: Option<String>,
+    #[serde(default)]
+    pub archived_at: Option<f64>,
+    /// Mid-turn or starting; `state` alone reads `running` for an idle live harness.
+    #[serde(default)]
+    pub working: bool,
+    /// When the session's newest log event landed; `None` before its first.
+    #[serde(default)]
+    pub last_active_at: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -375,6 +383,9 @@ mod tests {
             exit_summary: None,
             title: None,
             preview: None,
+            archived_at: None,
+            working: false,
+            last_active_at: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

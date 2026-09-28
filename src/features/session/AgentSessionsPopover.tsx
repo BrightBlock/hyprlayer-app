@@ -4,6 +4,8 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
   type Ref,
   type RefObject,
 } from "react";
@@ -15,8 +17,17 @@ import { formatCompactAge } from "@/lib/format";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useActiveSessions, useWorkstreamSessions } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
-import { cx, Popover } from "@/components/ui";
+import { cx, Popover, ROW_ACTION, SegmentedControl } from "@/components/ui";
 
+import { useArchivedRows } from "./archivedAgents";
+import { ArchivedSessionsList } from "./ArchivedSessionsList";
+import {
+  setSessionsQuery,
+  setSessionsView,
+  useAgentSessions,
+  type SessionsView,
+} from "./agentSessionsStore";
+import { canArchiveSession, setSessionArchived } from "./sessionArchive";
 import { openSessionTab, useWorkstreamTabsStore, type ShellTab } from "./workstreamTabs";
 
 // The window header, the caret gap, this panel's header and filter row, and margin.
@@ -40,6 +51,7 @@ export function AgentSessionsPopover({
   anchorRef: RefObject<HTMLElement | null>;
 }) {
   const headingId = useId();
+  const searchRef = useRef<HTMLInputElement>(null);
   return (
     <Popover
       open={open}
@@ -50,10 +62,19 @@ export function AgentSessionsPopover({
       sideOffset={10}
       caret
       trapFocus
+      initialFocusRef={searchRef}
       aria-labelledby={headingId}
       className="w-[440px] max-w-[calc(100vw-16px)] p-0 shadow-pop"
     >
-      <PopoverBody workstreamId={workstreamId} headingId={headingId} onClose={onClose} />
+      <span id={headingId} className="sr-only">
+        Agent sessions
+      </span>
+      <PopoverBody
+        workstreamId={workstreamId}
+        headingId={headingId}
+        searchRef={searchRef}
+        onClose={onClose}
+      />
     </Popover>
   );
 }
@@ -61,12 +82,44 @@ export function AgentSessionsPopover({
 function PopoverBody({
   workstreamId,
   headingId,
+  searchRef,
   onClose,
 }: {
   workstreamId: string;
   headingId: string;
+  searchRef: RefObject<HTMLInputElement | null>;
   onClose: () => void;
 }) {
+  const view = useAgentSessions((s) => s.view);
+  const currentCount = (useWorkstreamSessions(workstreamId).data ?? NONE_SESSIONS).filter(
+    (s) => s.archivedAt == null,
+  ).length;
+  const archivedCount = useArchivedRows(workstreamId).length;
+  const counted = (label: string, n: number) => (n > 0 ? `${label} ${n}` : label);
+  const switcher = (
+    <SegmentedControl<SessionsView>
+      aria-label="Agent sessions view"
+      value={view}
+      onChange={setSessionsView}
+      options={[
+        { value: "current", label: counted("Current", currentCount) },
+        { value: "archived", label: counted("Archived", archivedCount) },
+      ]}
+    />
+  );
+  const props = { workstreamId, headingId, searchRef, onClose, switcher };
+  return view === "archived" ? <ArchivedSessionsList {...props} /> : <CurrentSessionsList {...props} />;
+}
+
+export type SessionsListProps = {
+  workstreamId: string;
+  headingId: string;
+  searchRef: RefObject<HTMLInputElement | null>;
+  onClose: () => void;
+  switcher: ReactNode;
+};
+
+function CurrentSessionsList({ workstreamId, headingId, searchRef, onClose, switcher }: SessionsListProps) {
   const sessions = useWorkstreamSessions(workstreamId).data ?? NONE_SESSIONS;
   const activeSessions = useActiveSessions().data;
   const liveIds = useMemo(
@@ -74,21 +127,24 @@ function PopoverBody({
     [activeSessions],
   );
   const localShells = useWorkstreamTabsStore((s) => s.byWs[workstreamId]?.shells) ?? NONE_SHELLS;
+  // An unlocked tab title is a placeholder, so it never outranks the server's.
   const localTitles = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const shell of localShells) if (shell.sessionId) map.set(shell.sessionId, shell.title);
+    const map = new Map<string, string | null>();
+    for (const shell of localShells) {
+      if (shell.sessionId) map.set(shell.sessionId, shell.titleLocked ? shell.title : null);
+    }
     return map;
   }, [localShells]);
 
   const searchId = useId();
-  const [query, setQuery] = useState("");
+  const query = useAgentSessions((s) => s.query);
   const [active, setActive] = useState(0);
-  const searchRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
 
   const rows = useMemo<Row[]>(
     () =>
-      [...sessions]
+      sessions
+        .filter((s) => s.archivedAt == null)
         .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
         .map((session) => ({
           session,
@@ -142,19 +198,14 @@ function PopoverBody({
   };
 
   const clearFilter = () => {
-    setQuery("");
+    setSessionsQuery("");
     searchRef.current?.focus();
   };
 
   const now = Date.now();
   return (
     <>
-      <div className="flex items-baseline justify-between gap-3 px-3 pb-2.5 pt-3">
-        <span id={headingId} className="lbl">
-          Agent sessions
-        </span>
-        {rows.length > 0 && <span className="text-meta tabular-nums text-ink-dim">{rows.length}</span>}
-      </div>
+      <div className="px-3 pb-2.5 pt-3">{switcher}</div>
 
       <div className="flex items-center gap-2 px-3 pb-2.5">
         <div className="relative min-w-0 flex-1">
@@ -170,7 +221,7 @@ function PopoverBody({
             id={searchId}
             ref={searchRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setSessionsQuery(e.target.value)}
             onKeyDown={onSearchKey}
             placeholder="Filter by title or prompt"
             spellCheck={false}
@@ -212,6 +263,7 @@ function PopoverBody({
               onFocus={() => setActive(index)}
               onKeyDown={onRowKey(row.session, index)}
               onOpen={() => openRow(row.session)}
+              onArchive={() => void setSessionArchived(workstreamId, row.session.id, true)}
             />
           ))}
         </ul>
@@ -228,6 +280,7 @@ function AgentSessionRow({
   onFocus,
   onKeyDown,
   onOpen,
+  onArchive,
 }: {
   row: Row;
   now: number;
@@ -236,8 +289,11 @@ function AgentSessionRow({
   onFocus: () => void;
   onKeyDown: (e: KeyboardEvent<HTMLLIElement>) => void;
   onOpen: () => void;
+  onArchive: () => void;
 }) {
   const { session, title, live, localOpen } = row;
+  // An open tab is archived or closed through the tab itself, which also ends the harness.
+  const archivable = !localOpen && canArchiveSession(session);
   const meta = [
     stageLabel(session.stage),
     harnessOption(session.harness).label,
@@ -273,6 +329,19 @@ function AgentSessionRow({
         <div className="mt-0.5 truncate text-meta tabular-nums text-ink-dim">{meta}</div>
       </div>
       {localOpen && <span className="shrink-0 text-meta text-ink-dim">Open</span>}
+      {archivable && (
+        <span className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">
+          <button type="button" onClick={stop(onArchive)} aria-label={`Archive ${title}`} className={ROW_ACTION}>
+            Archive
+          </button>
+        </span>
+      )}
     </li>
   );
 }
+
+// Row actions sit inside the clickable row.
+const stop = (action: () => void) => (e: MouseEvent) => {
+  e.stopPropagation();
+  action();
+};

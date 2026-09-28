@@ -3,6 +3,7 @@ mod followup;
 mod forwarder;
 pub mod registry;
 mod service;
+pub(crate) mod titles;
 mod workflow_bridge;
 
 use std::collections::HashMap;

@@ -21,6 +21,7 @@ use crate::process::binaries::BinaryKind;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
+use hyprlayer_models::RuntimeEvent;
 use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
@@ -133,12 +134,11 @@ impl SessionService<'_> {
         let _op_guard = op.lock().await;
 
         let prompt = pipeline::append_docs(text.to_string(), attached_docs);
-        self.require_live(session_id).await?.send_user_turn(
-            &prompt,
-            None,
-            prompt_name,
-            client_message_id,
-        )
+        let driver = self.require_live(session_id).await?;
+        // A session someone is still talking to belongs back in the list.
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        blocking(move || db.set_session_archived(&id, false)).await?;
+        driver.send_user_turn(&prompt, None, prompt_name, client_message_id)
     }
 
     pub async fn respond_permission(
@@ -248,10 +248,75 @@ impl SessionService<'_> {
         blocking(move || db.set_session_title(&id, title.as_deref())).await
     }
 
+    /// Only an idle or exited session can be archived; unarchiving always works.
+    pub async fn set_archived(&self, session_id: &str, archived: bool) -> Result<()> {
+        let op = self.op_lock(session_id).await;
+        let _op_guard = op.lock().await;
+        let session = self.require_row(session_id).await?;
+        if archived && session.working {
+            return Err(CoreError::SessionBusy {
+                session_id: session_id.to_string(),
+            });
+        }
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        blocking(move || db.set_session_archived(&id, archived)).await?;
+        self.announce(session);
+        Ok(())
+    }
+
+    /// Removes an archived, exited session and its log for every client.
+    pub async fn delete(&self, session_id: &str) -> Result<()> {
+        let op = self.op_lock(session_id).await;
+        let _op_guard = op.lock().await;
+        let session = self.require_row(session_id).await?;
+        if session.archived_at.is_none() {
+            return Err(CoreError::SessionNotArchived {
+                session_id: session_id.to_string(),
+            });
+        }
+        if session.working || self.is_live(session_id).await {
+            return Err(CoreError::SessionBusy {
+                session_id: session_id.to_string(),
+            });
+        }
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        blocking(move || db.delete_session(&id)).await?;
+        self.announce(session);
+        Ok(())
+    }
+
+    async fn require_row(&self, session_id: &str) -> Result<Session> {
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        blocking(move || db.get_session(&id))
+            .await?
+            .ok_or_else(|| CoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })
+    }
+
+    /// Clients refetch session lists on any lifecycle event.
+    fn announce(&self, session: Session) {
+        let _ = self.runtime.events.send(RuntimeEvent::SessionLifecycle {
+            session_id: session.id,
+            workstream_id: session.workstream_id,
+            state: session.state,
+        });
+    }
+
+    /// Also queues untitled sessions for a title, so only workstreams a client
+    /// actually opens pay for backfill.
     pub async fn list(&self, workstream_id: &str) -> Result<Vec<Session>> {
         let id = workstream_id.to_string();
         let db = self.runtime.db.clone();
-        blocking(move || db.list_sessions(&id)).await
+        let sessions = blocking(move || db.list_sessions(&id)).await?;
+        // A preview means there is user text to title from.
+        for session in sessions.iter().rev() {
+            if session.title.is_none() && session.preview.is_some() && session.archived_at.is_none()
+            {
+                self.runtime.session_titler.enqueue(&session.id, false);
+            }
+        }
+        Ok(sessions)
     }
 
     pub async fn log(&self, session_id: &str) -> Result<Vec<SessionLogEntry>> {
@@ -492,6 +557,7 @@ impl SessionService<'_> {
         } = request;
 
         let harness = harness.unwrap_or_default();
+        let first_input = Some(input.trim().to_string()).filter(|t| !t.is_empty());
         let bodies = self.action_prompt_bodies(stage, &workstream).await;
         let prompt =
             pipeline::compose_prompt(stage, &input, &workstream.base_branch, &bodies, harness);
@@ -504,10 +570,12 @@ impl SessionService<'_> {
                 stage,
                 harness,
                 cwd: workstream.worktree_path.clone(),
+                first_input,
             };
             let db = self.runtime.db.clone();
             blocking(move || db.insert_session(new)).await?
         };
+        self.runtime.session_titler.enqueue(&session.id, true);
 
         Ok(StartedStageSession {
             session: session.clone(),

@@ -205,6 +205,8 @@ hyprlayer_proto::commands! {
     GetSessionLog: get_session_log(session_id: String) -> Vec<SessionLogEntry>;
     ListActiveSessions: list_active_sessions() -> Vec<ActiveSession>;
     SetSessionTitle: set_session_title(session_id: String, title: Option<String>) -> ();
+    SetSessionArchived: set_session_archived(session_id: String, archived: bool) -> ();
+    DeleteSession: delete_session(session_id: String) -> ();
     LaunchAndConverse: launch_and_converse(session_id: String) -> ();
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;

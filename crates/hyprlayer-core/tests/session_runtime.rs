@@ -37,6 +37,7 @@ fn seed_session(db: &Db, session_id: &str) {
         stage: Stage::General,
         harness: Harness::Claude,
         cwd: "/wt".into(),
+        first_input: None,
     })
     .unwrap();
 }

@@ -130,6 +130,8 @@ export const commands = {
 	attachSession: (sessionId: string, onEvent: Channel<SessionEvent>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
 	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
 	setSessionTitle: (sessionId: string, title: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_title", { sessionId, title })),
+	setSessionArchived: (sessionId: string, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_session_archived", { sessionId, archived })),
+	deleteSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_session", { sessionId })),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
 	saveAttachment: (workstreamId: string, fileName: string, data: number[]) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
 	/**
@@ -172,7 +174,6 @@ export const commands = {
 	ollamaSetEndpoint: (endpoint: string | null) => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_set_endpoint", { endpoint })),
 	ollamaSetSelectedModels: (models: string[]) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_selected_models", { models })),
 	ollamaSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_default_model", { model })),
-	suggestTabTitle: (text: string) => typedError<string, AppError>(__TAURI_INVOKE("suggest_tab_title", { text })),
 	terminalOpen: (workstreamId: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("terminal_open", { workstreamId, cols, rows, onEvent })),
 	agentOpen: (workstreamId: string, command: string, args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("agent_open", { workstreamId, command, args, cols, rows, onEvent })),
 	agentResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("agent_resize", { terminalId, cols, rows })),
@@ -1324,6 +1325,11 @@ export type Session = {
 	exitSummary: string | null,
 	title?: string | null,
 	preview?: string | null,
+	archivedAt?: number | null,
+	/**  Mid-turn or starting; `state` alone reads `running` for an idle live harness. */
+	working?: boolean,
+	/**  When the session's newest log event landed; `None` before its first. */
+	lastActiveAt?: number | null,
 };
 
 export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };

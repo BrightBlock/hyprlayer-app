@@ -90,7 +90,7 @@ export const COMMANDS: CommandDef[] = [
   },
   {
     id: "view.toggleArchivedAgents",
-    label: "Toggle Archived Agents",
+    label: "Toggle Archived Sessions",
     category: "View",
     when: "workstream",
     defaults: { mac: "mod+shift+a", other: "mod+shift+a" },

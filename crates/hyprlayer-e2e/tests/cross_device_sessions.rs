@@ -1,6 +1,8 @@
 //! Two clients, one session: opening a session another device started never
-//! kills its turn in progress, and the resume reports the mode actually
-//! running so the second client's tab can adopt it.
+//! kills its turn in progress, the resume reports the mode actually running
+//! so the second client's tab can adopt it, the server titles sessions itself
+//! so every device can tell them apart, and archiving or deleting a session on
+//! one device does so for all of them.
 #![cfg(unix)]
 
 use std::time::Duration;
@@ -15,16 +17,25 @@ const IO: Duration = Duration::from_secs(20);
 
 /// Merges `plan_mode.rs`'s spawn log with `session_lifecycle.rs`'s
 /// `ASK_PERMISSION` hold, so a turn can be parked mid-flight while a second
-/// client attaches.
+/// client attaches. `--output-format json` is the title call.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
-sid=""; mode=""
+sid=""; mode=""; oneshot=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --session-id|--resume) sid="$2"; shift 2 ;;
     --permission-mode) mode="$2"; shift 2 ;;
+    --output-format) [ "$2" = json ] && oneshot=1; shift 2 ;;
     *) shift ;;
   esac
 done
+if [ -n "$oneshot" ]; then
+  case "$(cat)" in
+    *E2E_PLAN_INPUT*) title="Planned Dark Mode" ;;
+    *) title="Cross Device Title" ;;
+  esac
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$title"
+  exit 0
+fi
 [ -n "$mode" ] && printf 'spawn %s\n' "$mode" >> "$(dirname "$0")/../spawns.log"
 printf '{"type":"system","subtype":"init","session_id":"%s","model":"claude-e2e","permissionMode":"%s","tools":[]}\n' "$sid" "$mode"
 turn=0
@@ -104,6 +115,97 @@ async fn cross_device_sessions() {
         "the first turn carries its nonce",
         first_turn_nonce.as_deref() == Some("cmid-start"),
         json!({ "nonce": first_turn_nonce, "kinds": kinds_seen(&first_turn) }),
+    );
+
+    j.step("the server titles sessions with no client pushing one");
+    let (plan_session, _prompt, _plan_stream, _plan_events) = a
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::Plan,
+            "E2E_PLAN_INPUT".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Claude),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start plan session");
+    j.alias(&plan_session.id, "$PLAN_SESSION");
+    let titled = async {
+        for _ in 0..(IO.as_millis() / 50) {
+            let rows = b.list_sessions(ws.clone()).await.expect("list_sessions");
+            if rows.iter().all(|r| r.title.is_some()) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    };
+    j.guard(
+        "both sessions get a server-generated title",
+        titled.await,
+        json!({}),
+    );
+    let sessions = j
+        .call(
+            &b,
+            Request::ListSessions {
+                workstream_id: ws.clone(),
+            },
+        )
+        .await
+        .expect("list_sessions");
+    let field = |id: &str, field: &str| {
+        session_row(&sessions, id)
+            .and_then(|r| r.pointer(field).cloned())
+            .unwrap_or(Value::Null)
+    };
+    j.guard(
+        "each title comes from that session's own prompt",
+        field(&session.id, "/title") == json!("Cross Device Title")
+            && field(&plan_session.id, "/title") == json!("Planned Dark Mode"),
+        json!({ "general": field(&session.id, "/title"), "plan": field(&plan_session.id, "/title") }),
+    );
+    j.guard(
+        "a plan session previews the user's text, not the skill wrapper",
+        field(&plan_session.id, "/preview") == json!("E2E_PLAN_INPUT"),
+        json!({ "preview": field(&plan_session.id, "/preview") }),
+    );
+
+    j.step("archiving hides an idle session everywhere, never a working one");
+    let busy = j
+        .call(
+            &b,
+            Request::SetSessionArchived {
+                session_id: plan_session.id.clone(),
+                archived: true,
+            },
+        )
+        .await;
+    j.guard(
+        "a session that never finished starting is refused",
+        busy.as_ref().err().map(|e| e.code.as_str()) == Some("session_busy"),
+        json!({ "code": busy.as_ref().err().map(|e| e.code.clone()) }),
+    );
+    j.call(
+        &b,
+        Request::SetSessionArchived {
+            session_id: session.id.clone(),
+            archived: true,
+        },
+    )
+    .await
+    .expect("archive the idle session");
+    let seen_by_a = a.list_sessions(ws.clone()).await.expect("list_sessions");
+    let archived_for_a = seen_by_a
+        .iter()
+        .find(|s| s.id == session.id)
+        .is_some_and(|s| s.archived_at.is_some());
+    j.guard(
+        "A sees B's archive",
+        archived_for_a,
+        json!({ "archived": archived_for_a }),
     );
 
     j.step("B opens the session mid-turn in another mode");
@@ -403,6 +505,68 @@ async fn cross_device_sessions() {
         "a blank title clears it",
         cleared_title.as_ref().is_some_and(Value::is_null),
         json!({ "title": cleared_title }),
+    );
+
+    j.step("sending unarchives; only an archived, exited session deletes");
+    let rows = b.list_sessions(ws.clone()).await.expect("list_sessions");
+    let unarchived = rows
+        .iter()
+        .find(|s| s.id == session.id)
+        .is_some_and(|s| s.archived_at.is_none());
+    j.guard(
+        "A's later turns brought the session back",
+        unarchived,
+        json!({ "unarchived": unarchived }),
+    );
+    let not_archived = j
+        .call(
+            &b,
+            Request::DeleteSession {
+                session_id: session.id.clone(),
+            },
+        )
+        .await;
+    j.guard(
+        "deleting a current session is refused",
+        not_archived.as_ref().err().map(|e| e.code.as_str()) == Some("session_not_archived"),
+        json!({ "code": not_archived.as_ref().err().map(|e| e.code.clone()) }),
+    );
+    j.call(
+        &a,
+        Request::KillSession {
+            session_id: session.id.clone(),
+        },
+    )
+    .await
+    .expect("kill_session");
+    b.set_session_archived(session.id.clone(), true)
+        .await
+        .expect("archive the killed session");
+    let deleted = async {
+        for _ in 0..(IO.as_millis() / 50) {
+            match b.delete_session(session.id.clone()).await {
+                Ok(()) => return true,
+                Err(e) if e.code == "session_busy" => {
+                    tokio::time::sleep(Duration::from_millis(50)).await
+                }
+                Err(_) => return false,
+            }
+        }
+        false
+    };
+    j.guard(
+        "an archived session deletes once its harness has exited",
+        deleted.await,
+        json!({}),
+    );
+    let rows = a.list_sessions(ws.clone()).await.expect("list_sessions");
+    let gone = rows.iter().all(|s| s.id != session.id);
+    let log = a.get_session_log(session.id.clone()).await;
+    let log_gone = log.as_ref().is_ok_and(Vec::is_empty);
+    j.guard(
+        "the row and its log are gone for A too",
+        gone && log_gone,
+        json!({ "gone": gone, "logGone": log_gone }),
     );
 
     j.step("shutdown");

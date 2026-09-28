@@ -1,8 +1,10 @@
-import { commands } from "@/lib/bindings";
+import { commands, type Session } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 
+import { pruneDeletedArchived } from "./archivedAgents";
+import { adoptServerTitles } from "./tabTitles";
 import { takeSeenTitle } from "./titleSeen";
 import { useWorkstreamTabsStore, type ShellTab, type WsTabState } from "./workstreamTabs";
 
@@ -40,9 +42,10 @@ function lockedTitleKey(byWs: Record<string, WsTabState>): string {
 }
 
 /**
- * Pushes a locked tab title to the server on change. A title the server itself
- * supplied is never pushed back (`titleSeen`), and a restart seeds state without
- * pushing so it can't clobber another device's rename.
+ * Pushes a locked tab title to the server on change, adopts server titles into
+ * placeholder tabs, and drops archived tabs whose session was deleted elsewhere. A title the server itself supplied is never pushed back
+ * (`titleSeen`), and a restart seeds state without pushing so it can't clobber
+ * another device's rename.
  */
 export function startSessionTitleSync(): () => void {
   const store = useWorkstreamTabsStore;
@@ -67,8 +70,18 @@ export function startSessionTitleSync(): () => void {
     }
     seen = next;
   });
+  const offCache = queryClient.getQueryCache().subscribe((event) => {
+    if (event.type !== "updated" || event.action.type !== "success") return;
+    const [key, workstreamId] = event.query.queryKey;
+    if (key !== "workstream-sessions" || typeof workstreamId !== "string") return;
+    const sessions = event.query.state.data as Session[] | undefined;
+    if (!sessions) return;
+    adoptServerTitles(workstreamId, sessions);
+    pruneDeletedArchived(workstreamId, sessions);
+  });
   return () => {
     off();
     offHydrate();
+    offCache();
   };
 }

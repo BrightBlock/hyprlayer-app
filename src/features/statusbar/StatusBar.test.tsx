@@ -456,36 +456,35 @@ describe("StatusBar trailing items", () => {
     expect(terminal.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
   });
 
-  it("puts the archive slot between the branch and the Server button, one divider each side", () => {
+  it("puts the sessions slot flush against the Server button, after one divider", () => {
     render(
       <StatusBar
         workstreamId="w1"
         workstream={makeView()}
-        archive={<button type="button">Archived agents</button>}
+        sessions={<button type="button">Agent sessions</button>}
         settings={null}
       />,
     );
-    const archive = screen.getByRole("button", { name: "Archived agents" });
-    const before = archive.previousElementSibling!;
-    expect(before.getAttribute("aria-hidden")).toBe("true");
-    expect(before.previousElementSibling?.textContent).toContain("feat/status-bar");
-    const after = archive.nextElementSibling!;
-    expect(after.getAttribute("aria-hidden")).toBe("true");
-    expect(after.nextElementSibling).toBe(screen.getByRole("button", { name: "Server: this machine" }));
+    const sessions = screen.getByRole("button", { name: "Agent sessions" });
+    expect(sessions.previousElementSibling).toBeNull();
+    expect(sessions.nextElementSibling).toBe(screen.getByRole("button", { name: "Server: this machine" }));
+    const divider = sessions.parentElement!.previousElementSibling!;
+    expect(divider.getAttribute("aria-hidden")).toBe("true");
+    expect(divider.previousElementSibling?.textContent).toContain("feat/status-bar");
   });
 
-  it("leads with the archive slot when there is no repo cluster", () => {
+  it("leads with the sessions slot when there is no repo cluster", () => {
     render(
       <StatusBar
         workstreamId="w1"
         workstream={makeView({ worktreeMode: "folder" })}
-        archive={<button type="button">Archived agents</button>}
+        sessions={<button type="button">Agent sessions</button>}
         settings={null}
       />,
     );
-    const archive = screen.getByRole("button", { name: "Archived agents" });
-    expect(archive.previousElementSibling).toBeNull();
-    expect(archive.nextElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    const sessions = screen.getByRole("button", { name: "Agent sessions" });
+    expect(sessions.previousElementSibling).toBeNull();
+    expect(sessions.parentElement!.previousElementSibling).toBeNull();
   });
 
 

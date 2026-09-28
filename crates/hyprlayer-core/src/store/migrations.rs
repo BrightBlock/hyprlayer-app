@@ -99,6 +99,12 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN title TEXT;
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN first_input TEXT;
+    ",
+    "
+    ALTER TABLE sessions ADD COLUMN archived_at REAL;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

@@ -90,8 +90,6 @@ import { ResizeGrips } from "@/components/ResizeGrips";
 import { Icon } from "@/components/Icon";
 import { ArchivedWorktreesButton } from "@/features/archive/ArchivedWorktreesButton";
 import { closeArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
-import { ArchivedAgentsButton } from "@/features/session/ArchivedAgentsButton";
-import { closeArchivedAgents } from "@/features/session/archivedAgentsStore";
 import { AgentSessionsButton } from "@/features/session/AgentSessionsButton";
 import { closeAgentSessions } from "@/features/session/agentSessionsStore";
 import { useMultiplexer } from "@/features/multiplexer/engines";
@@ -734,14 +732,12 @@ export function Root() {
   useCommand("search.open", () => {
     closeSettingsPopover();
     closeArchivedWorktrees();
-    closeArchivedAgents();
     closeAgentSessions();
     toggleSearch();
   });
   useCommand("prompts.palette", () => {
     closeSettingsPopover();
     closeArchivedWorktrees();
-    closeArchivedAgents();
     closeAgentSessions();
     togglePromptPalette();
   });
@@ -1453,7 +1449,6 @@ export function Root() {
         workstreamId={activeWorkstreamId ?? null}
         workstream={activeWorkstream ?? null}
         // ProjectPage's resolved workstream: the key its tabs live under.
-        archive={scriptsActiveWs ? <ArchivedAgentsButton workstreamId={scriptsActiveWs} /> : null}
         sessions={scriptsActiveWs ? <AgentSessionsButton workstreamId={scriptsActiveWs} /> : null}
         tools={
           scriptsActiveWs && (

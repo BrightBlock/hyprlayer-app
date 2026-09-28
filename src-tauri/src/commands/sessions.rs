@@ -272,6 +272,30 @@ pub async fn set_session_title(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn set_session_archived(
+    state: State<'_, AppState>,
+    session_id: String,
+    archived: bool,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .set_session_archived(session_id, archived)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
+    state
+        .client()?
+        .delete_session(session_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn respond_permission(
     state: State<'_, AppState>,
     session_id: String,

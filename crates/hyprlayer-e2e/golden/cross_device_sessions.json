@@ -31,6 +31,50 @@
     {
       "guards": [
         {
+          "evidence": {},
+          "guard": "both sessions get a server-generated title",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "general": "Cross Device Title",
+            "plan": "Planned Dark Mode"
+          },
+          "guard": "each title comes from that session's own prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "preview": "E2E_PLAN_INPUT"
+          },
+          "guard": "a plan session previews the user's text, not the skill wrapper",
+          "ok": true
+        }
+      ],
+      "step": "the server titles sessions with no client pushing one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "session_busy"
+          },
+          "guard": "a session that never finished starting is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": true
+          },
+          "guard": "A sees B's archive",
+          "ok": true
+        }
+      ],
+      "step": "archiving hides an idle session everywhere, never a working one"
+    },
+    {
+      "guards": [
+        {
           "evidence": {
             "asked": true
           },
@@ -166,6 +210,38 @@
         }
       ],
       "step": "B sees A's title and first prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "unarchived": true
+          },
+          "guard": "A's later turns brought the session back",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "session_not_archived"
+          },
+          "guard": "deleting a current session is refused",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "an archived session deletes once its harness has exited",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "gone": true,
+            "logGone": true
+          },
+          "guard": "the row and its log are gone for A too",
+          "ok": true
+        }
+      ],
+      "step": "sending unarchives; only an archived, exited session deletes"
     },
     {
       "guards": [

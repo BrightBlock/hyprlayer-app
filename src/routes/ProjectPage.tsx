@@ -33,7 +33,8 @@ import { PrChecksPanel } from "@/features/workstreams/PrChecksPanel";
 import { DiffTab } from "@/features/workstreams/DiffTab";
 import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
-import { restoreArchivedAgent } from "@/features/session/archivedAgents";
+import { classifyArchivedStatus, restoreArchivedAgent } from "@/features/session/archivedAgents";
+import { setSessionArchived } from "@/features/session/sessionArchive";
 import { DocPreviewTab } from "@/features/session/DocPreviewTab";
 import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
@@ -75,7 +76,7 @@ import {
   useSession,
   useSessionStore,
 } from "@/features/session/sessionStore";
-import { isBusy, isTerminal, type SessionState } from "@/features/session/transcript";
+import { isBusy } from "@/features/session/transcript";
 import { useCommand } from "@/lib/keybindings/registry";
 import { TAB_SELECT_COUNT, tabSelectId } from "@/lib/keybindings/commands";
 import {
@@ -189,13 +190,6 @@ const EDGE_OVERLAY_CLASS: Record<Edge, string> = {
   top: "inset-x-0 top-0 h-1/2",
   bottom: "inset-x-0 bottom-0 h-1/2",
 };
-
-function classifyArchivedStatus(state: SessionState | undefined): ArchivedStatus {
-  if (!state) return "idle";
-  if (state === "completed") return "done";
-  if (isTerminal(state)) return "stopped";
-  return "idle";
-}
 
 function classifyPtyArchivedStatus(state: AgentState | undefined): ArchivedStatus {
   return state === "done" ? "done" : "idle";
@@ -768,6 +762,7 @@ export function ProjectPage() {
       const entry = useSessionStore.getState().sessions[shell.sessionId];
       if (entry && !entry.live) dropSession(shell.sessionId);
       void endSession(shell.sessionId);
+      if (wsId) void setSessionArchived(wsId, shell.sessionId, true);
     }
   };
   const archiveOrCloseShell = (shellId: number) => {

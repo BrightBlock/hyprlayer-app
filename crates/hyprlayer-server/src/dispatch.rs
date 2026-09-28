@@ -1278,6 +1278,22 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn set_session_archived(
+        &self,
+        session_id: String,
+        archived: bool,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .sessions()
+            .set_archived(&session_id, archived)
+            .await
+            .wire()
+    }
+
+    async fn delete_session(&self, session_id: String) -> Result<(), WireError> {
+        self.runtime.sessions().delete(&session_id).await.wire()
+    }
+
     async fn import_attachment(
         &self,
         workstream_id: String,
@@ -2125,6 +2141,7 @@ mod tests {
             stage: Stage::General,
             harness: Harness::Claude,
             cwd: "/wt".into(),
+            first_input: None,
         })
         .unwrap();
     }

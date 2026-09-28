@@ -70,6 +70,12 @@ pub enum CoreError {
     #[error("No live session with id {session_id}")]
     SessionNotFound { session_id: String },
 
+    #[error("session {session_id} is still working")]
+    SessionBusy { session_id: String },
+
+    #[error("session {session_id} must be archived before it is deleted")]
+    SessionNotArchived { session_id: String },
+
     #[error("another Hyprlayer runtime is already using the profile at {path}")]
     RuntimeInUse { path: PathBuf },
 
@@ -447,6 +453,10 @@ impl CoreError {
             CoreError::SessionNotFound { .. } => {
                 Some("The session may have ended; start a new one.".into())
             }
+            CoreError::SessionBusy { .. } => {
+                Some("Wait for the agent to finish its turn, or stop it.".into())
+            }
+            CoreError::SessionNotArchived { .. } => Some("Archive the session first.".into()),
             CoreError::NpmMissing => Some(
                 "Install Node.js (it includes npm) and click Refresh, or install OpenCode with \
                  Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
@@ -616,6 +626,8 @@ impl CoreError {
             CoreError::OpencodeModelUnavailable { .. } => "opencode_model_unavailable",
             CoreError::UserTurnNotFound { .. } => "user_turn_not_found",
             CoreError::SessionNotFound { .. } => "session_not_found",
+            CoreError::SessionBusy { .. } => "session_busy",
+            CoreError::SessionNotArchived { .. } => "session_not_archived",
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",
             CoreError::RuntimeStopped => "runtime_stopped",

@@ -6,29 +6,26 @@ import {
   useState,
   type KeyboardEvent,
   type Ref,
-  type RefObject,
 } from "react";
 
-import { claudeModels } from "@/lib/domain/models";
 import { formatCompactAge } from "@/lib/format";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
-import { useClaudeProbe } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
-import { ConfirmDialog, cx, Popover, ROW_ACTION, ROW_ACTION_DANGER } from "@/components/ui";
+import { ConfirmDialog, cx, ROW_ACTION, ROW_ACTION_DANGER } from "@/components/ui";
 
+import type { SessionsListProps } from "./AgentSessionsPopover";
+import { setSessionsQuery, useAgentSessions } from "./agentSessionsStore";
 import {
-  archivedModelLabel,
-  deleteArchivedAgent,
-  newestFirst,
-  restoreArchivedAgent,
+  deleteArchivedRow,
+  restoreArchivedRow,
+  useArchivedRows,
+  type ArchivedRow,
 } from "./archivedAgents";
-import { useWorkstreamTabsStore, type ArchivedShell, type ArchivedStatus } from "./workstreamTabs";
+import type { ArchivedStatus } from "./workstreamTabs";
 
 // The window header, the caret gap, this panel's header and filter row, and margin.
 const CHROME_PX = 40 + 10 + 38 + 38 + 8;
 const LIST_MAX_HEIGHT = `calc(100dvh - ${CHROME_PX + STATUS_BAR_HEIGHT}px)`;
-
-const NONE: ArchivedShell[] = [];
 
 const STATUS: Record<ArchivedStatus, { label: string; dot: string }> = {
   done: { label: "Done", dot: "bg-ok" },
@@ -36,71 +33,30 @@ const STATUS: Record<ArchivedStatus, { label: string; dot: string }> = {
   idle: { label: "Idle", dot: "bg-ink-4" },
 };
 
-type Row = { entry: ArchivedShell; model: string };
-
 /** Once `gone` has left the list, focus returns to the row at `index`. */
-type FocusAfter = { index: number; gone: number[] };
+type FocusAfter = { index: number; gone: string[] };
 
-export function ArchivedAgentsPopover({
-  workstreamId,
-  open,
-  onClose,
-  anchorRef,
-}: {
-  workstreamId: string;
-  open: boolean;
-  onClose: () => void;
-  anchorRef: RefObject<HTMLElement | null>;
-}) {
-  const headingId = useId();
-  return (
-    <Popover
-      open={open}
-      onClose={onClose}
-      anchorRef={anchorRef}
-      side="top"
-      align="start"
-      sideOffset={10}
-      caret
-      trapFocus
-      aria-labelledby={headingId}
-      className="w-[440px] max-w-[calc(100vw-16px)] p-0 shadow-pop"
-    >
-      <PopoverBody workstreamId={workstreamId} headingId={headingId} onClose={onClose} />
-    </Popover>
-  );
-}
-
-function PopoverBody({
+export function ArchivedSessionsList({
   workstreamId,
   headingId,
+  searchRef,
   onClose,
-}: {
-  workstreamId: string;
-  headingId: string;
-  onClose: () => void;
-}) {
-  const archived = useWorkstreamTabsStore((s) => s.byWs[workstreamId]?.archived) ?? NONE;
-  const probed = useClaudeProbe().data?.models;
-  const catalog = useMemo(() => claudeModels(probed), [probed]);
+  switcher,
+}: SessionsListProps) {
+  const rows = useArchivedRows(workstreamId);
 
   const searchId = useId();
-  const [query, setQuery] = useState("");
-  const [pending, setPending] = useState<{ entry: ArchivedShell; index: number } | null>(null);
+  const query = useAgentSessions((s) => s.query);
+  const [pending, setPending] = useState<{ row: ArchivedRow; index: number } | null>(null);
   const [active, setActive] = useState(0);
-  const searchRef = useRef<HTMLInputElement>(null);
   const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
   const focusAfter = useRef<FocusAfter | null>(null);
 
-  const rows = useMemo<Row[]>(
-    () => newestFirst(archived).map((entry) => ({ entry, model: archivedModelLabel(entry.shell, catalog) })),
-    [archived, catalog],
-  );
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(
-      (row) => row.entry.shell.title.toLowerCase().includes(q) || row.model.toLowerCase().includes(q),
+      (row) => row.title.toLowerCase().includes(q) || row.model.toLowerCase().includes(q),
     );
   }, [rows, query]);
   const current = Math.min(active, Math.max(visible.length - 1, 0));
@@ -109,7 +65,7 @@ function PopoverBody({
   useEffect(() => {
     const target = focusAfter.current;
     if (pending || !target) return;
-    if (target.gone.some((id) => visible.some((row) => row.entry.shell.id === id))) return;
+    if (target.gone.some((key) => visible.some((row) => row.key === key))) return;
     focusAfter.current = null;
     if (visible.length === 0) {
       searchRef.current?.focus();
@@ -118,7 +74,7 @@ function PopoverBody({
     const index = Math.min(target.index, visible.length - 1);
     setActive(index);
     rowRefs.current[index]?.focus();
-  }, [pending, visible]);
+  }, [pending, visible, searchRef]);
 
   const focusRow = (index: number) => {
     const next = Math.max(0, Math.min(index, visible.length - 1));
@@ -126,22 +82,22 @@ function PopoverBody({
     rowRefs.current[next]?.focus();
   };
 
-  const closePending = (gone: number[] = []) => {
+  const closePending = (gone: string[] = []) => {
     focusAfter.current = { index: current, gone };
     setPending(null);
   };
 
-  const restore = (entry: ArchivedShell) => {
+  const restore = (row: ArchivedRow) => {
     onClose();
-    restoreArchivedAgent(workstreamId, entry.shell.id);
+    restoreArchivedRow(workstreamId, row);
   };
 
-  const askDelete = (entry: ArchivedShell, index: number) => {
+  const askDelete = (row: ArchivedRow, index: number) => {
     setActive(index);
-    setPending({ entry, index });
+    setPending({ row, index });
   };
 
-  const onRowKey = (entry: ArchivedShell, index: number) => (e: KeyboardEvent<HTMLLIElement>) => {
+  const onRowKey = (row: ArchivedRow, index: number) => (e: KeyboardEvent<HTMLLIElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.key === "ArrowDown") focusRow(index + 1);
     else if (e.key === "ArrowUp") {
@@ -149,8 +105,8 @@ function PopoverBody({
       else focusRow(index - 1);
     } else if (e.key === "Home") focusRow(0);
     else if (e.key === "End") focusRow(visible.length - 1);
-    else if (e.key === "Enter") restore(entry);
-    else if (e.key === "Delete" || e.key === "Backspace") askDelete(entry, index);
+    else if (e.key === "Enter") restore(row);
+    else if (e.key === "Delete" || e.key === "Backspace") askDelete(row, index);
     else return;
     e.preventDefault();
     e.stopPropagation();
@@ -163,7 +119,7 @@ function PopoverBody({
   };
 
   const clearFilter = () => {
-    setQuery("");
+    setSessionsQuery("");
     searchRef.current?.focus();
   };
 
@@ -171,17 +127,12 @@ function PopoverBody({
   return (
     <>
       <div inert={pending !== null}>
-        <div className="flex items-baseline justify-between gap-3 px-3 pb-2.5 pt-3">
-          <span id={headingId} className="lbl">
-            Archived agents
-          </span>
-          {rows.length > 0 && <span className="text-meta tabular-nums text-ink-dim">{rows.length}</span>}
-        </div>
+        <div className="px-3 pb-2.5 pt-3">{switcher}</div>
 
         <div className="flex items-center gap-2 px-3 pb-2.5">
           <div className="relative min-w-0 flex-1">
             <label htmlFor={searchId} className="sr-only">
-              Filter archived agents
+              Filter archived sessions
             </label>
             <Icon
               name="search"
@@ -192,7 +143,7 @@ function PopoverBody({
               id={searchId}
               ref={searchRef}
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setSessionsQuery(e.target.value)}
               onKeyDown={onSearchKey}
               placeholder="Filter by name or model"
               spellCheck={false}
@@ -207,7 +158,7 @@ function PopoverBody({
 
         {rows.length === 0 ? (
           <p className="border-t border-edge-2 px-3 py-6 text-center text-ui text-ink-dim">
-            No archived agents.
+            No archived sessions.
           </p>
         ) : visible.length === 0 ? (
           <p className="border-t border-edge-2 px-3 py-6 text-center text-ui text-ink-dim">
@@ -224,7 +175,7 @@ function PopoverBody({
           <ul aria-labelledby={headingId} className="overflow-y-auto" style={{ maxHeight: LIST_MAX_HEIGHT }}>
             {visible.map((row, index) => (
               <ArchivedAgentRow
-                key={row.entry.shell.id}
+                key={row.key}
                 row={row}
                 now={now}
                 focusable={index === current}
@@ -232,9 +183,9 @@ function PopoverBody({
                   rowRefs.current[index] = el;
                 }}
                 onFocus={() => setActive(index)}
-                onKeyDown={onRowKey(row.entry, index)}
-                onRestore={() => restore(row.entry)}
-                onDelete={() => askDelete(row.entry, index)}
+                onKeyDown={onRowKey(row, index)}
+                onRestore={() => restore(row)}
+                onDelete={() => askDelete(row, index)}
               />
             ))}
           </ul>
@@ -245,18 +196,18 @@ function PopoverBody({
         <ConfirmDialog
           open
           onClose={() => closePending()}
-          title={`Delete ${pending.entry.shell.title}?`}
+          title={`Delete ${pending.row.title}?`}
           confirmLabel="Delete"
           confirmVariant="danger"
           autoFocus="confirm"
           onConfirm={() => {
-            deleteArchivedAgent(workstreamId, pending.entry.shell.id);
-            closePending([pending.entry.shell.id]);
+            deleteArchivedRow(workstreamId, pending.row);
+            closePending([pending.row.key]);
           }}
         >
           <p className="text-body text-ink-2">
-            It leaves this workstream's archive and can't be restored. Its branch and worktree belong to
-            the workstream and stay put.
+            It is removed from this workstream on every device and can't be restored. Its branch and
+            worktree belong to the workstream and stay put.
           </p>
         </ConfirmDialog>
       )}
@@ -274,7 +225,7 @@ function ArchivedAgentRow({
   onRestore,
   onDelete,
 }: {
-  row: Row;
+  row: ArchivedRow;
   now: number;
   focusable: boolean;
   rowRef: Ref<HTMLLIElement>;
@@ -283,10 +234,9 @@ function ArchivedAgentRow({
   onRestore: () => void;
   onDelete: () => void;
 }) {
-  const { entry, model } = row;
-  const { title } = entry.shell;
-  const status = STATUS[entry.status];
-  const meta = [model, formatCompactAge(entry.archivedAt, now)].filter(Boolean).join(" · ");
+  const { title, model } = row;
+  const status = STATUS[row.status];
+  const meta = [model, formatCompactAge(row.archivedAt, now)].filter(Boolean).join(" · ");
   return (
     <li
       ref={rowRef}

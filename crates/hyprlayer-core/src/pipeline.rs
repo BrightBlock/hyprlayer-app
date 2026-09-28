@@ -317,9 +317,31 @@ pub fn compose_prompt(
     }
 }
 
+/// The user's own text inside a first turn `compose_prompt` + `append_docs`
+/// wrapped, for rows that predate `first_input`. Action-body stages are not
+/// recoverable.
+pub fn recover_input(stage: Stage, prompt: &str) -> Option<String> {
+    let prompt = prompt.split(DOCS_HEADER).next().unwrap_or(prompt);
+    let input = match (stage, stage.command()) {
+        (Stage::General, _) => prompt,
+        (Stage::Commit | Stage::Ship | Stage::Revise, _) | (_, None) => return None,
+        (_, Some(command)) => {
+            let rest = prompt.strip_prefix(command)?.strip_prefix(' ')?;
+            [PLAN_PROMPT_CODEX_SUFFIX, RESEARCH_PROMPT_CODEX_SUFFIX]
+                .iter()
+                .find_map(|suffix| rest.strip_suffix(suffix))
+                .unwrap_or(rest)
+        }
+    };
+    let input = input.trim();
+    (!input.is_empty()).then(|| input.to_string())
+}
+
+const DOCS_HEADER: &str = "\n\nRelevant documents:";
+
 pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
     if !attached_docs.is_empty() {
-        prompt.push_str("\n\nRelevant documents:");
+        prompt.push_str(DOCS_HEADER);
         for doc in attached_docs {
             prompt.push_str("\n- ");
             prompt.push_str(doc);

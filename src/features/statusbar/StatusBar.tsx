@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from "react";
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useViewport } from "@/lib/useViewport";
-import { Avatar, Divider, RepoStatus } from "./parts";
+import { Avatar, RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
@@ -12,7 +12,6 @@ import { SyncStatus } from "./SyncStatus";
 export function StatusBar({
   workstreamId,
   workstream,
-  archive,
   sessions,
   tools,
   settings,
@@ -20,7 +19,6 @@ export function StatusBar({
 }: {
   workstreamId: string | null;
   workstream: WorkstreamView | null;
-  archive?: ReactNode;
   sessions?: ReactNode;
   tools?: ReactNode;
   settings: ReactNode;
@@ -35,15 +33,9 @@ export function StatusBar({
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
-      {archive && (
-        <>
-          {repo && <Divider />}
-          {archive}
-        </>
-      )}
       <SyncStatus
         compact={compact}
-        divided={repo !== null || Boolean(archive)}
+        divided={repo !== null}
         menu={serverMenu}
         leading={sessions}
       />

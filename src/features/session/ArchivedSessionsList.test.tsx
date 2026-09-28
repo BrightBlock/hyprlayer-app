@@ -11,7 +11,7 @@
 //  9. Rows follow array order instead of `archivedAt` descending.
 // 10. The popover opens while disconnected, stacking over the HostsDialog.
 // 11. The popover stays open across a workstream change, showing another workstream's archive.
-// 12. The count reads "0".
+// 12. The Archived switch reads "0".
 // 13. A workstream with no tab state crashes instead of showing the empty state.
 // 14. Enter or Delete on a focused row button is also handled by the row.
 // 15. ⌘⇧A does not toggle the popover.
@@ -24,11 +24,13 @@ const h = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), dropSession: vi.fn()
 vi.mock("@/lib/queries", () => ({
   useConnectionStatus: h.useConnectionStatus,
   useClaudeProbe: () => ({ data: undefined }),
+  useWorkstreamSessions: () => ({ data: undefined }),
+  useActiveSessions: () => ({ data: undefined }),
 }));
 vi.mock("./sessionStore", () => ({ dropSession: h.dropSession }));
 
-import { ArchivedAgentsButton } from "./ArchivedAgentsButton";
-import { closeArchivedAgents, useArchivedAgents } from "./archivedAgentsStore";
+import { AgentSessionsButton } from "./AgentSessionsButton";
+import { closeAgentSessions, useAgentSessions } from "./agentSessionsStore";
 import { leaf } from "./paneTree";
 import {
   useComposerFocusStore,
@@ -94,7 +96,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  act(() => closeArchivedAgents());
+  act(() => closeAgentSessions());
   cleanup();
   useWorkstreamTabsStore.setState({ byWs: {} });
   useComposerFocusStore.setState({ pendingShellId: null });
@@ -102,17 +104,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-const trigger = () => screen.getByRole("button", { name: "Archived agents" });
-const popover = () => screen.queryByRole("dialog", { name: "Archived agents" });
+const trigger = () => screen.getByRole("button", { name: "Agent sessions" });
+const popover = () => screen.queryByRole("dialog", { name: "Agent sessions" });
 const rowFor = (title: string) => screen.getByRole("listitem", { name: new RegExp(`^${title},`) });
 const names = () => screen.queryAllByRole("listitem").map((li) => li.getAttribute("aria-label")?.split(",")[0]);
-const filterBox = () => screen.getByRole("textbox", { name: "Filter archived agents" });
+const filterBox = () => screen.getByRole("textbox", { name: "Filter archived sessions" });
 const archivedIds = (ws = "w1") =>
   (useWorkstreamTabsStore.getState().byWs[ws]?.archived ?? []).map((a) => a.shell.id);
 
 function openPopover(workstreamId = "w1") {
-  render(<ArchivedAgentsButton workstreamId={workstreamId} />);
+  render(<AgentSessionsButton workstreamId={workstreamId} />);
   fireEvent.click(trigger());
+  fireEvent.click(screen.getByRole("radio", { name: /^Archived/ }));
   const dialog = popover();
   expect(dialog).not.toBeNull();
   return dialog!;
@@ -123,22 +126,23 @@ function askDelete(title: string) {
   return screen.getByRole("dialog", { name: `Delete ${title}?` });
 }
 
-describe("ArchivedAgentsPopover", () => {
+describe("ArchivedSessionsList", () => {
   it("counts only a non-empty archive, and a workstream with no tabs says so", () => {
-    const { unmount } = render(<ArchivedAgentsButton workstreamId="w1" />);
-    expect(trigger().textContent).toBe("3");
-    unmount();
+    openPopover();
+    expect(screen.getByRole("radio", { name: "Archived 3" })).toBeTruthy();
+    act(() => closeAgentSessions());
+    cleanup();
 
     openPopover("w2");
-    expect(trigger().textContent).not.toMatch(/\d/);
-    expect(screen.getByText("No archived agents.")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Archived" })).toBeTruthy();
+    expect(screen.getByText("No archived sessions.")).toBeTruthy();
     expect(names()).toEqual([]);
   });
 
   it("opens as a labelled dialog, newest first, with model and age on each row", () => {
     const dialog = openPopover();
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
-    expect(within(dialog).getByText("3")).toBeTruthy();
+    expect(within(dialog).getByRole("radio", { name: "Archived 3" })).toBeTruthy();
     expect(names()).toEqual(["Old terminal agent", "Refactor auth", "Spike codex"]);
     expect(within(rowFor("Old terminal agent")).getByText("Gemini · 1h")).toBeTruthy();
     expect(within(rowFor("Refactor auth")).getByText("Sonnet 5 · 2h")).toBeTruthy();
@@ -193,7 +197,7 @@ describe("ArchivedAgentsPopover", () => {
     fireEvent.click(within(askDelete("Refactor auth")).getByRole("button", { name: "Delete" }));
     fireEvent.click(within(askDelete("Spike codex")).getByRole("button", { name: "Delete" }));
     expect(archivedIds()).toEqual([]);
-    expect(screen.getByText("No archived agents.")).toBeTruthy();
+    expect(screen.getByText("No archived sessions.")).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(filterBox()));
   });
 
@@ -247,23 +251,24 @@ describe("ArchivedAgentsPopover", () => {
     fireEvent.click(trigger());
     expect(popover()).toBeNull();
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
-    expect(useArchivedAgents.getState().open).toBe(false);
+    expect(useAgentSessions.getState().open).toBe(false);
   });
 
   it("closes when the workstream changes", () => {
-    const { rerender } = render(<ArchivedAgentsButton workstreamId="w1" />);
+    const { rerender } = render(<AgentSessionsButton workstreamId="w1" />);
     fireEvent.click(trigger());
     expect(popover()).not.toBeNull();
-    rerender(<ArchivedAgentsButton workstreamId="w2" />);
+    rerender(<AgentSessionsButton workstreamId="w2" />);
     expect(popover()).toBeNull();
   });
 
-  it("toggles on ⌘⇧A", () => {
-    render(<ArchivedAgentsButton workstreamId="w1" />);
+  it("toggles the archive on ⌘⇧A", () => {
+    render(<AgentSessionsButton workstreamId="w1" />);
     act(() => {
       runCommand("view.toggleArchivedAgents");
     });
     expect(popover()).not.toBeNull();
+    expect(screen.getByRole("radio", { name: "Archived 3" }).getAttribute("aria-checked")).toBe("true");
     act(() => {
       runCommand("view.toggleArchivedAgents");
     });

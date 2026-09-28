@@ -47,7 +47,6 @@ import {
   type Attachment,
 } from "./attachments";
 import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
-import { generateTabTitle } from "./tabTitles";
 import type { ShellTab } from "./workstreamTabs";
 import { MODE_STYLES, asStageKey, nextModeStage, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
@@ -1183,13 +1182,6 @@ export function SessionChat({
         promptName: expanded.title,
       });
       onSessionStarted(created.id);
-      if (expanded.text) {
-        void generateTabTitle({
-          workstreamId: view.item.id,
-          shellId: shell.id,
-          input: expanded.text,
-        });
-      }
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;

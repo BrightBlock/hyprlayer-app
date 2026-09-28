@@ -83,6 +83,7 @@ pub struct HyprlayerRuntime {
     index: Arc<ThoughtsIndex>,
     session_registry: Arc<SessionRegistry>,
     session_actors: Arc<SessionActors>,
+    session_titler: Arc<sessions::titles::SessionTitler>,
     terminals: Arc<TerminalRegistry>,
     scripts: Arc<ScriptRegistry>,
     opencode: Arc<OpenCodeManager>,
@@ -205,6 +206,7 @@ impl HyprlayerRuntime {
             index: Arc::new(ThoughtsIndex::new()),
             session_registry: Arc::new(SessionRegistry::new()),
             session_actors,
+            session_titler: Arc::default(),
             terminals: Arc::new(TerminalRegistry::new()),
             scripts: Arc::new(ScriptRegistry::new()),
             opencode: Arc::new(OpenCodeManager::new()),
@@ -317,10 +319,16 @@ impl HyprlayerRuntime {
             }
         });
 
-        self.tasks
-            .lock()
-            .await
-            .extend([startup_task, config_task, pr_watcher_task, sweep_task]);
+        let title_task =
+            sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
+
+        self.tasks.lock().await.extend([
+            startup_task,
+            config_task,
+            pr_watcher_task,
+            sweep_task,
+            title_task,
+        ]);
 
         Ok(())
     }

@@ -12,7 +12,6 @@ pub mod scripts;
 pub mod sessions;
 pub mod system;
 pub mod terminal;
-pub mod titles;
 pub mod workstreams;
 
 use crate::error::{AppError, CmdResult};

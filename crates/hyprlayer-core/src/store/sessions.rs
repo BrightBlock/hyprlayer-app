@@ -6,7 +6,7 @@ use super::{now_ms, Db};
 use crate::agent::Harness;
 use crate::claude::{SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
-use crate::pipeline::Stage;
+use crate::pipeline::{self, Stage};
 
 pub use hyprlayer_models::session::{LogCursor, Session, SessionLogEntry};
 
@@ -59,6 +59,14 @@ pub struct NewSession {
     pub stage: Stage,
     pub harness: Harness,
     pub cwd: String,
+    /// The user's text before `compose_prompt` wrapped it.
+    pub first_input: Option<String>,
+}
+
+/// What a session's title is generated from.
+pub struct SessionTitleSource {
+    pub workstream_id: String,
+    pub input: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -185,9 +193,27 @@ fn apply_row_mutation(
 }
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
-                    cost_usd, started_at, ended_at, exit_summary, title";
+                    cost_usd, started_at, ended_at, exit_summary, title, archived_at, \
+                    (SELECT e.kind FROM session_events e
+                      WHERE e.session_id = sessions.id AND e.kind IN ('userMessage', 'turnDone')
+                      ORDER BY e.seq DESC LIMIT 1) AS last_turn_kind, \
+                    (SELECT e.created_at FROM session_events e WHERE e.session_id = sessions.id
+                      ORDER BY e.seq DESC LIMIT 1) AS last_active_at";
+
+/// `TurnDone` persists `Running`, so a live idle harness is told apart by its log.
+fn is_working(state: SessionState, last_turn_kind: Option<&str>) -> bool {
+    match state {
+        SessionState::Starting
+        | SessionState::AwaitingPermission
+        | SessionState::AwaitingQuestion => true,
+        SessionState::Running => last_turn_kind == Some("userMessage"),
+        _ => false,
+    }
+}
 
 fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
+    let state = SessionState::parse(&row.get::<_, String>("state")?);
+    let last_turn_kind: Option<String> = row.get("last_turn_kind")?;
     Ok(Session {
         id: row.get("id")?,
         workstream_id: row.get("workstream_id")?,
@@ -195,7 +221,7 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         harness: Harness::parse(&row.get::<_, String>("harness")?),
         provider_session_id: row.get("claude_session_id")?,
         cwd: row.get("cwd")?,
-        state: SessionState::parse(&row.get::<_, String>("state")?),
+        state,
         model: row.get("model")?,
         cost_usd: row.get("cost_usd")?,
         started_at: row.get("started_at")?,
@@ -203,16 +229,40 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         exit_summary: row.get("exit_summary")?,
         title: row.get("title")?,
         preview: None,
+        archived_at: row.get("archived_at")?,
+        working: is_working(state, last_turn_kind.as_deref()),
+        last_active_at: row.get("last_active_at")?,
     })
 }
 
 const PREVIEW_CHARS: usize = 120;
 
-/// Flattens a `userMessage` payload's text to one line, capped at `PREVIEW_CHARS`.
-fn preview_of(payload: &str) -> Option<String> {
-    let SessionEvent::UserMessage { text, .. } = decode_raw_event(payload).ok()? else {
-        return None;
+/// Correlated subquery over `sessions`: its first `userMessage` payload.
+const FIRST_PROMPT: &str = "(SELECT payload FROM session_events e
+                             WHERE e.session_id = sessions.id AND e.kind = 'userMessage'
+                             ORDER BY e.seq LIMIT 1) AS first_prompt";
+
+/// The user's own first text: `first_input`, else recovered from the first
+/// turn for rows that predate it.
+fn user_input(row: &Row<'_>) -> rusqlite::Result<Option<String>> {
+    if let Some(input) = row.get::<_, Option<String>>("first_input")? {
+        return Ok(Some(input));
+    }
+    // Strict: `Stage::parse` reads a newer server's stage as General.
+    let Some(stage) = Stage::try_parse(&row.get::<_, String>("stage")?) else {
+        return Ok(None);
     };
+    let payload: Option<String> = row.get("first_prompt")?;
+    Ok(payload.as_deref().and_then(|payload| {
+        let SessionEvent::UserMessage { text, .. } = decode_raw_event(payload).ok()? else {
+            return None;
+        };
+        pipeline::recover_input(stage, &text)
+    }))
+}
+
+/// Flattens text to one line, capped at `PREVIEW_CHARS`.
+fn preview_of(text: &str) -> Option<String> {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut cut: String = flat.chars().take(PREVIEW_CHARS).collect();
     if cut.len() < flat.len() {
@@ -238,12 +288,16 @@ impl Db {
             exit_summary: None,
             title: None,
             preview: None,
+            archived_at: None,
+            working: true,
+            last_active_at: None,
         };
         self.with(|conn| {
             conn.execute(
                 "INSERT INTO sessions (id, workstream_id, stage, harness, claude_session_id, cwd,
-                                       state, model, cost_usd, started_at, ended_at, exit_summary)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                                       state, model, cost_usd, started_at, ended_at, exit_summary,
+                                       first_input)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                 params![
                     session.id,
                     session.workstream_id,
@@ -257,6 +311,7 @@ impl Db {
                     session.started_at,
                     session.ended_at,
                     session.exit_summary,
+                    new.first_input,
                 ],
             )?;
             Ok(())
@@ -279,27 +334,44 @@ impl Db {
         })
     }
 
-    /// A `General` session's preview is its first prompt; every other stage's
-    /// first turn is `compose_prompt`'s wrapped text, so it stays `None` and the
+    /// A session with no recoverable user text keeps a `None` preview and the
     /// caller falls back to the stage label.
     pub fn list_sessions(&self, workstream_id: &str) -> Result<Vec<Session>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(&format!(
-                "SELECT {COLS}, (SELECT payload FROM session_events e
-                                  WHERE e.session_id = sessions.id AND e.kind = 'userMessage'
-                                  ORDER BY e.seq LIMIT 1) AS first_prompt
+                "SELECT {COLS}, first_input, {FIRST_PROMPT}
                    FROM sessions WHERE workstream_id = ?1 ORDER BY started_at"
             ))?;
             let rows = stmt.query_map(params![workstream_id], |row| {
                 let mut session = row_to_session(row)?;
-                // Strict: `Stage::parse` reads a newer server's stage as General.
-                if Stage::try_parse(&row.get::<_, String>("stage")?) == Some(Stage::General) {
-                    let first_prompt: Option<String> = row.get("first_prompt")?;
-                    session.preview = first_prompt.as_deref().and_then(preview_of);
-                }
+                session.preview = user_input(row)?.as_deref().and_then(preview_of);
                 Ok(session)
             })?;
             rows.collect()
+        })
+    }
+
+    /// `None` once the session is titled or has no user text to title it from.
+    pub fn session_title_source(&self, id: &str) -> Result<Option<SessionTitleSource>> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!(
+                    "SELECT workstream_id, stage, first_input, {FIRST_PROMPT}
+                       FROM sessions WHERE id = ?1 AND title IS NULL"
+                ),
+                params![id],
+                |row| {
+                    let Some(input) = user_input(row)? else {
+                        return Ok(None);
+                    };
+                    Ok(Some(SessionTitleSource {
+                        workstream_id: row.get("workstream_id")?,
+                        input,
+                    }))
+                },
+            )
+            .optional()
+            .map(Option::flatten)
         })
     }
 
@@ -320,6 +392,40 @@ impl Db {
                 params![id, title],
             )?;
             Ok(())
+        })
+    }
+
+    /// Never overwrites a title, so a rename that lands first wins.
+    pub fn set_session_title_if_unset(&self, id: &str, title: &str) -> Result<bool> {
+        self.with(|conn| {
+            let changed = conn.execute(
+                "UPDATE sessions SET title = ?2 WHERE id = ?1 AND title IS NULL",
+                params![id, title],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    pub fn set_session_archived(&self, id: &str, archived: bool) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET archived_at = CASE WHEN ?2 THEN COALESCE(archived_at, ?3) END
+                  WHERE id = ?1",
+                params![id, archived, now_ms()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn delete_session(&self, id: &str) -> Result<()> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "DELETE FROM session_events WHERE session_id = ?1",
+                params![id],
+            )?;
+            tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+            tx.commit()
         })
     }
 
@@ -668,6 +774,7 @@ mod tests {
             stage: Stage::General,
             harness: Harness::Claude,
             cwd: "/wt".into(),
+            first_input: None,
         })
         .unwrap();
         for (seq, kind) in [
@@ -732,30 +839,40 @@ mod tests {
     }
 
     #[test]
-    fn only_a_strictly_general_session_gets_a_preview() {
+    fn preview_is_the_users_own_text_for_any_parseable_stage() {
         let db = Db::open_in_memory().unwrap();
         seed_dialog(&db, "anchor");
         let ws = db.list_active_workstreams().unwrap().pop().unwrap().id;
-        for (id, stage) in [
-            ("general", Stage::General),
-            ("plan", Stage::Plan),
-            ("future", Stage::General),
-        ] {
+        let cases = [
+            ("general", Stage::General, None, "the first prompt"),
+            (
+                "plan",
+                Stage::Plan,
+                Some("add dark mode"),
+                "/create_plan add dark mode",
+            ),
+            (
+                "legacy-plan",
+                Stage::Plan,
+                None,
+                "/create_plan add dark mode",
+            ),
+            ("commit", Stage::Commit, None, "Review the working tree"),
+            ("future", Stage::General, None, "the first prompt"),
+        ];
+        for (id, stage, first_input, prompt) in cases {
             db.insert_session(NewSession {
                 id: id.into(),
                 workstream_id: ws.clone(),
                 stage,
                 harness: Harness::Claude,
                 cwd: "/wt".into(),
+                first_input: first_input.map(str::to_string),
             })
             .unwrap();
-            db.append_session_event(
-                id,
-                0,
-                "userMessage",
-                r#"{"kind":"userMessage","text":"the first prompt","stage":null}"#,
-            )
-            .unwrap();
+            let payload = serde_json::json!({"kind": "userMessage", "text": prompt, "stage": null});
+            db.append_session_event(id, 0, "userMessage", &payload.to_string())
+                .unwrap();
         }
         // A stage from a newer server that this build cannot parse.
         db.with(|conn| {
@@ -774,8 +891,16 @@ mod tests {
                 .and_then(|s| s.preview.clone())
         };
         assert_eq!(preview("general").as_deref(), Some("the first prompt"));
-        assert_eq!(preview("plan"), None);
+        assert_eq!(preview("plan").as_deref(), Some("add dark mode"));
+        assert_eq!(preview("legacy-plan").as_deref(), Some("add dark mode"));
+        assert_eq!(preview("commit"), None);
         assert_eq!(preview("future"), None);
+
+        assert!(db.set_session_title_if_unset("plan", "Dark Mode").unwrap());
+        assert!(db.session_title_source("plan").unwrap().is_none());
+        assert!(!db.set_session_title_if_unset("plan", "Other").unwrap());
+        let source = db.session_title_source("legacy-plan").unwrap().unwrap();
+        assert_eq!(source.input, "add dark mode");
     }
 
     #[test]
