@@ -67,15 +67,17 @@ async fn doc_concurrency() {
         |e| matches!(e, RuntimeEvent::ThoughtsIndexUpdated { ids, .. } if ids.contains(&id)),
     )
     .await;
+    // Only the matching event: how many rescans precede it depends on watcher timing.
+    let announced = indexed.iter().find_map(|e| match e {
+        RuntimeEvent::ThoughtsIndexUpdated { ids, update, .. } if ids.contains(&id) => {
+            Some(format!("{update:?}"))
+        }
+        _ => None,
+    });
     j.guard(
         "creating a document announces an index update for it",
-        indexed.iter().any(
-            |e| matches!(e, RuntimeEvent::ThoughtsIndexUpdated { ids, .. } if ids.contains(&id)),
-        ),
-        json!({ "kinds": indexed.iter().filter_map(|e| match e {
-            RuntimeEvent::ThoughtsIndexUpdated { update, .. } => Some(format!("{update:?}")),
-            _ => None,
-        }).collect::<Vec<_>>() }),
+        announced.is_some(),
+        json!({ "kind": announced }),
     );
 
     j.step("the first writer wins");

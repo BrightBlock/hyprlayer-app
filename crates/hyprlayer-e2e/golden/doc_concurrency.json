@@ -12,11 +12,7 @@
         },
         {
           "evidence": {
-            "kinds": [
-              "Rescanned",
-              "Rescanned",
-              "Updated"
-            ]
+            "kind": "Updated"
           },
           "guard": "creating a document announces an index update for it",
           "ok": true
