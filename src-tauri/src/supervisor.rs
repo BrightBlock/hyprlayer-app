@@ -35,6 +35,11 @@ const SPAWN_RETRIES: u32 = 5;
 const SPAWN_RETRY_DELAY: Duration = Duration::from_secs(1);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// ssh's default is the OS TCP timeout, over a minute for an asleep host.
+const SSH_CONNECT_TIMEOUT: &str = "ConnectTimeout=5";
+/// For a host that accepts the connection and then stalls; the handshake alone
+/// allows 60s. `setup()` blocks on this, so it is how long a launch can hang.
+const REMOTE_CONNECT_DEADLINE: Duration = Duration::from_secs(15);
 
 /// The reconnect loop retries every 30s forever; one report per window.
 static CONNECT_FAILURES: RepeatGate = RepeatGate::new(Duration::from_secs(600));
@@ -137,7 +142,21 @@ pub async fn connect(
             blocked => blocked,
         },
         Target::LocalProfile(dir) => connect_local_profile(dir, &target.name()).await,
-        Target::Remote(host) => connect_remote(host, app_data_dir).await,
+        Target::Remote(host) => {
+            // Dropping the attempt kills its ssh children (`kill_on_drop`).
+            tokio::time::timeout(REMOTE_CONNECT_DEADLINE, connect_remote(host, app_data_dir))
+                .await
+                .unwrap_or_else(|_| Outcome::Blocked {
+                    title: CANNOT_START.to_string(),
+                    error: AppError::remote_unreachable(
+                        &host.label,
+                        format!(
+                            "it did not respond within {}s.",
+                            REMOTE_CONNECT_DEADLINE.as_secs()
+                        ),
+                    ),
+                })
+        }
     };
     log_outcome(target, started.elapsed(), &outcome);
     outcome
@@ -421,7 +440,8 @@ async fn ssh_relay_connect(
 
     let mut cmd = tokio::process::Command::new("ssh");
     hide_console(&mut cmd);
-    cmd.arg(&host.destination)
+    cmd.args(["-o", SSH_CONNECT_TIMEOUT])
+        .arg(&host.destination)
         .arg(provision::relay_command(&version))
         .kill_on_drop(true)
         .stdin(Stdio::piped())
@@ -600,6 +620,7 @@ async fn ssh_run(host: &Host, script: &str, stdin: Stdio) -> Result<Vec<u8>, App
     let mut cmd = tokio::process::Command::new("ssh");
     hide_console(&mut cmd);
     let output = cmd
+        .args(["-o", SSH_CONNECT_TIMEOUT])
         .arg(&host.destination)
         .arg(script)
         .kill_on_drop(true)
