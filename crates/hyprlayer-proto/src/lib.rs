@@ -40,6 +40,16 @@ impl WireError {
         }
     }
 
+    /// A well-formed request this server cannot decode: a newer client's
+    /// command, or arguments this build does not accept.
+    pub fn unsupported_command(command: &str) -> Self {
+        Self {
+            code: "unsupported_command".into(),
+            message: format!("This Hyprlayer server does not support `{command}`."),
+            remedy: Some("Update the Hyprlayer server on this host.".into()),
+        }
+    }
+
     pub fn disconnected() -> Self {
         Self {
             code: "server_disconnected".into(),

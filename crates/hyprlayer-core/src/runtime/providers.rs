@@ -19,7 +19,8 @@ use crate::settings::ClaudeSettings;
 use super::ports::ProviderHttpRequest;
 use super::HyprlayerRuntime;
 
-const TITLE_TIMEOUT: Duration = Duration::from_secs(20);
+// Background work, and a Haiku round trip alone swings from 4s to over 12s.
+const TITLE_TIMEOUT: Duration = Duration::from_secs(45);
 const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
@@ -493,9 +494,20 @@ impl ProviderService<'_> {
         let path = self.runtime.binaries.augmented_path().await;
         let claude_cfg = self.runtime.settings.get().await.providers.claude;
 
-        // Outside any repo, so the project's context can't become the title.
+        // Outside any repo, so the project's context can't become the title. No
+        // tools, MCP servers or default system prompt: they cost ~7x the tokens.
         let mut exec = Exec::new(&bin)
             .arg("-p")
+            .args([
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--no-session-persistence",
+            ])
+            .args([
+                "--system-prompt",
+                "You name coding requests with short titles.",
+            ])
             .cwd(std::env::temp_dir())
             .stdin(prompt.as_bytes().to_vec());
         if !flag.is_empty() {

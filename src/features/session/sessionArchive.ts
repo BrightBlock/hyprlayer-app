@@ -1,5 +1,5 @@
 import { commands, type Session } from "@/lib/bindings";
-import { unwrap } from "@/lib/ipc";
+import { isAppError, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 
@@ -21,6 +21,27 @@ export async function setSessionArchived(
     await refresh(workstreamId);
   } catch (e) {
     log.warn("session", `${archived ? "archiving" : "unarchiving"} ${sessionId} failed`, e);
+  }
+}
+
+const BUSY_RETRY_MS = 250;
+const BUSY_RETRY_LIMIT_MS = 10_000;
+
+// A killed harness reports its exit asynchronously, and the server refuses the archive until then.
+export async function archiveStoppedSession(workstreamId: string, sessionId: string): Promise<void> {
+  for (let waited = 0; ; waited += BUSY_RETRY_MS) {
+    try {
+      await unwrap(commands.setSessionArchived(sessionId, true));
+      await refresh(workstreamId);
+      return;
+    } catch (e) {
+      if (isAppError(e) && e.code === "session_busy" && waited < BUSY_RETRY_LIMIT_MS) {
+        await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_MS));
+        continue;
+      }
+      log.warn("session", `archiving stopped ${sessionId} failed`, e);
+      return;
+    }
   }
 }
 

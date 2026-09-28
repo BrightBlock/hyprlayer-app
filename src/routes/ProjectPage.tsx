@@ -34,7 +34,8 @@ import { DiffTab } from "@/features/workstreams/DiffTab";
 import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
 import { classifyArchivedStatus, restoreArchivedAgent } from "@/features/session/archivedAgents";
-import { setSessionArchived } from "@/features/session/sessionArchive";
+import { archiveStoppedSession, setSessionArchived } from "@/features/session/sessionArchive";
+import { StopAgentDialog } from "@/features/session/StopAgentDialog";
 import { DocPreviewTab } from "@/features/session/DocPreviewTab";
 import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
@@ -168,7 +169,6 @@ function isAgentShell(shell: ShellTab): boolean {
   return !isViewerShell(shell) && !isTerminalShell(shell) && !isPtyShell(shell);
 }
 
-const AGENT_BUSY_HINT = "Agent is still working. Stop it first.";
 
 const FULL_RECT: Rect = { x: 0, y: 0, w: 1, h: 1 };
 
@@ -204,23 +204,17 @@ function TabCloseControl({
   onArchive: () => void;
   onClose: () => void;
 }) {
-  const session = useSession(shell.sessionId);
   const archivable = isArchivable(shell);
-  const busy = isAgentShell(shell) && session ? agentStillWorking(session) : false;
-  const label = archivable ? (busy ? AGENT_BUSY_HINT : `Archive ${shell.title}`) : `Close ${shell.title}`;
+  const label = archivable ? `Archive ${shell.title}` : `Close ${shell.title}`;
   return (
     <button
       type="button"
-      aria-disabled={busy}
       onClick={(e) => {
         e.stopPropagation();
-        if (busy) return;
         if (archivable) onArchive();
         else onClose();
       }}
-      className={`mr-1 inline-flex h-5 w-5 items-center justify-center rounded ${
-        busy ? "cursor-not-allowed text-ink-dim/40" : "text-ink-dim hover:bg-edge hover:text-ink"
-      }`}
+      className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
       title={label}
       aria-label={label}
     >
@@ -330,6 +324,7 @@ export function ProjectPage() {
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
   const detachPr = useDetachPr();
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
+  const [stopShellId, setStopShellId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [docsModalShellId, setDocsModalShellId] = useState<number | null>(null);
   const { narrow } = useViewport();
@@ -535,15 +530,7 @@ export function ProjectPage() {
     .map((s) => s.ptyAgent?.sessionId)
     .filter((id): id is string => !!id);
   const contextIsLast = !!tabs && !!contextShell && isLastTab(tabs, contextShell.id);
-  const contextEntry = contextShell?.sessionId
-    ? useSessionStore.getState().sessions[contextShell.sessionId]
-    : undefined;
-  const archiveBlockedReason =
-    contextEntry && agentStillWorking(contextEntry)
-      ? AGENT_BUSY_HINT
-      : contextIsLast
-        ? "Keep at least one agent in the strip."
-        : null;
+  const archiveBlockedReason = contextIsLast ? "Keep at least one agent in the strip." : null;
   const shellBeingRenamed = renameShellId
     ? shells.find((s) => s.id === renameShellId)
     : null;
@@ -741,7 +728,7 @@ export function ProjectPage() {
     updateTabs((current) => removeShellState(current, shellId));
     if (shell.sessionId) dropSession(shell.sessionId);
   };
-  const archiveShell = (shellId: number) => {
+  const archiveShellNow = (shellId: number, stopping = false) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
     let status: ArchivedStatus;
@@ -761,9 +748,22 @@ export function ProjectPage() {
     if (!shell.ptyAgent && shell.sessionId) {
       const entry = useSessionStore.getState().sessions[shell.sessionId];
       if (entry && !entry.live) dropSession(shell.sessionId);
-      void endSession(shell.sessionId);
-      if (wsId) void setSessionArchived(wsId, shell.sessionId, true);
+      const sessionId = shell.sessionId;
+      if (stopping && wsId) {
+        void endSession(sessionId).then(() => archiveStoppedSession(wsId, sessionId));
+      } else {
+        void endSession(sessionId);
+        if (wsId) void setSessionArchived(wsId, sessionId, true);
+      }
     }
+  };
+  const archiveShell = (shellId: number) => {
+    const shell = shells.find((s) => s.id === shellId);
+    const session = shell && isAgentShell(shell) && shell.sessionId
+      ? useSessionStore.getState().sessions[shell.sessionId]
+      : undefined;
+    if (session && agentStillWorking(session)) setStopShellId(shellId);
+    else archiveShellNow(shellId);
   };
   const archiveOrCloseShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
@@ -772,10 +772,6 @@ export function ProjectPage() {
       closeShell(shellId);
       return;
     }
-    const session = isAgentShell(shell) && shell.sessionId
-      ? useSessionStore.getState().sessions[shell.sessionId]
-      : undefined;
-    if (session && agentStillWorking(session)) return;
     archiveShell(shellId);
   };
   const reopenLastClosedShell = () => {
@@ -1479,6 +1475,14 @@ export function ProjectPage() {
                   </ContextMenu>
                 );
               })()}
+            <StopAgentDialog
+              title={shells.find((s) => s.id === stopShellId)?.title ?? null}
+              onClose={() => setStopShellId(null)}
+              onConfirm={() => {
+                if (stopShellId !== null) archiveShellNow(stopShellId, true);
+                setStopShellId(null);
+              }}
+            />
             <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
               <form
                 className="space-y-3"

@@ -5,7 +5,7 @@ use std::io;
 
 use hyprlayer_models::RuntimeEvent;
 use hyprlayer_proto::frame::{self, Decoder, Frame};
-use hyprlayer_proto::ControlFrame;
+use hyprlayer_proto::{ControlFrame, Outcome, WireError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::rpc::{Request, Response};
@@ -24,6 +24,32 @@ pub fn encode_control(control: &Control) -> Result<Vec<u8>, serde_json::Error> {
 
 pub fn parse_control(line: &str) -> io::Result<Control> {
     serde_json::from_str(line).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// The error reply to a request `parse_control` rejected, when the line still
+/// names its id; `None` for a frame too broken to answer.
+pub fn reject_undecodable(line: &str) -> Option<(String, Control)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let (kind, envelope) = value.as_object()?.iter().next()?;
+    let id = envelope.get("id")?.as_u64()?;
+    let body = envelope.get("body")?;
+    let command = match body.as_object() {
+        Some(tagged) => tagged.keys().next()?.clone(),
+        None => body.as_str()?.to_string(),
+    };
+    let error = WireError::unsupported_command(&command);
+    let reply = match kind.as_str() {
+        "request" => Control::Response {
+            id,
+            outcome: Outcome::Err(error),
+        },
+        "stream_request" => Control::StreamResponse {
+            id,
+            outcome: Outcome::Err(error),
+        },
+        _ => return None,
+    };
+    Some((command, reply))
 }
 
 pub fn label(control: &Control) -> &'static str {

@@ -33,7 +33,8 @@ use logging::RepeatGate;
 use rpc::Dispatch;
 use streams::StreamRegistry;
 use transport::{
-    encode_control, label, parse_control, Control, FrameReader, FrameWriter, OUTBOUND_QUEUE_FRAMES,
+    encode_control, label, parse_control, reject_undecodable, Control, FrameReader, FrameWriter,
+    OUTBOUND_QUEUE_FRAMES,
 };
 
 /// The bundle identifier Tauri derives the desktop's app dirs from; a
@@ -558,7 +559,21 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 continue;
             }
         };
-        match parse_control(&line)? {
+        let control = match parse_control(&line) {
+            Ok(control) => control,
+            // Answered rather than dropped: a client newer than this server
+            // would otherwise lose every in-flight call and reconnect.
+            Err(e) => match reject_undecodable(&line) {
+                Some((command, reply)) => {
+                    tracing::warn!("conn {conn}: refused {command}: this build cannot decode it");
+                    let bytes = encode_control(&reply).expect("an error outcome always serializes");
+                    let _ = tx.send(bytes).await;
+                    continue;
+                }
+                None => return Err(e),
+            },
+        };
+        match control {
             Control::Request { id, body } => {
                 requests += 1;
                 let server = server.clone();

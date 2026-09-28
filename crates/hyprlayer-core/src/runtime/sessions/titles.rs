@@ -8,7 +8,8 @@ use crate::runtime::shutdown::TrackedTask;
 use crate::runtime::HyprlayerRuntime;
 
 /// Sessions awaiting a generated title, worked one at a time since each is a
-/// model call. An id is tried at most once per server lifetime.
+/// model call. An id is tried once per server lifetime, plus one retry after a
+/// failed call.
 #[derive(Default)]
 pub(crate) struct SessionTitler {
     state: Mutex<TitleQueue>,
@@ -19,6 +20,7 @@ pub(crate) struct SessionTitler {
 struct TitleQueue {
     pending: VecDeque<String>,
     tried: HashSet<String>,
+    retried: HashSet<String>,
 }
 
 impl SessionTitler {
@@ -35,6 +37,14 @@ impl SessionTitler {
         }
         drop(state);
         self.wake.notify_one();
+    }
+
+    /// Behind the rest of the queue, so a slow provider isn't hit again at once.
+    fn retry(&self, session_id: &str) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if state.retried.insert(session_id.to_string()) {
+            state.pending.push_back(session_id.to_string());
+        }
     }
 
     fn pop(&self) -> Option<String> {
@@ -58,7 +68,11 @@ pub(crate) fn spawn_worker(
                     return;
                 };
                 tokio::select! {
-                    _ = title_session(&runtime, &session_id) => {}
+                    failed = title_session(&runtime, &session_id) => {
+                        if failed {
+                            titler.retry(&session_id);
+                        }
+                    }
                     _ = stop.notified() => return,
                 }
             }
@@ -70,19 +84,29 @@ pub(crate) fn spawn_worker(
     })
 }
 
-async fn title_session(runtime: &HyprlayerRuntime, session_id: &str) {
+/// `true` when the model call failed and is worth another try.
+async fn title_session(runtime: &HyprlayerRuntime, session_id: &str) -> bool {
     let db = runtime.db.clone();
     let id = session_id.to_string();
     let source = match tokio::task::spawn_blocking(move || db.session_title_source(&id)).await {
         Ok(Ok(Some(source))) => source,
-        Ok(Ok(None)) => return,
-        Ok(Err(e)) => return tracing::warn!("session {session_id}: reading title source: {e}"),
-        Err(e) => return tracing::warn!("session {session_id}: reading title source: {e}"),
+        Ok(Ok(None)) => return false,
+        Ok(Err(e)) => {
+            tracing::warn!("session {session_id}: reading title source: {e}");
+            return false;
+        }
+        Err(e) => {
+            tracing::warn!("session {session_id}: reading title source: {e}");
+            return false;
+        }
     };
     let title = match runtime.providers().suggest_title(&source.input).await {
         Ok(Some(title)) => title,
-        Ok(None) => return,
-        Err(e) => return tracing::info!("session {session_id}: no title generated: {e}"),
+        Ok(None) => return false,
+        Err(e) => {
+            tracing::info!("session {session_id}: no title generated: {e}");
+            return true;
+        }
     };
 
     let db = runtime.db.clone();
@@ -108,4 +132,5 @@ async fn title_session(runtime: &HyprlayerRuntime, session_id: &str) {
         Ok(Err(e)) => tracing::warn!("session {session_id}: storing title: {e}"),
         Err(e) => tracing::warn!("session {session_id}: storing title: {e}"),
     }
+    false
 }

@@ -1,0 +1,69 @@
+{
+  "scenario": "unsupported_command",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the server greets first",
+          "ok": true
+        }
+      ],
+      "step": "connect over the raw socket"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "id": 7
+          },
+          "guard": "it is answered with an error carrying the request's id",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "error": [
+              "unsupported_command",
+              "This Hyprlayer server does not support `from_a_newer_client`.",
+              "Update the Hyprlayer server on this host."
+            ]
+          },
+          "guard": "the error names the command and says to update the server",
+          "ok": true
+        }
+      ],
+      "step": "send a command this server does not have"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refused": true
+          },
+          "guard": "a stream request is refused the same way",
+          "ok": true
+        }
+      ],
+      "step": "send a stream request this server does not have"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answered": true
+          },
+          "guard": "a known command on that connection still succeeds",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "dropped": false
+          },
+          "guard": "the server never drops the connection",
+          "ok": true
+        }
+      ],
+      "step": "the same connection keeps serving"
+    }
+  ]
+}
