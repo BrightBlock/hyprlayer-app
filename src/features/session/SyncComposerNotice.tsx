@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
+
 import { Icon } from "@/components/Icon";
 import { Button, Skeleton, Spinner } from "@/components/ui";
-import { deviceLabel, type SyncState } from "./transcriptSync";
+import { formatRelativeTime } from "@/lib/format";
+import { deviceLabel, type HeldView, type SyncState } from "./transcriptSync";
 
 export type SyncNotice =
-  | { kind: "behind"; count: number; device: string }
+  | { kind: "behind"; count: number; device: string; at: number | null }
   | { kind: "retry"; count: number; seconds: number }
   | { kind: "syncing"; count: number }
   | { kind: "synced"; device: string }
@@ -21,11 +24,14 @@ export function sentenceDevice(sync: SyncState): string {
   return device === "another device" ? "Another device" : device;
 }
 
+const NO_HELD: HeldView = { at: null, dismissedRev: null };
+
 export function syncNotice(
   sync: SyncState | undefined,
   drifted: boolean,
   loading: boolean,
   terminal = false,
+  held: HeldView = NO_HELD,
 ): SyncNotice | null {
   // Only a server without sync marks a view drifted; an ended view may have been resumed elsewhere.
   if (drifted) return { kind: "fallback", loading };
@@ -39,7 +45,10 @@ export function syncNotice(
     return { kind: "retry", count, seconds: Math.round(sync.retry.delayMs / 1000) };
   }
   // Count 0 is held items with no new revision, such as a turn end or a prompt.
-  if (sync.phase === "behind") return { kind: "behind", count, device: deviceLabel(sync) };
+  if (sync.phase === "behind") {
+    if (held.dismissedRev !== null && sync.remoteRev <= held.dismissedRev) return null;
+    return { kind: "behind", count, device: deviceLabel(sync), at: held.at };
+  }
   if (sync.phase === "syncing" && count > 0) return { kind: "syncing", count };
   if (sync.syncedWith) return { kind: "synced", device: sync.syncedWith };
   return null;
@@ -48,6 +57,18 @@ export function syncNotice(
 const turns = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`;
 // Held items with no new revision have nothing to count.
 const pullLabel = (n: number) => (n > 0 ? `Pull ${turns(n)}` : "Pull");
+
+const CLOSE =
+  "flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+
+function Age({ at }: { at: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  return <> · {formatRelativeTime(at)}</>;
+}
 
 const DOT = "h-1.5 w-1.5 shrink-0 rounded-full";
 const LINE = "mb-2 flex items-center gap-1.5 px-1 text-meta text-ink-dim";
@@ -91,15 +112,25 @@ function NoticeBody({
   switch (notice.kind) {
     case "behind":
       return (
-        <div className={LINE}>
+        <div className="flex items-center gap-2 rounded-t-lg border-b border-info/30 bg-info/10 py-1.5 pl-3 pr-1.5 text-ui text-ink-dim">
           <span className={`${DOT} bg-info`} aria-hidden />
-          <span>
-            {notice.count > 0
-              ? `${notice.count} new ${notice.count === 1 ? "turn" : "turns"} from ${notice.device}`
-              : `New from ${notice.device}`}
+          <span className="min-w-0 flex-1 truncate">
+            {notice.count > 0 ? (
+              <>
+                <span className="font-semibold text-ink">{`${notice.count} new ${notice.count === 1 ? "turn" : "turns"}`}</span> from{" "}
+              </>
+            ) : (
+              "New from "
+            )}
+            <span className="font-mono text-ink">{notice.device}</span>
+            {notice.at !== null && <Age at={notice.at} />}
           </span>
-          <button type="button" onClick={onPull} className={LINK}>
-            Pull
+          <Button variant="primary" size="sm" onClick={onPull}>
+            <Icon name="arrowDown" size="xs" />
+            Load
+          </Button>
+          <button type="button" onClick={onDismiss} aria-label="Dismiss" className={CLOSE}>
+            <Icon name="close" size="xs" />
           </button>
         </div>
       );
@@ -178,12 +209,7 @@ function NoticeBody({
               >
                 Load
               </button>
-              <button
-                type="button"
-                onClick={onDismiss}
-                aria-label="Dismiss"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-              >
+              <button type="button" onClick={onDismiss} aria-label="Dismiss" className={CLOSE}>
                 <Icon name="close" size="xs" />
               </button>
             </>

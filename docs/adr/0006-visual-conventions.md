@@ -523,12 +523,15 @@ What a view shows of turns another client added (`docs/adr/0009-hyprlayer-server
 
 - **Placeholders only through `Skeleton`** (`ui.tsx`). It is static at `opacity-75` while
   turns wait and shimmers (`animate-shimmer`) while they load. The transcript's tail draws
-  one skeleton per pending revision, one labelled group past `SUMMARY_AFTER`, and a single
-  "`<device>` is working…" skeleton in place of the elapsed counter.
+  one exchange (a prompt row and a reply row) however many turns wait, or, while the other
+  device works, only "`<device>` is working…" in place of the elapsed counter. The count,
+  the newest turn's age, **Load** and dismiss live in a strip across the top of the composer
+  box (`bg-info/10`, the box border `border-info/40`); dismissing hides it until a later
+  revision lands.
 - **Motion.** `animate-shimmer` (1.4s sweep) and `animate-sync-in` (350ms fade and 4px
   rise, on pulled items only) each have a `prefers-reduced-motion` block, and the shimmer
   joins the `data-window-blurred` pause list.
-- **Colour.** Sync is `info`: the composer's status line and its Pull and `now` links, the "New from
+- **Colour.** Sync is `info`: the composer's new-turns strip, its status line and `now` link, the "New from
   `<device>`" divider (`text-label text-info`, `bg-info/30` hairlines), the remote chip, the
   new-turns pill. The draft guard is `warn`: its card follows
   `HandoffBanner`'s (`rounded-md border border-warn/40 bg-warn/5`), the composer border turns

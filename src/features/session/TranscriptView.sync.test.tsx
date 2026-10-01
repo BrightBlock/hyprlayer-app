@@ -79,11 +79,22 @@ describe("new-from divider", () => {
 });
 
 describe("skeleton tail", () => {
-  it("counts the turns a guard holds back, padded past the named revisions", () => {
-    renderSync([], {
-      tail: { phase: "guard", turns: [{ rev: 42, kinds: ["user"] }], count: 2, working: null },
-    });
-    expect(screen.getByText("2 turns not shown")).toBeTruthy();
+  it("draws one placeholder however many turns wait; the count lives in the composer notice", () => {
+    const turns = [42, 43, 44, 45, 46].map((rev) => ({ rev, kinds: ["assistant" as const, "tool" as const] }));
+    const { container } = renderSync([], { tail: { phase: "guard", turns, count: 5, working: null } });
+    const placeholders = container.querySelectorAll("[data-sync-placeholder]");
+    expect(placeholders).toHaveLength(1);
+    // One exchange: a prompt row and a reply row.
+    expect(placeholders[0].querySelectorAll("[data-sync-row]")).toHaveLength(2);
+    expect(screen.queryByText(/not shown/)).toBeNull();
+    expect(screen.queryByText(/5 turns/)).toBeNull();
+  });
+
+  it("shows only the working line, not a placeholder too, while the other device's turn runs", () => {
+    const tail = { phase: "behind" as const, turns: [{ rev: 42, kinds: ["user" as const] }], count: 3, working: "nexus" };
+    const { container } = renderSync([], { tail });
+    expect(container.querySelectorAll("[data-sync-placeholder]")).toHaveLength(0);
+    expect(screen.getByText("nexus is working…")).toBeTruthy();
   });
 
   it("shimmers only while syncing", () => {
@@ -103,11 +114,6 @@ describe("skeleton tail", () => {
       />,
     );
     expect(container.querySelector(".animate-shimmer")).not.toBeNull();
-  });
-
-  it("collapses past the summary threshold into one labelled group", () => {
-    renderSync([], { tail: { phase: "behind", turns: [], count: 60, working: null } });
-    expect(screen.getByText("60 turns")).toBeTruthy();
   });
 
   it("replaces the elapsed counter while another device works", () => {

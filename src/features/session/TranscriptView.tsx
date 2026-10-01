@@ -23,7 +23,7 @@ import { stageLabel } from "@/lib/domain/stages";
 import type { ClientRef } from "@/lib/bindings";
 import type { SyncPhase } from "@/lib/domain/sync";
 import { exitLabel, type TranscriptItem } from "./transcript";
-import { SUMMARY_AFTER, type PendingTurn } from "./transcriptSync";
+import type { PendingTurn } from "./transcriptSync";
 import { backgroundTasksFromItems } from "./backgroundTask";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
@@ -987,48 +987,28 @@ export type TranscriptSync = {
 
 const NO_SYNC: TranscriptSync = { tail: null, divider: null, freshFromSeq: null, selfClientId: null };
 
-const BAR_WIDTHS = ["w-[82%]", "w-[64%]", "w-[46%]"];
-
-function RevisionSkeleton({ turn, shimmer }: { turn: PendingTurn; shimmer: boolean }) {
-  const bars = turn.kinds.includes("user") ? 1 : 1 + (turn.rev % 3);
-  return (
-    <div className="flex gap-2.5">
-      <Skeleton shimmer={shimmer} className="h-[22px] w-[22px] shrink-0 rounded-md" />
-      <div className="min-w-0 flex-1 space-y-1.5 pt-1">
-        {BAR_WIDTHS.slice(0, bars).map((width, i) => (
-          <Skeleton key={width} shimmer={shimmer} className={cx(i === 0 ? "h-3" : "h-2.5", width)} />
-        ))}
-        {turn.kinds.includes("tool") && <Skeleton shimmer={shimmer} className="h-7 w-full" />}
-      </div>
-    </div>
-  );
-}
-
-const turnsLabel = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`;
-
+// One exchange however many turns wait: the count belongs to the composer notice.
 function SyncSkeletonTail({ tail }: { tail: SkeletonTail }) {
+  if (tail.working || (tail.count === 0 && tail.turns.length === 0)) return null;
   const shimmer = tail.phase === "syncing";
-  const turns = [...tail.turns];
-  const lastRev = turns[turns.length - 1]?.rev ?? 0;
-  for (let i = turns.length; i < tail.count; i += 1) turns.push({ rev: lastRev + i, kinds: [] });
-  if (turns.length === 0) return null;
+  const avatar = <Skeleton shimmer={shimmer} className="h-[22px] w-[22px] shrink-0 rounded-md" />;
   return (
-    <div className="mt-5 space-y-4">
-      {tail.phase === "guard" && (
-        <div className="flex items-center gap-2 text-label text-ink-dim">
-          <span className="flex-1 border-t border-dashed border-edge" aria-hidden />
-          <span className="shrink-0">{turnsLabel(turns.length)} not shown</span>
-          <span className="flex-1 border-t border-dashed border-edge" aria-hidden />
+    <div data-sync-placeholder className="mt-5 space-y-4">
+      <div data-sync-row className="flex gap-2.5">
+        {avatar}
+        <div className="min-w-0 flex-1 space-y-1.5 pt-1">
+          <Skeleton shimmer={shimmer} className="h-3 w-32" />
+          <Skeleton shimmer={shimmer} className="h-2.5 w-[60%]" />
         </div>
-      )}
-      {turns.length > SUMMARY_AFTER ? (
-        <div className="flex items-center gap-2.5">
-          <Skeleton shimmer={shimmer} className="h-[22px] w-[22px] shrink-0 rounded-md" />
-          <span className="text-meta text-ink-dim">{turnsLabel(turns.length)}</span>
+      </div>
+      <div data-sync-row className="flex gap-2.5">
+        {avatar}
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <Skeleton shimmer={shimmer} className="h-9 w-full" />
+          <Skeleton shimmer={shimmer} className="h-2.5 w-[92%]" />
+          <Skeleton shimmer={shimmer} className="h-2.5 w-1/2" />
         </div>
-      ) : (
-        turns.map((turn) => <RevisionSkeleton key={turn.rev} turn={turn} shimmer={shimmer} />)
-      )}
+      </div>
     </div>
   );
 }

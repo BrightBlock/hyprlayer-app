@@ -576,7 +576,9 @@ describe("manual pull: another device's turns wait for Pull", () => {
         onLoad: () => {},
         onDismiss: () => {},
       }),
-    ).replace(/<[^>]+>/g, " ");
+    )
+      .replace(/<[^>]+>/g, "")
+      .replace(/\s+/g, " ");
 
   it("M1 a foreign revision on an idle, visible, draftless view waits instead of pulling", () => {
     const { state, effects } = run(synced(), remote());
@@ -594,11 +596,11 @@ describe("manual pull: another device's turns wait for Pull", () => {
     }
   });
 
-  it("M3 the behind notice names the turns and the device, with a Pull button", () => {
+  it("M3 the behind notice names the turns and the device, with a Load button", () => {
     const behind = run(synced(), remote(), remote({ rev: 7, turns: [{ rev: 7, kinds: ["assistant"] }] })).state;
     const text = noticeText(behind);
     expect(text).toContain("2 new turns from jons-macbook-pro");
-    expect(text).toContain("Pull");
+    expect(text).toContain("Load");
     expect(text).not.toContain("pulls when you're idle");
     expect(noticeText(run(synced(), remote()).state)).toContain("1 new turn from jons-macbook-pro");
   });
@@ -629,7 +631,7 @@ describe("manual pull: another device's turns wait for Pull", () => {
     expect(syncNotice(state, false, false)).toMatchObject({ kind: "guard", count: 1, device: OTHER.device });
   });
 
-  it("M7 held items with no new revision wait for Pull and block Send", () => {
+  it("M7 held items with no new revision wait for Load and block Send", () => {
     const { state, effects } = run(synced(), remote({ rev: 5, turns: [], flushable: true }));
     expect(effects).toEqual([]);
     expect(state.phase).toBe("behind");

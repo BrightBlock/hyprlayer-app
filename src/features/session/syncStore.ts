@@ -12,13 +12,14 @@ import {
 import type { EventBridge } from "@/lib/events";
 import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import { transition, type SyncEffect, type SyncInput, type SyncState } from "./transcriptSync";
+import { transition, type HeldView, type SyncEffect, type SyncInput, type SyncState } from "./transcriptSync";
 
 type TranscriptSyncStore = {
   bySession: Record<string, SyncState>;
   viewers: Record<string, ClientRef[]>;
   self: ClientIdentity | null;
   divider: Record<string, { seq: number; device: string } | null>;
+  held: Record<string, HeldView>;
 };
 
 export const useTranscriptSync = create<TranscriptSyncStore>(() => ({
@@ -26,6 +27,7 @@ export const useTranscriptSync = create<TranscriptSyncStore>(() => ({
   viewers: {},
   self: null,
   divider: {},
+  held: {},
 }));
 
 /** specta types every f64 as `number | null`; a rev that crossed as a u64 is never null. */
@@ -102,6 +104,10 @@ export function syncInput(sessionId: string, input: SyncInput): void {
   if (!existing || !sameState(before, state)) {
     useTranscriptSync.setState((s) => ({ bySession: { ...s.bySession, [sessionId]: state } }));
   }
+  if (state.remoteRev > before.remoteRev && state.remoteRev > state.localRev) {
+    const dismissedRev = useTranscriptSync.getState().held[sessionId]?.dismissedRev ?? null;
+    setHeld(sessionId, { at: Date.now(), dismissedRev });
+  }
   for (const effect of effects) runEffect(sessionId, effect);
   if (
     input.kind === "fetched" ||
@@ -159,19 +165,31 @@ export function setDivider(sessionId: string, divider: { seq: number; device: st
   useTranscriptSync.setState((s) => ({ divider: { ...s.divider, [sessionId]: divider } }));
 }
 
+function setHeld(sessionId: string, view: HeldView): void {
+  useTranscriptSync.setState((s) => ({ held: { ...s.held, [sessionId]: view } }));
+}
+
+/** Hides the new-turns strip until a later revision lands. */
+export function dismissHeld(sessionId: string): void {
+  const remoteRev = syncOf(sessionId)?.remoteRev ?? 0;
+  setHeld(sessionId, { at: useTranscriptSync.getState().held[sessionId]?.at ?? null, dismissedRev: remoteRev });
+}
+
 export function forgetSync(sessionId: string): void {
   clearTimeout(retryTimers.get(sessionId));
   retryTimers.delete(sessionId);
   drafting.delete(sessionId);
   useTranscriptSync.setState((s) => {
-    if (!(sessionId in s.bySession) && !(sessionId in s.viewers) && !(sessionId in s.divider)) return s;
+    if (![s.bySession, s.viewers, s.divider, s.held].some((m) => sessionId in m)) return s;
     const bySession = { ...s.bySession };
     const viewers = { ...s.viewers };
     const divider = { ...s.divider };
+    const held = { ...s.held };
     delete bySession[sessionId];
     delete viewers[sessionId];
     delete divider[sessionId];
-    return { bySession, viewers, divider };
+    delete held[sessionId];
+    return { bySession, viewers, divider, held };
   });
 }
 

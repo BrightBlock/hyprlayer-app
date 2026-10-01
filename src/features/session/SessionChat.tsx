@@ -113,7 +113,7 @@ import {
   useSessionBackgroundTasks,
   type QueuedMessage,
 } from "./sessionStore";
-import { noteComposerInput, setDivider, syncOf, useTranscriptSync } from "./syncStore";
+import { dismissHeld, noteComposerInput, setDivider, syncOf, useTranscriptSync } from "./syncStore";
 import { canSend } from "./transcriptSync";
 import { pendingCount, sentenceDevice, SyncComposerNotice, syncNotice } from "./SyncComposerNotice";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
@@ -976,6 +976,7 @@ export function SessionChat({
   const sid = shell.sessionId;
   const sync = useTranscriptSync((s) => (sid ? s.bySession[sid] : undefined));
   const divider = useTranscriptSync((s) => (sid ? (s.divider[sid] ?? null) : null));
+  const held = useTranscriptSync((s) => (sid ? s.held[sid] : undefined));
   const selfClientId = useTranscriptSync((s) => s.self?.clientId ?? null);
   const freshFromSeq = useFreshFromSeq(divider);
   // Deleted on the server: the ended-session composer, with nothing to resume.
@@ -1441,19 +1442,22 @@ export function SessionChat({
   );
 
   // On an ended view only fallback A shows: another device may have resumed the session.
-  const composerNotice = (
-    <SyncComposerNotice
-      notice={syncNotice(sync, Boolean(session?.drifted), refreshing, terminal)}
-      onPull={() => {
-        if (sid) void pullNow(sid);
-      }}
-      onSendAnyway={() => void handleSendAnyway()}
-      onLoad={() => void handleRefresh()}
-      onDismiss={() => {
-        if (sid) dismissDrift(sid);
-      }}
-    />
-  );
+  const notice = syncNotice(sync, Boolean(session?.drifted), refreshing, terminal, held);
+  // The new-turns strip sits inside the composer box; every other notice sits above it.
+  const behind = notice?.kind === "behind";
+  const noticeProps = {
+    onPull: () => {
+      if (sid) void pullNow(sid);
+    },
+    onSendAnyway: () => void handleSendAnyway(),
+    onLoad: () => void handleRefresh(),
+    onDismiss: () => {
+      if (!sid) return;
+      if (behind) dismissHeld(sid);
+      else dismissDrift(sid);
+    },
+  };
+  const composerNotice = <SyncComposerNotice notice={behind ? null : notice} {...noticeProps} />;
 
   return (
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
@@ -1595,9 +1599,12 @@ export function SessionChat({
                 className={`relative rounded-lg border bg-panel-2 transition-colors ${
                   sync?.phase === "guard"
                     ? "border-warn/50 focus-within:border-warn/50"
-                    : "border-edge focus-within:border-accent/50"
+                    : behind
+                      ? "border-info/40 focus-within:border-info/60"
+                      : "border-edge focus-within:border-accent/50"
                 }`}
               >
+                <SyncComposerNotice notice={behind ? notice : null} {...noticeProps} />
                 <AutocompleteDropdown state={autocomplete} />
                 {(attachments.length > 0 || (!started && shell.docs.length > 0)) && (
                   <div className="space-y-1.5 px-3 pt-2.5">

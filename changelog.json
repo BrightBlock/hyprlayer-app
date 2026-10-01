@@ -4,7 +4,7 @@
       "version": "0.8.6",
       "summary": "Open sessions stay in sync across devices.",
       "notes": [
-        "When another device adds turns to a session you have open, they wait until you click Pull, so they never stream in or play alert sounds while you work; sending with turns waiting asks you to pull first so your message answers the latest state, and your draft stays.",
+        "When another device adds turns to a session you have open, they wait until you click Load, so they never stream in or play alert sounds while you work; sending with turns waiting asks you to pull first so your message answers the latest state, and your draft stays.",
         "While another device's turn runs, a \"<device> is working…\" placeholder shows in place of its live output; its messages appear when you pull them in.",
         "The server now refuses a message sent from an out-of-date transcript instead of running it; a queued message that is refused waits for the pull and is sent after it.",
         "A message sent while another device's turn is running waits for that turn to finish.",

@@ -26,6 +26,9 @@ export type SyncState = {
   gone: boolean;
 };
 
+/** When the newest held turn arrived, and the remote rev the user dismissed the strip at. */
+export type HeldView = { at: number | null; dismissedRev: number | null };
+
 export type SyncInput =
   | { kind: "loaded"; rev: number; resetRev: number }
   | { kind: "applied"; rev: number }
@@ -56,7 +59,6 @@ export type SyncEffect =
   | { kind: "flashSynced" };
 
 export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000, 30_000] as const;
-export const SUMMARY_AFTER = 50;
 
 type Step = { state: SyncState; effects: SyncEffect[] };
 

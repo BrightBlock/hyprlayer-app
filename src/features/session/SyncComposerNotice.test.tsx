@@ -48,7 +48,24 @@ describe("syncNotice", () => {
   });
 
   it("counts the revisions behind, the number a refusal reports, and names the device", () => {
-    expect(syncNotice(sync(), false, false)).toEqual({ kind: "behind", count: 2, device: "jons-macbook-pro" });
+    expect(syncNotice(sync(), false, false)).toEqual({ kind: "behind", count: 2, device: "jons-macbook-pro", at: null });
+  });
+
+  it("carries when the newest held turn arrived", () => {
+    expect(syncNotice(sync(), false, false, false, { at: 1_000, dismissedRev: null })).toMatchObject({ at: 1_000 });
+  });
+
+  it("hides a dismissed strip until another turn lands", () => {
+    expect(syncNotice(sync(), false, false, false, { at: null, dismissedRev: 43 })).toBeNull();
+    expect(syncNotice(sync({ remoteRev: 44 }), false, false, false, { at: null, dismissedRev: 43 })).toMatchObject({
+      kind: "behind",
+      count: 3,
+    });
+  });
+
+  it("never lets a dismissal hide the guard", () => {
+    const guard = syncNotice(sync({ phase: "guard", draft: true }), false, false, false, { at: null, dismissedRev: 43 });
+    expect(guard).toMatchObject({ kind: "guard" });
   });
 
   it("still offers Pull for held items that bring no new revision", () => {
@@ -56,6 +73,7 @@ describe("syncNotice", () => {
       kind: "behind",
       count: 0,
       device: "jons-macbook-pro",
+      at: null,
     });
   });
 
@@ -115,14 +133,23 @@ describe("SyncComposerNotice", () => {
     expect(status().textContent).toBe("");
   });
 
-  it("pluralizes the new-turns line and pulls on Pull", () => {
+  it("pluralizes the new-turns strip, loads on Load, and dismisses", () => {
     const one = renderNotice(sync({ remoteRev: 42 }));
     expect(status().textContent).toContain("1 new turn from jons-macbook-pro");
-    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(one.onPull).toHaveBeenCalledTimes(1);
+    expect(one.onDismiss).toHaveBeenCalledTimes(1);
     cleanup();
     renderNotice(sync());
     expect(status().textContent).toContain("2 new turns from jons-macbook-pro");
+  });
+
+  it("dates the strip by the newest held turn", () => {
+    const at = Date.now() - 2 * 60_000;
+    const handlers = { onPull: vi.fn(), onSendAnyway: vi.fn(), onLoad: vi.fn(), onDismiss: vi.fn() };
+    render(<SyncComposerNotice notice={syncNotice(sync(), false, false, false, { at, dismissedRev: null })} {...handlers} />);
+    expect(status().textContent).toContain("2 new turns from jons-macbook-pro · 2m ago");
   });
 
   it("renders the guard copy with both actions as buttons", () => {
