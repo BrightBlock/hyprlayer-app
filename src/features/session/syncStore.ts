@@ -1,4 +1,3 @@
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 
 import {
@@ -13,15 +12,7 @@ import {
 import type { EventBridge } from "@/lib/events";
 import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import {
-  IDLE_AFTER_MS,
-  isIdle,
-  transition,
-  type SyncEffect,
-  type SyncInput,
-  type SyncState,
-  type TurnAuthor,
-} from "./transcriptSync";
+import { transition, type SyncEffect, type SyncInput, type SyncState } from "./transcriptSync";
 
 type TranscriptSyncStore = {
   bySession: Record<string, SyncState>;
@@ -68,24 +59,10 @@ const SYNCED_FLASH_MS = 3_000;
 const WATCH_DEBOUNCE_MS = 300;
 const POLL_MS = 15_000;
 
-const lastKeyAt = new Map<string, number>();
 const drafting = new Map<string, boolean>();
-const ownTurn = new Map<string, { streaming: boolean; turnAuthor: TurnAuthor }>();
-const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const visible = () => document.visibilityState !== "hidden";
-
-function idleNow(sessionId: string): boolean {
-  const own = ownTurn.get(sessionId);
-  return isIdle({
-    now: Date.now(),
-    lastKeyAt: lastKeyAt.get(sessionId) ?? 0,
-    visible: visible(),
-    streaming: own?.streaming ?? false,
-    turnAuthor: own?.turnAuthor ?? null,
-  });
-}
 
 function fresh(sessionId: string): SyncState {
   return {
@@ -99,7 +76,6 @@ function fresh(sessionId: string): SyncState {
     workingDevice: null,
     flushable: false,
     draft: drafting.get(sessionId) ?? false,
-    idle: idleNow(sessionId),
     fetching: false,
     retry: null,
     syncedWith: null,
@@ -172,41 +148,11 @@ function runEffect(sessionId: string, effect: SyncEffect): void {
   }
 }
 
-function evaluate(sessionId: string): void {
+export function noteComposerInput(sessionId: string, draft: string): void {
+  const next = draft.trim() !== "";
+  drafting.set(sessionId, next);
   const state = syncOf(sessionId);
-  if (!state) return;
-  const idle = idleNow(sessionId);
-  const draft = drafting.get(sessionId) ?? false;
-  if (state.idle !== idle || state.draft !== draft) syncInput(sessionId, { kind: "composer", draft, idle });
-}
-
-function evaluateAll(): void {
-  for (const sessionId of Object.keys(useTranscriptSync.getState().bySession)) evaluate(sessionId);
-}
-
-/** `typed` is false when the draft changed without a keystroke (mount, a send clearing it, a recall). */
-export function noteComposerInput(sessionId: string, draft: string, typed = true): void {
-  drafting.set(sessionId, draft.trim() !== "");
-  if (typed) {
-    lastKeyAt.set(sessionId, Date.now());
-    clearTimeout(idleTimers.get(sessionId));
-    idleTimers.set(
-      sessionId,
-      setTimeout(() => {
-        idleTimers.delete(sessionId);
-        evaluate(sessionId);
-      }, IDLE_AFTER_MS),
-    );
-  }
-  evaluate(sessionId);
-}
-
-// Pushed on every store write, so it compares before it allocates.
-export function noteOwnTurn(sessionId: string, streaming: boolean, turnAuthor: TurnAuthor): void {
-  const prev = ownTurn.get(sessionId);
-  if (prev && prev.streaming === streaming && prev.turnAuthor === turnAuthor) return;
-  ownTurn.set(sessionId, { streaming, turnAuthor });
-  evaluate(sessionId);
+  if (state && state.draft !== next) syncInput(sessionId, { kind: "composer", draft: next });
 }
 
 export function setDivider(sessionId: string, divider: { seq: number; device: string } | null): void {
@@ -214,13 +160,9 @@ export function setDivider(sessionId: string, divider: { seq: number; device: st
 }
 
 export function forgetSync(sessionId: string): void {
-  for (const timers of [idleTimers, retryTimers]) {
-    clearTimeout(timers.get(sessionId));
-    timers.delete(sessionId);
-  }
-  lastKeyAt.delete(sessionId);
+  clearTimeout(retryTimers.get(sessionId));
+  retryTimers.delete(sessionId);
   drafting.delete(sessionId);
-  ownTurn.delete(sessionId);
   useTranscriptSync.setState((s) => {
     if (!(sessionId in s.bySession) && !(sessionId in s.viewers) && !(sessionId in s.divider)) return s;
     const bySession = { ...s.bySession };
@@ -311,9 +253,6 @@ export function setupTranscriptSync(): void {
     (self) => useTranscriptSync.setState({ self }),
     (e) => log.warn("sync", "loading this client's identity failed", e),
   );
-  // WebKit doesn't always fire visibilitychange on occlusion; focus changes re-check too.
-  document.addEventListener("visibilitychange", evaluateAll);
-  void getCurrentWindow().onFocusChanged(evaluateAll);
   setInterval(() => {
     if (connected && visible()) void sendWatch();
   }, POLL_MS);

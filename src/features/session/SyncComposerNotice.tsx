@@ -3,7 +3,7 @@ import { Button, Skeleton, Spinner } from "@/components/ui";
 import { deviceLabel, type SyncState } from "./transcriptSync";
 
 export type SyncNotice =
-  | { kind: "behind"; count: number }
+  | { kind: "behind"; count: number; device: string }
   | { kind: "retry"; count: number; seconds: number }
   | { kind: "syncing"; count: number }
   | { kind: "synced"; device: string }
@@ -35,17 +35,19 @@ export function syncNotice(
   if (sync.phase === "guard" || (sync.phase === "syncing" && sync.draft && count > 0)) {
     return { kind: "guard", count, device: sentenceDevice(sync), syncing: sync.phase === "syncing" };
   }
-  if (sync.phase === "behind" && count > 0) {
-    return sync.retry
-      ? { kind: "retry", count, seconds: Math.round(sync.retry.delayMs / 1000) }
-      : { kind: "behind", count };
+  if (sync.phase === "behind" && sync.retry) {
+    return { kind: "retry", count, seconds: Math.round(sync.retry.delayMs / 1000) };
   }
+  // Count 0 is held items with no new revision, such as a turn end or a prompt.
+  if (sync.phase === "behind") return { kind: "behind", count, device: deviceLabel(sync) };
   if (sync.phase === "syncing" && count > 0) return { kind: "syncing", count };
   if (sync.syncedWith) return { kind: "synced", device: sync.syncedWith };
   return null;
 }
 
 const turns = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`;
+// Held items with no new revision have nothing to count.
+const pullLabel = (n: number) => (n > 0 ? `Pull ${turns(n)}` : "Pull");
 
 const DOT = "h-1.5 w-1.5 shrink-0 rounded-full";
 const LINE = "mb-2 flex items-center gap-1.5 px-1 text-meta text-ink-dim";
@@ -91,9 +93,13 @@ function NoticeBody({
       return (
         <div className={LINE}>
           <span className={`${DOT} bg-info`} aria-hidden />
-          <span>{turns(notice.count)} waiting · pulls when you're idle</span>
+          <span>
+            {notice.count > 0
+              ? `${notice.count} new ${notice.count === 1 ? "turn" : "turns"} from ${notice.device}`
+              : `New from ${notice.device}`}
+          </span>
           <button type="button" onClick={onPull} className={LINK}>
-            now
+            Pull
           </button>
         </div>
       );
@@ -102,7 +108,7 @@ function NoticeBody({
         <div className={LINE}>
           <span className={`${DOT} bg-info`} aria-hidden />
           <span>
-            Couldn't pull {turns(notice.count)} · retrying in {notice.seconds}s
+            Couldn't pull {notice.count > 0 ? turns(notice.count) : "new turns"} · retrying in {notice.seconds}s
           </span>
           <button type="button" onClick={onPull} className={LINK}>
             now
@@ -131,8 +137,8 @@ function NoticeBody({
             <span className="text-ui font-semibold text-ink">This session moved on from another client</span>
           </div>
           <p className="mt-1 text-ui text-ink-dim">
-            {notice.device} added {turns(notice.count)} while you were drafting. Pull them in first so your message
-            answers the latest state. Your draft stays.
+            {notice.device} added {notice.count > 0 ? turns(notice.count) : "to this session"} while you were drafting.
+            Pull them in first so your message answers the latest state. Your draft stays.
           </p>
           <div className="mt-2.5 flex items-center gap-2">
             <Button variant="primary" size="sm" onClick={onPull} disabled={notice.syncing}>
@@ -144,7 +150,7 @@ function NoticeBody({
               ) : (
                 <Icon name="arrowDown" size="xs" />
               )}
-              Pull {turns(notice.count)}
+              {pullLabel(notice.count)}
             </Button>
             <Button variant="ghost" size="sm" onClick={onSendAnyway}>
               Send anyway

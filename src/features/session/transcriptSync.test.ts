@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ClientRef, SessionEvent, SessionLogEntryDto } from "@/lib/bindings";
@@ -7,8 +9,6 @@ import {
   canSend,
   deviceLabel,
   heldSummary,
-  IDLE_AFTER_MS,
-  isIdle,
   mergeEntries,
   RETRY_DELAYS_MS,
   route,
@@ -20,6 +20,7 @@ import {
   type SyncInput,
   type SyncState,
 } from "./transcriptSync";
+import { SyncComposerNotice, syncNotice } from "./SyncComposerNotice";
 
 const SELF: ClientRef = { clientId: "me", device: "my-mac" };
 const OTHER: ClientRef = { clientId: "them", device: "jons-macbook-pro" };
@@ -36,7 +37,6 @@ function synced(over: Partial<SyncState> = {}): SyncState {
     workingDevice: null,
     flushable: false,
     draft: false,
-    idle: true,
     fetching: false,
     retry: null,
     syncedWith: null,
@@ -88,7 +88,7 @@ describe("transition", () => {
   });
 
   it("T1 an own revision on a detached view pulls silently and its fetch sets localRev", () => {
-    const start = synced({ draft: true, idle: false });
+    const start = synced({ draft: true });
     const { state, effects } = run(start, remote({ own: true, device: SELF.device }));
     expect(effects).toEqual(["pull"]);
     expect(state.phase).toBe("inSync");
@@ -100,11 +100,11 @@ describe("transition", () => {
     expect(after.effects).not.toContain("flashSynced");
   });
 
-  it("T2 another client's revision with an empty composer and an idle client pulls at once", () => {
+  it("T2 another client's revision with an empty composer waits behind", () => {
     const { state, effects } = run(synced(), remote());
-    expect(effects).toEqual(["pull"]);
-    expect(state.phase).toBe("syncing");
-    expect(state.fetching).toBe(true);
+    expect(effects).toEqual([]);
+    expect(state.phase).toBe("behind");
+    expect(state.fetching).toBe(false);
     expect(state.pendingTurns).toEqual([{ rev: 6, kinds: ["user"] }]);
   });
 
@@ -114,21 +114,15 @@ describe("transition", () => {
     expect(effects).not.toContain("pull");
   });
 
-  it("T4 a revision while not idle goes behind", () => {
-    const { state, effects } = run(synced({ idle: false }), remote());
-    expect(state.phase).toBe("behind");
+  it("T5 clearing the draft while behind leaves the guard and does not pull", () => {
+    const guarded = run(synced({ draft: true }), remote()).state;
+    const { state, effects } = run(guarded, { kind: "composer", draft: false });
     expect(effects).toEqual([]);
-  });
-
-  it("T5 becoming idle while behind pulls", () => {
-    const behind = run(synced({ idle: false }), remote()).state;
-    const { state, effects } = run(behind, { kind: "composer", draft: false, idle: true });
-    expect(effects).toEqual(["pull"]);
-    expect(state.phase).toBe("syncing");
+    expect(state.phase).toBe("behind");
   });
 
   it("T6 a revision at or below localRev does not reopen behind", () => {
-    const start = synced({ idle: false });
+    const start = synced();
     for (const rev of [4, 5]) {
       const { state, effects } = run(start, remote({ rev, turns: [{ rev, kinds: ["assistant"] }] }));
       expect(state.phase).toBe("inSync");
@@ -138,7 +132,7 @@ describe("transition", () => {
   });
 
   it("T7 a revision that lands during a fetch is fetched after the fetch ends", () => {
-    const syncing = run(synced(), remote()).state;
+    const syncing = run(synced(), remote(), { kind: "pull" }).state;
     const during = run(syncing, remote({ rev: 7, turns: [{ rev: 7, kinds: ["assistant"] }] }));
     expect(during.effects).toEqual([]);
     expect(during.state.phase).toBe("syncing");
@@ -159,10 +153,7 @@ describe("transition", () => {
     expect(pulled.state.remoteRev).toBe(6);
     expect(pulled.state.fetching).toBe(false);
 
-    const idleAgain = run(pulled.state, { kind: "composer", draft: false, idle: true });
-    expect(idleAgain.effects).toEqual([]);
-
-    const drafting = run(pulled.state, { kind: "composer", draft: true, idle: false });
+    const drafting = run(pulled.state, { kind: "composer", draft: true });
     expect(drafting.state.phase).toBe("guard");
 
     const polled = run(pulled.state, { kind: "polled", rev: 5, resetRev: 0, inFlight: 0, working: false });
@@ -172,7 +163,7 @@ describe("transition", () => {
   });
 
   it("T9 a fetch failure keeps the pending turns, goes behind and backs off 1s, 2s, 5s, 15s, 30s, 30s", () => {
-    let state = run(synced(), remote()).state;
+    let state = run(synced(), remote(), { kind: "pull" }).state;
     const delays: number[] = [];
     for (let i = 0; i < 6; i += 1) {
       const failed = transition(state, { kind: "fetchFailed" });
@@ -192,7 +183,7 @@ describe("transition", () => {
   });
 
   it("T10 a success after failures resets the backoff", () => {
-    const failing = run(synced(), remote(), { kind: "fetchFailed" }, { kind: "pull" }, { kind: "fetchFailed" });
+    const failing = run(synced(), remote(), { kind: "pull" }, { kind: "fetchFailed" }, { kind: "pull" }, { kind: "fetchFailed" });
     expect(failing.state.retry?.attempt).toBe(2);
     const ok = run(failing.state, { kind: "pull" }, fetched({ rev: 6 }));
     expect(ok.state.retry).toBeNull();
@@ -209,7 +200,7 @@ describe("transition", () => {
   });
 
   it("T12 a reset reloads and keeps pending state until the reload is loaded", () => {
-    const behind = run(synced({ idle: false }), remote()).state;
+    const behind = run(synced(), remote()).state;
     const reset = run(behind, { kind: "reset" });
     expect(reset.effects).toEqual(["reload"]);
     expect(reset.state.pendingTurns).toEqual(behind.pendingTurns);
@@ -225,21 +216,21 @@ describe("transition", () => {
   });
 
   it("T13 a pull while already fetching starts no second fetch", () => {
-    const syncing = run(synced(), remote()).state;
-    const { state, effects } = run(syncing, { kind: "pull" }, remote({ rev: 7 }), { kind: "composer", draft: false, idle: true });
+    const syncing = run(synced(), remote(), { kind: "pull" }).state;
+    const { state, effects } = run(syncing, { kind: "pull" }, remote({ rev: 7 }), { kind: "composer", draft: false });
     expect(effects).toEqual([]);
     expect(state.fetching).toBe(true);
   });
 
   it("T14 a deleted session shows nothing pending, and only a reload revives it", () => {
-    const behind = run(synced({ idle: false }), remote(), { kind: "stale", rev: 9, committedRev: 8 }).state;
+    const behind = run(synced(), remote(), { kind: "stale", rev: 9, committedRev: 8 }).state;
     const gone = run(behind, { kind: "gone" });
     expect(gone.state.phase).toBe("inSync");
     expect(gone.state.pendingTurns).toEqual([]);
     expect(pending(gone.state)).toBe(false);
     expect(gone.effects).toEqual([]);
 
-    const ignored = run(gone.state, remote({ rev: 10 }), { kind: "pull" }, { kind: "composer", draft: false, idle: true });
+    const ignored = run(gone.state, remote({ rev: 10 }), { kind: "pull" }, { kind: "composer", draft: false });
     expect(ignored.effects).toEqual([]);
     expect(pending(ignored.state)).toBe(false);
 
@@ -255,11 +246,11 @@ describe("transition", () => {
   });
 
   it("T16 Synced with <device> flashes only after a pull that brought another device's turns", () => {
-    const real = run(synced(), remote(), fetched({ rev: 6, device: OTHER.device }));
+    const real = run(synced(), remote(), { kind: "pull" }, fetched({ rev: 6, device: OTHER.device }));
     expect(real.effects).toEqual(["pull", "flashSynced"]);
     expect(real.state.syncedWith).toBe(OTHER.device);
 
-    const fromSummary = run(synced(), remote(), fetched({ rev: 6 }));
+    const fromSummary = run(synced(), remote(), { kind: "pull" }, fetched({ rev: 6 }));
     expect(fromSummary.effects).toContain("flashSynced");
     expect(fromSummary.state.syncedWith).toBe(OTHER.device);
 
@@ -272,8 +263,8 @@ describe("transition", () => {
     expect(empty.state.syncedWith).toBeNull();
   });
 
-  it("T17 held items flushable with no new rev pull when idle", () => {
-    const { state, effects } = run(synced(), remote({ rev: 5, turns: [], flushable: true }));
+  it("T17 held items flushable with no new rev clear on the pull that applies them", () => {
+    const { state, effects } = run(synced(), remote({ rev: 5, turns: [], flushable: true }), { kind: "pull" });
     expect(effects).toEqual(["pull"]);
     expect(state.phase).toBe("syncing");
     const done = run(state, fetched({ rev: 5 }));
@@ -289,12 +280,12 @@ describe("transition", () => {
   });
 
   it("T19 an authoritative read never lowers remoteRev below a reported commit", () => {
-    const behind = run(synced({ idle: false }), remote({ rev: 8, turns: [{ rev: 8, kinds: ["user"] }] })).state;
+    const behind = run(synced(), remote({ rev: 8, turns: [{ rev: 8, kinds: ["user"] }] })).state;
     const polled = run(behind, { kind: "polled", rev: 6, resetRev: 0, inFlight: 0, working: false });
     expect(polled.state.remoteRev).toBe(8);
     expect(polled.state.committedRev).toBe(8);
 
-    const stale = run(synced({ idle: false }), { kind: "stale", rev: 9, committedRev: 7 }).state;
+    const stale = run(synced(), { kind: "stale", rev: 9, committedRev: 7 }).state;
     const read = run(stale, { kind: "pull" }, fetched({ rev: 6 }));
     expect(read.state.committedRev).toBe(7);
     expect(read.state.remoteRev).toBeGreaterThanOrEqual(7);
@@ -328,18 +319,8 @@ describe("transition", () => {
     expect(deviceLabel(synced({ authorDevice: "mbp", workingDevice: "nexus" }))).toBe("mbp");
   });
 
-  it("T23 only an own streaming turn makes the client busy", () => {
-    const base = { now: 10_000, lastKeyAt: 10_000 - IDLE_AFTER_MS, visible: true };
-    expect(isIdle({ ...base, streaming: true, turnAuthor: "other" })).toBe(true);
-    expect(isIdle({ ...base, streaming: true, turnAuthor: null })).toBe(true);
-    expect(isIdle({ ...base, streaming: true, turnAuthor: "self" })).toBe(false);
-    expect(isIdle({ ...base, streaming: false, turnAuthor: "self" })).toBe(true);
-    expect(isIdle({ ...base, lastKeyAt: base.lastKeyAt + 1, streaming: false, turnAuthor: null })).toBe(false);
-    expect(isIdle({ ...base, visible: false, streaming: false, turnAuthor: null })).toBe(false);
-  });
-
   it("a partial page loops without advancing localRev past the rows read", () => {
-    const syncing = run(synced(), remote({ rev: 9, turns: [{ rev: 9, kinds: ["user"] }] })).state;
+    const syncing = run(synced(), remote({ rev: 9, turns: [{ rev: 9, kinds: ["user"] }] }), { kind: "pull" }).state;
     const partial = run(syncing, fetched({ rev: 9, remaining: 40 }));
     expect(partial.effects).toEqual(["pull"]);
     expect(partial.state.localRev).toBe(5);
@@ -394,10 +375,11 @@ describe("route and merge", () => {
     expect(route(arrival(partial, { seq: null, author: SELF }), ctx())).toBe("apply");
   });
 
-  it("R3 another author's permissionAsk with an empty buffer applies", () => {
-    expect(route(arrival(permissionAsk, { seq: 11 }), ctx())).toBe("apply");
-    expect(route(arrival(questionAsk, { seq: null }), ctx())).toBe("apply");
-    expect(route(arrival(turnDone, { seq: 12 }), ctx())).toBe("apply");
+  it("R3 another author's permissionAsk with an empty buffer is held; an author-less one applies", () => {
+    expect(route(arrival(permissionAsk, { seq: 11 }), ctx())).toBe("hold");
+    expect(route(arrival(questionAsk, { seq: null }), ctx())).toBe("hold");
+    expect(route(arrival(turnDone, { seq: 12 }), ctx())).toBe("hold");
+    expect(route(arrival(permissionAsk, { seq: 11, author: null }), ctx())).toBe("apply");
   });
 
   it("R4 a buffer is flushable once it holds a commit or ends where the turn waits", () => {
@@ -581,5 +563,79 @@ describe("route and merge", () => {
     const merged = mergeEntries(view, 4, { entries: [entry(null, assistantText("?"))], nextCursor: after(4) });
     expect(merged.view).toBe(view);
     expect(merged.appliedSeq).toBe(4);
+  });
+});
+
+describe("manual pull: another device's turns wait for Pull", () => {
+  const noticeText = (state: SyncState) =>
+    renderToStaticMarkup(
+      createElement(SyncComposerNotice, {
+        notice: syncNotice(state, false, false),
+        onPull: () => {},
+        onSendAnyway: () => {},
+        onLoad: () => {},
+        onDismiss: () => {},
+      }),
+    ).replace(/<[^>]+>/g, " ");
+
+  it("M1 a foreign revision on an idle, visible, draftless view waits instead of pulling", () => {
+    const { state, effects } = run(synced(), remote());
+    expect(effects).not.toContain("pull");
+    expect(state.fetching).toBe(false);
+    expect(state.phase).toBe("behind");
+    expect(state.pendingTurns).toEqual([{ rev: 6, kinds: ["user"] }]);
+    expect(canSend(state)).toBe(false);
+  });
+
+  it("M2 a foreign prompt or turn end is held even with an empty buffer", () => {
+    for (const event of [permissionAsk, questionAsk, turnDone, exited]) {
+      expect(route(arrival(event, { seq: 11 }), ctx())).toBe("hold");
+      expect(route(arrival(event, { seq: null }), ctx())).toBe("hold");
+    }
+  });
+
+  it("M3 the behind notice names the turns and the device, with a Pull button", () => {
+    const behind = run(synced(), remote(), remote({ rev: 7, turns: [{ rev: 7, kinds: ["assistant"] }] })).state;
+    const text = noticeText(behind);
+    expect(text).toContain("2 new turns from jons-macbook-pro");
+    expect(text).toContain("Pull");
+    expect(text).not.toContain("pulls when you're idle");
+    expect(noticeText(run(synced(), remote()).state)).toContain("1 new turn from jons-macbook-pro");
+  });
+
+  it("M4 an explicit pull fetches", () => {
+    const behind = run(synced(), remote()).state;
+    const { state, effects } = run(behind, { kind: "pull" });
+    expect(effects).toEqual(["pull"]);
+    expect(state.phase).toBe("syncing");
+    const done = run(state, fetched({ rev: 6, device: OTHER.device }));
+    expect(done.state.localRev).toBe(6);
+    expect(done.state.phase).toBe("inSync");
+    expect(done.effects).toContain("flashSynced");
+  });
+
+  it("M5 an own revision on a detached view still pulls silently", () => {
+    const { state, effects } = run(synced(), remote({ own: true, device: SELF.device }));
+    expect(effects).toEqual(["pull"]);
+    expect(state.pendingTurns).toEqual([]);
+    expect(syncNotice(state, false, false)).toBeNull();
+  });
+
+  it("M6 a foreign gap with a draft shows the guard and blocks Send", () => {
+    const { state, effects } = run(synced(), remote(), { kind: "composer", draft: true });
+    expect(state.phase).toBe("guard");
+    expect(effects).not.toContain("pull");
+    expect(canSend(state)).toBe(false);
+    expect(syncNotice(state, false, false)).toMatchObject({ kind: "guard", count: 1, device: OTHER.device });
+  });
+
+  it("M7 held items with no new revision wait for Pull and block Send", () => {
+    const { state, effects } = run(synced(), remote({ rev: 5, turns: [], flushable: true }));
+    expect(effects).toEqual([]);
+    expect(state.phase).toBe("behind");
+    expect(canSend(state)).toBe(false);
+    expect(noticeText(state)).toContain("New from jons-macbook-pro");
+    const drafting = run(state, { kind: "composer", draft: true }).state;
+    expect(drafting.phase).toBe("guard");
   });
 });

@@ -42,7 +42,9 @@ const h = vi.hoisted(() => {
     data: { clientId: "me", device: "my-mac" },
   }));
   const watchSessions = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
+  const notifyNeedsAttention = vi.fn(async () => {});
   return {
+    notifyNeedsAttention,
     connectionStatus,
     listSessionTurns,
     getClientIdentity,
@@ -63,6 +65,15 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
+vi.mock("@tauri-apps/api/window", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getCurrentWindow: () => ({ isFocused: async () => false, onFocusChanged: async () => () => {} }),
+}));
+vi.mock("@/lib/notifications", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  findWorkstreamForNotify: () => ({ projectPath: "/p", title: "ws" }),
+  notifyNeedsAttention: h.notifyNeedsAttention,
+}));
 vi.mock("../../lib/bindings", () => ({
   commands: {
     startStageSession: h.startStageSession,
@@ -103,6 +114,7 @@ const {
   useMostRecentDoc,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
+const { pullNow } = await import("./sessionStore");
 const { forgetSyncSupport, noteComposerInput, syncInput, syncOf, useTranscriptSync } = await import("./syncStore");
 const { log } = await import("@/lib/log");
 
@@ -1231,6 +1243,53 @@ describe("transcript sync: queue and reload", () => {
     vi.restoreAllMocks();
   });
 
+  it("holds another device's turn on an idle attached view until Pull", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    emitAt(THEIRS, 2, 1, OTHER);
+    emitAt(reply("theirs done"), 3, 2, OTHER);
+    emitAt(TURN_DONE, 4, 2, OTHER);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const texts = () => entryOf(id).items.map((it) => ("text" in it ? it.text : it.kind));
+    expect(texts()).not.toContain("theirs done");
+    expect(h.listSessionTurns).not.toHaveBeenCalled();
+    expect(syncOf(id)?.phase).toBe("behind");
+
+    await pullNow(id);
+    expect(texts()).toContain("theirs done");
+    expect(entryOf(id).streaming).toBe(false);
+    expect(syncOf(id)?.phase).toBe("inSync");
+  });
+
+  it("never alerts for a prompt in another device's turn, even when Pull applies it", async () => {
+    const ask: SessionEvent = { kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}" };
+    h.notifyNeedsAttention.mockClear();
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    emitAt(THEIRS, 2, 1, OTHER);
+    emitAt(ask, 3, 1, OTHER);
+    await settle();
+    await pullNow(id);
+    await settle();
+
+    expect(classifyEntry(entryOf(id))).toBe("needs-you");
+    expect(h.notifyNeedsAttention).not.toHaveBeenCalled();
+  });
+
+  it("alerts for a prompt in this device's own turn", async () => {
+    const ask: SessionEvent = { kind: "permissionAsk", requestId: "r2", toolName: "Bash", input: "{}" };
+    h.notifyNeedsAttention.mockClear();
+    await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(ask, 1, 0);
+    await settle();
+
+    expect(h.notifyNeedsAttention).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a flush refused as stale to the head of the queue and sends it again after the pull", async () => {
     const id = await startBusySession();
     emitAt(INIT, 0, 0);
@@ -1384,7 +1443,7 @@ describe("transcript sync: queue and reload", () => {
       .mockResolvedValueOnce(page([row(3, reply("more")), row(4, TURN_DONE)], 3));
 
     syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: true });
-    await settle();
+    await pullNow(id);
     await settle();
 
     expect(h.listSessionTurns).toHaveBeenCalledTimes(2);
@@ -1459,7 +1518,7 @@ describe("transcript sync: queue and reload", () => {
     h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("bye")), row(4, COMPLETED)], 2));
 
     syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: false });
-    await settle();
+    await pullNow(id);
 
     expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
     expect(entryOf(id).state).toBe("completed");

@@ -102,7 +102,6 @@ import {
 } from "./transcriptSync";
 import {
   forgetSync,
-  noteOwnTurn,
   rev,
   scheduleWatch,
   selfClientId,
@@ -147,7 +146,7 @@ const channels = new Map<string, Channel<SessionStreamItemDto>>();
 
 const restoring = new Set<string>();
 
-// Another device's items, waiting for this client to be idle (R8).
+// Another device's items, waiting for the user to pull them.
 const held = new Map<string, Arrival[]>();
 
 function entryOf(sessionId: string): SessionEntry | undefined {
@@ -163,7 +162,6 @@ function setEntry(sessionId: string, next: SessionEntry): void {
     return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
   });
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
-  noteOwnTurn(sessionId, next.streaming, next.turnAuthor ?? null);
   if (added) scheduleWatch();
 }
 
@@ -307,6 +305,9 @@ function holdItem(sessionId: string, item: Arrival): void {
   if (queue) queue.push(item);
   else held.set(sessionId, [item]);
   reportHeld(sessionId);
+  // A queued message waits on this turn's end; sending it is the user's own action.
+  const ended = item.event.kind === "turnDone" || item.event.kind === "exited";
+  if (ended && (entryOf(sessionId)?.queued.length ?? 0) > 0) void pullNow(sessionId);
 }
 
 function reportHeld(sessionId: string): void {
@@ -389,7 +390,8 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
   const autoApproved =
     event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName);
-  if (!wasNeedsYou && isNeedsYou && !autoApproved) {
+  // Another device is driving this turn; its user answers the prompt there.
+  if (!wasNeedsYou && isNeedsYou && !autoApproved && nextEntry.turnAuthor !== "other") {
     void maybeNotifyTransition(sessionId, current.workstreamId, current.stage);
   }
 
@@ -1001,8 +1003,12 @@ function flushQueuedMessage(sessionId: string): void {
   flushing.add(sessionId);
   void deliverQueued(sessionId, next).then((requeued) => {
     flushing.delete(sessionId);
+    if (!requeued) return;
+    const sync = syncOf(sessionId);
     // A pull that closed the gap while this flush held the slot found nothing to send.
-    if (requeued && !behind(syncOf(sessionId))) flushQueuedMessage(sessionId);
+    if (!behind(sync)) flushQueuedMessage(sessionId);
+    // A refusal's commits are read now, since the user already sent; an in-flight send alone has nothing to read.
+    else if (sync && sync.committedRev > sync.localRev) void pullNow(sessionId);
   });
 }
 

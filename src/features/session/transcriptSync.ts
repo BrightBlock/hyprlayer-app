@@ -20,7 +20,6 @@ export type SyncState = {
   /** Held items can apply: they include a commit or end where the turn waits. */
   flushable: boolean;
   draft: boolean;
-  idle: boolean;
   fetching: boolean;
   retry: { attempt: number; delayMs: number } | null;
   syncedWith: string | null;
@@ -41,7 +40,7 @@ export type SyncInput =
       own: boolean;
     }
   | { kind: "polled"; rev: number; resetRev: number; inFlight: number; working: boolean }
-  | { kind: "composer"; draft: boolean; idle: boolean }
+  | { kind: "composer"; draft: boolean }
   | { kind: "pull" }
   | { kind: "fetched"; rev: number; resetRev: number; inFlight: number; remaining: number; device: string | null }
   | { kind: "fetchFailed" }
@@ -56,7 +55,6 @@ export type SyncEffect =
   | { kind: "retryIn"; ms: number }
   | { kind: "flashSynced" };
 
-export const IDLE_AFTER_MS = 2_000;
 export const RETRY_DELAYS_MS = [1_000, 2_000, 5_000, 15_000, 30_000] as const;
 export const SUMMARY_AFTER = 50;
 
@@ -109,7 +107,9 @@ export function transition(state: SyncState, input: SyncInput): Step {
       if (!input.attached) {
         next.remoteRev = Math.max(state.remoteRev, input.rev);
         next.pendingTurns = mergeTurns(state.pendingTurns, input.turns, state.localRev);
-        if (input.device && input.turns.some((t) => t.rev > state.localRev)) next.authorDevice = input.device;
+        if (input.device && (input.flushable || input.turns.some((t) => t.rev > state.localRev))) {
+          next.authorDevice = input.device;
+        }
       }
       recheckIfReleased(next, input.turns, effects);
       next = settle(next, effects).state;
@@ -124,7 +124,7 @@ export function transition(state: SyncState, input: SyncInput): Step {
     }
 
     case "composer":
-      return settle({ ...state, draft: input.draft, idle: input.idle }, effects);
+      return settle({ ...state, draft: input.draft }, effects);
 
     case "pull":
       if (state.fetching) return { state, effects };
@@ -192,21 +192,16 @@ export function transition(state: SyncState, input: SyncInput): Step {
   }
 }
 
+// Another device's turns only ever apply on a pull the user asks for.
 function settle(state: SyncState, effects: SyncEffect[]): Step {
-  const behind = state.remoteRev > state.localRev;
-  // A gap that only another client's in-flight send explains has nothing to read yet.
-  const pullable = (behind && state.committedRev > state.localRev) || state.flushable;
+  // Held items with no new revision (a turn end, a prompt) still wait on a pull.
+  const pending = state.remoteRev > state.localRev || state.flushable;
   let phase: SyncPhase;
-  let next = state;
   if (state.fetching) phase = "syncing";
-  else if (state.draft && behind) phase = "guard";
-  else if (state.idle && !state.draft && state.retry === null && pullable) {
-    effects.push({ kind: "pull" });
-    next = { ...state, fetching: true };
-    phase = "syncing";
-  } else if (behind) phase = "behind";
+  else if (state.draft && pending) phase = "guard";
+  else if (pending) phase = "behind";
   else phase = "inSync";
-  return { state: { ...next, phase }, effects };
+  return { state: { ...state, phase }, effects };
 }
 
 function authoritative(state: SyncState, rev: number, inFlight: number): SyncState {
@@ -236,16 +231,6 @@ export function canSend(state: SyncState): boolean {
   return state.phase === "inSync";
 }
 
-export function isIdle(a: {
-  now: number;
-  lastKeyAt: number;
-  visible: boolean;
-  streaming: boolean;
-  turnAuthor: TurnAuthor;
-}): boolean {
-  return a.now - a.lastKeyAt >= IDLE_AFTER_MS && a.visible && !(a.streaming && a.turnAuthor === "self");
-}
-
 export function deviceLabel(state: SyncState): string {
   return state.authorDevice || state.workingDevice || "another device";
 }
@@ -264,13 +249,6 @@ export type Routed = Omit<Arrival, "receivedAt">;
 export type RouteContext = { selfId: string | null; appliedSeq: number; heldCount: number; ownTurnStreaming: boolean };
 
 const COMMIT_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["userMessage", "assistantText", "toolResult"]);
-const HELD_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set([
-  "userMessage",
-  "assistantText",
-  "thinking",
-  "toolUse",
-  "toolResult",
-]);
 const WAIT_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["turnDone", "exited", "permissionAsk", "questionAsk"]);
 const TURN_END_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["turnDone", "exited"]);
 
@@ -286,7 +264,7 @@ export function route(item: Routed, ctx: RouteContext): "apply" | "hold" | "drop
   if (foreign && event.kind === "partialText") return "drop";
   if (ctx.heldCount > 0) return isOwn(item.author, ctx.selfId) ? "flush" : "hold";
   if (foreign && event.kind === "userMessage" && ctx.ownTurnStreaming) return "apply";
-  if (foreign && item.seq !== null && HELD_KINDS.has(event.kind)) return "hold";
+  if (foreign) return "hold";
   return "apply";
 }
 

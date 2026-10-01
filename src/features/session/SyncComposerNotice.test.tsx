@@ -19,7 +19,6 @@ function sync(over: Partial<SyncState> = {}): SyncState {
     workingDevice: null,
     flushable: false,
     draft: false,
-    idle: false,
     fetching: false,
     retry: null,
     syncedWith: null,
@@ -48,8 +47,16 @@ describe("syncNotice", () => {
     expect(syncNotice(sync({ gone: true }), false, false)).toBeNull();
   });
 
-  it("counts the revisions behind, the number a refusal reports", () => {
-    expect(syncNotice(sync(), false, false)).toEqual({ kind: "behind", count: 2 });
+  it("counts the revisions behind, the number a refusal reports, and names the device", () => {
+    expect(syncNotice(sync(), false, false)).toEqual({ kind: "behind", count: 2, device: "jons-macbook-pro" });
+  });
+
+  it("still offers Pull for held items that bring no new revision", () => {
+    expect(syncNotice(sync({ remoteRev: 41, flushable: true }), false, false)).toEqual({
+      kind: "behind",
+      count: 0,
+      device: "jons-macbook-pro",
+    });
   });
 
   it("names the retry delay after a failed pull", () => {
@@ -108,11 +115,14 @@ describe("SyncComposerNotice", () => {
     expect(status().textContent).toBe("");
   });
 
-  it("pluralizes the waiting line and pulls on now", () => {
+  it("pluralizes the new-turns line and pulls on Pull", () => {
     const one = renderNotice(sync({ remoteRev: 42 }));
-    expect(status().textContent).toContain("1 turn waiting · pulls when you're idle");
-    fireEvent.click(screen.getByRole("button", { name: "now" }));
+    expect(status().textContent).toContain("1 new turn from jons-macbook-pro");
+    fireEvent.click(screen.getByRole("button", { name: "Pull" }));
     expect(one.onPull).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderNotice(sync());
+    expect(status().textContent).toContain("2 new turns from jons-macbook-pro");
   });
 
   it("renders the guard copy with both actions as buttons", () => {

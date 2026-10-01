@@ -433,11 +433,12 @@ watch set).
   commits or in-flight reservations. A client's own turns, its in-flight sends and
   the app follow-ups of its turns never count. A reservation is released by its
   echoed `UserMessage`, by `Exited`, or after 30s.
-- **Client.** Another device's committed items are held while this window is busy
-  or has a draft, then applied in order at the next idle moment; partial text is
-  dropped. A queued message refused as stale returns to the head of the queue and
-  is sent after the pull. A `rewound` item, or a higher `reset_rev` anywhere,
-  reloads the view and keeps the draft.
+- **Client.** Another device's items, prompts included, are held until the user
+  pulls, then applied in order; partial text is dropped, and a prompt in another
+  device's turn never notifies. A queued message pulls before it is sent, and
+  when another device's turn it waits on ends; one refused as stale returns to the
+  head of the queue and is sent after that pull. A `rewound` item, or a higher
+  `reset_rev` anywhere, reloads the view and keeps the draft.
 
 ## Part 6 — Runtime events
 

@@ -528,7 +528,7 @@ What a view shows of turns another client added (`docs/adr/0009-hyprlayer-server
 - **Motion.** `animate-shimmer` (1.4s sweep) and `animate-sync-in` (350ms fade and 4px
   rise, on pulled items only) each have a `prefers-reduced-motion` block, and the shimmer
   joins the `data-window-blurred` pause list.
-- **Colour.** Sync is `info`: the composer's status line and its `now` link, the "New from
+- **Colour.** Sync is `info`: the composer's status line and its Pull and `now` links, the "New from
   `<device>`" divider (`text-label text-info`, `bg-info/30` hairlines), the remote chip, the
   new-turns pill. The draft guard is `warn`: its card follows
   `HandoffBanner`'s (`rounded-md border border-warn/40 bg-warn/5`), the composer border turns

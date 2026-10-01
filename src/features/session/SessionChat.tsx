@@ -1004,7 +1004,7 @@ export function SessionChat({
 
   // Every draft change, typed or not: a send or a recall clears or fills it without a keystroke.
   useEffect(() => {
-    if (sid) noteComposerInput(sid, draft, false);
+    if (sid) noteComposerInput(sid, draft);
   }, [sid, draft]);
 
   const backgroundTasks = useSessionBackgroundTasks(sid);
@@ -1633,7 +1633,6 @@ export function SessionChat({
                         }
                         recalledValueRef.current = null;
                         onDraftChange(val);
-                        if (sid) noteComposerInput(sid, val);
                         autocomplete.syncCaret();
                       }}
                       onFocus={() => setComposerFocused(true)}
