@@ -31,6 +31,7 @@ import { BinaryCard } from "@/features/settings/BinaryCard";
 
 const DOCS_URL = "https://ollama.com";
 const DEFAULT_ENDPOINT = "http://localhost:11434";
+const NO_MODELS: string[] = [];
 
 function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -49,7 +50,7 @@ export function OllamaHarnessTab({
 }) {
   const ollama: OllamaSettings = settings.providers?.ollama ?? {
     endpoint: null,
-    selectedModels: [],
+    selectedModels: NO_MODELS,
     defaultModel: null,
   };
   const probe = useOllamaStatus(ollama.endpoint);
@@ -58,7 +59,7 @@ export function OllamaHarnessTab({
   const setDefault = useSetOllamaDefaultModel();
   const save = useSetAppSettings();
 
-  const settingsSelected = ollama.selectedModels ?? [];
+  const settingsSelected = ollama.selectedModels ?? NO_MODELS;
   const [pendingSelected, setPendingSelected] = useState<string[] | null>(null);
   const selected = pendingSelected ?? settingsSelected;
   useEffect(() => {
