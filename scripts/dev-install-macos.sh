@@ -31,6 +31,7 @@ FORCE=0
 FETCH=1
 UNINSTALL=0
 VERSION_SUFFIX=1
+REMOTES=()
 
 step() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -45,6 +46,8 @@ usage() {
     '  --ref <ref>           track something else (a branch, tag, SHA)' \
     '  --no-fetch            use what is already fetched (offline)' \
     '  --no-version-suffix   build a bare x.y.z' \
+    '  --remote <ssh-host>   also install this commit on a Linux host and share its' \
+    '                        server (repeatable; the host must pin this profile)' \
     '  --uninstall           remove the install (keeps its data dir)'
 }
 
@@ -55,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) UNINSTALL=1; shift ;;
     --no-version-suffix) VERSION_SUFFIX=0; shift ;;
     --ref)       REF="${2:?--ref needs a value}"; shift 2 ;;
+    --remote)    REMOTES+=("${2:?--remote needs a host}"); shift 2 ;;
     -h|--help)   usage; exit 0 ;;
     *)           die "unknown argument: $1" ;;
   esac
@@ -101,9 +105,23 @@ SHA="$(git -C "$SRC_DIR" rev-parse --verify "$REF^{commit}" 2>/dev/null)" \
 SHORT="$(git -C "$SRC_DIR" rev-parse --short "$SHA")"
 SUBJECT="$(git -C "$SRC_DIR" log -1 --format=%s "$SHA")"
 
+install_remotes() {
+  [[ ${#REMOTES[@]} -gt 0 ]] || return 0
+  local server_version flags=() host
+  server_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$SRC_DIR/crates/hyprlayer-server/Cargo.toml" | head -n1)"
+  [[ $FORCE -eq 1 ]] && flags+=(--force)
+  [[ $VERSION_SUFFIX -eq 0 ]] && flags+=(--no-version-suffix)
+  for host in "${REMOTES[@]}"; do
+    "$SRC_DIR/scripts/dev-install-remote.sh" --host "$host" --ref "$SHA" --app-id "$APP_ID" \
+      --version "$server_version" --cache-root "$DATA_DIR/server-cache" ${flags[@]+"${flags[@]}"} \
+      || die "--remote $host failed"
+  done
+}
+
 if [[ $FORCE -eq 0 && -d "$APP_BUNDLE" && -f "$STAMP" ]] && grep -qx "$SHA" "$STAMP"; then
   step "Already on $REF ($SHORT — $SUBJECT)"
   info "Nothing to build. Use --force to rebuild anyway."
+  install_remotes
   exit 0
 fi
 
@@ -229,3 +247,5 @@ if [[ -n "$REPO" ]]; then
 else
   info "refresh   $BOOTSTRAP"
 fi
+
+install_remotes

@@ -25,21 +25,19 @@ TRIPLE="$LINUX_TRIPLE"
 # build a developer actually runs is `.dev`, so the binary landed in a cache
 # the app never reads, and the app fell through to a download that does not
 # exist yet — which reads as provisioning being broken rather than as staging
-# to the wrong place. The bytes are identical for all three, so seed them all.
+# to the wrong place. The bytes are identical for both, so seed both.
+# ai.brightblock.hyprlayer.main (dev-install-*.sh) asks for its own commit's
+# server, which this tree is not: `dev-install-*.sh --remote` stages that one.
 IDENTIFIER=""
 ALL_IDENTIFIERS=(
   "ai.brightblock.hyprlayer"      # release install
   "ai.brightblock.hyprlayer.dev"  # tauri.dev.conf.json
-  "ai.brightblock.hyprlayer.main" # dev-install-*.sh
 )
 BUILDER="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
 REMOTE_DIR="hyprlayer-server-stage"
 FORCE=0
 FROM_HEAD=0
 VERSION_OVERRIDE=""
-# dev-install-*.sh all build out of this clone, stamping the server's version
-# `<version>+dev.<sha>` first — so it records what the installed app asks for.
-DEV_CLONE="${HYPRLAYER_DEV_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/hyprlayer-dev}/src"
 DEV_IDENTIFIER="ai.brightblock.hyprlayer.main"
 
 say() { printf '\033[1;36m→ %s\033[0m\n' "$*"; }
@@ -51,24 +49,19 @@ usage() {
     'stage-server-binary.sh - build hyprlayer-server and seed the client cache' \
     '' \
     "  --triple <triple>     $LINUX_TRIPLE (default) or $MAC_TRIPLE" \
-    '  --identifier <id>     stage for one app identifier instead of all three' \
+    '  --identifier <id>     stage for one app identifier instead of both' \
     '                        ai.brightblock.hyprlayer (the release),' \
-    '                        ai.brightblock.hyprlayer.dev (tauri.dev.conf.json),' \
-    '                        ai.brightblock.hyprlayer.main (dev-install-*.sh)' \
-    '                        Default: all three — the bytes are identical, and' \
-    '                        staging only one means the build you actually run' \
-    '                        may read an empty cache.' \
-    '  --version <v>         key the cache at this version for every identifier' \
-    '                        instead of the one each app reports. Default: the' \
-    "                        tree's hyprlayer-server version, except for" \
-    '                        ai.brightblock.hyprlayer.main, which is read from' \
-    '                        the dev-install build clone.' \
+    '                        ai.brightblock.hyprlayer.dev (tauri.dev.conf.json)' \
+    '                        Default: both. For dev-install builds' \
+    '                        (ai.brightblock.hyprlayer.main) use' \
+    '                        dev-install-*.sh --remote <host> instead.' \
+    '  --version <v>         key the cache at this version instead of the' \
+    "                        tree's hyprlayer-server version" \
     '  --force               rebuild even when the cache already holds it' \
     '  --from-head           build the committed HEAD instead of the working tree' \
     '' \
     "  HYPRLAYER_LINUX_SSH_HOST  builder for $LINUX_TRIPLE (default: nexus)" \
-    '  HYPRLAYER_APP_DATA_DIR    override the resolved app data dir' \
-    '  HYPRLAYER_DEV_CACHE       dev-install build clone (default: ~/.cache/hyprlayer-dev)'
+    '  HYPRLAYER_APP_DATA_DIR    override the resolved app data dir'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -97,28 +90,9 @@ SERVER_MANIFEST="crates/hyprlayer-server/Cargo.toml"
 VERSION="$(manifest_version "$SERVER_MANIFEST")"
 [[ -n "$VERSION" ]] || die "could not read the server version from $SERVER_MANIFEST"
 
-# What the app asks for, which is a different question: a dev-install build
-# carries `+dev.<sha>`, so it reads a cache directory this tree's version never
-# names — the version half of the trap above, and the half that reads as a 404.
-cache_version_for() {
-  local built
-  if [[ -n "$VERSION_OVERRIDE" ]]; then
-    printf '%s' "$VERSION_OVERRIDE"
-  elif [[ "$1" == "$DEV_IDENTIFIER" && -f "$DEV_CLONE/$SERVER_MANIFEST" ]] \
-    && built="$(manifest_version "$DEV_CLONE/$SERVER_MANIFEST")" && [[ -n "$built" ]]; then
-    # Only the build metadata may differ: a clone left on another release builds
-    # a server whose protocol this tree's bytes need not speak.
-    if [[ "${built%%+*}" == "${VERSION%%+*}" ]]; then
-      printf '%s' "$built"
-    else
-      printf '! %s is installed from %s, not this tree (%s) — staging it as %s; rerun dev-install, or pass --version\n' \
-        "$1" "$built" "$VERSION" "$VERSION" >&2
-      printf '%s' "$VERSION"
-    fi
-  else
-    printf '%s' "$VERSION"
-  fi
-}
+[[ "$IDENTIFIER" != "$DEV_IDENTIFIER" ]] \
+  || die "$DEV_IDENTIFIER runs its own commit's server, not this tree's — use dev-install-*.sh --remote <host>"
+CACHE_VERSION="${VERSION_OVERRIDE:-$VERSION}"
 
 data_dir_for() {
   case "$(uname -s)" in
@@ -144,7 +118,7 @@ for id in "${TARGET_IDENTIFIERS[@]}"; do
   else
     DATA_DIR="$(data_dir_for "$id")"
   fi
-  CACHES+=("$DATA_DIR/server-cache/$(cache_version_for "$id")/hyprlayer-server-$TRIPLE")
+  CACHES+=("$DATA_DIR/server-cache/$CACHE_VERSION/hyprlayer-server-$TRIPLE")
 done
 
 MISSING=()
