@@ -1015,7 +1015,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
               className="flex items-center gap-2.5 rounded-lg border border-edge bg-panel-2 px-3 py-2"
             >
               <span
-                className={`grid h-6 w-6 place-items-center rounded-full text-ui-sm font-semibold text-accent-ink ${
+                className={`grid h-6 w-6 place-items-center rounded-full text-ui-sm font-semibold leading-none text-accent-ink ${
                   i % 2 ? "bg-research" : "bg-accent"
                 }`}
               >

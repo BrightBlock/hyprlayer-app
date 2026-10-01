@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { Icon } from "@/components/Icon";
 import { Spinner } from "@/components/ui";
+import { monoFontStack } from "@/lib/appearance";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
@@ -75,10 +76,9 @@ export function AgentPtyTab({
   const launchedAtRef = useRef(0);
   const excludeRef = useRef<string[]>(excludeSessionIds ?? []);
   excludeRef.current = excludeSessionIds ?? [];
-  const appliedFontSizeRef = useRef<number>(0);
   const restartRef = useRef<((opts: { resume: boolean; bypass: boolean }) => void) | null>(null);
 
-  const fontSize = useTerminalZoom(engineRef, idRef, appliedFontSizeRef);
+  const fontSize = useTerminalZoom(engineRef, idRef);
   useTerminalThemeSync(engineRef);
 
   const agent = useAgentState(workstreamId, shellId);
@@ -97,13 +97,13 @@ export function AgentPtyTab({
 
     const eng = createTerminalEngine({
       fontSize,
+      fontFamily: monoFontStack(),
       theme: xtermThemeFromCss(),
       cursorBlink: engine.id !== "codex",
     });
     eng.mount(host);
     attachTerminalClipboard(eng);
     engineRef.current = eng;
-    appliedFontSizeRef.current = fontSize;
     let lastGrid = eng.fit();
     if (autoFocus) eng.focus();
 

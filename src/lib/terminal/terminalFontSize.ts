@@ -1,12 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-const MIN = 8;
-const MAX = 32;
-const DEFAULT = 12;
+export const TERMINAL_FONT_MIN = 8;
+export const TERMINAL_FONT_MAX = 32;
+export const TERMINAL_FONT_DEFAULT = 12;
 const STEP = 1;
 
-const clamp = (n: number): number => Math.max(MIN, Math.min(MAX, n));
+const clamp = (n: number): number => Math.max(TERMINAL_FONT_MIN, Math.min(TERMINAL_FONT_MAX, n));
 
 type TerminalFontSizeState = {
   fontSize: number;
@@ -18,10 +18,10 @@ type TerminalFontSizeState = {
 export const useTerminalFontSize = create<TerminalFontSizeState>()(
   persist(
     (set) => ({
-      fontSize: DEFAULT,
+      fontSize: TERMINAL_FONT_DEFAULT,
       zoomIn: () => set((s) => ({ fontSize: clamp(s.fontSize + STEP) })),
       zoomOut: () => set((s) => ({ fontSize: clamp(s.fontSize - STEP) })),
-      reset: () => set({ fontSize: DEFAULT }),
+      reset: () => set({ fontSize: TERMINAL_FONT_DEFAULT }),
     }),
     { name: "hyprlayer.terminalFontSize" },
   ),

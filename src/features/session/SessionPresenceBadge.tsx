@@ -19,7 +19,7 @@ export function SessionPresenceBadge({ sessionId }: { sessionId?: string | null 
           <span
             key={viewer.clientId}
             aria-hidden
-            className={`flex h-5 w-5 items-center justify-center rounded-full bg-panel-2 text-tag text-ink-2 ring-2 ring-panel ${
+            className={`flex h-5 w-5 items-center justify-center rounded-full bg-panel-2 text-tag leading-none text-ink-2 ring-2 ring-panel ${
               i > 0 ? "-ml-1.5" : ""
             }`}
           >

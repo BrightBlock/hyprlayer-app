@@ -71,6 +71,7 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
+import { useAppZoomCommands } from "@/lib/appearance";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -741,6 +742,7 @@ export function Root() {
     closeAgentSessions();
     togglePromptPalette();
   });
+  useAppZoomCommands();
   usePromptHotkeys(activeWorkstream ?? null);
   useEscape(
     narrowDrawer

@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
+import { monoFontStack } from "@/lib/appearance";
 import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
+import {
+  attachTerminalClipboard,
+  useTerminalFontSync,
+  useTerminalThemeSync,
+} from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -35,7 +40,9 @@ export function ScriptRunView({
   const hostRef = useRef<HTMLDivElement>(null);
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const engineRef = useRef<TerminalEngine | null>(null);
+  const idRef = useRef<string | undefined>(undefined);
   useTerminalThemeSync(engineRef);
+  useTerminalFontSync(engineRef, idRef);
   const attachRef = useRef(attachId);
   attachRef.current = attachId;
   const onStartedRef = useRef(onStarted);
@@ -49,7 +56,11 @@ export function ScriptRunView({
     const host = hostRef.current;
     if (!host) return;
 
-    const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    const engine = createTerminalEngine({
+      fontSize,
+      fontFamily: monoFontStack(),
+      theme: xtermThemeFromCss(),
+    });
     engineRef.current = engine;
     engine.mount(host);
     attachTerminalClipboard(engine);
@@ -58,6 +69,7 @@ export function ScriptRunView({
 
     let disposed = false;
     let id: string | undefined = attachRef.current ?? undefined;
+    idRef.current = id;
     const reattaching = id != null;
 
     const created: Channel<TerminalEvent>[] = [];
@@ -80,7 +92,10 @@ export function ScriptRunView({
           log.warn("script-run", `reattaching terminal ${id} failed`, e);
           return false;
         });
-        if (!ok) id = undefined;
+        if (!ok) {
+          id = undefined;
+          idRef.current = undefined;
+        }
       }
       if (reattaching && !id) {
         if (!disposed) onDeadRef.current?.();
@@ -98,6 +113,7 @@ export function ScriptRunView({
           );
           if (disposed) return;
           id = opened;
+          idRef.current = id;
           onStartedRef.current?.(opened);
         } catch (e) {
           log.error("script-run", `starting the ${kind} script failed`, e);
@@ -142,6 +158,7 @@ export function ScriptRunView({
       unsubInput();
       ro.disconnect();
       engineRef.current = null;
+      idRef.current = undefined;
       engine.dispose();
       releaseChannels(created);
     };

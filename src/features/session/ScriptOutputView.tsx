@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
 
-import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
+import { monoFontStack } from "@/lib/appearance";
+import {
+  attachTerminalClipboard,
+  useTerminalFontSync,
+  useTerminalThemeSync,
+} from "@/lib/terminal/terminalChrome";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
@@ -10,11 +15,16 @@ export function ScriptOutputView({ output }: { output: string }) {
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const engineRef = useRef<TerminalEngine | null>(null);
   useTerminalThemeSync(engineRef);
+  useTerminalFontSync(engineRef);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    const engine = createTerminalEngine({
+      fontSize,
+      fontFamily: monoFontStack(),
+      theme: xtermThemeFromCss(),
+    });
     engineRef.current = engine;
     engine.mount(host);
     attachTerminalClipboard(engine);

@@ -18,6 +18,7 @@ export interface TerminalEngine {
   refresh(): void;
   grid(): TerminalGrid;
   setFontSize(px: number): TerminalGrid;
+  setFontFamily(family: string): Promise<TerminalGrid>;
   setTheme(theme: TerminalTheme): void;
   focus(): void;
   hasSelection(): boolean;
@@ -60,11 +61,17 @@ class XtermEngine implements TerminalEngine {
   private rendererReady = false;
   private disposed = false;
   private fitRetries = 0;
+  private fontFamilyRequest = "";
 
-  constructor(opts: { fontSize: number; theme: TerminalTheme; cursorBlink?: boolean }) {
+  constructor(opts: {
+    fontSize: number;
+    fontFamily: string;
+    theme: TerminalTheme;
+    cursorBlink?: boolean;
+  }) {
     this.term = new Terminal({
       fontSize: opts.fontSize,
-      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+      fontFamily: opts.fontFamily,
       fontWeight: 400,
       // Only 400/500/600 are bundled; 700 would be synthesized.
       fontWeightBold: 600,
@@ -181,6 +188,15 @@ class XtermEngine implements TerminalEngine {
     return this.fit();
   }
 
+  async setFontFamily(family: string): Promise<TerminalGrid> {
+    this.fontFamilyRequest = family;
+    const px = this.term?.options.fontSize ?? 12;
+    await document.fonts.load(`${px}px ${family}`).catch(() => undefined);
+    if (!this.term || this.fontFamilyRequest !== family) return EMPTY_GRID;
+    this.term.options.fontFamily = family;
+    return this.fit();
+  }
+
   setTheme(theme: TerminalTheme): void {
     if (!this.term) return;
     this.term.options.theme = theme;
@@ -233,6 +249,7 @@ class XtermEngine implements TerminalEngine {
 
 export function createTerminalEngine(opts: {
   fontSize: number;
+  fontFamily: string;
   theme: TerminalTheme;
   cursorBlink?: boolean;
 }): TerminalEngine {

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { monoFontStack } from "@/lib/appearance";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { errorMessage, unwrap } from "@/lib/ipc";
@@ -31,20 +32,22 @@ export function TerminalTab({
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(terminalId);
-  const appliedFontSizeRef = useRef<number>(0);
 
-  const fontSize = useTerminalZoom(engineRef, idRef, appliedFontSizeRef);
+  const fontSize = useTerminalZoom(engineRef, idRef);
   useTerminalThemeSync(engineRef);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    const engine = createTerminalEngine({
+      fontSize,
+      fontFamily: monoFontStack(),
+      theme: xtermThemeFromCss(),
+    });
     engine.mount(host);
     attachTerminalClipboard(engine);
     engineRef.current = engine;
-    appliedFontSizeRef.current = fontSize;
     let lastGrid = engine.fit();
 
     if (autoFocus) engine.focus();

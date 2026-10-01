@@ -74,7 +74,7 @@ vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 const { createTerminalEngine } = await import("./terminalEngine");
 
 function newEngine() {
-  return createTerminalEngine({ fontSize: 12, theme: {} });
+  return createTerminalEngine({ fontSize: 12, fontFamily: "monospace", theme: {} });
 }
 
 // The fix is that dispose() drops the engine's Terminal and FitAddon references,

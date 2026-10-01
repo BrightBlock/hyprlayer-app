@@ -142,7 +142,7 @@ export function AuthorField({ id, value, placeholder, onChange }: FieldProps) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-panel-2 text-tag text-ink-dim">
+      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-panel-2 text-tag leading-none text-ink-dim">
         {initialsOf(value || placeholder || "")}
       </span>
       <input

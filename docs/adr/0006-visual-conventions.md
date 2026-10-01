@@ -5,6 +5,7 @@
 amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale") ·
 amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover) ·
 amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dark") ·
+amended 2026-09-26 (user text size via --text-scale and font families; see "Appearance scaling") ·
 amended 2026-09-28 (the Agent sessions status-bar button and popover) ·
 amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote chip, composer sync
 line and draft guard, presence badge; see "Remote sync surfaces")
@@ -487,12 +488,13 @@ Supersedes "Typography" above and the v4 section's `--text-3xs` and arbitrary si
 exist and a stray one renders at the inherited size. The twelve tokens are `text-display`,
 `h1`, `h2`, `h3`, `title`, `body-lg`, `body`, `ui`, `ui-sm`, `meta`, `label` and `tag`,
 each carrying its own line height, and tracking and weight where the spec fixes them.
-`meta`, `label` and `tag` also set JetBrains Mono and tabular nums, and `label`/`tag`
+`meta`, `label` and `tag` also set `--font-mono` and tabular nums, and `label`/`tag`
 uppercase, in the base layer so an explicit utility still wins. Register a new token in
 `cx()`'s tailwind-merge config, or it is read as a colour and dropped beside `text-ink`.
 
 Families are self-hosted through Fontsource: Inter (variable), JetBrains Mono
-400/500/600, and Instrument Serif for `text-display` only. Prose line height is
+400/500/600, and Instrument Serif for `text-display` only, plus the Appearance
+alternates listed under Appearance scaling. Prose line height is
 `leading-prose` (1.65). Left alone: the chord glyph `letterSpacing` in `ChordHint`,
 `KeyboardSettings` and `PromptLibrary`, the logo wordmark, `ScriptEditor`'s
 `leading-[22px]` gutter, inline code's relative `0.85em`, the harness-tab letter
@@ -516,6 +518,18 @@ Shadows are `shadow-sm` (small controls), `shadow-card` (status cards), `shadow-
 popover) and `shadow-ring-active`.
 Tailwind inlines a literal `--shadow-*` into its utility, so each maps to a per-theme
 `--elevation-*`/`--ring-active` variable instead. Dialogs keep `shadow-2xl`.
+
+### Appearance scaling (2026-09-26)
+
+- The twelve `--text-*` sizes are `calc(<px> * var(--text-scale, 1))`; a new token must
+  follow the same form.
+- `--text-scale` is set on `documentElement` by `src/lib/appearance.ts`, with presets
+  0.9 / 1 / 1.12 / 1.25.
+- Spacing and row tiers don't scale with text; app zoom scales everything.
+- `--font-sans` and `--font-mono` may be overridden at runtime, but only with the six
+  bundled families listed in `src/lib/appearance.ts`.
+- The terminal family follows the Code font selection.
+- No system fonts are allowed.
 
 ### Remote sync surfaces (2026-10-01)
 

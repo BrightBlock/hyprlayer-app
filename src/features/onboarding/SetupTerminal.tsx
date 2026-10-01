@@ -1,10 +1,15 @@
 import { useEffect, useRef } from "react";
 import { Channel } from "@tauri-apps/api/core";
 
+import { monoFontStack } from "@/lib/appearance";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import { attachTerminalClipboard, useTerminalThemeSync } from "@/lib/terminal/terminalChrome";
+import {
+  attachTerminalClipboard,
+  useTerminalFontSync,
+  useTerminalThemeSync,
+} from "@/lib/terminal/terminalChrome";
 import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -21,21 +26,24 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(undefined);
-  const appliedFontSizeRef = useRef<number>(0);
 
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   useTerminalThemeSync(engineRef);
+  useTerminalFontSync(engineRef, idRef);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
-    const engine = createTerminalEngine({ fontSize, theme: xtermThemeFromCss() });
+    const engine = createTerminalEngine({
+      fontSize,
+      fontFamily: monoFontStack(),
+      theme: xtermThemeFromCss(),
+    });
     engine.mount(host);
     attachTerminalClipboard(engine);
     engine.focus();
     engineRef.current = engine;
-    appliedFontSizeRef.current = fontSize;
     let lastGrid = engine.fit();
 
     const channel = new Channel<TerminalEvent>();
@@ -103,15 +111,6 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine || appliedFontSizeRef.current === fontSize) return;
-    appliedFontSizeRef.current = fontSize;
-    const g = engine.setFontSize(fontSize);
-    const id = idRef.current;
-    if (id) void commands.terminalResize(id, g.cols, g.rows);
-  }, [fontSize]);
 
   return (
     <div className={`relative min-h-0 min-w-0 flex-1 bg-surface ${className}`}>

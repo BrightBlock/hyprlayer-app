@@ -60,7 +60,7 @@ export function Avatar() {
       role="img"
       aria-label={handle}
       title={handle}
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-ui-sm font-semibold text-accent-ink"
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-ui-sm font-semibold leading-none text-accent-ink"
     >
       {letters}
     </span>

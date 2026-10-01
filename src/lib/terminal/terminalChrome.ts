@@ -2,18 +2,18 @@
 import { useEffect, type RefObject } from "react";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 
+import { monoFontStack, useAppearance } from "@/lib/appearance";
 import { commands } from "@/lib/bindings";
 import { useCommand } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { useThemeStore } from "@/lib/theme";
-import type { TerminalEngine } from "./terminalEngine";
+import type { TerminalEngine, TerminalGrid } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
 import { xtermThemeFromCss } from "./terminalTheme";
 
 export function useTerminalZoom(
   engineRef: RefObject<TerminalEngine | null>,
   idRef: RefObject<string | undefined>,
-  appliedFontSizeRef: RefObject<number>,
 ): number {
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const zoomIn = useTerminalFontSize((s) => s.zoomIn);
@@ -24,15 +24,34 @@ export function useTerminalZoom(
   useCommand("terminal.zoomOut", zoomOut);
   useCommand("terminal.zoomReset", zoomReset);
 
-  useEffect(() => {
-    const engine = engineRef.current;
-    if (!engine || appliedFontSizeRef.current === fontSize) return;
-    appliedFontSizeRef.current = fontSize;
-    const g = engine.setFontSize(fontSize);
-    if (idRef.current) void commands.terminalResize(idRef.current, g.cols, g.rows);
-  }, [fontSize, engineRef, idRef, appliedFontSizeRef]);
+  useTerminalFontSync(engineRef, idRef);
 
   return fontSize;
+}
+
+export function useTerminalFontSync(
+  engineRef: RefObject<TerminalEngine | null>,
+  idRef?: RefObject<string | undefined>,
+): void {
+  useEffect(() => {
+    const resize = (g: TerminalGrid) => {
+      const id = idRef?.current;
+      if (id && g.cols > 0 && g.rows > 0) void commands.terminalResize(id, g.cols, g.rows);
+    };
+    const unsubFamily = useAppearance.subscribe((s, prev) => {
+      const engine = engineRef.current;
+      if (engine && s.monoFont !== prev.monoFont)
+        void engine.setFontFamily(monoFontStack(s.monoFont)).then(resize);
+    });
+    const unsubSize = useTerminalFontSize.subscribe((s, prev) => {
+      const engine = engineRef.current;
+      if (engine && s.fontSize !== prev.fontSize) resize(engine.setFontSize(s.fontSize));
+    });
+    return () => {
+      unsubFamily();
+      unsubSize();
+    };
+  }, [engineRef, idRef]);
 }
 
 export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>): void {
@@ -56,6 +75,8 @@ export function attachTerminalClipboard(engine: TerminalEngine): void {
   if (IS_MACOS) return;
   engine.interceptKeys((e) => {
     if (e.type !== "keydown") return true;
+    // xterm maps ctrl+_ to ^_ and stops propagation, which would swallow terminal.zoomOut.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key === "_") return false;
     if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
     const key = e.key.toLowerCase();
     if (key !== "c" && key !== "v") return true;
