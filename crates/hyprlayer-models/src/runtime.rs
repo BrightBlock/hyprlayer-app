@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::project::{CreateStep, StepStatus};
 use crate::script::{RunPhase, ScriptKind};
-use crate::session::SessionState;
+use crate::session::{ClientRef, RevisedTurn, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -39,6 +39,24 @@ pub enum RuntimeEvent {
         session_id: String,
         workstream_id: String,
         state: SessionState,
+    },
+    SessionRevised {
+        session_id: String,
+        workstream_id: String,
+        rev: u64,
+        turns: Vec<RevisedTurn>,
+        author: Option<ClientRef>,
+        working: bool,
+        at: f64,
+    },
+    SessionReset {
+        session_id: String,
+        workstream_id: String,
+        rev: u64,
+    },
+    SessionViewers {
+        session_id: String,
+        viewers: Vec<ClientRef>,
     },
     ScriptRunChanged {
         workstream_id: String,

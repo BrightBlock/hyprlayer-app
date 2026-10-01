@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use hyprlayer_models::RuntimeEvent;
+use hyprlayer_models::{ClientRef, RevisedTurn, RuntimeEvent, SessionTurns};
 
 use crate::agent::AgentDriver;
 use crate::claude::{ExitOutcome, SessionEvent, SessionState};
@@ -60,8 +61,38 @@ pub(crate) enum Control {
         workflow: WorkflowChannel,
         reply: oneshot::Sender<()>,
     },
+    ReserveUserTurn {
+        client_message_id: String,
+        base_rev: Option<u64>,
+        author: Option<ClientRef>,
+        reply: oneshot::Sender<Result<()>>,
+    },
+    ReleaseUserTurn {
+        client_message_id: String,
+    },
+    ListTurns {
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<String>,
+        reply: oneshot::Sender<Result<SessionTurns>>,
+    },
+    RevState {
+        caller: Option<String>,
+        reply: oneshot::Sender<ActorRevState>,
+    },
     #[cfg(any(test, feature = "test-support"))]
-    AttachmentCount { reply: oneshot::Sender<usize> },
+    AttachmentCount {
+        reply: oneshot::Sender<usize>,
+    },
+}
+
+/// A live actor's revision state as `caller` sees it; "working" is its `in_turn` (R1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActorRevState {
+    pub rev: u64,
+    pub reset_rev: u64,
+    pub working: bool,
+    pub in_flight: u32,
 }
 
 pub(crate) struct ActorHandle {
@@ -173,6 +204,58 @@ impl ActorHandle {
         reply_rx.await.map_err(|_| actor_gone())
     }
 
+    pub(crate) async fn reserve_user_turn(
+        &self,
+        client_message_id: String,
+        base_rev: Option<u64>,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::ReserveUserTurn {
+                client_message_id,
+                base_rev,
+                author,
+                reply,
+            })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())?
+    }
+
+    /// Fire-and-forget: a release is advisory, and the caller has no state
+    /// worth blocking on (R5 — the TTL is the backstop if this is lost).
+    pub(crate) async fn release_user_turn(&self, client_message_id: String) {
+        let _ = self
+            .control
+            .send(Control::ReleaseUserTurn { client_message_id });
+    }
+
+    pub(crate) async fn list_turns(
+        &self,
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<String>,
+    ) -> Result<SessionTurns> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::ListTurns {
+                cursor,
+                limit,
+                caller,
+                reply,
+            })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())?
+    }
+
+    pub(crate) async fn rev_state(&self, caller: Option<String>) -> Result<ActorRevState> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::RevState { caller, reply })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) async fn attachment_count(&self) -> usize {
         let (reply, reply_rx) = oneshot::channel();
@@ -256,6 +339,18 @@ async fn run(
                         state.set_workflow(workflow);
                         let _ = reply.send(());
                     }
+                    Some(Control::ReserveUserTurn { client_message_id, base_rev, author, reply }) => {
+                        let _ = reply.send(state.reserve(client_message_id, base_rev, author));
+                    }
+                    Some(Control::ReleaseUserTurn { client_message_id }) => {
+                        state.release_reservation(&client_message_id);
+                    }
+                    Some(Control::ListTurns { cursor, limit, caller, reply }) => {
+                        let _ = reply.send(state.list_turns(cursor, limit, caller).await);
+                    }
+                    Some(Control::RevState { caller, reply }) => {
+                        let _ = reply.send(state.rev_state(caller.as_deref()));
+                    }
                     #[cfg(any(test, feature = "test-support"))]
                     Some(Control::AttachmentCount { reply }) => {
                         let _ = reply.send(state.attachments.len());
@@ -268,6 +363,9 @@ async fn run(
                     Some(event) => state.handle_event(event).await,
                     None => break,
                 }
+            }
+            _ = tokio::time::sleep_until(state.next_expiry()), if !state.reservations.is_empty() => {
+                state.expire_reservations();
             }
         }
     }
@@ -285,6 +383,18 @@ struct ActorState {
     next_attach_id: u64,
     attachments: HashMap<u64, LiveAttachment>,
     workflow: Option<WorkflowChannel>,
+    rev: u64,
+    reset_rev: u64,
+    /// The rev every unattributed commit counts as; raised by a reset (R4).
+    foreign_floor: u64,
+    rev_by_author: HashMap<String, u64>,
+    in_turn: bool,
+    turn_author: Option<ClientRef>,
+    /// A message that arrived mid-turn, and its author; opens the next turn on its first item.
+    next_turn: Option<Option<ClientRef>>,
+    /// Rows visible since the last announced revision; flushed onto it.
+    riders: Vec<RevisedTurn>,
+    reservations: HashMap<String, Reservation>,
 }
 
 impl ActorState {
@@ -296,16 +406,17 @@ impl ActorState {
     ) -> Self {
         let sid = session_id.clone();
         let handle = db.clone();
-        let (seq, workstream_id) = blocking(move || {
+        let (seq, workstream_id, rev, reset_rev) = blocking(move || {
             let seq = handle.next_session_seq(&sid)?;
             let workstream_id = handle
                 .get_session(&sid)?
                 .map(|s| s.workstream_id)
                 .unwrap_or_default();
-            Ok((seq, workstream_id))
+            let (rev, reset_rev) = handle.session_rev(&sid)?;
+            Ok((seq, workstream_id, rev, reset_rev))
         })
         .await
-        .unwrap_or((0, String::new()));
+        .unwrap_or((0, String::new(), 0, 0));
         Self {
             session_id,
             workstream_id,
@@ -318,6 +429,15 @@ impl ActorState {
             next_attach_id: 0,
             attachments: HashMap::new(),
             workflow: None,
+            rev,
+            reset_rev,
+            foreign_floor: rev,
+            rev_by_author: HashMap::new(),
+            in_turn: false,
+            turn_author: None,
+            next_turn: None,
+            riders: Vec::new(),
+            reservations: HashMap::new(),
         }
     }
 
@@ -331,7 +451,11 @@ impl ActorState {
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
 
-        Ok(SessionAttachment { replay, live })
+        Ok(SessionAttachment {
+            replay,
+            live,
+            rev: self.rev,
+        })
     }
 
     async fn log_after(
@@ -366,13 +490,9 @@ impl ActorState {
     /// `(seq, created_at)` still matching what the client folded, so a
     /// rewind that reused the seq is caught but a failed relaunch (which
     /// restores the original timestamp) is not a false positive.
-    async fn attach_from(
-        &mut self,
-        cursor: LogCursor,
-        echo_user_messages: bool,
-    ) -> Result<SessionAttachment> {
-        let after_seq = match cursor {
-            LogCursor::Empty => None,
+    async fn verify_cursor(&self, cursor: LogCursor) -> Result<Option<i64>> {
+        match cursor {
+            LogCursor::Empty => Ok(None),
             LogCursor::After { seq, created_at } => {
                 let (sid, db) = (self.session_id.clone(), self.db.clone());
                 let held = blocking(move || db.session_event_created_at(&sid, seq)).await?;
@@ -382,9 +502,17 @@ impl ActorState {
                         epoch: self.epoch,
                     });
                 }
-                Some(seq)
+                Ok(Some(seq))
             }
-        };
+        }
+    }
+
+    async fn attach_from(
+        &mut self,
+        cursor: LogCursor,
+        echo_user_messages: bool,
+    ) -> Result<SessionAttachment> {
+        let after_seq = self.verify_cursor(cursor).await?;
         let (sid, db) = (self.session_id.clone(), self.db.clone());
         let replay = blocking(move || db.session_log_after(&sid, after_seq)).await?;
         Ok(self.register_after(replay, after_seq, echo_user_messages))
@@ -403,7 +531,11 @@ impl ActorState {
         let id = self.next_attach_id;
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
-        SessionAttachment { replay, live }
+        SessionAttachment {
+            replay,
+            live,
+            rev: self.rev,
+        }
     }
 
     fn set_workflow(&mut self, workflow: WorkflowChannel) {
@@ -455,27 +587,36 @@ impl ActorState {
             let db = self.db.clone();
             let outcome =
                 blocking(move || db.apply_session_event(&sid, seq, kind, &payload, mutation)).await;
-            if let Ok(
-                ApplySessionEventOutcome::Applied | ApplySessionEventOutcome::AlreadyApplied,
-            ) = outcome
-            {
-                self.seq = seq + 1;
-                self.ordinal += 1;
-                let delivery = SessionDelivery {
-                    epoch: self.epoch,
-                    delivery_ordinal: self.ordinal,
-                    persisted_seq: Some(seq),
-                    event: boundary,
-                };
-                self.attachments.retain(|_, attachment| {
-                    attachment.deliver(delivery.clone());
-                    !attachment.detached()
-                });
-            } else if let Err(err) = outcome {
-                tracing::warn!(
-                    "session {}: failed to persist the rewind boundary at seq {seq}: {err}",
-                    self.session_id
-                );
+            match outcome {
+                Ok(applied) => {
+                    self.seq = seq + 1;
+                    self.ordinal += 1;
+                    let rev = match applied {
+                        ApplySessionEventOutcome::Applied { rev: Some(rev) } => rev,
+                        // Already applied, or the session row was missing: bump directly.
+                        _ => self.bump_reset_rev().await,
+                    };
+                    let delivery = SessionDelivery {
+                        epoch: self.epoch,
+                        delivery_ordinal: self.ordinal,
+                        persisted_seq: Some(seq),
+                        rev,
+                        author: None,
+                        event: boundary,
+                    };
+                    self.attachments.retain(|_, attachment| {
+                        attachment.deliver(delivery.clone());
+                        !attachment.detached()
+                    });
+                    self.reset(rev);
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "session {}: failed to persist the rewind boundary at seq {seq}: {err}",
+                        self.session_id
+                    );
+                    self.bump_and_reset().await;
+                }
             }
         }
 
@@ -502,10 +643,68 @@ impl ActorState {
         })
         .await?;
         self.seq = cutoff + removed.len() as i64;
+        self.bump_and_reset().await;
         Ok(())
     }
 
-    async fn handle_event(&mut self, event: SessionEvent) {
+    async fn list_turns(
+        &mut self,
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<String>,
+    ) -> Result<SessionTurns> {
+        let after_seq = self.verify_cursor(cursor).await?;
+        let (sid, db) = (self.session_id.clone(), self.db.clone());
+        let limit = limit.clamp(1, TURNS_PAGE_MAX);
+        let page = blocking(move || db.session_log_page(&sid, after_seq, limit)).await?;
+        Ok(SessionTurns {
+            entries: page.entries,
+            next_cursor: page
+                .last
+                .map_or(cursor, |(seq, created_at)| LogCursor::After {
+                    seq,
+                    created_at,
+                }),
+            remaining: page.remaining,
+            rev: self.rev,
+            reset_rev: self.reset_rev,
+            working: self.in_turn,
+            in_flight: self.foreign_in_flight(caller.as_deref()) as u32,
+        })
+    }
+
+    /// Bumps `sessions.rev`/`reset_rev` directly when the boundary row itself
+    /// didn't, so a reset still reaches watchers.
+    async fn bump_and_reset(&mut self) {
+        let rev = self.bump_reset_rev().await;
+        self.reset(rev);
+    }
+
+    async fn bump_reset_rev(&self) -> u64 {
+        let sid = self.session_id.clone();
+        let db = self.db.clone();
+        match blocking(move || db.bump_session_reset(&sid)).await {
+            Ok(rev) => rev,
+            Err(err) => {
+                tracing::warn!(
+                    "session {}: failed to bump rev for a reset: {err}",
+                    self.session_id
+                );
+                self.rev
+            }
+        }
+    }
+
+    fn rev_state(&self, caller: Option<&str>) -> ActorRevState {
+        ActorRevState {
+            rev: self.rev,
+            reset_rev: self.reset_rev,
+            working: self.in_turn,
+            in_flight: self.foreign_in_flight(caller) as u32,
+        }
+    }
+
+    async fn handle_event(&mut self, mut event: SessionEvent) {
         self.ordinal += 1;
         let ordinal = self.ordinal;
 
@@ -556,8 +755,25 @@ impl ActorState {
             }
         }
 
-        let persisted_seq = if ephemeral {
-            None
+        let author = self.author_for(&event);
+        if let SessionEvent::UserMessage {
+            author: stamped, ..
+        } = &mut event
+        {
+            *stamped = author.clone();
+        }
+        let turn_kind = event.turn_kind();
+        let exited = matches!(event, SessionEvent::Exited { .. });
+        let closes_turn = exited || matches!(event, SessionEvent::TurnDone { .. });
+        let announce_close =
+            closes_turn && (self.in_turn || exited && !self.reservations.is_empty());
+        if closes_turn {
+            // Ahead of the persist, whose early return below must not leave the turn open.
+            self.close_turn(exited);
+        }
+
+        let (persisted_seq, committed_rev) = if ephemeral {
+            (None, None)
         } else {
             let seq = self.seq;
             let kind = event.kind();
@@ -579,21 +795,40 @@ impl ActorState {
             })
             .await;
             match outcome {
-                Ok(
-                    ApplySessionEventOutcome::Applied | ApplySessionEventOutcome::AlreadyApplied,
-                ) => {
+                Ok(ApplySessionEventOutcome::Applied { rev }) => {
                     self.seq = seq + 1;
-                    Some(seq)
+                    (Some(seq), rev)
+                }
+                Ok(ApplySessionEventOutcome::AlreadyApplied) => {
+                    self.seq = seq + 1;
+                    (Some(seq), None)
                 }
                 Err(err) => {
                     tracing::warn!(
                         "session {}: failed to persist {kind} event at seq {seq}: {err}",
                         self.session_id
                     );
+                    if announce_close {
+                        self.announce_revision(self.current_author());
+                    }
                     return;
                 }
             }
         };
+
+        if let (Some(seq), Some(kind)) = (persisted_seq, turn_kind) {
+            self.riders.push(RevisedTurn { seq, kind });
+        }
+        match committed_rev {
+            Some(rev) => {
+                self.record_commit(rev, &author);
+                self.announce_revision(author.clone());
+            }
+            None if announce_close => {
+                self.announce_revision(self.current_author());
+            }
+            None => {}
+        }
 
         if let Some(state) = lifecycle_for(&event) {
             let _ = self.events.send(RuntimeEvent::SessionLifecycle {
@@ -607,6 +842,8 @@ impl ActorState {
             epoch: self.epoch,
             delivery_ordinal: ordinal,
             persisted_seq,
+            rev: self.rev,
+            author,
             event,
         };
         tracing::trace!(
@@ -622,6 +859,177 @@ impl ActorState {
             }
             !attachment.detached()
         });
+    }
+
+    /// Who a delivery is attributed to; a UserMessage also settles its reservation and joins a turn.
+    fn author_for(&mut self, event: &SessionEvent) -> Option<ClientRef> {
+        let SessionEvent::UserMessage {
+            client_message_id, ..
+        } = event
+        else {
+            // A parked message's turn opens with its first item, if the harness didn't merge it.
+            if !self.in_turn && event.turn_kind().is_some() {
+                if let Some(parked) = self.next_turn.take() {
+                    self.in_turn = true;
+                    self.turn_author = parked;
+                }
+            }
+            return self.current_author();
+        };
+        // Follow-ups are reserved like sends; an unmatched message is author-less, nonce or not.
+        let author = client_message_id
+            .as_ref()
+            .and_then(|id| self.reservations.remove(id))
+            .and_then(|reserved| reserved.author);
+        if self.in_turn {
+            // The running turn keeps its author; the harness may answer this after it or with it.
+            self.next_turn = Some(author.clone());
+        } else {
+            self.in_turn = true;
+            self.turn_author = author.clone();
+            self.next_turn = None;
+        }
+        author
+    }
+
+    fn current_author(&self) -> Option<ClientRef> {
+        self.turn_author.clone().filter(|_| self.in_turn)
+    }
+
+    /// Always closes: a parked mid-turn author waits for its turn's first item.
+    fn close_turn(&mut self, exited: bool) {
+        self.in_turn = false;
+        self.turn_author = None;
+        if exited {
+            self.next_turn = None;
+            self.reservations.clear();
+        }
+    }
+
+    fn record_commit(&mut self, rev: u64, author: &Option<ClientRef>) {
+        self.rev = rev;
+        match client_id(author) {
+            Some(id) => {
+                self.rev_by_author.insert(id.to_string(), rev);
+            }
+            // An unattributed turn is foreign to everyone.
+            None => self.foreign_floor = rev,
+        }
+    }
+
+    fn announce_revision(&mut self, author: Option<ClientRef>) {
+        let _ = self.events.send(RuntimeEvent::SessionRevised {
+            session_id: self.session_id.clone(),
+            workstream_id: self.workstream_id.clone(),
+            rev: self.rev,
+            turns: std::mem::take(&mut self.riders),
+            author,
+            working: self.in_turn,
+            at: crate::store::now_ms(),
+        });
+    }
+
+    /// A rewind or restore: every reader reloads, so no earlier commit is anyone's own.
+    fn reset(&mut self, rev: u64) {
+        self.rev = rev;
+        self.reset_rev = rev;
+        self.foreign_floor = rev;
+        self.rev_by_author.clear();
+        self.riders.clear();
+        self.in_turn = false;
+        self.turn_author = None;
+        self.next_turn = None;
+        let _ = self.events.send(RuntimeEvent::SessionReset {
+            session_id: self.session_id.clone(),
+            workstream_id: self.workstream_id.clone(),
+            rev,
+        });
+    }
+}
+
+/// A send accepted but not yet committed; other authors' sends are checked against it.
+struct Reservation {
+    author: Option<ClientRef>,
+    at: tokio::time::Instant,
+}
+
+// A UserMessage the relay dropped on lag never releases its slot.
+const RESERVATION_TTL: Duration = Duration::from_secs(30);
+
+const TURNS_PAGE_MAX: u32 = 2000;
+
+fn client_id(author: &Option<ClientRef>) -> Option<&str> {
+    author.as_ref().map(|a| a.client_id.as_str())
+}
+
+impl ActorState {
+    /// Other authors' sends in flight as `me` sees them; no identity counts them all.
+    fn foreign_in_flight(&self, me: Option<&str>) -> u64 {
+        self.reservations
+            .values()
+            .filter(|r| me.is_none() || client_id(&r.author) != me)
+            .count() as u64
+    }
+
+    /// The rev `me` must have applied for its send to answer the latest state.
+    fn foreign_rev(&self, me: Option<&str>) -> u64 {
+        let in_flight = self.foreign_in_flight(me);
+        if in_flight > 0 {
+            // Their turns land after everything committed so far, `me`'s included.
+            return self.rev + in_flight;
+        }
+        self.rev_by_author
+            .iter()
+            .filter(|(id, _)| me != Some(id.as_str()))
+            .map(|(_, rev)| *rev)
+            .fold(self.foreign_floor, u64::max)
+    }
+
+    fn reserve(
+        &mut self,
+        id: String,
+        base_rev: Option<u64>,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
+        let foreign = self.foreign_rev(client_id(&author));
+        if let Some(base_rev) = base_rev.filter(|base| *base < foreign) {
+            return Err(CoreError::StaleTranscript {
+                session_id: self.session_id.clone(),
+                rev: foreign,
+                committed_rev: self.rev,
+                missing_turns: foreign - base_rev,
+            });
+        }
+        self.reservations.insert(
+            id,
+            Reservation {
+                author,
+                at: tokio::time::Instant::now(),
+            },
+        );
+        Ok(())
+    }
+
+    fn next_expiry(&self) -> tokio::time::Instant {
+        let oldest = self.reservations.values().map(|r| r.at).min();
+        oldest.map_or_else(tokio::time::Instant::now, |at| at + RESERVATION_TTL)
+    }
+
+    fn expire_reservations(&mut self) {
+        let before = self.reservations.len();
+        self.reservations
+            .retain(|_, r| r.at.elapsed() < RESERVATION_TTL);
+        if self.reservations.len() < before {
+            // Same rev, no turns: readers drop the in-flight count it carried.
+            self.announce_revision(self.current_author());
+        }
+    }
+
+    /// The `ReleaseUserTurn` arm: releasing an unknown nonce is a silent no-op.
+    fn release_reservation(&mut self, id: &str) {
+        if self.reservations.remove(id).is_some() {
+            self.announce_revision(self.current_author());
+        }
     }
 }
 

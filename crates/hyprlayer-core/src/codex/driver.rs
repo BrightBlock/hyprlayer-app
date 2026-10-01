@@ -309,6 +309,7 @@ impl CodexDriver {
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
             client_message_id: client_message_id.map(str::to_string),
+            author: None,
         });
 
         let model = self.model.lock().ok().and_then(|m| m.clone());

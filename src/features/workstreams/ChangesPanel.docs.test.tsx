@@ -51,7 +51,7 @@ function emitToWorkstream(workstreamId: string, tool: { name: string; input: str
       input: tool.input,
       parentId: null,
     };
-    channel?.onmessage?.(toolUse);
+    channel?.onmessage?.({ seq: null, rev: null, author: null, event: toolUse });
   });
 }
 

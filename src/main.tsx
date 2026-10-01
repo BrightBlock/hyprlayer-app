@@ -5,11 +5,21 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands } from "./lib/bindings";
-import { attachEventListeners, registerEventBridge } from "./lib/events";
+import { attachEventListeners, onServerReconnected, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
 import { reconnectBridge } from "./features/hosts/reconnect";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
-import { activeWorkstreamIds, removeSessionsForWorkstream } from "./features/session/sessionStore";
+import {
+  activeWorkstreamIds,
+  reattachSessions,
+  removeSessionsForWorkstream,
+  sessionBridge,
+} from "./features/session/sessionStore";
+import {
+  setupTranscriptSync,
+  transcriptSyncBridge,
+  transcriptSyncReconnected,
+} from "./features/session/syncStore";
 import { registerPlanCard } from "./features/session/planCardSlot";
 import { registerSendInterceptor } from "./features/session/sendInterceptor";
 import { startSessionTitleSync } from "./features/session/sessionTitleSync";
@@ -39,6 +49,13 @@ initTheme();
 registerEventBridge(scriptRunBridge);
 registerEventBridge(writtenDocsBridge);
 registerEventBridge(reconnectBridge);
+registerEventBridge(sessionBridge);
+registerEventBridge(transcriptSyncBridge);
+// Ahead of the reattach, whose folds ask whether the new connection syncs.
+onServerReconnected(transcriptSyncReconnected);
+onServerReconnected(() => {
+  reattachSessions().catch((e) => log.warn("reconnect", "reattaching sessions failed", e));
+});
 registerActiveWorkstreams(activeWorkstreamIds);
 registerPlanCard(PlanCard);
 registerSendInterceptor(approveFromChat);
@@ -50,6 +67,7 @@ void unwrap(commands.listRunningScripts())
 useUpdate.getState().init();
 setupNotificationActions();
 startSessionTitleSync();
+setupTranscriptSync();
 setupQueryFocus();
 setupMotionGate();
 setupDragRegion();

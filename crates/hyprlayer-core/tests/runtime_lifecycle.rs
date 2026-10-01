@@ -6,16 +6,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use hyprlayer_core::agent::Harness;
+use hyprlayer_core::claude::SessionState;
 use hyprlayer_core::env::{RuntimeEnvironment, RuntimePaths};
 use hyprlayer_core::error::Result;
 use hyprlayer_core::hyprcli::StorageInfo;
 use hyprlayer_core::models::RuntimeEvent;
+use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::process::binaries::BinaryResolver;
 #[cfg(unix)]
 use hyprlayer_core::process::SupervisedChild;
 use hyprlayer_core::runtime::builder::RuntimeBuilder;
 use hyprlayer_core::runtime::ports::ConfigCli;
-use hyprlayer_core::store::Db;
+use hyprlayer_core::store::{Db, NewSession, NewWorkstream, WorktreeMode};
 use hyprlayer_core::CoreError;
 
 fn test_environment(home: &Path) -> RuntimeEnvironment {
@@ -656,6 +659,70 @@ async fn shutdown_now_tears_down_the_runtime_owned_opencode_server() {
         exited_within(&mut stdout, Duration::from_secs(5)).await,
         "an OpenCode server must not survive the synchronous exit path"
     );
+
+    runtime.shutdown().await;
+}
+
+/// A seeded, archived, idle session whose actor is running, as after `kill_session`.
+async fn archived_session_with_an_actor(runtime: &hyprlayer_core::HyprlayerRuntime, id: &str) {
+    let db = runtime.test_db();
+    db.insert_workstream(NewWorkstream {
+        project_path: "/p".into(),
+        title: "t".into(),
+        slug: format!("t-{id}"),
+        branch: format!("hyprlayer/{id}"),
+        worktree_path: "/wt".into(),
+        base_branch: "main".into(),
+        worktree_mode: WorktreeMode::Isolated,
+    })
+    .unwrap();
+    let ws = db.list_active_workstreams().unwrap().pop().unwrap();
+    db.insert_session(NewSession {
+        id: id.into(),
+        workstream_id: ws.id,
+        stage: Stage::General,
+        harness: Harness::Claude,
+        cwd: "/wt".into(),
+        first_input: None,
+    })
+    .unwrap();
+    db.set_session_state(id, SessionState::Idle).unwrap();
+    db.set_session_archived(id, true).unwrap();
+    drop(runtime.test_session_ingress(id).await);
+    let ids = [id.to_string()];
+    let revs = runtime.sessions().revs(&ids, None).await.unwrap();
+    assert_eq!(revs.len(), 1, "the session is watched before it is deleted");
+}
+
+// Clients mark a session gone when the watch reply omits it; the actor outlives the row.
+#[tokio::test]
+async fn a_deleted_session_is_omitted_from_revs() {
+    let root = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let runtime = RuntimeBuilder::new(test_environment(home.path()), test_paths(root.path()))
+        .open()
+        .await
+        .expect("open");
+
+    archived_session_with_an_actor(&runtime, "s-deleted").await;
+    runtime.sessions().delete("s-deleted").await.unwrap();
+    let ids = ["s-deleted".to_string()];
+    assert!(runtime
+        .sessions()
+        .revs(&ids, None)
+        .await
+        .unwrap()
+        .is_empty());
+
+    archived_session_with_an_actor(&runtime, "s-row-gone").await;
+    runtime.test_db().delete_session("s-row-gone").unwrap();
+    let ids = ["s-row-gone".to_string()];
+    assert!(runtime
+        .sessions()
+        .revs(&ids, None)
+        .await
+        .unwrap()
+        .is_empty());
 
     runtime.shutdown().await;
 }

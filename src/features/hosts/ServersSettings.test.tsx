@@ -48,6 +48,7 @@ function status(
     serverVersion: state === "connected" ? 1 : null,
     serverRelease: null,
     serverOutdated: false,
+    transcriptSync: false,
     error: null,
     ...extra,
   };

@@ -285,21 +285,27 @@ and `opencode_config_file`. Setting or removing a key invalidates the cached
 | `attach(&str)` | `SessionAttachment` |
 | `prepare_start(StartStageSessionRequest)` | `StartedStageSession` |
 | `launch(LaunchSessionParams)` | `Arc<dyn AgentDriver>` |
-| `launch_and_converse(LaunchAndConverseParams)` | `()` |
+| `launch_and_converse(LaunchAndConverseParams, Option<ClientRef>)` | `()` |
 | `rewind(RewindSessionRequest)` | `RewindSessionOutcome` |
 | `kill_and_await_exit(&str)` | `()` (not a `Result`) |
 | `live_driver(&str)` | `Option<Arc<dyn AgentDriver>>` (not a `Result`) |
 | `permission_mode(&str)` | `Option<PermissionMode>` (not a `Result`) |
 | `op_lock(&str)` | `Arc<tokio::sync::Mutex<()>>` (not a `Result`) |
+| `send(&str, &str, &[String], Option<&str>, Option<&str>, SendContext)` | `()` |
+| `list_turns(&str, LogCursor, u32, Option<&str>)` | `SessionTurns` |
+| `revs(&[String], Option<&str>)` | `Vec<SessionRev>` |
 
-`SessionAttachment { replay: Vec<SessionLogEntry>, live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>> }`
+`SessionAttachment { replay: Vec<SessionLogEntry>, live: LiveReceiver, rev: u64 }`
 delivers durable replay plus a bounded live stream (512 slots plus a reserved
 terminal slot); a consumer too slow for it is detached with a lag cursor and
-recovers history through `log_after`.
+recovers history through `log_after`. `live.recv()` yields events and
+`live.recv_item()` yields `SessionStreamItem`s; `rev` is the session's rev at
+attach.
 
-Sending a message, answering a question, and resolving a permission are driven
-through the `AgentDriver` returned by `live_driver`, under the `op_lock` for that
-session — there are no `send`/`answer`/`approve` methods on the service.
+Sending a message, answering a question, and resolving a permission go through
+`send`, `respond_permission` and `answer` on the service. Only `send` takes the
+session's `op_lock`; it also checks `SendContext.base_rev` against other
+authors' turns and refuses a stale one with `stale_transcript`.
 
 ### `ProjectService`
 

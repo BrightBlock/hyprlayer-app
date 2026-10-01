@@ -81,6 +81,54 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
             }
             .emit(handle);
         }
+        RuntimeEvent::SessionRevised {
+            session_id,
+            workstream_id,
+            rev,
+            turns,
+            author,
+            working,
+            at,
+        } => {
+            let _ = events::SessionRevised {
+                session_id,
+                workstream_id,
+                rev: rev as f64,
+                turns: turns
+                    .into_iter()
+                    .map(|t| events::RevisedTurnDto {
+                        seq: t.seq as f64,
+                        kind: t.kind,
+                    })
+                    .collect(),
+                author,
+                working,
+                at,
+            }
+            .emit(handle);
+        }
+        RuntimeEvent::SessionReset {
+            session_id,
+            workstream_id,
+            rev,
+        } => {
+            let _ = events::SessionReset {
+                session_id,
+                workstream_id,
+                rev: rev as f64,
+            }
+            .emit(handle);
+        }
+        RuntimeEvent::SessionViewers {
+            session_id,
+            viewers,
+        } => {
+            let _ = events::SessionViewers {
+                session_id,
+                viewers,
+            }
+            .emit(handle);
+        }
         RuntimeEvent::ScriptRunChanged {
             workstream_id,
             kind,

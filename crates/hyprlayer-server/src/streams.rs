@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use hyprlayer_core::runtime::scripts as core_scripts;
 use hyprlayer_core::runtime::sessions::{
-    LaunchAndConverseParams, LaunchSessionParams, RewindSessionRequest, SessionStreamError,
-    StartStageSessionRequest,
+    LaunchAndConverseParams, LaunchSessionParams, LiveReceiver, RewindSessionRequest,
+    SessionStreamError, StartStageSessionRequest,
 };
 use hyprlayer_core::runtime::terminals as core_terminals;
 use hyprlayer_core::terminal::TerminalEvent;
@@ -20,6 +20,7 @@ use hyprlayer_core::{
     CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
     SessionEvent, SessionLogEntry, Stage,
 };
+use hyprlayer_models::SessionStreamItem;
 use hyprlayer_proto::{frame, WireError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -80,6 +81,8 @@ pub enum StreamRequest {
         opts: StreamStartOpts,
         #[serde(default)]
         echo_user_messages: bool,
+        #[serde(default)]
+        with_meta: bool,
     },
     ResumeSession {
         session_id: String,
@@ -89,6 +92,8 @@ pub enum StreamRequest {
         cursor: Option<LogCursor>,
         #[serde(default)]
         echo_user_messages: bool,
+        #[serde(default)]
+        with_meta: bool,
     },
     RestartSession {
         session_id: String,
@@ -97,6 +102,8 @@ pub enum StreamRequest {
         permission_mode: Option<PermissionMode>,
         #[serde(default)]
         echo_user_messages: bool,
+        #[serde(default)]
+        with_meta: bool,
     },
     RewindSession {
         session_id: String,
@@ -104,11 +111,15 @@ pub enum StreamRequest {
         permission_mode: Option<PermissionMode>,
         #[serde(default)]
         echo_user_messages: bool,
+        #[serde(default)]
+        with_meta: bool,
     },
     AttachSession {
         session_id: String,
         #[serde(default)]
         echo_user_messages: bool,
+        #[serde(default)]
+        with_meta: bool,
     },
 }
 
@@ -158,6 +169,18 @@ impl StreamRequest {
             Self::RestartSession { .. } => "restart_session",
             Self::RewindSession { .. } => "rewind_session",
             Self::AttachSession { .. } => "attach_session",
+        }
+    }
+
+    /// `Some` for the session streams, which can carry `SessionStreamItem`s.
+    pub fn with_meta(&self) -> Option<bool> {
+        match self {
+            Self::StartStageSession { with_meta, .. }
+            | Self::ResumeSession { with_meta, .. }
+            | Self::RestartSession { with_meta, .. }
+            | Self::RewindSession { with_meta, .. }
+            | Self::AttachSession { with_meta, .. } => Some(*with_meta),
+            _ => None,
         }
     }
 }
@@ -283,9 +306,12 @@ pub(crate) enum StreamSource {
         /// Filled by `attach_session`, and by a resume that names the row
         /// its client folded last.
         replay: Vec<SessionLogEntry>,
-        live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+        live: LiveReceiver,
         /// Carried into a lag recovery's re-attach, so it keeps this stream's opt-in.
         echo_user_messages: bool,
+        with_meta: bool,
+        /// The session's rev once `replay` is applied.
+        rev: u64,
     },
 }
 
@@ -456,6 +482,7 @@ pub(crate) async fn prepare_stream(
             attached_docs,
             opts,
             echo_user_messages,
+            with_meta,
         } => {
             let workstream = runtime.workstreams().find(&workstream_id).await.wire()?;
             let StreamStartOpts {
@@ -503,6 +530,8 @@ pub(crate) async fn prepare_stream(
                     replay: Vec::new(),
                     live: attachment.live,
                     echo_user_messages,
+                    with_meta,
+                    rev: attachment.rev,
                 }),
             ))
         }
@@ -513,28 +542,33 @@ pub(crate) async fn prepare_stream(
             permission_mode,
             cursor,
             echo_user_messages,
+            with_meta,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
                 .map_err(wire_error)?;
             let sessions = runtime.sessions();
+            // Two clients resuming an exited session at once would each spawn a
+            // harness on the same conversation; the second must see the first's.
+            let op = sessions.op_lock(&session_id).await;
+            let _resuming = op.lock().await;
 
             if sessions.is_live(&session_id).await {
                 // Another client may be mid-turn; changing modes is restart_session's job.
-                let (replay, live) = match cursor {
+                let (replay, live, rev) = match cursor {
                     Some(c) => {
                         let a = sessions
                             .attach_from(&session_id, c, echo_user_messages)
                             .await
                             .wire()?;
-                        (a.replay, a.live)
+                        (a.replay, a.live, a.rev)
                     }
                     None => {
                         let a = sessions
                             .attach(&session_id, echo_user_messages)
                             .await
                             .wire()?;
-                        (Vec::new(), a.live)
+                        (Vec::new(), a.live, a.rev)
                     }
                 };
                 let running = sessions.permission_mode(&session_id).await;
@@ -550,6 +584,8 @@ pub(crate) async fn prepare_stream(
                         replay,
                         live,
                         echo_user_messages,
+                        with_meta,
+                        rev,
                     }),
                 ));
             }
@@ -562,20 +598,20 @@ pub(crate) async fn prepare_stream(
             // The relaunch replays too, for uniformity: a session that exited in
             // the gap between the client's log read and this resume ends with
             // `Exited` on the stream rather than silently vanishing.
-            let (replay, live) = match cursor {
+            let (replay, live, rev) = match cursor {
                 Some(c) => {
                     let a = sessions
                         .attach_from(&session_id, c, echo_user_messages)
                         .await
                         .wire()?;
-                    (a.replay, a.live)
+                    (a.replay, a.live, a.rev)
                 }
                 None => {
                     let a = sessions
                         .attach(&session_id, echo_user_messages)
                         .await
                         .wire()?;
-                    (Vec::new(), a.live)
+                    (Vec::new(), a.live, a.rev)
                 }
             };
             let stream_id = server.streams().next_id();
@@ -603,6 +639,8 @@ pub(crate) async fn prepare_stream(
                     replay,
                     live,
                     echo_user_messages,
+                    with_meta,
+                    rev,
                 }),
             ))
         }
@@ -612,6 +650,7 @@ pub(crate) async fn prepare_stream(
             effort,
             permission_mode,
             echo_user_messages,
+            with_meta,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -653,6 +692,8 @@ pub(crate) async fn prepare_stream(
                     replay: Vec::new(),
                     live: attachment.live,
                     echo_user_messages,
+                    with_meta,
+                    rev: attachment.rev,
                 }),
             ))
         }
@@ -661,6 +702,7 @@ pub(crate) async fn prepare_stream(
             user_turn,
             permission_mode,
             echo_user_messages,
+            with_meta,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -696,12 +738,15 @@ pub(crate) async fn prepare_stream(
                     replay: Vec::new(),
                     live: attachment.live,
                     echo_user_messages,
+                    with_meta,
+                    rev: attachment.rev,
                 }),
             ))
         }
         StreamRequest::AttachSession {
             session_id,
             echo_user_messages,
+            with_meta,
         } => {
             let attachment = runtime
                 .sessions()
@@ -716,6 +761,8 @@ pub(crate) async fn prepare_stream(
                     replay: attachment.replay,
                     live: attachment.live,
                     echo_user_messages,
+                    with_meta,
+                    rev: attachment.rev,
                 }),
             ))
         }
@@ -751,17 +798,23 @@ async fn run_stream(
             replay,
             live,
             echo_user_messages,
+            with_meta,
+            rev,
         } => {
-            forward_session(
-                &runtime,
-                stream_id,
-                &session_id,
-                replay,
-                live,
-                echo_user_messages,
-                &tx,
-            )
-            .await
+            if send_replay(&tx, stream_id, replay, rev, with_meta).await {
+                forward_session(
+                    &runtime,
+                    stream_id,
+                    &session_id,
+                    live,
+                    echo_user_messages,
+                    with_meta,
+                    &tx,
+                )
+                .await
+            } else {
+                "the client stopped reading during the replay"
+            }
         }
     };
     tracing::debug!("stream {stream_id} ended: {ended}");
@@ -787,21 +840,21 @@ async fn forward_session(
     runtime: &HyprlayerRuntime,
     stream_id: u64,
     session_id: &str,
-    replay: Vec<SessionLogEntry>,
-    mut live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    mut live: LiveReceiver,
     echo_user_messages: bool,
+    with_meta: bool,
     tx: &mpsc::Sender<Vec<u8>>,
 ) -> &'static str {
-    for entry in replay {
-        if !send_event(tx, stream_id, &entry.event).await {
-            return "the client stopped reading during the replay";
-        }
-    }
     loop {
-        match live.recv().await {
-            Some(Ok(event)) => {
-                let exited = matches!(event, SessionEvent::Exited { .. });
-                if !send_event(tx, stream_id, &event).await {
+        match live.recv_item().await {
+            Some(Ok(item)) => {
+                let exited = matches!(item.event, SessionEvent::Exited { .. });
+                let sent = if with_meta {
+                    send_event(tx, stream_id, &item).await
+                } else {
+                    send_event(tx, stream_id, &item.event).await
+                };
+                if !sent {
                     return "the client stopped reading";
                 }
                 if exited {
@@ -824,10 +877,9 @@ async fn forward_session(
                             resumed.replay.len()
                         );
                         live = resumed.live;
-                        for entry in resumed.replay {
-                            if !send_event(tx, stream_id, &entry.event).await {
-                                return "the client stopped reading during a lag replay";
-                            }
+                        if !send_replay(tx, stream_id, resumed.replay, resumed.rev, with_meta).await
+                        {
+                            return "the client stopped reading during a lag replay";
                         }
                     }
                     Err(e) => {
@@ -853,6 +905,37 @@ async fn forward_session(
     }
 }
 
+/// Replayed rows are committed: each carries the rev the session has once the replay is applied.
+async fn send_replay(
+    tx: &mpsc::Sender<Vec<u8>>,
+    stream_id: u64,
+    replay: Vec<SessionLogEntry>,
+    rev: u64,
+    with_meta: bool,
+) -> bool {
+    for entry in replay {
+        let sent = if with_meta {
+            send_event(
+                tx,
+                stream_id,
+                &SessionStreamItem {
+                    seq: Some(entry.seq),
+                    rev,
+                    author: None,
+                    event: entry.event,
+                },
+            )
+            .await
+        } else {
+            send_event(tx, stream_id, &entry.event).await
+        };
+        if !sent {
+            return false;
+        }
+    }
+    true
+}
+
 async fn send_event(tx: &mpsc::Sender<Vec<u8>>, stream_id: u64, event: &impl Serialize) -> bool {
     match serde_json::to_vec(event) {
         Ok(bytes) => tx
@@ -875,6 +958,37 @@ fn expect_stream(
 
 fn unexpected(command: &str, response: &StreamResponse) -> WireError {
     WireError::protocol(format!("{command} was answered with {response:?}"))
+}
+
+/// A session stream's frames; `Bare` where `with_meta` was not asked for or was ignored.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionFrame {
+    Item(SessionStreamItem),
+    Bare(SessionEvent),
+}
+
+pub struct SessionEvents {
+    rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    with_meta: bool,
+}
+
+impl SessionEvents {
+    /// `None` at a clean end of stream or an undecodable frame, as `EventStream::recv`.
+    pub async fn recv(&mut self) -> Option<SessionFrame> {
+        let bytes = self.rx.recv().await?;
+        if self.with_meta {
+            if let Ok(item) = serde_json::from_slice(&bytes) {
+                return Some(SessionFrame::Item(item));
+            }
+        }
+        match serde_json::from_slice(&bytes) {
+            Ok(event) => Some(SessionFrame::Bare(event)),
+            Err(e) => {
+                tracing::error!("session stream event did not decode: {e}");
+                None
+            }
+        }
+    }
 }
 
 /// The eleven streaming commands' client entry points. Hand-written, not
@@ -1055,6 +1169,7 @@ impl RpcClient {
                 opts,
                 // Only this branch's client sets this; a released 0.8.4 desktop never does.
                 echo_user_messages: true,
+                with_meta: false,
             })
             .await?;
         match response {
@@ -1096,6 +1211,7 @@ impl RpcClient {
                 permission_mode,
                 cursor,
                 echo_user_messages: true,
+                with_meta: false,
             })
             .await?;
         match response {
@@ -1135,6 +1251,7 @@ impl RpcClient {
                 effort,
                 permission_mode,
                 echo_user_messages: true,
+                with_meta: false,
             })
             .await?;
         match response {
@@ -1164,6 +1281,7 @@ impl RpcClient {
                 user_turn,
                 permission_mode,
                 echo_user_messages: true,
+                with_meta: false,
             })
             .await?;
         match response {
@@ -1181,6 +1299,25 @@ impl RpcClient {
         }
     }
 
+    /// Opens any session stream; `request` carries its own `with_meta`.
+    pub async fn open_session_stream(
+        &self,
+        request: StreamRequest,
+    ) -> Result<(StreamResponse, u64, SessionEvents), WireError> {
+        let command = request.command();
+        let Some(with_meta) = request.with_meta() else {
+            return Err(WireError::protocol(format!(
+                "{command} is not a session stream"
+            )));
+        };
+        let (response, rx) = self.call_stream(request).await?;
+        let Some(stream_id) = response.stream_id() else {
+            return Err(unexpected(command, &response));
+        };
+        let rx = expect_stream(rx, command)?;
+        Ok((response, stream_id, SessionEvents { rx, with_meta }))
+    }
+
     pub async fn attach_session_stream(
         &self,
         session_id: String,
@@ -1189,6 +1326,7 @@ impl RpcClient {
             .call_stream(StreamRequest::AttachSession {
                 session_id,
                 echo_user_messages: true,
+                with_meta: false,
             })
             .await?;
         match response {

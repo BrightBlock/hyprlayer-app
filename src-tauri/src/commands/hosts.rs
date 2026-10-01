@@ -41,6 +41,8 @@ pub struct ConnectionStatus {
     /// Connected to an older server than this app ships; `restart_server`
     /// (local) or `update_host_server` (remote) replaces it.
     pub server_outdated: bool,
+    /// The server targets transcript-sync events at this client.
+    pub transcript_sync: bool,
     /// `Some` for `Failed` and `Lost`.
     pub error: Option<AppError>,
 }

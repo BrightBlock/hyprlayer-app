@@ -76,6 +76,14 @@ pub enum CoreError {
     #[error("session {session_id} must be archived before it is deleted")]
     SessionNotArchived { session_id: String },
 
+    #[error("this session moved on: {missing_turns} newer turn(s) from another client")]
+    StaleTranscript {
+        session_id: String,
+        rev: u64,
+        committed_rev: u64,
+        missing_turns: u64,
+    },
+
     #[error("another Hyprlayer runtime is already using the profile at {path}")]
     RuntimeInUse { path: PathBuf },
 
@@ -457,6 +465,9 @@ impl CoreError {
                 Some("Wait for the agent to finish its turn, or stop it.".into())
             }
             CoreError::SessionNotArchived { .. } => Some("Archive the session first.".into()),
+            CoreError::StaleTranscript { .. } => {
+                Some("Pull the new turns, then send again.".into())
+            }
             CoreError::NpmMissing => Some(
                 "Install Node.js (it includes npm) and click Refresh, or install OpenCode with \
                  Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
@@ -628,6 +639,7 @@ impl CoreError {
             CoreError::SessionNotFound { .. } => "session_not_found",
             CoreError::SessionBusy { .. } => "session_busy",
             CoreError::SessionNotArchived { .. } => "session_not_archived",
+            CoreError::StaleTranscript { .. } => "stale_transcript",
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",
             CoreError::RuntimeStopped => "runtime_stopped",

@@ -165,6 +165,8 @@ pub enum SessionEvent {
         prompt_name: Option<String>,
         #[serde(default)]
         client_message_id: Option<String>,
+        #[serde(default)]
+        author: Option<ClientRef>,
     },
     PartialText {
         text: String,
@@ -275,6 +277,18 @@ impl SessionEvent {
             SessionEvent::Exited { .. } => "exited",
         }
     }
+
+    /// Kinds a revision rides on; `thinking`/`toolUse` ride with the next commit.
+    pub fn turn_kind(&self) -> Option<TurnKind> {
+        match self {
+            SessionEvent::UserMessage { .. } => Some(TurnKind::User),
+            SessionEvent::AssistantText { .. } | SessionEvent::Thinking { .. } => {
+                Some(TurnKind::Assistant)
+            }
+            SessionEvent::ToolUse { .. } | SessionEvent::ToolResult { .. } => Some(TurnKind::Tool),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,6 +342,71 @@ pub struct SessionLogEntry {
 pub enum LogCursor {
     Empty,
     After { seq: i64, created_at: f64 },
+}
+
+/// Who wrote a turn: display-only, it grants nothing (ADR-0009).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ClientRef {
+    pub client_id: String,
+    pub device: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum TurnKind {
+    User,
+    Assistant,
+    Tool,
+}
+
+/// A row that became visible with a revision; `thinking`/`toolUse` rows ride with the next commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct RevisedTurn {
+    pub seq: i64,
+    pub kind: TurnKind,
+}
+
+/// One page of a catch-up read; its session fields match the rows only when `remaining` is 0.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTurns {
+    pub entries: Vec<SessionLogEntry>,
+    /// The page's last raw row, so an undecodable tail still advances the read.
+    pub next_cursor: LogCursor,
+    pub remaining: u32,
+    pub rev: u64,
+    pub reset_rev: u64,
+    pub working: bool,
+    /// Other authors' sends accepted but not yet committed, as the caller sees them.
+    pub in_flight: u32,
+}
+
+/// A session-stream item with its log position; `seq` is `None` for an ephemeral event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionStreamItem {
+    pub seq: Option<i64>,
+    pub rev: u64,
+    pub author: Option<ClientRef>,
+    pub event: SessionEvent,
+}
+
+/// A watched session's state for one caller; the server fills `viewers`, which it owns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRev {
+    pub session_id: String,
+    pub rev: u64,
+    pub reset_rev: u64,
+    pub working: bool,
+    pub in_flight: u32,
+    pub viewers: Vec<ClientRef>,
 }
 
 #[cfg(test)]

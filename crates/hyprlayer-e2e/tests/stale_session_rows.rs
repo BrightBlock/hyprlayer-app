@@ -134,6 +134,7 @@ async fn stale_session_rows() {
             attached_docs: vec![],
             prompt_name: None,
             client_message_id: None,
+            base_rev: None,
         },
     )
     .await

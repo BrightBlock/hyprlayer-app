@@ -21,7 +21,7 @@ use crate::process::binaries::BinaryKind;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
-use hyprlayer_models::RuntimeEvent;
+use hyprlayer_models::{ClientRef, RuntimeEvent, SessionRev, SessionTurns};
 use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
@@ -105,6 +105,13 @@ pub struct ActiveSession {
     pub workstream: Workstream,
 }
 
+/// What a send is checked against and attributed to; the check counts only other authors' turns.
+#[derive(Debug, Clone, Default)]
+pub struct SendContext {
+    pub base_rev: Option<u64>,
+    pub author: Option<ClientRef>,
+}
+
 impl SessionService<'_> {
     pub(crate) async fn live_driver(&self, session_id: &str) -> Option<Arc<dyn AgentDriver>> {
         self.runtime.session_registry.get(session_id).await
@@ -129,16 +136,55 @@ impl SessionService<'_> {
         attached_docs: &[String],
         prompt_name: Option<&str>,
         client_message_id: Option<&str>,
+        ctx: SendContext,
     ) -> Result<()> {
         let op = self.op_lock(session_id).await;
         let _op_guard = op.lock().await;
 
         let prompt = pipeline::append_docs(text.to_string(), attached_docs);
         let driver = self.require_live(session_id).await?;
+
+        let nonce = self
+            .reserve_turn(session_id, client_message_id, &ctx)
+            .await?;
         // A session someone is still talking to belongs back in the list.
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
-        blocking(move || db.set_session_archived(&id, false)).await?;
-        driver.send_user_turn(&prompt, None, prompt_name, client_message_id)
+        if let Err(e) = blocking(move || db.set_session_archived(&id, false)).await {
+            // The driver never ran, so no UserMessage will release it.
+            if let Some(nonce) = &nonce {
+                self.runtime
+                    .session_actors
+                    .release_user_turn(session_id, nonce.clone())
+                    .await;
+            }
+            return Err(e);
+        }
+        // A failure from here keeps the reservation: the driver broadcast its UserMessage first.
+        driver.send_user_turn(
+            &prompt,
+            None,
+            prompt_name,
+            nonce.as_deref().or(client_message_id),
+        )
+    }
+
+    /// Reserves a checked or attributed send under a nonce the actor can match.
+    async fn reserve_turn(
+        &self,
+        session_id: &str,
+        client_message_id: Option<&str>,
+        ctx: &SendContext,
+    ) -> Result<Option<String>> {
+        if ctx.base_rev.is_none() && ctx.author.is_none() {
+            return Ok(None);
+        }
+        let nonce =
+            client_message_id.map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
+        self.runtime
+            .session_actors
+            .reserve_user_turn(session_id, nonce.clone(), ctx.base_rev, ctx.author.clone())
+            .await?;
+        Ok(Some(nonce))
     }
 
     pub async fn respond_permission(
@@ -281,6 +327,7 @@ impl SessionService<'_> {
         }
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
         blocking(move || db.delete_session(&id)).await?;
+        self.runtime.session_actors.remove(session_id).await;
         self.announce(session);
         Ok(())
     }
@@ -409,6 +456,51 @@ impl SessionService<'_> {
             .session_actors
             .attach_from(session_id, cursor, echo_user_messages)
             .await
+    }
+
+    pub async fn list_turns(
+        &self,
+        session_id: &str,
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<&str>,
+    ) -> Result<SessionTurns> {
+        self.runtime
+            .session_actors
+            .list_turns(session_id, cursor, limit, caller.map(str::to_string))
+            .await
+    }
+
+    /// Each watched session's revision state for `caller`; ids with no row are omitted.
+    pub async fn revs(&self, ids: &[String], caller: Option<&str>) -> Result<Vec<SessionRev>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            // The row decides existence: an actor can outlive a deleted session.
+            let (db, sid) = (self.runtime.db.clone(), id.clone());
+            let Some((rev, reset_rev, working)) =
+                blocking(move || db.session_rev_state(&sid)).await?
+            else {
+                continue;
+            };
+            let live = self
+                .runtime
+                .session_actors
+                .rev_state(id, caller.map(str::to_string))
+                .await;
+            let (rev, reset_rev, working, in_flight) = match live {
+                Some(s) => (s.rev, s.reset_rev, s.working, s.in_flight),
+                None => (rev, reset_rev, working, 0),
+            };
+            out.push(SessionRev {
+                session_id: id.clone(),
+                rev,
+                reset_rev,
+                working,
+                in_flight,
+                viewers: Vec::new(),
+            });
+        }
+        Ok(out)
     }
 
     pub async fn kill_and_await_exit(&self, session_id: &str) {
@@ -595,7 +687,11 @@ impl SessionService<'_> {
         })
     }
 
-    pub async fn launch_and_converse(&self, params: LaunchAndConverseParams) -> Result<()> {
+    pub async fn launch_and_converse(
+        &self,
+        params: LaunchAndConverseParams,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
         let LaunchAndConverseParams {
             session,
             project_path,
@@ -628,6 +724,13 @@ impl SessionService<'_> {
         let mut turns = followup.as_ref().map(|_| driver.subscribe());
         let first_send = {
             let _guard = op_lock.lock().await;
+            let ctx = SendContext {
+                base_rev: None,
+                author: author.clone(),
+            };
+            let nonce = self
+                .reserve_turn(&session_id, client_message_id.as_deref(), &ctx)
+                .await?;
             if matches!(followup, Some(Followup::CodexExecute(_))) {
                 driver.set_collab_mode(Some(CollabMode::Plan));
             }
@@ -635,12 +738,21 @@ impl SessionService<'_> {
                 &wire_prompt,
                 Some(stage.as_str()),
                 prompt_name.as_deref(),
-                client_message_id.as_deref(),
+                nonce.as_deref().or(client_message_id.as_deref()),
             )
         };
         first_send?;
         if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {
-            followup::run_followup(&session_id, driver.as_ref(), rx, followup, op_lock).await;
+            followup::run_followup(
+                &session_id,
+                driver.as_ref(),
+                rx,
+                followup,
+                op_lock,
+                &self.runtime.session_actors,
+                author,
+            )
+            .await;
         }
         Ok(())
     }

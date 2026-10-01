@@ -1,5 +1,6 @@
 
 import type {
+  ClientRef,
   ExitOutcome,
   Question,
   QuestionOption,
@@ -70,6 +71,9 @@ export function buildQuestionAnswers(
 
 type Parented = { parentId?: string | null };
 
+// The log row an item came from; absent for live-only and optimistic items.
+type Sequenced = { seq?: number | null };
+
 const SKILL_BODY_PREFIX = "Base directory for this skill:";
 
 export function skillBodyName(text: string): string | null {
@@ -123,7 +127,7 @@ export function splitInlineThinking(text: string): { reasoning: string | null; a
 }
 
 export type TranscriptItem =
-  | {
+  | ({
       kind: "user";
       id: string;
       text: string;
@@ -132,10 +136,11 @@ export type TranscriptItem =
       createdAt: number | null;
       promptName: string | null;
       clientMessageId?: string | null;
-    }
-  | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented)
-  | ({ kind: "thinking"; id: string; text: string } & Parented)
-  | ({ kind: "skill"; id: string; name: string; body: string } & Parented)
+      author?: ClientRef | null;
+    } & Sequenced)
+  | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented & Sequenced)
+  | ({ kind: "thinking"; id: string; text: string } & Parented & Sequenced)
+  | ({ kind: "skill"; id: string; name: string; body: string } & Parented & Sequenced)
   | ({
       kind: "tool";
       id: string;
@@ -144,52 +149,52 @@ export type TranscriptItem =
       input: string;
       result: { content: string; isError: boolean } | null;
       skillBody?: string;
-    } & Parented)
-  | {
+    } & Parented & Sequenced)
+  | ({
       kind: "permission";
       id: string;
       requestId: string;
       toolName: string;
       input: string;
       decision: PermissionDecision | null;
-    }
-  | { kind: "error"; id: string; detail: string; raw: string }
-  | {
+    } & Sequenced)
+  | ({ kind: "error"; id: string; detail: string; raw: string } & Sequenced)
+  | ({
       kind: "compact";
       id: string;
       trigger: string;
       preTokens: number | null;
       summary?: string;
-    }
-  | {
+    } & Sequenced)
+  | ({
       kind: "queuedCommand";
       id: string;
       commandUuid: string;
       label: string;
       detail: string | null;
-    }
-  | {
+    } & Sequenced)
+  | ({
       kind: "taskUpdate";
       id: string;
       taskId: string;
       toolUseId: string | null;
       status: string;
-    }
-  | {
+    } & Sequenced)
+  | ({
       kind: "relaunched";
       id: string;
-    }
-  | {
+    } & Sequenced)
+  | ({
       kind: "rewound";
       id: string;
-    }
-  | {
+    } & Sequenced)
+  | ({
       kind: "exit";
       id: string;
       outcome: ExitOutcome;
       code: number | null;
       stderrTail: string;
-    };
+    } & Sequenced);
 
 export type SessionView = {
   items: TranscriptItem[];
@@ -386,21 +391,28 @@ export function closeOpenAssistant(items: TranscriptItem[]): TranscriptItem[] {
   return copy;
 }
 
+// Every caller passes a freshly built item, so stamping in place saves a copy per item.
+function withSeq(item: TranscriptItem, seq: number | null): TranscriptItem {
+  if (seq !== null) item.seq = seq;
+  return item;
+}
+
 function appended(
   view: SessionView,
   make: (id: string) => TranscriptItem,
   closeAssistant = false,
+  seq: number | null = null,
 ): Pick<SessionView, "items" | "counter"> {
   const base = closeAssistant ? closeOpenAssistant(view.items) : view.items;
   return {
-    items: [...base, make(`i${view.counter}`)],
+    items: [...base, withSeq(make(`i${view.counter}`), seq)],
     counter: view.counter + 1,
   };
 }
 
 
-export function reduceEvent(view: SessionView, event: SessionEvent): SessionView {
-  const inner = reduceEventInner(view, event);
+export function reduceEvent(view: SessionView, event: SessionEvent, seq: number | null = null): SessionView {
+  const inner = reduceEventInner(view, event, seq);
   // A background subagent's events keep arriving after the launching turn's
   // own turnDone; letting one raise `streaming` pins the session at "working"
   // from the moment its work stops until the next turn.
@@ -414,7 +426,7 @@ export function reduceEvent(view: SessionView, event: SessionEvent): SessionView
   return next;
 }
 
-function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
+function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | null): SessionView {
   switch (event.kind) {
     case "init":
       return {
@@ -442,8 +454,10 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             createdAt: null,
             promptName: event.promptName ?? null,
             clientMessageId: id ?? null,
+            author: event.author ?? null,
           }),
           true,
+          seq,
         ),
         streaming: true,
       };
@@ -460,7 +474,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       }
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: true })),
+        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: true }), false, seq),
         streaming: true,
       };
     }
@@ -494,7 +508,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
         }
         return {
           ...view,
-          ...appended(view, makeSkill, !event.parentId),
+          ...appended(view, makeSkill, !event.parentId, seq),
           streaming: true,
         };
       }
@@ -519,7 +533,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             text: event.text,
             streaming: false,
             parentId: event.parentId,
-          })),
+          }), false, seq),
           streaming: true,
         };
       }
@@ -527,9 +541,11 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       if (reasoning) {
         const open = openAssistantIndex(view.items);
         const at = open !== -1 ? open : streamedAssistantIndex(view.items, event.text);
-        const built: TranscriptItem[] = [{ kind: "thinking", id: `i${view.counter}`, text: reasoning, parentId: null }];
+        const built: TranscriptItem[] = [
+          withSeq({ kind: "thinking", id: `i${view.counter}`, text: reasoning, parentId: null }, seq),
+        ];
         if (answer.length)
-          built.push({ kind: "assistant", id: `i${view.counter + 1}`, text: answer, streaming: false });
+          built.push(withSeq({ kind: "assistant", id: `i${view.counter + 1}`, text: answer, streaming: false }, seq));
         const items =
           at === -1
             ? [...view.items, ...built]
@@ -558,7 +574,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
       }
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: false })),
+        ...appended(view, (id) => ({ kind: "assistant", id, text: event.text, streaming: false }), false, seq),
         streaming: true,
       };
     }
@@ -571,6 +587,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           view,
           (id) => ({ kind: "thinking", id, text: event.text, parentId: event.parentId }),
           !event.parentId,
+          seq,
         ),
         streaming: true,
       };
@@ -591,6 +608,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             parentId: event.parentId,
           }),
           !event.parentId,
+          seq,
         ),
         streaming: true,
       };
@@ -617,7 +635,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           input: "",
           result: { content: event.content, isError: event.isError },
           parentId: event.parentId,
-        })),
+        }), false, seq),
         streaming: true,
       };
     }
@@ -636,6 +654,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             decision: null,
           }),
           true,
+          seq,
         ),
         state: "awaiting_permission",
         streaming: true,
@@ -695,6 +714,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             stderrTail: event.stderrTail,
           }),
           true,
+          seq,
         ),
         state: event.outcome,
         streaming: false,
@@ -706,7 +726,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
     case "protocolError":
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "error", id, detail: event.detail, raw: event.raw })),
+        ...appended(view, (id) => ({ kind: "error", id, detail: event.detail, raw: event.raw }), false, seq),
       };
 
     case "commandLifecycle":
@@ -722,6 +742,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             ...queuedCommandSeam(view.items),
           }),
           true,
+          seq,
         ),
       };
 
@@ -737,19 +758,20 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
             preTokens: event.preTokens,
           }),
           true,
+          seq,
         ),
       };
 
     case "relaunched":
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "relaunched", id })),
+        ...appended(view, (id) => ({ kind: "relaunched", id }), false, seq),
       };
 
     case "rewound":
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "rewound", id })),
+        ...appended(view, (id) => ({ kind: "rewound", id }), false, seq),
       };
 
     case "backgroundTaskUpdate":
@@ -761,7 +783,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent): SessionView {
           taskId: event.taskId,
           toolUseId: event.toolUseId,
           status: event.status,
-        })),
+        }), false, seq),
       };
 
     default:

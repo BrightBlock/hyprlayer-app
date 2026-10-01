@@ -86,7 +86,7 @@
         },
         {
           "evidence": {
-            "user_version": 10
+            "user_version": 11
           },
           "guard": "the database is at its migrated schema version",
           "ok": true
@@ -152,7 +152,7 @@
         },
         {
           "evidence": {
-            "user_version": 10
+            "user_version": 11
           },
           "guard": "the schema is not migrated a second time",
           "ok": true

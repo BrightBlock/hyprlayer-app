@@ -6,7 +6,8 @@ config I/O moves to the server) · amended 2026-09-19 (the server writes its own
 files; a spawned server's stderr goes to a file, not a pipe) · amended 2026-09-19
 (the server is versioned and released apart from the app; the app sets a minimum) ·
 amended 2026-09-26 (the environment overlay merges per key and validates the agent
-socket)
+socket) · amended 2026-09-30 (connections announce a display-only client identity;
+transcript-sync events are targeted)
 
 ## Decision
 
@@ -89,12 +90,16 @@ therefore asked every user to restart their server and lose its sessions.
 ### One server, one profile, one user
 
 `ProfileLock` permits one runtime per `app_data_dir`, so one server serves one
-profile: one `settings.json`, one `hyprlayer.db`, one session set. There is no
-per-connection identity anywhere in the runtime. Every attached client sees the same
-state and can act on all of it. "Multi-client" means your laptop and your desktop
-attached to your server; a second user means a second server on a second profile.
+profile: one `settings.json`, one `hyprlayer.db`, one session set. A connection may
+announce a client identity — a stable client id, a device name, and the event kinds it
+can decode (`announce_client`). It is display-only: it attributes user turns, drives
+presence, and targets the transcript-sync events, and it grants no authority — every
+attached client still sees the same state and can act on all of it. Core never reads
+it; the server hands it to core as data. "Multi-client" means your laptop and your
+desktop attached to your server; a second user means a second server on a second
+profile.
 
-Two consequences follow, accepted rather than designed around:
+Three consequences follow, accepted rather than designed around:
 
 - **`set_foreground` is last-writer-wins.** It is a single `AtomicBool`
   (`crates/hyprlayer-core/src/runtime/mod.rs`) feeding the PR watcher's cadence, so a
@@ -105,6 +110,9 @@ Two consequences follow, accepted rather than designed around:
   accepts. `SSH_AUTH_SOCK` is dropped unless it names a socket on the server, and a
   remote client sends neither `SSH_AUTH_SOCK` nor `DISPLAY`, so a laptop attaching
   over SSH no longer replaces a working agent.
+- **Some events are targeted.** `SessionRevised`, `SessionReset` and `SessionViewers`
+  reach only connections that announced them and are watching that session, because a
+  released desktop tears its connection down on an event kind it cannot decode.
 
 ### The environment overlay: the exception to freeze-at-construction
 
@@ -295,7 +303,8 @@ frontend leak figure and is not comparable.
 
 ## What we're not doing
 
-- No multi-user and no per-connection identity.
+- No multi-user, and no identity that grants authority: the announced client identity
+  is display-only.
 - No network listener, TLS, bearer tokens, or certificate management. Filesystem
   permissions on the socket are the authorization; SSH is the only remote path.
 - No browser or mobile client — there is no listener one could reach, and adding one

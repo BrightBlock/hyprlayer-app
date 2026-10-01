@@ -22,6 +22,7 @@ function status(patch: Partial<ConnectionStatus> = {}): ConnectionStatus {
     serverVersion: 3,
     serverRelease: null,
     serverOutdated: false,
+    transcriptSync: false,
     error: null,
     ...patch,
   };

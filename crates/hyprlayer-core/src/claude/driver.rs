@@ -220,6 +220,7 @@ impl ClaudeDriver {
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
             client_message_id: client_message_id.map(str::to_string),
+            author: None,
         });
         self.write_line(protocol::user_turn_json(&self.session_id, text))
     }

@@ -19,8 +19,9 @@ pub use project::{CreateStep, ProjectRecord, ProjectSource, StepStatus};
 pub use runtime::{RuntimeEvent, ThoughtsIndexUpdateKind};
 pub use script::{RunPhase, ScriptKind, ScriptRuntime, ScriptStatus};
 pub use session::{
-    ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, Session, SessionEvent,
-    SessionLogEntry, SessionState, TurnStatus,
+    ClientRef, ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, RevisedTurn,
+    Session, SessionEvent, SessionLogEntry, SessionRev, SessionState, SessionStreamItem,
+    SessionTurns, TurnKind, TurnStatus,
 };
 pub use terminal::TerminalEvent;
 pub use workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};

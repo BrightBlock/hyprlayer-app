@@ -111,6 +111,16 @@ export function Spinner({ size = "md" }: { size?: IconSize }) {
   return <Icon name="loading" size={size} label="Loading" className="animate-spin text-ink-dim" />;
 }
 
+/** A placeholder bar; static while waiting, shimmering while it loads. */
+export function Skeleton({ className, shimmer }: { className?: string; shimmer?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cx("block rounded-control bg-edge/70", shimmer ? "animate-shimmer" : "opacity-75", className)}
+    />
+  );
+}
+
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-12 text-center">

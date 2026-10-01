@@ -20,6 +20,16 @@ pub struct WireError {
     pub code: String,
     pub message: String,
     pub remedy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_transcript: Option<StaleTranscript>,
+}
+
+/// The numbers a `stale_transcript` refusal carries; absent from every other error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StaleTranscript {
+    pub rev: u64,
+    pub committed_rev: u64,
+    pub missing_turns: u64,
 }
 
 impl WireError {
@@ -28,6 +38,7 @@ impl WireError {
             code: "internal".into(),
             message: message.into(),
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -37,6 +48,7 @@ impl WireError {
             code: "protocol_error".into(),
             message: message.into(),
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -47,6 +59,7 @@ impl WireError {
             code: "unsupported_command".into(),
             message: format!("This Hyprlayer server does not support `{command}`."),
             remedy: Some("Update the Hyprlayer server on this host.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -55,6 +68,7 @@ impl WireError {
             code: "server_disconnected".into(),
             message: "The connection to the Hyprlayer server closed.".into(),
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -73,6 +87,7 @@ impl WireError {
                 "This side speaks Hyprlayer protocol version {ours}; the peer sent version {theirs}."
             ),
             remedy,
+            stale_transcript: None,
         }
     }
 }
@@ -180,6 +195,7 @@ mod tests {
             code: "session_not_found".into(),
             message: "No live session with id sess-fixture".into(),
             remedy: None,
+            stale_transcript: None,
         };
         let json = serde_json::to_string(&err).unwrap();
         assert_eq!(

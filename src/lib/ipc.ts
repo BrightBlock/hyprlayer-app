@@ -1,4 +1,4 @@
-import type { AppError } from "./bindings";
+import type { AppError, StaleTranscriptDto } from "./bindings";
 
 type CommandResult<T> = { status: "ok"; data: T } | { status: "error"; error: AppError };
 
@@ -17,6 +17,10 @@ export function isAppError(e: unknown): e is AppError {
     typeof (e as AppError).code === "string" &&
     typeof (e as AppError).message === "string"
   );
+}
+
+export function isStaleTranscript(e: unknown): e is AppError & { staleTranscript: StaleTranscriptDto } {
+  return isAppError(e) && e.code === "stale_transcript" && !!e.staleTranscript;
 }
 
 export function errorMessage(e: unknown): string {

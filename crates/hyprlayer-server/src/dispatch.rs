@@ -45,7 +45,7 @@ use hyprlayer_core::runtime::scripts::{
     RunLifecycleRequest, ScriptOutputRequest, ScriptRuntimeRequest, ScriptSettingsRequest,
     StopScriptRequest,
 };
-use hyprlayer_core::runtime::sessions::ActiveSession;
+use hyprlayer_core::runtime::sessions::{ActiveSession, SendContext};
 use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
 };
@@ -66,28 +66,31 @@ use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, PullOutcome};
 use hyprlayer_core::{
-    CoreError, HyprlayerRuntime, ProjectSource, ScriptKind, Session, SessionLogEntry, Stage,
-    Workstream, WorkstreamDoc, WorktreeMode,
+    CoreError, HyprlayerRuntime, LogCursor, ProjectSource, ScriptKind, Session, SessionLogEntry,
+    Stage, Workstream, WorkstreamDoc, WorktreeMode,
 };
-use hyprlayer_models::ScriptRuntime;
-use hyprlayer_proto::WireError;
+use hyprlayer_models::{ClientRef, ScriptRuntime, SessionRev, SessionTurns};
+use hyprlayer_proto::{StaleTranscript, WireError};
 
+use crate::events::{Clients, TRANSCRIPT_SYNC};
 use crate::rpc::{
-    ArchivedWorkstreamView, CreatedProject, Dispatch, PromptContext, ResolvedBranchPrefixes,
-    WorkstreamView, WorktreeFile,
+    AnnouncedClient, ArchivedWorkstreamView, CreatedProject, Dispatch, PromptContext,
+    ResolvedBranchPrefixes, WatchedSession, WorkstreamView, WorktreeFile,
 };
 use crate::streams::StreamState;
 
 pub struct Server {
     runtime: Arc<HyprlayerRuntime>,
     streams: StreamState,
+    clients: Clients,
 }
 
 impl Server {
-    pub fn new(runtime: Arc<HyprlayerRuntime>) -> Self {
+    pub fn new(runtime: Arc<HyprlayerRuntime>, clients: Clients) -> Self {
         Self {
             runtime,
             streams: StreamState::default(),
+            clients,
         }
     }
 
@@ -98,6 +101,20 @@ impl Server {
     pub(crate) fn streams(&self) -> &StreamState {
         &self.streams
     }
+
+    /// The announced identity of the connection this request came on.
+    fn caller(&self) -> Option<ClientRef> {
+        crate::CONN
+            .try_with(|conn| self.clients.client_ref(*conn))
+            .ok()
+            .flatten()
+    }
+}
+
+fn connection(command: &str) -> Result<u64, WireError> {
+    crate::CONN
+        .try_with(|conn| *conn)
+        .map_err(|_| WireError::protocol(format!("{command} needs a client connection")))
 }
 
 pub fn wire_error(e: CoreError) -> WireError {
@@ -105,6 +122,19 @@ pub fn wire_error(e: CoreError) -> WireError {
         code: e.code().to_string(),
         message: e.to_string(),
         remedy: e.remedy(),
+        stale_transcript: match &e {
+            CoreError::StaleTranscript {
+                rev,
+                committed_rev,
+                missing_turns,
+                ..
+            } => Some(StaleTranscript {
+                rev: *rev,
+                committed_rev: *committed_rev,
+                missing_turns: *missing_turns,
+            }),
+            _ => None,
+        },
     }
 }
 
@@ -141,6 +171,7 @@ fn file_conflict() -> WireError {
         remedy: Some(
             "Reload the file to pick up the external changes, then re-apply your edits.".into(),
         ),
+        stale_transcript: None,
     }
 }
 
@@ -242,6 +273,7 @@ impl Server {
                 code: op.to_string(),
                 message: e.to_string(),
                 remedy: Some(remedy.into()),
+                stale_transcript: None,
             }
         })
     }
@@ -668,6 +700,7 @@ impl Dispatch for Server {
                 message: "This project is a plain folder, so it has no git changes to discard."
                     .into(),
                 remedy: None,
+                stale_transcript: None,
             });
         }
         blocking("discard_project_changes", move || {
@@ -1181,6 +1214,7 @@ impl Dispatch for Server {
         attached_docs: Vec<String>,
         prompt_name: Option<String>,
         client_message_id: Option<String>,
+        base_rev: Option<u64>,
     ) -> Result<(), WireError> {
         self.runtime
             .sessions()
@@ -1190,6 +1224,10 @@ impl Dispatch for Server {
                 &attached_docs,
                 prompt_name.as_deref(),
                 client_message_id.as_deref(),
+                SendContext {
+                    base_rev,
+                    author: self.caller(),
+                },
             )
             .await
             .wire()
@@ -1260,6 +1298,58 @@ impl Dispatch for Server {
 
     async fn get_session_log(&self, session_id: String) -> Result<Vec<SessionLogEntry>, WireError> {
         self.runtime.sessions().log(&session_id).await.wire()
+    }
+
+    async fn list_session_turns(
+        &self,
+        session_id: String,
+        cursor: LogCursor,
+        limit: u32,
+    ) -> Result<SessionTurns, WireError> {
+        let caller = self.caller().map(|c| c.client_id);
+        self.runtime
+            .sessions()
+            .list_turns(&session_id, cursor, limit, caller.as_deref())
+            .await
+            .wire()
+    }
+
+    async fn announce_client(
+        &self,
+        client_id: String,
+        device: String,
+        capabilities: Vec<String>,
+    ) -> Result<AnnouncedClient, WireError> {
+        let conn = connection("announce_client")?;
+        let changed = self
+            .clients
+            .announce(conn, ClientRef { client_id, device }, capabilities);
+        self.clients.send_viewers(&changed);
+        Ok(AnnouncedClient {
+            features: vec![TRANSCRIPT_SYNC.into()],
+        })
+    }
+
+    async fn watch_sessions(
+        &self,
+        sessions: Vec<WatchedSession>,
+    ) -> Result<Vec<SessionRev>, WireError> {
+        let conn = connection("watch_sessions")?;
+        let ids: Vec<String> = sessions.into_iter().map(|s| s.session_id).collect();
+        let changed = self.clients.watch(conn, ids.iter().cloned().collect());
+        self.clients.send_viewers(&changed);
+        let caller = self.caller().map(|c| c.client_id);
+        let mut revs = self
+            .runtime
+            .sessions()
+            .revs(&ids, caller.as_deref())
+            .await
+            .wire()?;
+        // A dropped SessionViewers is recovered here, on the next poll.
+        for rev in &mut revs {
+            rev.viewers = self.clients.viewers(&rev.session_id);
+        }
+        Ok(revs)
     }
 
     async fn list_active_sessions(&self) -> Result<Vec<ActiveSession>, WireError> {
@@ -1914,7 +2004,11 @@ impl Dispatch for Server {
             )));
         };
         let started = std::time::Instant::now();
-        let launched = self.runtime.sessions().launch_and_converse(params).await;
+        let launched = self
+            .runtime
+            .sessions()
+            .launch_and_converse(params, self.caller())
+            .await;
         match &launched {
             Ok(()) => tracing::debug!(
                 "session {session_id}: launch returned after {:?}",
@@ -2188,6 +2282,8 @@ mod tests {
                 replay: attachment.replay,
                 live: attachment.live,
                 echo_user_messages: false,
+                with_meta: false,
+                rev: attachment.rev,
             },
             tx,
             registry.clone(),

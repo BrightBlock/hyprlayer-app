@@ -114,11 +114,11 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
-	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionEvent>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
-	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionEvent>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
-	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
-	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionEvent>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
-	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null, clientMessageId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName, clientMessageId })),
+	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionStreamItemDto>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
+	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
+	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
+	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null, clientMessageId: string | null, baseRev: number | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName, clientMessageId, baseRev })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	answerQuestion: (sessionId: string, requestId: string, answers: QuestionAnswers) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
@@ -127,7 +127,12 @@ export const commands = {
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<SessionLogEntryDto[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
-	attachSession: (sessionId: string, onEvent: Channel<SessionEvent>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
+	listSessionTurns: (sessionId: string, cursor: LogCursorDto, limit: number) => typedError<SessionTurnsDto, AppError>(__TAURI_INVOKE("list_session_turns", { sessionId, cursor, limit })),
+	/**  Replaces this connection's watched set; the reply recovers any dropped sync event. */
+	watchSessions: (sessions: WatchedSessionDto[]) => typedError<SessionRevDto[], AppError>(__TAURI_INVOKE("watch_sessions", { sessions })),
+	/**  Local: the identity this app announces on every connect. */
+	getClientIdentity: () => typedError<ClientIdentity, AppError>(__TAURI_INVOKE("get_client_identity")),
+	attachSession: (sessionId: string, onEvent: Channel<SessionStreamItemDto>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
 	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
 	setSessionTitle: (sessionId: string, title: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_title", { sessionId, title })),
 	setSessionArchived: (sessionId: string, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_session_archived", { sessionId, archived })),
@@ -285,6 +290,9 @@ export const events = {
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	serverDisconnected: makeEvent<ServerDisconnected>("server-disconnected"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
+	sessionReset: makeEvent<SessionReset>("session-reset"),
+	sessionRevised: makeEvent<SessionRevised>("session-revised"),
+	sessionViewers: makeEvent<SessionViewers>("session-viewers"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
@@ -433,6 +441,7 @@ export type AppError = {
 	code: string,
 	message: string,
 	remedy: string | null,
+	staleTranscript?: StaleTranscriptDto | null,
 };
 
 export type AppSettings = {
@@ -600,6 +609,17 @@ export type CliUpdateResult = {
 	stderr: string,
 };
 
+export type ClientIdentity = {
+	clientId: string,
+	device: string,
+};
+
+/**  Who wrote a turn: display-only, it grants nothing (ADR-0009). */
+export type ClientRef = {
+	clientId: string,
+	device: string,
+};
+
 export type CodexAuthStatus = {
 	method: string | null,
 	email: string | null,
@@ -670,6 +690,8 @@ export type ConnectionStatus = {
 	 *  (local) or `update_host_server` (remote) replaces it.
 	 */
 	serverOutdated: boolean,
+	/**  The server targets transcript-sync events at this client. */
+	transcriptSync: boolean,
 	/**  `Some` for `Failed` and `Lost`. */
 	error: AppError | null,
 };
@@ -1245,6 +1267,12 @@ export type ResumedSession = {
 
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
 
+/**  Revs and seqs are `f64` here: specta exports no `u64`/`i64`. */
+export type RevisedTurnDto = {
+	seq: number | null,
+	kind: TurnKind,
+};
+
 export type RewindResult = {
 	session: Session,
 	liveRewound: boolean,
@@ -1332,7 +1360,7 @@ export type Session = {
 	lastActiveAt?: number | null,
 };
 
-export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
+export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
 
 export type SessionLifecycle = {
 	sessionId: string,
@@ -1347,7 +1375,55 @@ export type SessionLogEntryDto = {
 	createdAt: number | null,
 };
 
+export type SessionReset = {
+	sessionId: string,
+	workstreamId: string,
+	rev: number | null,
+};
+
+export type SessionRevDto = {
+	sessionId: string,
+	rev: number | null,
+	resetRev: number | null,
+	working: boolean,
+	inFlight: number,
+	viewers: ClientRef[],
+};
+
+export type SessionRevised = {
+	sessionId: string,
+	workstreamId: string,
+	rev: number | null,
+	turns: RevisedTurnDto[],
+	author: ClientRef | null,
+	working: boolean,
+	at: number | null,
+};
+
 export type SessionState = "idle" | "starting" | "running" | "awaiting_permission" | "awaiting_question" | "completed" | "interrupted" | "killed" | "spawn_failed" | "crashed";
+
+/**  `seq`/`rev`/`author` are null for an ephemeral event and for a server without transcript sync. */
+export type SessionStreamItemDto = {
+	seq: number | null,
+	rev: number | null,
+	author: ClientRef | null,
+	event: SessionEvent,
+};
+
+export type SessionTurnsDto = {
+	entries: SessionLogEntryDto[],
+	nextCursor: LogCursorDto,
+	remaining: number,
+	rev: number | null,
+	resetRev: number | null,
+	working: boolean,
+	inFlight: number,
+};
+
+export type SessionViewers = {
+	sessionId: string,
+	viewers: ClientRef[],
+};
 
 export type SlashCommand = {
 	name: string,
@@ -1361,6 +1437,13 @@ export type SlashKind = "skill" | "command";
 export type SortKey = "relevance" | "date" | "mtime" | "title";
 
 export type Stage = "research" | "plan" | "implement" | "validate" | "commit" | "ship" | "revise" | "general";
+
+/**  `StaleTranscript` across Tauri: specta exports no `u64`. */
+export type StaleTranscriptDto = {
+	rev: number | null,
+	committedRev: number | null,
+	missingTurns: number | null,
+};
 
 export type StartOpts = {
 	harness?: Harness | null,
@@ -1461,6 +1544,14 @@ export type ThoughtsRepoStatus = {
 };
 
 export type ThoughtsSource = { mode: "clone"; url: string; location: string | null } | { mode: "disk"; path: string } | { mode: "create"; path: string };
+
+export type TurnKind = "user" | "assistant" | "tool";
+
+export type WatchedSessionDto = {
+	sessionId: string,
+	/**  The rev this view last applied. */
+	rev: number | null,
+};
 
 export type Workstream = {
 	id: string,

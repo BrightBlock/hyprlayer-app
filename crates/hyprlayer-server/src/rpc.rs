@@ -53,10 +53,10 @@ use hyprlayer_core::skills::{AgentSkill, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::{PullOutcome, WorktreeStatus};
 use hyprlayer_core::{
-    ProjectSource, ScriptKind, Session, SessionLogEntry, Stage, Workstream, WorkstreamDoc,
-    WorktreeMode,
+    LogCursor, ProjectSource, ScriptKind, Session, SessionLogEntry, Stage, Workstream,
+    WorkstreamDoc, WorktreeMode,
 };
-use hyprlayer_models::ScriptRuntime;
+use hyprlayer_models::{ScriptRuntime, SessionRev, SessionTurns};
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
 
@@ -106,6 +106,18 @@ pub struct CreatedProject {
     pub project: ProjectView,
     pub github_url: Option<String>,
     pub github_error: Option<WireError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnnouncedClient {
+    pub features: Vec<String>,
+}
+
+/// A session a client views and the rev it last applied.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchedSession {
+    pub session_id: String,
+    pub rev: u64,
 }
 
 hyprlayer_proto::commands! {
@@ -194,7 +206,7 @@ hyprlayer_proto::commands! {
     DetachWorkstreamPr: detach_workstream_pr(id: String) -> ();
     MergeWorkstreamPr: merge_workstream_pr(id: String, method: MergeMethod) -> ();
 
-    SendUserMessage: send_user_message(session_id: String, text: String, attached_docs: Vec<String>, prompt_name: Option<String>, client_message_id: Option<String>) -> ();
+    SendUserMessage: send_user_message(session_id: String, text: String, attached_docs: Vec<String>, prompt_name: Option<String>, client_message_id: Option<String>, base_rev: Option<u64>) -> ();
     RespondPermission: respond_permission(session_id: String, request_id: String, allow: bool, message: Option<String>) -> ();
     AnswerQuestion: answer_question(session_id: String, request_id: String, answers: QuestionAnswers) -> ();
     InterruptSession: interrupt_session(session_id: String) -> ();
@@ -203,6 +215,9 @@ hyprlayer_proto::commands! {
     SetSessionEffort: set_session_effort(session_id: String, effort: Option<String>) -> ();
     ListSessions: list_sessions(workstream_id: String) -> Vec<Session>;
     GetSessionLog: get_session_log(session_id: String) -> Vec<SessionLogEntry>;
+    ListSessionTurns: list_session_turns(session_id: String, cursor: LogCursor, limit: u32) -> SessionTurns;
+    AnnounceClient: announce_client(client_id: String, device: String, capabilities: Vec<String>) -> AnnouncedClient;
+    WatchSessions: watch_sessions(sessions: Vec<WatchedSession>) -> Vec<SessionRev>;
     ListActiveSessions: list_active_sessions() -> Vec<ActiveSession>;
     SetSessionTitle: set_session_title(session_id: String, title: Option<String>) -> ();
     SetSessionArchived: set_session_archived(session_id: String, archived: bool) -> ();

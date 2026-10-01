@@ -52,6 +52,16 @@ pub fn reject_undecodable(line: &str) -> Option<(String, Control)> {
     Some((command, reply))
 }
 
+/// The kind of an event this build cannot decode, so the reader can skip it.
+pub fn undecodable_event(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    match value.get("event")?.get("event")? {
+        serde_json::Value::String(unit) => Some(unit.clone()),
+        serde_json::Value::Object(tagged) => tagged.keys().next().cloned(),
+        _ => None,
+    }
+}
+
 pub fn label(control: &Control) -> &'static str {
     match control {
         Control::Hello { .. } => "hello",

@@ -12,12 +12,15 @@ use hyprlayer_core::agent::{AgentDriver, Harness};
 use hyprlayer_core::claude::{ExitOutcome, SessionEvent, SessionState};
 use hyprlayer_core::codex::CollabMode;
 use hyprlayer_core::error::{CoreError, Result as CoreResult};
-use hyprlayer_core::models::session::QuestionAnswers;
+use hyprlayer_core::models::session::{ClientRef, QuestionAnswers, RevisedTurn, TurnKind};
+use hyprlayer_core::models::RuntimeEvent;
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::runtime::sessions::{
     run_codex_followup_for_test, SessionRuntimeHandle, SessionStreamError,
 };
-use hyprlayer_core::store::{Db, NewSession, NewWorkstream, SessionEventGateAction, WorktreeMode};
+use hyprlayer_core::store::{
+    Db, LogCursor, NewSession, NewWorkstream, SessionEventGateAction, StoredEvent, WorktreeMode,
+};
 
 fn seed_session(db: &Db, session_id: &str) {
     db.insert_workstream(NewWorkstream {
@@ -70,6 +73,63 @@ async fn wait_for_log_len(db: &Db, session_id: &str, len: usize) {
     })
     .await;
     assert!(ok, "session log never reached {len} entries");
+}
+
+fn client_ref(id: &str) -> ClientRef {
+    ClientRef {
+        client_id: id.to_string(),
+        device: format!("{id}-device"),
+    }
+}
+
+/// The fields of a `SessionRevised` worth asserting on.
+struct Revised {
+    rev: u64,
+    author: Option<ClientRef>,
+    working: bool,
+    turns: Vec<RevisedTurn>,
+}
+
+/// Drains `events` up to and including the next `SessionRevised`, skipping any
+/// `SessionLifecycle` in between.
+async fn next_session_revised(events: &mut broadcast::Receiver<RuntimeEvent>) -> Revised {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("timed out waiting for a SessionRevised")
+            .expect("events channel closed")
+        {
+            RuntimeEvent::SessionRevised {
+                rev,
+                author,
+                working,
+                turns,
+                ..
+            } => {
+                return Revised {
+                    rev,
+                    author,
+                    working,
+                    turns,
+                }
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// Drains `events` up to and including the next `SessionReset`, returning its rev.
+async fn next_session_reset(events: &mut broadcast::Receiver<RuntimeEvent>) -> u64 {
+    loop {
+        match tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("timed out waiting for a SessionReset")
+            .expect("events channel closed")
+        {
+            RuntimeEvent::SessionReset { rev, .. } => return rev,
+            _ => continue,
+        }
+    }
 }
 
 #[test]
@@ -574,6 +634,7 @@ async fn a_user_message_reaches_only_attachments_that_opted_in() {
             stage: None,
             prompt_name: None,
             client_message_id: Some("m1".into()),
+            author: None,
         })
         .await
         .unwrap();
@@ -881,6 +942,7 @@ async fn cold_rewind_relaunch_failure_restores_the_removed_rows() {
     seed_session(&db, "s1");
 
     let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
     let ingress = handle.ingress("s1").await;
     for i in 0..5 {
         ingress.send(turn_done(i as f64)).await.unwrap();
@@ -896,6 +958,8 @@ async fn cold_rewind_relaunch_failure_restores_the_removed_rows() {
         3,
         "two kept rows plus the rewind boundary"
     );
+    // None of the turnDone rows advance rev, so the boundary itself is the first.
+    assert_eq!(next_session_reset(&mut events).await, 1);
 
     handle
         .restore_after_failed_relaunch("s1", 2, outcome.removed)
@@ -909,9 +973,1119 @@ async fn cold_rewind_relaunch_failure_restores_the_removed_rows() {
         assert_eq!(restored_entry.kind, original_entry.kind);
     }
 
+    // The restore has no row of its own, so it must bump rev/reset_rev directly
+    // and still emit a SessionReset (case 14).
+    assert_eq!(next_session_reset(&mut events).await, 2);
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(turns.rev, 2);
+    assert_eq!(turns.reset_rev, 2);
+
     let ingress = handle.ingress("s1").await;
     ingress.send(turn_done(42.0)).await.unwrap();
     wait_for_log_len(&db, "s1", original.len() + 1).await;
     let after = db.session_log("s1").unwrap();
     assert_eq!(after.last().unwrap().seq, original.len() as i64);
+}
+
+// --- Revisions, reservations and authorship (Phase 1 §5/§6) ---
+//
+// Each test below is a failure mode from the plan's failure list: the
+// assertions verify the bad outcome named in its doc comment does *not*
+// happen. An E2E scenario cannot reach any of them (time-based expiry,
+// forced persist failures, races only one actor's serialization prevents,
+// mid-turn attribution the fake harness can't drive, and undecodable rows).
+
+/// 1. A duplicate `(seq, payload)` (`AlreadyApplied`) must not bump rev again.
+#[tokio::test]
+async fn already_applied_does_not_bump_rev_again() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+
+    // Two actors sharing one db, both spawned before either writes, so both
+    // start at seq 0: the second's write collides with the first's row.
+    let handle1 = SessionRuntimeHandle::new(db.clone());
+    let handle2 = SessionRuntimeHandle::new(db.clone());
+    let ingress1 = handle1.ingress("s1").await;
+    let ingress2 = handle2.ingress("s1").await;
+
+    let event = SessionEvent::UserMessage {
+        text: "hi".into(),
+        stage: None,
+        prompt_name: None,
+        client_message_id: None,
+        author: None,
+    };
+    ingress1.send(event.clone()).await.unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+    ingress2.send(event).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // A fresh third actor reads the db's rev directly.
+    let handle3 = SessionRuntimeHandle::new(db.clone());
+    let turns = handle3
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        turns.rev, 1,
+        "a duplicate (seq, payload) must not bump rev again"
+    );
+}
+
+/// 2. `thinking`, `toolUse`, `turnDone`, `usage` and `partialText` must not bump rev.
+#[tokio::test]
+async fn bookkeeping_kinds_do_not_bump_rev() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+
+    ingress
+        .send(SessionEvent::Thinking {
+            text: "t".into(),
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::ToolUse {
+            id: "t1".into(),
+            name: "grep".into(),
+            input: "{}".into(),
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    ingress.send(turn_done(1.0)).await.unwrap();
+    ingress
+        .send(SessionEvent::Usage { context_tokens: 10 })
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::PartialText {
+            text: "p".into(),
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    // PartialText is ephemeral; the other four persist.
+    wait_for_log_len(&db, "s1", 4).await;
+
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(turns.rev, 0);
+}
+
+/// 3. A reservation whose `UserMessage` was persisted must still count, so
+/// another author's next send at the older base is refused.
+#[tokio::test]
+async fn a_committed_reservation_still_makes_a_foreign_send_stale() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    let b = client_ref("client-b");
+    let err = handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 1,
+                committed_rev: 1,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "expected StaleTranscript(1, 1, 1), got {err:?}"
+    );
+}
+
+/// 4. A reservation whose `UserMessage` failed to persist must not leak.
+#[tokio::test]
+async fn a_reservation_whose_user_message_failed_to_persist_does_not_leak() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    db.set_session_event_gate(|_, seq| {
+        if seq == 0 {
+            SessionEventGateAction::FailRowMutation
+        } else {
+            SessionEventGateAction::Proceed
+        }
+    });
+
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let a = client_ref("client-a");
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    // The gated persist fails; give the actor a moment to process it.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    db.clear_session_event_gate();
+
+    let b = client_ref("client-b");
+    handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .expect("a reservation settled by a failed persist must not leak");
+}
+
+/// 5. A reservation whose `UserMessage` never arrives must expire after the
+/// TTL (not linger forever, and not need another send to notice), and its
+/// expiry must emit a same-rev `SessionRevised`.
+/// 31s mirrors `RESERVATION_TTL` (30s in forwarder.rs, private to that module).
+#[tokio::test]
+async fn a_leaked_reservation_expires_after_the_ttl() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    // Spawn the actor (and its startup blocking read) before pausing time.
+    let _ingress = handle.ingress("s1").await;
+    let mut events = handle.subscribe_events();
+
+    tokio::time::pause();
+
+    let a = client_ref("client-a");
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+
+    tokio::time::advance(Duration::from_secs(31)).await;
+    for _ in 0..5 {
+        tokio::task::yield_now().await;
+    }
+
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.rev, 0, "expiry announces the unchanged rev");
+    assert!(revised.turns.is_empty());
+
+    let b = client_ref("client-b");
+    handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .expect("an expired reservation must not still block a foreign sender");
+}
+
+/// 6. Two reservations at one base_rev from different authors, with no
+/// `UserMessage` between them, must not both pass: the second is refused
+/// with `rev = committed + 1`.
+#[tokio::test]
+async fn a_second_authors_reservation_is_refused_while_the_first_is_still_in_flight() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let a = client_ref("client-a");
+    let b = client_ref("client-b");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), Some(0), Some(a))
+        .await
+        .unwrap();
+    let err = handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 1,
+                committed_rev: 0,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "expected StaleTranscript(1, 0, 1), got {err:?}"
+    );
+}
+
+/// 7. None of a client's own in-flight reservation, its own committed turn,
+/// or its own turn's app follow-up may make its own next send stale.
+#[tokio::test]
+async fn a_clients_own_activity_never_makes_its_own_next_send_stale() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let a = client_ref("client-a");
+
+    // (a) an own in-flight reservation
+    handle
+        .reserve_user_turn("s1", "a1".into(), Some(0), Some(a.clone()))
+        .await
+        .unwrap();
+    handle
+        .reserve_user_turn("s1", "a2".into(), Some(0), Some(a.clone()))
+        .await
+        .expect("a's own in-flight reservation must not make a's next send stale");
+
+    // Commit "a1" as A's turn (rev 1), so (b) can check an own *committed* turn.
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    // (b) an own committed turn
+    handle
+        .reserve_user_turn("s1", "a3".into(), Some(1), Some(a.clone()))
+        .await
+        .expect("a's own committed turn must not make a's next send stale");
+
+    // (c) an own turn's app follow-up, reserved under its author
+    handle
+        .reserve_user_turn("s1", "a-followup".into(), None, Some(a.clone()))
+        .await
+        .unwrap();
+    handle
+        .reserve_user_turn("s1", "a4".into(), Some(1), Some(a))
+        .await
+        .expect("a's own follow-up reservation must not make a's next send stale");
+}
+
+/// 8. Another author's reservation must still make this client's send stale
+/// when this client committed after that author's last commit: A drives revs
+/// to 8, B reserves at base 8, then A's own send at base 8 is refused with rev 9.
+#[tokio::test]
+async fn another_authors_in_flight_reservation_counts_from_the_committed_rev() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+    let b = client_ref("client-b");
+
+    for i in 0..4 {
+        handle
+            .reserve_user_turn("s1", format!("a-{i}"), None, Some(a.clone()))
+            .await
+            .unwrap();
+        ingress
+            .send(SessionEvent::UserMessage {
+                text: format!("turn {i}"),
+                stage: None,
+                prompt_name: None,
+                client_message_id: Some(format!("a-{i}")),
+                author: None,
+            })
+            .await
+            .unwrap();
+        ingress
+            .send(SessionEvent::AssistantText {
+                text: "ok".into(),
+                parent_id: None,
+                injected: false,
+            })
+            .await
+            .unwrap();
+    }
+    wait_for_log_len(&db, "s1", 8).await;
+
+    handle
+        .reserve_user_turn("s1", "b-pull".into(), Some(8), Some(b))
+        .await
+        .expect("B's own read is caught up, so its reservation at base 8 must be accepted");
+
+    let err = handle
+        .reserve_user_turn("s1", "a-4".into(), Some(8), Some(a))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 9,
+                committed_rev: 8,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "expected StaleTranscript(9, 8, 1), got {err:?}"
+    );
+}
+
+/// 9. Neither an author-less commit (a released desktop's turn) nor the revs
+/// that existed when a fresh actor spawned may be taken as any one client's own.
+#[tokio::test]
+async fn authorless_and_pre_spawn_history_are_foreign_to_every_client() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+
+    // (a) an author-less commit
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "legacy".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: None,
+            author: None,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    let a = client_ref("client-a");
+    let err = handle
+        .reserve_user_turn("s1", "a1".into(), Some(0), Some(a))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 1,
+                committed_rev: 1,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "an author-less commit must be foreign to every client: {err:?}"
+    );
+
+    // (b) history that predates a fresh actor's spawn
+    let fresh = SessionRuntimeHandle::new(db.clone());
+    let b = client_ref("client-b");
+    let err = fresh
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 1,
+                committed_rev: 1,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "history predating a fresh actor must be foreign to every client: {err:?}"
+    );
+}
+
+/// 10. A `UserMessage` arriving mid-turn must keep its own author on its own
+/// revision and leave the running turn's author until `TurnDone`. `TurnDone`
+/// closes the turn; the parked author opens the next one when its first item lands.
+#[tokio::test]
+async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+
+    let a = client_ref("client-a");
+    let b = client_ref("client-b");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a.clone()))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "from a".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.author, Some(a.clone()));
+    assert_eq!(revised.rev, 1);
+
+    // The turn is still running: an assistant block is attributed to A.
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "partial reply".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.author, Some(a.clone()));
+    assert!(revised.working);
+
+    // B's message arrives mid-turn: its own revision is attributed to B...
+    handle
+        .reserve_user_turn("s1", "b1".into(), None, Some(b.clone()))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "from b".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("b1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(
+        revised.author,
+        Some(b.clone()),
+        "a mid-turn message keeps its own author"
+    );
+    assert!(revised.working);
+
+    // ...but the still-running turn's own next item stays attributed to A.
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "still a's turn".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(
+        revised.author,
+        Some(a),
+        "the running turn keeps its own author until TurnDone"
+    );
+
+    // TurnDone always closes: a harness may have answered B's message already.
+    ingress.send(turn_done(1.0)).await.unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.rev, 4, "TurnDone itself does not advance rev");
+    assert!(!revised.working, "TurnDone closes the turn");
+
+    // B's turn opens under B when its first item lands.
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "b's reply".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(
+        revised.author,
+        Some(b),
+        "the parked author opens the next turn"
+    );
+    assert!(revised.working);
+}
+
+/// 21. A harness that answers a mid-turn message together with the running
+/// turn sends one `TurnDone` for both: the turn must close (`working: false`),
+/// and the next send must open a turn under its own author, not the parked one.
+#[tokio::test]
+async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+    let b = client_ref("client-b");
+
+    for (nonce, author) in [("b1", &b), ("a1", &a)] {
+        handle
+            .reserve_user_turn("s1", nonce.into(), None, Some(author.clone()))
+            .await
+            .unwrap();
+        ingress
+            .send(SessionEvent::UserMessage {
+                text: nonce.into(),
+                stage: None,
+                prompt_name: None,
+                client_message_id: Some(nonce.into()),
+                author: None,
+            })
+            .await
+            .unwrap();
+        let _ = next_session_revised(&mut events).await;
+    }
+    // One reply and one TurnDone answer both messages.
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "both".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.author, Some(b.clone()));
+    ingress.send(turn_done(1.0)).await.unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert!(
+        !revised.working,
+        "one TurnDone for a merged turn must close it"
+    );
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert!(!turns.working, "list_turns must not report a phantom turn");
+
+    // A's next send opens its own turn; the parked author is not charged to it.
+    handle
+        .reserve_user_turn("s1", "a2".into(), Some(3), Some(a.clone()))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "a2".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a2".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.author, Some(a.clone()));
+    assert!(revised.working);
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "reply".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.author, Some(a), "the reply belongs to A's own turn");
+    ingress.send(turn_done(2.0)).await.unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert!(!revised.working);
+}
+
+/// 11. `ReleaseUserTurn` must emit a same-rev `SessionRevised` only when a
+/// reservation actually existed; releasing an unknown nonce must not.
+#[tokio::test]
+async fn release_user_turn_announces_only_when_a_reservation_actually_existed() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    handle.release_user_turn("s1", "a1".into()).await;
+    let revised = next_session_revised(&mut events).await;
+    assert_eq!(revised.rev, 0);
+    assert!(revised.turns.is_empty());
+
+    handle.release_user_turn("s1", "unknown".into()).await;
+    let nothing = tokio::time::timeout(Duration::from_millis(300), events.recv()).await;
+    assert!(
+        nothing.is_err(),
+        "releasing an unknown nonce must not announce a revision"
+    );
+}
+
+/// 12. A `TurnDone` or `Exited` whose persist fails must still close the turn,
+/// clear its reservations, and announce the turn's end.
+#[tokio::test]
+async fn a_failed_persist_still_closes_the_turn_and_announces_its_end() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    let _ = next_session_revised(&mut events).await;
+
+    // TurnDone's own row-write fails.
+    db.set_session_event_gate(|_, _| SessionEventGateAction::FailRowMutation);
+    ingress.send(turn_done(1.0)).await.unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert!(
+        !revised.working,
+        "the turn must close even though its TurnDone failed to persist"
+    );
+    db.clear_session_event_gate();
+
+    let b = client_ref("client-b");
+    handle
+        .reserve_user_turn("s1", "b1".into(), Some(1), Some(b))
+        .await
+        .expect("a closed turn must not leave a stale in-flight reservation");
+
+    // Exited's own row-write also fails: its reservations must still clear
+    // and its end must still be announced.
+    handle
+        .reserve_user_turn("s1", "b2".into(), None, Some(client_ref("client-b")))
+        .await
+        .unwrap();
+    db.set_session_event_gate(|_, _| SessionEventGateAction::FailRowMutation);
+    ingress
+        .send(SessionEvent::Exited {
+            outcome: ExitOutcome::Crashed,
+            code: Some(1),
+            stderr_tail: String::new(),
+        })
+        .await
+        .unwrap();
+    let revised = next_session_revised(&mut events).await;
+    assert!(!revised.working);
+    db.clear_session_event_gate();
+
+    let c = client_ref("client-c");
+    handle
+        .reserve_user_turn("s1", "c1".into(), Some(1), Some(c))
+        .await
+        .expect("Exited must clear reservations even when its own persist fails");
+}
+
+/// 13. `Exited` must clear any reservations left in flight.
+#[tokio::test]
+async fn exited_clears_any_reservations_left_in_flight() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::Exited {
+            outcome: ExitOutcome::Crashed,
+            code: Some(1),
+            stderr_tail: String::new(),
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    let b = client_ref("client-b");
+    handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
+        .await
+        .expect("Exited must clear any reservations left in flight");
+}
+
+/// 14a. A rewind must bump rev, set reset_rev, raise the foreign floor, and
+/// emit `SessionReset`. (`restore_after_failed_relaunch`'s half of case 14 is
+/// covered by the extended `cold_rewind_relaunch_failure_restores_the_removed_rows`.)
+#[tokio::test]
+async fn a_rewind_bumps_rev_sets_reset_rev_raises_the_foreign_floor_and_emits_session_reset() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a.clone()))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::AssistantText {
+            text: "reply".into(),
+            parent_id: None,
+            injected: false,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 2).await;
+    let _ = next_session_revised(&mut events).await;
+    let _ = next_session_revised(&mut events).await;
+
+    let outcome = handle.rewind("s1", 1, None).await.unwrap();
+    assert!(!outcome.live_rewound, "no live driver was supplied");
+
+    // Cutting at seq 1 keeps the userMessage; the boundary lands at seq 1 and
+    // is itself a rev-advancing kind, so rev goes from 2 to 3.
+    let reset_rev = next_session_reset(&mut events).await;
+    assert_eq!(reset_rev, 3);
+
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(turns.rev, 3);
+    assert_eq!(turns.reset_rev, 3);
+
+    // The foreign floor is raised: A's own pre-rewind base no longer excuses it.
+    let err = handle
+        .reserve_user_turn("s1", "a2".into(), Some(2), Some(a))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 3,
+                committed_rev: 3,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "expected StaleTranscript(3, 3, 1), got {err:?}"
+    );
+}
+
+/// 15. A `SessionRevised` must carry its riding `toolUse`/`thinking` seqs, a
+/// fresh (non-stale) rev, and `working: false` once a `TurnDone` leaves
+/// nothing queued.
+#[tokio::test]
+async fn a_session_revised_carries_its_riders_a_fresh_rev_and_working_state() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: None,
+            author: None,
+        })
+        .await
+        .unwrap();
+    let user_revised = next_session_revised(&mut events).await;
+    assert_eq!(user_revised.rev, 1);
+
+    ingress
+        .send(SessionEvent::Thinking {
+            text: "hmm".into(),
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::ToolUse {
+            id: "t1".into(),
+            name: "grep".into(),
+            input: "{}".into(),
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::ToolResult {
+            tool_use_id: "t1".into(),
+            content: "ok".into(),
+            is_error: false,
+            parent_id: None,
+        })
+        .await
+        .unwrap();
+    let reply_revised = next_session_revised(&mut events).await;
+    assert_eq!(
+        reply_revised.rev, 2,
+        "only toolResult advances rev; the reported rev must not be stale"
+    );
+    assert_eq!(
+        reply_revised.turns.len(),
+        3,
+        "thinking and toolUse must ride with the commit that follows them"
+    );
+    let kinds: Vec<TurnKind> = reply_revised.turns.iter().map(|t| t.kind).collect();
+    assert!(kinds.contains(&TurnKind::Assistant));
+    assert!(kinds.contains(&TurnKind::Tool));
+
+    ingress.send(turn_done(1.0)).await.unwrap();
+    let done_revised = next_session_revised(&mut events).await;
+    assert!(
+        !done_revised.working,
+        "no queued turn: TurnDone must report working: false"
+    );
+    assert!(done_revised.turns.is_empty());
+}
+
+/// 16. `list_turns`' rev must match its rows even racing a delayed concurrent
+/// commit: the actor serializes control messages against ingress inline.
+#[tokio::test]
+async fn list_turns_rev_matches_its_rows_even_racing_a_concurrent_commit() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    db.set_session_event_gate(|_, seq| {
+        if seq == 0 {
+            SessionEventGateAction::Delay(Duration::from_millis(200))
+        } else {
+            SessionEventGateAction::Proceed
+        }
+    });
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: None,
+            author: None,
+        })
+        .await
+        .unwrap();
+
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    let counted = turns
+        .entries
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.event,
+                SessionEvent::UserMessage { .. }
+                    | SessionEvent::AssistantText { .. }
+                    | SessionEvent::ToolResult { .. }
+                    | SessionEvent::Rewound { .. }
+            )
+        })
+        .count() as u64;
+    assert_eq!(
+        turns.rev, counted,
+        "rev must always match the rows a consistent read returns"
+    );
+    db.clear_session_event_gate();
+}
+
+/// 17. `list_turns` with a rewritten cursor must be refused with
+/// `session_epoch_advanced`, not silently return rows.
+#[tokio::test]
+async fn list_turns_with_a_rewritten_cursor_is_refused() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    ingress.send(turn_done(1.0)).await.unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    let log = db.session_log("s1").unwrap();
+    let stale_cursor = LogCursor::After {
+        seq: log[0].seq,
+        created_at: log[0].created_at + 1.0,
+    };
+    let err = handle
+        .list_turns("s1", stale_cursor, 100, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, CoreError::SessionEpochAdvanced { .. }));
+}
+
+/// 18. `list_turns` must take `next_cursor` from the last raw row, so a page
+/// whose trailing rows don't decode is still resumable rather than read forever.
+#[tokio::test]
+async fn list_turns_resumes_past_an_undecodable_trailing_row() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    ingress.send(turn_done(1.0)).await.unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+
+    db.restore_session_events(
+        "s1",
+        &[StoredEvent {
+            seq: 1.0,
+            kind: "turnDone".into(),
+            payload: "not valid json".into(),
+            created_at: 12345.0,
+        }],
+    )
+    .unwrap();
+
+    let page = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.entries.len(),
+        1,
+        "the undecodable row is skipped, not returned"
+    );
+    assert_eq!(
+        page.next_cursor,
+        LogCursor::After {
+            seq: 1,
+            created_at: 12345.0
+        },
+        "next_cursor must name the raw row even though it didn't decode"
+    );
+    assert_eq!(page.remaining, 0);
+
+    let next = handle
+        .list_turns("s1", page.next_cursor, 100, None)
+        .await
+        .unwrap();
+    assert!(next.entries.is_empty());
+    assert_eq!(next.remaining, 0);
+}
+
+/// 19. `list_turns`' `in_flight` must exclude the caller's own reservations.
+#[tokio::test]
+async fn list_turns_in_flight_excludes_the_callers_own_reservations() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let a = client_ref("client-a");
+    let b = client_ref("client-b");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a))
+        .await
+        .unwrap();
+    handle
+        .reserve_user_turn("s1", "b1".into(), None, Some(b))
+        .await
+        .unwrap();
+
+    let as_a = handle
+        .list_turns("s1", LogCursor::Empty, 100, Some("client-a".into()))
+        .await
+        .unwrap();
+    assert_eq!(as_a.in_flight, 1, "only B's reservation is foreign to A");
+
+    let as_unidentified = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        as_unidentified.in_flight, 2,
+        "an unidentified caller counts every reservation"
+    );
+}
+
+/// 20. A nonce-less `UserMessage` right after an announced client's turn must
+/// not be attributed to that client: it must be author-less, raising the
+/// foreign floor so that same client's next send at its own older base is stale.
+#[tokio::test]
+async fn a_nonceless_message_after_an_announced_clients_turn_is_not_attributed_to_it() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let ingress = handle.ingress("s1").await;
+    let a = client_ref("client-a");
+
+    handle
+        .reserve_user_turn("s1", "a1".into(), None, Some(a.clone()))
+        .await
+        .unwrap();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("a1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    ingress.send(turn_done(1.0)).await.unwrap();
+    wait_for_log_len(&db, "s1", 2).await;
+
+    // A nonce-less message right after A's turn: no reservation to match.
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "raw rpc".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: None,
+            author: None,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 3).await;
+
+    // It is author-less and foreign to everyone, A included: A's own last
+    // known base (rev 1, from its own turn) is now stale.
+    let err = handle
+        .reserve_user_turn("s1", "a2".into(), Some(1), Some(a))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            CoreError::StaleTranscript {
+                rev: 2,
+                committed_rev: 2,
+                missing_turns: 1,
+                ..
+            }
+        ),
+        "expected StaleTranscript(2, 2, 1), got {err:?}"
+    );
 }

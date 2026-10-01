@@ -9,16 +9,21 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
+  type RefObject,
   type WheelEvent,
 } from "react";
 
-import { Button, Spinner } from "@/components/ui";
+import { Button, Skeleton, Spinner, cx } from "@/components/ui";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { HyprlayerMark } from "@/components/Logo";
 import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { stageLabel } from "@/lib/domain/stages";
+import type { ClientRef } from "@/lib/bindings";
+import type { SyncPhase } from "@/lib/domain/sync";
 import { exitLabel, type TranscriptItem } from "./transcript";
+import { SUMMARY_AFTER, type PendingTurn } from "./transcriptSync";
 import { backgroundTasksFromItems } from "./backgroundTask";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
@@ -91,6 +96,17 @@ function UserMessageToolbar({
   );
 }
 
+function RemoteChip({ device, createdAt }: { device: string; createdAt: number | null }) {
+  const now = useTickingNow(createdAt);
+  return (
+    <span className="mb-1 inline-flex items-center gap-1 rounded-control bg-info/10 px-1.5 py-0.5 text-tag normal-case text-info">
+      <Icon name="device" size="xs" />
+      from {device}
+      {createdAt !== null && ` · ${formatRelativeTime(createdAt, now)}`}
+    </span>
+  );
+}
+
 const UserMessage = memo(function UserMessage({
   id,
   text,
@@ -99,6 +115,8 @@ const UserMessage = memo(function UserMessage({
   createdAt,
   promptName,
   prompt,
+  author,
+  selfClientId,
 }: {
   id: string;
   text: string;
@@ -107,10 +125,15 @@ const UserMessage = memo(function UserMessage({
   createdAt: number | null;
   promptName: string | null;
   prompt: PromptHandlers;
+  author: ClientRef | null;
+  selfClientId: string | null;
 }) {
+  // Unknown identity attributes nothing, as in routing.
+  const remote = author && selfClientId !== null && author.clientId !== selfClientId ? author : null;
   return (
     <div className="group flex flex-col items-end">
       <div className="max-w-[85%] rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
+        {remote && <RemoteChip device={remote.device} createdAt={createdAt} />}
         {stage && stage !== "general" && (
           <span className="mb-1 block text-label text-ink-dim">
             {stageLabel(stage)}
@@ -738,6 +761,7 @@ function renderSingle(
   busy: boolean,
   permission: PermissionHandlers,
   prompt: PromptHandlers,
+  selfClientId: string | null,
 ) {
   switch (item.kind) {
     case "user":
@@ -750,6 +774,8 @@ function renderSingle(
           createdAt={item.createdAt}
           promptName={item.promptName}
           prompt={prompt}
+          author={item.author ?? null}
+          selfClientId={selfClientId}
         />
       );
     case "assistant":
@@ -862,58 +888,201 @@ function SubagentBlock({
   );
 }
 
+const SelfClientId = createContext<string | null>(null);
+
+const unitItems = (u: Unit): TranscriptItem[] => (u.type === "group" ? u.items : [u.item]);
+
+const seqAtLeast = (item: TranscriptItem, seq: number) => item.seq != null && item.seq >= seq;
+
 function ItemList({
   items,
   childrenByParent,
   busy,
   permission,
   prompt,
+  freshFromSeq = null,
+  divider = null,
 }: {
   items: TranscriptItem[];
   childrenByParent: ChildMap;
   busy: boolean;
   permission: PermissionHandlers;
   prompt: PromptHandlers;
+  freshFromSeq?: number | null;
+  divider?: { seq: number; node: ReactNode } | null;
 }) {
   const planCards = useContext(PlanCardsContext);
+  const selfClientId = useContext(SelfClientId);
   // Subagents and plan cards (a Bash-written plan, a presented one) never fold into a tool group.
   const keepOut = (it: TranscriptItem) =>
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
   const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
   const units = toUnits(visible, keepOut);
+
+  const renderUnit = (unit: Unit, i: number): ReactNode => {
+    const gap = gapForKinds(i > 0 ? unitKind(units[i - 1]) : undefined, unitKind(unit));
+    // A group's first item decides, so a group that grows doesn't fade in again.
+    const fresh = freshFromSeq !== null && seqAtLeast(unitItems(unit)[0], freshFromSeq);
+    const className = cx(gap, fresh && "animate-sync-in");
+    if (unit.type === "group") {
+      return (
+        <div key={`g:${unit.id}`} className={className}>
+          <ToolGroup items={unit.items} busy={busy} />
+        </div>
+      );
+    }
+    const item = unit.item;
+    if (item.kind === "tool" && childrenByParent.has(item.toolUseId)) {
+      return (
+        <div key={item.id} className={className}>
+          <SubagentBlock
+            item={item}
+            childItems={childrenByParent.get(item.toolUseId)!}
+            childrenByParent={childrenByParent}
+            busy={busy}
+            permission={permission}
+            prompt={prompt}
+          />
+        </div>
+      );
+    }
+    return (
+      <div key={item.id} className={className}>
+        {renderSingle(item, busy, permission, prompt, selfClientId)}
+      </div>
+    );
+  };
+
+  const dividerAt = divider ? units.findIndex((u) => unitItems(u).some((it) => seqAtLeast(it, divider.seq))) : -1;
+  // One flat keyed list, so the divider coming and going never remounts the unit beside it.
+  const nodes: ReactNode[] = [];
+  units.forEach((unit, i) => {
+    if (divider && i === dividerAt) {
+      nodes.push(
+        <div key={`divider:${divider.seq}`} className={i > 0 ? "mt-5" : ""}>
+          {divider.node}
+        </div>,
+      );
+    }
+    nodes.push(renderUnit(unit, i));
+  });
+  return <>{nodes}</>;
+}
+
+export type SkeletonTail = {
+  phase: SyncPhase;
+  turns: PendingTurn[];
+  /** Revisions not shown; padded past `turns` when a refusal counted turns no revision named. */
+  count: number;
+  /** Another device's turn is running; its label replaces the elapsed counter. */
+  working: string | null;
+};
+
+export type TranscriptSync = {
+  tail: SkeletonTail | null;
+  divider: { seq: number; device: string } | null;
+  freshFromSeq: number | null;
+  selfClientId: string | null;
+};
+
+const NO_SYNC: TranscriptSync = { tail: null, divider: null, freshFromSeq: null, selfClientId: null };
+
+const BAR_WIDTHS = ["w-[82%]", "w-[64%]", "w-[46%]"];
+
+function RevisionSkeleton({ turn, shimmer }: { turn: PendingTurn; shimmer: boolean }) {
+  const bars = turn.kinds.includes("user") ? 1 : 1 + (turn.rev % 3);
   return (
-    <>
-      {units.map((unit, i) => {
-        const gap = gapForKinds(i > 0 ? unitKind(units[i - 1]) : undefined, unitKind(unit));
-        if (unit.type === "group") {
-          return (
-            <div key={`g:${unit.id}`} className={gap}>
-              <ToolGroup items={unit.items} busy={busy} />
-            </div>
-          );
+    <div className="flex gap-2.5">
+      <Skeleton shimmer={shimmer} className="h-[22px] w-[22px] shrink-0 rounded-md" />
+      <div className="min-w-0 flex-1 space-y-1.5 pt-1">
+        {BAR_WIDTHS.slice(0, bars).map((width, i) => (
+          <Skeleton key={width} shimmer={shimmer} className={cx(i === 0 ? "h-3" : "h-2.5", width)} />
+        ))}
+        {turn.kinds.includes("tool") && <Skeleton shimmer={shimmer} className="h-7 w-full" />}
+      </div>
+    </div>
+  );
+}
+
+const turnsLabel = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`;
+
+function SyncSkeletonTail({ tail }: { tail: SkeletonTail }) {
+  const shimmer = tail.phase === "syncing";
+  const turns = [...tail.turns];
+  const lastRev = turns[turns.length - 1]?.rev ?? 0;
+  for (let i = turns.length; i < tail.count; i += 1) turns.push({ rev: lastRev + i, kinds: [] });
+  if (turns.length === 0) return null;
+  return (
+    <div className="mt-5 space-y-4">
+      {tail.phase === "guard" && (
+        <div className="flex items-center gap-2 text-label text-ink-dim">
+          <span className="flex-1 border-t border-dashed border-edge" aria-hidden />
+          <span className="shrink-0">{turnsLabel(turns.length)} not shown</span>
+          <span className="flex-1 border-t border-dashed border-edge" aria-hidden />
+        </div>
+      )}
+      {turns.length > SUMMARY_AFTER ? (
+        <div className="flex items-center gap-2.5">
+          <Skeleton shimmer={shimmer} className="h-[22px] w-[22px] shrink-0 rounded-md" />
+          <span className="text-meta text-ink-dim">{turnsLabel(turns.length)}</span>
+        </div>
+      ) : (
+        turns.map((turn) => <RevisionSkeleton key={turn.rev} turn={turn} shimmer={shimmer} />)
+      )}
+    </div>
+  );
+}
+
+function WorkingSkeleton({ device }: { device: string }) {
+  return (
+    <div className="mt-3 flex items-center gap-2.5">
+      <Skeleton shimmer className="h-[22px] w-[22px] shrink-0 rounded-md" />
+      <span className="text-meta text-ink-dim">{device} is working…</span>
+    </div>
+  );
+}
+
+function SyncDivider({
+  device,
+  rootRef,
+  onPassed,
+}: {
+  device: string;
+  rootRef: RefObject<HTMLDivElement | null>;
+  onPassed?: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const passed = useRef(onPassed);
+  passed.current = onPassed;
+  useEffect(() => {
+    const el = ref.current;
+    const root = rootRef.current;
+    if (!el || !root || typeof IntersectionObserver === "undefined") return;
+    // A pin to the bottom can carry it off-screen before it was ever shown; that isn't reading past it.
+    let seen = false;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry.isIntersecting) {
+          seen = true;
+          return;
         }
-        const item = unit.item;
-        if (item.kind === "tool" && childrenByParent.has(item.toolUseId)) {
-          return (
-            <div key={item.id} className={gap}>
-              <SubagentBlock
-                item={item}
-                childItems={childrenByParent.get(item.toolUseId)!}
-                childrenByParent={childrenByParent}
-                busy={busy}
-                permission={permission}
-                prompt={prompt}
-              />
-            </div>
-          );
-        }
-        return (
-          <div key={item.id} className={gap}>
-            {renderSingle(item, busy, permission, prompt)}
-          </div>
-        );
-      })}
-    </>
+        // Only leaving through the top means it was read past; below the fold it is still ahead.
+        if (!seen || !entry.rootBounds || entry.boundingClientRect.bottom >= entry.rootBounds.top) return;
+        io.disconnect();
+        passed.current?.();
+      },
+      { root },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [rootRef]);
+  return (
+    <div ref={ref} className="flex items-center gap-2 text-label text-info">
+      <span className="h-px flex-1 bg-info/30" aria-hidden />
+      <span className="shrink-0">New from {device}</span>
+      <span className="h-px flex-1 bg-info/30" aria-hidden />
+    </div>
   );
 }
 
@@ -925,6 +1094,9 @@ type Props = {
   workingSince: number | null;
   permission: PermissionHandlers;
   prompt: PromptHandlers;
+  sync?: TranscriptSync;
+  onBottomChange?: (atBottom: boolean) => void;
+  onDividerPassed?: () => void;
 };
 
 export type TranscriptHandle = {
@@ -966,12 +1138,30 @@ export function insideNestedScroller(target: EventTarget | null, root: HTMLEleme
 
 export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
-    { items, busy, connecting, harnessLabel, workingSince, permission, prompt },
+    {
+      items,
+      busy,
+      connecting,
+      harnessLabel,
+      workingSince,
+      permission,
+      prompt,
+      sync = NO_SYNC,
+      onBottomChange,
+      onDividerPassed,
+    },
     ref,
   ) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
+    const bottomChanged = useRef(onBottomChange);
+    bottomChanged.current = onBottomChange;
+    const setAtBottom = useCallback((next: boolean) => {
+      if (atBottom.current === next) return;
+      atBottom.current = next;
+      bottomChanged.current?.(next);
+    }, []);
     const lastTop = useRef(0);
     const relockUntil = useRef(0);
     const easeFrame = useRef(0);
@@ -1004,7 +1194,7 @@ export const TranscriptView = memo(
           if (tries++ < JUMP_MAX_FRAMES) frame = requestAnimationFrame(attempt);
           return;
         }
-        atBottom.current = false;
+        setAtBottom(false);
         jumping.current = true;
         settleJump();
         el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1013,7 +1203,7 @@ export const TranscriptView = memo(
       return () => {
         if (frame) cancelAnimationFrame(frame);
       };
-    }, [jump, settleJump]);
+    }, [jump, settleJump, setAtBottom]);
 
     useEffect(
       () => () => {
@@ -1051,7 +1241,7 @@ export const TranscriptView = memo(
         });
       },
       scrollToBottom() {
-        atBottom.current = true;
+        setAtBottom(true);
         const el = scrollRef.current;
         if (!el || el.scrollHeight - el.clientHeight - el.scrollTop <= 0) return;
         relockUntil.current = performance.now() + SEND_GLIDE_MS;
@@ -1082,7 +1272,7 @@ export const TranscriptView = memo(
       }
       const gap = el.scrollHeight - el.clientHeight - top;
       const wasBottom = atBottom.current;
-      atBottom.current = stickAfterScroll(lastTop.current, top, gap, wasBottom);
+      setAtBottom(stickAfterScroll(lastTop.current, top, gap, wasBottom));
       if (!wasBottom && atBottom.current) relockUntil.current = performance.now() + RELOCK_MS;
       lastTop.current = top;
     };
@@ -1091,7 +1281,7 @@ export const TranscriptView = memo(
       const el = scrollRef.current;
       if (!el || !releaseOnWheel(e.deltaX, e.deltaY, e.ctrlKey, el.scrollTop)) return;
       if (insideNestedScroller(e.target, el)) return;
-      atBottom.current = false;
+      setAtBottom(false);
     };
 
     useEffect(() => {
@@ -1143,6 +1333,7 @@ export const TranscriptView = memo(
       }
     }
     const topLevel = items.filter((item) => parentIdOf(item) === null);
+    const { tail, divider } = sync;
 
     return (
       <div
@@ -1154,22 +1345,36 @@ export const TranscriptView = memo(
         <div ref={contentRef} className="mx-auto w-[90%]">
           <OpenBackgroundIds.Provider value={openBackgroundIds}>
             <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
-              <ItemList
-                items={topLevel}
-                childrenByParent={childrenByParent}
-                busy={busy}
-                permission={permission}
-                prompt={prompt}
-              />
+              <SelfClientId.Provider value={sync.selfClientId}>
+                <ItemList
+                  items={topLevel}
+                  childrenByParent={childrenByParent}
+                  busy={busy}
+                  permission={permission}
+                  prompt={prompt}
+                  freshFromSeq={sync.freshFromSeq}
+                  divider={
+                    divider && {
+                      seq: divider.seq,
+                      node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
+                    }
+                  }
+                />
+              </SelfClientId.Provider>
             </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
+          {tail && <SyncSkeletonTail tail={tail} />}
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">
               <Spinner size="sm" />
               Connecting to {harnessLabel}…
             </div>
           )}
-          {workingSince !== null && <ElapsedCounter since={workingSince} />}
+          {tail?.working ? (
+            <WorkingSkeleton device={tail.working} />
+          ) : (
+            workingSince !== null && <ElapsedCounter since={workingSince} />
+          )}
         </div>
       </div>
     );

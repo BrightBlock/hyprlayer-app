@@ -7,7 +7,9 @@ import { useShallow } from "zustand/shallow";
 
 import {
   commands,
+  events,
   type Bootstrap,
+  type ClientRef,
   type ClaudeProbe,
   type Harness,
   type LogCursorDto,
@@ -16,9 +18,15 @@ import {
   type Session,
   type SessionEvent,
   type SessionLogEntryDto,
+  type SessionReset,
+  type SessionRevised,
+  type SessionState,
+  type SessionStreamItemDto,
+  type SessionTurnsDto,
 } from "@/lib/bindings";
 import type { WorkstreamActivity } from "@/lib/domain/activity";
-import { isAppError, unwrap } from "@/lib/ipc";
+import type { EventBridge } from "@/lib/events";
+import { isAppError, isStaleTranscript, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
@@ -80,6 +88,30 @@ import {
   type SessionView,
   type TranscriptItem,
 } from "./transcript";
+import {
+  canSend,
+  heldSummary,
+  mergeEntries,
+  route,
+  turnAuthorAfter,
+  type Arrival,
+  type RouteContext,
+  type Routed,
+  type SyncState,
+  type TurnAuthor,
+} from "./transcriptSync";
+import {
+  forgetSync,
+  noteOwnTurn,
+  rev,
+  scheduleWatch,
+  selfClientId,
+  setDivider,
+  setSyncHandlers,
+  syncInput,
+  syncOf,
+  syncSupport,
+} from "./syncStore";
 
 export type SessionEntry = SessionView & {
   workstreamId: string;
@@ -90,9 +122,15 @@ export type SessionEntry = SessionView & {
   /** The harness's own plan mode, layered over `permissionMode` (codex, OpenCode). */
   planning?: boolean;
   reloading?: boolean;
+  drifted?: boolean;
   queued: QueuedMessage[];
   workingSince: number | null;
   taskStartedAt: Record<string, number>;
+  /** Highest log seq in the view; a rewind's reload lowers it, since the rewind reuses seqs. */
+  appliedSeq?: number;
+  /** Where a catch-up read resumes: the last fold's or page's final raw row. */
+  cursor?: LogCursorDto | null;
+  turnAuthor?: TurnAuthor;
 };
 
 export type QueuedMessage = {
@@ -105,15 +143,19 @@ type State = { sessions: Record<string, SessionEntry> };
 
 export const useSessionStore = create<State>(() => ({ sessions: {} }));
 
-const channels = new Map<string, Channel<SessionEvent>>();
+const channels = new Map<string, Channel<SessionStreamItemDto>>();
 
 const restoring = new Set<string>();
+
+// Another device's items, waiting for this client to be idle (R8).
+const held = new Map<string, Arrival[]>();
 
 function entryOf(sessionId: string): SessionEntry | undefined {
   return useSessionStore.getState().sessions[sessionId];
 }
 
 function setEntry(sessionId: string, next: SessionEntry): void {
+  const added = !useSessionStore.getState().sessions[sessionId];
   useSessionStore.setState((s) => {
     const prev = s.sessions[sessionId];
     const workingSince = nextWorkingSince(prev, next);
@@ -121,6 +163,14 @@ function setEntry(sessionId: string, next: SessionEntry): void {
     return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
   });
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
+  noteOwnTurn(sessionId, next.streaming, next.turnAuthor ?? null);
+  if (added) scheduleWatch();
+}
+
+function forgetSession(sessionId: string): void {
+  channels.delete(sessionId);
+  held.delete(sessionId);
+  forgetSync(sessionId);
 }
 
 const lastWorkingAt = new Map<string, number>();
@@ -147,22 +197,24 @@ export function removeSessionsForWorkstream(workstreamId: string): void {
   const { sessions } = useSessionStore.getState();
   const ids = Object.keys(sessions).filter((id) => sessions[id]?.workstreamId === workstreamId);
   if (ids.length === 0) return;
-  for (const id of ids) channels.delete(id);
+  for (const id of ids) forgetSession(id);
   useSessionStore.setState((s) => {
     const next = { ...s.sessions };
     for (const id of ids) delete next[id];
     return { sessions: next };
   });
+  scheduleWatch();
 }
 
 export function dropSession(sessionId: string): void {
-  channels.delete(sessionId);
+  forgetSession(sessionId);
   useSessionStore.setState((s) => {
     if (!s.sessions[sessionId]) return s;
     const next = { ...s.sessions };
     delete next[sessionId];
     return { sessions: next };
   });
+  scheduleWatch();
 }
 
 function nextTaskStartedAt(
@@ -185,29 +237,124 @@ function nextWorkingSince(prev: SessionEntry | undefined, next: SessionEntry): n
 
 // Events can arrive before the command returns the session id.
 function bufferedChannel(): {
-  channel: Channel<SessionEvent>;
+  channel: Channel<SessionStreamItemDto>;
   activate: (sessionId: string) => void;
 } {
-  const buffer: SessionEvent[] = [];
+  const buffer: SessionStreamItemDto[] = [];
   let boundId: string | null = null;
-  const channel = new Channel<SessionEvent>();
-  channel.onmessage = (event) => {
-    if (boundId) dispatch(boundId, event);
-    else buffer.push(event);
+  const channel = new Channel<SessionStreamItemDto>();
+  channel.onmessage = (item) => {
+    if (retired.has(channel)) return;
+    if (boundId) dispatch(boundId, item);
+    else buffer.push(item);
   };
   return {
     channel,
     activate(sessionId) {
       boundId = sessionId;
-      for (const event of buffer) dispatch(sessionId, event);
+      for (const item of buffer) dispatch(sessionId, item);
       buffer.length = 0;
     },
   };
 }
 
-function dispatch(sessionId: string, event: SessionEvent): void {
+// Reused per item: `route` reads it and keeps nothing.
+const routeContext: RouteContext = { selfId: null, appliedSeq: -1, heldCount: 0, ownTurnStreaming: false };
+
+function dispatch(sessionId: string, item: SessionStreamItemDto): void {
+  // A server without sync sends no rev: everything applies as it arrives.
+  if (item.rev === null) {
+    applyEvent(sessionId, item.event, null);
+    return;
+  }
   const current = entryOf(sessionId);
   if (!current) return;
+  routeContext.selfId = selfClientId();
+  routeContext.appliedSeq = current.appliedSeq ?? -1;
+  routeContext.heldCount = held.get(sessionId)?.length ?? 0;
+  routeContext.ownTurnStreaming = current.streaming && current.turnAuthor === "self";
+  switch (route(item, routeContext)) {
+    case "reset":
+      if (rev(item.rev) > (syncOf(sessionId)?.resetRev ?? 0)) syncInput(sessionId, { kind: "reset" });
+      return;
+    case "apply":
+      applySynced(sessionId, item);
+      return;
+    case "hold":
+      holdItem(sessionId, { ...item, receivedAt: Date.now() });
+      return;
+    case "flush":
+      applyHeld(sessionId);
+      applySynced(sessionId, item);
+      return;
+    case "skip":
+    case "drop":
+      return;
+  }
+}
+
+function applySynced(sessionId: string, item: Routed): void {
+  if (!entryOf(sessionId)) return;
+  applyEvent(sessionId, item.event, item);
+  const applied = rev(item.rev);
+  const sync = syncOf(sessionId);
+  // Most items repeat the rev already applied; partial text arrives per token.
+  if (!sync || applied > sync.localRev) syncInput(sessionId, { kind: "applied", rev: applied });
+}
+
+function holdItem(sessionId: string, item: Arrival): void {
+  const queue = held.get(sessionId);
+  if (queue) queue.push(item);
+  else held.set(sessionId, [item]);
+  reportHeld(sessionId);
+}
+
+function reportHeld(sessionId: string): void {
+  const queue = held.get(sessionId);
+  if (!queue) return;
+  const summary = heldSummary(queue);
+  syncInput(sessionId, {
+    kind: "remote",
+    rev: summary.rev ?? syncOf(sessionId)?.localRev ?? 0,
+    turns: summary.turns,
+    device: summary.device,
+    working: summary.working,
+    flushable: summary.flushable,
+    attached: false,
+    own: false,
+  });
+}
+
+// In arrival order, through the same path a live item takes.
+function applyHeld(sessionId: string): Arrival[] {
+  const queue = held.get(sessionId);
+  if (!queue) return [];
+  held.delete(sessionId);
+  for (const item of queue) {
+    applySynced(sessionId, item);
+    if (item.event.kind !== "userMessage") continue;
+    // A live user message has no createdAt; when it arrived is the closest stand-in.
+    const entry = entryOf(sessionId);
+    const last = entry?.items[entry.items.length - 1];
+    if (entry && last?.kind === "user" && last.seq === item.seq && last.createdAt === null) {
+      setEntry(sessionId, { ...entry, items: [...entry.items.slice(0, -1), { ...last, createdAt: item.receivedAt }] });
+    }
+  }
+  return queue;
+}
+
+function trimHeld(sessionId: string, appliedSeq: number): void {
+  const queue = held.get(sessionId);
+  if (!queue) return;
+  const kept = queue.filter((item) => item.seq === null || item.seq > appliedSeq);
+  if (kept.length === 0) held.delete(sessionId);
+  else if (kept.length < queue.length) held.set(sessionId, kept);
+}
+
+function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | null): void {
+  const current = entryOf(sessionId);
+  if (!current) return;
+  const seq = synced?.seq ?? null;
 
   // A mode restart must not mark the transcript terminal.
   if (event.kind === "exited" && current.reloading) {
@@ -222,13 +369,18 @@ function dispatch(sessionId: string, event: SessionEvent): void {
       reloading: false,
       planning: false,
       state: "idle",
+      appliedSeq: Math.max(current.appliedSeq ?? -1, seq ?? -1),
     });
     void queryClient.invalidateQueries({ queryKey: ["workstream", current.workstreamId, "diff"] });
     return;
   }
 
   const wasNeedsYou = classifyEntry(current) === "needs-you";
-  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event), ...modeFields(event) };
+  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event, seq), ...modeFields(event) };
+  if (synced) {
+    if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) nextEntry.appliedSeq = seq;
+    nextEntry.turnAuthor = turnAuthorAfter(current.turnAuthor ?? null, synced, selfClientId(), current.streaming);
+  }
   setEntry(sessionId, nextEntry);
   if (event.kind === "permissionModeChanged") {
     setSessionPermissionMode(current.workstreamId, sessionId, event.mode);
@@ -244,19 +396,22 @@ function dispatch(sessionId: string, event: SessionEvent): void {
   if (event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName)) {
     void respondPermission(sessionId, event.requestId, true, null);
   }
-  if (event.kind === "turnDone" || event.kind === "exited") {
+  if (event.kind === "turnDone") {
     invalidateWorktreeGit(current.workstreamId);
     invalidateWorkstreamPr(current.workstreamId);
-  }
-  if (event.kind === "turnDone") {
     flushQueuedMessage(sessionId);
   }
-  if (event.kind === "exited") {
-    channels.delete(sessionId);
-    const latest = entryOf(sessionId);
-    if (latest) setEntry(sessionId, { ...latest, live: false });
-    void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
-  }
+  if (event.kind === "exited") endStream(sessionId, current.workstreamId);
+}
+
+// The session exited: its stream is dead, whether the exit came on it or in a pulled page.
+function endStream(sessionId: string, workstreamId: string): void {
+  invalidateWorktreeGit(workstreamId);
+  invalidateWorkstreamPr(workstreamId);
+  channels.delete(sessionId);
+  const latest = entryOf(sessionId);
+  if (latest) setEntry(sessionId, { ...latest, live: false });
+  void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
 }
 
 // Live-only: the server never persists mode events, so a replayed log has none.
@@ -360,6 +515,7 @@ export async function startSession(args: {
     workingSince: null,
     taskStartedAt: {},
     queued: [],
+    turnAuthor: "self",
   });
 
   activate(session.id);
@@ -374,12 +530,74 @@ function adoptRunningMode(sessionId: string, running: PermissionMode | null | un
   setSessionPermissionMode(entry.workstreamId, sessionId, running);
 }
 
-// A cursor is only ever valid right after folding the log: live events carry
-// no seq, so nothing else in the client can produce one.
-function foldLog(
+type LogRead = {
+  entries: SessionLogEntryDto[];
+  cursor: LogCursorDto;
+  /** Set when read through `list_session_turns`; they match the rows read. */
+  revs: { rev: number; resetRev: number } | null;
+};
+
+const FOLD_PAGE = 2000;
+const PULL_PAGE = 200;
+const FOLD_RESTARTS = 3;
+
+// With sync, a fold pages from the start so it carries the rev it read up to (R6).
+async function readLog(sessionId: string): Promise<LogRead> {
+  if (!(await syncSupport())) {
+    const entries = await unwrap(commands.getSessionLog(sessionId));
+    const lastRow = entries[entries.length - 1];
+    const cursor: LogCursorDto = lastRow
+      ? { kind: "after", seq: lastRow.seq, createdAt: lastRow.createdAt }
+      : { kind: "empty" };
+    return { entries, cursor, revs: null };
+  }
+  for (let attempt = 1; attempt <= FOLD_RESTARTS; attempt += 1) {
+    try {
+      const read = await readTurns(sessionId);
+      if (read) return read;
+    } catch (e) {
+      if (attempt === FOLD_RESTARTS || !isSessionEpochAdvanced(e)) throw e;
+    }
+  }
+  throw new Error(`${sessionId} kept rewinding while its log was read`);
+}
+
+// Null when a rewind between pages rewrote rows already read.
+async function readTurns(sessionId: string): Promise<LogRead | null> {
+  const entries: SessionLogEntryDto[] = [];
+  let cursor: LogCursorDto = { kind: "empty" };
+  let resetRev: number | null = null;
+  for (;;) {
+    const page: SessionTurnsDto = await unwrap(commands.listSessionTurns(sessionId, cursor, FOLD_PAGE));
+    if (resetRev !== null && rev(page.resetRev) !== resetRev) return null;
+    resetRev = rev(page.resetRev);
+    for (const entry of page.entries) entries.push(entry);
+    cursor = page.nextCursor;
+    if (page.remaining === 0) return { entries, cursor, revs: { rev: rev(page.rev), resetRev } };
+  }
+}
+
+// Who opened the last turn among rows after `afterSeq`, and the last other device among them.
+function turnOpeners(
   entries: SessionLogEntryDto[],
+  afterSeq: number,
+): { turnAuthor: TurnAuthor | undefined; device: string | null } {
+  const selfId = selfClientId();
+  let turnAuthor: TurnAuthor | undefined;
+  let device: string | null = null;
+  for (const entry of entries) {
+    if (entry.event.kind !== "userMessage" || (entry.seq ?? -1) <= afterSeq) continue;
+    const author = entry.event.author ?? null;
+    turnAuthor = !author ? null : author.clientId === selfId ? "self" : "other";
+    if (author && author.clientId !== selfId) device = author.device;
+  }
+  return { turnAuthor, device };
+}
+
+function foldLog(
+  read: LogRead,
   previousItems: TranscriptItem[] = [],
-): { view: SessionView; cursor: LogCursorDto } {
+): { view: SessionView; cursor: LogCursorDto; appliedSeq: number; turnAuthor: TurnAuthor } {
   // The log stores no attachments; recover them from the optimistic item this
   // device already rendered, matched by the nonce both share.
   const attachmentsById = new Map(
@@ -388,9 +606,11 @@ function foldLog(
       .map((it) => [it.clientMessageId as string, it.attachments]),
   );
   let view = initialSessionView("starting");
-  for (const stored of entries) {
+  let appliedSeq = -1;
+  for (const stored of read.entries) {
+    if (stored.seq !== null && stored.seq > appliedSeq) appliedSeq = stored.seq;
     try {
-      view = reduceEvent(view, stored.event);
+      view = reduceEvent(view, stored.event, stored.seq);
       const last = view.items[view.items.length - 1];
       if (stored.kind === "userMessage" && last?.kind === "user") {
         const createdAt = last.createdAt === null ? stored.createdAt : last.createdAt;
@@ -403,11 +623,14 @@ function foldLog(
       log.warn("session", `folding a ${stored.kind} event`, e);
     }
   }
-  const lastRow = entries[entries.length - 1];
-  const cursor: LogCursorDto = lastRow
-    ? { kind: "after", seq: lastRow.seq, createdAt: lastRow.createdAt }
-    : { kind: "empty" };
-  return { view, cursor };
+  const turnAuthor = turnOpeners(read.entries, -1).turnAuthor ?? null;
+  return { view, cursor: read.cursor, appliedSeq, turnAuthor };
+}
+
+// A full fold replaces everything held: those rows are in it, or the reload discarded them.
+function foldLoaded(sessionId: string, read: LogRead): void {
+  held.delete(sessionId);
+  if (read.revs) syncInput(sessionId, { kind: "loaded", ...read.revs });
 }
 
 // Re-reads and re-folds the log into the existing entry, in place (no
@@ -415,21 +638,37 @@ function foldLog(
 // Returns the cursor the fold ended at, or null if the entry disappeared
 // while the log was in flight.
 async function foldAndWriteEntry(sessionId: string): Promise<LogCursorDto | null> {
-  const entries = await unwrap(commands.getSessionLog(sessionId));
+  const read = await readLog(sessionId);
   const current = entryOf(sessionId);
   if (!current) return null;
-  const { view, cursor } = foldLog(entries, current.items);
-  setEntry(sessionId, { ...current, ...view, live: true, state: "starting" });
-  return cursor;
+  const { view, ...position } = foldLog(read, current.items);
+  setEntry(sessionId, { ...current, ...view, ...position, live: true, state: "starting" });
+  foldLoaded(sessionId, read);
+  return position.cursor;
 }
 
 function isSessionEpochAdvanced(e: unknown): boolean {
   return isAppError(e) && e.code === "session_epoch_advanced";
 }
 
-export async function resumeSession(
+const resuming = new Map<string, Promise<void>>();
+
+// Single-flight: two concurrent resumes would each attach a stream and every
+// event would land in the transcript twice.
+export function resumeSession(
   sessionId: string,
   opts: { cursor?: LogCursorDto; flush?: boolean } = {},
+): Promise<void> {
+  const inFlight = resuming.get(sessionId);
+  if (inFlight) return inFlight;
+  const run = resumeOnce(sessionId, opts).finally(() => resuming.delete(sessionId));
+  resuming.set(sessionId, run);
+  return run;
+}
+
+async function resumeOnce(
+  sessionId: string,
+  opts: { cursor?: LogCursorDto; flush?: boolean },
 ): Promise<void> {
   if (!entryOf(sessionId) || channels.has(sessionId)) return;
 
@@ -479,6 +718,8 @@ export async function resumeSession(
   }
 
   adoptRunningMode(sessionId, permissionMode);
+  const resumed = entryOf(sessionId);
+  if (resumed?.drifted) setEntry(sessionId, { ...resumed, drifted: false });
 
   // A quiet Claude resume emits no init event.
   const after = entryOf(sessionId);
@@ -584,12 +825,14 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
     );
   }
 
+  held.delete(sessionId);
   const latest = entryOf(sessionId);
   if (latest) {
     const truncated = truncateAtUserOrdinal(latest, ordinal);
     setEntry(sessionId, {
       ...latest,
       ...truncated,
+      appliedSeq: lastSeq(truncated.items),
       autoAllow: liveRewound ? latest.autoAllow : [],
       reloading: false,
       live: true,
@@ -603,6 +846,14 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
 
   channels.set(sessionId, channel);
   activate(sessionId);
+}
+
+function lastSeq(items: TranscriptItem[]): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const seq = items[i].seq;
+    if (seq !== undefined && seq !== null) return seq;
+  }
+  return -1;
 }
 
 function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView {
@@ -653,7 +904,10 @@ export async function sendMessage(
     });
     return;
   }
-  await deliverMessage(sessionId, text, attachments, promptName);
+  const sync = syncOf(sessionId);
+  // Senders that skip the composer's guard (the handoff banner) pull first.
+  if (sync && !canSend(sync)) await pullNow(sessionId);
+  await deliverMessage(sessionId, text, attachments, promptName, "back");
 }
 
 async function deliverMessage(
@@ -661,6 +915,7 @@ async function deliverMessage(
   text: string,
   attachments: Attachment[] = [],
   promptName: string | null = null,
+  requeue: "front" | "back" = "back",
 ): Promise<void> {
   if (!entryOf(sessionId)) return;
   // Resume before adding the optimistic item: a session another device drove
@@ -670,10 +925,22 @@ async function deliverMessage(
   if (!channels.has(sessionId)) await resumeSession(sessionId, { flush: false });
   const current = entryOf(sessionId);
   if (!current) return;
+  // The resume attached mid-turn, or a pull showed one running: it would land inside that turn.
+  // Working, not busy: a resumed log can re-show a dead process's ask, which must not block.
+  if (channels.has(sessionId) && isWorking(current)) {
+    const message: QueuedMessage = { text, attachments, promptName };
+    const queued = requeue === "front" ? [message, ...current.queued] : [...current.queued, message];
+    setEntry(sessionId, { ...current, queued });
+    return;
+  }
   const clientMessageId = crypto.randomUUID();
   const withUser = addUserMessage(current, text, null, attachments, Date.now(), promptName, clientMessageId);
   const optimisticId = withUser.items[withUser.items.length - 1].id;
-  setEntry(sessionId, { ...current, ...withUser });
+  // Only a sync server keeps a sync state; an older one ignores the base.
+  const baseRev = syncOf(sessionId)?.localRev ?? null;
+  setEntry(sessionId, { ...current, ...withUser, turnAuthor: "self" });
+  // Busy from here on, so this turn's end may flush the next queued message.
+  flushing.delete(sessionId);
   try {
     await unwrap(
       commands.sendUserMessage(
@@ -682,23 +949,216 @@ async function deliverMessage(
         attachments.map((a) => a.path),
         promptName,
         clientMessageId,
+        baseRev,
       ),
     );
   } catch (e) {
     const latest = entryOf(sessionId);
     if (latest) {
-      setEntry(sessionId, { ...latest, items: latest.items.filter((it) => it.id !== optimisticId) });
+      const items = latest.items.filter((it) => it.id !== optimisticId);
+      setEntry(sessionId, { ...latest, items, ...(isStaleTranscript(e) ? unsentTurn(current, latest, items) : {}) });
+    }
+    if (isStaleTranscript(e)) {
+      syncInput(sessionId, {
+        kind: "stale",
+        rev: rev(e.staleTranscript.rev),
+        committedRev: rev(e.staleTranscript.committedRev),
+      });
     }
     throw e;
   }
 }
 
+// A refused send never reached the harness, so the turn it opened locally never ran. But a
+// log item applied meanwhile (the winner's message) opened a real one, which keeps running.
+function unsentTurn(
+  before: SessionEntry,
+  latest: SessionEntry,
+  items: TranscriptItem[],
+): Pick<SessionEntry, "streaming" | "turnAuthor"> {
+  if ((latest.appliedSeq ?? -1) === (before.appliedSeq ?? -1)) {
+    return { streaming: before.streaming, turnAuthor: before.turnAuthor };
+  }
+  let author: ClientRef | null = null;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (item.kind !== "user") continue;
+    author = item.author ?? null;
+    break;
+  }
+  const turnAuthor: TurnAuthor = !author ? null : author.clientId === selfClientId() ? "self" : "other";
+  return { streaming: latest.streaming, turnAuthor };
+}
+
+const flushing = new Set<string>();
+
 function flushQueuedMessage(sessionId: string): void {
   const entry = entryOf(sessionId);
-  if (!entry || entry.queued.length === 0 || isBusy(entry)) return;
+  // One flush per session: a pull's own trailing flush must not overtake the one waiting on it.
+  if (!entry || entry.queued.length === 0 || isBusy(entry) || flushing.has(sessionId)) return;
   const [next, ...rest] = entry.queued;
   setEntry(sessionId, { ...entry, queued: rest });
-  void deliverMessage(sessionId, next.text, next.attachments, next.promptName);
+  flushing.add(sessionId);
+  void deliverQueued(sessionId, next).then((requeued) => {
+    flushing.delete(sessionId);
+    // A pull that closed the gap while this flush held the slot found nothing to send.
+    if (requeued && !behind(syncOf(sessionId))) flushQueuedMessage(sessionId);
+  });
+}
+
+const behind = (sync: SyncState | undefined) => !!sync && sync.remoteRev > sync.localRev;
+
+// A refused or still-behind flush keeps its place; whatever closes the gap flushes again.
+async function deliverQueued(sessionId: string, next: QueuedMessage): Promise<boolean> {
+  const requeue = () => {
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, queued: [next, ...latest.queued] });
+    return true;
+  };
+  try {
+    if (behind(syncOf(sessionId))) await pullNow(sessionId);
+    // Another client's send is still in flight: sending now would only 409.
+    if (behind(syncOf(sessionId))) return requeue();
+    await deliverMessage(sessionId, next.text, next.attachments, next.promptName, "front");
+  } catch (e) {
+    if (isStaleTranscript(e)) return requeue();
+    log.warn("session", "sending a queued message failed", e);
+  }
+  return false;
+}
+
+const pulls = new Map<string, Promise<void>>();
+const reloads = new Map<string, Promise<void>>();
+
+/** Pulls held and missed turns now; resolves when the running pull or reload ends. */
+export function pullNow(sessionId: string): Promise<void> {
+  const running = pulls.get(sessionId) ?? reloads.get(sessionId);
+  if (running) return running;
+  syncInput(sessionId, { kind: "pull" });
+  unstick(sessionId);
+  return pulls.get(sessionId) ?? reloads.get(sessionId) ?? Promise.resolve();
+}
+
+// `fetching` with no read in flight ignores every `pull` (a reload gated off by a mode
+// restart leaves it so); a pull ends it with `fetched`, `reset` or `fetchFailed`.
+function unstick(sessionId: string): void {
+  if (!syncOf(sessionId)?.fetching || pulls.has(sessionId) || reloads.has(sessionId)) return;
+  log.warn("session", `${sessionId} was left syncing with no read in flight; pulling`);
+  startPull(sessionId);
+}
+
+// Asked for while the slot was taken, e.g. by `fetched` seeing a commit land mid-read.
+const repull = new Set<string>();
+
+// Single-flight. No pull is asked for during a reload: `fetching` stays set until its `loaded`.
+function startPull(sessionId: string): void {
+  if (!entryOf(sessionId)) return;
+  if (pulls.has(sessionId)) {
+    repull.add(sessionId);
+    return;
+  }
+  // Deferred so the slot is taken before applying held items can ask for another pull.
+  const run = (async () => {
+    await Promise.resolve();
+    do {
+      repull.delete(sessionId);
+      await pullOnce(sessionId);
+    } while (repull.has(sessionId) && entryOf(sessionId));
+  })().finally(() => {
+    pulls.delete(sessionId);
+    repull.delete(sessionId);
+  });
+  pulls.set(sessionId, run);
+}
+
+async function pullOnce(sessionId: string): Promise<void> {
+  try {
+    const selfId = selfClientId();
+    const applied = applyHeld(sessionId);
+    let device: string | null = null;
+    for (const item of applied) if (item.author && item.author.clientId !== selfId) device = item.author.device;
+    let firstSeq = applied.find((item) => item.seq !== null)?.seq ?? null;
+    let fetched: { rev: number; resetRev: number; inFlight: number } | null = null;
+
+    const sync = syncOf(sessionId);
+    if (sync && (sync.localRev < sync.remoteRev || sync.committedRev > sync.localRev)) {
+      let cursor: LogCursorDto = entryOf(sessionId)?.cursor ?? { kind: "empty" };
+      for (;;) {
+        const page = await unwrap(commands.listSessionTurns(sessionId, cursor, PULL_PAGE));
+        const current = entryOf(sessionId);
+        if (!current) return;
+        const before = current.appliedSeq ?? -1;
+        const merged = mergeEntries(current, before, page);
+        if (merged.reset) {
+          syncInput(sessionId, { kind: "reset" });
+          return;
+        }
+        const opened = turnOpeners(page.entries, before);
+        setEntry(sessionId, {
+          ...current,
+          ...merged.view,
+          appliedSeq: merged.appliedSeq,
+          cursor: merged.cursor,
+          turnAuthor: opened.turnAuthor === undefined ? current.turnAuthor : opened.turnAuthor,
+        });
+        // The stream's own exit will now be skipped as already applied.
+        if (isTerminal(merged.view.state) && channels.has(sessionId)) endStream(sessionId, current.workstreamId);
+        trimHeld(sessionId, merged.appliedSeq);
+        device = opened.device ?? device;
+        firstSeq ??= merged.firstNewSeq;
+        cursor = merged.cursor;
+        if (page.remaining === 0) {
+          fetched = { rev: rev(page.rev), resetRev: rev(page.resetRev), inFlight: page.inFlight };
+          break;
+        }
+      }
+    }
+
+    const latest = syncOf(sessionId);
+    syncInput(sessionId, {
+      kind: "fetched",
+      rev: fetched?.rev ?? latest?.localRev ?? 0,
+      resetRev: fetched?.resetRev ?? latest?.resetRev ?? 0,
+      inFlight: fetched?.inFlight ?? 0,
+      remaining: 0,
+      device,
+    });
+    if (firstSeq !== null && device) setDivider(sessionId, { seq: firstSeq, device });
+    // Items that arrived during the read are still held; `fetched` cleared their flag.
+    reportHeld(sessionId);
+  } catch (e) {
+    if (isSessionEpochAdvanced(e)) {
+      syncInput(sessionId, { kind: "reset" });
+    } else if (isAppError(e) && e.code === "session_not_found") {
+      syncInput(sessionId, { kind: "gone" });
+    } else {
+      log.warn("session", `pulling new turns into ${sessionId} failed`, e);
+      syncInput(sessionId, { kind: "fetchFailed" });
+    }
+  }
+}
+
+// Absorbs the reload a 15s poll repeats while one is pending.
+function startReload(sessionId: string): void {
+  if (reloads.has(sessionId) || entryOf(sessionId)?.reloading) return;
+  reloads.set(
+    sessionId,
+    reloadOnce(sessionId).finally(() => reloads.delete(sessionId)),
+  );
+}
+
+async function reloadOnce(sessionId: string): Promise<void> {
+  let folded = true;
+  try {
+    await refreshSession(sessionId);
+    // A resume already in flight folded nothing here, so no `loaded` arrived.
+    folded = !syncOf(sessionId)?.fetching || pulls.has(sessionId);
+  } catch (e) {
+    log.warn("session", `reloading ${sessionId} after a rewind failed`, e);
+    folded = false;
+  }
+  // Without a `loaded`, `fetching` would hold Send back for good.
+  if (!folded && entryOf(sessionId)) syncInput(sessionId, { kind: "fetchFailed" });
 }
 
 export function cancelQueuedMessage(sessionId: string, index: number): void {
@@ -1041,8 +1501,8 @@ export async function restoreSessionIfNeeded(
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
   try {
-    const [entries, active] = await Promise.all([
-      unwrap(commands.getSessionLog(sessionId)),
+    const [read, active] = await Promise.all([
+      readLog(sessionId),
       // The server outlives the app (ADR-0009): a session it still reports
       // live is attached to below rather than shown as a frozen transcript.
       unwrap(commands.listActiveSessions()).catch((e) => {
@@ -1052,11 +1512,12 @@ export async function restoreSessionIfNeeded(
     ]);
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
-    const { view: folded, cursor } = foldLog(entries);
+    const { view: folded, ...position } = foldLog(read);
     const live = active.some((a) => a.session.id === sessionId);
     const view = restoredView(folded, live);
     setEntry(sessionId, {
       ...view,
+      ...position,
       workstreamId,
       stage,
       autoAllow: [],
@@ -1066,13 +1527,120 @@ export async function restoreSessionIfNeeded(
       taskStartedAt: {},
       queued: [],
     });
-    if (live) await resumeSession(sessionId, { cursor });
+    foldLoaded(sessionId, read);
+    if (live) await resumeSession(sessionId, { cursor: position.cursor });
   } catch (error) {
     log.error("session", `restoring ${sessionId} failed`, error);
   } finally {
     restoring.delete(sessionId);
   }
 }
+
+async function liveSessionIds(): Promise<Set<string>> {
+  const active = await unwrap(commands.listActiveSessions());
+  return new Set(active.map((a) => a.session.id));
+}
+
+// A retired channel may still be delivering (a live stream this window
+// replaced); its events would land twice beside the fresh attach's replay.
+// ponytail: the retired stream keeps running server-side until the session
+// exits; expose cancel_stream to the frontend if that ever shows up in load.
+const retired = new WeakSet<Channel<SessionStreamItemDto>>();
+
+async function resync(sessionId: string, live: boolean): Promise<void> {
+  const inFlight = resuming.get(sessionId);
+  if (inFlight) return inFlight;
+  if (entryOf(sessionId)?.reloading) return;
+  const old = channels.get(sessionId);
+  if (old) retired.add(old);
+  channels.delete(sessionId);
+  if (live) return resumeSession(sessionId);
+  const read = await readLog(sessionId);
+  const current = entryOf(sessionId);
+  if (!current || channels.has(sessionId)) return;
+  const { view, ...position } = foldLog(read, current.items);
+  setEntry(sessionId, { ...current, ...restoredView(view, false), ...position, live: false, drifted: false });
+  foldLoaded(sessionId, read);
+}
+
+/** Hides the no-sync "new turns" notice until the next lifecycle event marks the view again. */
+export function dismissDrift(sessionId: string): void {
+  const entry = entryOf(sessionId);
+  if (entry?.drifted) setEntry(sessionId, { ...entry, drifted: false });
+}
+
+export async function refreshSession(sessionId: string): Promise<void> {
+  await resync(sessionId, (await liveSessionIds()).has(sessionId));
+}
+
+// A dropped connection ends every stream without an `Exited`, so the channels
+// still registered here are dead and would block any resume.
+export async function reattachSessions(): Promise<void> {
+  const live = await liveSessionIds();
+  await Promise.all(
+    Object.keys(useSessionStore.getState().sessions).map((id) =>
+      resync(id, live.has(id)).catch((e) =>
+        log.warn("session", `reattaching ${id} after a reconnect failed`, e),
+      ),
+    ),
+  );
+}
+
+function markDrifted(sessionId: string, state: SessionState): void {
+  const entry = entryOf(sessionId);
+  if (!entry || entry.drifted || entry.reloading) return;
+  if (channels.has(sessionId) || resuming.has(sessionId)) return;
+  // This window's own stop already shows the exit the event announces.
+  if (isTerminal(state) && isTerminal(entry.state)) return;
+  setEntry(sessionId, { ...entry, drifted: true });
+}
+
+export const sessionBridge: EventBridge = () => [
+  events.sessionLifecycle.listen(({ payload }) => {
+    if (!entryOf(payload.sessionId)) return;
+    // A sync server pulls other devices' turns itself.
+    void syncSupport().then((synced) => {
+      if (!synced) markDrifted(payload.sessionId, payload.state);
+    });
+  }),
+];
+
+function onRevised(event: SessionRevised): void {
+  const { sessionId } = event;
+  if (!entryOf(sessionId)) return;
+  const queue = held.get(sessionId);
+  const selfId = selfClientId();
+  const at = rev(event.rev);
+  syncInput(sessionId, {
+    kind: "remote",
+    rev: at,
+    turns: event.turns.length > 0 ? [{ rev: at, kinds: [...new Set(event.turns.map((t) => t.kind))] }] : [],
+    device: event.author?.device ?? null,
+    working: event.working,
+    // A turnless revision must not clear what the held buffer reported.
+    flushable: queue ? heldSummary(queue).flushable : false,
+    attached: channels.has(sessionId),
+    own: selfId !== null && event.author?.clientId === selfId,
+  });
+}
+
+function onReset(event: SessionReset): void {
+  const entry = entryOf(event.sessionId);
+  if (!entry || entry.reloading) return;
+  if (rev(event.rev) > (syncOf(event.sessionId)?.resetRev ?? 0)) syncInput(event.sessionId, { kind: "reset" });
+}
+
+setSyncHandlers({
+  pull: startPull,
+  reload: startReload,
+  flush: (sessionId) => {
+    unstick(sessionId);
+    flushQueuedMessage(sessionId);
+  },
+  watched: () => Object.keys(useSessionStore.getState().sessions),
+  revised: onRevised,
+  reset: onReset,
+});
 
 export function transcriptToText(sessionId: string): string {
   const entry = useSessionStore.getState().sessions[sessionId];

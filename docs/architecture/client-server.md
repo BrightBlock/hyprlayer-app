@@ -113,6 +113,14 @@ reconnect:
   Run scripts, and every `git`/`gh` shell-out. The server merges per key, drops
   an `SSH_AUTH_SOCK` that is not a socket on its host, and a remote client sends
   no `SSH_AUTH_SOCK` or `DISPLAY`.
+- **`AnnounceClient`** — the client id, device name and the targeted event
+  kinds this build decodes. Display-only (ADR-0009): it attributes user turns
+  and grants nothing. A server that answers `unsupported_command` predates
+  transcript sync.
+- **`WatchSessions`** — the sessions the client views and the rev each last
+  applied, re-sent as that set changes and on a poll. It replaces the
+  connection's watched set and answers each session's `rev`, `reset_rev`,
+  `working`, `in_flight` and `viewers`.
 - **`WorktreeRoot`** — read once, to register the asset-protocol scope. This
   one does *not* repeat on reconnect: it derives from the host, and an unchanged
   host has an unchanged root.
@@ -356,9 +364,13 @@ control channel and an `mpsc(2048)` ingress. For each event it:
 2. Decides whether the event is ephemeral (`PartialText`, an unreportable exit)
    or persisted — persisted events go to SQLite through
    `apply_session_event`, which also applies any row mutation the event implies.
-3. Emits a `SessionLifecycle` runtime event when the event changes state
+3. Bumps `sessions.rev` for a committed `userMessage`/`assistantText`/
+   `toolResult`/`rewound` and emits `SessionRevised`; a rewind or restore
+   raises `reset_rev` and emits `SessionReset` instead. Both are targeted
+   (Part 6).
+4. Emits a `SessionLifecycle` runtime event when the event changes state
    (`Init` → `Running`, `PermissionAsk` → `AwaitingPermission`, and so on).
-4. Fans the delivery out to every `LiveAttachment`, dropping the ones that have
+5. Fans the delivery out to every `LiveAttachment`, dropping the ones that have
    detached.
 
 Persist-then-fan-out is the order that matters: the log is the durable record,
@@ -376,6 +388,11 @@ The server recovers on the client's behalf (`run_stream`): on
 re-sends the recovered entries under the same stream id, and re-attaches. The
 client is never told a lag happened.
 
+A session stream opened `with_meta` carries `{ seq, rev, author, event }`
+items instead of bare events: `seq` is `None` for an ephemeral event, and
+replayed rows carry `author: None` and the rev the session has once the replay
+is applied. Without the flag the stream is the released wire, unchanged.
+
 The replay rule is narrower than it looks: only `attach_session`, and a
 `resume` carrying a cursor, replay. The cursor names the last row a client's
 restore folded; the server verifies that row's `(seq, createdAt)` still
@@ -392,6 +409,36 @@ lock, appends any attached docs to the prompt, and writes to the live driver —
 the op lock is what stops a message typed mid-flight from consuming a one-shot
 collaboration mode during a two-phase stage.
 
+A send also carries `base_rev`. The actor reserves it against other authors'
+committed and in-flight turns and refuses a stale one with `stale_transcript`
+(`{rev, committed_rev, missing_turns}`), before the driver ever sees it.
+
+## Part 5b — Transcript sync
+
+Several desktops can view one session. The client side lives in
+`src/features/session/transcriptSync.ts` (pure rules) and `syncStore.ts` (timers,
+watch set).
+
+- **Revisions.** `sessions.rev` advances in the same transaction as each committed
+  `userMessage`, `assistantText`, `toolResult` or `rewound` row; `reset_rev` is the
+  rev of the last rewind or restore. Neither ever decreases.
+- **Events.** `SessionRevised` (each commit, each turn end, each released
+  reservation), `SessionReset` and `SessionViewers` reach only announced
+  connections watching that session (Part 6). A full outbound queue drops them;
+  the 15s `watch_sessions` reply carries `rev`, `reset_rev`, `working`, `in_flight`
+  and viewers, so the next poll recovers any of the three.
+- **Catch-up.** `list_session_turns` pages raw rows after a verified cursor;
+  `next_cursor` is the page's last raw row, so an undecodable tail still advances.
+- **Stale check.** A send is refused when its `base_rev` is behind other authors'
+  commits or in-flight reservations. A client's own turns, its in-flight sends and
+  the app follow-ups of its turns never count. A reservation is released by its
+  echoed `UserMessage`, by `Exited`, or after 30s.
+- **Client.** Another device's committed items are held while this window is busy
+  or has a draft, then applied in order at the next idle moment; partial text is
+  dropped. A queued message refused as stale returns to the head of the queue and
+  is sent after the pull. A `rewound` item, or a higher `reset_rev` anywhere,
+  reloads the view and keeps the draft.
+
 ## Part 6 — Runtime events
 
 The runtime broadcasts `RuntimeEvent`s. The server subscribes **once**
@@ -402,6 +449,13 @@ The runtime broadcasts `RuntimeEvent`s. The server subscribes **once**
 - The per-client send is `try_send`, non-blocking: a client that has stopped
   draining loses the event, which is exactly the outcome a lagged in-process
   subscriber had before the split.
+
+`SessionRevised`, `SessionReset` and `SessionViewers` are targeted: they reach
+only a connection that announced the kind and is watching that session, because
+a released desktop tears its connection down on a kind it cannot decode.
+`RpcClient` from 0.8.6 instead skips an event kind it cannot decode, logging it
+once, and keeps the connection. A targeted event dropped on a full queue is
+recovered by the next `watch_sessions` reply, which carries the same state.
 
 On the client, `runtime_events::map` turns each variant into its Tauri event,
 and the frontend bridge invalidates the matching react-query keys.

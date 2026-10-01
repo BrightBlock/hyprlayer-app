@@ -2,10 +2,14 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, Mutex as AsyncMutex};
 
+use hyprlayer_models::ClientRef;
+
 use crate::agent::{AgentDriver, Harness};
 use crate::claude::{SessionEvent, TurnStatus};
 use crate::codex::CollabMode;
 use crate::pipeline::{self, Stage};
+
+use super::SessionActors;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Followup {
@@ -30,6 +34,8 @@ pub(crate) async fn run_followup(
     rx: &mut broadcast::Receiver<SessionEvent>,
     followup: Followup,
     op_lock: Arc<AsyncMutex<()>>,
+    actors: &SessionActors,
+    author: Option<ClientRef>,
 ) {
     let status = loop {
         match rx.recv().await {
@@ -56,7 +62,9 @@ pub(crate) async fn run_followup(
     match followup {
         Followup::ShipDescribe => {
             tracing::info!("session {session_id}: sending the ship describe follow-up");
-            if let Err(e) = driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None, None)
+            let nonce = reserve_followup_turn(session_id, actors, author).await;
+            if let Err(e) =
+                driver.send_user_turn(pipeline::SHIP_DESCRIBE_PROMPT, None, None, Some(&nonce))
             {
                 tracing::warn!("session {session_id}: the describe follow-up was not sent: {e}");
             }
@@ -84,11 +92,30 @@ pub(crate) async fn run_followup(
             let _guard = op_lock.lock().await;
             driver.set_collab_mode(Some(CollabMode::Default));
             tracing::info!("session {session_id}: starting phase two");
-            if let Err(e) = driver.send_user_turn(prompt, None, None, None) {
+            let nonce = reserve_followup_turn(session_id, actors, author).await;
+            if let Err(e) = driver.send_user_turn(prompt, None, None, Some(&nonce)) {
                 tracing::warn!("session {session_id}: phase two was not sent: {e}");
             }
         }
     }
+}
+
+/// Reserves a follow-up's turn under the trigger's author (R3), minting the
+/// nonce the actor matches the echoed `UserMessage` by. Reserving even with
+/// no author still blocks another client's send until this one commits.
+async fn reserve_followup_turn(
+    session_id: &str,
+    actors: &SessionActors,
+    author: Option<ClientRef>,
+) -> String {
+    let nonce = uuid::Uuid::new_v4().to_string();
+    if let Err(e) = actors
+        .reserve_user_turn(session_id, nonce.clone(), None, author)
+        .await
+    {
+        tracing::warn!("session {session_id}: follow-up reservation failed: {e}");
+    }
+    nonce
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -98,7 +125,22 @@ pub async fn run_codex_followup_for_test(
     prompt: &'static str,
     op_lock: Arc<AsyncMutex<()>>,
 ) {
-    run_followup("test", driver, rx, Followup::CodexExecute(prompt), op_lock).await;
+    // No caller reaches the actor from this helper's callers, so it builds its
+    // own throwaway one; the reservation it takes for session "test" is never read.
+    let actors = SessionActors::new(
+        Arc::new(crate::store::Db::open_in_memory().expect("in-memory db for a test followup")),
+        broadcast::channel(8).0,
+    );
+    run_followup(
+        "test",
+        driver,
+        rx,
+        Followup::CodexExecute(prompt),
+        op_lock,
+        &actors,
+        None,
+    )
+    .await;
 }
 
 #[cfg(test)]

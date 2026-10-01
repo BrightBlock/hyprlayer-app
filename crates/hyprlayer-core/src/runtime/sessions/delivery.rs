@@ -1,3 +1,4 @@
+use hyprlayer_models::{ClientRef, SessionStreamItem};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -12,7 +13,20 @@ pub(crate) struct SessionDelivery {
     pub epoch: u64,
     pub delivery_ordinal: u64,
     pub persisted_seq: Option<i64>,
+    pub rev: u64,
+    pub author: Option<ClientRef>,
     pub event: SessionEvent,
+}
+
+impl SessionDelivery {
+    fn item(&self) -> SessionStreamItem {
+        SessionStreamItem {
+            seq: self.persisted_seq,
+            rev: self.rev,
+            author: self.author.clone(),
+            event: self.event.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +39,21 @@ pub enum SessionStreamError {
 
 pub struct SessionAttachment {
     pub replay: Vec<SessionLogEntry>,
-    pub live: mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
+    pub live: LiveReceiver,
+    pub rev: u64,
+}
+
+pub struct LiveReceiver(mpsc::Receiver<Result<SessionStreamItem, SessionStreamError>>);
+
+impl LiveReceiver {
+    /// Events only: most readers never need the log position.
+    pub async fn recv(&mut self) -> Option<Result<SessionEvent, SessionStreamError>> {
+        Some(self.0.recv().await?.map(|item| item.event))
+    }
+
+    pub async fn recv_item(&mut self) -> Option<Result<SessionStreamItem, SessionStreamError>> {
+        self.0.recv().await
+    }
 }
 
 enum Delivered {
@@ -35,7 +63,7 @@ enum Delivered {
 }
 
 pub(crate) struct LiveAttachment {
-    sender: mpsc::Sender<Result<SessionEvent, SessionStreamError>>,
+    sender: mpsc::Sender<Result<SessionStreamItem, SessionStreamError>>,
     pending_partial: Option<SessionDelivery>,
     last_persisted_seq: Option<i64>,
     detached: bool,
@@ -45,12 +73,7 @@ pub(crate) struct LiveAttachment {
 }
 
 impl LiveAttachment {
-    pub(crate) fn new(
-        echo_user_messages: bool,
-    ) -> (
-        Self,
-        mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
-    ) {
+    pub(crate) fn new(echo_user_messages: bool) -> (Self, LiveReceiver) {
         Self::resuming_after(None, echo_user_messages)
     }
 
@@ -59,10 +82,7 @@ impl LiveAttachment {
     pub(crate) fn resuming_after(
         last_persisted_seq: Option<i64>,
         echo_user_messages: bool,
-    ) -> (
-        Self,
-        mpsc::Receiver<Result<SessionEvent, SessionStreamError>>,
-    ) {
+    ) -> (Self, LiveReceiver) {
         let (sender, receiver) = mpsc::channel(ATTACH_QUEUE_CAPACITY + 1);
         (
             Self {
@@ -72,7 +92,7 @@ impl LiveAttachment {
                 detached: false,
                 echo_user_messages,
             },
-            receiver,
+            LiveReceiver(receiver),
         )
     }
 
@@ -82,11 +102,11 @@ impl LiveAttachment {
 
     // One slot of the channel's capacity is always kept free so a `Lagged`
     // signal can be enqueued the moment this attachment falls behind.
-    fn try_deliver(&mut self, event: SessionEvent) -> Delivered {
+    fn try_deliver(&mut self, item: SessionStreamItem) -> Delivered {
         if self.sender.capacity() < 2 {
             return Delivered::Full;
         }
-        match self.sender.try_send(Ok(event)) {
+        match self.sender.try_send(Ok(item)) {
             Ok(()) => Delivered::Ok,
             Err(TrySendError::Full(_)) => Delivered::Full,
             Err(TrySendError::Closed(_)) => Delivered::Closed,
@@ -110,7 +130,7 @@ impl LiveAttachment {
         }
 
         if let Some(pending) = self.pending_partial.take() {
-            if let Delivered::Ok = self.try_deliver(pending.event) {
+            if let Delivered::Ok = self.try_deliver(pending.item()) {
                 if let Some(seq) = pending.persisted_seq {
                     self.last_persisted_seq = Some(seq);
                 }
@@ -121,7 +141,7 @@ impl LiveAttachment {
         }
 
         let is_partial = matches!(delivery.event, SessionEvent::PartialText { .. });
-        match self.try_deliver(delivery.event.clone()) {
+        match self.try_deliver(delivery.item()) {
             Delivered::Ok => {
                 if let Some(seq) = delivery.persisted_seq {
                     self.last_persisted_seq = Some(seq);
@@ -148,6 +168,8 @@ mod tests {
             epoch: 0,
             delivery_ordinal: 0,
             persisted_seq: None,
+            rev: 0,
+            author: None,
             event: SessionEvent::TurnDone {
                 cost_usd: None,
                 num_turns: None,
@@ -164,7 +186,7 @@ mod tests {
             attachment.deliver(unpersisted_turn());
         }
         let mut last = None;
-        while let Ok(item) = rx.try_recv() {
+        while let Ok(item) = rx.0.try_recv() {
             last = Some(item);
         }
         assert_eq!(

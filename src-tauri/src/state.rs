@@ -20,6 +20,8 @@ struct Connection {
     /// sessions and terminals are still running on the far side.
     lost: bool,
     outdated: bool,
+    /// The server answered `announce_client` with transcript sync.
+    transcript_sync: bool,
 }
 
 pub struct AppState {
@@ -35,6 +37,7 @@ impl AppState {
                 failure: None,
                 lost: false,
                 outdated,
+                transcript_sync: false,
             }),
         }
     }
@@ -49,6 +52,7 @@ impl AppState {
                 failure: Some(error),
                 lost: false,
                 outdated: false,
+                transcript_sync: false,
             }),
         }
     }
@@ -117,7 +121,27 @@ impl AppState {
                 .as_ref()
                 .and_then(|c| c.server_semver().map(str::to_string)),
             server_outdated: guard.client.is_some() && guard.outdated,
+            transcript_sync: guard.client.is_some() && guard.transcript_sync,
             error: guard.failure.clone(),
+        }
+    }
+
+    pub fn transcript_sync(&self) -> bool {
+        self.read().transcript_sync
+    }
+
+    /// Only for the live client, as `mark_lost`: a retired one's announce must not stick.
+    pub fn set_transcript_sync(&self, client: &Arc<RpcClient>, on: bool) {
+        let mut guard = self
+            .connection
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard
+            .client
+            .as_ref()
+            .is_some_and(|live| Arc::ptr_eq(live, client))
+        {
+            guard.transcript_sync = on;
         }
     }
 
@@ -156,6 +180,8 @@ impl AppState {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.client = Some(client);
         guard.outdated = outdated;
+        // Until this client announces.
+        guard.transcript_sync = false;
         guard.failure = None;
         guard.lost = false;
     }

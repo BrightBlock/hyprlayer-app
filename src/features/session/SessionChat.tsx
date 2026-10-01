@@ -15,7 +15,7 @@ import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
-import { errorMessage } from "@/lib/ipc";
+import { errorMessage, isStaleTranscript } from "@/lib/ipc";
 import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
@@ -81,7 +81,14 @@ import { useWrittenDocs } from "./writtenDocs";
 import { planRevisions } from "./planRevisions";
 import { PlanCardsContext } from "./planCardSlot";
 import { interceptSend } from "./sendInterceptor";
-import { TranscriptView, type PermissionHandlers, type PromptHandlers, type TranscriptHandle } from "./TranscriptView";
+import {
+  TranscriptView,
+  type PermissionHandlers,
+  type PromptHandlers,
+  type SkeletonTail,
+  type TranscriptHandle,
+  type TranscriptSync,
+} from "./TranscriptView";
 import { clearTranscriptJump, useTranscriptJumpStore } from "./transcriptJump";
 import {
   allowForSession,
@@ -89,8 +96,11 @@ import {
   applyModel,
   applyPermissionMode,
   cancelQueuedMessage,
+  dismissDrift,
   isFirstUserTurn,
   killSession,
+  pullNow,
+  refreshSession,
   respondPermission,
   restoreSessionIfNeeded,
   resumeSession,
@@ -103,6 +113,9 @@ import {
   useSessionBackgroundTasks,
   type QueuedMessage,
 } from "./sessionStore";
+import { noteComposerInput, setDivider, syncOf, useTranscriptSync } from "./syncStore";
+import { canSend } from "./transcriptSync";
+import { pendingCount, sentenceDevice, SyncComposerNotice, syncNotice } from "./SyncComposerNotice";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
 import {
   buildQuestionAnswers,
@@ -129,6 +142,29 @@ import {
   type HistoryNav,
   type NavResult,
 } from "./promptHistory";
+
+type Divider = { seq: number; device: string };
+
+// Dividers whose fade has played, kept outside the component so a remount doesn't replay it.
+const fadedDividers = new WeakSet<Divider>();
+const FRESH_MS = 400;
+
+function useFreshFromSeq(divider: Divider | null): number | null {
+  const [, expire] = useState(0);
+  useEffect(() => {
+    if (!divider || fadedDividers.has(divider)) return;
+    let mounted = true;
+    // Not cleared on unmount: the fade is spent whether or not this view saw it end.
+    setTimeout(() => {
+      fadedDividers.add(divider);
+      if (mounted) expire((n) => n + 1);
+    }, FRESH_MS);
+    return () => {
+      mounted = false;
+    };
+  }, [divider]);
+  return divider && !fadedDividers.has(divider) ? divider.seq : null;
+}
 
 const DOT_COLOR: Record<ReturnType<typeof describeState>["tone"], string> = {
   ok: "bg-ok",
@@ -605,6 +641,7 @@ export function SessionChat({
   const session = useSession(shell.sessionId);
   const [starting, setStarting] = useState(false);
   const [resuming, setResuming] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const dropRef = useRef<HTMLDivElement>(null);
@@ -846,16 +883,19 @@ export function SessionChat({
     }
   }, [shell.sessionId, hasEntry, view.item.id, shell.sessionStage, shell.mode, restorePermissionFlag]);
 
-  const autoResumedRef = useRef<string | null>(null);
+  const autoResumeDecidedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!shell.sessionId) {
-      autoResumedRef.current = null;
+      autoResumeDecidedRef.current = null;
       return;
     }
-    if (autoResumedRef.current === shell.sessionId) return;
-    if (!session || !isTerminal(session.state)) return;
-    if (session.items.length === 0) return;
-    autoResumedRef.current = shell.sessionId;
+    if (autoResumeDecidedRef.current === shell.sessionId) return;
+    if (!session || session.items.length === 0) return;
+    // Decided once, when the tab first sees the session: one that ends while
+    // open was stopped on purpose (here or on another device), and every open
+    // window relaunching it would race to spawn duplicate harnesses.
+    autoResumeDecidedRef.current = shell.sessionId;
+    if (!isTerminal(session.state)) return;
     setError(null);
     setResuming(true);
     void resumeSession(shell.sessionId)
@@ -933,14 +973,39 @@ export function SessionChat({
     });
   };
 
+  const sid = shell.sessionId;
+  const sync = useTranscriptSync((s) => (sid ? s.bySession[sid] : undefined));
+  const divider = useTranscriptSync((s) => (sid ? (s.divider[sid] ?? null) : null));
+  const selfClientId = useTranscriptSync((s) => s.self?.clientId ?? null);
+  const freshFromSeq = useFreshFromSeq(divider);
+  // Deleted on the server: the ended-session composer, with nothing to resume.
+  const gone = Boolean(sync?.gone);
+  // A server without sync keeps no sync state, and nothing holds its sends back.
+  const sendable = !sync || canSend(sync);
   const busy = session ? isBusy(session) : started;
   const working = session ? isWorking(session) : false;
-  const terminal = session ? isTerminal(session.state) : false;
+  const terminal = (session ? isTerminal(session.state) : false) || gone;
   const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
   const attachments = shell.attachments ?? [];
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
-  const sid = shell.sessionId;
+  const otherTurnRunning = Boolean(sync?.workingDevice) || (session?.turnAuthor === "other" && working);
+  const tail = useMemo<SkeletonTail | null>(() => {
+    if (!sync) return null;
+    const count = pendingCount(sync);
+    const workingLabel = otherTurnRunning ? sentenceDevice(sync) : null;
+    if (count === 0 && sync.pendingTurns.length === 0 && !workingLabel) return null;
+    return { phase: sync.phase, turns: sync.pendingTurns, count, working: workingLabel };
+  }, [sync, otherTurnRunning]);
+  const transcriptSync = useMemo<TranscriptSync>(
+    () => ({ tail, divider, freshFromSeq, selfClientId }),
+    [tail, divider, freshFromSeq, selfClientId],
+  );
+
+  // Every draft change, typed or not: a send or a recall clears or fills it without a keystroke.
+  useEffect(() => {
+    if (sid) noteComposerInput(sid, draft, false);
+  }, [sid, draft]);
 
   const backgroundTasks = useSessionBackgroundTasks(sid);
 
@@ -990,6 +1055,21 @@ export function SessionChat({
   useCommand("session.togglePlan", toggleTasks);
 
   const transcriptRef = useRef<TranscriptHandle | null>(null);
+  // Scrolled up: the rev and divider then, so a later pull's turns can be counted on the pill.
+  const [away, setAway] = useState<{ rev: number; divider: Divider | null } | null>(null);
+  const dividerRef = useRef(divider);
+  dividerRef.current = divider;
+  const onBottomChange = useCallback(
+    (atBottom: boolean) =>
+      setAway(atBottom || !sid ? null : { rev: syncOf(sid)?.localRev ?? 0, divider: dividerRef.current }),
+    [sid],
+  );
+  useEffect(() => setAway(null), [sid]);
+  const newTurns =
+    away && divider && divider !== away.divider ? Math.max(0, (sync?.localRev ?? 0) - away.rev) : 0;
+  const onDividerPassed = useCallback(() => {
+    if (sid) setDivider(sid, null);
+  }, [sid]);
   const jumpRequest = useTranscriptJumpStore((s) =>
     s.pending && s.pending.sessionId === sid ? s.pending : null,
   );
@@ -1196,6 +1276,9 @@ export function SessionChat({
   const handleSend = async () => {
     const text = draft.trim();
     if ((!text && attachments.length === 0) || pendingArg || !sid) return;
+    // The store, not the render: a send right after a pull must see what the pull left.
+    const current = syncOf(sid);
+    if (current && !canSend(current)) return;
     setError(null);
     try {
       const intercepted =
@@ -1210,14 +1293,23 @@ export function SessionChat({
       const expanded = await expandDraft(text);
       if (!expanded) return;
       await sendMessage(sid, expanded.text, attachments, expanded.title);
+      setDivider(sid, null);
       transcriptRef.current?.scrollToBottom();
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;
       onClearAttachments();
     } catch (e) {
-      setError(errorMessage(e));
+      // A refusal for staleness shows as the guard.
+      if (!isStaleTranscript(e)) setError(errorMessage(e));
     }
+  };
+
+  // Never a bypass: the pull runs first, and turns that land meanwhile keep the guard up.
+  const handleSendAnyway = async () => {
+    if (!sid) return;
+    await pullNow(sid);
+    await handleSend();
   };
 
   const handleClear = async (opts: { skipConfirm?: boolean } = {}) => {
@@ -1232,6 +1324,19 @@ export function SessionChat({
     }
     if (live && sid) await killSession(sid).catch(() => {});
     onResetSession();
+  };
+
+  const handleRefresh = async () => {
+    if (!sid) return;
+    setError(null);
+    setRefreshing(true);
+    try {
+      await refreshSession(sid);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const handleClearAndResume = async () => {
@@ -1335,6 +1440,21 @@ export function SessionChat({
     },
   );
 
+  // On an ended view only fallback A shows: another device may have resumed the session.
+  const composerNotice = (
+    <SyncComposerNotice
+      notice={syncNotice(sync, Boolean(session?.drifted), refreshing, terminal)}
+      onPull={() => {
+        if (sid) void pullNow(sid);
+      }}
+      onSendAnyway={() => void handleSendAnyway()}
+      onLoad={() => void handleRefresh()}
+      onDismiss={() => {
+        if (sid) dismissDrift(sid);
+      }}
+    />
+  );
+
   return (
     <div ref={dropRef} className="relative flex min-h-0 flex-1 flex-col">
       {dragOver && (
@@ -1354,16 +1474,34 @@ export function SessionChat({
       )}
       {started ? (
         <PlanCardsContext.Provider value={planCards}>
-          <TranscriptView
-            ref={transcriptRef}
-            items={session?.items ?? []}
-            busy={working}
-            connecting={!session || session.state === "starting"}
-            harnessLabel={harness.label}
-            workingSince={session?.workingSince ?? null}
-            permission={permission}
-            prompt={prompt}
-          />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <TranscriptView
+              ref={transcriptRef}
+              items={session?.items ?? []}
+              busy={working}
+              connecting={!session || session.state === "starting"}
+              harnessLabel={harness.label}
+              workingSince={session?.workingSince ?? null}
+              permission={permission}
+              prompt={prompt}
+              sync={transcriptSync}
+              onBottomChange={onBottomChange}
+              onDividerPassed={onDividerPassed}
+            />
+            {newTurns > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  transcriptRef.current?.scrollToBottom();
+                  setAway(null);
+                }}
+                className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-info/40 bg-panel px-3 py-1 text-meta text-info shadow-pop hover:bg-panel-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <Icon name="arrowDown" size="xs" />
+                {newTurns} new {newTurns === 1 ? "turn" : "turns"}
+              </button>
+            )}
+          </div>
         </PlanCardsContext.Provider>
       ) : (
         <div className="min-h-0 flex-1" />
@@ -1378,40 +1516,44 @@ export function SessionChat({
           )}
 
           {terminal ? (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2.5">
-              <span className="text-body text-ink-dim">
-                {resuming
-                  ? "Resuming the previous session…"
-                  : "This session has ended. Resume to continue, or start fresh."}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button onClick={onResetSession} disabled={resuming}>
-                  New session
-                </Button>
-                <Button
-                  variant="primary"
-                  busy={resuming}
-                  disabled={!sid || resuming}
-                  onClick={async () => {
-                    if (!sid) return;
-                    setError(null);
-                    setResuming(true);
-                    try {
-                      await resumeSession(sid);
-                    } catch (e) {
-                      setError(errorMessage(e));
-                    } finally {
-                      setResuming(false);
-                    }
-                  }}
-                >
-                  Resume
-                </Button>
+            <>
+              {composerNotice}
+              <div className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2.5">
+                <span className="text-body text-ink-dim">
+                  {resuming
+                    ? "Resuming the previous session…"
+                    : "This session has ended. Resume to continue, or start fresh."}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button onClick={onResetSession} disabled={resuming}>
+                    New session
+                  </Button>
+                  <Button
+                    variant="primary"
+                    busy={resuming}
+                    disabled={!sid || resuming || gone}
+                    onClick={async () => {
+                      if (!sid) return;
+                      setError(null);
+                      setResuming(true);
+                      try {
+                        await resumeSession(sid);
+                      } catch (e) {
+                        setError(errorMessage(e));
+                      } finally {
+                        setResuming(false);
+                      }
+                    }}
+                  >
+                    Resume
+                  </Button>
+                </div>
               </div>
-            </div>
+            </>
           ) : (
             <>
               <div className="relative z-30">
+                {composerNotice}
                 {(showHandoffSuggest || showHandoffReady) && (
                   <HandoffBanner
                     mode={showHandoffReady ? "ready" : "suggest"}
@@ -1449,7 +1591,13 @@ export function SessionChat({
               {pinnedPrompts.length > 0 && (
                 <PromptChips view={view} onPick={pickPrompt} className="mb-1.5 ml-auto max-w-[70%]" />
               )}
-              <div className="relative rounded-lg border border-edge bg-panel-2 transition-colors focus-within:border-accent/50">
+              <div
+                className={`relative rounded-lg border bg-panel-2 transition-colors ${
+                  sync?.phase === "guard"
+                    ? "border-warn/50 focus-within:border-warn/50"
+                    : "border-edge focus-within:border-accent/50"
+                }`}
+              >
                 <AutocompleteDropdown state={autocomplete} />
                 {(attachments.length > 0 || (!started && shell.docs.length > 0)) && (
                   <div className="space-y-1.5 px-3 pt-2.5">
@@ -1485,6 +1633,7 @@ export function SessionChat({
                         }
                         recalledValueRef.current = null;
                         onDraftChange(val);
+                        if (sid) noteComposerInput(sid, val);
                         autocomplete.syncCaret();
                       }}
                       onFocus={() => setComposerFocused(true)}
@@ -1541,7 +1690,11 @@ export function SessionChat({
                     <button
                       type="button"
                       disabled={
-                        !canSubmit || Boolean(pendingArg) || starting || Boolean(pendingQuestion)
+                        !canSubmit ||
+                        Boolean(pendingArg) ||
+                        starting ||
+                        Boolean(pendingQuestion) ||
+                        (started && !sendable)
                       }
                       onClick={() => (started ? void handleSend() : void handleStart())}
                       title={

@@ -32,7 +32,21 @@ const h = vi.hoisted(() => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     return { status: "ok", data: null };
   });
+  const connectionStatus = vi.fn(async () => ({
+    status: "ok",
+    data: { state: "connected", transcriptSync: false },
+  }));
+  const listSessionTurns = vi.fn();
+  const getClientIdentity = vi.fn(async () => ({
+    status: "ok",
+    data: { clientId: "me", device: "my-mac" },
+  }));
+  const watchSessions = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
   return {
+    connectionStatus,
+    listSessionTurns,
+    getClientIdentity,
+    watchSessions,
     FakeChannel,
     state,
     startStageSession,
@@ -61,6 +75,10 @@ vi.mock("../../lib/bindings", () => ({
     getSessionLog: h.getSessionLog,
     listActiveSessions: h.listActiveSessions,
     restartSession: h.restartSession,
+    connectionStatus: h.connectionStatus,
+    listSessionTurns: h.listSessionTurns,
+    getClientIdentity: h.getClientIdentity,
+    watchSessions: h.watchSessions,
   },
 }));
 
@@ -85,6 +103,8 @@ const {
   useMostRecentDoc,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
+const { forgetSyncSupport, noteComposerInput, syncInput, syncOf, useTranscriptSync } = await import("./syncStore");
+const { log } = await import("@/lib/log");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
 const TURN_DONE: SessionEvent = {
@@ -94,8 +114,12 @@ const TURN_DONE: SessionEvent = {
   contextTokens: null,
 };
 
+function item(event: SessionEvent) {
+  return { seq: null, rev: null, author: null, event };
+}
+
 function emit(event: SessionEvent): void {
-  h.state.lastChannel?.onmessage?.(event);
+  h.state.lastChannel?.onmessage?.(item(event));
 }
 
 async function startBusySession(): Promise<string> {
@@ -123,7 +147,9 @@ beforeEach(() => {
   h.getSessionLog.mockClear();
   h.getSessionLog.mockResolvedValue({ status: "ok", data: [] });
   h.restartSession.mockClear();
+  h.listSessionTurns.mockReset();
   h.state.lastChannel = null;
+  forgetSyncSupport();
 });
 
 afterEach(cleanup);
@@ -175,12 +201,12 @@ describe("conversation steering (mid-turn message queue)", () => {
     emit(INIT);
     emit(TURN_DONE);
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "A", [], null, expect.any(String), null);
     expect(queued(id)).toEqual(["B"]);
 
     emit(TURN_DONE);
     await Promise.resolve();
-    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenLastCalledWith(id, "B", [], null, expect.any(String), null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -399,7 +425,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     await applyPermissionMode(id, "acceptEdits");
     await Promise.resolve();
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "do it now", [], null, expect.any(String), null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -481,7 +507,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await resumeSession(id);
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String), null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -493,7 +519,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     await sendMessage(id, "new turn");
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "new turn", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "new turn", [], null, expect.any(String), null);
     expect(isWorking(entryOf(id))).toBe(true);
     expect(isBusy(entryOf(id))).toBe(true);
 
@@ -505,7 +531,7 @@ describe("resuming a silent process settles out of `starting`", () => {
   const resumeEmitting = (...burst: SessionEvent[]) =>
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
-      for (const event of burst) ch.onmessage?.(event);
+      for (const event of burst) ch.onmessage?.(item(event));
       return { status: "ok", data: {} };
     });
 
@@ -531,7 +557,7 @@ describe("resuming a silent process settles out of `starting`", () => {
     resumeEmitting(INIT);
     await resumeSession(id);
 
-    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "later", [], null, expect.any(String), null);
     expect(queued(id)).toEqual([]);
   });
 
@@ -543,7 +569,7 @@ describe("resuming a silent process settles out of `starting`", () => {
 
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
-      ch.onmessage?.({ kind: "partialText", text: "thinking" } as SessionEvent);
+      ch.onmessage?.(item({ kind: "partialText", text: "thinking" } as SessionEvent));
       return { status: "ok", data: {} };
     });
 
@@ -1011,7 +1037,7 @@ describe("restoring a stored session log", () => {
 
     expect(h.resumeSession).toHaveBeenCalledTimes(1);
     expect(h.sendUserMessage).toHaveBeenCalledTimes(1);
-    expect(h.sendUserMessage).toHaveBeenCalledWith("expired-continue", "carry on", [], null, expect.any(String));
+    expect(h.sendUserMessage).toHaveBeenCalledWith("expired-continue", "carry on", [], null, expect.any(String), null);
     expect(h.respondPermission).not.toHaveBeenCalled();
   });
 
@@ -1150,5 +1176,334 @@ describe("answering a question", () => {
 
     expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", { "Which?": "A" });
     expect(entryOf(id).pendingQuestion).toBeNull();
+  });
+});
+
+describe("transcript sync: queue and reload", () => {
+  const SELF = { clientId: "me", device: "my-mac" };
+  const OTHER = { clientId: "them", device: "jons-macbook-pro" };
+  const THEIRS: SessionEvent = { kind: "userMessage", text: "theirs", stage: null, author: OTHER };
+  const reply = (text: string): SessionEvent => ({ kind: "assistantText", text, parentId: null });
+  const row = (seq: number, event: SessionEvent) => ({ seq, kind: event.kind, event, createdAt: 1_700_000_000_000 + seq });
+  type Row = ReturnType<typeof row>;
+  const page = (entries: Row[], rev: number, over: Record<string, unknown> = {}) => {
+    const last = entries[entries.length - 1];
+    return {
+      status: "ok",
+      data: {
+        entries,
+        nextCursor: last ? { kind: "after", seq: last.seq, createdAt: last.createdAt } : { kind: "empty" },
+        remaining: 0,
+        rev,
+        resetRev: 0,
+        working: false,
+        inFlight: 0,
+        ...over,
+      },
+    };
+  };
+  const STALE = (rev: number, committedRev: number) => ({
+    status: "error",
+    error: {
+      code: "stale_transcript",
+      message: "this session moved on",
+      remedy: "Pull the new turns, then send again.",
+      staleTranscript: { rev, committedRev, missingTurns: rev },
+    },
+  });
+
+  function emitAt(event: SessionEvent, seq: number | null, rev: number, author: typeof SELF | null = SELF): void {
+    h.state.lastChannel?.onmessage?.({ seq, rev, author, event });
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const sent = () => (h.sendUserMessage.mock.calls as unknown[][]).map((c) => [c[1], c[5]]);
+
+  beforeEach(() => {
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: true } });
+    h.listSessionTurns.mockResolvedValue(page([], 0));
+    useTranscriptSync.setState({ self: SELF });
+  });
+
+  afterEach(() => {
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: false } });
+    useTranscriptSync.setState({ self: null });
+    vi.restoreAllMocks();
+  });
+
+  it("returns a flush refused as stale to the head of the queue and sends it again after the pull", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A");
+    h.sendUserMessage.mockResolvedValueOnce(STALE(2, 2) as never);
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("theirs done")), row(4, TURN_DONE)], 2));
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
+    expect(sent()).toEqual([
+      ["A", 0],
+      ["A", 2],
+    ]);
+    expect(queued(id)).toEqual([]);
+    expect(syncOf(id)?.committedRev).toBe(2);
+  });
+
+  it("pulls before flushing a queued message while the view is behind", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A");
+    noteComposerInput(id, "still typing");
+    syncInput(id, {
+      kind: "remote",
+      rev: 1,
+      turns: [{ rev: 1, kinds: ["user"] }],
+      device: OTHER.device,
+      working: false,
+      flushable: false,
+      attached: false,
+      own: false,
+    });
+    expect(h.listSessionTurns).not.toHaveBeenCalled();
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("theirs done")), row(4, TURN_DONE)], 2));
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
+    expect(h.listSessionTurns.mock.invocationCallOrder[0]).toBeLessThan(h.sendUserMessage.mock.invocationCallOrder[0]);
+    expect(sent()).toEqual([["A", 2]]);
+  });
+
+  it("queues instead of sending when the resume attached mid-turn", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    emitAt(EXITED, 2, 0);
+    h.listSessionTurns.mockResolvedValueOnce(page([row(0, INIT), row(1, TURN_DONE), row(2, EXITED)], 0));
+    h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+      const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+      // A replayed row: author-less, so it applies at once.
+      ch.onmessage?.({ seq: 3, rev: 1, author: null, event: { ...THEIRS, author: null } });
+      return { status: "ok", data: {} };
+    });
+
+    await sendMessage(id, "mine");
+
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    expect(h.sendUserMessage).not.toHaveBeenCalled();
+    expect(queued(id)).toEqual(["mine"]);
+  });
+
+  it("returns a flushed message to the head and a new one to the tail when a pull reveals a running turn", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A");
+    await sendMessage(id, "B");
+    syncInput(id, { kind: "polled", rev: 1, resetRev: 0, inFlight: 0, working: true });
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS)], 1, { working: true }));
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+    await sendMessage(id, "C");
+
+    expect(h.sendUserMessage).not.toHaveBeenCalled();
+    expect(queued(id)).toEqual(["A", "B", "C"]);
+  });
+
+  it("logs a queued message that fails for any other reason", async () => {
+    const warn = vi.spyOn(log, "warn");
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A");
+    await sendMessage(id, "B");
+    h.sendUserMessage.mockResolvedValueOnce({
+      status: "error",
+      error: { code: "internal", message: "boom", remedy: null },
+    } as never);
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+
+    expect(warn).toHaveBeenCalledWith("session", expect.stringContaining("queued"), expect.objectContaining({ code: "internal" }));
+    expect(queued(id)).toEqual(["B"]);
+    expect(entryOf(id).items.some((it) => it.kind === "user" && it.text === "A")).toBe(false);
+  });
+
+  it("sends queued messages in order, once each, only after another client's in-flight send lands", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A");
+    await sendMessage(id, "B");
+    syncInput(id, { kind: "polled", rev: 0, resetRev: 0, inFlight: 1, working: true });
+    h.listSessionTurns.mockResolvedValueOnce(page([], 0, { inFlight: 1 }));
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+
+    expect(h.sendUserMessage).not.toHaveBeenCalled();
+    expect(queued(id)).toEqual(["A", "B"]);
+
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("theirs done")), row(4, TURN_DONE)], 2));
+    syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: false });
+    await settle();
+
+    expect(sent()).toEqual([["A", 2]]);
+    expect(queued(id)).toEqual(["B"]);
+
+    emitAt(TURN_DONE, 5, 2);
+    await settle();
+
+    expect(sent()).toEqual([
+      ["A", 2],
+      ["B", 2],
+    ]);
+    expect(queued(id)).toEqual([]);
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads again when a revision lands during a pull, and settles in sync", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    h.listSessionTurns
+      .mockImplementationOnce(async () => {
+        syncInput(id, {
+          kind: "remote",
+          rev: 3,
+          turns: [{ rev: 3, kinds: ["assistant"] }],
+          device: OTHER.device,
+          working: true,
+          flushable: false,
+          attached: false,
+          own: false,
+        });
+        return page([row(2, THEIRS)], 2, { working: true });
+      })
+      .mockResolvedValueOnce(page([row(3, reply("more")), row(4, TURN_DONE)], 3));
+
+    syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: true });
+    await settle();
+    await settle();
+
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(2);
+    const sync = syncOf(id);
+    expect(sync?.localRev).toBe(3);
+    expect(sync?.fetching).toBe(false);
+    expect(sync?.phase).toBe("inSync");
+  });
+
+  it("keeps a refused flush at the head while the winner's turn runs, and sends it once after that turn ends", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    await sendMessage(id, "A2");
+    // The other client's message lands mid-send; the server then refuses ours.
+    h.sendUserMessage.mockImplementationOnce(async () => {
+      emitAt({ ...THEIRS, text: "B wins" }, 2, 1, OTHER);
+      return STALE(1, 1) as never;
+    });
+
+    emitAt(TURN_DONE, 1, 0);
+    await settle();
+    await settle();
+
+    expect(sent()).toEqual([["A2", 0]]);
+    expect(queued(id)).toEqual(["A2"]);
+    expect(entryOf(id).streaming).toBe(true);
+    expect(entryOf(id).turnAuthor).toBe("other");
+
+    emitAt(TURN_DONE, 3, 1, OTHER);
+    await settle();
+
+    expect(sent()).toEqual([
+      ["A2", 0],
+      ["A2", 1],
+    ]);
+    expect(queued(id)).toEqual([]);
+  });
+
+  it("recovers a view left syncing when the reload its reset asked for was dropped", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    let finishRestart: () => void = () => {};
+    h.restartSession.mockImplementationOnce(async (...args: unknown[]) => {
+      h.state.lastChannel = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+      await new Promise<void>((resolve) => (finishRestart = resolve));
+      return { status: "ok", data: null };
+    });
+    const restarting = applyPermissionMode(id, "acceptEdits");
+    // A reset during a mode restart: the reload it asks for is gated off by `reloading`.
+    syncInput(id, { kind: "reset" });
+    finishRestart();
+    await restarting;
+    expect(syncOf(id)?.fetching).toBe(true);
+    expect(h.listSessionTurns).not.toHaveBeenCalled();
+
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("theirs done")), row(4, TURN_DONE)], 2));
+    syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: false });
+    await settle();
+
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
+    expect(syncOf(id)?.localRev).toBe(2);
+    expect(syncOf(id)?.fetching).toBe(false);
+    expect(syncOf(id)?.phase).toBe("inSync");
+  });
+
+  it("tears down an attached stream when a pulled page shows the session exited", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    const COMPLETED: SessionEvent = { kind: "exited", outcome: "completed", code: 0, stderrTail: "" };
+    h.listSessionTurns.mockResolvedValueOnce(page([row(2, THEIRS), row(3, reply("bye")), row(4, COMPLETED)], 2));
+
+    syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: false });
+    await settle();
+
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
+    expect(entryOf(id).state).toBe("completed");
+    expect(entryOf(id).live).toBe(false);
+    // With no channel registered, stop has nothing to interrupt.
+    await stopSession(id);
+    expect(h.interruptSession).not.toHaveBeenCalled();
+
+    const before = entryOf(id);
+    emitAt(COMPLETED, 4, 2, null);
+    expect(entryOf(id)).toBe(before);
+  });
+
+  it("applies an item at a seq a rewind reused once the reload has lowered appliedSeq", async () => {
+    const id = "rewound-1";
+    const live = { status: "ok", data: [{ session: { id } }] };
+    const channels: InstanceType<typeof h.FakeChannel>[] = [];
+    h.resumeSession.mockImplementation(async (...args: unknown[]) => {
+      channels.push(args[args.length - 1] as InstanceType<typeof h.FakeChannel>);
+      return { status: "ok", data: {} };
+    });
+    const one: SessionEvent = { kind: "userMessage", text: "one", stage: null };
+    const two: SessionEvent = { kind: "userMessage", text: "two", stage: null };
+    h.listActiveSessions.mockResolvedValueOnce(live).mockResolvedValueOnce(live);
+    h.listSessionTurns
+      .mockResolvedValueOnce(page([row(0, INIT), row(1, one), row(2, reply("a")), row(3, two), row(4, reply("b"))], 4))
+      .mockResolvedValueOnce(
+        page([row(0, INIT), row(1, one), row(2, reply("a")), row(3, { kind: "rewound" })], 5, { resetRev: 5 }),
+      );
+
+    await restoreSessionIfNeeded(id, "ws1", "general");
+    expect(channels).toHaveLength(1);
+    channels[0].onmessage?.({ seq: 3, rev: 5, author: null, event: { kind: "rewound" } });
+    await settle();
+    await settle();
+
+    expect(channels).toHaveLength(2);
+    expect(syncOf(id)?.resetRev).toBe(5);
+    channels[1].onmessage?.({ seq: 4, rev: 6, author: null, event: reply("after the rewind") });
+
+    const texts = entryOf(id).items.map((it) => ("text" in it ? it.text : it.kind));
+    expect(texts).toContain("after the rewind");
+    expect(texts).not.toContain("b");
+    h.resumeSession.mockReset();
+    h.resumeSession.mockImplementation(async () => ({ status: "ok", data: {} }));
   });
 });

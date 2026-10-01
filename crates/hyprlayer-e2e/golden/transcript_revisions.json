@@ -1,0 +1,149 @@
+{
+  "scenario": "transcript_revisions",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "init",
+              "assistantText",
+              "contextWindow",
+              "turnDone"
+            ]
+          },
+          "guard": "a first turn is rev 2 (user message, reply)",
+          "ok": true
+        }
+      ],
+      "step": "A starts a session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rev": 5
+          },
+          "guard": "user, tool result and reply each advance rev; the tool call does not",
+          "ok": true
+        }
+      ],
+      "step": "a tool turn commits three revisions"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "matches": true,
+            "pages": 4
+          },
+          "guard": "pages concatenate to the full log",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "eachPageResumes": true,
+            "pages": 4
+          },
+          "guard": "each page resumes at its own last row",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "identical": true
+          },
+          "guard": "the same read twice returns the same page",
+          "ok": true
+        }
+      ],
+      "step": "the catch-up read pages and repeats"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "stale_transcript",
+            "committedRev": 5,
+            "missingTurns": 3,
+            "rev": 5
+          },
+          "guard": "refused with stale_transcript",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSawStale": false
+          },
+          "guard": "the harness never saw it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rev": 5
+          },
+          "guard": "rev is unchanged",
+          "ok": true
+        }
+      ],
+      "step": "a stale send never reaches the harness"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rev": 7
+          },
+          "guard": "a checked send at the current rev is accepted and commits",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rev": 9
+          },
+          "guard": "a legacy send with no base_rev is accepted unchecked",
+          "ok": true
+        }
+      ],
+      "step": "a current send and a legacy send are accepted"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "session_epoch_advanced"
+          },
+          "guard": "a cursor whose row was rewritten is refused",
+          "ok": true
+        }
+      ],
+      "step": "a rewritten cursor is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "sawLifecycle": true,
+            "sawRevision": false
+          },
+          "guard": "no SessionRevised or SessionReset ever reaches the client",
+          "ok": true
+        }
+      ],
+      "step": "revisions reach no client yet"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

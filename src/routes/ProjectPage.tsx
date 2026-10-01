@@ -33,6 +33,7 @@ import { PrChecksPanel } from "@/features/workstreams/PrChecksPanel";
 import { DiffTab } from "@/features/workstreams/DiffTab";
 import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
+import { SessionPresenceBadge } from "@/features/session/SessionPresenceBadge";
 import { classifyArchivedStatus, restoreArchivedAgent } from "@/features/session/archivedAgents";
 import { archiveStoppedSession, setSessionArchived } from "@/features/session/sessionArchive";
 import { StopAgentDialog } from "@/features/session/StopAgentDialog";
@@ -1092,6 +1093,7 @@ export function ProjectPage() {
           )}
         </ScrollableTabStrip>
         <div className="flex shrink-0 items-center gap-1">
+          <SessionPresenceBadge sessionId={active?.sessionId} />
           <IconButton
             onClick={(e) => openSplitMenu(e, paneId)}
             title="Split pane"

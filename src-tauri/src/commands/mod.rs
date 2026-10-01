@@ -31,6 +31,7 @@ pub(crate) async fn ensure_registered_project(
             code: "unknown_project".into(),
             message: format!("{project_path} is not a registered project."),
             remedy: None,
+            stale_transcript: None,
         });
     }
     Ok(())

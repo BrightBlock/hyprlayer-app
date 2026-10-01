@@ -1,7 +1,7 @@
 import { focusManager } from "@tanstack/react-query";
 
 import { commands, events } from "@/lib/bindings";
-import type { EventBridge } from "@/lib/events";
+import { notifyServerReconnected, type EventBridge } from "@/lib/events";
 import { errorMessage, errorRemedy, isAppError, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
@@ -58,6 +58,7 @@ export async function retryConnection(): Promise<void> {
   running = true;
   try {
     await attempt();
+    notifyServerReconnected();
     await queryClient.invalidateQueries();
     useReconnectStore.setState({ lostAt: null, halted: false });
   } catch (e) {
@@ -88,6 +89,7 @@ async function reconnectLoop(): Promise<void> {
           "reconnect",
           `reconnected on attempt ${n}, ${Math.round((Date.now() - lostAt) / 1000)}s after the drop`,
         );
+        notifyServerReconnected();
         // The server may have restarted with different state.
         await queryClient.invalidateQueries();
         // Only now: the status reads `lost` until the refetch lands, and its counter must hold.

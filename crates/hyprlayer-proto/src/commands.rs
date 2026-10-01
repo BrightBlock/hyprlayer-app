@@ -138,6 +138,7 @@ mod tests {
                 code: "reset_refused".into(),
                 message: "no".into(),
                 remedy: None,
+                stale_transcript: None,
             })
         }
     }

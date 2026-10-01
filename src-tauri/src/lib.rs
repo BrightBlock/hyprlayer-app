@@ -1,4 +1,5 @@
 mod client;
+mod client_identity;
 pub mod commands;
 mod editors;
 pub mod error;
@@ -16,12 +17,14 @@ mod window_geometry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use hyprlayer_server::events::{TARGETED_EVENTS, TRANSCRIPT_SYNC};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
+use crate::client_identity::ClientIdentity;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -118,6 +121,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::set_session_effort,
             commands::sessions::list_sessions,
             commands::sessions::get_session_log,
+            commands::sessions::list_session_turns,
+            commands::sessions::watch_sessions,
+            commands::sessions::get_client_identity,
             commands::sessions::attach_session,
             commands::sessions::list_active_sessions,
             commands::sessions::set_session_title,
@@ -223,6 +229,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::WorktreeChanged,
             events::WorkstreamBranchChanged,
             events::SessionLifecycle,
+            events::SessionRevised,
+            events::SessionReset,
+            events::SessionViewers,
             events::ScriptRunChanged,
             events::QuitRequested,
             events::ServerDisconnected
@@ -282,6 +291,38 @@ pub(crate) async fn attach_client(
             e.message
         );
     }
+    let identity = handle.state::<ClientIdentity>();
+    let supported = match client
+        .announce_client(
+            identity.client_id.clone(),
+            identity.device.clone(),
+            TARGETED_EVENTS.map(str::to_string).to_vec(),
+        )
+        .await
+    {
+        Ok(announced) => {
+            let on = announced.features.iter().any(|f| f == TRANSCRIPT_SYNC);
+            log::info!(
+                "announced this client as {}; transcript sync {}",
+                identity.device,
+                if on { "on" } else { "off" }
+            );
+            on
+        }
+        Err(e) if e.code == "unsupported_command" => {
+            log::info!(
+                "this server predates transcript sync; other devices' turns show as a Load notice"
+            );
+            false
+        }
+        Err(e) => {
+            log::warn!("announcing this client failed: {}", e.message);
+            false
+        }
+    };
+    handle
+        .state::<AppState>()
+        .set_transcript_sync(&client, supported);
     runtime_events::spawn(handle.clone(), client);
 }
 
@@ -361,6 +402,8 @@ pub fn run() {
             let app_config_dir = app.path().app_config_dir()?;
             let app_data_dir = app.path().app_data_dir()?;
             let app_log_dir = app.path().app_log_dir()?;
+            // Before any `attach_client`, which announces it.
+            app.manage(client_identity::load_or_create(&app_config_dir));
 
             // hosts.json is read before connecting anything, because it's the
             // one thing that has to be decided locally: there is no server to

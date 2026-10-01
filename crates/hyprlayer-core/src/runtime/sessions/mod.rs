@@ -11,17 +11,19 @@ use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 
-use hyprlayer_models::RuntimeEvent;
+use hyprlayer_models::{ClientRef, RuntimeEvent, SessionTurns};
 
 use crate::agent::AgentDriver;
 use crate::claude::SessionEvent;
 use crate::error::Result;
 use crate::store::{Db, LogCursor, SessionLogEntry};
 
-pub use delivery::{SessionAttachment, SessionStreamError};
+pub use delivery::{LiveReceiver, SessionAttachment, SessionStreamError};
+pub use forwarder::ActorRevState;
 pub use service::{
     ActiveSession, LaunchAndConverseParams, LaunchSessionParams, RewindSessionOutcome,
-    RewindSessionRequest, SessionService, StartStageSessionRequest, StartedStageSession,
+    RewindSessionRequest, SendContext, SessionService, StartStageSessionRequest,
+    StartedStageSession,
 };
 
 #[cfg(any(test, feature = "test-support"))]
@@ -169,6 +171,71 @@ impl SessionActors {
         handle.set_workflow(workflow).await
     }
 
+    pub(crate) async fn reserve_user_turn(
+        &self,
+        session_id: &str,
+        client_message_id: String,
+        base_rev: Option<u64>,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
+        let mut handles = self.handles.lock().await;
+        if !handles.contains_key(session_id) {
+            handles.insert(
+                session_id.to_string(),
+                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
+            );
+        }
+        let handle = handles.get(session_id).expect("just inserted above");
+        handle
+            .reserve_user_turn(client_message_id, base_rev, author)
+            .await
+    }
+
+    pub(crate) async fn release_user_turn(&self, session_id: &str, client_message_id: String) {
+        let mut handles = self.handles.lock().await;
+        if !handles.contains_key(session_id) {
+            handles.insert(
+                session_id.to_string(),
+                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
+            );
+        }
+        let handle = handles.get(session_id).expect("just inserted above");
+        handle.release_user_turn(client_message_id).await;
+    }
+
+    pub(crate) async fn list_turns(
+        &self,
+        session_id: &str,
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<String>,
+    ) -> Result<SessionTurns> {
+        let mut handles = self.handles.lock().await;
+        if !handles.contains_key(session_id) {
+            handles.insert(
+                session_id.to_string(),
+                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
+            );
+        }
+        let handle = handles.get(session_id).expect("just inserted above");
+        handle.list_turns(cursor, limit, caller).await
+    }
+
+    /// Stops a deleted session's actor: its control channel closes, ending its open streams.
+    pub(crate) async fn remove(&self, session_id: &str) {
+        self.handles.lock().await.remove(session_id);
+    }
+
+    /// Asks only a running actor: a revision read must not spawn one.
+    pub(crate) async fn rev_state(
+        &self,
+        session_id: &str,
+        caller: Option<String>,
+    ) -> Option<ActorRevState> {
+        let handles = self.handles.lock().await;
+        handles.get(session_id)?.rev_state(caller).await.ok()
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) async fn attachment_count(&self, session_id: &str) -> usize {
         let handles = self.handles.lock().await;
@@ -182,6 +249,7 @@ impl SessionActors {
 #[cfg(any(test, feature = "test-support"))]
 pub struct SessionRuntimeHandle {
     actors: Arc<SessionActors>,
+    events: broadcast::Sender<RuntimeEvent>,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -189,8 +257,53 @@ impl SessionRuntimeHandle {
     pub fn new(db: Arc<Db>) -> Self {
         let (events, _) = broadcast::channel(64);
         Self {
-            actors: Arc::new(SessionActors::new(db, events)),
+            actors: Arc::new(SessionActors::new(db, events.clone())),
+            events,
         }
+    }
+
+    /// A fresh receiver on the runtime events broadcast; subscribe before the
+    /// actions whose `SessionRevised`/`SessionReset` you want to observe.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<RuntimeEvent> {
+        self.events.subscribe()
+    }
+
+    pub async fn reserve_user_turn(
+        &self,
+        session_id: &str,
+        client_message_id: String,
+        base_rev: Option<u64>,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
+        self.actors
+            .reserve_user_turn(session_id, client_message_id, base_rev, author)
+            .await
+    }
+
+    pub async fn release_user_turn(&self, session_id: &str, client_message_id: String) {
+        self.actors
+            .release_user_turn(session_id, client_message_id)
+            .await
+    }
+
+    pub async fn list_turns(
+        &self,
+        session_id: &str,
+        cursor: LogCursor,
+        limit: u32,
+        caller: Option<String>,
+    ) -> Result<SessionTurns> {
+        self.actors
+            .list_turns(session_id, cursor, limit, caller)
+            .await
+    }
+
+    pub async fn rev_state(
+        &self,
+        session_id: &str,
+        caller: Option<String>,
+    ) -> Option<ActorRevState> {
+        self.actors.rev_state(session_id, caller).await
     }
 
     pub async fn ingress(&self, session_id: &str) -> mpsc::Sender<SessionEvent> {

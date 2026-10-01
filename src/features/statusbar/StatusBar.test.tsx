@@ -29,6 +29,7 @@ const CONNECTED: ConnectionStatus = {
   serverVersion: 3,
   serverRelease: null,
   serverOutdated: false,
+  transcriptSync: false,
   error: null,
 };
 const LOST: ConnectionStatus = {

@@ -1,4 +1,5 @@
 use hyprlayer_core::claude::SessionState;
+use hyprlayer_core::models::{ClientRef, TurnKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
@@ -43,6 +44,41 @@ pub struct SessionLifecycle {
     pub session_id: String,
     pub workstream_id: String,
     pub state: SessionState,
+}
+
+/// Revs and seqs are `f64` here: specta exports no `u64`/`i64`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RevisedTurnDto {
+    pub seq: f64,
+    pub kind: TurnKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRevised {
+    pub session_id: String,
+    pub workstream_id: String,
+    pub rev: f64,
+    pub turns: Vec<RevisedTurnDto>,
+    pub author: Option<ClientRef>,
+    pub working: bool,
+    pub at: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionReset {
+    pub session_id: String,
+    pub workstream_id: String,
+    pub rev: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionViewers {
+    pub session_id: String,
+    pub viewers: Vec<ClientRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

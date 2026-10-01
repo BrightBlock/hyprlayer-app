@@ -18,6 +18,16 @@ export function registerEventBridge(bridge: EventBridge): void {
   featureBridges.push(bridge);
 }
 
+const reconnectHandlers: Array<() => void> = [];
+
+export function onServerReconnected(handler: () => void): void {
+  reconnectHandlers.push(handler);
+}
+
+export function notifyServerReconnected(): void {
+  for (const handler of reconnectHandlers) handler();
+}
+
 export function attachEventListeners(): () => void {
   const unlisteners: Promise<() => void>[] = [
     ...featureBridges.flatMap((bridge) => bridge()),

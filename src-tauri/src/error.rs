@@ -1,13 +1,66 @@
 use hyprlayer_core::CoreError;
-use hyprlayer_proto::WireError;
+use hyprlayer_proto::{StaleTranscript, WireError};
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub code: String,
     pub message: String,
     pub remedy: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub stale_transcript: Option<StaleTranscriptDto>,
+}
+
+// Hand-written: `skip_serializing_if` makes specta split the binding in two.
+// Omitting a `None` detail keeps every other envelope byte-identical.
+impl Serialize for AppError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let len = if self.stale_transcript.is_some() {
+            4
+        } else {
+            3
+        };
+        let mut s = serializer.serialize_struct("AppError", len)?;
+        s.serialize_field("code", &self.code)?;
+        s.serialize_field("message", &self.message)?;
+        s.serialize_field("remedy", &self.remedy)?;
+        if let Some(stale) = &self.stale_transcript {
+            s.serialize_field("staleTranscript", stale)?;
+        }
+        s.end()
+    }
+}
+
+/// `StaleTranscript` across Tauri: specta exports no `u64`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct StaleTranscriptDto {
+    pub rev: f64,
+    pub committed_rev: f64,
+    pub missing_turns: f64,
+}
+
+impl From<StaleTranscript> for StaleTranscriptDto {
+    fn from(s: StaleTranscript) -> Self {
+        Self {
+            rev: s.rev as f64,
+            committed_rev: s.committed_rev as f64,
+            missing_turns: s.missing_turns as f64,
+        }
+    }
+}
+
+impl From<StaleTranscriptDto> for StaleTranscript {
+    fn from(dto: StaleTranscriptDto) -> Self {
+        Self {
+            rev: dto.rev as u64,
+            committed_rev: dto.committed_rev as u64,
+            missing_turns: dto.missing_turns as u64,
+        }
+    }
 }
 
 impl From<CoreError> for AppError {
@@ -16,6 +69,7 @@ impl From<CoreError> for AppError {
             code: err.code().to_string(),
             message: err.to_string(),
             remedy: err.remedy(),
+            stale_transcript: None,
         }
     }
 }
@@ -26,6 +80,7 @@ impl From<WireError> for AppError {
             code: err.code,
             message: err.message,
             remedy: err.remedy,
+            stale_transcript: err.stale_transcript.map(StaleTranscriptDto::from),
         }
     }
 }
@@ -36,6 +91,7 @@ impl From<AppError> for WireError {
             code: err.code,
             message: err.message,
             remedy: err.remedy,
+            stale_transcript: err.stale_transcript.map(StaleTranscript::from),
         }
     }
 }
@@ -46,6 +102,7 @@ impl AppError {
             code: "internal".into(),
             message: message.into(),
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -54,6 +111,7 @@ impl AppError {
             code: "project_not_found".into(),
             message: format!("No hyprlayer project is mapped at {path}"),
             remedy: Some("Add the repository as a project first.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -67,6 +125,7 @@ impl AppError {
             code: "remote_cli_missing".into(),
             message: format!("{host} does not have the Hyprlayer server this build needs."),
             remedy: Some("Install it from the Hyprlayer server panel.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -79,6 +138,7 @@ impl AppError {
                 "{host} is running Hyprlayer server {running}; this app needs {minimum} or newer."
             ),
             remedy: Some("Update it from the Hyprlayer server panel.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -92,6 +152,7 @@ impl AppError {
                 "Hyprlayer's server ships for Linux x86_64, macOS arm64, and Windows x86_64."
                     .into(),
             ),
+            stale_transcript: None,
         }
     }
 
@@ -102,6 +163,7 @@ impl AppError {
             code: "remote_auth_failed".into(),
             message: format!("Could not authenticate to {host}: {}", detail.into()),
             remedy: Some("Check your SSH credentials.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -116,6 +178,7 @@ impl AppError {
             // No remedy: `message` carries ssh's own words, and this is also the
             // fallback arm, where a specific instruction would be a guess.
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -127,6 +190,7 @@ impl AppError {
             code: "remote_command_failed".into(),
             message: format!("A command failed on {host}: {}", detail.into()),
             remedy: None,
+            stale_transcript: None,
         }
     }
 
@@ -146,6 +210,7 @@ impl AppError {
                 "No release publishes this version's server yet — stage one with scripts/stage-server-binary.sh."
                     .into(),
             ),
+            stale_transcript: None,
         }
     }
 
@@ -159,6 +224,7 @@ impl AppError {
             code: "host_changed".into(),
             message: format!("The active Hyprlayer server is now {host}."),
             remedy: Some("Relaunch Hyprlayer to connect to it.".into()),
+            stale_transcript: None,
         }
     }
 
@@ -170,6 +236,7 @@ impl AppError {
             code: "server_unavailable".into(),
             message: detail.into(),
             remedy: None,
+            stale_transcript: None,
         }
     }
 }
@@ -216,6 +283,7 @@ mod tests {
             code: code.clone(),
             message: message.clone(),
             remedy: remedy.clone(),
+            stale_transcript: None,
         };
         let app = AppError::from(wire);
         assert_eq!(

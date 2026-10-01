@@ -1,0 +1,342 @@
+{
+  "scenario": "transcript_sync",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "a": true,
+            "b": true
+          },
+          "guard": "the server reports transcript sync",
+          "ok": true
+        }
+      ],
+      "step": "clients announce"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "device": "device-a",
+            "hasSeq": true,
+            "rev": 1
+          },
+          "guard": "A's user message carries A and rev 1",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "device": "device-a",
+            "rev": 2
+          },
+          "guard": "the reply commits rev 2 under A",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hasSeq": false,
+            "partial": true
+          },
+          "guard": "partial text has no seq",
+          "ok": true
+        }
+      ],
+      "step": "A starts a session with metadata"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "inFlight": 0,
+            "resetRev": 0,
+            "rev": 2,
+            "viewers": [
+              "device-a",
+              "device-b"
+            ],
+            "working": false
+          },
+          "guard": "watch answers the current state and its viewers",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "viewers": [
+              "device-a",
+              "device-b"
+            ]
+          },
+          "guard": "B learns both devices view it",
+          "ok": true
+        }
+      ],
+      "step": "both watch the session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "reply": {
+              "device": "device-a",
+              "rev": 4
+            },
+            "user": {
+              "device": "device-a",
+              "rev": 3
+            }
+          },
+          "guard": "B's stream carries A's turn attributed to A",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "commits": [
+              {
+                "device": "device-a",
+                "rev": 3,
+                "turns": [
+                  "user"
+                ],
+                "working": true
+              },
+              {
+                "device": "device-a",
+                "rev": 4,
+                "turns": [
+                  "assistant"
+                ],
+                "working": true
+              }
+            ]
+          },
+          "guard": "B hears each commit with its author",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rev": 4,
+            "seen": true,
+            "working": false
+          },
+          "guard": "the turn's end is announced",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "withinOneSecond": true
+          },
+          "guard": "B receives A's committed reply within 1s of A",
+          "ok": true
+        }
+      ],
+      "step": "B follows A's next turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "author": {
+              "clientId": "client-a",
+              "device": "device-a"
+            }
+          },
+          "guard": "the last user message is stored with A as its author",
+          "ok": true
+        }
+      ],
+      "step": "the stored message keeps its author"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "first": null,
+            "second": null
+          },
+          "guard": "a client's back-to-back sends are both accepted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "stale_transcript",
+            "committedRev": 8,
+            "missingTurns": 4,
+            "rev": 8
+          },
+          "guard": "another client's older base is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSawIt": false
+          },
+          "guard": "B's text never reached the harness",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rev": 8
+          },
+          "guard": "B's pull reaches rev 8",
+          "ok": true
+        }
+      ],
+      "step": "a client's own sends never make it stale"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "authorClientId": "client-a",
+            "serverMintedNonce": true
+          },
+          "guard": "the follow-up is attributed to A",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "stale_transcript",
+            "committedRev": 4,
+            "missingTurns": 2,
+            "rev": 4
+          },
+          "guard": "the follow-up is foreign to another client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "error": null
+          },
+          "guard": "the follow-up never makes its own client stale",
+          "ok": true
+        }
+      ],
+      "step": "an app follow-up belongs to the client whose turn triggered it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "stale_transcript",
+            "committedRev": 9,
+            "missingTurns": 1,
+            "rev": 9
+          },
+          "guard": "the second send is refused with stale_transcript",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSawIt": false
+          },
+          "guard": "B's text never reached the harness",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rev": 10
+          },
+          "guard": "B's pull reaches rev 10",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "device": "device-b",
+            "error": null,
+            "rev": 11
+          },
+          "guard": "the resend after pulling is accepted and attributed to B",
+          "ok": true
+        }
+      ],
+      "step": "both send at once"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "viewers": [
+              "device-a"
+            ]
+          },
+          "guard": "viewers shrink when a client leaves",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "inFlight": 0,
+            "resetRev": 0,
+            "rev": 14,
+            "viewers": [
+              "device-a",
+              "device-b"
+            ],
+            "working": false
+          },
+          "guard": "the reconnect is told the current state and viewers",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hasOfflineReply": true,
+            "hasOwnTurn": true,
+            "strictlyIncreasing": true
+          },
+          "guard": "every missed row once, in order",
+          "ok": true
+        }
+      ],
+      "step": "B leaves and catches up on reconnect"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "author": null
+          },
+          "guard": "no author is inferred for a nonce-less message",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "stale_transcript",
+            "committedRev": 16,
+            "missingTurns": 2,
+            "rev": 16
+          },
+          "guard": "it is foreign to every announced client",
+          "ok": true
+        }
+      ],
+      "step": "a released desktop's message is author-less"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstBareKind": "userMessage",
+            "sawLifecycle": true,
+            "sawTargeted": false
+          },
+          "guard": "the released-client path is unchanged",
+          "ok": true
+        }
+      ],
+      "step": "an unannounced client sees none of it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

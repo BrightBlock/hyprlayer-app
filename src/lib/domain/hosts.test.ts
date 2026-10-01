@@ -129,6 +129,7 @@ function status(state: ConnectionStatus["state"], host: Host | null, code?: stri
     serverVersion: state === "connected" ? 1 : null,
     serverRelease: null,
     serverOutdated: false,
+    transcriptSync: false,
     error: code ? { code, message: `${code} happened`, remedy: null } : null,
   };
 }

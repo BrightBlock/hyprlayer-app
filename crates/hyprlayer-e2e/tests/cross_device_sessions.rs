@@ -217,6 +217,7 @@ async fn cross_device_sessions() {
             attached_docs: vec![],
             prompt_name: None,
             client_message_id: None,
+            base_rev: None,
         },
     )
     .await
@@ -333,6 +334,7 @@ async fn cross_device_sessions() {
             attached_docs: vec![],
             prompt_name: None,
             client_message_id: None,
+            base_rev: None,
         },
     )
     .await
@@ -393,6 +395,7 @@ async fn cross_device_sessions() {
             attached_docs: vec![],
             prompt_name: None,
             client_message_id: Some("cmid-four".into()),
+            base_rev: None,
         },
     )
     .await

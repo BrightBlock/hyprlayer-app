@@ -5,7 +5,9 @@
 amended 2026-09-24 (the v4 type scale replaces Tailwind's; see "v4 type scale") ·
 amended 2026-09-25 (archived agents moved from a dedicated view to a status-bar popover) ·
 amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dark") ·
-amended 2026-09-28 (the Agent sessions status-bar button and popover)
+amended 2026-09-28 (the Agent sessions status-bar button and popover) ·
+amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote chip, composer sync
+line and draft guard, presence badge; see "Remote sync surfaces")
 
 ## Decision
 
@@ -514,6 +516,30 @@ Shadows are `shadow-sm` (small controls), `shadow-card` (status cards), `shadow-
 popover) and `shadow-ring-active`.
 Tailwind inlines a literal `--shadow-*` into its utility, so each maps to a per-theme
 `--elevation-*`/`--ring-active` variable instead. Dialogs keep `shadow-2xl`.
+
+### Remote sync surfaces (2026-10-01)
+
+What a view shows of turns another client added (`docs/adr/0009-hyprlayer-server.md`).
+
+- **Placeholders only through `Skeleton`** (`ui.tsx`). It is static at `opacity-75` while
+  turns wait and shimmers (`animate-shimmer`) while they load. The transcript's tail draws
+  one skeleton per pending revision, one labelled group past `SUMMARY_AFTER`, and a single
+  "`<device>` is working…" skeleton in place of the elapsed counter.
+- **Motion.** `animate-shimmer` (1.4s sweep) and `animate-sync-in` (350ms fade and 4px
+  rise, on pulled items only) each have a `prefers-reduced-motion` block, and the shimmer
+  joins the `data-window-blurred` pause list.
+- **Colour.** Sync is `info`: the composer's status line and its `now` link, the "New from
+  `<device>`" divider (`text-label text-info`, `bg-info/30` hairlines), the remote chip, the
+  new-turns pill. The draft guard is `warn`: its card follows
+  `HandoffBanner`'s (`rounded-md border border-warn/40 bg-warn/5`), the composer border turns
+  `border-warn/50`. The no-sync fallback notice is
+  `bg-info/10 border-info/40`.
+- **Remote chip.** `bg-info/10 text-info text-tag normal-case rounded-control`, with the
+  `device` icon, above another client's user message.
+- **New-turns pill.** Centred `bottom-3` over the transcript, `rounded-full border-info/40
+  bg-panel shadow-pop`; shown only while scrolled up after a pull added turns.
+- **Presence badge.** In the pane tab strip's right cluster, before the split button; hidden
+  below two viewers.
 
 ## Rationale
 

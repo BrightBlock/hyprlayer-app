@@ -88,10 +88,23 @@ pub(crate) struct SessionRowMutation {
     pub clear_orphans: bool,
 }
 
+/// Kinds whose commit advances `sessions.rev`; migration 11 backfills the same set.
+pub(crate) const REV_KINDS: [&str; 4] = ["userMessage", "assistantText", "toolResult", "rewound"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ApplySessionEventOutcome {
-    Applied,
+    /// `rev` is the session's new rev when this row advanced it.
+    Applied {
+        rev: Option<u64>,
+    },
     AlreadyApplied,
+}
+
+/// One page of raw rows; `last` is the final row read, decodable or not.
+pub(crate) struct SessionLogPage {
+    pub entries: Vec<SessionLogEntry>,
+    pub last: Option<(i64, f64)>,
+    pub remaining: u32,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -518,6 +531,96 @@ impl Db {
         })
     }
 
+    /// `(rev, reset_rev)`, or `(0, 0)` when the session has no row.
+    pub(crate) fn session_rev(&self, session_id: &str) -> Result<(u64, u64)> {
+        self.with(|conn| {
+            let row = conn
+                .query_row(
+                    "SELECT rev, reset_rev FROM sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+                )
+                .optional()?;
+            Ok(row.unwrap_or((0, 0)))
+        })
+    }
+
+    /// `(rev, reset_rev, working)` for a session with no running actor; `None` without a row.
+    pub(crate) fn session_rev_state(&self, session_id: &str) -> Result<Option<(u64, u64, bool)>> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!("SELECT rev, reset_rev, {COLS} FROM sessions WHERE id = ?1"),
+                params![session_id],
+                |row| {
+                    let state = SessionState::parse(&row.get::<_, String>("state")?);
+                    let last_turn_kind: Option<String> = row.get("last_turn_kind")?;
+                    Ok((
+                        row.get::<_, i64>("rev")? as u64,
+                        row.get::<_, i64>("reset_rev")? as u64,
+                        is_working(state, last_turn_kind.as_deref()),
+                    ))
+                },
+            )
+            .optional()
+        })
+    }
+
+    /// Bumps `rev` and sets `reset_rev` to match, for a rewind boundary that
+    /// failed to persist or a restore. Both right-hand `rev`s read the old value.
+    pub(crate) fn bump_session_reset(&self, session_id: &str) -> Result<u64> {
+        self.with(|conn| {
+            let rev = conn
+                .query_row(
+                    "UPDATE sessions SET rev = rev + 1, reset_rev = rev + 1 WHERE id = ?1 RETURNING rev",
+                    params![session_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            Ok(rev.unwrap_or(0) as u64)
+        })
+    }
+
+    /// A page of raw rows after `after_seq`, decoded as `session_log_after` does.
+    pub(crate) fn session_log_page(
+        &self,
+        session_id: &str,
+        after_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<SessionLogPage> {
+        let rows: Vec<StoredEvent> = self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT seq, kind, payload, created_at FROM session_events
+                 WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+            )?;
+            let rows =
+                stmt.query_map(params![session_id, after_seq.unwrap_or(-1), limit], |row| {
+                    Ok(StoredEvent {
+                        seq: row.get::<_, i64>("seq")? as f64,
+                        kind: row.get("kind")?,
+                        payload: row.get("payload")?,
+                        created_at: row.get("created_at")?,
+                    })
+                })?;
+            rows.collect()
+        })?;
+
+        let last = rows.last().map(|r| (r.seq as i64, r.created_at));
+        let after_last = last.map_or(after_seq.unwrap_or(-1), |(seq, _)| seq);
+        let remaining = self.with(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM session_events WHERE session_id = ?1 AND seq > ?2",
+                params![session_id, after_last],
+                |row| row.get::<_, i64>(0),
+            )
+        })?;
+
+        Ok(SessionLogPage {
+            entries: decode_session_log(session_id, rows),
+            last,
+            remaining: remaining as u32,
+        })
+    }
+
     pub fn session_events(&self, session_id: &str) -> Result<Vec<StoredEvent>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(
@@ -684,7 +787,21 @@ impl Db {
                          VALUES (?1,?2,?3,?4,?5)",
                         params![session_id, seq, kind, raw_payload, now_ms()],
                     )?;
-                    ApplySessionEventOutcome::Applied
+                    let rev = if REV_KINDS.contains(&kind) {
+                        tx.query_row(
+                            // A rewind boundary is also the rev every reader reloads from.
+                            "UPDATE sessions SET rev = rev + 1,
+                                    reset_rev = CASE WHEN ?2 = 'rewound' THEN rev + 1 ELSE reset_rev END
+                              WHERE id = ?1 RETURNING rev",
+                            params![session_id, kind],
+                            |row| row.get::<_, i64>(0),
+                        )
+                        .optional()?
+                        .map(|rev| rev as u64)
+                    } else {
+                        None
+                    };
+                    ApplySessionEventOutcome::Applied { rev }
                 }
                 Some((existing_kind, existing_payload)) => {
                     if existing_kind == kind && existing_payload == raw_payload {

@@ -50,6 +50,11 @@ const SLOW_REQUEST: Duration = Duration::from_secs(5);
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
 static REQUEST_FAILURES: RepeatGate = RepeatGate::new(Duration::from_secs(60));
 
+tokio::task_local! {
+    /// The connection a request arrived on; announce, watch and attribution read it.
+    pub(crate) static CONN: u64;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     Serve,
@@ -369,7 +374,7 @@ impl SocketServer {
         let forwarder = events::spawn_forwarder(&runtime, clients.clone());
         Ok(Self {
             listener,
-            server: Arc::new(Server::new(runtime)),
+            server: Arc::new(Server::new(runtime, clients.clone())),
             clients,
             forwarder,
             stop: Arc::new(Notify::new()),
@@ -478,7 +483,8 @@ where
     let result = read_requests(conn, &mut reader, &server, &tx, &stop, &streams).await;
     // A dropped connection cancels every stream it owned.
     streams.abort_all();
-    clients.unregister(conn);
+    let left = clients.unregister(conn);
+    clients.send_viewers(&left);
     writer_task.abort();
     result.map(Some)
 }
@@ -584,7 +590,10 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     // Its own task, so a panicking handler still gets an answer
                     // back to the caller instead of leaving it waiting.
                     let outcome: Outcome<_> =
-                        match tokio::spawn(async move { server.dispatch(body).await }).await {
+                        // A task-local scope does not survive a further spawn, so it wraps the inner one.
+                        match tokio::spawn(CONN.scope(conn, async move { server.dispatch(body).await }))
+                            .await
+                        {
                             Ok(result) => result.into(),
                             Err(e) if e.is_panic() => {
                                 tracing::error!("conn {conn}: {command} panicked: {e}");
@@ -616,9 +625,9 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     let command = body.command();
                     let started = Instant::now();
                     let preparing = server.clone();
-                    let prepared = match tokio::spawn(async move {
+                    let prepared = match tokio::spawn(CONN.scope(conn, async move {
                         streams::prepare_stream(&preparing, body).await
-                    })
+                    }))
                     .await
                     {
                         Ok(prepared) => prepared,

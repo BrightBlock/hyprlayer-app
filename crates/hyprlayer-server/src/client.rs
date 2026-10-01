@@ -3,7 +3,7 @@
 //! typed methods (`list_sessions`, …) are generated onto `RpcClient` by the
 //! command table in `rpc.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -23,7 +23,8 @@ use crate::rpc::{Request, Response};
 use crate::socket;
 use crate::streams::{StreamRequest, StreamResponse};
 use crate::transport::{
-    label, parse_control, Control, FrameReader, FrameWriter, OUTBOUND_QUEUE_FRAMES,
+    label, parse_control, undecodable_event, Control, FrameReader, FrameWriter,
+    OUTBOUND_QUEUE_FRAMES,
 };
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Response, WireError>>>>>;
@@ -350,6 +351,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
     events: mpsc::UnboundedSender<RuntimeEvent>,
     writer: tokio::task::AbortHandle,
 ) {
+    let mut skipped = HashSet::new();
     let reason = loop {
         match reader.next_frame().await {
             Ok(Some(Frame::Control(line))) => match parse_control(&line) {
@@ -396,7 +398,15 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     let _ = events.send(event);
                 }
                 Ok(other) => tracing::warn!("unexpected {} frame from server", label(&other)),
-                Err(e) => break format!("an unreadable control frame ({e})"),
+                Err(e) => match undecodable_event(&line) {
+                    // A newer server's event kind; the rest of the connection is still good.
+                    Some(kind) => {
+                        if skipped.insert(kind.clone()) {
+                            tracing::warn!("skipping {kind} events this build cannot decode: {e}");
+                        }
+                    }
+                    None => break format!("an unreadable control frame ({e})"),
+                },
             },
             Ok(Some(Frame::Data(payload))) => match frame::decode_stream_frame(&payload) {
                 Some((stream_id, event)) => {
@@ -488,5 +498,111 @@ impl<E: DeserializeOwned> EventStream<E> {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use hyprlayer_proto::Outcome;
+
+    use super::*;
+    use crate::transport::encode_control;
+
+    const FUTURE_EVENT: &str = r#"{"event":{"event":{"sessionFromTheFuture":{"sessionId":"s1"}}}}"#;
+
+    /// A peer that says hello, answers the first request after writing `lines`, then holds on.
+    async fn scripted_client(lines: Vec<&'static str>) -> Arc<RpcClient> {
+        let (ours, theirs) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(async move {
+            let (rd, wr) = tokio::io::split(theirs);
+            let mut reader = FrameReader::new(rd);
+            let mut writer = FrameWriter::new(wr);
+            let _ = reader.next_control().await;
+            let _ = writer
+                .write_control(&Control::Hello {
+                    protocol_version: PROTOCOL_VERSION,
+                    build: None,
+                    version: None,
+                })
+                .await;
+            let Ok(Some(Control::Request { id, .. })) = reader.next_control().await else {
+                return;
+            };
+            for line in lines {
+                let _ = writer.write_bytes(&frame::encode_control(line)).await;
+            }
+            let answer = Control::Response {
+                id,
+                outcome: Outcome::Ok(Response::ReorderProjects(())),
+            };
+            let _ = writer.write_bytes(&encode_control(&answer).unwrap()).await;
+            while matches!(reader.next_frame().await, Ok(Some(_))) {}
+        });
+        RpcClient::connect(ours).await.expect("the peer says hello")
+    }
+
+    fn any_call() -> Request {
+        Request::ReorderProjects { paths: Vec::new() }
+    }
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Every test reaching the skip's `warn!` holds one: a thread with no scoped
+    /// subscriber can cache that callsite's interest as never for all threads.
+    /// Current-thread runtime, so the spawned reader logs under this default.
+    fn capture_logs() -> (Captured, tracing::subscriber::DefaultGuard) {
+        let captured = Captured::default();
+        let writer = captured.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        (captured, tracing::subscriber::set_default(subscriber))
+    }
+
+    #[tokio::test]
+    async fn an_unknown_event_kind_keeps_the_connection_and_its_pending_call() {
+        let (_logs, _guard) = capture_logs();
+        let client =
+            scripted_client(vec![FUTURE_EVENT, r#"{"event":{"event":"configChanged"}}"#]).await;
+        let mut events = client.take_events().unwrap();
+
+        assert!(client.call(any_call()).await.is_ok());
+        assert!(matches!(
+            events.recv().await,
+            Some(RuntimeEvent::ConfigChanged)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_skipped_event_kind_is_logged_once() {
+        let (captured, _guard) = capture_logs();
+        let client = scripted_client(vec![FUTURE_EVENT, FUTURE_EVENT]).await;
+
+        assert!(client.call(any_call()).await.is_ok());
+        let logs = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+        let lines = logs.lines().filter(|l| l.contains("sessionFromTheFuture"));
+        assert_eq!(lines.count(), 1, "{logs}");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_line_that_is_not_an_event_still_ends_the_connection() {
+        let client = scripted_client(vec![r#"{"response":42}"#]).await;
+
+        let err = client.call(any_call()).await.expect_err("the call fails");
+        assert_eq!(err.code, WireError::disconnected().code);
     }
 }
