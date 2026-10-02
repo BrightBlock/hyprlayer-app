@@ -72,6 +72,7 @@ export function attachEventListeners(): () => void {
     events.thoughtsIndexUpdated.listen((event) => {
       void queryClient.invalidateQueries({ queryKey: ["docs"] });
       void queryClient.invalidateQueries({ queryKey: ["related"] });
+      void queryClient.invalidateQueries({ queryKey: ["thoughts-git-status"] });
       const { ids } = event.payload;
       if (ids.length === 0) {
         void queryClient.invalidateQueries({ queryKey: ["doc"] });

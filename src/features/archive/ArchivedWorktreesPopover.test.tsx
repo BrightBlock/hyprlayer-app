@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ArchiveInfo, ArchivedWorkstreamView, Bootstrap } from "@/lib/bindings";
@@ -21,8 +22,25 @@ vi.mock("@/lib/bindings", () => ({ commands: b }));
 vi.mock("@/lib/log", () => ({ log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
-import { ArchivedWorktreesButton } from "./ArchivedWorktreesButton";
-import { closeArchivedWorktrees } from "./archivedWorktreesStore";
+import { ArchivedWorktreesPopover } from "./ArchivedWorktreesPopover";
+import {
+  closeArchivedWorktrees,
+  openArchivedWorktrees,
+  useArchivedWorktrees,
+} from "./archivedWorktreesStore";
+
+function ArchivedWorktreesButton() {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const open = useArchivedWorktrees((s) => s.open);
+  return (
+    <>
+      <button ref={anchorRef} type="button" onClick={openArchivedWorktrees}>
+        Archived worktrees
+      </button>
+      <ArchivedWorktreesPopover open={open} onClose={closeArchivedWorktrees} anchorRef={anchorRef} />
+    </>
+  );
+}
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
@@ -128,8 +146,6 @@ const filterBox = () => screen.getByRole("textbox", { name: "Filter archived wor
 describe("ArchivedWorktreesPopover", () => {
   it("opens as a labelled dialog over the page and refreshes PR state once", async () => {
     await openPopover();
-    const trigger = screen.getByRole("button", { name: "Archived worktrees" });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("3 · 1.5 GB")).toBeTruthy();
     expect(b.refreshArchivedWorkstreams).toHaveBeenCalledTimes(1);
   });

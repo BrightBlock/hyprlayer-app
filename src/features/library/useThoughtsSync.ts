@@ -35,15 +35,27 @@ export function useThoughtsSync(projectPath: string | undefined): ThoughtsSyncSt
     flashTimer.current = window.setTimeout(() => setFlash(null), FLASH_MS);
   }, []);
 
-  const { mutate, isPending } = sync;
+  // Promise-tracked rather than the observer's isPending: the auto-sync fires from an effect,
+  // and StrictMode's remount detaches the observer from that mutation, leaving it pending forever.
+  const { mutateAsync } = sync;
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const fire = useCallback(() => {
-    mutate(null, {
-      onSuccess: () => showFlash("ok"),
-      onError: () => showFlash("bad"),
-      onSettled: () =>
-        void queryClient.invalidateQueries({ queryKey: ["thoughts-git-status"] }),
-    });
-  }, [mutate, showFlash]);
+    setSyncing(true);
+    setError(null);
+    mutateAsync(null)
+      .then(
+        () => showFlash("ok"),
+        (e: unknown) => {
+          setError(errorMessage(e));
+          showFlash("bad");
+        },
+      )
+      .finally(() => {
+        setSyncing(false);
+        void queryClient.invalidateQueries({ queryKey: ["thoughts-git-status"] });
+      });
+  }, [mutateAsync, showFlash]);
 
   useEffect(() => {
     if (!projectPath) return;
@@ -53,7 +65,7 @@ export function useThoughtsSync(projectPath: string | undefined): ThoughtsSyncSt
   }, [projectPath, fire]);
 
   const syncNow = () => {
-    if (isPending) return;
+    if (syncing) return;
     lastAutoSyncAt = Date.now();
     fire();
   };
@@ -62,8 +74,8 @@ export function useThoughtsSync(projectPath: string | undefined): ThoughtsSyncSt
     status: status.data,
     hidden:
       !projectPath || (isAppError(status.error) && HIDDEN_CODES.has(status.error.code)),
-    syncing: isPending,
-    error: sync.isError ? errorMessage(sync.error) : null,
+    syncing,
+    error,
     flash,
     syncNow,
   };

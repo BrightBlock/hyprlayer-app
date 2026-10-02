@@ -23,6 +23,7 @@ vi.mock("@/lib/queries", () => ({
   useHostProbes: () => ({ nexus: { ok: false, code: "remote_unreachable", at: 1 } }),
   useAgentFiles: () => ({ data: [] }),
   useAgentSkills: () => ({ data: [] }),
+  useArchivedWorkstreams: () => ({ data: [] }),
 }));
 
 vi.mock("@/lib/notifications", () => ({

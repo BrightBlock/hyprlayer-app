@@ -360,6 +360,16 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
   }),
 );
 
+export function isAgentTab(shell: ShellTab): boolean {
+  return !shell.docPreviewPath && !shell.diffView && !shell.filePath && !shell.terminalView;
+}
+
+export function useAgentTabCount(workstreamId: string | null): number {
+  return useWorkstreamTabsStore((s) =>
+    workstreamId ? (s.byWs[workstreamId]?.shells.filter(isAgentTab).length ?? 0) : 0,
+  );
+}
+
 export function updateWorkstreamTabs(
   next: (prev: Record<string, WsTabState>) => Record<string, WsTabState>,
 ): void {

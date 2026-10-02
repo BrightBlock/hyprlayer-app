@@ -13,6 +13,7 @@ import {
   type SessionControlsSnapshot,
 } from "@/features/session/sessionControls";
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
+import { Avatar } from "./parts";
 import { StatusBar } from "./StatusBar";
 
 const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), useBootstrap: vi.fn() }));
@@ -149,7 +150,6 @@ function renderBar(workstream: WorkstreamView | null = makeView()) {
     <StatusBar
       workstreamId={workstream?.item.id ?? null}
       workstream={workstream}
-      settings={<button type="button">Settings</button>}
     />,
   );
 }
@@ -237,7 +237,7 @@ describe("StatusBar sync status", () => {
 
     mockStatus({ ...CONNECTED, host: NEXUS });
     rerender(
-      <StatusBar workstreamId="w1" workstream={makeView()} settings={null} />,
+      <StatusBar workstreamId="w1" workstream={makeView()} />,
     );
     expect(screen.getByRole("button", { name: "Server: Nexus" }).textContent).toContain("connected · Nexus");
     expect(vi.getTimerCount()).toBe(0);
@@ -444,26 +444,26 @@ describe("StatusBar session controls", () => {
 });
 
 describe("StatusBar trailing items", () => {
-  it("puts the tools slot just left of the settings gear", () => {
+  it("ends with the tools slot, after a divider", () => {
     render(
       <StatusBar
         workstreamId={null}
         workstream={null}
         tools={<button type="button">Terminal</button>}
-        settings={<button type="button">Settings</button>}
       />,
     );
     const terminal = screen.getByRole("button", { name: "Terminal" });
-    expect(terminal.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
+    expect(terminal.nextElementSibling).toBeNull();
+    expect(terminal.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("puts the sessions slot flush against the Server button, after one divider", () => {
+  it("puts the sessions slot flush against the Server button, one divider after thoughts", () => {
     render(
       <StatusBar
         workstreamId="w1"
         workstream={makeView()}
+        thoughts={<button type="button">Thoughts</button>}
         sessions={<button type="button">Agent sessions</button>}
-        settings={null}
       />,
     );
     const sessions = screen.getByRole("button", { name: "Agent sessions" });
@@ -471,8 +471,9 @@ describe("StatusBar trailing items", () => {
     expect(sessions.nextElementSibling).toBe(screen.getByRole("button", { name: "Server: this machine" }));
     const divider = sessions.parentElement!.previousElementSibling!;
     expect(divider.getAttribute("aria-hidden")).toBe("true");
-    expect(divider.previousElementSibling?.textContent).toContain("feat/status-bar");
+    expect(divider.previousElementSibling).toBe(screen.getByRole("button", { name: "Thoughts" }));
   });
+
 
   it("leads with the sessions slot when there is no repo cluster", () => {
     render(
@@ -480,7 +481,6 @@ describe("StatusBar trailing items", () => {
         workstreamId="w1"
         workstream={makeView({ worktreeMode: "folder" })}
         sessions={<button type="button">Agent sessions</button>}
-        settings={null}
       />,
     );
     const sessions = screen.getByRole("button", { name: "Agent sessions" });
@@ -489,9 +489,8 @@ describe("StatusBar trailing items", () => {
   });
 
 
-  it("renders the settings slot and the handle's initials", () => {
-    renderBar();
-    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+  it("renders the handle's initials", () => {
+    render(<Avatar />);
     const avatar = screen.getByRole("img", { name: "jon tsiros" });
     expect(avatar.textContent).toBe("JT");
     expect(avatar.getAttribute("title")).toBe("jon tsiros");
@@ -499,7 +498,7 @@ describe("StatusBar trailing items", () => {
 
   it("has no avatar without a ready config", () => {
     mockConfig({ state: "missing", path: "/c" });
-    renderBar();
+    render(<Avatar />);
     expect(screen.queryByRole("img")).toBeNull();
   });
 });

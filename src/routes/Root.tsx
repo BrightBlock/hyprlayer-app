@@ -35,6 +35,7 @@ import {
 } from "@/lib/queries";
 import { errorMessage } from "@/lib/ipc";
 import { log } from "@/lib/log";
+import { basename } from "@/lib/path";
 import { copyDiagnostics } from "@/lib/diagnostics";
 import { triggerActiveFileSave } from "@/lib/fileSave";
 import { docTitle } from "@/features/library/text";
@@ -89,7 +90,6 @@ import { HyprlayerMark } from "@/components/Logo";
 import { WindowControls } from "@/components/WindowControls";
 import { ResizeGrips } from "@/components/ResizeGrips";
 import { Icon } from "@/components/Icon";
-import { ArchivedWorktreesButton } from "@/features/archive/ArchivedWorktreesButton";
 import { closeArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { AgentSessionsButton } from "@/features/session/AgentSessionsButton";
 import { closeAgentSessions } from "@/features/session/agentSessionsStore";
@@ -111,6 +111,10 @@ import {
 } from "@/features/settings/settingsPopoverStore";
 import { ScriptsDockButton } from "@/features/statusbar/ScriptsDockButton";
 import { StatusBar } from "@/features/statusbar/StatusBar";
+import { Avatar } from "@/features/statusbar/parts";
+import { ThoughtsSyncStatus } from "@/features/library/ThoughtsSyncButton";
+import { useThoughtsSync } from "@/features/library/useThoughtsSync";
+import { useAgentTabCount } from "@/features/session/workstreamTabs";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
@@ -278,22 +282,32 @@ function OpenInMenu({ dir }: { dir: string }) {
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={cx(topIconClass, "w-auto gap-0.5 pl-1 pr-0.5", open && "bg-edge/60 text-ink")}
-        title="Open in editor or terminal"
-        aria-label="Open working directory in editor or terminal"
+        className={cx(
+          "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-control border border-edge pl-2 pr-1.5 text-ui font-semibold text-ink-2 hover:bg-edge/60 hover:text-ink",
+          open && "bg-edge/60 text-ink",
+        )}
+        title={`Open ${basename(dir)} in…`}
+        aria-label="Open this worktree in…"
         aria-haspopup="menu"
         aria-expanded={open}
       >
         {headerAppIcon(defaultApp)}
-        <Icon name="chevronDown" size="xs" />
+        Open
+        <Icon name="chevronDown" size="xs" className="text-ink-dim" />
       </button>
       <Popover
         open={open}
         onClose={() => setOpen(false)}
         anchorRef={triggerRef}
         align="end"
-        className="min-w-44"
+        className="min-w-60 max-w-80"
       >
+        <div className="border-b border-edge-2 px-2.5 pb-2 pt-1.5">
+          <div className="text-ui font-semibold text-ink">Open this worktree in</div>
+          <div className="mt-0.5 truncate font-mono text-meta text-ink-dim" title={dir}>
+            {dir}
+          </div>
+        </div>
         {items.map((it, i) => (
           <MenuItem
             key={it.key}
@@ -619,6 +633,9 @@ export function Root() {
   const scriptsPosition = useScriptsStore((s) => s.dockPosition);
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const diffHidden = useUiStore((state) => state.diffHidden);
+  const diffWidth = useUiStore((state) => state.diffWidth);
+  const thoughtsSync = useThoughtsSync(currentProjectPath ?? undefined);
+  const agentCount = useAgentTabCount(onBoard ? null : (activeWorkstreamId ?? null));
   const toggleDiff = useUiStore((state) => state.toggleDiff);
   const diffShown = narrow ? narrowDrawer === "diff" : !diffHidden;
   const toggleDiffOrDrawer = () => {
@@ -863,6 +880,11 @@ export function Root() {
                   <Icon name="chevronRight" />
                 </span>
                 <span className="truncate text-ink-dim">{crumb}</span>
+                {agentCount > 0 && (
+                  <span className="shrink-0 font-mono text-meta text-ink-4">
+                    {agentCount} {agentCount === 1 ? "agent" : "agents"}
+                  </span>
+                )}
               </>
             ) : onLibrary ? (
               <>
@@ -949,14 +971,14 @@ export function Root() {
                   className="px-1"
                 />
               )}
-            <ArchivedWorktreesButton />
+            {currentProject && (
+              <OpenInMenu
+                dir={activeWorkstream?.item.worktreePath ?? currentProject.path}
+              />
+            )}
+            <SettingsButton />
             {currentProject && (
               <>
-                <OpenInMenu
-                  dir={
-                    activeWorkstream?.item.worktreePath ?? currentProject.path
-                  }
-                />
                 {currentSection === "Agent" && !onBoard && (
                   <button
                     type="button"
@@ -990,6 +1012,8 @@ export function Root() {
                 <Icon name="panels" />
               </button>
             )}
+            <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-edge" />
+            <Avatar />
           </div>
         </div>
 
@@ -1434,36 +1458,45 @@ export function Root() {
           />
         )}
 
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <Suspense
-            fallback={
-              <div className="flex h-full items-center justify-center">
-                <Spinner size="lg" />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
-        </main>
-      </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center">
+                  <Spinner size="lg" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </main>
 
-      <StatusBar
-        workstreamId={activeWorkstreamId ?? null}
-        workstream={activeWorkstream ?? null}
-        // ProjectPage's resolved workstream: the key its tabs live under.
-        sessions={scriptsActiveWs ? <AgentSessionsButton workstreamId={scriptsActiveWs} /> : null}
-        tools={
-          scriptsActiveWs && (
-            <ScriptsDockButton
-              open={scriptsDockOpen}
-              running={scriptsRunning}
-              onToggle={toggleScriptsDock}
-            />
-          )
-        }
-        settings={<SettingsButton />}
-        serverMenu={(anchorRef) => <ServerMenu anchorRef={anchorRef} />}
-      />
+          <StatusBar
+            workstreamId={activeWorkstreamId ?? null}
+            workstream={activeWorkstream ?? null}
+            thoughts={
+              thoughtsSync.hidden ? null : (
+                <ThoughtsSyncStatus sync={thoughtsSync} compact={compact} />
+              )
+            }
+            // ProjectPage's resolved workstream: the key its tabs live under.
+            sessions={scriptsActiveWs ? <AgentSessionsButton workstreamId={scriptsActiveWs} /> : null}
+            tools={
+              scriptsActiveWs && (
+                <ScriptsDockButton
+                  open={scriptsDockOpen}
+                  running={scriptsRunning}
+                  onToggle={toggleScriptsDock}
+                />
+              )
+            }
+            serverMenu={(anchorRef) => <ServerMenu anchorRef={anchorRef} />}
+            rightPanelWidth={
+              currentSection === "Agent" && !narrow && !diffHidden ? diffWidth : undefined
+            }
+          />
+        </div>
+      </div>
 
       {itemMenu && (
         <ContextMenu position={itemMenu} onClose={() => setItemMenu(null)}>

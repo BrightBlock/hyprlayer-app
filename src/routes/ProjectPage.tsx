@@ -114,6 +114,7 @@ import {
   type ArchivedStatus,
   type ShellTab,
   type WsTabState,
+  isAgentTab,
 } from "@/features/session/workstreamTabs";
 import {
   leaves,
@@ -163,7 +164,7 @@ function isPtyShell(shell: ShellTab): boolean {
 }
 
 function isArchivable(shell: ShellTab): boolean {
-  return isAgentShell(shell) || isPtyShell(shell);
+  return isAgentTab(shell);
 }
 
 function isAgentShell(shell: ShellTab): boolean {
@@ -198,10 +199,12 @@ function classifyPtyArchivedStatus(state: AgentState | undefined): ArchivedStatu
 
 function TabCloseControl({
   shell,
+  hoverOnly,
   onArchive,
   onClose,
 }: {
   shell: ShellTab;
+  hoverOnly: boolean;
   onArchive: () => void;
   onClose: () => void;
 }) {
@@ -215,7 +218,9 @@ function TabCloseControl({
         if (archivable) onArchive();
         else onClose();
       }}
-      className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+      className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[2px] text-ink-dim hover:bg-edge hover:text-ink ${
+        hoverOnly ? "invisible group-hover:visible focus-visible:visible" : ""
+      }`}
       title={label}
       aria-label={label}
     >
@@ -993,23 +998,17 @@ export function ProjectPage() {
         opts.onSelect();
         setShellMenu({ shellId: shell.id, x: e.clientX, y: e.clientY });
       }}
-      className={`relative inline-flex shrink-0 cursor-pointer select-none items-center ${
-        drag?.id === shell.id
-          ? "rounded-md opacity-60 bg-accent/10 ring-2 ring-inset ring-accent"
-          : ""
+      className={`group relative inline-flex h-7 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-control border pl-2.5 text-ui ${
+        opts.closable ? "pr-1" : "pr-2.5"
       } ${
-        opts.active && opts.paneFocused ? "text-ink" : "text-ink-dim hover:text-ink"
-      }`}
+        !opts.active
+          ? "border-transparent bg-panel-2 font-medium text-ink-dim hover:text-ink"
+          : opts.paneFocused
+            ? "border-edge bg-panel font-semibold text-ink shadow-sm"
+            : "border-edge bg-panel font-medium text-ink-2"
+      } ${drag?.id === shell.id ? "opacity-60 ring-2 ring-inset ring-accent" : ""}`}
     >
-      {opts.active && (
-        <span
-          className={`absolute inset-x-0 bottom-0 h-0.5 ${
-            opts.paneFocused ? "bg-accent" : "bg-ink-dim/40"
-          }`}
-          aria-hidden="true"
-        />
-      )}
-      <span className="flex min-w-0 items-center gap-1.5 px-3 py-1 text-body font-medium">
+      <span className="flex min-w-0 items-center gap-1.5">
         {shell.diffView ? (
           <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
             <Icon name="diff" size="sm" />
@@ -1048,6 +1047,7 @@ export function ProjectPage() {
       {opts.closable && (
         <TabCloseControl
           shell={shell}
+          hoverOnly={!opts.active}
           onArchive={() => archiveShell(shell.id)}
           onClose={() => closeShell(shell.id)}
         />
@@ -1065,12 +1065,11 @@ export function ProjectPage() {
       <div
         data-glass
         data-pane={paneId}
-        className={`relative z-10 flex h-8 items-center justify-between gap-3 border-b border-edge ${GLASS_BAND} ${
+        className={`relative z-10 flex h-10 items-center justify-between gap-3 border-b border-edge ${GLASS_BAND} ${
           first ? "pl-5 pr-2.5" : "px-3"
         } ${dropTarget?.paneId === paneId && dropTarget.edge === null ? "bg-accent/10" : ""}`}
       >
         <ScrollableTabStrip
-          fullHeight
           activeId={active?.id ?? null}
           trailing={
             <IconButton

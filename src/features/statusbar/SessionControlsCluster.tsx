@@ -60,7 +60,6 @@ export function SessionControlsCluster({
           />
         )}
       </div>
-      <Divider />
     </div>
   );
 }

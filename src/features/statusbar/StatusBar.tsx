@@ -3,47 +3,59 @@ import type { ReactNode, RefObject } from "react";
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useViewport } from "@/lib/useViewport";
-import { Avatar, RepoStatus } from "./parts";
+import { Divider, RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
 
-/** App-wide bar: the open workstream's repo state, the connection, and the focused session's controls. */
+const BAR_PAD_X = 12;
+
+/**
+ * Sits under the agent view: the open workstream's repo state and the focused session's
+ * controls, then thoughts, sessions and the server in a cluster that lines up with the
+ * right panel when `rightPanelWidth` is given.
+ */
 export function StatusBar({
   workstreamId,
   workstream,
+  thoughts,
   sessions,
   tools,
-  settings,
   serverMenu,
+  rightPanelWidth,
 }: {
   workstreamId: string | null;
   workstream: WorkstreamView | null;
+  thoughts?: ReactNode;
   sessions?: ReactNode;
   tools?: ReactNode;
-  settings: ReactNode;
   serverMenu?: (anchorRef: RefObject<HTMLElement | null>) => ReactNode;
+  rightPanelWidth?: number;
 }) {
   const { compact } = useViewport();
   const repo = workstream ? repoSummary(workstream) : null;
   return (
     <footer
       aria-label="Status bar"
-      className="flex shrink-0 items-center gap-3 border-t border-edge bg-panel px-3 text-meta tabular-nums"
-      style={{ height: STATUS_BAR_HEIGHT }}
+      className="flex shrink-0 items-center gap-3 border-t border-edge bg-panel text-meta tabular-nums"
+      style={{ height: STATUS_BAR_HEIGHT, paddingLeft: BAR_PAD_X, paddingRight: BAR_PAD_X }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
-      <SyncStatus
-        compact={compact}
-        divided={repo !== null}
-        menu={serverMenu}
-        leading={sessions}
-      />
       <div className="flex-1" />
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
-      {tools}
-      {settings}
-      <Avatar />
+      <div
+        className="flex shrink-0 items-center justify-end gap-2 self-stretch border-l border-edge pl-2"
+        style={rightPanelWidth ? { width: rightPanelWidth - BAR_PAD_X } : undefined}
+      >
+        {thoughts}
+        <SyncStatus compact={compact} divided={!!thoughts} menu={serverMenu} leading={sessions} />
+        {tools && (
+          <>
+            <Divider />
+            {tools}
+          </>
+        )}
+      </div>
     </footer>
   );
 }

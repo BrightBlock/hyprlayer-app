@@ -6,7 +6,14 @@ import type { AppSettings } from "@/lib/bindings";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { invalidateNotificationSettingsCache } from "@/lib/notifications";
 import { IS_MACOS } from "@/lib/platform";
-import { useAgentFiles, useAgentSkills, useBootstrap, useSetAppSettings } from "@/lib/queries";
+import { formatBytes } from "@/lib/format";
+import {
+  useAgentFiles,
+  useAgentSkills,
+  useArchivedWorkstreams,
+  useBootstrap,
+  useSetAppSettings,
+} from "@/lib/queries";
 import { appearanceSegment, useThemeStore, type AppearanceSegment } from "@/lib/theme";
 import { Icon } from "@/components/Icon";
 import {
@@ -19,6 +26,8 @@ import {
   SegmentedControl,
   Toggle,
 } from "@/components/ui";
+
+import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
@@ -48,7 +57,6 @@ export function SettingsPopover({
       open={open}
       onClose={onClose}
       anchorRef={anchorRef}
-      side="top"
       align="end"
       sideOffset={10}
       caret
@@ -81,6 +89,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         <span className="flex-1">Servers</span>
         <Meta>{serversMeta(useServerCounts())}</Meta>
       </Link>
+      <ArchivedLink onClose={onClose} />
       <Link
         to="/settings"
         search={{}}
@@ -162,6 +171,29 @@ function WorkshopLink({ onClose }: { onClose: () => void }) {
       <span className="flex-1">Workshop</span>
       <Meta>{workshopMeta(agents, skills?.length ?? null)}</Meta>
     </Link>
+  );
+}
+
+function ArchivedLink({ onClose }: { onClose: () => void }) {
+  const archived = useArchivedWorkstreams().data;
+  const bytes = archived?.reduce((sum, a) => sum + (a.info.sizeBytes ?? 0), 0) ?? 0;
+  return (
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      onClick={() => {
+        onClose();
+        openArchivedWorktrees();
+      }}
+      className={cx(BAR_POPOVER_ROW, "w-full text-left")}
+    >
+      <Icon name="archive" size="sm" className="text-ink-dim" />
+      <span className="flex-1">Archived worktrees</span>
+      {archived && (
+        <Meta>{bytes > 0 ? `${archived.length} · ${formatBytes(bytes)}` : archived.length}</Meta>
+      )}
+      <Icon name="chevronRight" size="sm" className="text-ink-dim" />
+    </button>
   );
 }
 
