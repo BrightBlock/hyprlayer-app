@@ -35,6 +35,7 @@ const EMPTY_GRID: TerminalGrid = { cols: 0, rows: 0 };
 
 type XtermCore = {
   _core: {
+    viewport?: { syncScrollArea: () => void };
     _createRenderer: () => unknown;
     _renderService: {
       setRenderer: (renderer: unknown) => void;
@@ -241,6 +242,12 @@ class XtermEngine implements TerminalEngine {
     }
     this.webgl = undefined;
     releaseWebglContext(canvas);
+    // xterm queues syncScrollArea on a timer at open() and on a frame at reset().
+    // Once a resize has recorded the buffer length, a call landing after dispose
+    // reads the disposed renderer's dimensions and throws; StrictMode's mount,
+    // fit, unmount does exactly that. Verified against @xterm/xterm 5.5.0.
+    const viewport = (this.term as unknown as XtermCore | null)?._core?.viewport;
+    if (viewport) viewport.syncScrollArea = () => {};
     this.term?.dispose();
     this.term = null;
     this.fitAddon = null;
