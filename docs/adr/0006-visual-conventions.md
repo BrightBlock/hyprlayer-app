@@ -542,7 +542,7 @@ What a view shows of turns another client added (`docs/adr/0009-hyprlayer-server
   the newest turn's age, **Load** and dismiss live in a strip across the top of the composer
   box (`bg-info/10`, the box border `border-info/40`); dismissing hides it until a later
   revision lands.
-- **Motion.** `animate-shimmer` (1.4s sweep) and `animate-sync-in` (350ms fade and 4px
+- **Motion.** `animate-shimmer` (1.4s sweep) and `animate-sync-in` (280ms fade and 4px
   rise, on pulled items only) each have a `prefers-reduced-motion` block, and the shimmer
   joins the `data-window-blurred` pause list.
 - **Colour.** Sync is `info`: the composer's new-turns strip, its status line and `now` link, the "New from
@@ -627,3 +627,20 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   - **Three of the four `RowSpine`-shaped literals** (`Settings.tsx:1138`,
     `Root.tsx:1901`, `LibrarySidebar.tsx:146`) — named above under "Row
     tiers." Only `Root.tsx:2035` runs through the `RowSpine` component.
+
+### Motion (2026-10-01)
+
+- **Tokens** live in `src/index.css` `@theme`: `--duration-instant` 80ms, `quick` 140ms,
+  `base` 200ms, `gentle` 280ms, `slow` 400ms; `--ease-out` (entering), `--ease-in`
+  (leaving), `--ease-std` (moves, resizes, and the default for every `transition-*`
+  utility, which runs at `quick`). `linear` is for spinners and progress only. New motion
+  uses these, never a literal duration or curve.
+- **Overlays enter from their anchor.** `Popover`, `DropdownSelect` and `ContextMenu` use
+  `animate-pop-in` (scale .96, `base`, origin at the anchor's edge); `Dialog` fades its scrim
+  (`animate-fade-in`) and rises its panel (`animate-dialog-in`, 8px from .98, `gentle`).
+  They have no exit animation yet: they unmount on close.
+- **Press, hover, focus.** `Button` and `IconButton` press to scale .97 and change hover
+  colour in `instant`, then settle back in `quick`; the focus ring grows with them.
+- **Reduced motion.** The entrance classes become a 100ms fade; press scale is `motion-safe`.
+  Spinners and the working pulses keep their own `prefers-reduced-motion` blocks.
+- `animate-step-in` runs at `slow` (first-run only) and `animate-sync-in` at `gentle`.

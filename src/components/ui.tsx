@@ -35,6 +35,9 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 
 const FOCUS_RING = "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
+const PRESS =
+  "transition hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97";
+
 export function ChordHint({ chord, className }: { chord: string; className?: string }) {
   return (
     <kbd
@@ -64,7 +67,8 @@ export function Button({
   return (
     <button
       className={cx(
-        "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-body font-medium transition-colors",
+        "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-body font-medium",
+        PRESS,
         size === "sm" && "h-6 gap-1.5 px-2 py-0 text-ui",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -313,7 +317,10 @@ export function DropdownSelect({
                 e.preventDefault();
                 moveFocus(move);
               }}
-              className="fixed z-50 overflow-y-auto rounded-card border border-edge bg-panel p-1 shadow-pop"
+              className={cx(
+                "fixed z-50 overflow-y-auto rounded-card border border-edge bg-panel p-1 shadow-pop animate-pop-in",
+                pos.bottom === undefined ? "origin-top-left" : "origin-bottom-left",
+              )}
               style={{
                 top: pos.top,
                 bottom: pos.bottom,
@@ -547,7 +554,7 @@ export function Dialog({
   return (
     <div
       className={cx(
-        "fixed inset-0 z-50 flex justify-center bg-surface/70 p-4 backdrop-blur-sm",
+        "fixed inset-0 z-50 flex animate-fade-in justify-center bg-surface/70 p-4 backdrop-blur-sm",
         align === "top" ? "items-start pt-[6vh]" : "items-center",
       )}
       onMouseDown={(e) => {
@@ -559,7 +566,7 @@ export function Dialog({
         aria-modal="true"
         aria-label={ariaLabel}
         className={cx(
-          "flex max-h-full w-full flex-col overflow-hidden rounded-card border border-edge bg-panel shadow-2xl",
+          "flex max-h-full w-full animate-dialog-in flex-col overflow-hidden rounded-card border border-edge bg-panel shadow-2xl",
           DIALOG_SIZE[size],
           className,
         )}
@@ -772,6 +779,7 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
       type="button"
       className={cx(
         "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control",
+        PRESS,
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         active ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink",
@@ -870,7 +878,7 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
     <div
       ref={ref}
       role="menu"
-      className="fixed z-50 min-w-44 rounded-card border border-edge bg-panel p-1 shadow-pop"
+      className="fixed z-50 min-w-44 origin-top-left animate-pop-in rounded-card border border-edge bg-panel p-1 shadow-pop"
       style={{ left: pos.x, top: pos.y }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -923,6 +931,11 @@ type PopoverProps = {
   "aria-label"?: string;
   "aria-labelledby"?: string;
 };
+
+const POP_ORIGIN = {
+  below: { start: "origin-top-left", end: "origin-top-right" },
+  above: { start: "origin-bottom-left", end: "origin-bottom-right" },
+} as const;
 
 const CARET = 9;
 const CARET_INSET = 8;
@@ -1003,7 +1016,8 @@ export function Popover({
         tabIndex={trapFocus ? -1 : undefined}
         onKeyDown={onTrapKeyDown}
         className={cx(
-          "fixed z-50 rounded-card border border-edge bg-panel p-1 shadow-pop outline-none",
+          "fixed z-50 rounded-card border border-edge bg-panel p-1 shadow-pop outline-none animate-pop-in",
+          POP_ORIGIN[pos.below ? "below" : "above"][align],
           className,
         )}
         style={{ top: pos.top, bottom: pos.bottom, left: pos.left, minWidth: pos.minWidth }}
