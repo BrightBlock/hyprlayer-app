@@ -33,6 +33,14 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+function progressLabel(tracker: PlanTracker): string {
+  const checks = tracker.checks;
+  const tasks = { done: tracker.done - checks.done, total: tracker.total - checks.total };
+  if (checks.total === 0) return `${tasks.done} of ${plural(tasks.total, "task")} done`;
+  if (tasks.total === 0) return `${checks.done} of ${plural(checks.total, "check")} passed`;
+  return `${tasks.done} of ${plural(tasks.total, "task")} · ${checks.done} of ${plural(checks.total, "check")}`;
+}
+
 // Announces completions only; an aria-live list would read out every status tick.
 function useCompletionAnnouncement(tracker: PlanTracker): string {
   const seen = useRef<Set<string> | null>(null);
@@ -118,10 +126,13 @@ export function PlanPanel({
           <>
             <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
             <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
-              {tracker.phases.map((phase) => (
+              {tracker.phases.map((phase, i) => (
                 <PhaseSection
                   key={`${phase.label}:${phase.name}`}
                   phase={phase}
+                  // Keyed by the current phase, so finishing one drops earlier choices: it collapses and the next opens.
+                  collapseKey={`${tracker.title}\0${tracker.currentPhase}\0${phase.label}:${phase.name}`}
+                  defaultCollapsed={tracker.allDone || i + 1 !== tracker.currentPhase}
                   showState
                   pulse={tracker.pulsing && !reduceMotion}
                   flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
@@ -147,9 +158,7 @@ export function PlanPanel({
         {tracking ? (
           <>
             {tracker.total > 0 && (
-              <span className="text-meta tabular-nums text-ink-4">
-                {tracker.done} of {plural(tracker.total, "task")} done
-              </span>
+              <span className="text-meta tabular-nums text-ink-4">{progressLabel(tracker)}</span>
             )}
             <span className="flex-1" />
             {tracker.allDone ? (
@@ -169,7 +178,7 @@ export function PlanPanel({
           <>
             {tracker.phases.length > 0 && (
               <span className="text-meta tabular-nums text-ink-4">
-                {plural(tracker.phases.length, "phase")} · {tracker.done} of {plural(tracker.total, "task")} done
+                {plural(tracker.phases.length, "phase")} · {progressLabel(tracker)}
               </span>
             )}
             <span className="flex-1" />

@@ -359,6 +359,42 @@ describe("planTaskTimeline", () => {
   });
 });
 
+describe("a subagent's own todo list", () => {
+  const child = <T extends TranscriptItem>(item: T): T => ({ ...item, parentId: "agent-1" });
+  const items: TranscriptItem[] = [
+    taskCreate("c1", "Phase 1: Scaffold", { id: 1 }),
+    taskCreate("c2", "Phase 2: Build", { id: 2 }),
+    taskUpdate("u1", { taskId: "1", status: "in_progress" }),
+    makeTool("Agent", JSON.stringify({ subagent_type: "foreman", run_in_background: false }), "agent-1"),
+    child(
+      todoWrite("w1", [
+        { content: "Write the route", status: "in_progress" },
+        { content: "Add types", status: "pending" },
+      ]),
+    ),
+    child(makeTool("Read", "{}", "r1", ok("…"))),
+  ];
+
+  it("leaves the session's tasks alone", () => {
+    expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
+      { id: "1", subject: "Phase 1: Scaffold", status: "in_progress" },
+      { id: "2", subject: "Phase 2: Build", status: "pending" },
+    ]);
+  });
+
+  it("lets the session's next update land on its own task", () => {
+    const next = [...items, taskUpdate("u2", { taskId: "1", status: "completed" })];
+    expect(planTasksFromItems(next)[0]).toEqual({ id: "1", subject: "Phase 1: Scaffold", status: "completed" });
+  });
+
+  it("keeps the timeline on the session's tasks, jumping to the spawn", () => {
+    expect(planTaskTimeline(items).map((t) => [t.subject, t.status, t.jumpToolUseId])).toEqual([
+      ["Phase 1: Scaffold", "in_progress", "agent-1"],
+      ["Phase 2: Build", "pending", null],
+    ]);
+  });
+});
+
 describe("todoPhaseLabel", () => {
   it("reads phase-level todos", () => {
     expect(todoPhaseLabel("Phase 2: Build the tracker")).toBe("2");

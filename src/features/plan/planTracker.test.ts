@@ -19,7 +19,13 @@ function todo(subject: string, status: string, jumpToolUseId: string | null = nu
   return { id: null, subject, status, jumpToolUseId };
 }
 
-const building: SessionSignal = { stage: "implement", activity: "working", reason: null, failureItemId: null };
+const building: SessionSignal = {
+  stage: "implement",
+  activity: "working",
+  reason: null,
+  failureItemId: null,
+  subagent: null,
+};
 
 describe("progress", () => {
   it("is zero, not NaN, for a plan with no tasks", () => {
@@ -38,6 +44,16 @@ describe("progress", () => {
     const t = trackPlan(plan([true, true, false, false]), [todo("Port OG Images.html to the route", "in_progress")], building);
     expect(t.done).toBe(2);
     expect(t.progress).toBeCloseTo(0.625);
+  });
+
+  it("gives the phase being built half credit until its rows are ticked", () => {
+    const t = trackPlan(plan(), [todo("Phase 1: Scaffold", "in_progress")], building);
+    expect([t.done, t.total, t.progress]).toEqual([0, 4, 0.25]);
+  });
+
+  it("drops that credit once the phase todo completes", () => {
+    const t = trackPlan(plan([true, false, false, false]), [todo("Phase 1: Scaffold", "completed")], building);
+    expect(t.progress).toBe(0.25);
   });
 
   it("reaches 100% and clears the current task when all are done", () => {
@@ -105,6 +121,25 @@ describe("matching", () => {
   });
 });
 
+describe("checks", () => {
+  const doc = parsePlanDoc(
+    "## Phase 1: A\n- [ ] Write it\n### Success Criteria:\n#### Automated Verification:\n- [x] fmt\n- [ ] clippy\n#### Manual Verification:\n- [ ] Looks right\n",
+    PATH,
+  );
+
+  it("flags check rows with their group and counts them apart from tasks", () => {
+    const t = trackPlan(doc, [todo("clippy", "completed")], building);
+    expect(t.phases[0].tasks.map((x) => [x.title, x.check, x.group, x.state])).toEqual([
+      ["Write it", false, null, "pending"],
+      ["fmt", true, "automated", "done"],
+      ["clippy", true, "automated", "done"],
+      ["Looks right", true, "manual", "pending"],
+    ]);
+    expect([t.done, t.total]).toEqual([2, 4]);
+    expect(t.checks).toEqual({ done: 2, total: 3 });
+  });
+});
+
 describe("doc edited mid-build", () => {
   it("keeps a title match when a task is inserted before it", () => {
     const edited = parsePlanDoc(
@@ -146,6 +181,13 @@ describe("session status overlay", () => {
       failureItemId: "i42",
     });
     expect(t.phases[1].tasks[1]).toMatchObject({ state: "failed", reason: "crashed", jump: { itemId: "i42" } });
+  });
+
+  it("carries the running subagent on the current task", () => {
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 3, lastTool: "Edit diff.rs", steps: null };
+    const t = trackPlan(plan(), [todo("Phase 1: Scaffold", "in_progress")], { ...building, subagent });
+    expect(t.current?.subagent).toEqual(subagent);
+    expect(t.pulsing).toBe(true);
   });
 
   it("leaves in-progress static once the session stops working", () => {

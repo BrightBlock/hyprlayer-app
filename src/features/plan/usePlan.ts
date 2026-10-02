@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { isInlinePlanKey } from "@/features/session/planPresentation";
 import { useDoc } from "@/lib/queries";
 
-import { parsePlanDoc, type PlanDoc } from "./planDoc";
+import { parsePlanDoc, phaseRows, type PlanDoc } from "./planDoc";
 
 export const FLASH_MS = 1000;
 
@@ -16,7 +16,7 @@ export function planSections(plan: PlanDoc): Map<string, string> {
   ]);
   if (plan.phases.length === 0) sections.set("body", plan.body);
   for (const p of plan.phases) {
-    sections.set(`phase:${p.label}`, JSON.stringify([p.name, p.tasks.map((t) => [t.key, t.title, t.checked])]));
+    sections.set(`phase:${p.label}`, JSON.stringify([p.name, phaseRows(p).map((t) => [t.key, t.title, t.checked])]));
   }
   return sections;
 }

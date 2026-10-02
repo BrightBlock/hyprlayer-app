@@ -72,6 +72,7 @@ export function PlanPreviewDraft({
               <PhaseSection
                 key={`${phase.label}:${phase.name}`}
                 phase={phase}
+                collapseKey={`${tracker.title}\0draft\0${phase.label}:${phase.name}`}
                 showState={false}
                 pulse={false}
                 flash={flash(`phase:${phase.label}`)}

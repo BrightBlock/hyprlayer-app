@@ -1,6 +1,19 @@
 import { cx } from "@/components/ui";
+import type { RunningSubagent } from "@/features/session/subagent";
 
 import type { CurrentItem, PlanTracker } from "./planTracker";
+
+function subagentLine(s: RunningSubagent): string {
+  const parts = [s.agent];
+  if (s.steps) {
+    parts.push(`${s.steps.done} of ${s.steps.total} steps`);
+    if (s.steps.current) parts.push(s.steps.current);
+  } else if (s.tools > 0) {
+    parts.push(`${s.tools} tool${s.tools === 1 ? "" : "s"}`);
+    if (s.lastTool) parts.push(s.lastTool);
+  }
+  return parts.join(" · ");
+}
 
 export function CurrentTaskCard({
   current,
@@ -23,6 +36,9 @@ export function CurrentTaskCard({
         />
         <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{current.title}</span>
       </div>
+      {current.subagent && (
+        <div className="mt-1 truncate text-meta tabular-nums text-ink-4">{subagentLine(current.subagent)}</div>
+      )}
       {current.reason && (
         <div
           className={cx(

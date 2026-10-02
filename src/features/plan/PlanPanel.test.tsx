@@ -6,6 +6,7 @@ import type { TimelineTask } from "@/features/session/planTasks";
 
 import { PlanPanel } from "./PlanPanel";
 import { parsePlanDoc } from "./planDoc";
+import { usePlanPreviewStore } from "./planPreviewStore";
 import { trackPlan, type SessionSignal } from "./planTracker";
 
 vi.mock("@/features/library/MarkdownPreview", () => ({
@@ -19,7 +20,7 @@ const DOC = (status: string, checks: string) =>
   );
 
 const todo = (subject: string, status: string): TimelineTask => ({ id: null, subject, status, jumpToolUseId: "tu-1" });
-const working: SessionSignal = { stage: "implement", activity: "working", reason: null, failureItemId: null };
+const working: SessionSignal = { stage: "implement", activity: "working", reason: null, failureItemId: null, subagent: null };
 
 function setReducedMotion(reduce: boolean) {
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
@@ -44,8 +45,99 @@ function renderPanel(tracker: ReturnType<typeof trackPlan>, overrides: Partial<P
   return props;
 }
 
-beforeEach(() => setReducedMotion(false));
+beforeEach(() => {
+  setReducedMotion(false);
+  usePlanPreviewStore.setState({ phaseOverrides: {} });
+});
 afterEach(cleanup);
+
+describe("PlanPanel phase collapse", () => {
+  const THREE = (checks: string) =>
+    parsePlanDoc(
+      `---\nstatus: active\n---\n# Three\n\n## Phase 1: A\n- [${checks[0]}] first\n\n## Phase 2: B\n- [${checks[1]}] second\n\n## Phase 3: C\n- [${checks[2]}] third\n`,
+      "/t/plans/three.md",
+    );
+  const header = (title: string) => screen.getByText(title).closest("button")!;
+  const expanded = () => ["Phase 1 — A", "Phase 2 — B", "Phase 3 — C"].map((t) => header(t).getAttribute("aria-expanded"));
+
+  it("opens only the current phase", () => {
+    renderPanel(trackPlan(THREE("x  "), [], working));
+    expect(expanded()).toEqual(["false", "true", "false"]);
+    expect(screen.queryByText("first")).toBeNull();
+    expect(screen.getByText("second")).toBeTruthy();
+  });
+
+  it("toggles a phase from its header", () => {
+    renderPanel(trackPlan(THREE("x  "), [], working));
+    fireEvent.click(header("Phase 3 — C"));
+    expect(screen.getByText("third")).toBeTruthy();
+    fireEvent.click(header("Phase 2 — B"));
+    expect(screen.queryByText("second")).toBeNull();
+  });
+
+  it("keeps a choice across remounts while the phase stays current", () => {
+    renderPanel(trackPlan(THREE("   "), [], working));
+    fireEvent.click(header("Phase 1 — A"));
+    cleanup();
+    renderPanel(trackPlan(THREE("   "), [], working));
+    expect(expanded()).toEqual(["false", "false", "false"]);
+  });
+
+  it("collapses a finished phase and opens the next, dropping earlier choices", () => {
+    renderPanel(trackPlan(THREE("   "), [], working));
+    fireEvent.click(header("Phase 3 — C"));
+    cleanup();
+    renderPanel(trackPlan(THREE("x  "), [], working));
+    expect(expanded()).toEqual(["false", "true", "false"]);
+  });
+
+  it("collapses every phase once the plan is done", () => {
+    renderPanel(trackPlan(THREE("xxx"), [], working));
+    expect(expanded()).toEqual(["false", "false", "false"]);
+  });
+
+  it("shows every phase of a draft, still collapsible", () => {
+    renderPanel(trackPlan(DOC("draft", "    "), [], null));
+    expect(screen.getByText("Add the route")).toBeTruthy();
+    expect(screen.getByText("Wire the image slot")).toBeTruthy();
+    fireEvent.click(header("Phase 2 — Build"));
+    expect(screen.queryByText("Wire the image slot")).toBeNull();
+  });
+});
+
+describe("PlanPanel checks", () => {
+  const CHECKS = (status: string, tasks: string) =>
+    parsePlanDoc(
+      `---\nstatus: ${status}\n---\n# Review\n\n## Phase 1: Diff\n${tasks}### Success Criteria:\n#### Automated Verification:\n- [x] fmt\n- [ ] clippy\n#### Manual Verification:\n- [ ] Looks right\n`,
+      "/t/plans/review.md",
+    );
+  const follows = (a: HTMLElement, b: HTMLElement) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it("labels automated and manual checks under their phase", () => {
+    renderPanel(trackPlan(CHECKS("active", ""), [], working));
+    const automated = screen.getByText("Automated checks");
+    const manual = screen.getByText("Manual checks");
+    expect(follows(automated, screen.getByText("clippy"))).toBe(true);
+    expect(follows(screen.getByText("clippy"), manual)).toBe(true);
+    expect(follows(manual, screen.getByText("Looks right"))).toBe(true);
+  });
+
+  it("counts checks as passed when a plan has no tasks", () => {
+    renderPanel(trackPlan(CHECKS("active", ""), [], working));
+    expect(screen.getByText("1 of 3 checks passed")).toBeTruthy();
+  });
+
+  it("counts tasks and checks apart when a plan has both", () => {
+    renderPanel(trackPlan(CHECKS("active", "- [ ] Write it\n"), [], working));
+    expect(screen.getByText("0 of 1 task · 1 of 3 checks")).toBeTruthy();
+  });
+
+  it("uses the same wording in a draft", () => {
+    renderPanel(trackPlan(CHECKS("draft", ""), [], null));
+    expect(screen.getByText("Automated checks")).toBeTruthy();
+    expect(screen.getByText("1 phase · 1 of 3 checks passed")).toBeTruthy();
+  });
+});
 
 describe("PlanPanel tracking", () => {
   const tracker = () =>
@@ -59,6 +151,7 @@ describe("PlanPanel tracking", () => {
       failureItemId: "i9",
     });
     renderPanel(failed);
+    fireEvent.click(screen.getByText("Phase 2 — Build"));
     const done = screen.getByRole("button", { name: "Add the route, done" });
     expect(done.querySelector("[data-box]")?.className).toContain("bg-ok");
     expect(within(done).getByText("Add the route").className).toContain("line-through");
@@ -109,6 +202,18 @@ describe("PlanPanel tracking", () => {
     expect(screen.getByText("2 of 4 tasks done")).toBeTruthy();
     expect(screen.getByText("+412")).toBeTruthy();
     expect(screen.getByText("−18")).toBeTruthy();
+  });
+
+  it("shows the running subagent's steps under the current task", () => {
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: { done: 1, total: 3, current: "Diff layer" } };
+    renderPanel(trackPlan(DOC("active", "    "), [todo("Phase 1: Scaffold", "in_progress")], { ...working, subagent }));
+    expect(screen.getByText("foreman · 1 of 3 steps · Diff layer")).toBeTruthy();
+  });
+
+  it("falls back to the subagent's tool count and last call", () => {
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: null };
+    renderPanel(trackPlan(DOC("active", "    "), [todo("Phase 1: Scaffold", "in_progress")], { ...working, subagent }));
+    expect(screen.getByText("foreman · 160 tools · Edit diff.rs")).toBeTruthy();
   });
 
   it("hides the current task card when nothing is running", () => {

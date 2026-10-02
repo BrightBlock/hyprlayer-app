@@ -15,13 +15,24 @@ type PlanPreviewState = {
   bySession: Record<string, PlanSelection>;
   returnTo: AsideSnapshot | null;
   narrow: boolean;
+  // Collapse choices; here rather than in the panel, which unmounts whenever the aside shows Changes.
+  phaseOverrides: Record<string, boolean>;
 };
 
 export const usePlanPreviewStore = create<PlanPreviewState>(() => ({
   bySession: {},
   returnTo: null,
   narrow: false,
+  phaseOverrides: {},
 }));
+
+export function setPhaseCollapsed(key: string, collapsed: boolean): void {
+  usePlanPreviewStore.setState((s) => ({ phaseOverrides: { ...s.phaseOverrides, [key]: collapsed } }));
+}
+
+export function usePhaseCollapsed(key: string, fallback: boolean): boolean {
+  return usePlanPreviewStore((s) => s.phaseOverrides[key] ?? fallback);
+}
 
 export function setPlanPreviewNarrow(narrow: boolean): void {
   if (usePlanPreviewStore.getState().narrow !== narrow) usePlanPreviewStore.setState({ narrow });

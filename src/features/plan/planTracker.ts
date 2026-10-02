@@ -1,7 +1,8 @@
 import { todoPhaseLabel, type TimelineTask } from "@/features/session/planTasks";
+import type { RunningSubagent } from "@/features/session/subagent";
 import type { TranscriptJump } from "@/features/session/transcriptJump";
 
-import type { PlanDoc } from "./planDoc";
+import { phaseRows, type CheckGroup, type PlanDoc, type PlanDocCriterion, type PlanDocTask } from "./planDoc";
 
 export type JumpTarget = TranscriptJump;
 export type TaskState = "done" | "in_progress" | "pending" | "waiting" | "failed";
@@ -12,6 +13,8 @@ export type TrackedTask = {
   title: string;
   state: TaskState;
   added: boolean;
+  check: boolean;
+  group: CheckGroup | null;
   reason: string | null;
   jump: JumpTarget | null;
 };
@@ -23,6 +26,7 @@ export type CurrentItem = {
   state: "in_progress" | "waiting" | "failed";
   reason: string | null;
   taskKey: string | null;
+  subagent: RunningSubagent | null;
 };
 
 export type SessionSignal = {
@@ -30,6 +34,7 @@ export type SessionSignal = {
   activity: "working" | "waiting" | "failed" | "idle";
   reason: string | null;
   failureItemId: string | null;
+  subagent: RunningSubagent | null;
 };
 
 export type PlanTracker = {
@@ -44,6 +49,7 @@ export type PlanTracker = {
   currentPhase: number | null;
   done: number;
   total: number;
+  checks: { done: number; total: number };
   progress: number;
   allDone: boolean;
   pulsing: boolean;
@@ -64,8 +70,20 @@ function normalize(text: string): string {
     .trim();
 }
 
-type Slot = { key: string; title: string; checked: boolean; todo: TimelineTask | null };
+type Slot = {
+  key: string;
+  title: string;
+  checked: boolean;
+  todo: TimelineTask | null;
+  check: boolean;
+  group: CheckGroup | null;
+};
 type Phase = { label: string; name: string; slots: Slot[]; todo: TimelineTask | null; added: TimelineTask[] };
+
+function slotOf(row: PlanDocTask | PlanDocCriterion): Slot {
+  const check = "group" in row;
+  return { key: row.key, title: row.title, checked: row.checked, todo: null, check, group: check ? row.group : null };
+}
 
 function taskStateOf(slot: Slot): TaskState {
   if (slot.checked || slot.todo?.status === "completed") return "done";
@@ -117,7 +135,7 @@ export function trackPlan(
   const phases: Phase[] = doc.phases.map((p) => ({
     label: p.label,
     name: p.name,
-    slots: p.tasks.map((t) => ({ key: t.key, title: t.title, checked: t.checked, todo: null })),
+    slots: phaseRows(p).map(slotOf),
     todo: null,
     added: [],
   }));
@@ -165,6 +183,8 @@ export function trackPlan(
         title: s.title,
         state: taskStateOf(s),
         added: false,
+        check: s.check,
+        group: s.group,
         reason: null,
         jump: jumpOf(s.todo) ?? jumpOf(p.todo),
       })),
@@ -173,6 +193,8 @@ export function trackPlan(
         title: todo.subject,
         state: todoState(todo),
         added: true,
+        check: false,
+        group: null,
         reason: null,
         jump: jumpOf(todo),
       })),
@@ -197,6 +219,7 @@ export function trackPlan(
         state: "in_progress",
         reason: null,
         taskKey: currentTask && !currentTask.added ? currentTask.key : null,
+        subagent: session?.subagent ?? null,
       };
       break;
     }
@@ -219,8 +242,15 @@ export function trackPlan(
   const all = tracked.flatMap((p) => p.tasks);
   const total = all.length;
   const done = all.filter((t) => t.state === "done").length;
-  // Phases stand in for tasks when no phase has any.
-  const units: (TaskState | PhaseState)[] = total > 0 ? all.map((t) => t.state) : tracked.map((p) => p.state);
+  const checks = all.filter((t) => t.check);
+  // Phases stand in for tasks when no phase has any; a phase being built gives its pending rows half credit.
+  const units: (TaskState | PhaseState)[] =
+    total > 0
+      ? tracked.flatMap((p, i) => {
+          const building = phases[i].todo?.status === "in_progress";
+          return p.tasks.map((t) => (building && t.state === "pending" ? "in_progress" : t.state));
+        })
+      : tracked.map((p) => p.state);
   const unitsDone = units.filter((s) => s === "done").length;
   const half = units.filter((s) => s === "in_progress" || s === "waiting").length;
   const allDone = units.length > 0 && unitsDone === units.length;
@@ -244,6 +274,7 @@ export function trackPlan(
     currentPhase,
     done,
     total,
+    checks: { done: checks.filter((t) => t.state === "done").length, total: checks.length },
     progress: units.length > 0 ? (unitsDone + 0.5 * half) / units.length : 0,
     allDone,
     pulsing: activity === "working" && current?.state === "in_progress",

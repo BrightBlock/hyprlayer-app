@@ -1,6 +1,8 @@
 import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 
+import type { CheckGroup } from "./planDoc";
+import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
 import type { JumpTarget, PhaseState, TaskState, TrackedPhase, TrackedTask } from "./planTracker";
 
 const PHASE_SUFFIX: Record<PhaseState, string | null> = {
@@ -24,6 +26,27 @@ const TEXT: Record<TaskState, string> = {
   waiting: "text-ink-2",
   failed: "text-ink-2",
 };
+
+const CHECK_LABEL: Record<CheckGroup | "none", string> = {
+  automated: "Automated checks",
+  manual: "Manual checks",
+  none: "Checks",
+};
+
+type RowGroup = { label: string | null; rows: TrackedTask[] };
+
+// Tasks first and unlabeled, then each run of checks under its group's label.
+function rowGroups(tasks: TrackedTask[]): RowGroup[] {
+  const work = tasks.filter((t) => !t.check);
+  const groups: RowGroup[] = work.length > 0 ? [{ label: null, rows: work }] : [];
+  for (const task of tasks.filter((t) => t.check)) {
+    const label = CHECK_LABEL[task.group ?? "none"];
+    const last = groups[groups.length - 1];
+    if (last?.label === label) last.rows.push(task);
+    else groups.push({ label, rows: [task] });
+  }
+  return groups;
+}
 
 export function taskAriaLabel(task: TrackedTask): string {
   const state =
@@ -117,38 +140,64 @@ export function TaskRow({
 
 export function PhaseSection({
   phase,
+  collapseKey,
+  defaultCollapsed = false,
   showState,
   pulse,
   flash = false,
   onJump,
 }: {
   phase: TrackedPhase;
+  collapseKey: string;
+  defaultCollapsed?: boolean;
   showState: boolean;
   pulse: boolean;
   flash?: boolean;
   onJump: (target: JumpTarget) => void;
 }) {
+  const collapsed = usePhaseCollapsed(collapseKey, defaultCollapsed);
   const suffix = showState ? PHASE_SUFFIX[phase.state] : null;
   const title = phase.label ? `Phase ${phase.label} — ${phase.name}` : phase.name;
   return (
     <section className={cx("-mx-2 rounded-control px-2", flash && "animate-plan-flash")}>
-      <div
+      <button
+        type="button"
         data-phase-label
+        aria-expanded={!collapsed}
+        onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
         className={cx(
-          "mb-2 text-label",
+          "flex w-full items-start gap-1.5 text-left text-label",
+          !collapsed && "mb-2",
           showState && phase.state === "done" ? "text-ok" : "text-ink-4",
         )}
       >
-        <span>{title}</span>
-        {suffix && <span className="text-ink-4"> {suffix}</span>}
-      </div>
-      <ul className="space-y-2">
-        {phase.tasks.map((task) => (
-          <li key={task.key}>
-            {showState ? <TaskRow task={task} pulse={pulse} onJump={onJump} /> : <DraftTaskRow task={task} />}
-          </li>
-        ))}
-      </ul>
+        <Icon
+          name="chevronDown"
+          size="xs"
+          className={cx("shrink-0 transition-transform", collapsed && "-rotate-90")}
+        />
+        <span className="min-w-0">
+          <span>{title}</span>
+          {suffix && <span className="text-ink-4"> {suffix}</span>}
+        </span>
+      </button>
+      {/* pl-[18px] lines rows up with the header text: chevron (12px) + gap (6px). */}
+      {!collapsed && (
+        <div className="space-y-3 pl-[18px]">
+          {rowGroups(phase.tasks).map((group, i) => (
+            <div key={i}>
+              {group.label && <div className="mb-1.5 text-meta text-ink-4">{group.label}</div>}
+              <ul className="space-y-2">
+                {group.rows.map((task) => (
+                  <li key={task.key}>
+                    {showState ? <TaskRow task={task} pulse={pulse} onJump={onJump} /> : <DraftTaskRow task={task} />}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

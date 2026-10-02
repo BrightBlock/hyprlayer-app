@@ -9,7 +9,8 @@ import {
 } from "@/features/session/planPresentation";
 import { planTaskTimeline } from "@/features/session/planTasks";
 import { useSession, type SessionEntry } from "@/features/session/sessionStore";
-import { describeState, isWorking } from "@/features/session/transcript";
+import { runningSubagent, type RunningSubagent } from "@/features/session/subagent";
+import { describeState, isBusy, isTerminal, isWorking } from "@/features/session/transcript";
 import { parseToolInput } from "@/features/session/toolDisplay";
 import { useWrittenDocs } from "@/features/session/writtenDocs";
 import { basename } from "@/lib/path";
@@ -18,15 +19,25 @@ import { useResolvedPlanSelection } from "./planPreviewStore";
 import { trackPlan, type PlanTracker, type SessionSignal } from "./planTracker";
 import { usePlan } from "./usePlan";
 
-// Reuses the pane header's status vocabulary so the tracker never contradicts it.
+// A foreground subagent only runs inside a busy turn; a background one outlives it.
+function liveSubagent(entry: SessionEntry): RunningSubagent | null {
+  if (!entry.live) return null;
+  const subagent = runningSubagent(entry.items);
+  if (!subagent) return null;
+  return (subagent.background ? !isTerminal(entry.state) : isBusy(entry)) ? subagent : null;
+}
+
+// Reuses the pane header's status labels; a live background subagent also counts as working.
 export function sessionSignalOf(entry: SessionEntry): SessionSignal {
   const label = describeState(entry.state, entry.streaming).label;
+  const subagent = liveSubagent(entry);
   if (entry.pendingPermission) {
     return {
       stage: entry.stage,
       activity: "waiting",
       reason: `${label} · ${entry.pendingPermission.toolName}`,
       failureItemId: null,
+      subagent,
     };
   }
   if (entry.pendingQuestion) {
@@ -36,17 +47,19 @@ export function sessionSignalOf(entry: SessionEntry): SessionSignal {
       activity: "waiting",
       reason: header ? `${label} · ${header}` : label,
       failureItemId: null,
+      subagent,
     };
   }
   if (entry.state === "crashed" || entry.state === "spawn_failed") {
     const failure = entry.items.filter((i) => i.kind === "error" || i.kind === "exit").pop();
-    return { stage: entry.stage, activity: "failed", reason: label, failureItemId: failure?.id ?? null };
+    return { stage: entry.stage, activity: "failed", reason: label, failureItemId: failure?.id ?? null, subagent };
   }
   return {
     stage: entry.stage,
-    activity: isWorking(entry) ? "working" : "idle",
+    activity: isWorking(entry) || subagent?.background ? "working" : "idle",
     reason: null,
     failureItemId: null,
+    subagent,
   };
 }
 

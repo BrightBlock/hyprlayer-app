@@ -1,7 +1,9 @@
 import { basename } from "@/lib/path";
 
 export type PlanDocTask = { key: string; title: string; checked: boolean; line: number; explicitId: boolean };
-export type PlanDocPhase = { label: string; name: string; tasks: PlanDocTask[] };
+export type CheckGroup = "automated" | "manual";
+export type PlanDocCriterion = PlanDocTask & { group: CheckGroup | null };
+export type PlanDocPhase = { label: string; name: string; tasks: PlanDocTask[]; criteria: PlanDocCriterion[] };
 export type PlanDoc = {
   title: string;
   status: string | null;
@@ -19,6 +21,7 @@ const CHECKBOX = /^(\s*[-*+]\s+\[)([ xX~])(\]\s+)(.*)$/;
 const FENCE = /^\s*(```|~~~)/;
 const LEAD_ID = /^\[(P\d+[a-z]?\.\d+)\]\s*/i;
 const TRAIL_ID = /<!--\s*id:\s*([\w.-]+)\s*-->/i;
+const CRITERIA = /success criteria/i;
 
 export function isDraftStatus(status: string | null): boolean {
   return !status || status.toLowerCase() === "draft";
@@ -38,12 +41,22 @@ function explicitTaskId(text: string): string | null {
   return LEAD_ID.exec(text)?.[1] ?? TRAIL_ID.exec(text)?.[1] ?? null;
 }
 
+// Tasks and checks in document order: keys, toggles and the tracker's rows all index this list.
+export function phaseRows(phase: PlanDocPhase): (PlanDocTask | PlanDocCriterion)[] {
+  return [...phase.tasks, ...phase.criteria].sort((a, b) => a.line - b.line);
+}
+
+function checkGroup(heading: string): CheckGroup | null {
+  if (/automated/i.test(heading)) return "automated";
+  return /manual/i.test(heading) ? "manual" : null;
+}
+
 // Explicit ids survive edits; positional keys are the fallback and never collide with them.
 function assignKeys(phases: PlanDocPhase[]): void {
   const taken = new Set<string>();
   const pending: [PlanDocPhase, PlanDocTask, number][] = [];
   for (const phase of phases) {
-    phase.tasks.forEach((task, i) => {
+    phaseRows(phase).forEach((task, i) => {
       if (task.explicitId && !taken.has(task.key)) taken.add(task.key);
       else pending.push([phase, task, i]);
     });
@@ -67,6 +80,7 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
   let h1Line = -1;
   const phases: PlanDocPhase[] = [];
   let phase: { level: number; phase: PlanDocPhase } | null = null;
+  let criteria: { level: number; group: CheckGroup | null } | null = null;
   let overview: { level: number; lines: string[] } | null = null;
   let overviewText = "";
   let inFence = false;
@@ -88,12 +102,16 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
       }
       const phaseMatch = level <= 3 ? PHASE.exec(text) : null;
       if (phaseMatch) {
-        const next = { label: phaseMatch[1], name: phaseMatch[2].trim(), tasks: [] };
+        const next = { label: phaseMatch[1], name: phaseMatch[2].trim(), tasks: [], criteria: [] };
         phases.push(next);
         phase = { level, phase: next };
+        criteria = null;
         continue;
       }
       if (phase && level <= phase.level) phase = null;
+      if (criteria && (!phase || level <= criteria.level)) criteria = null;
+      if (phase && CRITERIA.test(text)) criteria = { level, group: null };
+      else if (criteria) criteria.group = checkGroup(text);
       if (level === 1 && h1 === null) {
         h1 = text;
         h1Line = i;
@@ -106,13 +124,15 @@ export function parsePlanDoc(content: string, path: string): PlanDoc {
     const box = CHECKBOX.exec(line);
     if (!box) continue;
     const id = explicitTaskId(box[4]);
-    phase.phase.tasks.push({
+    const task = {
       key: id ?? "",
       title: cleanTitle(box[4]),
       checked: box[2] === "x" || box[2] === "X",
       line: i,
       explicitId: id !== null,
-    });
+    };
+    if (criteria) phase.phase.criteria.push({ ...task, group: criteria.group });
+    else phase.phase.tasks.push(task);
   }
   if (overview) overviewText = overview.lines.join("\n").trim();
   assignKeys(phases);
@@ -139,7 +159,7 @@ export function toggleTask(
   task: { key: string; title: string },
   checked: boolean,
 ): string | null {
-  const all = parsePlanDoc(content, "").phases.flatMap((p) => p.tasks);
+  const all = parsePlanDoc(content, "").phases.flatMap(phaseRows);
   const target =
     all.find((t) => t.explicitId && t.key === task.key) ??
     all.find((t) => t.key === task.key && t.title === task.title) ??

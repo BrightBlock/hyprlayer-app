@@ -31,7 +31,7 @@ function parseTaskListSnapshot(content: string): IdentifiedTask[] {
   return out;
 }
 
-function todosFromTodoWrite(input: string): IdentifiedTask[] {
+export function todosFromTodoWrite(input: string): IdentifiedTask[] {
   const parsed = parseToolInput(input);
   const todos = parsed?.todos;
   if (!Array.isArray(todos)) return [];
@@ -48,6 +48,11 @@ function todosFromTodoWrite(input: string): IdentifiedTask[] {
 type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
 
 const TRACKING_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TodoWrite"]);
+
+// A subagent's TodoWrite is its own list; applied here it would replace the session's.
+function isSubagentTodoWrite(item: ToolItem): boolean {
+  return item.name === "TodoWrite" && !!item.parentId;
+}
 
 // `newBatchClears`: a create after everything finished starts a fresh list, as the Tasks panel shows it.
 function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem, newBatchClears = true): void {
@@ -108,7 +113,7 @@ function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem, newBatc
 export function planTasksFromItems(items: TranscriptItem[]): PlanTask[] {
   const tasks = new Map<string, PlanTask>();
   for (const item of items) {
-    if (item.kind === "tool") applyTrackingTool(tasks, item);
+    if (item.kind === "tool" && !isSubagentTodoWrite(item)) applyTrackingTool(tasks, item);
   }
   return Array.from(tasks.values());
 }
@@ -124,7 +129,7 @@ export function planTaskTimeline(items: TranscriptItem[], since: string | null =
   const stale = new Set<string>();
   let awaitingWork: string[] = [];
   for (const item of items) {
-    if (item.kind !== "tool") continue;
+    if (item.kind !== "tool" || isSubagentTodoWrite(item)) continue;
     if (item.toolUseId === since) for (const key of tasks.keys()) stale.add(key);
     if (!TRACKING_TOOLS.has(item.name)) {
       if (item.parentId) continue;

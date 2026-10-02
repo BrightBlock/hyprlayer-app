@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePlanDoc, toggleTask } from "./planDoc";
+import { parsePlanDoc, phaseRows, toggleTask } from "./planDoc";
 
 const PATH = "/t/repos/app/shared/plans/2026-09-24-og-images.md";
 
@@ -74,9 +74,10 @@ describe("parsePlanDoc", () => {
       ["1", "Scaffold"],
       ["2", "Build"],
     ]);
-    expect(doc.phases[0].tasks.map((t) => [t.key, t.title, t.checked])).toEqual([
-      ["P1.1", "Types check: pnpm typecheck", true],
-      ["P1.2", "Lint passes", false],
+    expect(doc.phases[0].tasks).toEqual([]);
+    expect(doc.phases[0].criteria.map((t) => [t.key, t.title, t.checked, t.group])).toEqual([
+      ["P1.1", "Types check: pnpm typecheck", true, "automated"],
+      ["P1.2", "Lint passes", false, "automated"],
     ]);
   });
 
@@ -153,6 +154,50 @@ describe("parsePlanDoc", () => {
     const lf = parsePlanDoc(PLAN, PATH);
     expect(crlf.phases).toEqual(lf.phases);
     expect(crlf.title).toBe(lf.title);
+  });
+});
+
+describe("success criteria", () => {
+  const MIXED = [
+    "## Phase 1: A",
+    "- [ ] Write it",
+    "### Success Criteria:",
+    "- [ ] Ungrouped",
+    "#### Automated Verification:",
+    "- [x] fmt",
+    "#### Manual Verification (/verify in the dev app):",
+    "- [ ] Looks right",
+    "### Notes",
+    "- [ ] After the section",
+    "## Phase 2: B",
+    "- [ ] Next phase task",
+    "",
+  ].join("\n");
+
+  it("splits checks from tasks, grouped by their Automated and Manual sub-headings", () => {
+    const [a, b] = parsePlanDoc(MIXED, PATH).phases;
+    expect(a.tasks.map((t) => t.title)).toEqual(["Write it", "After the section"]);
+    expect(a.criteria.map((c) => [c.title, c.checked, c.group])).toEqual([
+      ["Ungrouped", false, null],
+      ["fmt", true, "automated"],
+      ["Looks right", false, "manual"],
+    ]);
+    expect(b.tasks.map((t) => t.title)).toEqual(["Next phase task"]);
+    expect(b.criteria).toEqual([]);
+  });
+
+  it("keeps positional keys in document order across tasks and checks", () => {
+    expect(phaseRows(parsePlanDoc(MIXED, PATH).phases[0]).map((r) => [r.key, r.title])).toEqual([
+      ["P1.1", "Write it"],
+      ["P1.2", "Ungrouped"],
+      ["P1.3", "fmt"],
+      ["P1.4", "Looks right"],
+      ["P1.5", "After the section"],
+    ]);
+  });
+
+  it("toggles a check the same way as a task", () => {
+    expect(toggleTask(MIXED, { key: "P1.4", title: "Looks right" }, true)).toContain("- [x] Looks right");
   });
 });
 
