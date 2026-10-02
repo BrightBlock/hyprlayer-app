@@ -2,15 +2,20 @@
   "versions": [
     {
       "version": "0.8.6",
-      "summary": "Open sessions stay in sync across devices.",
+      "summary": "Sessions sync across devices, with new appearance controls and a cleaner workspace.",
       "notes": [
-        "When another device adds turns to a session you have open, they wait until you click Load, so they never stream in or play alert sounds while you work; sending with turns waiting asks you to pull first so your message answers the latest state, and your draft stays.",
-        "While another device's turn runs, a \"<device> is working…\" placeholder shows in place of its live output; its messages appear when you pull them in.",
+        "When another device adds turns to a session you have open, they wait until you click Load, so they never stream in or play alert sounds while you work; sending with turns waiting asks you to load them first so your message answers the latest state, and your draft stays.",
+        "While another device's turn runs, a \"<device> is working…\" placeholder shows in place of its live output; its messages appear when you load them.",
         "The server now refuses a message sent from an out-of-date transcript instead of running it; a queued message that is refused waits for the pull and is sent after it.",
         "A message sent while another device's turn is running waits for that turn to finish.",
         "Sessions show which devices are viewing them.",
+        "Appearance settings now include app zoom, four text sizes, interface and code font choices, and terminal font size. Use Cmd/Ctrl + plus, minus, or zero for app zoom; add Shift to change terminal font size.",
+        "Settings and your profile moved to the top bar, archived worktrees are in Settings, and the status bar sits below the agent view. The workstream breadcrumb shows its agent tab count.",
+        "Dialogs, menus, and buttons have smoother transitions that respect reduced-motion preferences.",
+        "Fixed a terminal error when closing a terminal while a scroll update was pending.",
         "Transcript sync needs hyprlayer-server 0.8.6; with an older server, a notice offers to load new turns instead."
-      ]
+      ],
+      "date": "2026-10-02"
     },
     {
       "version": "0.8.5",
