@@ -1,6 +1,6 @@
 import type { WorkstreamView } from "@/lib/bindings";
 import { Button, ConfirmDialog } from "@/components/ui";
-import { isFolderWorkstream } from "@/lib/domain/projects";
+import { appOwnsWorktree, isFolderWorkstream } from "@/lib/domain/projects";
 import { isAppError } from "@/lib/ipc";
 import { useArchiveWorkstream } from "@/lib/queries";
 
@@ -36,6 +36,7 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
 
   const scriptFailed = isAppError(archive.error) && archive.error.code === "archive_script_failed";
   const folder = target !== null && isFolderWorkstream(target);
+  const moves = target !== null && appOwnsWorktree(target.item);
 
   return (
     <ConfirmDialog
@@ -70,6 +71,8 @@ export function ArchiveWorkstreamDialog({ target, onClose, onArchived }: Props) 
         )}
         {folder ? (
           "the folder is left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
+        ) : !moves ? (
+          "the folder and branch are left untouched; only this workstream is archived. You can unarchive it later from the Archive view."
         ) : (
           <>
             the worktree moves to <span className="text-meta">archived-contexts/</span>{" "}

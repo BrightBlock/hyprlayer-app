@@ -121,6 +121,44 @@ pub fn current_branch(repo_path: &Path) -> Option<String> {
     head.shorthand().map(|s| s.to_string())
 }
 
+/// Linked worktrees on a branch, other than `repo_path` itself.
+pub fn branch_worktrees(repo_path: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let repo = open_repo(repo_path)?;
+    let names = repo.worktrees().map_err(|e| CoreError::OutputParse {
+        program: "git2 worktrees".into(),
+        detail: e.message().to_string(),
+    })?;
+    let own = dunce::canonicalize(repo_path).ok();
+    let mut found = Vec::new();
+    for name in names.iter().flatten() {
+        let Ok(wt) = repo.find_worktree(name) else {
+            continue;
+        };
+        if wt.validate().is_err() {
+            continue;
+        }
+        let path = dunce::canonicalize(wt.path()).unwrap_or_else(|_| wt.path().to_path_buf());
+        if own.as_ref() == Some(&path) {
+            continue;
+        }
+        // Read HEAD through the `.git` pointer rather than opening a repository per worktree.
+        let Some(branch) = linked_head_branch(&path) else {
+            continue;
+        };
+        found.push((branch, path));
+    }
+    Ok(found)
+}
+
+fn linked_head_branch(worktree: &Path) -> Option<String> {
+    let pointer = std::fs::read_to_string(worktree.join(".git")).ok()?;
+    let admin = worktree.join(pointer.trim().strip_prefix("gitdir: ")?);
+    let head = std::fs::read_to_string(admin.join("HEAD")).ok()?;
+    head.trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_string)
+}
+
 pub fn remote_to_web_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let (host, path) = if let Some(rest) = raw

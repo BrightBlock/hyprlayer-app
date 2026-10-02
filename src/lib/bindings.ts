@@ -526,6 +526,11 @@ export type BranchPrefix = {
 	keywords?: string[],
 };
 
+export type BranchWorktree = {
+	branch: string,
+	path: string,
+};
+
 export type BundleSource = "releaseAsset" | "fallback" | "unknown";
 
 export type CatalogModel = {
@@ -1576,6 +1581,7 @@ export type WorkstreamBases = {
 	remoteBranches: string[],
 	defaultBase: string,
 	currentBranch: string | null,
+	worktrees?: BranchWorktree[],
 };
 
 export type WorkstreamBranchChanged = {
@@ -1612,7 +1618,7 @@ export type WorktreeGitStatus = {
 	unstaged: GitFileEntry[],
 };
 
-export type WorktreeMode = "isolated" | "existing" | "inplace" | "folder";
+export type WorktreeMode = "isolated" | "existing" | "inplace" | "folder" | "attached";
 
 export type WorktreeStatus = {
 	exists: boolean,

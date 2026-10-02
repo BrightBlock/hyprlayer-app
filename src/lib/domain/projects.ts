@@ -1,5 +1,5 @@
 
-import type { Project, ProjectSource, WorkstreamView } from "@/lib/bindings";
+import type { Project, ProjectSource, Workstream, WorkstreamView } from "@/lib/bindings";
 
 export function isFolderSource(source: ProjectSource): boolean {
   return source === "folder";
@@ -11,6 +11,15 @@ export function isGitProject(project: Pick<Project, "source"> | undefined | null
 
 export function isFolderWorkstream(view: Pick<WorkstreamView, "item">): boolean {
   return view.item.worktreeMode === "folder";
+}
+
+/** Mirrors core's `app_owns_worktree`: only these folders are moved on archive and deleted on purge. */
+export function appOwnsWorktree(item: Pick<Workstream, "worktreeMode">): boolean {
+  return item.worktreeMode === "isolated" || item.worktreeMode === "existing";
+}
+
+export function runsInProjectDir(item: Pick<Workstream, "worktreeMode">): boolean {
+  return item.worktreeMode === "inplace" || item.worktreeMode === "folder";
 }
 
 export function shortBranch(ref: string): string {

@@ -719,7 +719,7 @@ impl Dispatch for Server {
         branch: Option<String>,
         branch_prefix: Option<String>,
     ) -> Result<WorkstreamView, WireError> {
-        let inplace = mode == WorktreeMode::Inplace;
+        let runs_setup = !matches!(mode, WorktreeMode::Inplace | WorktreeMode::Attached);
         let result = self
             .runtime
             .workstreams()
@@ -735,7 +735,7 @@ impl Dispatch for Server {
             .wire()?;
 
         // TODO: Gate setup scripts on repository trust.
-        if !inplace {
+        if runs_setup {
             if let Err(e) = self
                 .runtime
                 .scripts()

@@ -8,6 +8,7 @@ import {
   type RefObject,
 } from "react";
 
+import { appOwnsWorktree } from "@/lib/domain/projects";
 import { formatBytes } from "@/lib/format";
 import { isAppError } from "@/lib/ipc";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
@@ -359,7 +360,7 @@ function DeleteConfirm({
 }) {
   const loss = lossOnDelete(row);
   const { item, info, archiveExists } = row.view;
-  const ownFiles = item.worktreeMode === "isolated" || item.worktreeMode === "existing";
+  const ownFiles = appOwnsWorktree(item);
   const size = info.sizeBytes === null ? "" : ` (${formatBytes(info.sizeBytes)})`;
   const what = !ownFiles
     ? "It has no worktree of its own, so this removes only the record and its agent history."

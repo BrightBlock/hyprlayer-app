@@ -13,6 +13,7 @@ const q = vi.hoisted(() => ({
   useDiscardProjectChanges: vi.fn(),
   useRestoreWorkstream: vi.fn(),
   useBranchPrefixes: vi.fn(),
+  useWorkstreams: vi.fn(() => ({ data: [] })),
 }));
 vi.mock("@/lib/queries", () => q);
 

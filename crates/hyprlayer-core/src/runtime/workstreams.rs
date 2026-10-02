@@ -146,6 +146,16 @@ pub struct WorkstreamBases {
     pub remote_branches: Vec<String>,
     pub default_base: String,
     pub current_branch: Option<String>,
+    #[serde(default)]
+    pub worktrees: Vec<BranchWorktree>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct BranchWorktree {
+    pub branch: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +320,7 @@ impl WorkstreamService<'_> {
 
         for (item, _) in rows
             .iter()
-            .filter(|(item, record)| record.scanned_at.is_none() && !item.shares_project_dir())
+            .filter(|(item, record)| record.scanned_at.is_none() && item.app_owns_worktree())
         {
             let dir = archive_dir_for(Path::new(&item.project_path), &item.slug);
             let base = item.base_branch.clone();
@@ -715,26 +725,41 @@ impl WorkstreamService<'_> {
         let default_base = worktree::detect_base_branch(&git, &repo, &overlay)
             .await
             .unwrap_or_default();
-        let (branches, local_branches, remote_branches, current_branch) = blocking(move || {
-            let branches = crate::gitops::list_branches(&repo)?;
-            let local_branches = crate::gitops::list_local_branches(&repo)?;
-            let remote_branches = crate::gitops::list_remote_branches(&repo)?
-                .into_iter()
-                .filter(|r| match crate::gitops::local_name_for_remote(r) {
-                    Some(local) => !local_branches.iter().any(|l| l == local),
-                    None => false,
-                })
-                .collect();
-            let current_branch = crate::gitops::current_branch(&repo);
-            Ok((branches, local_branches, remote_branches, current_branch))
-        })
-        .await?;
+        let (branches, local_branches, remote_branches, current_branch, worktrees) =
+            blocking(move || {
+                let branches = crate::gitops::list_branches(&repo)?;
+                let local_branches = crate::gitops::list_local_branches(&repo)?;
+                let remote_branches = crate::gitops::list_remote_branches(&repo)?
+                    .into_iter()
+                    .filter(|r| match crate::gitops::local_name_for_remote(r) {
+                        Some(local) => !local_branches.iter().any(|l| l == local),
+                        None => false,
+                    })
+                    .collect();
+                let current_branch = crate::gitops::current_branch(&repo);
+                let worktrees = attachable_worktrees(&repo)
+                    .into_iter()
+                    .map(|(branch, path)| BranchWorktree {
+                        branch,
+                        path: path.display().to_string(),
+                    })
+                    .collect();
+                Ok((
+                    branches,
+                    local_branches,
+                    remote_branches,
+                    current_branch,
+                    worktrees,
+                ))
+            })
+            .await?;
         Ok(WorkstreamBases {
             branches,
             local_branches,
             remote_branches,
             default_base,
             current_branch,
+            worktrees,
         })
     }
 
@@ -939,6 +964,23 @@ impl WorkstreamService<'_> {
         Err(CoreError::WorkstreamBranchInvalid { branch })
     }
 
+    /// Callers hold the project lock, so no other workstream can claim `path` meanwhile.
+    async fn ensure_unattached(&self, project_path: &str, path: &Path) -> Result<()> {
+        let pp = project_path.to_string();
+        let db = self.runtime.db.clone();
+        let active = blocking(move || db.list_workstreams(&pp, false)).await?;
+        match active
+            .iter()
+            .find(|w| canonical_prefix(Path::new(&w.worktree_path)) == path)
+        {
+            Some(owner) => Err(CoreError::WorktreeAlreadyAttached {
+                path: path.display().to_string(),
+                title: owner.title.clone(),
+            }),
+            None => Ok(()),
+        }
+    }
+
     pub async fn create(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
         let started = std::time::Instant::now();
         let what = format!(
@@ -1008,9 +1050,15 @@ impl WorkstreamService<'_> {
             WorktreeMode::Inplace => CreateMode::InPlace {
                 branch: needs_branch("in-place")?,
             },
+            WorktreeMode::Attached => {
+                let branch = needs_branch("attached")?;
+                let path = attachable_worktree(&project_path, &branch).await?;
+                CreateMode::Attached { branch, path }
+            }
             WorktreeMode::Folder => return Err(CoreError::WorkstreamModeNeedsBranch),
         };
         let inplace = mode == WorktreeMode::Inplace;
+        let owns_folder = matches!(mode, WorktreeMode::Isolated | WorktreeMode::Existing);
 
         let _guard = self
             .runtime
@@ -1025,6 +1073,9 @@ impl WorkstreamService<'_> {
             if active.iter().any(|w| w.is_inplace()) {
                 return Err(CoreError::InplaceWorkstreamExists);
             }
+        }
+        if let CreateMode::Attached { path, .. } = &create_mode {
+            self.ensure_unattached(&project_path, path).await?;
         }
 
         let effective = self.effective_for(&project_path).await?;
@@ -1071,7 +1122,7 @@ impl WorkstreamService<'_> {
 
         let worktree_path = PathBuf::from(&created.path);
 
-        let (link, seed) = if inplace {
+        let (link, seed) = if !owns_folder {
             (
                 thoughts_links::check_thoughts(&worktree_path, &effective),
                 None,
@@ -1213,7 +1264,7 @@ impl WorkstreamService<'_> {
         self.runtime.terminals.remove_for_workstream(&id).await;
         self.runtime.scripts.clear_workstream(&id).await;
 
-        if item.shares_project_dir() {
+        if !item.app_owns_worktree() {
             let db = self.runtime.db.clone();
             let aid = id.clone();
             blocking(move || db.archive_workstream(&aid)).await?;
@@ -1369,12 +1420,21 @@ impl WorkstreamService<'_> {
             });
         }
 
-        if item.shares_project_dir() {
+        if !item.app_owns_worktree() {
             if let Some(target) = target {
                 return Err(CoreError::WorkstreamRestoreTargetInvalid {
                     path: target.display().to_string(),
                     reason: "it has no worktree of its own to move".into(),
                 });
+            }
+            if item.worktree_mode == WorktreeMode::Attached {
+                let path = canonical_prefix(Path::new(&item.worktree_path));
+                if !worktree::is_live_worktree(&path) {
+                    return Err(CoreError::WorkstreamWorktreeMissing {
+                        path: item.worktree_path.clone(),
+                    });
+                }
+                self.ensure_unattached(&item.project_path, &path).await?;
             }
             let link = if item.is_folder() {
                 None
@@ -1750,7 +1810,7 @@ fn archived_view(
     delete_branch: bool,
 ) -> ArchivedWorkstream {
     let archive_path = archive_dir_for(Path::new(&item.project_path), &item.slug);
-    let archive_exists = item.shares_project_dir() || archive_path.exists();
+    let archive_exists = !item.app_owns_worktree() || archive_path.exists();
     let info = ArchiveInfo {
         purge_in_ms: record.purge_after - now,
         kept: record.kept_at.is_some(),
@@ -1793,9 +1853,35 @@ fn pr_state_name(state: &pr::PrState) -> &'static str {
 
 /// The worktree went back but the row never flipped, so its files are live.
 fn half_restored(item: &Workstream) -> bool {
-    !item.shares_project_dir()
+    item.app_owns_worktree()
         && !archive_dir_for(Path::new(&item.project_path), &item.slug).exists()
         && worktree::is_live_worktree(Path::new(&item.worktree_path))
+}
+
+/// Linked worktrees a workstream may attach to; the app's own archives are excluded.
+fn attachable_worktrees(repo: &Path) -> Vec<(String, PathBuf)> {
+    let archives = canonical_prefix(&repo.join(worktree::ARCHIVE_SUBDIR));
+    match crate::gitops::branch_worktrees(repo) {
+        Ok(all) => all
+            .into_iter()
+            .filter(|(_, path)| !path.starts_with(&archives))
+            .collect(),
+        Err(e) => {
+            tracing::warn!("listing worktrees of {} failed: {e}", repo.display());
+            Vec::new()
+        }
+    }
+}
+
+async fn attachable_worktree(project_path: &str, branch: &str) -> Result<PathBuf> {
+    let repo = PathBuf::from(project_path);
+    let worktrees = blocking(move || Ok(attachable_worktrees(&repo))).await?;
+    worktrees
+        .into_iter()
+        .find_map(|(b, path)| (b == branch).then_some(path))
+        .ok_or_else(|| CoreError::WorktreeNotFound {
+            branch: branch.to_string(),
+        })
 }
 
 /// Canonicalizes the longest existing ancestor and re-appends the rest.

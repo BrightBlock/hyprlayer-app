@@ -10,6 +10,8 @@ pub enum WorktreeMode {
     Existing,
     Inplace,
     Folder,
+    // A worktree made outside this app; its folder is never moved or deleted.
+    Attached,
 }
 
 impl WorktreeMode {
@@ -19,6 +21,7 @@ impl WorktreeMode {
             WorktreeMode::Existing => "existing",
             WorktreeMode::Inplace => "inplace",
             WorktreeMode::Folder => "folder",
+            WorktreeMode::Attached => "attached",
         }
     }
 
@@ -27,6 +30,7 @@ impl WorktreeMode {
             "isolated" => WorktreeMode::Isolated,
             "existing" => WorktreeMode::Existing,
             "folder" => WorktreeMode::Folder,
+            "attached" => WorktreeMode::Attached,
             _ => WorktreeMode::Inplace,
         }
     }
@@ -88,10 +92,11 @@ impl Workstream {
         self.worktree_mode == WorktreeMode::Inplace
     }
 
-    pub fn shares_project_dir(&self) -> bool {
+    /// Only these folders may be archived, restored or deleted by the app.
+    pub fn app_owns_worktree(&self) -> bool {
         matches!(
             self.worktree_mode,
-            WorktreeMode::Inplace | WorktreeMode::Folder
+            WorktreeMode::Isolated | WorktreeMode::Existing
         )
     }
 
@@ -107,7 +112,7 @@ impl Workstream {
         self.status == WorkstreamStatus::Active
             && matches!(
                 self.worktree_mode,
-                WorktreeMode::Inplace | WorktreeMode::Existing
+                WorktreeMode::Inplace | WorktreeMode::Existing | WorktreeMode::Attached
             )
     }
 
@@ -156,6 +161,7 @@ mod tests {
             WorktreeMode::Existing,
             WorktreeMode::Inplace,
             WorktreeMode::Folder,
+            WorktreeMode::Attached,
         ] {
             assert_eq!(WorktreeMode::parse(mode.as_str()), mode);
         }
@@ -168,6 +174,7 @@ mod tests {
             WorktreeMode::Existing,
             WorktreeMode::Inplace,
             WorktreeMode::Folder,
+            WorktreeMode::Attached,
         ] {
             assert!(!workstream(mode, WorkstreamStatus::Active).app_owns_branch());
         }

@@ -5,6 +5,7 @@ import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/c
 import { Icon } from "@/components/Icon";
 import type { WorktreeMode } from "@/lib/bindings";
 import { previewSlug, suggestPrefix } from "@/lib/domain/branchPrefix";
+import { runsInProjectDir } from "@/lib/domain/projects";
 import { formatRelativeTime } from "@/lib/format";
 import { isAppError } from "@/lib/ipc";
 import { basename } from "@/lib/path";
@@ -16,6 +17,7 @@ import {
   useFetchProjectRemote,
   useRestoreWorkstream,
   useWorkstreamBases,
+  useWorkstreams,
 } from "@/lib/queries";
 
 type Props = {
@@ -82,6 +84,11 @@ export function CreateWorkstreamDialog({
     [localBranches, remoteBranches],
   );
   const remoteSet = useMemo(() => new Set(remoteBranches), [remoteBranches]);
+  const worktreeFor = useMemo(
+    () => new Map((bases.data?.worktrees ?? []).map((w) => [w.branch, w.path])),
+    [bases.data?.worktrees],
+  );
+  const active = useWorkstreams(projectPath);
   const filtered = useMemo(() => filterBranches(pickable, query), [pickable, query]);
 
   const typeList = useMemo(() => {
@@ -116,9 +123,20 @@ export function CreateWorkstreamDialog({
     [checkoutDirty, currentBranch, archived.data, projectPath],
   );
 
+  const ownerOf = (branch: string, path: string | undefined) =>
+    path === undefined
+      ? undefined
+      : active.data?.find(
+          (v) =>
+            v.item.worktreePath === path ||
+            (v.item.branch === branch && !runsInProjectDir(v.item)),
+        );
+
   const isNew = selectedBranch === null;
   const remoteSelected = !isNew && !!selectedBranch && remoteSet.has(selectedBranch);
   const currentSelected = !isNew && !!currentBranch && selectedBranch === currentBranch;
+  const worktreePath = !isNew && selectedBranch ? worktreeFor.get(selectedBranch) : undefined;
+  const owner = selectedBranch ? ownerOf(selectedBranch, worktreePath) : undefined;
 
   useEffect(() => {
     if (currentSelected && place === "worktree") setPlace("here");
@@ -175,12 +193,22 @@ export function CreateWorkstreamDialog({
     if (folder) return { mode: "folder", base: null, branch: null, branchPrefix: null };
     if (isNew)
       return { mode: "isolated", base: base || null, branch: null, branchPrefix: typePrefix };
+    if (worktreePath)
+      return { mode: "attached", base: null, branch: selectedBranch, branchPrefix: null };
     if (place === "here")
       return { mode: "inplace", base: null, branch: selectedBranch, branchPrefix: null };
     return { mode: "existing", base: null, branch: selectedBranch, branchPrefix: null };
   };
 
+  const openOwner = () => {
+    if (!owner) return;
+    reset();
+    onClose();
+    onCreated(owner);
+  };
+
   const submit = () => {
+    if (owner) return openOwner();
     const trimmed = title.trim();
     if (!trimmed || create.isPending) return;
     create.mutate(
@@ -201,14 +229,20 @@ export function CreateWorkstreamDialog({
   const inplace = !isNew && place === "here";
   const busyLabel = folder
     ? "Creating…"
-    : inplace
-      ? "Switching branch…"
-      : "Provisioning worktree…";
+    : worktreePath
+      ? "Opening worktree…"
+      : inplace
+        ? "Switching branch…"
+        : "Provisioning worktree…";
   const localFor = remoteSelected && selectedBranch ? localNameFor(selectedBranch) : selectedBranch;
   const hint = folder
     ? "Runs in the project folder. No branch, no worktree. Add as many as you like."
     : isNew
       ? "Creates a new branch named from your title, in a dedicated worktree."
+      : owner
+        ? "This branch already has a workstream. Nothing new is created."
+      : worktreePath
+        ? "Opens this worktree as it is. Nothing is created or switched, and archiving the workstream leaves the folder in place."
       : remoteSelected
         ? inplace
           ? `Creates local branch ${localFor} tracking ${selectedBranch} and switches your checkout to it. No worktree is created.`
@@ -268,7 +302,15 @@ export function CreateWorkstreamDialog({
                   icon={<Icon name="branch" size="sm" />}
                   label={b}
                   detail={
-                    remoteSet.has(b) ? "remote" : b === currentBranch ? "active" : undefined
+                    remoteSet.has(b)
+                      ? "remote"
+                      : b === currentBranch
+                        ? "active"
+                        : worktreeFor.has(b)
+                          ? ownerOf(b, worktreeFor.get(b))
+                            ? "workstream"
+                            : "worktree"
+                          : undefined
                   }
                   selected={selectedBranch === b}
                   disabled={create.isPending}
@@ -308,7 +350,15 @@ export function CreateWorkstreamDialog({
           </Field>
         )}
 
-        {folder ? null : isNew ? (
+        {folder ? null : worktreePath ? (
+          owner ? (
+            <WorktreeCard title="Already a workstream here" detail={owner.item.title} />
+          ) : (
+            <Field label="Where">
+              <WorktreeCard title="Existing worktree" detail={worktreePath} />
+            </Field>
+          )
+        ) : isNew ? (
           <Field label="Branched from">
             <DropdownSelect
               aria-label="Branched from"
@@ -387,14 +437,20 @@ export function CreateWorkstreamDialog({
           <Button type="button" onClick={close} disabled={create.isPending || recovering}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            busy={create.isPending}
-            disabled={!title.trim() || recovering || (isNew && !folder && prefixes.isLoading)}
-          >
-            {create.isPending ? busyLabel : "Create"}
-          </Button>
+          {owner ? (
+            <Button type="button" variant="primary" onClick={openOwner}>
+              Go to workstream
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              variant="primary"
+              busy={create.isPending}
+              disabled={!title.trim() || recovering || (isNew && !folder && prefixes.isLoading)}
+            >
+              {create.isPending ? busyLabel : "Create"}
+            </Button>
+          )}
         </div>
       </form>
     </Dialog>
@@ -487,6 +543,21 @@ function CheckoutDirtyNotice({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+function WorktreeCard({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-md border border-edge bg-panel-2 px-3 py-2.5">
+      <Icon name="folder" size="sm" className="mt-0.5 text-ink-dim" />
+      <div className="min-w-0">
+        <div className="text-body font-medium text-ink">{title}</div>
+        {/* rtl moves the ellipsis to the start so the folder name stays visible */}
+        <div dir="rtl" className="mt-0.5 truncate text-left font-mono text-ui text-ink-dim" title={detail}>
+          <bdi dir="ltr">{detail}</bdi>
+        </div>
+      </div>
     </div>
   );
 }

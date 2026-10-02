@@ -1,4 +1,5 @@
 import type { ArchiveInfo, ArchivedWorkstreamView } from "@/lib/bindings";
+import { appOwnsWorktree } from "@/lib/domain/projects";
 
 export const PURGE_WARNING_DAYS = 7;
 
@@ -95,7 +96,7 @@ export function filterArchived(rows: ArchiveRow[], query: string, mergedOnly: bo
  */
 export function lossOnDelete(row: ArchiveRow): DeleteLoss | null {
   const { item, info, archiveExists } = row.view;
-  const ownFiles = item.worktreeMode === "isolated" || item.worktreeMode === "existing";
+  const ownFiles = appOwnsWorktree(item);
   if (!ownFiles || !archiveExists) return null;
   const unchecked = info.uncommitted === null;
   const uncommitted = info.uncommitted ?? 0;

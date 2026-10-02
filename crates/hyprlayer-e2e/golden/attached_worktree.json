@@ -1,0 +1,188 @@
+{
+  "scenario": "attached_worktree",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "worktrees": [
+              {
+                "branch": "feat/elsewhere",
+                "path": "$SANDBOX/home/elsewhere/demo-elsewhere"
+              }
+            ]
+          },
+          "guard": "the branch list offers the worktree with its path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "worktrees": [
+              {
+                "branch": "feat/elsewhere",
+                "path": "$SANDBOX/home/elsewhere/demo-elsewhere"
+              }
+            ]
+          },
+          "guard": "the project's own checkout is not offered as a worktree",
+          "ok": true
+        }
+      ],
+      "step": "a worktree made outside the app"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "worktree_not_found"
+          },
+          "guard": "attaching the main checkout's branch fails as worktree_not_found",
+          "ok": true
+        }
+      ],
+      "step": "a branch in no worktree is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branch": "feat/elsewhere",
+            "worktreeMode": "attached",
+            "worktreePath": "$SANDBOX/home/elsewhere/demo-elsewhere"
+          },
+          "guard": "the workstream runs in the existing folder on its branch",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "wip": "unsaved\n"
+          },
+          "guard": "attaching keeps the uncommitted work",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pwd": null
+          },
+          "guard": "the Setup script does not run in a folder the app did not make",
+          "ok": true
+        }
+      ],
+      "step": "attach"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "worktree_attached"
+          },
+          "guard": "a second workstream on the same worktree fails as worktree_attached",
+          "ok": true
+        }
+      ],
+      "step": "attaching it twice is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "registered": true,
+            "wip": "unsaved\n"
+          },
+          "guard": "archive leaves the folder, its work and its git registration",
+          "ok": true
+        }
+      ],
+      "step": "archive"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "worktree_attached"
+          },
+          "guard": "restoring the first fails as worktree_attached",
+          "ok": true
+        }
+      ],
+      "step": "restore is refused while another workstream holds the folder"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": "active",
+            "worktreePath": "$SANDBOX/home/elsewhere/demo-elsewhere"
+          },
+          "guard": "restore reopens the same folder",
+          "ok": true
+        }
+      ],
+      "step": "restore"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "registered": true,
+            "wip": "unsaved\n"
+          },
+          "guard": "purge leaves the folder, its work and its git registration",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branch_exists": true
+          },
+          "guard": "purge keeps the branch",
+          "ok": true
+        }
+      ],
+      "step": "purge"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "offered": false,
+            "registered_in_git": true
+          },
+          "guard": "an archive is still a git worktree but is not offered",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "worktree_not_found"
+          },
+          "guard": "attaching an archive fails as worktree_not_found",
+          "ok": true
+        }
+      ],
+      "step": "the app's own archived worktrees are not offered"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "worktree_missing"
+          },
+          "guard": "restoring fails as worktree_missing",
+          "ok": true
+        }
+      ],
+      "step": "restore after the folder is gone"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

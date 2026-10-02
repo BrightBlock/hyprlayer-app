@@ -216,6 +216,12 @@ pub enum CoreError {
     #[error("This project already has an in-place workstream.")]
     InplaceWorkstreamExists,
 
+    #[error("`{branch}` is not checked out in a worktree of this project.")]
+    WorktreeNotFound { branch: String },
+
+    #[error("{path} is already the worktree of {title}.")]
+    WorktreeAlreadyAttached { path: String, title: String },
+
     #[error("The Archive script failed. Fix it and retry, or skip it to archive anyway.")]
     ArchiveScriptFailed,
 
@@ -550,6 +556,12 @@ impl CoreError {
             CoreError::InplaceWorkstreamExists => Some(
                 "Archive it first, or create the workstream in a dedicated worktree.".into(),
             ),
+            CoreError::WorktreeNotFound { .. } => {
+                Some("Reopen the dialog to see where the branch is checked out now.".into())
+            }
+            CoreError::WorktreeAlreadyAttached { .. } => {
+                Some("Open that workstream instead.".into())
+            }
             CoreError::ArchiveScriptFailed => {
                 Some("Re-run archive, or choose Skip to archive without the script.".into())
             }
@@ -681,6 +693,8 @@ impl CoreError {
             CoreError::WorkstreamNeedsBranch { .. } => "invalid_branch",
             CoreError::WorkstreamBranchInvalid { .. } => "invalid_branch",
             CoreError::InplaceWorkstreamExists => "inplace_exists",
+            CoreError::WorktreeNotFound { .. } => "worktree_not_found",
+            CoreError::WorktreeAlreadyAttached { .. } => "worktree_attached",
             CoreError::ArchiveScriptFailed => "archive_script_failed",
             CoreError::ScriptEmpty { .. } => "script_empty",
             CoreError::WorkstreamNotArchived { .. } => "not_archived",

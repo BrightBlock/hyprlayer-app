@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-server"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",

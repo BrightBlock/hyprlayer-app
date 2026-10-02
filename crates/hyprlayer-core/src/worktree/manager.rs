@@ -56,6 +56,7 @@ pub enum CreateMode {
     Isolated,
     Existing { branch: String },
     InPlace { branch: String },
+    Attached { branch: String, path: PathBuf },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,20 +173,22 @@ impl WorktreeManager {
         let overlay = self.overlay_pairs();
 
         // Best effort: offline still creates, from whatever refs are local.
-        if let Err(e) = git_in(
-            git,
-            &spec.project_repo,
-            &["fetch", "--prune", "origin"],
-            &overlay,
-        )
-        .timeout(Duration::from_secs(30))
-        .run()
-        .await
-        {
-            tracing::warn!(
-                "fetch in {} failed; creating from local refs: {e}",
-                spec.project_repo.display()
-            );
+        if !matches!(spec.mode, CreateMode::Attached { .. }) {
+            if let Err(e) = git_in(
+                git,
+                &spec.project_repo,
+                &["fetch", "--prune", "origin"],
+                &overlay,
+            )
+            .timeout(Duration::from_secs(30))
+            .run()
+            .await
+            {
+                tracing::warn!(
+                    "fetch in {} failed; creating from local refs: {e}",
+                    spec.project_repo.display()
+                );
+            }
         }
 
         match &spec.mode {
@@ -214,6 +217,17 @@ impl WorktreeManager {
                 self.worktree_add(git, &spec.project_repo, &path, &[], branch)
                     .await?;
                 self.windows_longpaths(git, &path).await;
+                Ok(CreatedWorktree {
+                    path: path.display().to_string(),
+                    branch: branch.clone(),
+                    slug,
+                    base_branch: base,
+                })
+            }
+            CreateMode::Attached { branch, path } => {
+                let base = detect_base_branch(git, &spec.project_repo, &overlay)
+                    .await
+                    .unwrap_or_else(|_| branch.clone());
                 Ok(CreatedWorktree {
                     path: path.display().to_string(),
                     branch: branch.clone(),

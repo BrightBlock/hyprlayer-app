@@ -537,7 +537,7 @@ mod tests {
 
         assert_eq!(got.worktree_mode, WorktreeMode::Folder);
         assert!(got.is_folder());
-        assert!(got.shares_project_dir());
+        assert!(!got.app_owns_worktree());
         assert!(!got.is_inplace());
         assert!(!got.app_owns_branch());
 
