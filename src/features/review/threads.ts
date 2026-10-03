@@ -38,11 +38,15 @@ export function threadSize(t: Thread): number {
   return 1 + t.replies.length;
 }
 
-// A thread is resolved through its root, so its replies stop counting with it.
+// A thread is resolved through its root, and a note's replies through the note.
 export function openCountsByPath(threads: Thread[], notes: ReviewNote[]): Map<string, number> {
   const counts = new Map<string, number>();
   const add = (path: string, n: number) => counts.set(path, (counts.get(path) ?? 0) + n);
-  for (const t of threads) if (!t.root.resolved) add(t.root.path, threadSize(t));
+  const resolvedNotes = new Set(notes.filter((n) => n.resolved).map((n) => n.id));
+  for (const t of threads) {
+    const noteId = t.root.replyToNoteId;
+    if (!t.root.resolved && !(noteId && resolvedNotes.has(noteId))) add(t.root.path, threadSize(t));
+  }
   for (const n of notes) if (!n.resolved) add(n.path, 1);
   return counts;
 }

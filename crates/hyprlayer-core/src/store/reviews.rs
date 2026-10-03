@@ -28,6 +28,8 @@ pub struct NewReviewNote {
 pub struct ReviewCommentRow {
     pub id: String,
     pub parent_id: Option<String>,
+    /// The agent note this comment answers.
+    pub reply_to_note_id: Option<String>,
     pub path: String,
     pub side: ReviewSide,
     pub line: u32,
@@ -114,6 +116,7 @@ fn row_to_comment(row: &Row<'_>) -> rusqlite::Result<ReviewCommentRow> {
     Ok(ReviewCommentRow {
         id: row.get("id")?,
         parent_id: row.get("parent_id")?,
+        reply_to_note_id: row.get("reply_to_note_id")?,
         path: row.get("path")?,
         side: ReviewSide::parse(&side),
         line: row.get("line")?,
@@ -158,8 +161,8 @@ fn row_to_round(row: &Row<'_>) -> rusqlite::Result<ReviewRoundRow> {
     })
 }
 
-const COMMENT_COLS: &str = "id, parent_id, path, side, line, anchor_text, body, state, round, \
-                            sent_context, resolved_at, created_at, updated_at";
+const COMMENT_COLS: &str = "id, parent_id, reply_to_note_id, path, side, line, anchor_text, body, \
+                            state, round, sent_context, resolved_at, created_at, updated_at";
 const NOTE_COLS: &str = "id, path, line, anchor_text, kind, body, task, resolved_at, created_at";
 const ROUND_COLS: &str = "number, verdict, summary, message, viewed_count, file_count, \
                           comment_count, submitted_at, delivered_at";
@@ -245,17 +248,20 @@ impl Db {
         })
     }
 
+    /// A reply to a note resolves it in the same transaction.
     pub fn insert_comment(&self, review_id: &str, comment: &ReviewCommentRow) -> Result<()> {
         self.with(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
                 &format!(
                     "INSERT INTO review_comments (review_id, {COMMENT_COLS})
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
                 ),
                 params![
                     review_id,
                     comment.id,
                     comment.parent_id,
+                    comment.reply_to_note_id,
                     comment.path,
                     comment.side.as_str(),
                     comment.line,
@@ -269,7 +275,25 @@ impl Db {
                     comment.updated_at,
                 ],
             )?;
-            Ok(())
+            if let Some(note_id) = &comment.reply_to_note_id {
+                tx.execute(
+                    "UPDATE review_notes SET resolved_at = COALESCE(resolved_at, ?3)
+                     WHERE id = ?1 AND review_id = ?2",
+                    params![note_id, review_id, now_ms()],
+                )?;
+            }
+            tx.commit()
+        })
+    }
+
+    pub fn review_note(&self, review_id: &str, id: &str) -> Result<Option<ReviewNoteRow>> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!("SELECT {NOTE_COLS} FROM review_notes WHERE id = ?1 AND review_id = ?2"),
+                params![id, review_id],
+                row_to_note,
+            )
+            .optional()
         })
     }
 

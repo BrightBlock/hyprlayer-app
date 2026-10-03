@@ -100,6 +100,60 @@ describe("parseReviewMessage", () => {
     expect(parsed?.items.map((i) => i.body)).toEqual(["First line.\nSecond line.\n  indented code", "Next."]);
   });
 
+  it("reads a note reply: the quoted note above the answer", () => {
+    const parsed = parseReviewMessage(
+      message(
+        "Review · Changes requested · 0 / 1 viewed · 2 comments",
+        "",
+        "- `a.rs:6` Reply to note [needs_your_call]:",
+        "  > Is 20 right?",
+        "  >",
+        "  > Confirm the constant.",
+        "  ",
+        "  > Yes, keep 20.",
+        "  Add a doc comment.",
+        "- `a.rs:9` Plain.",
+        "",
+        FOOTER,
+      ),
+    );
+    expect(parsed?.items).toEqual([
+      {
+        path: "a.rs",
+        line: 6,
+        removed: false,
+        body: "> Yes, keep 20.\nAdd a doc comment.",
+        note: { kind: "needs_your_call", body: "Is 20 right?\n\nConfirm the constant." },
+      },
+      { path: "a.rs", line: 9, removed: false, body: "Plain." },
+    ]);
+  });
+
+  it("keeps a body that only looks like a note reply", () => {
+    const parsed = parseReviewMessage(
+      message(
+        "Review · Changes requested · 0 / 1 viewed · 4 comments",
+        "",
+        "- `a.rs:1` Reply to note [shout]:",
+        "  > q",
+        "  ",
+        "  a",
+        "- `a.rs:4` Reply to note [constructor]:",
+        "  > q",
+        "  ",
+        "  a",
+        "- `a.rs:2` Reply to note [note]:",
+        "  not quoted",
+        "- `a.rs:3` Reply to note [note]:",
+        "  > q",
+        "",
+        FOOTER,
+      ),
+    );
+    expect(parsed?.items.map((i) => i.note)).toEqual([undefined, undefined, undefined, undefined]);
+    expect(parsed?.items[0].body).toBe("Reply to note [shout]:\n> q\n\na");
+  });
+
   it("marks a removed line", () => {
     const parsed = parseReviewMessage(
       message("Review · Changes requested · 0 / 1 viewed · 1 comment", "", "- `old.rs:12 (removed line)` Why drop this?", "", FOOTER),

@@ -369,6 +369,7 @@
             "line": 4,
             "parentId": null,
             "path": "src/edit.rs",
+            "replyToNoteId": null,
             "resolved": true,
             "side": "modified",
             "state": "pending"
@@ -384,6 +385,7 @@
             "line": 4,
             "parentId": "$COMMENT",
             "path": "src/edit.rs",
+            "replyToNoteId": null,
             "resolved": false,
             "side": "modified",
             "state": "pending"
@@ -480,6 +482,7 @@
               "line": 4,
               "parentId": null,
               "path": "src/edit.rs",
+              "replyToNoteId": null,
               "resolved": true,
               "side": "modified",
               "state": "pending"
@@ -681,6 +684,7 @@
                 "line": 4,
                 "parentId": null,
                 "path": "src/edit.rs",
+                "replyToNoteId": null,
                 "resolved": true,
                 "side": "modified",
                 "state": "pending"
@@ -692,6 +696,7 @@
                 "line": 4,
                 "parentId": "$COMMENT",
                 "path": "src/edit.rs",
+                "replyToNoteId": null,
                 "resolved": false,
                 "side": "modified",
                 "state": "pending"
@@ -703,6 +708,7 @@
                 "line": 2,
                 "parentId": null,
                 "path": "src/gone.rs",
+                "replyToNoteId": null,
                 "resolved": false,
                 "side": "original",
                 "state": "pending"
@@ -714,6 +720,7 @@
                 "line": 2,
                 "parentId": null,
                 "path": "src/gone.rs",
+                "replyToNoteId": null,
                 "resolved": false,
                 "side": "modified",
                 "state": "pending"
@@ -725,6 +732,7 @@
                 "line": 4,
                 "parentId": null,
                 "path": "src/new_name.rs",
+                "replyToNoteId": null,
                 "resolved": false,
                 "side": "original",
                 "state": "pending"
@@ -807,7 +815,102 @@
       "guards": [
         {
           "evidence": {
-            "message": "Review · Changes requested · 2 / 7 viewed · 6 comments\n\nTighten the constants before this ships.\n\n- `src/edit.rs:4` Why 3, and not 30?\n- `src/edit.rs:4` It balances the sum.\n- `src/gone.rs:2 (removed line)` Why is this here?\n- `src/gone.rs:2` Why is this here?\n- `src/new_name.rs:4 (removed line)` Why is this here?\n- `src/edit.rs:7` Name this constant.\n  \n  It also needs a doc comment.\n\nAddress each comment, then stop. Files you change go back to unviewed in the review."
+            "comment": {
+              "body": "Keep 20; the spec fixes it.",
+              "currentLine": 7,
+              "id": "$NOTE_REPLY",
+              "line": 6,
+              "parentId": null,
+              "path": "src/edit.rs",
+              "replyToNoteId": "$NEEDS_CALL_NOTE",
+              "resolved": false,
+              "side": "modified",
+              "state": "pending"
+            },
+            "replyToNoteId": "$NEEDS_CALL_NOTE"
+          },
+          "guard": "a note reply is a comment on the note's own line, whatever location the client sent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after": true,
+            "before": false,
+            "notes": [
+              {
+                "body": "Why `b` is 20 is a guess; confirm the constant.",
+                "currentLine": 7,
+                "kind": "needs_your_call",
+                "line": 6,
+                "path": "src/edit.rs",
+                "resolved": true,
+                "task": "Phase 1: edit"
+              },
+              {
+                "body": "This constant was not in the plan.",
+                "currentLine": 2,
+                "kind": "outside_plan_scope",
+                "line": 2,
+                "path": "src/new.rs",
+                "resolved": false,
+                "task": "Phase 2: new"
+              },
+              {
+                "body": "Prints the sum.",
+                "currentLine": 8,
+                "kind": "note",
+                "line": 7,
+                "path": "src/edit.rs",
+                "resolved": false,
+                "task": null
+              },
+              {
+                "body": "Added after the first commit.",
+                "currentLine": 1,
+                "kind": "note",
+                "line": 1,
+                "path": "src/new.rs",
+                "resolved": false,
+                "task": "Phase 2: new"
+              },
+              {
+                "body": "Short.",
+                "currentLine": 2,
+                "kind": "note",
+                "line": 2,
+                "path": "src/new.rs",
+                "resolved": false,
+                "task": null
+              }
+            ]
+          },
+          "guard": "replying resolves the note, and only that note",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "others": 5
+          },
+          "guard": "ordinary comments carry no note",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comments": 6,
+            "foreign": "review_note_not_found",
+            "missing": "review_note_not_found"
+          },
+          "guard": "a reply to a note that is missing, or another workstream's, is refused and leaves nothing behind",
+          "ok": true
+        }
+      ],
+      "step": "answer the agent's note"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "message": "Review · Changes requested · 2 / 7 viewed · 7 comments\n\nTighten the constants before this ships.\n\n- `src/edit.rs:4` Why 3, and not 30?\n- `src/edit.rs:4` It balances the sum.\n- `src/gone.rs:2 (removed line)` Why is this here?\n- `src/gone.rs:2` Why is this here?\n- `src/new_name.rs:4 (removed line)` Why is this here?\n- `src/edit.rs:7` Reply to note [needs_your_call]:\n  > Why `b` is 20 is a guess; confirm the constant.\n  \n  Keep 20; the spec fixes it.\n- `src/edit.rs:7` Name this constant.\n  \n  It also needs a doc comment.\n\nAddress each comment, then stop. Files you change go back to unviewed in the review."
           },
           "guard": "the message follows the review grammar",
           "ok": true
@@ -841,13 +944,18 @@
                 "state": "sending"
               },
               {
+                "id": "$NOTE_REPLY",
+                "round": 2,
+                "state": "sending"
+              },
+              {
                 "id": "$PENDING",
                 "round": 2,
                 "state": "sending"
               }
             ],
             "round": {
-              "commentCount": 6,
+              "commentCount": 7,
               "delivered": false,
               "fileCount": 7,
               "number": 2,
@@ -885,6 +993,7 @@
             "again": true,
             "delivered": true,
             "states": [
+              "sent",
               "sent",
               "sent",
               "sent",
@@ -936,6 +1045,7 @@
               "$COMMENT_1": false,
               "$COMMENT_2": false,
               "$COMMENT_3": false,
+              "$NOTE_REPLY": true,
               "$PENDING": true,
               "$REPLY": true
             },

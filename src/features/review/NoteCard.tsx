@@ -1,9 +1,12 @@
 import { Icon } from "@/components/Icon";
-import { Button, cx } from "@/components/ui";
+import { useState, type ReactNode } from "react";
+
+import { Button, cx, IconButton } from "@/components/ui";
 import type { ReviewNote } from "@/lib/bindings";
-import { formatRelativeTime } from "@/lib/format";
+import { formatRelativeTime, plural } from "@/lib/format";
 import { useResolveReviewNote } from "@/lib/queries";
 
+import { ResolvedBar } from "./CommentThread";
 import { NOTE_KIND_LABEL } from "./threads";
 
 const KIND_TAG: Record<ReviewNote["kind"], string> = {
@@ -35,7 +38,19 @@ function InlineCode({ text }: { text: string }) {
     );
 }
 
-export function NoteCard({ note, workstreamId }: { note: ReviewNote; workstreamId: string }) {
+export function NoteCard({
+  note,
+  workstreamId,
+  onReply,
+  onResolved,
+  onCollapse,
+}: {
+  note: ReviewNote;
+  workstreamId: string;
+  onReply?: () => void;
+  onResolved?: () => void;
+  onCollapse?: () => void;
+}) {
   const resolve = useResolveReviewNote();
   return (
     <div
@@ -49,20 +64,74 @@ export function NoteCard({ note, workstreamId }: { note: ReviewNote; workstreamI
         <KindTag kind={note.kind} />
         <span className="text-meta text-ink-4">{formatRelativeTime(note.createdAt)}</span>
         <span className="flex-1" />
+        {onReply && (
+          <Button size="sm" onClick={onReply}>
+            Reply
+          </Button>
+        )}
         <Button
           size="sm"
           aria-pressed={note.resolved}
           busy={resolve.isPending}
-          onClick={() => resolve.mutate({ workstreamId, noteId: note.id, resolved: !note.resolved })}
+          onClick={() => {
+            const resolved = !note.resolved;
+            resolve.mutate({ workstreamId, noteId: note.id, resolved }, { onSuccess: () => resolved && onResolved?.() });
+          }}
         >
           <Icon name="check" size="xs" />
           {note.resolved ? "Resolved" : "Resolve"}
         </Button>
+        {onCollapse && (
+          <IconButton className="h-6 w-6 hover:bg-edge/60" aria-label="Collapse conversation" onClick={onCollapse}>
+            <Icon name="chevronDown" size="xs" />
+          </IconButton>
+        )}
       </div>
       <div className="md selectable whitespace-pre-wrap break-words text-body leading-prose text-ink">
         <InlineCode text={note.body} />
       </div>
       {note.task && <div className="mt-2 truncate text-ui-sm text-ink-dim">Plan task · {note.task}</div>}
+    </div>
+  );
+}
+
+/**
+ * A note and its replies, folded once the note is resolved. A reply resolves its note,
+ * so the conversation stays open while the reviewer is still writing in it.
+ */
+export function NoteConversation({
+  note,
+  workstreamId,
+  replyCount,
+  replying,
+  onReply,
+  children,
+}: {
+  note: ReviewNote;
+  workstreamId: string;
+  replyCount: number;
+  replying: boolean;
+  onReply?: () => void;
+  children?: ReactNode;
+}) {
+  const [shown, setShown] = useState(false);
+  if (replying && !shown) setShown(true);
+
+  if (note.resolved && !shown) {
+    const kind = NOTE_KIND_LABEL[note.kind];
+    const summary = replyCount > 0 ? `${kind} · ${plural(replyCount, "comment")}` : kind;
+    return <ResolvedBar summary={summary} onShow={() => setShown(true)} />;
+  }
+  return (
+    <div className="space-y-2">
+      <NoteCard
+        note={note}
+        workstreamId={workstreamId}
+        onReply={onReply}
+        onResolved={() => setShown(false)}
+        onCollapse={note.resolved ? () => setShown(false) : undefined}
+      />
+      {children}
     </div>
   );
 }

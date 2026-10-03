@@ -97,10 +97,11 @@ const EDIT_DROPPED: &str = "fn edit() {\n    // One.\n    // Two.\n    // Three.
 // The review's last edit: the line below the pending comment's, inside its context.
 const EDIT_FIXED: &str = "// Header.\nfn edit() {\n    // One.\n    // Two.\n    // Three.\n    let a = 1;\n    let b = 20;\n    println!(\"{}\", a * b);\n}\n";
 const PENDING_BODY: &str = "Name this constant.\n\nIt also needs a doc comment.";
+const NOTE_ANSWER: &str = "Keep 20; the spec fixes it.";
 const REQUEST_SUMMARY: &str = "Tighten the constants before this ships.";
 // The resolved root and its reply are outdated, so they carry the line they were left on.
 const REVIEW_MESSAGE: &str = concat!(
-    "Review · Changes requested · 2 / 7 viewed · 6 comments\n",
+    "Review · Changes requested · 2 / 7 viewed · 7 comments\n",
     "\n",
     "Tighten the constants before this ships.\n",
     "\n",
@@ -109,6 +110,10 @@ const REVIEW_MESSAGE: &str = concat!(
     "- `src/gone.rs:2 (removed line)` Why is this here?\n",
     "- `src/gone.rs:2` Why is this here?\n",
     "- `src/new_name.rs:4 (removed line)` Why is this here?\n",
+    "- `src/edit.rs:7` Reply to note [needs_your_call]:\n",
+    "  > Why `b` is 20 is a guess; confirm the constant.\n",
+    "  \n",
+    "  Keep 20; the spec fixes it.\n",
     "- `src/edit.rs:7` Name this constant.\n",
     "  \n",
     "  It also needs a doc comment.\n",
@@ -1077,6 +1082,90 @@ async fn review_lifecycle() {
         json!({ "round": round_summary(&saved["round"]), "comments": states, "status": after_comment["status"] }),
     );
 
+    j.step("answer the agent's note");
+    let call_note = note_of_kind(&after_comment, "needs_your_call");
+    let call_note_id = text(&call_note, "/id");
+    j.alias(&call_note_id, "$NEEDS_CALL_NOTE");
+    let unanswered = review(&mut j, &client, &id).await;
+    let reply = add_comment(
+        &mut j,
+        &client,
+        AddReviewCommentRequest {
+            body: NOTE_ANSWER.into(),
+            // The note's own location wins over whatever the client sends.
+            reply_to_note_id: Some(call_note_id.clone()),
+            ..comment_on(&id, "ignored.rs", ReviewSide::Original, 99, "ignored")
+        },
+    )
+    .await
+    .expect("add_review_comment answering a note");
+    let reply_id = text(&reply, "/id");
+    j.alias(&reply_id, "$NOTE_REPLY");
+    let answered = review(&mut j, &client, &id).await;
+    let stored = comment_in(&answered, &reply_id);
+    let note_after = note_of_kind(&answered, "needs_your_call");
+    j.guard(
+        "a note reply is a comment on the note's own line, whatever location the client sent",
+        reply["replyToNoteId"] == json!(call_note_id)
+            && stored["replyToNoteId"] == json!(call_note_id)
+            && stored["parentId"].is_null()
+            && stored["path"] == json!("src/edit.rs")
+            && stored["side"] == json!("modified")
+            && stored["line"] == json!(6)
+            && stored["currentLine"] == note_after["currentLine"]
+            && stored["state"] == json!("pending"),
+        json!({ "comment": summary(&stored), "replyToNoteId": stored["replyToNoteId"] }),
+    );
+    j.guard(
+        "replying resolves the note, and only that note",
+        call_note["resolved"] == json!(false)
+            && note_after["resolved"] == json!(true)
+            && notes(&answered)
+                .iter()
+                .filter(|n| n["resolved"] == json!(true))
+                .count()
+                == 1
+            && comment_in(&unanswered, &reply_id).is_null(),
+        json!({ "before": call_note["resolved"], "after": note_after["resolved"], "notes": notes(&answered) }),
+    );
+    let ordinary: Vec<Value> = comments(&answered)
+        .into_iter()
+        .filter(|c| text(c, "/id") != reply_id)
+        .map(|c| c["replyToNoteId"].clone())
+        .collect();
+    j.guard(
+        "ordinary comments carry no note",
+        ordinary.iter().all(Value::is_null),
+        json!({ "others": ordinary.len() }),
+    );
+    let missing = add_comment(
+        &mut j,
+        &client,
+        AddReviewCommentRequest {
+            reply_to_note_id: Some("no-such-note".into()),
+            ..comment_on(&id, "src/edit.rs", ReviewSide::Modified, 6, "")
+        },
+    )
+    .await;
+    let foreign = add_comment(
+        &mut j,
+        &client,
+        AddReviewCommentRequest {
+            workstream_id: other_id.clone(),
+            reply_to_note_id: Some(call_note_id.clone()),
+            ..comment_on(&other_id, "src/edit.rs", ReviewSide::Modified, 6, "")
+        },
+    )
+    .await;
+    let unchanged = review(&mut j, &client, &id).await;
+    j.guard(
+        "a reply to a note that is missing, or another workstream's, is refused and leaves nothing behind",
+        code(&missing).as_deref() == Some("review_note_not_found")
+            && code(&foreign).as_deref() == Some("review_note_not_found")
+            && comment_ids(&unchanged) == comment_ids(&answered),
+        json!({ "missing": code(&missing), "foreign": code(&foreign), "comments": comment_ids(&unchanged).len() }),
+    );
+
     j.step("request changes");
     let pending = add_comment(
         &mut j,
@@ -1096,6 +1185,7 @@ async fn review_lifecycle() {
     .expect("add_review_comment before requesting changes");
     let pending_id = text(&pending, "/id");
     j.alias(&pending_id, "$PENDING");
+
     set_viewed(
         &mut j,
         &client,
@@ -1134,12 +1224,12 @@ async fn review_lifecycle() {
         comments(&sending)
             .iter()
             .all(|c| c["state"] == json!("sending") && c["round"] == json!(2))
-            && states.len() == 6
+            && states.len() == 7
             && latest["number"] == json!(2)
             && latest["verdict"] == json!("request_changes")
             && latest["delivered"] == json!(false)
             && latest["message"] == json!(REVIEW_MESSAGE)
-            && latest["commentCount"] == json!(6)
+            && latest["commentCount"] == json!(7)
             && sending["status"] == json!("in_progress"),
         json!({ "round": round_summary(&latest), "comments": states, "status": sending["status"] }),
     );
@@ -1405,6 +1495,7 @@ fn comment_on(
         anchor_text: anchor.to_string(),
         body: "Why is this here?".to_string(),
         parent_id: None,
+        reply_to_note_id: None,
     }
 }
 
@@ -1445,6 +1536,7 @@ fn summary(comment: &Value) -> Value {
     json!({
         "id": comment["id"],
         "parentId": comment["parentId"],
+        "replyToNoteId": comment["replyToNoteId"],
         "path": comment["path"],
         "side": comment["side"],
         "line": comment["line"],
@@ -1662,6 +1754,14 @@ fn note_summary(note: &Value) -> Value {
         "task": note["task"],
         "resolved": note["resolved"],
     })
+}
+
+fn note_of_kind(review: &Value, kind: &str) -> Value {
+    review["notes"]
+        .as_array()
+        .and_then(|all| all.iter().find(|n| n["kind"] == json!(kind)))
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn notes(review: &Value) -> Vec<Value> {

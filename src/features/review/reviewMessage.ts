@@ -1,6 +1,17 @@
 // Mirrors `crates/hyprlayer-core/src/review/message.rs`, which composes the message.
 
-export type ReviewMessageItem = { path: string; line: number; removed: boolean; body: string };
+import type { ReviewNoteKind } from "@/lib/bindings";
+
+import { NOTE_KIND_LABEL } from "./threads";
+
+/** `note` is set when `body` answers an agent note; `body` is then the answer alone. */
+export type ReviewMessageItem = {
+  path: string;
+  line: number;
+  removed: boolean;
+  body: string;
+  note?: { kind: ReviewNoteKind; body: string };
+};
 
 export type ReviewMessage = {
   viewed: number;
@@ -15,6 +26,21 @@ const HEADER = /^Review · Changes requested · (\d+) \/ (\d+) viewed · (\d+) (
 const ITEM = /^- `([^`]+):(\d+)( \(removed line\))?` (.+)$/;
 const FOOTER = "Address each comment, then stop. Files you change go back to unviewed in the review.";
 const INDENT = "  ";
+const NOTE_REPLY = /^Reply to note \[([a-z_]+)\]:$/;
+
+// The quoted note, a blank line, then the answer.
+function splitNoteReply(body: string): Pick<ReviewMessageItem, "body" | "note"> {
+  const lines = body.split("\n");
+  const head = NOTE_REPLY.exec(lines[0]);
+  const gap = lines.indexOf("");
+  if (!head || !Object.prototype.hasOwnProperty.call(NOTE_KIND_LABEL, head[1]) || gap < 2 || gap === lines.length - 1) return { body };
+  const quote = lines.slice(1, gap);
+  if (!quote.every((l) => l.startsWith(">"))) return { body };
+  return {
+    body: lines.slice(gap + 1).join("\n"),
+    note: { kind: head[1] as ReviewNoteKind, body: quote.map((l) => l.replace(/^> ?/, "")).join("\n") },
+  };
+}
 
 /** Null for anything the grammar didn't produce, so the caller shows the plain prompt. */
 export function parseReviewMessage(text: string): ReviewMessage | null {
@@ -39,7 +65,7 @@ export function parseReviewMessage(text: string): ReviewMessage | null {
           path: item[1],
           line: Number(item[2]),
           removed: item[3] !== undefined,
-          body: [item[4], ...continuation].join("\n"),
+          ...splitNoteReply([item[4], ...continuation].join("\n")),
         });
         continuation = [];
       } else if (line.startsWith(INDENT)) {

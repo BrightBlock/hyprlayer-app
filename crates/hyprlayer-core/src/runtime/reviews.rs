@@ -11,7 +11,7 @@ use crate::error::{CoreError, Result};
 use crate::gitops::safe_join;
 use crate::review::anchor::reanchor;
 use crate::review::diff::{self, ReviewFileList};
-use crate::review::message::{self, MessageComment};
+use crate::review::message::{self, MessageComment, MessageNote};
 use crate::review::sidecar;
 use crate::store::{
     now_ms, CommentChange, Db, NewReviewNote, NewReviewRound, ReviewCommentRow, ReviewNoteRow,
@@ -55,6 +55,7 @@ pub struct ReviewView {
 pub struct ReviewComment {
     pub id: String,
     pub parent_id: Option<String>,
+    pub reply_to_note_id: Option<String>,
     pub path: String,
     pub side: ReviewSide,
     pub line: u32,
@@ -121,6 +122,9 @@ pub struct AddReviewCommentRequest {
     pub anchor_text: String,
     pub body: String,
     pub parent_id: Option<String>,
+    /// Answers an agent note and resolves it; the note's location replaces the request's.
+    #[serde(default)]
+    pub reply_to_note_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,14 +290,15 @@ impl ReviewService<'_> {
         Ok(())
     }
 
-    /// A reply is placed on its parent's line; the request's location is ignored.
+    /// A reply is placed on its parent's line, a note reply on its note's; the request's
+    /// location is ignored. A comment with a parent is a thread reply, so it never answers a note.
     pub async fn add_comment(&self, req: AddReviewCommentRequest) -> Result<ReviewComment> {
         ensure_running(self.runtime)?;
         let item = self.reviewable(&req.workstream_id).await?;
         if req.body.trim().is_empty() {
             return Err(CoreError::ReviewCommentEmpty);
         }
-        if req.parent_id.is_none() {
+        if req.parent_id.is_none() && req.reply_to_note_id.is_none() {
             if req.line == 0 {
                 return Err(CoreError::ReviewCommentLineInvalid);
             }
@@ -306,27 +311,46 @@ impl ReviewService<'_> {
         let workstream_id = item.id.clone();
         let row = blocking(move || {
             let review = db.ensure_review(&workstream_id)?;
-            let (parent_id, path, side, line, anchor_text) = match req.parent_id {
-                Some(parent_id) => {
-                    let parent = db.review_comment(&review.id, &parent_id)?.ok_or_else(|| {
-                        CoreError::ReviewCommentNotFound {
-                            id: parent_id.clone(),
-                        }
-                    })?;
-                    (
-                        Some(parent.id),
-                        parent.path,
-                        parent.side,
-                        parent.line,
-                        parent.anchor_text,
-                    )
-                }
-                None => (None, req.path, req.side, req.line, req.anchor_text),
-            };
+            let (parent_id, note_id, path, side, line, anchor_text) =
+                match (req.parent_id, req.reply_to_note_id) {
+                    (Some(parent_id), _) => {
+                        let parent =
+                            db.review_comment(&review.id, &parent_id)?.ok_or_else(|| {
+                                CoreError::ReviewCommentNotFound {
+                                    id: parent_id.clone(),
+                                }
+                            })?;
+                        (
+                            Some(parent.id),
+                            None,
+                            parent.path,
+                            parent.side,
+                            parent.line,
+                            parent.anchor_text,
+                        )
+                    }
+                    (None, Some(note_id)) => {
+                        let note = db.review_note(&review.id, &note_id)?.ok_or_else(|| {
+                            CoreError::ReviewNoteNotFound {
+                                id: note_id.clone(),
+                            }
+                        })?;
+                        (
+                            None,
+                            Some(note.id),
+                            note.path,
+                            ReviewSide::Modified,
+                            note.line,
+                            note.anchor_text,
+                        )
+                    }
+                    (None, None) => (None, None, req.path, req.side, req.line, req.anchor_text),
+                };
             let now = now_ms();
             let row = ReviewCommentRow {
                 id: uuid::Uuid::new_v4().to_string(),
                 parent_id,
+                reply_to_note_id: note_id,
                 path,
                 side,
                 line,
@@ -484,6 +508,7 @@ impl ReviewService<'_> {
                             (current.unwrap_or(c.line), ctx)
                         })
                         .collect();
+                    let notes = db.list_notes(&review.id)?;
                     let items: Vec<MessageComment<'_>> = unsent
                         .iter()
                         .zip(&placed)
@@ -492,6 +517,14 @@ impl ReviewService<'_> {
                             line: *line,
                             removed: c.side == ReviewSide::Original,
                             body: &c.body,
+                            note: c
+                                .reply_to_note_id
+                                .as_deref()
+                                .and_then(|id| notes.iter().find(|n| n.id == id))
+                                .map(|n| MessageNote {
+                                    kind: n.kind,
+                                    body: &n.body,
+                                }),
                         })
                         .collect();
                     let text =
@@ -692,6 +725,7 @@ fn comment_view(
     ReviewComment {
         id: row.id,
         parent_id: row.parent_id,
+        reply_to_note_id: row.reply_to_note_id,
         path: row.path,
         side: row.side,
         line: row.line,

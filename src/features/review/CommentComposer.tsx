@@ -7,10 +7,13 @@ import { useAddReviewComment } from "@/lib/queries";
 export function CommentComposer({
   request,
   agentLabel,
+  quote,
   onDone,
 }: {
   request: Omit<AddReviewCommentRequest, "body">;
   agentLabel: string;
+  /** What this comment answers, shown above the box. */
+  quote?: string;
   onDone: () => void;
 }) {
   const [body, setBody] = useState("");
@@ -29,6 +32,11 @@ export function CommentComposer({
 
   return (
     <div className="space-y-2 rounded-card border border-edge bg-panel p-2.5">
+      {quote && (
+        <blockquote className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-edge pl-2 text-ui-sm text-ink-dim">
+          {quote}
+        </blockquote>
+      )}
       <TextArea
         ref={ref}
         rows={3}

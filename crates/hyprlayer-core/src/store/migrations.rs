@@ -182,6 +182,10 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE (review_id, fingerprint)
     );
     ",
+    "
+    ALTER TABLE review_comments
+        ADD COLUMN reply_to_note_id TEXT REFERENCES review_notes(id) ON DELETE SET NULL;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -323,13 +327,13 @@ mod tests {
     }
 
     #[test]
-    fn user_version_reaches_12() {
+    fn user_version_reaches_the_latest() {
         let conn = v10_schema();
         migrate(&conn).unwrap();
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, MIGRATIONS.len() as u32);
     }
 
     /// This phase's manual check: the backfill against a real profile copy, never a runtime
@@ -389,7 +393,7 @@ mod tests {
     /// The review tables against a real profile copy; never a runtime, for the same reason.
     #[test]
     #[ignore = "needs HYPRLAYER_MIGRATE_COPY"]
-    fn reaches_12_on_a_copied_profile() {
+    fn reaches_latest_on_a_copied_profile() {
         let Ok(path) = std::env::var("HYPRLAYER_MIGRATE_COPY") else {
             return;
         };
@@ -397,7 +401,10 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert!(version < 12, "expected a pre-12 profile copy at {path}");
+        assert!(
+            version < MIGRATIONS.len() as u32,
+            "expected a profile copy behind the latest schema at {path}"
+        );
         let workstreams = |conn: &Connection| -> i64 {
             conn.query_row("SELECT COUNT(*) FROM workstreams", [], |r| r.get(0))
                 .unwrap()
@@ -409,8 +416,8 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 12);
+        assert_eq!(version, MIGRATIONS.len() as u32);
         assert_eq!(workstreams(&conn), before);
-        println!("migrated a profile copy with {before} workstream(s) to schema 12");
+        println!("migrated a profile copy with {before} workstream(s) to schema {version}");
     }
 }

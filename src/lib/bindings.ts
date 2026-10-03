@@ -326,6 +326,8 @@ export type AddReviewCommentRequest = {
 	anchorText: string,
 	body: string,
 	parentId: string | null,
+	/**  Answers an agent note and resolves it; the note's location replaces the request's. */
+	replyToNoteId?: string | null,
 };
 
 export type AgentBundleInstall = {
@@ -1308,6 +1310,7 @@ export type ReviewChanged = {
 export type ReviewComment = {
 	id: string,
 	parentId: string | null,
+	replyToNoteId: string | null,
 	path: string,
 	side: ReviewSide,
 	line: number,

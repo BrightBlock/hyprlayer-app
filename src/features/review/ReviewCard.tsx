@@ -7,6 +7,7 @@ import { plural } from "@/lib/format";
 import { findWorkstreamForNotify } from "@/lib/notifications";
 import type { ReviewCardProps } from "@/features/session/reviewCardSlot";
 
+import { KindTag } from "./NoteCard";
 import { parseReviewMessage, type ReviewMessageItem } from "./reviewMessage";
 
 // Implement transcripts carry no plan-card context, so fall back to the open workstream.
@@ -45,12 +46,13 @@ export const ReviewCard = memo(function ReviewCard({ text, workstreamId, fallbac
               <button
                 type="button"
                 onClick={() => open(workstreamId, item)}
-                title={item.body}
+                title={item.note ? `${item.note.body}\n\n${item.body}` : item.body}
                 className={rowClass({ tier: "compact", className: "flex w-full gap-2 px-1.5 text-left" })}
               >
                 <code className="shrink-0 font-mono text-meta text-ink-2">
                   {item.path}:{item.line}
                 </code>
+                {item.note && <KindTag kind={item.note.kind} />}
                 <span className="min-w-0 flex-1 truncate text-ink">{item.body.split("\n")[0]}</span>
               </button>
             </li>

@@ -272,7 +272,7 @@ function ProjectCommands(props: {
   onNewWorkstream: () => void;
   onToggleRun: (() => void) | null;
   onCycleStage: (() => void) | null;
-  onOpenReview: (() => void) | null;
+  onToggleReview: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
   const running = Boolean(props.sessionId && session && isBusy(session));
@@ -295,7 +295,7 @@ function ProjectCommands(props: {
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
-  useCommand("ws.review", props.onOpenReview);
+  useCommand("ws.review", props.onToggleReview);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return (
@@ -855,6 +855,12 @@ export function ProjectPage() {
       search: (prev) => ({ ...prev, review: "files", reviewFile: undefined, reviewLine: undefined }),
     });
   };
+  const toggleReview = () => {
+    if (!reviewing) return openReview();
+    void navigate({
+      search: (prev) => ({ ...prev, review: undefined, reviewFile: undefined, reviewLine: undefined }),
+    });
+  };
   const changeShellMode = (shell: ShellTab, key: StageKey) => {
     if (!activeView || key === shell.mode) return;
     patchShell(shell.id, { mode: key });
@@ -1321,7 +1327,7 @@ export function ProjectPage() {
             ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
             : null
         }
-        onOpenReview={reviewable ? openReview : null}
+        onToggleReview={reviewable ? toggleReview : null}
       />
       {reviewing && activeView ? (
         <ReviewWorkspace

@@ -16,9 +16,9 @@ import { useConnectionStatus, useEditorTargets, useReviewFileSides } from "@/lib
 import { CommentComposer } from "./CommentComposer";
 import { CommentLayer, slotKey } from "./commentGutter";
 import { CommentThread } from "./CommentThread";
-import { KindTag, NoteCard } from "./NoteCard";
+import { KindTag, NoteConversation } from "./NoteCard";
 import { type Slot, ThreadPortals } from "./ThreadPortals";
-import type { Thread } from "./threads";
+import { NOTE_KIND_LABEL, type Thread, threadSize } from "./threads";
 
 const MODE_OPTIONS = [
   { value: "unified", label: "Unified" },
@@ -41,7 +41,7 @@ function scrollToLine(view: EditorView, line: number) {
   view.dispatch({ effects: EditorView.scrollIntoView(at, { y: "center" }) });
 }
 
-type Composer = { path: string; side: ReviewSide; line: number; anchorText: string };
+type Composer = { path: string; side: ReviewSide; line: number; anchorText: string; noteId?: string };
 
 function LineContext({ side, line, text }: { side: ReviewSide; line: number; text: string }) {
   return (
@@ -134,12 +134,65 @@ export function DiffPane({
     }
     return slot.items;
   };
-  for (const n of notes) {
-    const card = <NoteCard key={n.id} note={n} workstreamId={wsId} />;
-    if (n.currentLine == null) outdated.push(card);
-    else at("modified", n.currentLine).push(card);
-  }
+  // A note's replies render under its card, so the exchange reads as one conversation.
+  const answers = new Map<string, Thread[]>();
+  const noteIds = new Set(notes.map((n) => n.id));
+  const loose: Thread[] = [];
   for (const t of threads) {
+    const id = t.root.replyToNoteId;
+    if (id && noteIds.has(id)) answers.set(id, [...(answers.get(id) ?? []), t]);
+    else loose.push(t);
+  }
+  for (const n of notes) {
+    const replies = answers.get(n.id) ?? [];
+    const replying = composer?.noteId === n.id;
+    const group = [
+      ...replies.map((t) => (
+        <CommentThread key={t.root.id} thread={t} workstreamId={wsId} agentLabel={agentLabel} />
+      )),
+    ];
+    if (replying) {
+      group.push(
+        <CommentComposer
+          key={`reply-${n.id}`}
+          request={{
+            workstreamId: wsId,
+            path: file.path,
+            side: "modified",
+            line: n.currentLine ?? n.line,
+            anchorText: "",
+            parentId: null,
+            replyToNoteId: n.id,
+          }}
+          agentLabel={agentLabel}
+          quote={`${NOTE_KIND_LABEL[n.kind]}: ${n.body}`}
+          onDone={() => setOpened(null)}
+        />,
+      );
+    }
+    // An outdated note's reply stays anchored to the note's own line: the server re-anchors it
+    // like any comment, so it lists as outdated beside the note and follows it if the line returns.
+    const conversation = (
+      <NoteConversation
+        key={n.id}
+        note={n}
+        workstreamId={wsId}
+        replyCount={replies.reduce((sum, t) => sum + threadSize(t), 0)}
+        replying={replying}
+        // The first reply opens the thread; later ones go through its own Reply.
+        onReply={
+          replies.length === 0 && !replying
+            ? () => setOpened({ path: file.path, side: "modified", line: n.currentLine ?? n.line, anchorText: "", noteId: n.id })
+            : undefined
+        }
+      >
+        {group}
+      </NoteConversation>
+    );
+    if (n.currentLine == null) outdated.push(conversation);
+    else at("modified", n.currentLine).push(conversation);
+  }
+  for (const t of loose) {
     const { root } = t;
     const context = <LineContext side={root.side} line={root.currentLine ?? root.line} text={root.anchorText} />;
     const render = (withContext: boolean) => (
@@ -155,16 +208,17 @@ export function DiffPane({
     else if (!inline(root.side)) above.push(render(true));
     else at(root.side, root.currentLine).push(render(false));
   }
-  if (composer && inline(composer.side)) {
-    at(composer.side, composer.line).push(
+  const lineComposer = composer && !composer.noteId && inline(composer.side) ? composer : null;
+  if (lineComposer) {
+    at(lineComposer.side, lineComposer.line).push(
       <CommentComposer
         key="composer"
         request={{
           workstreamId: wsId,
           path: file.path,
-          side: composer.side,
-          line: composer.line,
-          anchorText: composer.anchorText,
+          side: lineComposer.side,
+          line: lineComposer.line,
+          anchorText: lineComposer.anchorText,
           parentId: null,
         }}
         agentLabel={agentLabel}
@@ -297,7 +351,7 @@ export function DiffPane({
             <ThreadPortals
               layer={layer}
               slots={slots}
-              composer={composer && inline(composer.side) ? composer : null}
+              composer={lineComposer}
             />
           </>
         ) : null}

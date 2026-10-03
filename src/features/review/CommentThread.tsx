@@ -110,6 +110,20 @@ function CommentBody({
   );
 }
 
+/** A resolved conversation folded to one row, as GitHub does. */
+export function ResolvedBar({ summary, onShow }: { summary: ReactNode; onShow: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onShow}
+      className="flex w-full items-center gap-1.5 rounded-card border border-edge bg-panel px-3 py-1.5 text-left text-ui text-ink-dim hover:bg-edge/50"
+    >
+      <Icon name="check" size="xs" />
+      Resolved · {summary} · <span className="text-ink-2 underline-offset-2 hover:underline">Show</span>
+    </button>
+  );
+}
+
 export function CommentThread({
   thread,
   workstreamId,
@@ -127,18 +141,7 @@ export function CommentThread({
   const { root } = thread;
   const count = plural(threadSize(thread), "comment");
 
-  if (root.resolved && !shown) {
-    return (
-      <button
-        type="button"
-        onClick={() => setShown(true)}
-        className="flex w-full items-center gap-1.5 rounded-card border border-edge bg-panel px-3 py-1.5 text-left text-ui text-ink-dim hover:bg-edge/50"
-      >
-        <Icon name="check" size="xs" />
-        Resolved · {count} · <span className="text-ink-2 underline-offset-2 hover:underline">Show</span>
-      </button>
-    );
-  }
+  if (root.resolved && !shown) return <ResolvedBar summary={count} onShow={() => setShown(true)} />;
 
   return (
     <div className="space-y-2 rounded-card border border-edge bg-panel px-3 py-2.5">
