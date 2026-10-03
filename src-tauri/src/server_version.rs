@@ -20,6 +20,8 @@ pub enum Fit {
     TooOld,
     /// Usable, but older than the server this app ships.
     Older,
+    /// The shipped release, but a different dev build of it; only `exact_fit` says so.
+    OtherBuild,
     /// The shipped version or newer.
     Current,
 }
@@ -37,15 +39,37 @@ fn known(version: &str) -> Version {
 
 /// `reported` is the server's hello `version`; unparseable reads as unversioned.
 pub fn fit(reported: Option<&str>) -> Fit {
+    fit_against(reported, SERVER_VERSION)
+}
+
+/// `fit` for a server this app may restart. Dev installs stamp `+dev.<sha>` on
+/// an unchanged release version, so only the full string tells their builds apart.
+pub fn exact_fit(reported: Option<&str>) -> Fit {
+    exact_fit_against(reported, SERVER_VERSION)
+}
+
+fn fit_against(reported: Option<&str>, shipped: &str) -> Fit {
     let version = reported
         .and_then(parse)
         .unwrap_or_else(|| known(UNVERSIONED_SERVER));
     if version < known(MIN_SERVER_VERSION) {
         Fit::TooOld
-    } else if version < known(SERVER_VERSION) {
+    } else if version < known(shipped) {
         Fit::Older
     } else {
         Fit::Current
+    }
+}
+
+fn exact_fit_against(reported: Option<&str>, shipped: &str) -> Fit {
+    let fit = fit_against(reported, shipped);
+    let other_build = reported.map(str::trim).is_some_and(|reported| {
+        reported != shipped && (reported.contains('+') || shipped.contains('+'))
+    });
+    if fit == Fit::Current && other_build {
+        Fit::OtherBuild
+    } else {
+        fit
     }
 }
 
@@ -96,6 +120,44 @@ mod tests {
     fn an_unversioned_server_reads_as_the_last_unversioned_release() {
         assert_eq!(fit(None), fit(Some(UNVERSIONED_SERVER)));
         assert_eq!(fit(Some("garbage")), fit(None));
+    }
+
+    const RELEASE: &str = "999.1.0";
+    const DEV_A: &str = "999.1.0+dev.aaa";
+    const DEV_B: &str = "999.1.0+dev.bbb";
+
+    #[test]
+    fn a_server_matches_only_its_exact_build() {
+        assert_eq!(exact_fit_against(Some(RELEASE), RELEASE), Fit::Current);
+        assert_eq!(exact_fit_against(Some(DEV_A), DEV_A), Fit::Current);
+        assert_eq!(
+            exact_fit_against(Some(" 999.1.0+dev.aaa\n"), DEV_A),
+            Fit::Current
+        );
+    }
+
+    #[test]
+    fn an_older_release_is_older_whatever_the_app_build() {
+        assert_eq!(exact_fit_against(Some("999.0.0"), RELEASE), Fit::Older);
+        assert_eq!(exact_fit_against(Some("999.0.0"), DEV_A), Fit::Older);
+    }
+
+    #[test]
+    fn a_dev_build_on_either_side_of_the_same_release_is_another_build() {
+        assert_eq!(exact_fit_against(Some(DEV_B), DEV_A), Fit::OtherBuild);
+        assert_eq!(exact_fit_against(Some(RELEASE), DEV_A), Fit::OtherBuild);
+        assert_eq!(exact_fit_against(Some(DEV_A), RELEASE), Fit::OtherBuild);
+    }
+
+    #[test]
+    fn the_exact_rule_leaves_unversioned_and_too_old_servers_alone() {
+        assert_eq!(exact_fit_against(None, DEV_A), fit_against(None, DEV_A));
+        assert_eq!(
+            exact_fit_against(Some("garbage"), DEV_A),
+            fit_against(None, DEV_A)
+        );
+        assert_eq!(exact_fit_against(Some("0.0.1+dev.aaa"), DEV_A), Fit::TooOld);
+        assert_eq!(exact_fit_against(Some("0.0.1"), RELEASE), Fit::TooOld);
     }
 
     #[test]

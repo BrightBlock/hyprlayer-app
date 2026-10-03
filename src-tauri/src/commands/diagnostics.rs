@@ -68,7 +68,7 @@ pub async fn collect_diagnostics(app: AppHandle, state: State<'_, AppState>) -> 
             .server_version
             .map_or("unknown".to_string(), |v| v.to_string()),
         if status.server_outdated {
-            ", older than the server this app ships"
+            ", not the server this app ships"
         } else {
             ""
         }

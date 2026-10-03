@@ -73,8 +73,8 @@ pub fn incompatible_server_detail() -> String {
 }
 
 pub enum Outcome {
-    /// `outdated`: the server is older than the one this app ships, so a
-    /// restart would update it. Optional while it meets `MIN_SERVER_VERSION`.
+    /// `outdated`: the server is not the one this app ships, so a restart
+    /// would replace it. Optional while it meets `MIN_SERVER_VERSION`.
     Connected {
         client: Arc<RpcClient>,
         outdated: bool,
@@ -136,7 +136,8 @@ pub async fn connect(
             }
             Outcome::Connected { client, .. } => {
                 let expected = provision::sha256_file(&server_binary());
-                let outdated = is_outdated(&client, expected.as_deref());
+                let fit = server_version::exact_fit(client.server_semver());
+                let outdated = is_outdated(fit, &client, expected.as_deref());
                 Outcome::Connected { client, outdated }
             }
             blocked => blocked,
@@ -173,7 +174,7 @@ fn log_outcome(target: &Target, elapsed: Duration, outcome: &Outcome) {
                 .server_build()
                 .map_or("unknown", |build| &build[..build.len().min(12)]),
             if *outdated {
-                ", older than the server this app ships"
+                ", not the server this app ships"
             } else {
                 ""
             }
@@ -201,9 +202,9 @@ fn log_outcome(target: &Target, elapsed: Duration, outcome: &Outcome) {
 /// Decided by version, so an app release that leaves the server alone asks
 /// for no restart. Bytes are compared only in debug builds, where `cargo
 /// build` changes the server without changing its version.
-fn is_outdated(client: &RpcClient, expected_build: Option<&str>) -> bool {
-    match server_version::fit(client.server_semver()) {
-        Fit::TooOld | Fit::Older => true,
+fn is_outdated(fit: Fit, client: &RpcClient, expected_build: Option<&str>) -> bool {
+    match fit {
+        Fit::TooOld | Fit::Older | Fit::OtherBuild => true,
         Fit::Current => {
             cfg!(debug_assertions)
                 && expected_build.is_some_and(|expected| client.server_build() != Some(expected))
@@ -360,7 +361,9 @@ pub async fn connect_or_spawn(
 pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
     match ssh_relay_connect(host, app_data_dir).await {
         Ok((client, relay, expected)) => {
-            let outdated = is_outdated(&client, expected.as_deref());
+            // The relay attaches to whatever daemon is already running there.
+            let fit = server_version::exact_fit(client.server_semver());
+            let outdated = is_outdated(fit, &client, expected.as_deref());
             // The relay must live as long as the connection does. It is
             // killed on drop, unlike the local server's deliberate orphan —
             // killing this SSH connection only ends the relay (plan §1), not
