@@ -47,6 +47,7 @@ type Props = {
   open: boolean;
   onClose: () => void;
   initialUrl?: string | null;
+  initialMode?: "clone" | "disk";
   onAdded: (project: Project) => void;
 };
 
@@ -80,16 +81,16 @@ export function AddProjectDialog(props: Props) {
   return props.open ? <AddProjectWizard {...props} /> : null;
 }
 
-function AddProjectWizard({ onClose, initialUrl, onAdded }: Props) {
+function AddProjectWizard({ onClose, initialUrl, initialMode, onAdded }: Props) {
   const bootstrap = useBootstrap();
   const configMissing = bootstrap.data?.config.state === "missing";
 
   const [step, setStep] = useState<1 | 2>(1);
-  const [source, setSource] = useState<RepoSource>({
-    mode: "clone",
-    url: initialUrl ?? "",
-    location: "",
-  });
+  const [source, setSource] = useState<RepoSource>(
+    initialMode === "disk"
+      ? { mode: "disk", path: "" }
+      : { mode: "clone", url: initialUrl ?? "", location: "" },
+  );
   const [user, setUser] = useState("");
   const [initBranch, setInitBranch] = useState("main");
   const [setUpGit, setSetUpGit] = useState(false);

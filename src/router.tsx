@@ -5,8 +5,10 @@ import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
 import type { LibrarySearch } from "./features/library/librarySearch";
 import { RouteError } from "./components/RouteError";
+import { RouteNotFound } from "./components/RouteNotFound";
 import { registerAppNav, type ReviewTab } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
+import type { LaunchStage } from "./lib/domain/stages";
 
 const Onboarding = lazy(() =>
   import("./routes/Onboarding").then((m) => ({ default: m.Onboarding })),
@@ -23,6 +25,9 @@ const PromptsPage = lazy(() =>
 );
 const AgentsPage = lazy(() =>
   import("./routes/AgentsPage").then((m) => ({ default: m.AgentsPage })),
+);
+const PipelinePage = lazy(() =>
+  import("./routes/PipelinePage").then((m) => ({ default: m.PipelinePage })),
 );
 
 function optionalString(value: unknown): string | undefined {
@@ -102,6 +107,12 @@ const agentsRoute = createRoute({
   }),
 });
 
+const pipelineRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/pipeline",
+  component: PipelinePage,
+});
+
 const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/library",
@@ -122,6 +133,7 @@ const libraryRoute = createRoute({
 export type ProjectSearch = {
   item?: string;
   create?: boolean;
+  stage?: LaunchStage;
   review?: ReviewTab;
   reviewFile?: string;
   reviewLine?: number;
@@ -134,6 +146,7 @@ const projectRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
     item: optionalString(search.item),
     create: search.create === true || search.create === "true" || undefined,
+    stage: search.stage === "research" || search.stage === "plan" ? search.stage : undefined,
     review: search.review === "files" || search.review === "plan" ? search.review : undefined,
     reviewFile: optionalString(search.reviewFile),
     reviewLine: optionalLine(search.reviewLine),
@@ -147,6 +160,7 @@ const routeTree = rootRoute.addChildren([
   archiveRoute,
   promptsRoute,
   agentsRoute,
+  pipelineRoute,
   libraryRoute,
   projectRoute,
 ]);
@@ -158,7 +172,11 @@ if (lastHref && lastHref !== "/" && window.location.pathname === "/") {
 
 // Per-route boundaries: without one, a page's render error replaced the whole
 // app, window controls included, with the router's bare fallback.
-export const router = createRouter({ routeTree, defaultErrorComponent: RouteError });
+export const router = createRouter({
+  routeTree,
+  defaultErrorComponent: RouteError,
+  defaultNotFoundComponent: RouteNotFound,
+});
 
 registerAppNav({
   currentLocation: () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Button, PageError } from "@/components/ui";
@@ -10,6 +10,7 @@ import { AddProjectDialog } from "@/features/projects/AddProjectDialog";
 import { DiscoverDialog } from "@/features/dashboard/DiscoverDialog";
 import { buildGraph } from "@/features/dashboard/graph";
 import { useFleet } from "@/features/dashboard/fleet";
+import { FirstRunBlank } from "@/features/dashboard/FirstRunBlank";
 import { KnowledgeGraph } from "@/features/dashboard/KnowledgeGraph";
 import {
   ActivityPanel,
@@ -28,6 +29,7 @@ import {
 } from "@/features/dashboard/Observatory";
 import { stageLabel, stageOf } from "@/lib/domain/stages";
 import { selectAgentTab } from "@/features/search/selectAgentTab";
+import { useSlowNow } from "@/lib/useSlowNow";
 
 const GRAPH_DOC_LIMIT = 200;
 
@@ -51,15 +53,6 @@ const PANEL_SCRIM =
   ].join(", ") +
   ", var(--color-surface) 100%)";
 
-function useSlowNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
 function greetingFor(now: number, name: string | null): string {
   const hour = new Date(now).getHours();
   const day = hour >= 5 && hour < 12 ? "morning" : hour >= 12 && hour < 18 ? "afternoon" : "evening";
@@ -80,7 +73,7 @@ export function Dashboard() {
   const docs = useMemo(() => docsQuery.data?.items ?? [], [docsQuery.data]);
   const graph = useMemo(() => buildGraph(docs), [docs]);
 
-  const [addProject, setAddProject] = useState<{ url: string | null } | null>(null);
+  const [addProject, setAddProject] = useState<{ url: string | null; mode?: "clone" | "disk" } | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
 
   const projectNames = useMemo(
@@ -195,6 +188,26 @@ export function Dashboard() {
       : null;
 
   const thoughtsConfigured = config?.state === "ready" && config.configured;
+
+  if (bootstrap.data && projects.length === 0) {
+    return (
+      <div className="h-full min-h-[560px]">
+        <FirstRunBlank
+          onOpenProject={() => setAddProject({ url: null, mode: "disk" })}
+          onClone={() => setAddProject({ url: null, mode: "clone" })}
+          showFinishSetup={!thoughtsConfigured}
+        />
+        <AddProjectDialog
+          open={addProject !== null}
+          initialUrl={addProject?.url ?? null}
+          initialMode={addProject?.mode}
+          onClose={() => setAddProject(null)}
+          onAdded={openProject}
+        />
+      </div>
+    );
+  }
+
   const firstRun = bootstrap.data !== undefined && !thoughtsConfigured;
   const hasProjects = projects.length > 0;
   const openWizard = () => void navigate({ to: "/onboarding" });
@@ -344,6 +357,7 @@ export function Dashboard() {
       <AddProjectDialog
         open={addProject !== null}
         initialUrl={addProject?.url ?? null}
+        initialMode={addProject?.mode}
         onClose={() => setAddProject(null)}
         onAdded={openProject}
       />

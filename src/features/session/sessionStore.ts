@@ -127,6 +127,8 @@ export type SessionEntry = SessionView & {
   drifted?: boolean;
   queued: QueuedMessage[];
   workingSince: number | null;
+  /** Optional so setEntry's callers needn't supply it; derived on every write. */
+  awaitingSince?: number | null;
   taskStartedAt: Record<string, number>;
   /** Highest log seq in the view; a rewind's reload lowers it, since the rewind reuses seqs. */
   appliedSeq?: number;
@@ -166,8 +168,11 @@ function setEntry(sessionId: string, next: SessionEntry): void {
   useSessionStore.setState((s) => {
     const prev = s.sessions[sessionId];
     const workingSince = nextWorkingSince(prev, next);
+    const awaitingSince = nextAwaitingSince(prev, next);
     const taskStartedAt = nextTaskStartedAt(prev, next);
-    return { sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, taskStartedAt } } };
+    return {
+      sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, awaitingSince, taskStartedAt } },
+    };
   });
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
   if (added) scheduleWatch();
@@ -239,6 +244,11 @@ function nextWorkingSince(prev: SessionEntry | undefined, next: SessionEntry): n
   if (!isWorking(next)) return null;
   const wasWorking = prev ? isWorking(prev) : false;
   return wasWorking ? (prev?.workingSince ?? Date.now()) : Date.now();
+}
+
+function nextAwaitingSince(prev: SessionEntry | undefined, next: SessionEntry): number | null {
+  if (!isAwaiting(next)) return null;
+  return prev && isAwaiting(prev) ? (prev.awaitingSince ?? Date.now()) : Date.now();
 }
 
 // Events can arrive before the command returns the session id.
@@ -1882,15 +1892,17 @@ const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
   "needs-you": 5,
 };
 
-export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
-  if (
+export function isAwaiting(entry: SessionEntry): boolean {
+  return (
     entry.state === "awaiting_permission" ||
     entry.state === "awaiting_question" ||
     hasPendingPermission(entry) ||
     entry.pendingQuestion !== null
-  ) {
-    return "needs-you";
-  }
+  );
+}
+
+export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
+  if (isAwaiting(entry)) return "needs-you";
   if (isWorking(entry)) return "working";
   if (entry.state === "crashed" || entry.state === "spawn_failed") return "error";
   if (entry.state === "completed" || (entry.state === "running" && !entry.streaming)) {

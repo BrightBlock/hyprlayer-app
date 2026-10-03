@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 
 import type { GithubRepo } from "@/lib/bindings";
-import { Field, RefreshButton, Spinner, TextInput } from "@/components/ui";
+import { cx, Field, RefreshButton, Spinner, TextInput } from "@/components/ui";
 import { PathField } from "@/components/PathField";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import { useRecentRepos } from "@/lib/queries";
@@ -16,6 +16,9 @@ type Props = {
   onChange: (next: RepoSource) => void;
   modes?: Array<RepoSource["mode"]>;
   labels?: Partial<Record<RepoSource["mode"], string>>;
+  variant?: "tabs" | "cards";
+  icons?: Partial<Record<RepoSource["mode"], ReactNode>>;
+  descriptions?: Partial<Record<RepoSource["mode"], string>>;
   defaultLocation?: string;
   disabled?: boolean;
   showRecents?: boolean;
@@ -37,6 +40,9 @@ export function RepoSourcePicker({
   onChange,
   modes = ["clone", "disk"],
   labels,
+  variant = "tabs",
+  icons,
+  descriptions,
   defaultLocation = "",
   disabled = false,
   showRecents = true,
@@ -74,7 +80,32 @@ export function RepoSourcePicker({
 
   return (
     <div className="space-y-3">
-      {modes.length > 1 && (
+      {modes.length > 1 && variant === "cards" && (
+        <div className="grid grid-cols-3 gap-2">
+          {modes.map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              disabled={disabled}
+              aria-pressed={value.mode === m}
+              className={cx(
+                "flex flex-col gap-1.5 rounded-card border p-3 text-left disabled:cursor-not-allowed disabled:opacity-50",
+                value.mode === m
+                  ? "border-ink bg-panel ring-1 ring-ink"
+                  : "border-edge bg-panel/90 hover:bg-panel",
+              )}
+            >
+              <span className="flex items-center gap-2 text-body font-semibold text-ink">
+                {icons?.[m]}
+                {labels?.[m] ?? MODE_LABELS[m]}
+              </span>
+              {descriptions?.[m] && <span className="text-ui-sm text-ink-dim">{descriptions[m]}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {modes.length > 1 && variant === "tabs" && (
         <div className="flex gap-1 rounded-lg border border-edge bg-panel p-1 text-body">
           {modes.map((m) => (
             <button

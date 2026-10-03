@@ -4,6 +4,7 @@ import { Badge, Button, Card, Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { errorMessage } from "@/lib/ipc";
+import { IS_MACOS } from "@/lib/platform";
 import {
   useBootstrap,
   useCliInstallMethods,
@@ -12,21 +13,40 @@ import {
   useSetBinaryOverride,
 } from "@/lib/queries";
 import type { CliInstallMethod } from "@/lib/bindings";
-import { Step } from "./StepShell";
+import { CARD_CLASS, CheckDot, Step } from "./StepShell";
 
 const STEP_NUMBER = 2;
-const STEP_TOTAL = 4;
-const TITLE = "Install the Hyprlayer CLI";
+const TITLE = (
+  <>
+    Install the
+    <br />
+    Hyprlayer <em className="italic">CLI.</em>
+  </>
+);
+const LEDE = (
+  <>
+    The app drives every agent through the <span className="font-mono">hyprlayer</span> command. Install it
+    once; the next steps use it to link your agents and your notes.
+  </>
+);
 
-export function CliInstallStep({ onNext }: { onNext: () => void }) {
+export function CliInstallStep({
+  total,
+  onBack,
+  onNext,
+}: {
+  total: number;
+  onBack: () => void;
+  onNext: () => void;
+}) {
   const bootstrap = useBootstrap();
   const hl = bootstrap.data?.binaries.find((b) => b.kind === "hyprlayer");
   const hlOk = hl?.state.state === "ok";
 
   if (bootstrap.isLoading) {
     return (
-      <Step number={STEP_NUMBER} total={STEP_TOTAL} title={TITLE}>
-        <Card className="flex items-center justify-center py-12">
+      <Step number={STEP_NUMBER} total={total} title={TITLE} lede={LEDE} onBack={onBack}>
+        <Card className={`${CARD_CLASS} flex items-center justify-center py-12`}>
           <Spinner />
         </Card>
       </Step>
@@ -36,19 +56,18 @@ export function CliInstallStep({ onNext }: { onNext: () => void }) {
   return (
     <Step
       number={STEP_NUMBER}
-      total={STEP_TOTAL}
+      total={total}
       title={TITLE}
-      footer={
-        <Button variant="primary" onClick={onNext} disabled={!hlOk}>
-          Next
-        </Button>
-      }
+      lede={LEDE}
+      onBack={onBack}
+      onNext={onNext}
+      nextEnabled={hlOk}
     >
       {hlOk ? (
-        <Card className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Icon name="check" size="lg" />
-            <p className="text-body font-medium text-ink">Hyprlayer CLI is installed</p>
+        <Card className={`${CARD_CLASS} space-y-3`}>
+          <div className="flex items-center gap-3">
+            <CheckDot className="bg-ok" />
+            <p className="text-body font-semibold text-ink">Hyprlayer CLI is installed</p>
           </div>
           <p className="text-body text-ink-dim">
             Found {hl?.version ? `v${hl.version}` : "the CLI"}
@@ -91,15 +110,8 @@ function InstallPicker() {
 
   return (
     <div className="space-y-3">
-      <Card>
-        <p className="text-body text-ink-dim">
-          Hyprlayer's command-line tool powers your config, thoughts storage, and the AI setup in
-          the next steps. Install it to continue.
-        </p>
-      </Card>
-
       {installedButMissing && (
-        <Card className="space-y-2 border-warn/40">
+        <Card className={`${CARD_CLASS} space-y-2 border-warn/40`}>
           <p className="text-body text-ink">
             The installer finished, but <span className="text-meta">hyprlayer</span> isn't
             detected yet.
@@ -115,7 +127,7 @@ function InstallPicker() {
         </Card>
       )}
 
-      <Card className="space-y-3">
+      <Card className={`${CARD_CLASS} space-y-3`}>
         {methods.isLoading ? (
           <div className="flex items-center justify-center py-6">
             <Spinner />
@@ -126,20 +138,28 @@ function InstallPicker() {
           </div>
         ) : available.length > 0 ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-body font-medium text-ink">Install with a package manager</p>
+            <div>
+              <p className="text-body font-semibold text-ink">Install with a package manager</p>
+              <p className="mt-0.5 text-ui-sm text-ink-dim">
+                {available.map((m) => m.label).join(", ")} found on this {IS_MACOS ? "Mac" : "computer"}.
+              </p>
+            </div>
             <div className="flex flex-wrap justify-end gap-2">
               {available.map((m) => (
-                <Button key={m.id} variant="primary" onClick={() => install.mutate(m.id)}>
+                <Button key={m.id} variant="primary" className="h-[34px]" onClick={() => install.mutate(m.id)}>
                   Install with {m.label}
                 </Button>
               ))}
             </div>
           </div>
         ) : (
-          <p className="text-body text-ink-dim">
-            No supported package manager was found on your system. Install one of the options below,
-            or point Hyprlayer at an existing install.
-          </p>
+          <>
+            <p className="text-body font-semibold text-ink">Install with a package manager</p>
+            <p className="text-body text-ink-dim">
+              No supported package manager was found on your system. Install one of the options below,
+              or point Hyprlayer at an existing install.
+            </p>
+          </>
         )}
         {install.isError && (
           <p className="selectable break-words text-ui text-bad">
@@ -148,8 +168,8 @@ function InstallPicker() {
         )}
       </Card>
 
-      <Card className="space-y-3">
-        <p className="text-body font-medium text-ink">Or set it up yourself</p>
+      <Card className={`${CARD_CLASS} space-y-3`}>
+        <p className="text-body font-semibold text-ink">Or set it up yourself</p>
         {all.length > 0 && (
           <div className="space-y-2">
             {all.map((m) => (
@@ -159,7 +179,7 @@ function InstallPicker() {
         )}
         <div className="flex items-center gap-2 pt-1">
           <Button onClick={() => void locate()} busy={override.isPending}>
-            Locate existing install…
+            <Icon name="folder" size="sm" /> Locate existing install…
           </Button>
           <span className="text-ui text-ink-dim">
             Already have <span className="font-mono">hyprlayer</span>? Point us at it.
@@ -190,7 +210,7 @@ function CommandRow({ method }: { method: CliInstallMethod }) {
         </p>
       </div>
       <Button onClick={() => trigger(method.command)} className="shrink-0 text-ui">
-        {copied ? "Copied" : "Copy"}
+        <Icon name="copy" size="sm" /> {copied ? "Copied" : "Copy"}
       </Button>
     </div>
   );

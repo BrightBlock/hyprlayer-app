@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 
-import { Badge, DropdownSelect, ErrorNote, Field, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
+import { Badge, cx, DropdownSelect, ErrorNote, Field, MenuItem, Popover, Spinner, TextInput } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { RepoAvatar } from "@/components/RepoAvatar";
 import type { Project, QueryResult } from "@/lib/bindings";
 import { isGitProject } from "@/lib/domain/projects";
-import type { LibrarySearch } from "./librarySearch";
+import { libraryFiltersActive, type LibrarySearch } from "./librarySearch";
 import { formatRelativeTime } from "@/lib/format";
 import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES, STATUS_TONE } from "./constants";
 import { groupDocsByType } from "./docGroups";
@@ -23,6 +23,7 @@ type Props = {
   error: unknown;
   onNewDoc: () => void;
   sync: ThoughtsSyncState;
+  thoughtsConfigured: boolean;
   width: number;
   collapsed: boolean;
 };
@@ -37,11 +38,15 @@ export function LibrarySidebar({
   error,
   onNewDoc,
   sync,
+  thoughtsConfigured,
   width,
   collapsed,
 }: Props) {
   const groups = groupDocsByType(result?.items ?? []);
   const now = Date.now();
+  const filtersActive = libraryFiltersActive(search);
+  const projectName =
+    projects.find((p) => p.thoughtsProject === search.project)?.mappedName ?? search.project;
 
   return (
     <aside
@@ -78,71 +83,86 @@ export function LibrarySidebar({
           onChange={(e) => onUpdate({ q: e.target.value || undefined })}
           placeholder="Filter…"
         />
-        <TypeTabs value={search.type} onChange={(type) => onUpdate({ type })} />
+        <TypeTabs
+          value={search.type}
+          onChange={(type) => onUpdate({ type })}
+          dimmed={result?.total === 0 && !filtersActive}
+        />
         <MoreFilters search={search} onUpdate={onUpdate} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
-        {isError && (
-          <div className="p-3">
-            <ErrorNote error={error} />
-          </div>
+        {!thoughtsConfigured ? (
+          <p className="px-4 py-6 font-mono text-meta text-ink-dim">thoughts isn't set up</p>
+        ) : (
+          <>
+            {isError && (
+              <div className="p-3">
+                <ErrorNote error={error} />
+              </div>
+            )}
+            {isLoading && (
+              <div className="flex justify-center p-8">
+                <Spinner />
+              </div>
+            )}
+            {result && result.items.length === 0 &&
+              (filtersActive ? (
+                <p className="px-4 py-6 text-body text-ink-dim">No documents match the current filters.</p>
+              ) : (
+                <p className="px-4 py-6 font-mono text-meta text-ink-dim">
+                  {projectName ? `no thoughts in ${projectName} yet` : "no thoughts yet"}
+                </p>
+              ))}
+            {groups.map((group) => (
+              <div key={group.type || "untyped"} className="mb-1">
+                <div className="flex items-center justify-between px-4 pb-1 pt-2">
+                  <span className="text-label text-ink-dim/70">
+                    {group.label}
+                  </span>
+                  <span className="text-ui-sm text-ink-dim/50">
+                    {formatRelativeTime(group.newestMs, now).replace(" ago", "")}
+                  </span>
+                </div>
+                {group.docs.map((doc) => {
+                  const selected = search.doc === doc.id;
+                  const subtitle = [doc.project ?? doc.fm.project, doc.fm.author]
+                    .filter(Boolean)
+                    .join(" · ");
+                  const related = doc.fm.related?.length ?? 0;
+                  return (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => onUpdate({ doc: doc.id })}
+                      className={`relative block w-full px-4 py-2 text-left ${
+                        selected ? "bg-accent/15" : "hover:bg-edge/40"
+                      }`}
+                    >
+                      {selected && (
+                        <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />
+                      )}
+                      <p
+                        className={`truncate text-body ${selected ? "font-semibold text-ink" : "font-medium text-ink"}`}
+                      >
+                        {docTitle(doc)}
+                      </p>
+                      {subtitle && (
+                        <p className="mt-0.5 truncate text-ui text-ink-dim">{subtitle}</p>
+                      )}
+                      <div className="mt-1 flex items-center gap-2 text-ui-sm text-ink-dim">
+                        {related > 0 && <span>≡ {related}</span>}
+                        {doc.fm.status && (
+                          <Badge tone={STATUS_TONE[doc.fm.status] ?? "dim"}>{doc.fm.status}</Badge>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </>
         )}
-        {isLoading && (
-          <div className="flex justify-center p-8">
-            <Spinner />
-          </div>
-        )}
-        {result && result.items.length === 0 && (
-          <p className="px-4 py-6 text-body text-ink-dim">No documents match the current filters.</p>
-        )}
-        {groups.map((group) => (
-          <div key={group.type || "untyped"} className="mb-1">
-            <div className="flex items-center justify-between px-4 pb-1 pt-2">
-              <span className="text-label text-ink-dim/70">
-                {group.label}
-              </span>
-              <span className="text-ui-sm text-ink-dim/50">
-                {formatRelativeTime(group.newestMs, now).replace(" ago", "")}
-              </span>
-            </div>
-            {group.docs.map((doc) => {
-              const selected = search.doc === doc.id;
-              const subtitle = [doc.project ?? doc.fm.project, doc.fm.author]
-                .filter(Boolean)
-                .join(" · ");
-              const related = doc.fm.related?.length ?? 0;
-              return (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() => onUpdate({ doc: doc.id })}
-                  className={`relative block w-full px-4 py-2 text-left ${
-                    selected ? "bg-accent/15" : "hover:bg-edge/40"
-                  }`}
-                >
-                  {selected && (
-                    <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />
-                  )}
-                  <p
-                    className={`truncate text-body ${selected ? "font-semibold text-ink" : "font-medium text-ink"}`}
-                  >
-                    {docTitle(doc)}
-                  </p>
-                  {subtitle && (
-                    <p className="mt-0.5 truncate text-ui text-ink-dim">{subtitle}</p>
-                  )}
-                  <div className="mt-1 flex items-center gap-2 text-ui-sm text-ink-dim">
-                    {related > 0 && <span>≡ {related}</span>}
-                    {doc.fm.status && (
-                      <Badge tone={STATUS_TONE[doc.fm.status] ?? "dim"}>{doc.fm.status}</Badge>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        ))}
       </div>
       </div>
     </aside>
@@ -240,9 +260,11 @@ function SwitcherItem({
 function TypeTabs({
   value,
   onChange,
+  dimmed,
 }: {
   value: string | undefined;
   onChange: (type: string | undefined) => void;
+  dimmed?: boolean;
 }) {
   const tab = (label: string, active: boolean, onClick: () => void) => (
     <button
@@ -257,7 +279,7 @@ function TypeTabs({
     </button>
   );
   return (
-    <div className="no-scrollbar flex items-center gap-1 overflow-x-auto">
+    <div className={cx("no-scrollbar flex items-center gap-1 overflow-x-auto", dimmed && "opacity-50")}>
       {tab("All", !value, () => onChange(undefined))}
       {DOC_TYPES.map((t) => tab(t, value === t, () => onChange(t)))}
     </div>

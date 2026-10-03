@@ -346,11 +346,13 @@ real server without a webview.
 `list(Option<String>)`, `save(AgentFile)`, `delete(String)`,
 `new_file_path(String, String, Option<String>)`, `context_files(Option<String>)`,
 `mcp_servers(Option<String>)`, `skills(Option<String>)`,
-`export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
+`harness_counts()`, `export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
 `bundle_versions()`, `repair_bundle()`, `install_bundle_version(Option<String>)`.
 
 The `Option<String>` in most positions is a project path; `None` means the
-user-global scope.
+user-global scope. `harness_counts()` counts each `ai status` platform's `agents/`
+files (`.md`; `.toml` for codex) and `skills/*/SKILL.md` dirs on the server host;
+`agent_files` is its headless test.
 
 ### `PromptService`
 

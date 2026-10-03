@@ -111,6 +111,25 @@
         },
         {
           "evidence": {
+            "claude_matches_disk": true,
+            "platforms": [
+              {
+                "agents": 19,
+                "platformId": "claude",
+                "skills": 14
+              },
+              {
+                "agents": 19,
+                "platformId": "codex",
+                "skills": 14
+              }
+            ]
+          },
+          "guard": "harness counts match the files on disk",
+          "ok": true
+        },
+        {
+          "evidence": {
             "commands": 18
           },
           "guard": "slash commands read from the worktree",

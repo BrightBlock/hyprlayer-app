@@ -232,6 +232,7 @@ export const commands = {
 	agentContextFiles: (projectPath: string | null) => typedError<AgentContextFile[], AppError>(__TAURI_INVOKE("agent_context_files", { projectPath })),
 	agentMcpServers: (projectPath: string | null) => typedError<AgentMcpServer[], AppError>(__TAURI_INVOKE("agent_mcp_servers", { projectPath })),
 	agentSkills: (projectPath: string | null) => typedError<AgentSkill[], AppError>(__TAURI_INVOKE("agent_skills", { projectPath })),
+	agentHarnessCounts: () => typedError<HarnessCounts[], AppError>(__TAURI_INVOKE("agent_harness_counts")),
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
 	updateAgentBundle: () => typedError<AgentBundleReport, AppError>(__TAURI_INVOKE("update_agent_bundle")),
@@ -914,6 +915,12 @@ export type GithubTarget = {
 export type GitignoreTemplate = "node" | "rust" | "python" | "go";
 
 export type Harness = "claude" | "opencode" | "codex";
+
+export type HarnessCounts = {
+	platformId: string,
+	agents: number,
+	skills: number,
+};
 
 export type HealthCheck = {
 	id: string,

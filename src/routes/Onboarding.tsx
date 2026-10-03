@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { BLANK_CTA, BLANK_CTA_SECONDARY } from "@/components/BlankState";
+import { BrandMark, harnessBrand } from "@/components/BrandMark";
 import {
   Button,
   Card,
@@ -10,7 +12,10 @@ import {
   TextInput,
 } from "@/components/ui";
 import { Icon } from "@/components/Icon";
+import { PathField } from "@/components/PathField";
 import {
+  invalidateAgentBundle,
+  useAgentHarnessCounts,
   useAiStatus,
   useBootstrap,
   useDefaultUsername,
@@ -20,16 +25,34 @@ import {
 import { CliUpdateNote } from "@/features/settings/AgentBundleSection";
 import { CliInstallStep } from "@/features/onboarding/CliInstallStep";
 import { SetupTerminal } from "@/features/onboarding/SetupTerminal";
-import { Step } from "@/features/onboarding/StepShell";
+import { CARD_CLASS, CheckDot, Step } from "@/features/onboarding/StepShell";
+import { WizardFrame } from "@/features/onboarding/WizardFrame";
 import { RepoSourcePicker, type RepoSource } from "@/features/projects/RepoSourcePicker";
 import type { ThoughtsSource } from "@/lib/bindings";
+import { plural } from "@/lib/format";
 import { useEscape } from "@/lib/keybindings/registry";
+import { IS_MACOS } from "@/lib/platform";
 import { dismissOnboarding } from "./onboardingState";
 
 const TOTAL_STEPS = 4;
 
+const NAME_OUTCOMES = [
+  "Claude Code and Codex agent workflows linked and ready to use",
+  "A thoughts repository for your project notes and docs",
+  "A dashboard where you can add projects and start coding",
+];
 
-function Step1({
+const AGENTS_TITLE = (
+  <>
+    Your agents,
+    <br />
+    <em className="italic">linked.</em>
+  </>
+);
+const AGENTS_LEDE =
+  "Hyprlayer's agents, skills and commands are installed once and shared by Claude Code and Codex, so either harness can run the same workflows.";
+
+function NameStep({
   user,
   onChange,
   onNext,
@@ -42,34 +65,25 @@ function Step1({
     <Step
       number={1}
       total={TOTAL_STEPS}
-      title="Welcome to Hyprlayer"
-      footer={
-        <Button
-          variant="primary"
-          onClick={onNext}
-          disabled={!user.trim()}
-        >
-          Next
-        </Button>
+      title={
+        <>
+          Welcome to
+          <br />
+          <em className="italic">Hyprlayer.</em>
+        </>
       }
+      lede="This takes about two minutes. You'll end up with:"
+      onNext={onNext}
+      nextEnabled={!!user.trim()}
     >
-      <Card className="space-y-4">
-        <p className="text-body text-ink-dim">
-          This takes about two minutes. You'll end up with:
-        </p>
-        <ul className="space-y-1 text-body text-ink-dim">
-          <li className="flex items-center gap-2">
-            <Icon name="check" size="xs" />
-            Claude Code and Codex agent workflows linked and ready to use
-          </li>
-          <li className="flex items-center gap-2">
-            <Icon name="check" size="xs" />
-            A thoughts repository for your project notes and docs
-          </li>
-          <li className="flex items-center gap-2">
-            <Icon name="check" size="xs" />
-            A dashboard where you can add projects and start coding
-          </li>
+      <Card className={CARD_CLASS}>
+        <ul className="mb-5 space-y-2.5">
+          {NAME_OUTCOMES.map((outcome) => (
+            <li key={outcome} className="flex items-center gap-3 text-body text-ink-2">
+              <CheckDot className="bg-ink" />
+              {outcome}
+            </li>
+          ))}
         </ul>
         <Field label="Your name">
           <TextInput
@@ -77,6 +91,7 @@ function Step1({
             onChange={(e) => onChange(e.target.value)}
             placeholder="e.g. alice"
             autoFocus
+            className="w-80"
             onKeyDown={(e) => {
               if (e.key === "Enter" && user.trim()) onNext();
             }}
@@ -96,26 +111,25 @@ type AiPhase =
   | { kind: "running" }
   | { kind: "checking" };
 
-function Step2({ onNext }: { onNext: () => void }) {
+function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   const aiStatus = useAiStatus();
+  const counts = useAgentHarnessCounts();
   const isInstalled = aiStatus.data?.installed ?? false;
   const platforms = aiStatus.data?.platforms ?? [];
-  const agentPaths = platforms
-    .map((platform) => platform.location)
-    .filter((location): location is string => !!location);
 
   const [phase, setPhase] = useState<AiPhase>({ kind: "idle" });
   const startRepair = () => setPhase({ kind: "running" });
 
   const handleExit = (_code: number | null) => {
     setPhase({ kind: "checking" });
+    invalidateAgentBundle();
     void aiStatus.refetch().finally(() => setPhase({ kind: "idle" }));
   };
 
   if (aiStatus.isLoading) {
     return (
-      <Step number={3} total={TOTAL_STEPS} title="AI agents">
-        <Card className="flex items-center justify-center gap-2 py-12 text-body text-ink-dim">
+      <Step number={3} total={TOTAL_STEPS} title={AGENTS_TITLE} lede={AGENTS_LEDE} onBack={onBack}>
+        <Card className={`${CARD_CLASS} flex items-center justify-center gap-2 py-12 text-body text-ink-dim`}>
           <Spinner /> Setting up Claude Code and Codex agents…
         </Card>
       </Step>
@@ -127,15 +141,14 @@ function Step2({ onNext }: { onNext: () => void }) {
       <Step
         number={3}
         total={TOTAL_STEPS}
-        title="AI agents"
-        footer={
-          <Button variant="primary" disabled>
-            Next
-          </Button>
-        }
+        title={AGENTS_TITLE}
+        lede={AGENTS_LEDE}
+        onBack={onBack}
+        onNext={onNext}
+        nextEnabled={false}
       >
         <div className="space-y-3">
-          <Card>
+          <Card className={CARD_CLASS}>
             <p className="text-body text-ink-dim">
               Repairing the shared Claude Code and Codex agent installation. This step checks the
               result when the command finishes.
@@ -157,46 +170,64 @@ function Step2({ onNext }: { onNext: () => void }) {
     <Step
       number={3}
       total={TOTAL_STEPS}
-      title="AI agents"
-      footer={
-        <Button variant="primary" onClick={onNext} disabled={!isInstalled}>
-          Next
-        </Button>
-      }
+      title={AGENTS_TITLE}
+      lede={AGENTS_LEDE}
+      onBack={onBack}
+      onNext={onNext}
+      nextEnabled={isInstalled}
     >
       {phase.kind === "checking" ? (
-        <Card className="flex items-center justify-center gap-2 py-12 text-body text-ink-dim">
+        <Card className={`${CARD_CLASS} flex items-center justify-center gap-2 py-12 text-body text-ink-dim`}>
           <Spinner size="sm" /> Checking status…
         </Card>
       ) : isInstalled ? (
-        <Card className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Icon name="check" size="lg" />
-            <p className="text-body font-medium text-ink">
-              Claude Code and Codex agents are ready
-            </p>
+        <Card className={CARD_CLASS}>
+          <div className="flex items-center gap-3 pb-3.5">
+            <CheckDot className="bg-ok" />
+            <p className="text-body font-semibold text-ink">Claude Code and Codex agents are ready</p>
           </div>
-          {agentPaths.length > 0 ? (
-            <p className="text-ui text-ink-dim">
-              {agentPaths.map((location, i) => (
-                <span key={location}>
-                  {i > 0 && " · "}
-                  <span className="font-mono">{location}</span>
-                </span>
-              ))}
-            </p>
+          {platforms.length > 0 ? (
+            platforms.map((p) => {
+              const count = counts.data?.find((c) => c.platformId === p.id);
+              return (
+                <div key={p.id ?? p.name} className="flex items-center gap-3 border-t border-edge-2 py-2.5">
+                  <BrandMark brand={harnessBrand(p.id)} size="sm" />
+                  <span className="w-[104px] text-body font-semibold text-ink">{p.name}</span>
+                  {p.location && (
+                    <span className="selectable flex-1 font-mono text-meta text-ink-dim">
+                      {`${p.location.replace(/\/+$/, "")}/agents`}
+                    </span>
+                  )}
+                  {count && (
+                    <span className="text-meta text-ink-dim">
+                      {plural(count.agents, "agent")} · {plural(count.skills, "skill")}
+                    </span>
+                  )}
+                  {p.installed ? (
+                    <Icon name="check" size="sm" className="text-ok" />
+                  ) : (
+                    <Icon name="warning" size="sm" className="text-warn-ink" />
+                  )}
+                </div>
+              );
+            })
           ) : (
-            <p className="text-ui text-ink-dim">
+            <p className="border-t border-edge-2 py-2.5 text-ui text-ink-dim">
               {aiStatus.data?.agentTool ?? "Agent files"} reported ready. Update the Hyprlayer CLI
               to see separate Claude Code and Codex link status.
             </p>
           )}
-          <Button type="button" onClick={startRepair} className="text-body">
-            Repair installation
-          </Button>
+          <div className="flex items-center gap-3 border-t border-edge-2 pt-3.5">
+            <Button type="button" onClick={startRepair}>
+              <Icon name="tool" size="sm" /> Repair installation
+            </Button>
+            <span className="text-ui-sm text-ink-dim">
+              Re-links the shared install if an agent goes missing.
+            </span>
+          </div>
         </Card>
       ) : (
-        <Card className="space-y-3">
+        <Card className={`${CARD_CLASS} space-y-3`}>
           <p className="text-body text-ink-dim">
             Automatic setup did not finish. Repair the shared installation to link Hyprlayer's
             agents into both Claude Code and Codex.
@@ -213,7 +244,7 @@ function Step2({ onNext }: { onNext: () => void }) {
 }
 
 
-function Step3({ user }: { user: string }) {
+function ThoughtsStep({ user, onBack }: { user: string; onBack: () => void }) {
   const navigate = useNavigate();
   const bootstrap = useBootstrap();
   const initThoughts = useInitThoughtsRepo();
@@ -271,11 +302,20 @@ function Step3({ user }: { user: string }) {
     <Step
       number={4}
       total={TOTAL_STEPS}
-      title="Your thoughts repository"
+      title={
+        <>
+          Where your
+          <br />
+          <em className="italic">thoughts</em> live.
+        </>
+      }
+      lede="Hyprlayer stores your project notes, plans, and research in a git repository."
+      onBack={onBack}
       footer={
         <>
           <Button
             type="button"
+            className={BLANK_CTA_SECONDARY}
             onClick={() => {
               dismissOnboarding();
               void navigate({ to: "/" });
@@ -286,6 +326,7 @@ function Step3({ user }: { user: string }) {
           </Button>
           <Button
             variant="primary"
+            className={BLANK_CTA}
             onClick={() => void submit()}
             busy={initThoughts.isPending}
             disabled={!canSubmit || initThoughts.isPending}
@@ -296,27 +337,22 @@ function Step3({ user }: { user: string }) {
       }
     >
       <div className="space-y-3">
-        <Card>
-          <p className="text-body text-ink-dim">
-            Hyprlayer stores your project notes, plans, and research in a git repository.
+        {alreadyConfigured ? (
+          <p className="text-ui text-ink">
+            <Icon name="check" size="sm" className="mr-1 inline align-[-2px]" />
+            Your thoughts repository is already set up. Keep it, or select a different one below
+            and Hyprlayer will switch to it.
           </p>
-          {alreadyConfigured ? (
-            <p className="mt-2 text-body text-ink">
+        ) : (
+          foundExisting &&
+          source?.mode === "disk" && (
+            <p className="text-ui text-ink">
               <Icon name="check" size="sm" className="mr-1 inline align-[-2px]" />
-              Your thoughts repository is already set up. Keep it, or select a
-              different one below and Hyprlayer will switch to it.
+              Using the existing thoughts repo at{" "}
+              <span className="break-all text-meta">{defaultLocation}</span>.
             </p>
-          ) : (
-            foundExisting &&
-            source?.mode === "disk" && (
-              <p className="mt-2 text-body text-ink">
-                <Icon name="check" size="sm" className="mr-1 inline align-[-2px]" />
-                Using the existing thoughts repo at{" "}
-                <span className="break-all text-meta">{defaultLocation}</span>.
-              </p>
-            )
-          )}
-        </Card>
+          )
+        )}
         {source == null ? (
           <div className="flex justify-center py-6">
             <Spinner />
@@ -326,13 +362,44 @@ function Step3({ user }: { user: string }) {
             value={source}
             onChange={setSource}
             modes={["create", "clone", "disk"]}
+            variant="cards"
             labels={{
               create: "Create new",
               clone: "Clone from GitHub",
               disk: "Open existing folder",
             }}
+            icons={{
+              create: <Icon name="circlePlus" size="sm" />,
+              clone: <BrandMark brand="github" size="sm" />,
+              disk: <Icon name="folder" size="sm" />,
+            }}
+            descriptions={{
+              create: "Start an empty git repo for your notes",
+              clone: "Pull an existing thoughts repo",
+              disk: `Use a repo already on this ${IS_MACOS ? "Mac" : "computer"}`,
+            }}
             defaultLocation={defaultLocation}
             disabled={initThoughts.isPending}
+            createSlot={
+              source.mode === "create" && (
+                <Card className={CARD_CLASS}>
+                  <Field label="Location">
+                    <PathField
+                      value={source.path}
+                      onChange={(path) => setSource({ mode: "create", path })}
+                      placeholder="~/thoughts"
+                      autoFocus
+                      disabled={initThoughts.isPending}
+                      browseTitle="Choose where to create the repo"
+                    />
+                  </Field>
+                  <p className="mt-2 text-ui-sm text-ink-dim">
+                    Each project gets a folder here. Plans, research and handoffs are plain markdown
+                    you can read, diff and push without the app.
+                  </p>
+                </Card>
+              )
+            }
           />
         )}
         {initThoughts.error != null && (
@@ -365,39 +432,11 @@ export function Onboarding() {
   useEscape(exit);
 
   return (
-    <div className="flex min-h-screen items-start justify-center bg-surface px-4 py-12">
-      <div className="w-full max-w-xl">
-        {step > 1 && (
-          <div className="mb-4 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setStep((s) => (s - 1) as 1 | 2 | 3 | 4)}
-              className="inline-flex items-center gap-1 text-ui text-ink-dim hover:text-ink"
-            >
-              <Icon name="chevronLeft" size="sm" /> Back
-            </button>
-            <button
-              type="button"
-              onClick={exit}
-              className="text-ui text-ink-dim hover:text-ink"
-            >
-              Exit setup
-            </button>
-          </div>
-        )}
-        <div key={step} className="animate-step-in">
-          {step === 1 && (
-            <Step1
-              user={user}
-              onChange={setUser}
-              onNext={() => setStep(2)}
-            />
-          )}
-          {step === 2 && <CliInstallStep onNext={() => setStep(3)} />}
-          {step === 3 && <Step2 onNext={() => setStep(4)} />}
-          {step === 4 && <Step3 user={user} />}
-        </div>
-      </div>
-    </div>
+    <WizardFrame step={step} onExit={exit}>
+      {step === 1 && <NameStep user={user} onChange={setUser} onNext={() => setStep(2)} />}
+      {step === 2 && <CliInstallStep total={TOTAL_STEPS} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 3 && <AgentsStep onBack={() => setStep(2)} onNext={() => setStep(4)} />}
+      {step === 4 && <ThoughtsStep user={user} onBack={() => setStep(3)} />}
+    </WizardFrame>
   );
 }

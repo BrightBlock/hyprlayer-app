@@ -24,7 +24,7 @@ type Props = {
   projectPath: string;
   open: boolean;
   onClose: () => void;
-  onCreated: (view: WorkstreamView) => void;
+  onCreated: (view: WorkstreamView, created?: boolean) => void;
   folder?: boolean;
 };
 
@@ -217,7 +217,7 @@ export function CreateWorkstreamDialog({
         onSuccess: (view) => {
           reset();
           onClose();
-          onCreated(view);
+          onCreated(view, true);
         },
       },
     );

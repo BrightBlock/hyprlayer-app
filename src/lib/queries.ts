@@ -667,6 +667,12 @@ export function useSetWorkstreamStage(projectPath: string) {
   });
 }
 
+// No optimistic cancel: the create's list refetch must land, or ProjectPage drops the new selection.
+export async function setNewWorkstreamStage(id: string, stage: Stage): Promise<void> {
+  await unwrap(commands.setWorkstreamStage(id, stage));
+  invalidateWorkstreamLists();
+}
+
 export function useArchiveWorkstream() {
   return useMutation({
     mutationFn: ({ id, skipScripts = false }: { id: string; skipScripts?: boolean }) =>
@@ -1097,6 +1103,16 @@ export function useAgentSkills(projectPath: string | null) {
   });
 }
 
+// An older server rejects the command; callers hide counts on error.
+export function useAgentHarnessCounts() {
+  return useQuery({
+    queryKey: ["agent-harness-counts"],
+    queryFn: () => unwrap(commands.agentHarnessCounts()),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
 export function useAgentBundle(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ["agent-bundle"],
@@ -1137,6 +1153,7 @@ export function invalidateAgentBundle() {
   invalidateCliBundleState();
   void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-harness-counts"] });
 }
 
 export function useProbeDefaultThoughts() {

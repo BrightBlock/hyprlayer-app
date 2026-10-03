@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use hyprlayer_core::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
+use hyprlayer_core::agents::{
+    AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
+};
 use hyprlayer_core::branch_prefix::{self, BranchPrefix};
 use hyprlayer_core::claude::ClaudeProbe;
 use hyprlayer_core::codex::CodexProbe;
@@ -2060,6 +2062,10 @@ impl Dispatch for Server {
         project_path: Option<String>,
     ) -> Result<Vec<AgentSkill>, WireError> {
         self.runtime.agents().skills(project_path).await.wire()
+    }
+
+    async fn agent_harness_counts(&self) -> Result<Vec<HarnessCounts>, WireError> {
+        self.runtime.agents().harness_counts().await.wire()
     }
 
     async fn export_agent_file(

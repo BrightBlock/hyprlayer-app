@@ -88,7 +88,7 @@ import {
   type Attachment,
 } from "@/features/session/attachments";
 import { isFolderWorkstream, isGitProject } from "@/lib/domain/projects";
-import { nextModeStage, stageLabel, type StageKey } from "@/lib/domain/stages";
+import { nextModeStage, stageLabel, type LaunchStage, type StageKey } from "@/lib/domain/stages";
 import {
   activeShellIn,
   appendShell,
@@ -106,6 +106,7 @@ import {
   paneShells,
   removeShellState,
   requestComposerFocus,
+  seedWorkstreamMode,
   selectLastTab,
   selectTabAt,
   setFocusedPane,
@@ -136,8 +137,15 @@ import {
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectBoard } from "@/features/board/ProjectBoard";
+import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
-import { useBootstrap, useDetachPr, useSetWorkstreamStage, useWorkstreams } from "@/lib/queries";
+import {
+  setNewWorkstreamStage,
+  useBootstrap,
+  useDetachPr,
+  useSetWorkstreamStage,
+  useWorkstreams,
+} from "@/lib/queries";
 import { basename } from "@/lib/path";
 import { shortSha } from "@/lib/format";
 import { canSplitExtent, drawerWidth, splitPaneFloor } from "@/lib/layout";
@@ -327,6 +335,7 @@ export function ProjectPage() {
     null,
   );
   const [createOpen, setCreateOpen] = useState(false);
+  const [pendingStage, setPendingStage] = useState<LaunchStage>();
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
     null,
   );
@@ -360,8 +369,9 @@ export function ProjectPage() {
   useEffect(() => {
     if (search.create) {
       setCreateOpen(true);
+      setPendingStage(search.stage);
       void navigate({
-        search: (prev) => ({ ...prev, create: undefined }),
+        search: (prev) => ({ ...prev, create: undefined, stage: undefined }),
         replace: true,
       });
     }
@@ -372,6 +382,8 @@ export function ProjectPage() {
   const showAside = narrow ? narrowDrawer === "diff" : !diffHidden;
   const asideWidth = narrow ? drawerWidth(diffWidth, paneWidth) : diffWidth;
   const showBoard = selectedId === undefined;
+  // ProjectCommands registers ws.new only in the workspace branch.
+  useCommand("ws.new", showBoard ? () => setCreateOpen(true) : null);
 
   useEffect(() => {
     if (selectedId === undefined) return;
@@ -824,6 +836,18 @@ export function ProjectPage() {
       replace: true,
     });
   };
+  // The dialog calls onClose() before onCreated(); this closure keeps the render's pendingStage, so a ref would lose it.
+  const onCreated = (view: WorkstreamView, created?: boolean) => {
+    if (created && pendingStage) {
+      seedWorkstreamMode(view.item.id, pendingStage);
+      void setNewWorkstreamStage(view.item.id, pendingStage);
+    }
+    selectItem(view.item.id);
+  };
+  const closeCreate = () => {
+    setCreateOpen(false);
+    setPendingStage(undefined);
+  };
   const reviewable = !!activeView && !isFolderWorkstream(activeView);
   const reviewing = reviewable && !!search.review;
   const openReview = () => {
@@ -1220,10 +1244,12 @@ export function ProjectPage() {
     return (
       <>
         <ProjectBoard
+          projectPath={projectPath}
           views={views}
           folder={folderProject}
           onOpen={(id) => selectItem(id)}
           onNewWorkstream={() => setCreateOpen(true)}
+          onRestore={openArchivedWorktrees}
           onCardContextMenu={
             folderProject ? undefined : (view, x, y) => setCardMenu({ x, y, view })
           }
@@ -1255,8 +1281,8 @@ export function ProjectPage() {
           projectPath={projectPath}
           folder={folderProject}
           open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          onCreated={(view) => selectItem(view.item.id)}
+          onClose={closeCreate}
+          onCreated={onCreated}
         />
       </>
     );
@@ -1733,8 +1759,8 @@ export function ProjectPage() {
         projectPath={projectPath}
         folder={folderProject}
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={(view) => selectItem(view.item.id)}
+        onClose={closeCreate}
+        onCreated={onCreated}
       />
 
       <Dialog

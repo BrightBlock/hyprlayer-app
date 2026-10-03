@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::docs::frontmatter::{extract_block, patch_frontmatter, FmPatch, FmValue};
 use crate::error::Result;
+use crate::hyprcli::AiPlatformStatus;
 
 const MAX_AGENT_BYTES: u64 = 1024 * 1024;
 
@@ -36,6 +37,45 @@ pub struct AgentFile {
     pub updated_at: Option<f64>,
     pub shipped_path: Option<String>,
     pub modified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessCounts {
+    pub platform_id: String,
+    pub agents: u32,
+    pub skills: u32,
+}
+
+// Codex agents are TOML; Claude's are markdown.
+pub fn harness_counts(platforms: &[AiPlatformStatus], home: &Path) -> Vec<HarnessCounts> {
+    platforms
+        .iter()
+        .filter_map(|p| {
+            let root = crate::agent_bundle::expand_tilde(p.location.as_deref()?, Some(home));
+            let ext = if p.id == "codex" { "toml" } else { "md" };
+            Some(HarnessCounts {
+                platform_id: p.id.clone(),
+                agents: count_files(&root.join("agents"), ext),
+                skills: crate::skills::skill_count(&root.join("skills")),
+            })
+        })
+        .collect()
+}
+
+fn count_files(dir: &Path, ext: &str) -> u32 {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| {
+                    let path = e.path();
+                    path.is_file() && path.extension().is_some_and(|x| x == ext)
+                })
+                .count() as u32
+        })
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

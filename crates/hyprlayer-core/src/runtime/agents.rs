@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::agent_bundle::{self, BundleSource, CollisionReport};
-use crate::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
+use crate::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts};
 use crate::error::{CoreError, Result};
 use crate::hyprcli::{AiVersions, BundleSelection, HyprCli};
 use crate::skills::AgentSkill;
@@ -175,6 +175,15 @@ impl AgentService<'_> {
             ))
         })
         .await
+    }
+
+    pub async fn harness_counts(&self) -> Result<Vec<HarnessCounts>> {
+        ensure_running(self.runtime)?;
+        let home = self.home();
+        let status = HyprCli::new(&self.runtime.binaries)
+            .ai_status(&home)
+            .await?;
+        blocking(move || Ok(crate::agents::harness_counts(&status.platforms, &home))).await
     }
 
     pub async fn export(&self, agent: AgentFile, overlay: AgentOverlay) -> Result<String> {

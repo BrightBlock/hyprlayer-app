@@ -96,7 +96,7 @@ pub fn is_manageable_pair(status: &AiStatus) -> bool {
         })
 }
 
-fn expand_tilde(path: &str, home: Option<&Path>) -> std::path::PathBuf {
+pub(crate) fn expand_tilde(path: &str, home: Option<&Path>) -> std::path::PathBuf {
     let expanded = shellexpand::tilde_with_context(path, || home.and_then(Path::to_str));
     std::path::PathBuf::from(expanded.as_ref())
 }

@@ -5,6 +5,7 @@ import { EmptyState } from "@/components/ui";
 import { CreateDocDialog } from "@/features/library/CreateDocDialog";
 import { docQueryFromSearch } from "@/features/library/DocFilters";
 import { DocDetail } from "@/features/library/DocDetail";
+import { LibraryBlank } from "@/features/library/LibraryBlank";
 import { LibrarySidebar } from "@/features/library/LibrarySidebar";
 import { resolveSyncProjectPath } from "@/features/library/thoughtsSync";
 import { useThoughtsSync } from "@/features/library/useThoughtsSync";
@@ -14,12 +15,15 @@ import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
 import { startEdgeDrag } from "@/lib/resize";
 import { useViewport } from "@/lib/useViewport";
 import { useCommand } from "@/lib/keybindings/registry";
-import type { LibrarySearch } from "@/features/library/librarySearch";
+import { libraryFiltersActive, type LibrarySearch } from "@/features/library/librarySearch";
 
 export function LibraryPage() {
   const search = useSearch({ from: "/library" });
   const navigate = useNavigate({ from: "/library" });
   const bootstrap = useBootstrap();
+  const config = bootstrap.data?.config;
+  // Assume configured until bootstrap lands so "Set up thoughts" never flashes.
+  const thoughtsConfigured = bootstrap.data === undefined || (config?.state === "ready" && config.configured);
   const [createOpen, setCreateOpen] = useState(false);
 
   useCommand("doc.new", () => setCreateOpen(true));
@@ -39,9 +43,8 @@ export function LibraryPage() {
   }, [search, setLastSearch, setProjectSearch]);
 
   const lastProject = useLibraryScope((s) => s.lastProject);
-  const thoughtsSync = useThoughtsSync(
-    resolveSyncProjectPath(search, lastProject, bootstrap.data?.projects ?? []),
-  );
+  const targetProject = resolveSyncProjectPath(search, lastProject, bootstrap.data?.projects ?? []);
+  const thoughtsSync = useThoughtsSync(targetProject);
 
   const libraryWidth = useUiStore((s) => s.libraryWidth);
   const setLibraryWidth = useUiStore((s) => s.setLibraryWidth);
@@ -66,6 +69,7 @@ export function LibraryPage() {
         error={docs.error}
         onNewDoc={() => setCreateOpen(true)}
         sync={thoughtsSync}
+        thoughtsConfigured={thoughtsConfigured}
         width={narrow ? SIDE_PANEL_MIN : libraryWidth}
         collapsed={libraryCollapsed}
       />
@@ -91,6 +95,12 @@ export function LibraryPage() {
       <section className="min-w-0 flex-1">
         {search.doc ? (
           <DocDetail id={search.doc} />
+        ) : !thoughtsConfigured || (docs.data?.total === 0 && !libraryFiltersActive(search)) ? (
+          <LibraryBlank
+            thoughtsConfigured={thoughtsConfigured}
+            targetProject={targetProject}
+            onNewNote={() => setCreateOpen(true)}
+          />
         ) : (
           <EmptyState title="Select a document" />
         )}

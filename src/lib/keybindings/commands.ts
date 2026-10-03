@@ -124,6 +124,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+0", other: "mod+0" },
   },
   {
+    id: "project.open",
+    label: "Open Project",
+    category: "Workspace",
+    when: "always",
+    defaults: { mac: "mod+o", other: "mod+o" },
+  },
+  {
     id: "tab.new",
     label: "New Agent Tab",
     category: "Workspace",

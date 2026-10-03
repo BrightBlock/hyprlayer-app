@@ -12,7 +12,7 @@ import type {
 } from "react";
 
 import { errorMessage, errorRemedy } from "@/lib/ipc";
-import { formatChord } from "@/lib/keybindings/chord";
+import { formatChord, type Chord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -48,6 +48,17 @@ export function ChordHint({ chord, className }: { chord: string; className?: str
     >
       {formatChord(chord, IS_MACOS)}
     </kbd>
+  );
+}
+
+const KBD_CHIP = "inline-flex items-center rounded-control border border-edge bg-panel/70 px-1.5 py-0.5 text-meta text-ink-dim";
+
+export function Kbd({ chord, children, className }: { chord?: Chord | null; children?: ReactNode; className?: string }) {
+  if (chord === null) return null;
+  return chord ? (
+    <ChordHint chord={chord} className={cx(KBD_CHIP, className)} />
+  ) : (
+    <kbd className={cx(KBD_CHIP, className)}>{children}</kbd>
   );
 }
 

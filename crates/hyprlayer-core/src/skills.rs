@@ -278,6 +278,10 @@ fn scan_skills(dir: &Path) -> Vec<SkillEntry> {
     out
 }
 
+pub(crate) fn skill_count(dir: &Path) -> u32 {
+    scan_skills(dir).len() as u32
+}
+
 fn collect_skills(dir: &Path, source: &str, out: &mut Vec<SlashCommand>) {
     for entry in scan_skills(dir) {
         let name = entry.declared.unwrap_or(entry.dir);

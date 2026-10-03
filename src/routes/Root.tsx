@@ -56,6 +56,8 @@ import {
   PROJECT_SIDEBAR_DEFAULT,
   PROJECT_SIDEBAR_MAX,
   PROJECT_SIDEBAR_MIN,
+  TITLEBAR_INSET,
+  TITLEBAR_INSET_LIGHTS,
 } from "@/lib/layout";
 import { IS_MACOS } from "@/lib/platform";
 import { dragRegion } from "@/lib/dragRegion";
@@ -153,8 +155,9 @@ import { useLastRoute } from "@/lib/lastRoute";
 
 const EMPTY_OVERRIDES: Overrides = {};
 
-const LEFT_CLUSTER_WITH_LIGHTS = 92;
-const LEFT_CLUSTER_NO_LIGHTS = 12;
+// Unregistering would let ⌘, reach the native menu and Ctrl+P reach WebView2's print UI; only a running handler preventDefaults.
+const SWALLOW = () => {};
+
 const LEFT_CLUSTER_ICON = 28;
 const LEFT_CLUSTER_GAP = 4;
 // macOS app icons pad their art ~10% per side; 20px shows ~16px, matching the md icon tier.
@@ -184,6 +187,7 @@ function routeSection(pathname: string): string {
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/prompts")) return "Prompt Library";
   if (pathname.startsWith("/agents")) return "Agents";
+  if (pathname.startsWith("/pipeline")) return "Pipeline";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/onboarding")) return "Setup";
   if (pathname === "/") return "Home";
@@ -419,7 +423,9 @@ export function Root() {
   const onPrompts = pathname.startsWith("/prompts");
   const onSettings = pathname.startsWith("/settings");
   const onAgents = pathname.startsWith("/agents");
-  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents;
+  const onOnboarding = pathname.startsWith("/onboarding");
+  const onPipeline = pathname.startsWith("/pipeline");
+  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
     const open = useUiStore.getState().narrowDrawer;
@@ -530,7 +536,7 @@ export function Root() {
     else fallback();
   };
   const toggleNav = (
-    target: "/library" | "/prompts" | "/agents",
+    target: "/library" | "/prompts" | "/agents" | "/pipeline",
   ) => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
@@ -617,7 +623,7 @@ export function Root() {
   );
   const detachPr = useDetachPr();
   const reprovision = useReprovisionWorkstream();
-  const [addProjectOpen, setAddProjectOpen] = useState(false);
+  const [addProjectMode, setAddProjectMode] = useState<"clone" | "disk" | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     x: number;
     y: number;
@@ -675,11 +681,11 @@ export function Root() {
     ? !libraryCollapsed
     : onAgents
       ? !agentsCollapsed
-      : onPrompts || onSettings
+      : onPrompts || onSettings || onPipeline
         ? true
         : projectSidebarShown;
   const toggleSidebar = () => {
-    if (onPrompts || onSettings) return;
+    if (onPrompts || onSettings || onPipeline) return;
     if (onLibrary) toggleLibrary();
     else if (onAgents) toggleAgents();
     else if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
@@ -689,8 +695,8 @@ export function Root() {
   const isFullscreen = useIsFullscreen();
   const macTrafficLights = IS_MACOS && !isFullscreen;
   const leftClusterLeft = macTrafficLights
-    ? LEFT_CLUSTER_WITH_LIGHTS
-    : LEFT_CLUSTER_NO_LIGHTS;
+    ? TITLEBAR_INSET_LIGHTS
+    : TITLEBAR_INSET;
   const leftClusterIcons =
     (IS_MACOS ? 0 : 1) + 1 + (currentProject && isGitProject(currentProject) ? 1 : 0);
   const leftClusterRight =
@@ -720,17 +726,20 @@ export function Root() {
   useKeybindings(
     bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
   );
-  useCommand("nav.dashboard", () => void navigate({ to: "/" }));
-  useCommand("nav.library", () => toggleNav("/library"));
-  useCommand("nav.settings", toggleSettingsPopover);
+  useCommand("nav.dashboard", onOnboarding ? SWALLOW : () => void navigate({ to: "/" }));
+  useCommand("nav.library", onOnboarding ? SWALLOW : () => toggleNav("/library"));
+  useCommand("nav.settings", onOnboarding ? SWALLOW : toggleSettingsPopover);
   useCommand(
     "nav.projectDocs",
-    currentProject && isGitProject(currentProject)
-      ? () => openProjectDocs(currentProject)
-      : null,
+    onOnboarding
+      ? SWALLOW
+      : currentProject && isGitProject(currentProject)
+        ? () => openProjectDocs(currentProject)
+        : null,
   );
   useCommand("nav.back", canGoBack ? () => router.history.back() : null);
-  useCommand("view.toggleProjectSidebar", toggleSidebar);
+  useCommand("view.toggleProjectSidebar", onOnboarding ? SWALLOW : toggleSidebar);
+  useCommand("project.open", onOnboarding ? null : () => setAddProjectMode("disk"));
   useCommand("terminal.open", scriptsActiveWs ? toggleScriptsDock : null);
   useCommand(
     "terminal.toggleFullscreen",
@@ -738,7 +747,7 @@ export function Root() {
   );
   useCommand(
     "view.toggleChangesSidebar",
-    currentSection === "Agent" ? toggleDiffOrDrawer : null,
+    onOnboarding ? SWALLOW : currentSection === "Agent" ? toggleDiffOrDrawer : null,
   );
   useCommand(
     "ws.commit",
@@ -748,18 +757,28 @@ export function Root() {
     "ws.ship",
     gitActions.canShip && !gitActions.shipping ? gitActions.doShip : null,
   );
-  useCommand("search.open", () => {
-    closeSettingsPopover();
-    closeArchivedWorktrees();
-    closeAgentSessions();
-    toggleSearch();
-  });
-  useCommand("prompts.palette", () => {
-    closeSettingsPopover();
-    closeArchivedWorktrees();
-    closeAgentSessions();
-    togglePromptPalette();
-  });
+  useCommand(
+    "search.open",
+    onOnboarding
+      ? SWALLOW
+      : () => {
+          closeSettingsPopover();
+          closeArchivedWorktrees();
+          closeAgentSessions();
+          toggleSearch();
+        },
+  );
+  useCommand(
+    "prompts.palette",
+    onOnboarding
+      ? SWALLOW
+      : () => {
+          closeSettingsPopover();
+          closeArchivedWorktrees();
+          closeAgentSessions();
+          togglePromptPalette();
+        },
+  );
   useAppZoomCommands();
   usePromptHotkeys(activeWorkstream ?? null);
   useEscape(
@@ -769,6 +788,9 @@ export function Root() {
         ? () => closeOrBack(() => void navigate({ to: "/" }))
         : null,
   );
+
+  const onOnboardingRef = useRef(onOnboarding);
+  onOnboardingRef.current = onOnboarding;
 
   const checkNow = useUpdate((s) => s.checkNow);
   const showToast = useToast((s) => s.show);
@@ -799,7 +821,7 @@ export function Root() {
       }),
       // Only fires when the webview did not take ⌘, (useKeybindings prevents the default), so opening is idempotent.
       listen("menu:open-settings", () => {
-        openSettingsPopover();
+        if (!onOnboardingRef.current) openSettingsPopover();
       }),
       listen("menu:save-file", () => {
         triggerActiveFileSave();
@@ -818,6 +840,20 @@ export function Root() {
 
   return (
     <div className="flex h-full flex-col bg-surface">
+      {onOnboarding ? (
+        <main className="min-h-0 flex-1">
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <Spinner size="lg" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
+        </main>
+      ) : (
+        <>
       <header
         className="relative flex h-10 shrink-0 items-center border-b border-edge bg-panel"
         {...dragRegion()}
@@ -1073,6 +1109,15 @@ export function Root() {
             </button>
             <button
               type="button"
+              onClick={() => toggleNav("/pipeline")}
+              className={railNavClass(onPipeline)}
+              title="Pipeline"
+              aria-label="Pipeline"
+            >
+              <Icon name="pipeline" size="rail" />
+            </button>
+            <button
+              type="button"
               onClick={() => toggleNav("/library")}
               className={railNavClass(pathname.startsWith("/library"))}
               title="Library"
@@ -1108,7 +1153,7 @@ export function Root() {
             onClick={() => setNarrowDrawer(null)}
           />
         )}
-        {!onLibrary && !onPrompts && !onSettings && !onAgents && (
+        {!onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline && (
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
               compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
@@ -1137,7 +1182,7 @@ export function Root() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setAddProjectOpen(true)}
+                  onClick={() => setAddProjectMode("clone")}
                   className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
                   title="Add project"
                   aria-label="Add project"
@@ -1449,7 +1494,7 @@ export function Root() {
           </aside>
         )}
 
-        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && !onAgents && (
+        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline && (
           <div
             role="separator"
             aria-orientation="vertical"
@@ -1498,6 +1543,8 @@ export function Root() {
           />
         </div>
       </div>
+        </>
+      )}
 
       {itemMenu && (
         <ContextMenu position={itemMenu} onClose={() => setItemMenu(null)}>
@@ -1629,8 +1676,9 @@ export function Root() {
       )}
 
       <AddProjectDialog
-        open={addProjectOpen}
-        onClose={() => setAddProjectOpen(false)}
+        open={addProjectMode !== null}
+        initialMode={addProjectMode ?? "clone"}
+        onClose={() => setAddProjectMode(null)}
         onAdded={(project) =>
           void navigate({
             to: "/projects/$projectPath",

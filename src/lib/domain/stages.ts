@@ -4,6 +4,8 @@ import type { DocKind } from "./docs";
 
 export type StageKey = Stage;
 
+export type LaunchStage = Extract<StageKey, "research" | "plan">;
+
 export const STAGES = [
   { key: "general", label: "General" },
   { key: "research", label: "Research" },

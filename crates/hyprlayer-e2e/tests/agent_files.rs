@@ -167,6 +167,27 @@ async fn agent_files() {
             evidence,
         );
     }
+    let counts = j
+        .call(&client, Request::AgentHarnessCounts {})
+        .await
+        .expect("agent_harness_counts");
+    let claude = counts
+        .as_array()
+        .and_then(|a| a.iter().find(|c| text(c, "/platformId") == "claude"));
+    let claude_root = sandbox.home.join(".claude");
+    let (disk_agents, disk_skills) = (
+        count_ext(&claude_root.join("agents"), "md"),
+        count_skill_dirs(&claude_root.join("skills")),
+    );
+    let claude_matches_disk = claude.is_some_and(|c| {
+        c.pointer("/agents").and_then(Value::as_u64) == Some(disk_agents)
+            && c.pointer("/skills").and_then(Value::as_u64) == Some(disk_skills)
+    });
+    j.guard(
+        "harness counts match the files on disk",
+        claude_matches_disk && disk_agents > 0,
+        json!({ "platforms": counts, "claude_matches_disk": claude_matches_disk }),
+    );
     let view = create_workstream(&mut j, &client, &project, "Agent work").await;
     let ws = text(&view, "/item/id");
     let commands = j
@@ -240,4 +261,26 @@ fn names(agents: &Value) -> Vec<String> {
         .as_array()
         .map(|items| items.iter().map(|a| text(a, "/name")).collect())
         .unwrap_or_default()
+}
+
+fn count_ext(dir: &std::path::Path, ext: &str) -> u64 {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().is_file() && e.path().extension().is_some_and(|x| x == ext))
+                .count() as u64
+        })
+        .unwrap_or(0)
+}
+
+fn count_skill_dirs(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().join("SKILL.md").is_file())
+                .count() as u64
+        })
+        .unwrap_or(0)
 }

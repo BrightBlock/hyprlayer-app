@@ -45,7 +45,8 @@ export function StatusBar({
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
       <div
         className="flex shrink-0 items-center justify-end gap-2 self-stretch border-l border-edge pl-2"
-        style={rightPanelWidth ? { width: rightPanelWidth - BAR_PAD_X } : undefined}
+        // A floor, not a width: a long server label would otherwise spill left over the session controls.
+        style={rightPanelWidth ? { minWidth: rightPanelWidth - BAR_PAD_X } : undefined}
       >
         {thoughts}
         <SyncStatus compact={compact} divided={!!thoughts} menu={serverMenu} leading={sessions} />

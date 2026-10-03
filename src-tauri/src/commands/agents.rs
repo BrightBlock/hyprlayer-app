@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use hyprlayer_core::agent_bundle::{self, BundleSource};
-use hyprlayer_core::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
+use hyprlayer_core::agents::{
+    AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
+};
 use hyprlayer_core::hyprcli::AiVersions;
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::skills::AgentSkill;
@@ -93,6 +95,16 @@ pub async fn agent_skills(
     state
         .client()?
         .agent_skills(project_path)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn agent_harness_counts(state: State<'_, AppState>) -> CmdResult<Vec<HarnessCounts>> {
+    state
+        .client()?
+        .agent_harness_counts()
         .await
         .map_err(AppError::from)
 }

@@ -10,7 +10,9 @@
 
 use std::collections::BTreeMap;
 
-use hyprlayer_core::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay};
+use hyprlayer_core::agents::{
+    AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
+};
 use hyprlayer_core::branch_prefix::{BranchPrefix, PrefixSource};
 use hyprlayer_core::claude::ClaudeProbe;
 use hyprlayer_core::codex::CodexProbe;
@@ -311,6 +313,7 @@ hyprlayer_proto::commands! {
     AgentContextFiles: agent_context_files(project_path: Option<String>) -> Vec<AgentContextFile>;
     AgentMcpServers: agent_mcp_servers(project_path: Option<String>) -> Vec<AgentMcpServer>;
     AgentSkills: agent_skills(project_path: Option<String>) -> Vec<AgentSkill>;
+    AgentHarnessCounts: agent_harness_counts() -> Vec<HarnessCounts>;
     ExportAgentFile: export_agent_file(agent: AgentFile, overlay: AgentOverlay) -> String;
     AgentBundleStatus: agent_bundle_status() -> BundleStatus;
     UpdateAgentBundle: update_agent_bundle() -> BundleReport;

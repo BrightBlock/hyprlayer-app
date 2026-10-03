@@ -376,7 +376,12 @@ export function updateWorkstreamTabs(
   useWorkstreamTabsStore.setState((s) => ({ byWs: next(s.byWs) }));
 }
 
-export const useComposerFocusStore = create<{ pendingShellId: number | null }>(() => ({
+export function seedWorkstreamMode(workstreamId: string, mode: StageKey): void {
+  const base = defaultTabState();
+  updateWorkstreamTabs((all) => ({ ...all, [workstreamId]: { ...base, shells: base.shells.map((s) => ({ ...s, mode })) } }));
+}
+
+export const useComposerFocusStore =create<{ pendingShellId: number | null }>(() => ({
   pendingShellId: null,
 }));
 
