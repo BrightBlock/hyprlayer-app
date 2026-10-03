@@ -37,8 +37,9 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 
 const FOCUS_RING = "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
 
+// No opacity, snap on disable: WebKit leaves stale paint when an animating button shifts layout.
 const PRESS =
-  "transition hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97";
+  "transition-[color,background-color,border-color,box-shadow,scale] hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97 disabled:transition-none";
 
 export function ChordHint({ chord, className }: { chord: string; className?: string }) {
   return (

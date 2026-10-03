@@ -106,7 +106,7 @@ export function ImportPromptsDialog({
           return (
             <div
               key={c.key}
-              className={`space-y-2 rounded-lg border bg-panel-2 px-3 py-2.5 transition-opacity ${
+              className={`space-y-2 rounded-lg border bg-panel-2 px-3 py-2.5 ${
                 c.conflict && d.include ? "border-warn/40" : "border-edge"
               } ${d.include && !skipped ? "" : "opacity-50"}`}
             >

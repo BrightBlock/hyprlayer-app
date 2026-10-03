@@ -444,7 +444,7 @@ describe("StatusBar session controls", () => {
 });
 
 describe("StatusBar trailing items", () => {
-  it("ends with the tools slot, after a divider", () => {
+  it("puts the tools slot after the session controls, before the right cluster", () => {
     render(
       <StatusBar
         workstreamId={null}
@@ -453,8 +453,8 @@ describe("StatusBar trailing items", () => {
       />,
     );
     const terminal = screen.getByRole("button", { name: "Terminal" });
-    expect(terminal.nextElementSibling).toBeNull();
-    expect(terminal.previousElementSibling?.getAttribute("aria-hidden")).toBe("true");
+    expect(terminal.parentElement?.tagName).toBe("FOOTER");
+    expect(terminal.nextElementSibling?.className).toContain("border-l");
   });
 
   it("puts the sessions slot flush against the Server button, one divider after thoughts", () => {

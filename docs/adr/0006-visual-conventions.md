@@ -640,7 +640,9 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   (`animate-fade-in`) and rises its panel (`animate-dialog-in`, 8px from .98, `gentle`).
   They have no exit animation yet: they unmount on close.
 - **Press, hover, focus.** `Button` and `IconButton` press to scale .97 and change hover
-  colour in `instant`, then settle back in `quick`; the focus ring grows with them.
+  colour in `instant`, then settle back in `quick`; the focus ring grows with them. They
+  never transition opacity and snap when disabled: WebKit leaves stale paint when an
+  animating button shifts layout (a busy spinner widening it).
 - **Reduced motion.** The entrance classes become a 100ms fade; press scale is `motion-safe`.
   Spinners and the working pulses keep their own `prefers-reduced-motion` blocks.
 - `animate-step-in` runs at `slow` (first-run only) and `animate-sync-in` at `gentle`.

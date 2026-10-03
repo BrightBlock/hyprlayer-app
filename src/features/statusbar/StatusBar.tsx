@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from "react";
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useViewport } from "@/lib/useViewport";
-import { Divider, RepoStatus } from "./parts";
+import { RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
@@ -43,6 +43,7 @@ export function StatusBar({
       {repo && <RepoStatus repo={repo} compact={compact} />}
       <div className="flex-1" />
       <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
+      {tools}
       <div
         className="flex shrink-0 items-center justify-end gap-2 self-stretch border-l border-edge pl-2"
         // A floor, not a width: a long server label would otherwise spill left over the session controls.
@@ -50,12 +51,6 @@ export function StatusBar({
       >
         {thoughts}
         <SyncStatus compact={compact} divided={!!thoughts} menu={serverMenu} leading={sessions} />
-        {tools && (
-          <>
-            <Divider />
-            {tools}
-          </>
-        )}
       </div>
     </footer>
   );
