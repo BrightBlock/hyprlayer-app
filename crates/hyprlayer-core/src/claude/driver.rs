@@ -42,6 +42,7 @@ pub struct SpawnConfig {
     pub effort: Option<String>,
     pub chrome: bool,
     pub agent: Option<crate::pipeline::SessionAgent>,
+    pub append_system_prompt: Option<String>,
     pub env: Vec<(String, String)>,
     pub claude_config_dir: Option<PathBuf>,
 }
@@ -125,6 +126,9 @@ impl ClaudeDriver {
             });
             cmd.args(["--agents", &defs.to_string()])
                 .args(["--agent", agent.name]);
+        }
+        if let Some(prompt) = &config.append_system_prompt {
+            cmd.args(["--append-system-prompt", prompt]);
         }
 
         crate::process::appimage::scrub_tokio(&mut cmd);

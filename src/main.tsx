@@ -21,9 +21,15 @@ import {
   transcriptSyncReconnected,
 } from "./features/session/syncStore";
 import { registerPlanCard } from "./features/session/planCardSlot";
+import { registerReadyCard } from "./features/session/readyCardSlot";
+import { registerReviewCard } from "./features/session/reviewCardSlot";
 import { registerSendInterceptor } from "./features/session/sendInterceptor";
 import { startSessionTitleSync } from "./features/session/sessionTitleSync";
 import { PlanCard } from "./features/plan/PlanCard";
+import { ReviewCard } from "./features/review/ReviewCard";
+import { ReadyForReviewCard } from "./features/review/ReadyForReviewCard";
+import { ReviewChecklist } from "./features/review/ReviewChecklist";
+import { registerReviewChecklist } from "./features/plan/reviewChecklistSlot";
 import { approveFromChat } from "./features/plan/planApproval";
 import { unwrap } from "./lib/ipc";
 import { installGlobalHandlers, log } from "./lib/log";
@@ -64,6 +70,9 @@ onServerReconnected(() => {
 });
 registerActiveWorkstreams(activeWorkstreamIds);
 registerPlanCard(PlanCard);
+registerReviewCard(ReviewCard);
+registerReadyCard(ReadyForReviewCard);
+registerReviewChecklist(ReviewChecklist);
 registerSendInterceptor(approveFromChat);
 onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();

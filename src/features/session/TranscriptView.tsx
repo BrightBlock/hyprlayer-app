@@ -33,6 +33,8 @@ import type { Attachment } from "./attachments";
 import { formatElapsed, formatRelativeTime, formatTokens } from "@/lib/format";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { PlanCardsContext, planCardComponent } from "./planCardSlot";
+import { readyCardComponent, type ReadyCardProps } from "./readyCardSlot";
+import { REVIEW_PROMPT, reviewCardComponent } from "./reviewCardSlot";
 import { SkillChip } from "./SkillChip";
 import {
   baseName,
@@ -130,6 +132,8 @@ const UserMessage = memo(function UserMessage({
 }) {
   // Unknown identity attributes nothing, as in routing.
   const remote = author && selfClientId !== null && author.clientId !== selfClientId ? author : null;
+  const workstreamId = useContext(PlanCardsContext)?.workstreamId ?? null;
+  const ReviewCard = promptName === REVIEW_PROMPT ? reviewCardComponent() : null;
   return (
     <div className="group flex flex-col items-end">
       <div className="max-w-[85%] rounded-lg border border-edge bg-panel-2 px-3.5 py-2.5">
@@ -140,7 +144,13 @@ const UserMessage = memo(function UserMessage({
           </span>
         )}
         {text &&
-          (promptName ? (
+          (ReviewCard && promptName ? (
+            <ReviewCard
+              text={text}
+              workstreamId={workstreamId}
+              fallback={<PromptCard name={promptName} body={text} />}
+            />
+          ) : promptName ? (
             <PromptCard name={promptName} body={text} />
           ) : (
             <p className="selectable whitespace-pre-wrap break-words text-body text-ink">{text}</p>
@@ -1075,6 +1085,8 @@ type Props = {
   permission: PermissionHandlers;
   prompt: PromptHandlers;
   sync?: TranscriptSync;
+  // Set for an implement session; the review feature decides whether the card shows.
+  ready?: ReadyCardProps | null;
   onBottomChange?: (atBottom: boolean) => void;
   onDividerPassed?: () => void;
 };
@@ -1127,6 +1139,7 @@ export const TranscriptView = memo(
       permission,
       prompt,
       sync = NO_SYNC,
+      ready = null,
       onBottomChange,
       onDividerPassed,
     },
@@ -1314,6 +1327,7 @@ export const TranscriptView = memo(
     }
     const topLevel = items.filter((item) => parentIdOf(item) === null);
     const { tail, divider } = sync;
+    const ReadyCard = ready ? readyCardComponent() : null;
 
     return (
       <div
@@ -1343,6 +1357,7 @@ export const TranscriptView = memo(
               </SelfClientId.Provider>
             </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
+          {ReadyCard && ready && <ReadyCard sessionId={ready.sessionId} workstreamId={ready.workstreamId} />}
           {tail && <SyncSkeletonTail tail={tail} />}
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">

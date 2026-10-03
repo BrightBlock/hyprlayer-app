@@ -1,6 +1,6 @@
 
 import type { DocKind } from "@/lib/domain/docs";
-import { diffStrings, type PatchLine } from "@/features/workstreams/diff";
+import { diffStrings, type PatchLine } from "@/lib/diff";
 
 import type { TranscriptItem } from "./transcript";
 import type { WrittenDocs } from "./writtenDocs";

@@ -25,6 +25,8 @@ use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::{self, ScriptSettings};
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
+use hyprlayer_core::review;
+use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::attachments::{ImportAttachmentRequest, SaveAttachmentRequest};
 use hyprlayer_core::runtime::library::{
@@ -41,6 +43,10 @@ use hyprlayer_core::runtime::prompts::{
     PromptImportRequest, PromptImportResult,
 };
 use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
+use hyprlayer_core::runtime::reviews::{
+    AddReviewCommentRequest, ReviewComment, ReviewView, SetReviewFileViewedRequest,
+    SubmitReviewRequest, SubmitReviewResult,
+};
 use hyprlayer_core::runtime::scripts::{
     RunLifecycleRequest, ScriptOutputRequest, ScriptRuntimeRequest, ScriptSettingsRequest,
     StopScriptRequest,
@@ -1048,6 +1054,115 @@ impl Dispatch for Server {
             gitops::worktree_file_sides(p, &path, staged)
         })
         .await
+    }
+
+    async fn review_changed_files(
+        &self,
+        workstream_id: String,
+    ) -> Result<ReviewFileList, WireError> {
+        self.with_worktree_base(&workstream_id, "review_changed_files", |p, base| {
+            review::diff::review_changed_files(p, base)
+        })
+        .await
+    }
+
+    async fn review_file_sides(
+        &self,
+        workstream_id: String,
+        path: String,
+    ) -> Result<ReviewFileSides, WireError> {
+        self.with_worktree_base(&workstream_id, "review_file_sides", move |p, base| {
+            review::diff::review_file_sides(p, base, &path)
+        })
+        .await
+    }
+
+    async fn get_review(&self, workstream_id: String) -> Result<ReviewView, WireError> {
+        self.runtime.reviews().get(&workstream_id).await.wire()
+    }
+
+    async fn set_review_file_viewed(
+        &self,
+        req: SetReviewFileViewedRequest,
+    ) -> Result<(), WireError> {
+        self.runtime.reviews().set_viewed(req).await.wire()
+    }
+
+    async fn add_review_comment(
+        &self,
+        req: AddReviewCommentRequest,
+    ) -> Result<ReviewComment, WireError> {
+        self.runtime.reviews().add_comment(req).await.wire()
+    }
+
+    async fn edit_review_comment(
+        &self,
+        workstream_id: String,
+        comment_id: String,
+        body: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .reviews()
+            .edit_comment(&workstream_id, &comment_id, &body)
+            .await
+            .wire()
+    }
+
+    async fn delete_review_comment(
+        &self,
+        workstream_id: String,
+        comment_id: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .reviews()
+            .delete_comment(&workstream_id, &comment_id)
+            .await
+            .wire()
+    }
+
+    async fn resolve_review_comment(
+        &self,
+        workstream_id: String,
+        comment_id: String,
+        resolved: bool,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .reviews()
+            .resolve_comment(&workstream_id, &comment_id, resolved)
+            .await
+            .wire()
+    }
+
+    async fn resolve_review_note(
+        &self,
+        workstream_id: String,
+        note_id: String,
+        resolved: bool,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .reviews()
+            .resolve_note(&workstream_id, &note_id, resolved)
+            .await
+            .wire()
+    }
+
+    async fn submit_review(
+        &self,
+        req: SubmitReviewRequest,
+    ) -> Result<SubmitReviewResult, WireError> {
+        self.runtime.reviews().submit(req).await.wire()
+    }
+
+    async fn mark_review_round_delivered(
+        &self,
+        workstream_id: String,
+        round: u32,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .reviews()
+            .mark_delivered(&workstream_id, round)
+            .await
+            .wire()
     }
 
     async fn worktree_list_dir(

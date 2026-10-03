@@ -3,6 +3,7 @@ import { queryClient } from "./queryClient";
 import { refreshOmarchyTheme } from "./theme";
 import {
   invalidateCliBundleState,
+  invalidateReview,
   invalidateScriptOutput,
   invalidateScriptRuntime,
   invalidateWorkstreamLists,
@@ -55,6 +56,10 @@ export function attachEventListeners(): () => void {
     }),
     events.worktreeChanged.listen((event) => {
       invalidateWorktreeGit(event.payload.workstreamId);
+    }),
+    // Only mutations announce this; a read that did would refetch itself forever.
+    events.reviewChanged.listen((event) => {
+      invalidateReview(event.payload.workstreamId);
     }),
     events.workstreamBranchChanged.listen((event) => {
       invalidateWorkstreamLists();

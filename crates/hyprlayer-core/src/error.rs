@@ -318,6 +318,27 @@ pub enum CoreError {
     #[error(fmt = fmt_pr_not_found)]
     PrNotFound { pr_number: u32, detail: String },
 
+    #[error("No review comment with id {id}")]
+    ReviewCommentNotFound { id: String },
+
+    #[error("No review note with id {id}")]
+    ReviewNoteNotFound { id: String },
+
+    #[error("This comment was already sent, so it can't be edited or deleted.")]
+    ReviewCommentLocked,
+
+    #[error("A comment needs some text.")]
+    ReviewCommentEmpty,
+
+    #[error("A comment needs a line number, counting from 1.")]
+    ReviewCommentLineInvalid,
+
+    #[error("Round {round} of this review hasn't reached the agent yet.")]
+    ReviewRoundUndelivered { round: u32 },
+
+    #[error("No change request round {round} in this review")]
+    ReviewRoundNotFound { round: u32 },
+
     // Keeps the legacy `internal` code (v0.7 envelope, pinned by the workstreams
     // fixture), like TerminalCommandEmpty below.
     #[error("base branch cannot be empty")]
@@ -625,6 +646,10 @@ impl CoreError {
             CoreError::Frontmatter(_) => Some(
                 "Open the document in the Library and use Properties → Edit raw.".into(),
             ),
+            CoreError::ReviewCommentLocked => Some("Reply to it instead.".into()),
+            CoreError::ReviewRoundUndelivered { .. } => {
+                Some("Resend it from the review, then submit again.".into())
+            }
             _ => None,
         }
     }
@@ -730,6 +755,13 @@ impl CoreError {
             CoreError::RemoteUnsupported { .. } => "remote_unsupported",
             CoreError::WorkstreamFolderNoGit => "folder_no_git",
             CoreError::PrNotFound { .. } => "pr_not_found",
+            CoreError::ReviewCommentNotFound { .. } => "review_comment_not_found",
+            CoreError::ReviewNoteNotFound { .. } => "review_note_not_found",
+            CoreError::ReviewCommentLocked => "review_comment_locked",
+            CoreError::ReviewCommentEmpty => "review_comment_empty",
+            CoreError::ReviewCommentLineInvalid => "review_comment_line_invalid",
+            CoreError::ReviewRoundUndelivered { .. } => "review_round_undelivered",
+            CoreError::ReviewRoundNotFound { .. } => "review_round_not_found",
             CoreError::WorkstreamBaseBranchEmpty => "internal",
             CoreError::TerminalCommandEmpty => "internal",
             CoreError::RollbackFailed { original, .. } => original.code(),

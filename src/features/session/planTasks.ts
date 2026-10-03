@@ -50,12 +50,12 @@ type ToolItem = Extract<TranscriptItem, { kind: "tool" }>;
 const TRACKING_TOOLS = new Set(["TaskCreate", "TaskUpdate", "TaskList", "TodoWrite"]);
 
 // A subagent's TodoWrite is its own list; applied here it would replace the session's.
-function isSubagentTodoWrite(item: ToolItem): boolean {
+export function isSubagentTodoWrite(item: ToolItem): boolean {
   return item.name === "TodoWrite" && !!item.parentId;
 }
 
 // `newBatchClears`: a create after everything finished starts a fresh list, as the Tasks panel shows it.
-function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem, newBatchClears = true): void {
+export function applyTrackingTool(tasks: Map<string, PlanTask>, item: ToolItem, newBatchClears = true): void {
   switch (item.name) {
     case "TaskCreate": {
       if (newBatchClears && tasks.size > 0 && [...tasks.values()].every((t) => t.status === "completed")) {

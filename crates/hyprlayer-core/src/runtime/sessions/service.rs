@@ -18,6 +18,7 @@ use crate::opencode::runtime::OpenCodeDriver;
 use crate::opencode::support::opencode_model_is_supported;
 use crate::pipeline::{self, Stage};
 use crate::process::binaries::BinaryKind;
+use crate::review::sidecar;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
@@ -567,6 +568,29 @@ impl SessionService<'_> {
         .flatten()
     }
 
+    /// Review notes ride along only for Implement, and never over a user's own instructions.
+    async fn codex_developer_instructions(&self, session: &Session) -> Option<String> {
+        let memory = self.memory_instructions(&session.workstream_id).await;
+        if session.stage != Stage::Implement {
+            return memory;
+        }
+        let codex_config = self.runtime.paths.codex_home.join("config.toml");
+        let user_has_own = blocking(move || {
+            Ok(std::fs::read_to_string(&codex_config)
+                .is_ok_and(|text| config_sets_developer_instructions(&text)))
+        })
+        .await
+        .unwrap_or(true);
+        if user_has_own {
+            return memory;
+        }
+        let notes = pipeline::review_notes_instruction(&session.workstream_id);
+        Some(match memory {
+            Some(memory) => format!("{memory}\n\n{notes}"),
+            None => notes,
+        })
+    }
+
     async fn prompt_vars_for(&self, ws: &Workstream, template: &str) -> pipeline::PromptVars {
         let want_changed = template.contains("{{changed_files}}");
         let want_diff = template.contains("{{diff}}");
@@ -651,8 +675,26 @@ impl SessionService<'_> {
         let harness = harness.unwrap_or_default();
         let first_input = Some(input.trim().to_string()).filter(|t| !t.is_empty());
         let bodies = self.action_prompt_bodies(stage, &workstream).await;
-        let prompt =
+        let mut prompt =
             pipeline::compose_prompt(stage, &input, &workstream.base_branch, &bodies, harness);
+        if let Some(suffix) = pipeline::implement_notes_suffix(harness, stage, &workstream.id) {
+            prompt.push_str(&suffix);
+        }
+        if stage == Stage::Implement {
+            let worktree = workstream.worktree_path.clone();
+            let excluded = blocking(move || {
+                Ok(sidecar::ensure_review_dir_excluded(std::path::Path::new(
+                    &worktree,
+                ))?)
+            })
+            .await;
+            if let Err(e) = excluded {
+                tracing::warn!(
+                    "workstream {}: could not exclude the review dir: {e}",
+                    workstream.id
+                );
+            }
+        }
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
 
         let session = {
@@ -917,7 +959,7 @@ impl SessionService<'_> {
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
                 env.extend(self.runtime.environment.overlay_env());
 
-                let developer_instructions = self.memory_instructions(&session.workstream_id).await;
+                let developer_instructions = self.codex_developer_instructions(session).await;
 
                 let resume_thread = resume
                     .then(|| session.provider_session_id.clone())
@@ -972,6 +1014,7 @@ impl SessionService<'_> {
                     allowed_tools,
                     mut disallowed_tools,
                     agent,
+                    review_notes,
                 } = policy
                 else {
                     unreachable!("claude harness yields a claude launch policy")
@@ -1017,6 +1060,8 @@ impl SessionService<'_> {
                     effort,
                     chrome: claude_cfg.chrome_enabled,
                     agent,
+                    append_system_prompt: review_notes
+                        .then(|| pipeline::review_notes_instruction(&session.workstream_id)),
                     env,
                     claude_config_dir: Some(self.runtime.paths.claude_config_dir.clone()),
                 })?;

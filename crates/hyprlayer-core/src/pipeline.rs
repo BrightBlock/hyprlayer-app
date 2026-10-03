@@ -177,6 +177,34 @@ tools rather than printing the document in the conversation. If the previous tur
 findings, do the research now and write the document anyway. Ask no further questions and \
 change no code.";
 
+pub fn review_notes_path(workstream_id: &str) -> String {
+    format!(".hyprlayer/review/{workstream_id}.jsonl")
+}
+
+/// One paragraph: it travels as a single argv value and is handed to subagents verbatim.
+pub fn review_notes_instruction(workstream_id: &str) -> String {
+    let path = review_notes_path(workstream_id);
+    format!(
+        "As you implement, leave review notes for the human reviewer: append one JSON object per \
+line to `{path}` (create the directory if needed) with keys `path` (repo-relative), `line` \
+(1-based, in the file as you leave it), `kind` (`note`, `needs_your_call`, or \
+`outside_plan_scope`), `body` (one or two sentences, markdown), and `task` (the plan phase or \
+task you were on). Use `needs_your_call` for a decision the human should make and \
+`outside_plan_scope` for any change the plan did not ask for. Never stage or commit this file. \
+When you delegate work to a subagent, include this paragraph verbatim in its prompt."
+    )
+}
+
+/// Claude carries the instruction in its system prompt and Codex in `developer_instructions`.
+pub fn implement_notes_suffix(
+    harness: Harness,
+    stage: Stage,
+    workstream_id: &str,
+) -> Option<String> {
+    (harness == Harness::Opencode && stage == Stage::Implement)
+        .then(|| format!("\n\n{}", review_notes_instruction(workstream_id)))
+}
+
 pub fn commit_prompt_default(harness: Harness) -> &'static str {
     match harness {
         Harness::Claude => COMMIT_PROMPT_DEFAULT,

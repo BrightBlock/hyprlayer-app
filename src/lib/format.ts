@@ -51,6 +51,10 @@ export function formatCompactCount(n: number): string {
   return units >= 10 || tenth === 0 ? `${units}${unit.suffix}` : `${units}.${tenth}${unit.suffix}`;
 }
 
+export function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
 export function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }

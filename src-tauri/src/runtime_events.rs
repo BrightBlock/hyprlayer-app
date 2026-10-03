@@ -57,6 +57,9 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
         RuntimeEvent::WorktreeChanged { workstream_id } => {
             let _ = events::WorktreeChanged { workstream_id }.emit(handle);
         }
+        RuntimeEvent::ReviewChanged { workstream_id } => {
+            let _ = events::ReviewChanged { workstream_id }.emit(handle);
+        }
         RuntimeEvent::WorkstreamBranchChanged {
             workstream_id,
             branch,

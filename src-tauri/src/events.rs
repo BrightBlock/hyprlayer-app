@@ -32,6 +32,12 @@ pub struct WorktreeChanged {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
+pub struct ReviewChanged {
+    pub workstream_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkstreamBranchChanged {
     pub workstream_id: String,
     pub branch: String,

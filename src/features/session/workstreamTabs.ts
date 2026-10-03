@@ -416,6 +416,12 @@ export function setSessionPermissionMode(workstreamId: string, sessionId: string
   });
 }
 
+/** The mode a session's tab would relaunch it in, for resumes that start outside the tab. */
+export function sessionPermissionMode(workstreamId: string, sessionId: string): string | undefined {
+  const shells = useWorkstreamTabsStore.getState().byWs[workstreamId]?.shells ?? [];
+  return shells.find((s) => s.sessionId === sessionId)?.permissionMode;
+}
+
 const tabMode = (stage: StageKey): StageKey =>
   MODE_STAGES.some((s) => s.key === stage) ? stage : "general";
 

@@ -72,9 +72,8 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
           ? gitActions.canCommit && !gitActions.committing
             ? null
             : "Nothing to commit right now"
-          : gitActions.canShip && !gitActions.shipping
-            ? null
-            : "Nothing to ship right now";
+          : (gitActions.shipBlocked ??
+            (gitActions.canShip && !gitActions.shipping ? null : "Nothing to ship right now"));
       return {
         key: `builtin:${id}`,
         name: def.name,

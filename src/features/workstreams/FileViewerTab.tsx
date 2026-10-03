@@ -12,7 +12,7 @@ import { clearActiveFileSave, setActiveFileSave } from "@/lib/fileSave";
 import { useCommand } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { useSaveWorktreeFile, useWorktreeFile } from "@/lib/queries";
-import { codeBase, useLangForPath } from "./codeView";
+import { codeBase, useLangForPath } from "@/lib/codeView";
 
 const MARKDOWN_RE = /\.(md|markdown|mdx)$/i;
 const NUL = String.fromCharCode(0);

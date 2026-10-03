@@ -216,7 +216,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               {pull.isError && <ErrorNote error={pull.error} onDismiss={() => pull.reset()} />}
             </div>
 
-            {(actions.canCommit || actions.canShip) && (
+            {(actions.canCommit || actions.canShip || actions.shipBlocked) && (
               <div className="flex gap-2">
                 {actions.canCommit && (
                   <button
@@ -230,13 +230,16 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     Commit · {actions.changedCount}
                   </button>
                 )}
-                {actions.canShip && (
+                {(actions.canShip || actions.shipBlocked) && (
                   <button
                     type="button"
-                    disabled={actions.shipping}
+                    disabled={actions.shipping || actions.shipBlocked !== null}
                     onClick={actions.doShip}
                     className="inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-md bg-accent text-body font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-60"
-                    title={`Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`}
+                    title={
+                      actions.shipBlocked ??
+                      `Runs the Ship prompt. Commits, pushes, and opens a pull request${chordHint("ws.ship")}`
+                    }
                   >
                     <Icon name="pullRequest" />
                     Ship

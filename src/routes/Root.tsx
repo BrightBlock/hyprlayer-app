@@ -118,6 +118,7 @@ import { useAgentTabCount } from "@/features/session/workstreamTabs";
 import { ConfirmQuitDialog } from "@/features/system/ConfirmQuitDialog";
 import { PromptPalette } from "@/features/prompts/PromptPalette";
 import { PromptArgsDialog } from "@/features/prompts/PromptArgsDialog";
+import { ShipCheckDialog } from "@/features/review/ShipCheckDialog";
 import { togglePromptPalette } from "@/features/prompts/promptsStore";
 import { usePromptHotkeys } from "@/features/prompts/usePromptHotkeys";
 import {
@@ -1678,6 +1679,7 @@ export function Root() {
       <SearchPalette />
       <PromptPalette activeWorkstream={activeWorkstream ?? null} />
       <PromptArgsDialog />
+      <ShipCheckDialog />
       <FullDiskAccessNotice />
       <ServerDisconnectedNotice />
       <HostsDialog />

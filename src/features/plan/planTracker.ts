@@ -2,7 +2,14 @@ import { todoPhaseLabel, type TimelineTask } from "@/features/session/planTasks"
 import type { RunningSubagent } from "@/features/session/subagent";
 import type { TranscriptJump } from "@/features/session/transcriptJump";
 
-import { phaseRows, type CheckGroup, type PlanDoc, type PlanDocCriterion, type PlanDocTask } from "./planDoc";
+import {
+  phaseRows,
+  type CheckGroup,
+  type PlanDoc,
+  type PlanDocCriterion,
+  type PlanDocPhase,
+  type PlanDocTask,
+} from "./planDoc";
 
 export type JumpTarget = TranscriptJump;
 export type TaskState = "done" | "in_progress" | "pending" | "waiting" | "failed";
@@ -52,6 +59,8 @@ export type PlanTracker = {
   checks: { done: number; total: number };
   progress: number;
   allDone: boolean;
+  // Every phase built; unlike `allDone`, criteria and added rows don't count.
+  tasksDone: boolean;
   pulsing: boolean;
   writeBacks: { key: string; title: string }[];
 };
@@ -79,6 +88,31 @@ type Slot = {
   group: CheckGroup | null;
 };
 type Phase = { label: string; name: string; slots: Slot[]; todo: TimelineTask | null; added: TimelineTask[] };
+
+export type PlanMatch = { phaseLabel: string; taskKey: string | null };
+
+// `taken` lets the tracker skip rows another todo already holds; `taskKey: null` is a phase-level match.
+export function matchTodoToPlan(
+  phases: PlanDocPhase[],
+  subject: string,
+  taken: (key: string) => boolean = () => false,
+): PlanMatch | null {
+  const phaseByLabel = (label: string) => phases.find((p) => p.label.toLowerCase() === label.toLowerCase());
+  const tag = TASK_TAG.exec(subject);
+  const tagPhase = tag ? phaseByLabel(tag[1]) : undefined;
+  const tagged =
+    tag && tagPhase && phaseRows(tagPhase).find((r) => r.key.toLowerCase() === `p${tag[1]}.${tag[2]}`.toLowerCase());
+  if (tagPhase && tagged && !taken(tagged.key)) return { phaseLabel: tagPhase.label, taskKey: tagged.key };
+  const label = todoPhaseLabel(subject);
+  const phase = label !== null ? phaseByLabel(label) : undefined;
+  if (phase) return { phaseLabel: phase.label, taskKey: null };
+  const wanted = normalize(subject);
+  for (const p of phases) {
+    const row = phaseRows(p).find((r) => !taken(r.key) && normalize(r.title) === wanted);
+    if (row) return { phaseLabel: p.label, taskKey: row.key };
+  }
+  return null;
+}
 
 function slotOf(row: PlanDocTask | PlanDocCriterion): Slot {
   const check = "group" in row;
@@ -140,25 +174,16 @@ export function trackPlan(
     added: [],
   }));
   const slots = phases.flatMap((p) => p.slots);
+  const slotByKey = new Map(slots.map((s) => [s.key, s]));
   const unmatched: TimelineTask[] = [];
 
-  const phaseByLabel = (label: string) => phases.find((p) => p.label.toLowerCase() === label.toLowerCase());
+  const taken = (key: string) => slotByKey.get(key)?.todo != null;
   for (const todo of todos) {
-    const tag = TASK_TAG.exec(todo.subject);
-    const tagged = tag && phaseByLabel(tag[1])?.slots.find((s) => s.key.toLowerCase() === `p${tag[1]}.${tag[2]}`.toLowerCase());
-    if (tagged && !tagged.todo) {
-      tagged.todo = todo;
-      continue;
-    }
-    const label = todoPhaseLabel(todo.subject);
-    const phase = label !== null ? phaseByLabel(label) : undefined;
-    if (phase) {
-      phase.todo = todo;
-      continue;
-    }
-    const wanted = normalize(todo.subject);
-    const slot = slots.find((s) => !s.todo && normalize(s.title) === wanted);
+    const match = matchTodoToPlan(doc.phases, todo.subject, taken);
+    const slot = match?.taskKey != null ? slotByKey.get(match.taskKey) : undefined;
+    const phase = match && match.taskKey === null ? phases.find((p) => p.label === match.phaseLabel) : undefined;
     if (slot) slot.todo = todo;
+    else if (phase) phase.todo = todo;
     else unmatched.push(todo);
   }
 
@@ -255,6 +280,10 @@ export function trackPlan(
   const half = units.filter((s) => s === "in_progress" || s === "waiting").length;
   const allDone = units.length > 0 && unitsDone === units.length;
   if (allDone) current = null;
+  const built = (p: Phase) =>
+    p.todo?.status === "completed" ||
+    (p.slots.some((s) => !s.check) && p.slots.every((s) => s.check || taskStateOf(s) === "done"));
+  const tasksDone = allDone || (doc.phases.length > 0 && phases.slice(0, doc.phases.length).every(built));
 
   let currentPhase: number | null = null;
   if (tracked.length > 0) {
@@ -277,6 +306,7 @@ export function trackPlan(
     checks: { done: checks.filter((t) => t.state === "done").length, total: checks.length },
     progress: units.length > 0 ? (unitsDone + 0.5 * half) / units.length : 0,
     allDone,
+    tasksDone,
     pulsing: activity === "working" && current?.state === "in_progress",
     writeBacks: slots
       .filter((s) => !s.checked && s.todo?.status === "completed")

@@ -114,6 +114,74 @@ const MIGRATIONS: &[&str] = &[
            AND e.kind IN ('userMessage', 'assistantText', 'toolResult', 'rewound')
     );
     ",
+    "
+    CREATE TABLE reviews (
+        id            TEXT PRIMARY KEY,
+        workstream_id TEXT NOT NULL UNIQUE REFERENCES workstreams(id) ON DELETE CASCADE,
+        status        TEXT NOT NULL DEFAULT 'in_progress',
+        notes_offset  INTEGER NOT NULL DEFAULT 0,
+        created_at    REAL NOT NULL,
+        updated_at    REAL NOT NULL
+    );
+    CREATE TABLE review_rounds (
+        id            TEXT PRIMARY KEY,
+        review_id     TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+        number        INTEGER NOT NULL,
+        verdict       TEXT NOT NULL,
+        summary       TEXT,
+        message       TEXT,
+        viewed_count  INTEGER NOT NULL,
+        file_count    INTEGER NOT NULL,
+        comment_count INTEGER NOT NULL,
+        submitted_at  REAL NOT NULL,
+        delivered_at  REAL,
+        UNIQUE (review_id, number)
+    );
+    CREATE TABLE review_round_files (
+        round_id    TEXT NOT NULL REFERENCES review_rounds(id) ON DELETE CASCADE,
+        path        TEXT NOT NULL,
+        content_oid TEXT NOT NULL,
+        PRIMARY KEY (round_id, path)
+    );
+    CREATE TABLE review_comments (
+        id           TEXT PRIMARY KEY,
+        review_id    TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+        parent_id    TEXT REFERENCES review_comments(id) ON DELETE CASCADE,
+        path         TEXT NOT NULL,
+        side         TEXT NOT NULL,
+        line         INTEGER NOT NULL,
+        anchor_text  TEXT NOT NULL,
+        body         TEXT NOT NULL,
+        state        TEXT NOT NULL DEFAULT 'pending',
+        round        INTEGER,
+        sent_context TEXT,
+        resolved_at  REAL,
+        created_at   REAL NOT NULL,
+        updated_at   REAL NOT NULL
+    );
+    CREATE INDEX idx_review_comments_review ON review_comments(review_id, path);
+    CREATE TABLE review_viewed (
+        review_id   TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+        path        TEXT NOT NULL,
+        content_oid TEXT NOT NULL,
+        viewed_at   REAL NOT NULL,
+        PRIMARY KEY (review_id, path)
+    );
+    CREATE TABLE review_notes (
+        id          TEXT PRIMARY KEY,
+        review_id   TEXT NOT NULL REFERENCES reviews(id) ON DELETE CASCADE,
+        fingerprint TEXT NOT NULL,
+        path        TEXT NOT NULL,
+        line        INTEGER NOT NULL,
+        anchor_text TEXT NOT NULL,
+        kind        TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        task        TEXT,
+        resolved_at REAL,
+        created_at  REAL NOT NULL,
+        UNIQUE (review_id, fingerprint)
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -255,13 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn user_version_reaches_11() {
+    fn user_version_reaches_12() {
         let conn = v10_schema();
         migrate(&conn).unwrap();
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
     }
 
     /// This phase's manual check: the backfill against a real profile copy, never a runtime
@@ -283,7 +351,7 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, MIGRATIONS.len() as u32);
 
         let mut stmt = conn
             .prepare(
@@ -316,5 +384,33 @@ mod tests {
             checked += 1;
         }
         println!("checked {checked} session(s) in the copied profile");
+    }
+
+    /// The review tables against a real profile copy; never a runtime, for the same reason.
+    #[test]
+    #[ignore = "needs HYPRLAYER_MIGRATE_COPY"]
+    fn reaches_12_on_a_copied_profile() {
+        let Ok(path) = std::env::var("HYPRLAYER_MIGRATE_COPY") else {
+            return;
+        };
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(version < 12, "expected a pre-12 profile copy at {path}");
+        let workstreams = |conn: &Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM workstreams", [], |r| r.get(0))
+                .unwrap()
+        };
+        let before = workstreams(&conn);
+
+        migrate(&conn).unwrap();
+
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 12);
+        assert_eq!(workstreams(&conn), before);
+        println!("migrated a profile copy with {before} workstream(s) to schema 12");
     }
 }

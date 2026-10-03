@@ -218,19 +218,19 @@ lags and receives `RecvError::Lagged`.
 
 ## Services
 
-Eleven handles, each borrowed from the runtime for the duration of one call:
+Twelve handles, each borrowed from the runtime for the duration of one call:
 
 ```rust
 runtime.settings()   runtime.providers()  runtime.sessions()   runtime.projects()
 runtime.library()    runtime.agents()     runtime.prompts()    runtime.workstreams()
-runtime.attachments() runtime.terminals() runtime.scripts()
+runtime.attachments() runtime.terminals() runtime.scripts()    runtime.reviews()
 ```
 
 Each handle's operational request/result types live in that service's module and
 are supported alongside it: `hyprlayer_core::runtime::{settings_service,
 providers, sessions, projects, library, agents, prompts, workstreams,
-attachments, terminals, scripts}`. The handles themselves are also re-exported
-at the crate root.
+attachments, terminals, scripts, reviews}`. The handles themselves are also
+re-exported at the crate root.
 
 Every method takes `&self` and returns `Result<T>` unless shown otherwise.
 
@@ -411,6 +411,37 @@ Code release has moved its project directories.
 existing regular `*.md` file in the project's memory directory and refuses a
 symlink, and `base_mtime_ms` is the same optimistic-concurrency token as
 `LibraryService::save`.
+
+### `ReviewService`
+
+`get(&str)`, `set_viewed(SetReviewFileViewedRequest)`,
+`add_comment(AddReviewCommentRequest)`, `edit_comment(&str, &str, &str)`,
+`delete_comment(&str, &str)`, `resolve_comment(&str, &str, bool)`,
+`resolve_note(&str, &str, bool)`, `submit(SubmitReviewRequest)`,
+`mark_delivered(&str, u32)`. The first `&str` is always the workstream id.
+
+One review per workstream, created by the first call that needs it. `get` diffs
+the branch against its merge-base with the base branch, uncommitted work
+included. A file reads as viewed while its content hash still matches the one it
+was viewed at. Each comment is re-anchored on read: its line moves with the text
+it was left on, searched within 50 lines of where it was, and `current_line` is
+`None` once that text is gone. The base side is read from the merge-base, at a
+rename's old path.
+
+A reply is placed on its parent's line, whatever the request says. Edit and
+delete refuse a comment that is sending or sent (`review_comment_locked`), and a
+comment or note id from another workstream's review is not found. Every mutation
+sends `RuntimeEvent::ReviewChanged`; `get` sends nothing, though it may create
+the review.
+
+`submit` records a round. Comment and Approve save the pending comments on it.
+Request changes moves every unsent comment to sending and returns the message
+(`review/message.rs`) for the caller to deliver; `mark_delivered` then marks them
+sent. Until then the round refuses the next submit (`review_round_undelivered`).
+After a delivered round, `changed_since_round` lists the files whose content
+differs from the round's snapshot, and a sent comment in one of them is
+`addressed` once its line or the lines around it changed. The `review_lifecycle`
+E2E scenario is their headless test.
 
 ### `AttachmentService`
 

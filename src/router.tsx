@@ -5,7 +5,7 @@ import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
 import type { LibrarySearch } from "./features/library/librarySearch";
 import { RouteError } from "./components/RouteError";
-import { registerAppNav } from "./lib/appNav";
+import { registerAppNav, type ReviewTab } from "./lib/appNav";
 import { useLastRoute } from "./lib/lastRoute";
 
 const Onboarding = lazy(() =>
@@ -27,6 +27,11 @@ const AgentsPage = lazy(() =>
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalLine(value: unknown): number | undefined {
+  const n = typeof value === "string" ? Number(value) : value;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : undefined;
 }
 
 const rootRoute = createRootRoute({ component: Root });
@@ -117,6 +122,9 @@ const libraryRoute = createRoute({
 export type ProjectSearch = {
   item?: string;
   create?: boolean;
+  review?: ReviewTab;
+  reviewFile?: string;
+  reviewLine?: number;
 };
 
 const projectRoute = createRoute({
@@ -126,6 +134,9 @@ const projectRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): ProjectSearch => ({
     item: optionalString(search.item),
     create: search.create === true || search.create === "true" || undefined,
+    review: search.review === "files" || search.review === "plan" ? search.review : undefined,
+    reviewFile: optionalString(search.reviewFile),
+    reviewLine: optionalLine(search.reviewLine),
   }),
 });
 
@@ -160,6 +171,23 @@ registerAppNav({
       params: { projectPath },
       search: { item: workstreamId },
     });
+  },
+  openReview: ({ projectPath, workstreamId, tab = "files", file, line }) => {
+    void router.navigate({
+      to: "/projects/$projectPath",
+      params: { projectPath },
+      search: { item: workstreamId, review: tab, reviewFile: file, reviewLine: line },
+    });
+  },
+  closeReview: () => {
+    void router.navigate({
+      from: "/projects/$projectPath",
+      to: ".",
+      search: (prev) => ({ ...prev, review: undefined, reviewFile: undefined, reviewLine: undefined }),
+    });
+  },
+  openPrompt: (prompt) => {
+    void router.navigate({ to: "/prompts", search: { prompt } });
   },
 });
 

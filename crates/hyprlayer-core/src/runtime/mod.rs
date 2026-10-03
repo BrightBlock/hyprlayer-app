@@ -10,6 +10,7 @@ mod profile_lock;
 pub mod projects;
 pub mod prompts;
 pub mod providers;
+pub mod reviews;
 pub mod script_registry;
 pub mod scripts;
 pub mod sessions;

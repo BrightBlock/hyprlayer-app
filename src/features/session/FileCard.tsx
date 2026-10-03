@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { openPath } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/Icon";
-import { PATCH_LINE_CLASSES } from "@/features/workstreams/diff";
+import { PATCH_LINE_CLASSES } from "@/lib/diff";
 import { baseName, type EditDiff } from "./toolDisplay";
 
 const POPOVER_MAX_H = 320;

@@ -15,6 +15,7 @@ import { parseToolInput } from "@/features/session/toolDisplay";
 import { useWrittenDocs } from "@/features/session/writtenDocs";
 import { basename } from "@/lib/path";
 
+import type { PlanDoc } from "./planDoc";
 import { useResolvedPlanSelection } from "./planPreviewStore";
 import { trackPlan, type PlanTracker, type SessionSignal } from "./planTracker";
 import { usePlan } from "./usePlan";
@@ -90,6 +91,7 @@ export function presentationStatus(p: PlanPresentation | null): string | null {
 export type PlanTrackerResult = {
   key: string | null;
   tracker: PlanTracker | null;
+  plan: PlanDoc | null;
   presentation: PlanPresentation | null;
   inline: boolean;
   indexed: boolean;
@@ -143,5 +145,5 @@ export function usePlanTracker(sessionId: string | undefined): PlanTrackerResult
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signal is keyed by value
     [parsed, timeline, signalKey],
   );
-  return { key, tracker, presentation, inline, indexed, loading, error, changed };
+  return { key, tracker, plan: parsed, presentation, inline, indexed, loading, error, changed };
 }

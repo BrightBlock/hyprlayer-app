@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { extendTailwindMerge } from "tailwind-merge";
 import type {
@@ -6,7 +6,9 @@ import type {
   HTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
+  Ref,
   RefObject,
+  TextareaHTMLAttributes,
 } from "react";
 
 import { errorMessage, errorRemedy } from "@/lib/ipc";
@@ -53,6 +55,7 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "ghost" | "danger";
   size?: "sm" | "md";
   busy?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 };
 
 export function Button({
@@ -139,6 +142,56 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
     <input
       className={cx(
         "selectable w-full rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-body text-ink",
+        "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
+        FOCUS_RING,
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        className,
+      )}
+      {...rest}
+    />
+  );
+}
+
+const TEXTAREA_MAX_LINES = 8;
+
+// Controlled only: it re-measures when `value` changes.
+export function TextArea({
+  className,
+  value,
+  rows = 2,
+  ref,
+  ...rest
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: Ref<HTMLTextAreaElement> }) {
+  const inner = useRef<HTMLTextAreaElement | null>(null);
+  const setRef = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      inner.current = el;
+      if (typeof ref === "function") ref(el);
+      else if (ref) ref.current = el;
+    },
+    [ref],
+  );
+
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    const px = (v: string) => parseFloat(v) || 0;
+    const border = px(cs.borderTopWidth) + px(cs.borderBottomWidth);
+    const max = px(cs.lineHeight) * TEXTAREA_MAX_LINES + px(cs.paddingTop) + px(cs.paddingBottom) + border;
+    el.style.height = "auto";
+    const natural = el.scrollHeight + border;
+    el.style.height = `${Math.min(natural, max)}px`;
+    el.style.overflowY = natural > max ? "auto" : "hidden";
+  }, [value]);
+
+  return (
+    <textarea
+      ref={setRef}
+      value={value}
+      rows={rows}
+      className={cx(
+        "selectable block w-full resize-none rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-body text-ink",
         "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
         FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",

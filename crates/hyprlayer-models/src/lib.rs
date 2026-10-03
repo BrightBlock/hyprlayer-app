@@ -8,6 +8,7 @@
 
 pub mod agent;
 pub mod project;
+pub mod review;
 pub mod runtime;
 pub mod script;
 pub mod session;
@@ -16,6 +17,9 @@ pub mod workstream;
 
 pub use agent::{Harness, PermissionMode, Stage};
 pub use project::{CreateStep, ProjectRecord, ProjectSource, StepStatus};
+pub use review::{
+    FileChangeKind, ReviewCommentState, ReviewNoteKind, ReviewSide, ReviewStatus, ReviewVerdict,
+};
 pub use runtime::{RuntimeEvent, ThoughtsIndexUpdateKind};
 pub use script::{RunPhase, ScriptKind, ScriptRuntime, ScriptStatus};
 pub use session::{

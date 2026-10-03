@@ -23,7 +23,7 @@ function ToastIcon({ tone }: { tone: ToastTone }) {
 }
 
 export function Toast() {
-  const { visible, title, message, tone, action, hide } = useToast();
+  const { visible, title, message, tone, action, timed, hide } = useToast();
   const dismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unmountRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,7 +34,7 @@ export function Toast() {
   const [exiting, setExiting] = useState(false);
   const [acting, setActing] = useState(false);
 
-  const sticky = action !== null;
+  const sticky = action !== null && !timed;
 
   useEffect(() => {
     if (visible) {

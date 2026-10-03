@@ -1,21 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-
-import { MergeView, unifiedMergeView } from "@codemirror/merge";
-import { EditorView } from "@codemirror/view";
-
+import { DiffView, useDiffMode, type DiffMode } from "@/components/DiffView";
 import { ErrorNote, Spinner } from "@/components/ui";
+import { useLangForPath } from "@/lib/codeView";
 import { shortSha } from "@/lib/format";
 import { useCommitFileSides, useFileSides } from "@/lib/queries";
-import { diffWordHighlight, readOnlyExtensions, useLangForPath } from "./codeView";
 import { renamedLabel } from "./renamedLabel";
-
-type DiffMode = "unified" | "split";
-
-const MODE_KEY = "hyprlayer:diff-mode";
-
-function loadMode(): DiffMode {
-  return localStorage.getItem(MODE_KEY) === "split" ? "split" : "unified";
-}
 
 export function DiffTab({
   id,
@@ -31,55 +19,13 @@ export function DiffTab({
   const working = useFileSides(id, path, staged, !sha);
   const commit = useCommitFileSides(id, sha ?? "", path);
   const sides = sha ? commit : working;
-  const [mode, setMode] = useState<DiffMode>(loadMode);
+  const [mode, setMode] = useDiffMode();
   const lang = useLangForPath(path);
-  const hostRef = useRef<HTMLDivElement>(null);
 
   const data = sides.data;
   const heading = renamedLabel(path, data?.originalPath ?? null);
   const oneSided = !!data && (!data.originalExists || !data.modifiedExists);
   const effectiveMode: DiffMode = oneSided ? "unified" : mode;
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host || !data) return;
-
-    const readOnly = [readOnlyExtensions(lang), diffWordHighlight];
-    const collapseUnchanged = { margin: 3, minSize: 6 };
-
-    let view: EditorView | MergeView;
-    if (effectiveMode === "split") {
-      view = new MergeView({
-        parent: host,
-        a: { doc: data.original, extensions: readOnly },
-        b: { doc: data.modified, extensions: readOnly },
-        highlightChanges: false,
-        gutter: true,
-        collapseUnchanged,
-      });
-    } else {
-      view = new EditorView({
-        parent: host,
-        doc: data.modified,
-        extensions: [
-          readOnly,
-          unifiedMergeView({
-            original: data.original,
-            highlightChanges: false,
-            gutter: true,
-            mergeControls: false,
-            collapseUnchanged,
-          }),
-        ],
-      });
-    }
-    return () => view.destroy();
-  }, [data, effectiveMode, lang]);
-
-  const setModePersist = (next: DiffMode) => {
-    localStorage.setItem(MODE_KEY, next);
-    setMode(next);
-  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -101,7 +47,7 @@ export function DiffTab({
               key={m}
               type="button"
               disabled={oneSided}
-              onClick={() => setModePersist(m)}
+              onClick={() => setMode(m)}
               className={`px-2 py-0.5 text-ui font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 effectiveMode === m ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2"
               }`}
@@ -119,9 +65,9 @@ export function DiffTab({
         <div className="p-4">
           <ErrorNote error={sides.error} />
         </div>
-      ) : (
-        <div ref={hostRef} className="selectable min-h-0 flex-1 overflow-auto" />
-      )}
+      ) : data ? (
+        <DiffView original={data.original} modified={data.modified} mode={effectiveMode} lang={lang} />
+      ) : null}
     </div>
   );
 }

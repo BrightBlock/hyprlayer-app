@@ -87,7 +87,8 @@ export async function runApproval(
     case "permission":
       return respondPermission(ctx.sessionId, action.requestId, true, null);
     case "message":
-      return sendMessage(ctx.sessionId, APPROVAL_TEXT);
+      await sendMessage(ctx.sessionId, APPROVAL_TEXT);
+      return;
     case "question":
       if (ctx.pendingQuestion) {
         return answerQuestion(ctx.sessionId, ctx.pendingQuestion.requestId, buildAnswers(ctx.pendingQuestion));

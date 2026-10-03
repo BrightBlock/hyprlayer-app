@@ -22,6 +22,7 @@ pub enum LaunchPolicy {
         allowed_tools: Vec<String>,
         disallowed_tools: Vec<String>,
         agent: Option<SessionAgent>,
+        review_notes: bool,
     },
     Codex {
         permission_mode: PermissionMode,
@@ -48,6 +49,7 @@ pub fn launch_policy(
             allowed_tools: base.allowed_tools,
             disallowed_tools: base.disallowed_tools,
             agent: agent_for(stage),
+            review_notes: stage == Stage::Implement,
         },
         Harness::Codex => LaunchPolicy::Codex {
             permission_mode,
@@ -111,6 +113,7 @@ mod tests {
                 allowed_tools,
                 disallowed_tools,
                 agent,
+                ..
             } => {
                 assert_eq!(permission_mode, base.permission_mode);
                 assert_eq!(allowed_tools, base.allowed_tools);

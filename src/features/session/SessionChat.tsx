@@ -1105,6 +1105,10 @@ export function SessionChat({
         : null,
     [sid, workstreamId, sessionItems, sessionStage, writtenDocs],
   );
+  const readyCard = useMemo(
+    () => (sid && sessionStage === "implement" ? { sessionId: sid, workstreamId } : null),
+    [sid, sessionStage, workstreamId],
+  );
   const detectedHandoffPath = useMemo(
     () => (sessionItems ? detectHandoffDoc(sessionItems, writtenDocs, dismissedSet) : null),
     [sessionItems, dismissedSet, writtenDocs],
@@ -1489,6 +1493,7 @@ export function SessionChat({
               permission={permission}
               prompt={prompt}
               sync={transcriptSync}
+              ready={readyCard}
               onBottomChange={onBottomChange}
               onDividerPassed={onDividerPassed}
             />

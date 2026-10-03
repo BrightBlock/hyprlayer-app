@@ -2,6 +2,7 @@ use hyprlayer_core::branch_prefix::{BranchPrefix, PrefixSource};
 use hyprlayer_core::gitops::{CommitEntry, DirEntry, FileSides, GitFileEntry, WorktreeGitStatus};
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
+use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::workstreams as core_workstreams;
 use hyprlayer_core::skills::SlashCommand;
 use hyprlayer_core::store::{Workstream, WorkstreamDoc, WorktreeMode};
@@ -564,6 +565,33 @@ pub async fn worktree_file_sides(
     state
         .client()?
         .worktree_file_sides(id, path, staged)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn review_changed_files(
+    state: State<'_, AppState>,
+    workstream_id: String,
+) -> CmdResult<ReviewFileList> {
+    state
+        .client()?
+        .review_changed_files(workstream_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn review_file_sides(
+    state: State<'_, AppState>,
+    workstream_id: String,
+    path: String,
+) -> CmdResult<ReviewFileSides> {
+    state
+        .client()?
+        .review_file_sides(workstream_id, path)
         .await
         .map_err(AppError::from)
 }

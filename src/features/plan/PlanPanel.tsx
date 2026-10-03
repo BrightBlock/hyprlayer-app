@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
+import { plural } from "@/lib/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
 import { PhaseSection } from "./PhaseSection";
@@ -28,10 +29,6 @@ type Props = {
 };
 
 const NO_CHANGES: ReadonlySet<string> = new Set();
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
 
 function progressLabel(tracker: PlanTracker): string {
   const checks = tracker.checks;

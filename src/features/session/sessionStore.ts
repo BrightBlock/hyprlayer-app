@@ -44,6 +44,7 @@ import {
 } from "./backgroundTask";
 import { planTasksFromItems, todoPhaseLabel, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
+import { REVIEW_PROMPT } from "./reviewCardSlot";
 import { permissionModeOption } from "@/lib/domain/permissions";
 import {
   bodyHasVars,
@@ -63,8 +64,10 @@ import {
   openCommitTab,
   openImplementTab,
   openPromptTab,
+  openSessionTab,
   openShipTab,
   paneShells,
+  sessionPermissionMode,
   setSessionPermissionMode,
   useWorkstreamTabsStore,
   visibleShells,
@@ -136,7 +139,12 @@ export type QueuedMessage = {
   text: string;
   attachments: Attachment[];
   promptName: string | null;
+  /** Runs once the queued text actually reaches the harness. */
+  onSent?: () => void;
 };
+
+/** "dropped": the session left the store before anything was sent or queued. */
+export type SendOutcome = "sent" | "queued" | "dropped";
 
 type State = { sessions: Record<string, SessionEntry> };
 
@@ -896,20 +904,21 @@ export async function sendMessage(
   text: string,
   attachments: Attachment[] = [],
   promptName: string | null = null,
-): Promise<void> {
+  onSent?: () => void,
+): Promise<SendOutcome> {
   const current = entryOf(sessionId);
-  if (!current) return;
+  if (!current) return "dropped";
   if (channels.has(sessionId) && isBusy(current)) {
     setEntry(sessionId, {
       ...current,
-      queued: [...current.queued, { text, attachments, promptName }],
+      queued: [...current.queued, { text, attachments, promptName, onSent }],
     });
-    return;
+    return "queued";
   }
   const sync = syncOf(sessionId);
   // Senders that skip the composer's guard (the handoff banner) pull first.
   if (sync && !canSend(sync)) await pullNow(sessionId);
-  await deliverMessage(sessionId, text, attachments, promptName, "back");
+  return deliverMessage(sessionId, text, attachments, promptName, "back", onSent);
 }
 
 async function deliverMessage(
@@ -918,22 +927,23 @@ async function deliverMessage(
   attachments: Attachment[] = [],
   promptName: string | null = null,
   requeue: "front" | "back" = "back",
-): Promise<void> {
-  if (!entryOf(sessionId)) return;
+  onSent?: () => void,
+): Promise<SendOutcome> {
+  if (!entryOf(sessionId)) return "dropped";
   // Resume before adding the optimistic item: a session another device drove
   // in the meantime replays those turns first, so they land above this
   // prompt instead of after it. `flush: false` keeps the settle from sending
   // a queued message ahead of the one being delivered right now.
   if (!channels.has(sessionId)) await resumeSession(sessionId, { flush: false });
   const current = entryOf(sessionId);
-  if (!current) return;
+  if (!current) return "dropped";
   // The resume attached mid-turn, or a pull showed one running: it would land inside that turn.
   // Working, not busy: a resumed log can re-show a dead process's ask, which must not block.
   if (channels.has(sessionId) && isWorking(current)) {
-    const message: QueuedMessage = { text, attachments, promptName };
+    const message: QueuedMessage = { text, attachments, promptName, onSent };
     const queued = requeue === "front" ? [message, ...current.queued] : [...current.queued, message];
     setEntry(sessionId, { ...current, queued });
-    return;
+    return "queued";
   }
   const clientMessageId = crypto.randomUUID();
   const withUser = addUserMessage(current, text, null, attachments, Date.now(), promptName, clientMessageId);
@@ -969,6 +979,7 @@ async function deliverMessage(
     }
     throw e;
   }
+  return "sent";
 }
 
 // A refused send never reached the harness, so the turn it opened locally never ran. But a
@@ -1025,7 +1036,15 @@ async function deliverQueued(sessionId: string, next: QueuedMessage): Promise<bo
     if (behind(syncOf(sessionId))) await pullNow(sessionId);
     // Another client's send is still in flight: sending now would only 409.
     if (behind(syncOf(sessionId))) return requeue();
-    await deliverMessage(sessionId, next.text, next.attachments, next.promptName, "front");
+    const outcome = await deliverMessage(
+      sessionId,
+      next.text,
+      next.attachments,
+      next.promptName,
+      "front",
+      next.onSent,
+    );
+    if (outcome === "sent") next.onSent?.();
   } catch (e) {
     if (isStaleTranscript(e)) return requeue();
     log.warn("session", "sending a queued message failed", e);
@@ -1405,6 +1424,56 @@ export async function runPromptTextInWorkstream(
   } finally {
     promptStartsInFlight.delete(workstreamId);
   }
+}
+
+// Loads, then attaches, the implement session; false when only a fresh session can take the review.
+async function attachForReview(workstreamId: string, implement: Session): Promise<boolean> {
+  if (implement.state === "spawn_failed") return false;
+  await restoreSessionIfNeeded(
+    implement.id,
+    workstreamId,
+    "implement",
+    permissionModeOption(sessionPermissionMode(workstreamId, implement.id)).flag,
+  );
+  const entry = entryOf(implement.id);
+  if (!entry || entry.state === "spawn_failed") return false;
+  if (channels.has(implement.id)) return true;
+  try {
+    await resumeSession(implement.id, { flush: false });
+  } catch (e) {
+    log.warn("session", `resuming ${implement.id} for a review failed; starting a new session`, e);
+    return false;
+  }
+  return entryOf(implement.id) !== undefined;
+}
+
+/**
+ * Sends a review to the implement session, resuming a finished one so it keeps its
+ * context. `onQueuedSent` runs if the text was queued behind a turn, once it goes out.
+ */
+export async function deliverReview(
+  workstreamId: string,
+  implement: Session | null,
+  text: string,
+  onQueuedSent?: () => void,
+): Promise<"sent" | "queued"> {
+  if (implement && (await attachForReview(workstreamId, implement))) {
+    const outcome = await sendMessage(implement.id, text, [], REVIEW_PROMPT, onQueuedSent);
+    if (outcome !== "dropped") {
+      openSessionTab(workstreamId, implement);
+      return outcome;
+    }
+  }
+  const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
+  const session = await startSession({
+    workstreamId,
+    stage: "general",
+    input: text,
+    promptName: REVIEW_PROMPT,
+    ...newChatLaunchArgs(settings, null, claudeCatalogSnapshot()),
+  });
+  openPromptTab(workstreamId, session.id, "Review");
+  return "sent";
 }
 
 export async function commitWorkstream(workstreamId: string): Promise<void> {

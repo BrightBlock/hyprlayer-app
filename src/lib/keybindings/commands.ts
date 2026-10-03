@@ -252,6 +252,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+shift+p", other: "mod+shift+p" },
   },
   {
+    id: "ws.review",
+    label: "Review Changes",
+    category: "Workspace",
+    when: "workstream",
+    defaults: { mac: "mod+shift+r", other: "mod+shift+r" },
+  },
+  {
     id: "ws.cycleStage",
     label: "Cycle Agent Stage",
     category: "Workspace",

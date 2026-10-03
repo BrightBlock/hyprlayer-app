@@ -4,9 +4,9 @@ import type { CommitEntry } from "@/lib/bindings";
 import { ErrorNote, rowClass, Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { FileTypeIcon } from "@/components/fileIcon";
+import { glyphForStatus } from "@/lib/domain/review";
 import { formatRelativeTime, shortSha } from "@/lib/format";
 import { useCommitFiles } from "@/lib/queries";
-import { GLYPH } from "./changeGlyph";
 import { renamedLabel } from "./renamedLabel";
 
 function CommitRow({
@@ -53,11 +53,7 @@ function CommitRow({
           <p className="px-1 pb-1 pl-[26px] text-ui text-ink-dim/70">No files changed.</p>
         ) : (
           (files.data ?? []).map((entry) => {
-            const glyph = GLYPH[entry.change] ?? {
-              ch: "?",
-              cls: "text-ink-dim",
-              label: entry.change,
-            };
+            const glyph = glyphForStatus(entry.change);
             const label = renamedLabel(entry.path, entry.oldPath);
             return (
               <button

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineTask } from "@/features/session/planTasks";
 
 import { parsePlanDoc } from "./planDoc";
-import { trackPlan, type SessionSignal } from "./planTracker";
+import { matchTodoToPlan, trackPlan, type SessionSignal } from "./planTracker";
 
 const PATH = "/t/plans/p.md";
 
@@ -276,5 +276,76 @@ describe("jump targets", () => {
     );
     expect(t.phases[0].tasks[0].jump).toEqual({ toolUseId: "tu-task" });
     expect(t.phases[0].tasks[1].jump).toEqual({ toolUseId: "tu-phase" });
+  });
+});
+
+describe("tasksDone", () => {
+  it("follows the doc tasks: all done, then one pending", () => {
+    expect(trackPlan(plan([true, true, true, true]), [], building).tasksDone).toBe(true);
+    expect(trackPlan(plan([true, true, true, false]), [], building).tasksDone).toBe(false);
+  });
+
+  it("builds a criteria-only phase once its todo completes", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [ ] fmt\n\n## Phase 2: B\n### Success Criteria:\n- [ ] clippy\n", PATH);
+    expect(trackPlan(doc, [todo("Phase 1: A", "completed"), todo("Phase 2: B", "in_progress")], building).tasksDone).toBe(false);
+    expect(trackPlan(doc, [todo("Phase 1: A", "completed"), todo("Phase 2: B", "completed")], building).tasksDone).toBe(true);
+  });
+
+  it("stays false with ticked Phase 1 tasks and a criteria-only Phase 2 whose todo is pending", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n- [x] a\n\n## Phase 2: B\n### Success Criteria:\n- [ ] clippy\n", PATH);
+    expect(trackPlan(doc, [todo("Phase 2: B", "pending")], building).tasksDone).toBe(false);
+  });
+
+  it("is true through allDone when every criterion is ticked by hand", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [x] fmt\n- [x] clippy\n", PATH);
+    const t = trackPlan(doc, [], building);
+    expect([t.allDone, t.tasksDone]).toEqual([true, true]);
+  });
+
+  it("counts a phase built when its todo completed over an unticked task row", () => {
+    const t = trackPlan(plan([true, true, false, false]), [todo("Phase 2: Build", "completed")], building);
+    expect([t.tasksDone, t.allDone]).toEqual([true, false]);
+  });
+
+  it("is not held back by an unchecked manual criterion, which still holds allDone", () => {
+    const doc = parsePlanDoc(
+      "## Phase 1: A\n- [x] Write it\n### Success Criteria:\n#### Automated Verification:\n- [ ] fmt\n#### Manual Verification:\n- [ ] Looks right\n",
+      PATH,
+    );
+    const t = trackPlan(doc, [todo("fmt", "completed")], building);
+    expect([t.tasksDone, t.allDone]).toEqual([true, false]);
+  });
+
+  it("is not held back by an added row", () => {
+    const t = trackPlan(plan([true, true, true, true]), [todo("Regenerate bindings", "pending")], building);
+    expect([t.tasksDone, t.allDone]).toEqual([true, false]);
+  });
+});
+
+describe("matchTodoToPlan", () => {
+  const phases = plan().phases;
+
+  it("matches a [P2.1] tag to its row", () => {
+    expect(matchTodoToPlan(phases, "[P2.1] porting the page")).toEqual({ phaseLabel: "2", taskKey: "P2.1" });
+  });
+
+  it("matches a Phase 2: label to the phase", () => {
+    expect(matchTodoToPlan(phases, "Phase 2: Build the tracker")).toEqual({ phaseLabel: "2", taskKey: null });
+  });
+
+  it("matches a normalized title", () => {
+    expect(matchTodoToPlan(phases, "  add `TYPES`. ")).toEqual({ phaseLabel: "1", taskKey: "P1.2" });
+  });
+
+  it("returns null with no match", () => {
+    expect(matchTodoToPlan(phases, "Regenerate bindings")).toBeNull();
+  });
+
+  it("drops a taken [P2.3] tag to the title tier, as trackPlan does", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n- [ ] Ship it\n\n## Phase 2: B\n- [ ] x\n- [ ] y\n- [ ] z\n", PATH);
+    expect(matchTodoToPlan(doc.phases, "[P2.3] Ship it")).toEqual({ phaseLabel: "2", taskKey: "P2.3" });
+    expect(matchTodoToPlan(doc.phases, "[P2.3] Ship it", (k) => k === "P2.3")).toEqual({ phaseLabel: "1", taskKey: "P1.1" });
+    const t = trackPlan(doc, [todo("[P2.3] z", "completed"), todo("[P2.3] Ship it", "in_progress")], building);
+    expect(t.phases[0].tasks[0].state).toBe("in_progress");
   });
 });

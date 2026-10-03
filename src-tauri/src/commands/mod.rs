@@ -8,6 +8,7 @@ pub mod ollama;
 pub mod onboarding;
 pub mod projects;
 pub mod prompts;
+pub mod reviews;
 pub mod scripts;
 pub mod sessions;
 pub mod system;

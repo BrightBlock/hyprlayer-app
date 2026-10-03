@@ -67,6 +67,8 @@ export const commands = {
 	worktreeUnstage: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_unstage", { id, paths })),
 	worktreeDiscard: (id: string, paths: string[]) => typedError<null, AppError>(__TAURI_INVOKE("worktree_discard", { id, paths })),
 	worktreeFileSides: (id: string, path: string, staged: boolean) => typedError<FileSides, AppError>(__TAURI_INVOKE("worktree_file_sides", { id, path, staged })),
+	reviewChangedFiles: (workstreamId: string) => typedError<ReviewFileList, AppError>(__TAURI_INVOKE("review_changed_files", { workstreamId })),
+	reviewFileSides: (workstreamId: string, path: string) => typedError<ReviewFileSides, AppError>(__TAURI_INVOKE("review_file_sides", { workstreamId, path })),
 	worktreeListDir: (id: string, path: string) => typedError<DirEntry[], AppError>(__TAURI_INVOKE("worktree_list_dir", { id, path })),
 	worktreeReadFile: (id: string, path: string) => typedError<WorktreeFile, AppError>(__TAURI_INVOKE("worktree_read_file", { id, path })),
 	worktreeWriteFile: (id: string, path: string, content: string, baseMtimeMs: number | null) => typedError<number | null, AppError>(__TAURI_INVOKE("worktree_write_file", { id, path, content, baseMtimeMs })),
@@ -114,6 +116,15 @@ export const commands = {
 } | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
+	getReview: (workstreamId: string) => typedError<ReviewView, AppError>(__TAURI_INVOKE("get_review", { workstreamId })),
+	setReviewFileViewed: (req: SetReviewFileViewedRequest) => typedError<null, AppError>(__TAURI_INVOKE("set_review_file_viewed", { req })),
+	addReviewComment: (req: AddReviewCommentRequest) => typedError<ReviewComment, AppError>(__TAURI_INVOKE("add_review_comment", { req })),
+	editReviewComment: (workstreamId: string, commentId: string, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_review_comment", { workstreamId, commentId, body })),
+	deleteReviewComment: (workstreamId: string, commentId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_review_comment", { workstreamId, commentId })),
+	resolveReviewComment: (workstreamId: string, commentId: string, resolved: boolean) => typedError<null, AppError>(__TAURI_INVOKE("resolve_review_comment", { workstreamId, commentId, resolved })),
+	resolveReviewNote: (workstreamId: string, noteId: string, resolved: boolean) => typedError<null, AppError>(__TAURI_INVOKE("resolve_review_note", { workstreamId, noteId, resolved })),
+	submitReview: (req: SubmitReviewRequest) => typedError<SubmitReviewResult, AppError>(__TAURI_INVOKE("submit_review", { req })),
+	markReviewRoundDelivered: (workstreamId: string, round: number) => typedError<null, AppError>(__TAURI_INVOKE("mark_review_round_delivered", { workstreamId, round })),
 	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionStreamItemDto>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
 	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
 	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
@@ -287,6 +298,7 @@ export const events = {
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	reviewChanged: makeEvent<ReviewChanged>("review-changed"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	serverDisconnected: makeEvent<ServerDisconnected>("server-disconnected"),
 	sessionLifecycle: makeEvent<SessionLifecycle>("session-lifecycle"),
@@ -303,6 +315,16 @@ export type ActiveSessionView = {
 	session: Session,
 	workstreamTitle: string,
 	projectPath: string,
+};
+
+export type AddReviewCommentRequest = {
+	workstreamId: string,
+	path: string,
+	side: ReviewSide,
+	line: number,
+	anchorText: string,
+	body: string,
+	parentId: string | null,
 };
 
 export type AgentBundleInstall = {
@@ -811,6 +833,8 @@ export type Engine = {
 
 export type ExitOutcome = "completed" | "interrupted" | "crashed" | "killed" | "detached" | "spawn_failed";
 
+export type FileChangeKind = "added" | "modified" | "deleted" | "renamed" | "typechange" | "other";
+
 export type FileSides = {
 	original: string,
 	modified: string,
@@ -1270,7 +1294,106 @@ export type ResumedSession = {
 	permissionMode: PermissionMode | null,
 };
 
+export type ReviewChanged = {
+	workstreamId: string,
+};
+
+export type ReviewComment = {
+	id: string,
+	parentId: string | null,
+	path: string,
+	side: ReviewSide,
+	line: number,
+	/**  Missing once the line is gone from its side's current text. */
+	currentLine: number | null,
+	anchorText: string,
+	body: string,
+	state: ReviewCommentState,
+	round: number | null,
+	resolved: boolean,
+	addressed: boolean,
+	createdAt: number | null,
+	updatedAt: number | null,
+};
+
+/**  Resolution is not a state: a sent comment can be resolved and keep its history. */
+export type ReviewCommentState = "pending" | "saved" | "sending" | "sent";
+
 export type ReviewDecision = "approved" | "changesRequested" | "reviewRequired";
+
+export type ReviewFile = {
+	path: string,
+	oldPath: string | null,
+	change: FileChangeKind,
+	additions: number,
+	deletions: number,
+	contentOid: string,
+	binary: boolean,
+};
+
+export type ReviewFileList = {
+	base: string,
+	mergeBase: string | null,
+	baseResolved: boolean,
+	files: ReviewFile[],
+	additions: number,
+	deletions: number,
+};
+
+export type ReviewFileSides = {
+	original: string,
+	modified: string,
+	originalExists: boolean,
+	modifiedExists: boolean,
+	originalPath: string | null,
+	binary: boolean,
+	tooLarge: boolean,
+	contentOid: string,
+};
+
+export type ReviewNote = {
+	id: string,
+	path: string,
+	line: number,
+	currentLine: number | null,
+	kind: ReviewNoteKind,
+	body: string,
+	task: string | null,
+	resolved: boolean,
+	createdAt: number | null,
+};
+
+export type ReviewNoteKind = "note" | "needs_your_call" | "outside_plan_scope";
+
+export type ReviewRound = {
+	number: number,
+	verdict: ReviewVerdict,
+	summary: string | null,
+	message: string | null,
+	viewedCount: number,
+	fileCount: number,
+	commentCount: number,
+	submittedAt: number | null,
+	delivered: boolean,
+};
+
+export type ReviewSide = "original" | "modified";
+
+export type ReviewStatus = "in_progress" | "changes_requested" | "approved";
+
+export type ReviewVerdict = "comment" | "request_changes" | "approve";
+
+export type ReviewView = {
+	id: string,
+	workstreamId: string,
+	status: ReviewStatus,
+	files: ReviewFileList,
+	viewed: string[],
+	comments: ReviewComment[],
+	notes: ReviewNote[],
+	rounds: ReviewRound[],
+	changedSinceRound: string[],
+};
 
 /**  Revs and seqs are `f64` here: specta exports no `u64`/`i64`. */
 export type RevisedTurnDto = {
@@ -1430,6 +1553,13 @@ export type SessionViewers = {
 	viewers: ClientRef[],
 };
 
+export type SetReviewFileViewedRequest = {
+	workstreamId: string,
+	path: string,
+	contentOid: string,
+	viewed: boolean,
+};
+
 export type SlashCommand = {
 	name: string,
 	description: string,
@@ -1488,6 +1618,18 @@ export type StorageSettings = {
 	spaceId?: string | null,
 	typeId?: string | null,
 	apiTokenEnv?: string | null,
+};
+
+export type SubmitReviewRequest = {
+	workstreamId: string,
+	verdict: ReviewVerdict,
+	summary: string | null,
+};
+
+export type SubmitReviewResult = {
+	round: ReviewRound,
+	/**  Request changes only: what to deliver to the implement session. */
+	message: string | null,
 };
 
 export type SyncReport = {

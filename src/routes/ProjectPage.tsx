@@ -42,6 +42,7 @@ import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
 import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
 import { PlanAside, PlanDocSync } from "@/features/plan/PlanAside";
+import { ReviewWorkspace } from "@/features/review/ReviewWorkspace";
 import { usePlanAside } from "@/features/plan/usePlanAside";
 import { AgentPtyTab } from "@/features/multiplexer/AgentPtyTab";
 import { EngineGlyph } from "@/components/EngineGlyph";
@@ -86,7 +87,7 @@ import {
   IMAGE_EXTENSIONS,
   type Attachment,
 } from "@/features/session/attachments";
-import { isGitProject } from "@/lib/domain/projects";
+import { isFolderWorkstream, isGitProject } from "@/lib/domain/projects";
 import { nextModeStage, stageLabel, type StageKey } from "@/lib/domain/stages";
 import {
   activeShellIn,
@@ -263,6 +264,7 @@ function ProjectCommands(props: {
   onNewWorkstream: () => void;
   onToggleRun: (() => void) | null;
   onCycleStage: (() => void) | null;
+  onOpenReview: (() => void) | null;
 }) {
   const session = useSession(props.sessionId);
   const running = Boolean(props.sessionId && session && isBusy(session));
@@ -285,6 +287,7 @@ function ProjectCommands(props: {
   useCommand("ws.new", props.onNewWorkstream);
   useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
+  useCommand("ws.review", props.onOpenReview);
   useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return (
@@ -374,7 +377,16 @@ export function ProjectPage() {
     if (selectedId === undefined) return;
     if (!workstreams.isSuccess || workstreams.isFetching) return;
     if (!views.some((v) => v.item.id === selectedId)) {
-      void navigate({ search: (prev) => ({ ...prev, item: undefined }), replace: true });
+      void navigate({
+        search: (prev) => ({
+          ...prev,
+          item: undefined,
+          review: undefined,
+          reviewFile: undefined,
+          reviewLine: undefined,
+        }),
+        replace: true,
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, workstreams.isSuccess, workstreams.isFetching]);
@@ -802,8 +814,21 @@ export function ProjectPage() {
 
   const selectItem = (id: string) => {
     void navigate({
-      search: (prev) => ({ ...prev, item: id }),
+      search: (prev) => ({
+        ...prev,
+        item: id,
+        review: undefined,
+        reviewFile: undefined,
+        reviewLine: undefined,
+      }),
       replace: true,
+    });
+  };
+  const reviewable = !!activeView && !isFolderWorkstream(activeView);
+  const reviewing = reviewable && !!search.review;
+  const openReview = () => {
+    void navigate({
+      search: (prev) => ({ ...prev, review: "files", reviewFile: undefined, reviewLine: undefined }),
     });
   };
   const changeShellMode = (shell: ShellTab, key: StageKey) => {
@@ -1270,431 +1295,447 @@ export function ProjectPage() {
             ? () => changeShellMode(focusedShell, nextModeStage(focusedShell.mode))
             : null
         }
+        onOpenReview={reviewable ? openReview : null}
       />
-      <section className="flex min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1">
-          <main className="flex min-w-0 flex-1 flex-col">
-            {shellMenu &&
-              contextShell &&
-              tabs &&
-              (() => {
-                const pane = paneOf(tabs, contextShell);
-                const onlyTab = paneShells(tabs, pane).length === 1;
-                const canRow = canSplit(pane, "row");
-                const canCol = canSplit(pane, "col");
-                const nextPane = paneIds[(paneIds.indexOf(pane) + 1) % paneIds.length];
-                return (
-                  <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
-                    <ContextMenuItem
-                      onClick={() => {
-                        openRenameShell(contextShell);
-                        setShellMenu(null);
-                      }}
-                    >
-                      Rename tab
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      onClick={() => {
-                        copyShellTranscript(contextShell);
-                        setShellMenu(null);
-                      }}
-                    >
-                      Copy transcript
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      disabled={onlyTab || !canRow}
-                      hint={!canRow ? "Not enough room" : undefined}
-                      onClick={() => {
-                        updateTabs((current) =>
-                          splitPaneState(current, paneOf(current, contextShell), "row", "after", contextShell.id),
-                        );
-                        setShellMenu(null);
-                      }}
-                    >
-                      Split right with this tab
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      disabled={onlyTab || !canCol}
-                      hint={!canCol ? "Not enough room" : undefined}
-                      onClick={() => {
-                        updateTabs((current) =>
-                          splitPaneState(current, paneOf(current, contextShell), "col", "after", contextShell.id),
-                        );
-                        setShellMenu(null);
-                      }}
-                    >
-                      Split down with this tab
-                    </ContextMenuItem>
-                    {paneIds.length > 1 && (
-                      <ContextMenuItem
-                        onClick={() => {
-                          moveShellToPane(contextShell.id, nextPane);
-                          setShellMenu(null);
-                        }}
-                      >
-                        Move to next pane
-                      </ContextMenuItem>
-                    )}
-                    {paneIds.length > 1 &&
-                      (zoomedPaneId === pane ? (
+      {reviewing && activeView ? (
+        <ReviewWorkspace
+          key={activeView.item.id}
+          view={activeView}
+          tab={search.review!}
+          file={search.reviewFile}
+          line={search.reviewLine}
+          onOpenDoc={openDoc}
+        />
+      ) : (
+        <>
+          <section className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1">
+              <main className="flex min-w-0 flex-1 flex-col">
+                {shellMenu &&
+                  contextShell &&
+                  tabs &&
+                  (() => {
+                    const pane = paneOf(tabs, contextShell);
+                    const onlyTab = paneShells(tabs, pane).length === 1;
+                    const canRow = canSplit(pane, "row");
+                    const canCol = canSplit(pane, "col");
+                    const nextPane = paneIds[(paneIds.indexOf(pane) + 1) % paneIds.length];
+                    return (
+                      <ContextMenu position={shellMenu} onClose={() => setShellMenu(null)}>
                         <ContextMenuItem
                           onClick={() => {
-                            setMaximized(null);
+                            openRenameShell(contextShell);
                             setShellMenu(null);
                           }}
                         >
-                          Restore split view
+                          Rename tab
                         </ContextMenuItem>
-                      ) : (
                         <ContextMenuItem
                           onClick={() => {
-                            selectShell(contextShell.id);
-                            if (wsId) setMaximized({ wsId, paneId: pane });
+                            copyShellTranscript(contextShell);
                             setShellMenu(null);
                           }}
                         >
-                          Expand pane
+                          Copy transcript
                         </ContextMenuItem>
-                      ))}
-                    {isArchivable(contextShell) && (
-                      <ContextMenuItem
-                        disabled={archiveBlockedReason !== null}
-                        hint={archiveBlockedReason ?? undefined}
-                        onClick={() => {
-                          archiveShell(contextShell.id);
-                          setShellMenu(null);
-                        }}
-                      >
-                        Archive agent
-                      </ContextMenuItem>
-                    )}
-                    <ContextMenuItem
-                      danger={isArchivable(contextShell)}
-                      disabled={contextIsLast}
-                      onClick={() => {
-                        closeShell(contextShell.id);
-                        setShellMenu(null);
-                      }}
-                    >
-                      {isArchivable(contextShell) ? "Close agent" : "Close tab"}
-                    </ContextMenuItem>
-                  </ContextMenu>
-                );
-              })()}
-            {splitMenu &&
-              (() => {
-                const menu = splitMenu;
-                const canRow = canSplit(menu.paneId, "row");
-                const canCol = canSplit(menu.paneId, "col");
-                return (
-                  <ContextMenu position={menu} onClose={() => setSplitMenu(null)}>
-                    <ContextMenuItem
-                      disabled={!canRow}
-                      hint={!canRow ? "Not enough room" : undefined}
-                      onClick={() => {
-                        splitPane(menu.paneId, "row");
-                        setSplitMenu(null);
-                      }}
-                    >
-                      Split right
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      disabled={!canCol}
-                      hint={!canCol ? "Not enough room" : undefined}
-                      onClick={() => {
-                        splitPane(menu.paneId, "col");
-                        setSplitMenu(null);
-                      }}
-                    >
-                      Split down
-                    </ContextMenuItem>
-                    <MenuSeparator />
-                    <ContextMenuItem
-                      disabled={paneIds.length === 1}
-                      onClick={() => {
-                        mergePane(menu.paneId);
-                        setSplitMenu(null);
-                      }}
-                    >
-                      Close pane (keep tabs)
-                    </ContextMenuItem>
-                  </ContextMenu>
-                );
-              })()}
-            {newAgentMenu &&
-              (() => {
-                const menu = newAgentMenu;
-                const def = defaultEngine(multiplexer);
-                const spawn = (engineId?: string) => addShellToPane(menu.pane, engineId);
-                return (
-                  <ContextMenu position={menu} onClose={() => setNewAgentMenu(null)}>
-                    <div className="px-2 pb-1 pt-0.5 text-ui text-ink-dim">
-                      New agent in {activeView?.item.title ?? "workstream"}
-                    </div>
-                    {enabledEngines(multiplexer).map((engine) => (
-                      <ContextMenuItem
-                        key={engine.id}
-                        onClick={() => {
-                          spawn(engine.id);
-                          setNewAgentMenu(null);
-                        }}
-                      >
-                        <span className="flex w-full items-center gap-2">
-                          <EngineGlyph
-                            glyph={engine.glyph}
-                            accentToken={engine.accentToken}
-                            className="text-body leading-none"
-                          />
-                          <span className="min-w-0 flex-1 truncate">{engine.label}</span>
-                          {engine.id === def?.id && (
-                            <span className="text-meta text-ink-dim">⌘T</span>
-                          )}
-                        </span>
-                      </ContextMenuItem>
-                    ))}
-                    <MenuSeparator />
-                    <ContextMenuItem
-                      onClick={() => {
-                        spawn();
-                        setNewAgentMenu(null);
-                      }}
-                    >
-                      <span className="flex w-full items-center gap-2">
-                        <SessionTabIcon mode="general" />
-                        <span className="min-w-0 flex-1 truncate">Native chat</span>
-                      </span>
-                    </ContextMenuItem>
-                    <MenuSeparator />
-                    <ContextMenuItem
-                      onClick={() => {
-                        setNewAgentMenu(null);
-                        void navigate({ to: "/settings", search: { section: "advanced" } });
-                      }}
-                    >
-                      Configure engines…
-                    </ContextMenuItem>
-                  </ContextMenu>
-                );
-              })()}
-            <StopAgentDialog
-              title={shells.find((s) => s.id === stopShellId)?.title ?? null}
-              onClose={() => setStopShellId(null)}
-              onConfirm={() => {
-                if (stopShellId !== null) archiveShellNow(stopShellId, true);
-                setStopShellId(null);
-              }}
-            />
-            <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
-              <form
-                className="space-y-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  commitRenameShell();
-                }}
-              >
-                <TextInput
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  autoFocus
-                />
-                <div className="flex justify-end gap-2">
-                  <Button type="button" onClick={closeRenameShell}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" variant="primary" disabled={!renameValue.trim()}>
-                    Rename
-                  </Button>
-                </div>
-              </form>
-            </Dialog>
-            <CreateWorkstreamDialog
-              projectPath={projectPath}
-              folder={folderProject}
-              open={createOpen}
-              onClose={() => setCreateOpen(false)}
-              onCreated={(view) => selectItem(view.item.id)}
-            />
-
-            {activeView && tabs ? (
-              <div ref={splitRowRef} className="relative min-h-0 flex-1">
-                {[...paneIds].sort(byPaneIdSuffix).map((paneId) => {
-                  const zoomedAway = zoomedPaneId !== null && zoomedPaneId !== paneId;
-                  const r = zoomedPaneId === paneId ? FULL_RECT : rects[paneId];
-                  return (
-                    <div
-                      key={paneId}
-                      data-pane={paneId}
-                      className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden ${zoomedAway ? "hidden" : ""} ${
-                        r.x > 1e-6 ? "border-l border-edge" : ""
-                      } ${r.y > 1e-6 ? "border-t border-edge" : ""}`}
-                      style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
-                      onPointerDownCapture={() => {
-                        if (paneIds.length > 1 && focusedPaneId(tabs) !== paneId) {
-                          updateTabs((current) => setFocusedPane(current, paneId));
-                        }
-                      }}
-                    >
-                      {renderLeafStrip(paneId)}
-                      <div
-                        data-pane-content
-                        className={`relative flex min-h-0 flex-1 flex-col ${
-                          dropTarget?.paneId === paneId && dropTarget.edge === null
-                            ? "ring-2 ring-inset ring-accent/60"
-                            : ""
-                        }`}
-                      >
-                        {renderPaneContent(activeShellIn(tabs, paneId))}
-                        {dropTarget?.paneId === paneId && dropTarget.edge && (
-                          <div
-                            className={`pointer-events-none absolute bg-accent/15 ring-2 ring-inset ring-accent/60 ${
-                              EDGE_OVERLAY_CLASS[dropTarget.edge]
-                            }`}
-                          />
+                        <ContextMenuItem
+                          disabled={onlyTab || !canRow}
+                          hint={!canRow ? "Not enough room" : undefined}
+                          onClick={() => {
+                            updateTabs((current) =>
+                              splitPaneState(current, paneOf(current, contextShell), "row", "after", contextShell.id),
+                            );
+                            setShellMenu(null);
+                          }}
+                        >
+                          Split right with this tab
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          disabled={onlyTab || !canCol}
+                          hint={!canCol ? "Not enough room" : undefined}
+                          onClick={() => {
+                            updateTabs((current) =>
+                              splitPaneState(current, paneOf(current, contextShell), "col", "after", contextShell.id),
+                            );
+                            setShellMenu(null);
+                          }}
+                        >
+                          Split down with this tab
+                        </ContextMenuItem>
+                        {paneIds.length > 1 && (
+                          <ContextMenuItem
+                            onClick={() => {
+                              moveShellToPane(contextShell.id, nextPane);
+                              setShellMenu(null);
+                            }}
+                          >
+                            Move to next pane
+                          </ContextMenuItem>
                         )}
+                        {paneIds.length > 1 &&
+                          (zoomedPaneId === pane ? (
+                            <ContextMenuItem
+                              onClick={() => {
+                                setMaximized(null);
+                                setShellMenu(null);
+                              }}
+                            >
+                              Restore split view
+                            </ContextMenuItem>
+                          ) : (
+                            <ContextMenuItem
+                              onClick={() => {
+                                selectShell(contextShell.id);
+                                if (wsId) setMaximized({ wsId, paneId: pane });
+                                setShellMenu(null);
+                              }}
+                            >
+                              Expand pane
+                            </ContextMenuItem>
+                          ))}
+                        {isArchivable(contextShell) && (
+                          <ContextMenuItem
+                            disabled={archiveBlockedReason !== null}
+                            hint={archiveBlockedReason ?? undefined}
+                            onClick={() => {
+                              archiveShell(contextShell.id);
+                              setShellMenu(null);
+                            }}
+                          >
+                            Archive agent
+                          </ContextMenuItem>
+                        )}
+                        <ContextMenuItem
+                          danger={isArchivable(contextShell)}
+                          disabled={contextIsLast}
+                          onClick={() => {
+                            closeShell(contextShell.id);
+                            setShellMenu(null);
+                          }}
+                        >
+                          {isArchivable(contextShell) ? "Close agent" : "Close tab"}
+                        </ContextMenuItem>
+                      </ContextMenu>
+                    );
+                  })()}
+                {splitMenu &&
+                  (() => {
+                    const menu = splitMenu;
+                    const canRow = canSplit(menu.paneId, "row");
+                    const canCol = canSplit(menu.paneId, "col");
+                    return (
+                      <ContextMenu position={menu} onClose={() => setSplitMenu(null)}>
+                        <ContextMenuItem
+                          disabled={!canRow}
+                          hint={!canRow ? "Not enough room" : undefined}
+                          onClick={() => {
+                            splitPane(menu.paneId, "row");
+                            setSplitMenu(null);
+                          }}
+                        >
+                          Split right
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          disabled={!canCol}
+                          hint={!canCol ? "Not enough room" : undefined}
+                          onClick={() => {
+                            splitPane(menu.paneId, "col");
+                            setSplitMenu(null);
+                          }}
+                        >
+                          Split down
+                        </ContextMenuItem>
+                        <MenuSeparator />
+                        <ContextMenuItem
+                          disabled={paneIds.length === 1}
+                          onClick={() => {
+                            mergePane(menu.paneId);
+                            setSplitMenu(null);
+                          }}
+                        >
+                          Close pane (keep tabs)
+                        </ContextMenuItem>
+                      </ContextMenu>
+                    );
+                  })()}
+                {newAgentMenu &&
+                  (() => {
+                    const menu = newAgentMenu;
+                    const def = defaultEngine(multiplexer);
+                    const spawn = (engineId?: string) => addShellToPane(menu.pane, engineId);
+                    return (
+                      <ContextMenu position={menu} onClose={() => setNewAgentMenu(null)}>
+                        <div className="px-2 pb-1 pt-0.5 text-ui text-ink-dim">
+                          New agent in {activeView?.item.title ?? "workstream"}
+                        </div>
+                        {enabledEngines(multiplexer).map((engine) => (
+                          <ContextMenuItem
+                            key={engine.id}
+                            onClick={() => {
+                              spawn(engine.id);
+                              setNewAgentMenu(null);
+                            }}
+                          >
+                            <span className="flex w-full items-center gap-2">
+                              <EngineGlyph
+                                glyph={engine.glyph}
+                                accentToken={engine.accentToken}
+                                className="text-body leading-none"
+                              />
+                              <span className="min-w-0 flex-1 truncate">{engine.label}</span>
+                              {engine.id === def?.id && (
+                                <span className="text-meta text-ink-dim">⌘T</span>
+                              )}
+                            </span>
+                          </ContextMenuItem>
+                        ))}
+                        <MenuSeparator />
+                        <ContextMenuItem
+                          onClick={() => {
+                            spawn();
+                            setNewAgentMenu(null);
+                          }}
+                        >
+                          <span className="flex w-full items-center gap-2">
+                            <SessionTabIcon mode="general" />
+                            <span className="min-w-0 flex-1 truncate">Native chat</span>
+                          </span>
+                        </ContextMenuItem>
+                        <MenuSeparator />
+                        <ContextMenuItem
+                          onClick={() => {
+                            setNewAgentMenu(null);
+                            void navigate({ to: "/settings", search: { section: "advanced" } });
+                          }}
+                        >
+                          Configure engines…
+                        </ContextMenuItem>
+                      </ContextMenu>
+                    );
+                  })()}
+                <StopAgentDialog
+                  title={shells.find((s) => s.id === stopShellId)?.title ?? null}
+                  onClose={() => setStopShellId(null)}
+                  onConfirm={() => {
+                    if (stopShellId !== null) archiveShellNow(stopShellId, true);
+                    setStopShellId(null);
+                  }}
+                />
+                <Dialog open={Boolean(shellBeingRenamed)} onClose={closeRenameShell} title="Rename tab">
+                  <form
+                    className="space-y-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      commitRenameShell();
+                    }}
+                  >
+                    <TextInput
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" onClick={closeRenameShell}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" variant="primary" disabled={!renameValue.trim()}>
+                        Rename
+                      </Button>
+                    </div>
+                  </form>
+                </Dialog>
+
+                {activeView && tabs ? (
+                  <div ref={splitRowRef} className="relative min-h-0 flex-1">
+                    {[...paneIds].sort(byPaneIdSuffix).map((paneId) => {
+                      const zoomedAway = zoomedPaneId !== null && zoomedPaneId !== paneId;
+                      const r = zoomedPaneId === paneId ? FULL_RECT : rects[paneId];
+                      return (
+                        <div
+                          key={paneId}
+                          data-pane={paneId}
+                          className={`absolute flex min-h-0 min-w-0 flex-col overflow-hidden ${zoomedAway ? "hidden" : ""} ${
+                            r.x > 1e-6 ? "border-l border-edge" : ""
+                          } ${r.y > 1e-6 ? "border-t border-edge" : ""}`}
+                          style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: pct(r.h) }}
+                          onPointerDownCapture={() => {
+                            if (paneIds.length > 1 && focusedPaneId(tabs) !== paneId) {
+                              updateTabs((current) => setFocusedPane(current, paneId));
+                            }
+                          }}
+                        >
+                          {renderLeafStrip(paneId)}
+                          <div
+                            data-pane-content
+                            className={`relative flex min-h-0 flex-1 flex-col ${
+                              dropTarget?.paneId === paneId && dropTarget.edge === null
+                                ? "ring-2 ring-inset ring-accent/60"
+                                : ""
+                            }`}
+                          >
+                            {renderPaneContent(activeShellIn(tabs, paneId))}
+                            {dropTarget?.paneId === paneId && dropTarget.edge && (
+                              <div
+                                className={`pointer-events-none absolute bg-accent/15 ring-2 ring-inset ring-accent/60 ${
+                                  EDGE_OVERLAY_CLASS[dropTarget.edge]
+                                }`}
+                              />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {zoomedPaneId === null &&
+                      splits.map((split) => {
+                        const { rect, node } = split;
+                        const row = node.dir === "row";
+                        return (
+                          <div
+                            key={split.path.join("") || "root"}
+                            role="separator"
+                            aria-orientation={row ? "vertical" : "horizontal"}
+                            aria-label="Resize agent split"
+                            className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
+                              row
+                                ? "w-2 -translate-x-1/2 cursor-col-resize"
+                                : "h-2 -translate-y-1/2 cursor-row-resize"
+                            }`}
+                            style={
+                              row
+                                ? {
+                                    left: pct(rect.x + rect.w * node.ratio),
+                                    top: pct(rect.y),
+                                    height: pct(rect.h),
+                                  }
+                                : {
+                                    left: pct(rect.x),
+                                    top: pct(rect.y + rect.h * node.ratio),
+                                    width: pct(rect.w),
+                                  }
+                            }
+                            onPointerDown={(e) => startSplitResize(split, e)}
+                          />
+                        );
+                      })}
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto p-5">
+                    <div className="mx-auto max-w-3xl space-y-4">
+                      <div className="rounded-lg border border-edge bg-panel p-6 text-center">
+                        <p className="text-title text-ink">Create your first workstream</p>
+                        <p className="mx-auto mt-1 max-w-md text-body leading-prose text-ink-dim">
+                          {folderProject
+                            ? "Each workstream is its own conversation, all running in this folder. Start as many as you need."
+                            : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
+                        </p>
+                        <Button variant="primary" className="mt-4" onClick={() => setCreateOpen(true)}>
+                          <Icon name="add" />
+                          New workstream
+                        </Button>
                       </div>
                     </div>
-                  );
-                })}
-                {zoomedPaneId === null &&
-                  splits.map((split) => {
-                    const { rect, node } = split;
-                    const row = node.dir === "row";
-                    return (
-                      <div
-                        key={split.path.join("") || "root"}
-                        role="separator"
-                        aria-orientation={row ? "vertical" : "horizontal"}
-                        aria-label="Resize agent split"
-                        className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
-                          row
-                            ? "w-2 -translate-x-1/2 cursor-col-resize"
-                            : "h-2 -translate-y-1/2 cursor-row-resize"
-                        }`}
-                        style={
-                          row
-                            ? {
-                                left: pct(rect.x + rect.w * node.ratio),
-                                top: pct(rect.y),
-                                height: pct(rect.h),
-                              }
-                            : {
-                                left: pct(rect.x),
-                                top: pct(rect.y + rect.h * node.ratio),
-                                width: pct(rect.w),
-                              }
-                        }
-                        onPointerDown={(e) => startSplitResize(split, e)}
-                      />
-                    );
-                  })}
-              </div>
-            ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto p-5">
-                <div className="mx-auto max-w-3xl space-y-4">
-                  <div className="rounded-lg border border-edge bg-panel p-6 text-center">
-                    <p className="text-title text-ink">Create your first workstream</p>
-                    <p className="mx-auto mt-1 max-w-md text-body leading-prose text-ink-dim">
-                      {folderProject
-                        ? "Each workstream is its own conversation, all running in this folder. Start as many as you need."
-                        : "Each workstream gets its own branch and worktree, so agents can research, plan, and implement without touching your checkout."}
-                    </p>
-                    <Button variant="primary" className="mt-4" onClick={() => setCreateOpen(true)}>
-                      <Icon name="add" />
-                      New workstream
-                    </Button>
                   </div>
-                </div>
-              </div>
-            )}
-            {activeView && dockOpen && dockPosition === "bottom" && (
-              <ScriptDock
-                key={activeView.item.id}
-                workstreamId={activeView.item.id}
-                projectPath={projectPath}
-                onEditScripts={() => openProjectSettings(projectPath)}
-              />
-            )}
-          </main>
-        </div>
-      </section>
+                )}
+                {activeView && dockOpen && dockPosition === "bottom" && (
+                  <ScriptDock
+                    key={activeView.item.id}
+                    workstreamId={activeView.item.id}
+                    projectPath={projectPath}
+                    onEditScripts={() => openProjectSettings(projectPath)}
+                  />
+                )}
+              </main>
+            </div>
+          </section>
 
-      {showAside && !narrow && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize diff sidebar"
-          className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-          onPointerDown={startDiffResize}
-        />
-      )}
-      <aside
-        className={`shrink-0 overflow-hidden border-l border-edge bg-panel ${
-          narrow ? "absolute inset-y-0 right-0 z-30 shadow-lg" : "relative"
-        }`}
-        style={{ width: showAside ? asideWidth : 0 }}
-        inert={!showAside}
-      >
-        <div
-          className="absolute inset-y-0 right-0 flex flex-col"
-          style={{ width: asideWidth }}
-        >
-          {planAside.available && (
-            <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
-              <SegmentedControl
-                aria-label="Right panel"
-                value={planAside.view}
-                options={[
-                  { value: "plan", label: "Plan" },
-                  { value: "changes", label: "Changes" },
-                ]}
-                onChange={planAside.setView}
-              />
-            </div>
-          )}
-          {planAside.view === "plan" && activeView && focusedShell ? (
-            <div className="min-h-0 flex-1">
-              <PlanAside
-                view={activeView}
-                shell={focusedShell}
-                onOpenDoc={openDoc}
-                onOpenFile={(path) => openDocPreview(path, basename(path).replace(/\.md$/, ""))}
-                onReviewChanges={() => planAside.setView("changes")}
-              />
-            </div>
-          ) : (
-            <>
-              {!folderProject && <GitPanel view={activeView ?? null} />}
-              <div className="flex min-h-0 flex-1 flex-col">
-                <ChangesPanel
-                  workstreamId={activeView?.item.id ?? null}
-                  onOpenDoc={openDocPreview}
-                  onOpenDiff={openDiff}
-                  onOpenFile={openFile}
-                  filesOnly={folderProject}
-                  baseBranch={activeView?.item.baseBranch ?? null}
-                />
-              </div>
-              <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
-            </>
-          )}
-          {rightDock && showAside && (
-            <ScriptDock
-              key={`${activeView!.item.id}:right`}
-              workstreamId={activeView!.item.id}
-              projectPath={projectPath}
-              onEditScripts={() => openProjectSettings(projectPath)}
-              orientation="right"
+          {showAside && !narrow && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize diff sidebar"
+              className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+              onPointerDown={startDiffResize}
             />
           )}
-          {!folderProject && <PrChecksPanel view={activeView ?? null} />}
-        </div>
-      </aside>
+          <aside
+            className={`shrink-0 overflow-hidden border-l border-edge bg-panel ${
+              narrow ? "absolute inset-y-0 right-0 z-30 shadow-lg" : "relative"
+            }`}
+            style={{ width: showAside ? asideWidth : 0 }}
+            inert={!showAside}
+          >
+            <div
+              className="absolute inset-y-0 right-0 flex flex-col"
+              style={{ width: asideWidth }}
+            >
+              {planAside.available && (
+                <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
+                  <SegmentedControl
+                    aria-label="Right panel"
+                    value={planAside.view}
+                    options={[
+                      { value: "plan", label: "Plan" },
+                      { value: "changes", label: "Changes" },
+                    ]}
+                    onChange={planAside.setView}
+                  />
+                </div>
+              )}
+              {planAside.view === "plan" && activeView && focusedShell ? (
+                <div className="min-h-0 flex-1">
+                  <PlanAside
+                    view={activeView}
+                    shell={focusedShell}
+                    onOpenDoc={openDoc}
+                    onOpenFile={(path) => openDocPreview(path, basename(path).replace(/\.md$/, ""))}
+                    onReviewChanges={openReview}
+                  />
+                </div>
+              ) : (
+                <>
+                  {!folderProject && <GitPanel view={activeView ?? null} />}
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <ChangesPanel
+                      workstreamId={activeView?.item.id ?? null}
+                      onOpenDoc={openDocPreview}
+                      onOpenDiff={openDiff}
+                      onOpenFile={openFile}
+                      onOpenReview={reviewable ? openReview : undefined}
+                      filesOnly={folderProject}
+                      baseBranch={activeView?.item.baseBranch ?? null}
+                    />
+                  </div>
+                  <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
+                </>
+              )}
+              {rightDock && showAside && (
+                <ScriptDock
+                  key={`${activeView!.item.id}:right`}
+                  workstreamId={activeView!.item.id}
+                  projectPath={projectPath}
+                  onEditScripts={() => openProjectSettings(projectPath)}
+                  orientation="right"
+                />
+              )}
+              {!folderProject && <PrChecksPanel view={activeView ?? null} />}
+            </div>
+          </aside>
+        </>
+      )}
 
       {tabs?.shells.map((s) =>
         s.mode === "implement" && s.sessionId ? (
           <PlanDocSync key={s.sessionId} sessionId={s.sessionId} />
         ) : null,
       )}
+
+      <CreateWorkstreamDialog
+        projectPath={projectPath}
+        folder={folderProject}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(view) => selectItem(view.item.id)}
+      />
 
       <Dialog
         open={docsModalShellId !== null}

@@ -30,6 +30,9 @@ pub enum RuntimeEvent {
     WorktreeChanged {
         workstream_id: String,
     },
+    ReviewChanged {
+        workstream_id: String,
+    },
     WorkstreamBranchChanged {
         workstream_id: String,
         branch: String,

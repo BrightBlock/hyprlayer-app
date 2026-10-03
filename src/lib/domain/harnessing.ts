@@ -45,6 +45,10 @@ export function harnessOption(key: string | undefined | null): HarnessOption {
   return HARNESSES.find((h) => h.key === key) ?? HARNESSES[0];
 }
 
+export function harnessLabel(h: Harness | null | undefined): string {
+  return HARNESSES.find((o) => o.key === h)?.label ?? "the agent";
+}
+
 export function effectiveHarnessKey(defaultHarness: string | null | undefined): Harness {
   if (defaultHarness === "opencode" || defaultHarness === "ollama") return "opencode";
   if (defaultHarness === "codex") return "codex";

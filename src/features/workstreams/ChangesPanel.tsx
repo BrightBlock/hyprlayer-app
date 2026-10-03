@@ -30,7 +30,7 @@ import {
 import { useUiStore } from "@/lib/uiStore";
 import { useWorkstreamArtifacts, useWorkstreamDocs } from "@/features/session/sessionStore";
 import type { DocKind } from "@/lib/domain/docs";
-import { GLYPH } from "./changeGlyph";
+import { glyphForStatus } from "@/lib/domain/review";
 import { CommitsPanel } from "./CommitsPanel";
 import { renamedLabel } from "./renamedLabel";
 
@@ -55,7 +55,7 @@ const FileRow = memo(function FileRow({
   onToggle,
   onMenu,
 }: FileRowProps) {
-  const glyph = GLYPH[entry.change] ?? { ch: "?", cls: "text-ink-dim", label: entry.change };
+  const glyph = glyphForStatus(entry.change);
   return (
     <div
       className={rowClass({ tier: "compact", className: "group flex gap-2 pr-1 text-left" })}
@@ -510,6 +510,7 @@ type Props = {
   onOpenDoc: (path: string, title: string) => void;
   onOpenDiff: (path: string, staged: boolean, sha?: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenReview?: () => void;
   filesOnly?: boolean;
   baseBranch: string | null;
 };
@@ -519,6 +520,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   onOpenDoc,
   onOpenDiff,
   onOpenFile,
+  onOpenReview,
   filesOnly = false,
   baseBranch,
 }: Props) {
@@ -572,6 +574,11 @@ export const ChangesPanel = memo(function ChangesPanel({
           )}
           {workstreamId !== null && (
             <div className="flex items-center">
+              {!filesOnly && onOpenReview && (
+                <IconButton onClick={onOpenReview} title="Review changes" aria-label="Review changes">
+                  <Icon name="review" size="sm" />
+                </IconButton>
+              )}
               <IconButton
                 active={tab === "memory"}
                 onClick={() => setTab("memory")}

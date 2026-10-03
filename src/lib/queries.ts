@@ -4,6 +4,7 @@ import { keepPreviousData, skipToken, useMutation, useQuery } from "@tanstack/re
 import {
   commands,
   type ActiveSessionView,
+  type AddReviewCommentRequest,
   type AppSettings,
   type BinaryKind,
   type Bootstrap,
@@ -18,6 +19,8 @@ import {
   type Project,
   type ScriptKind,
   type ScriptSettings,
+  type SetReviewFileViewedRequest,
+  type SubmitReviewRequest,
   type Stage,
   type WorktreeMode,
   type ThoughtQuery,
@@ -955,6 +958,119 @@ export function useCommitFileSides(id: string, sha: string, path: string) {
     queryFn: () => unwrap(commands.worktreeCommitFileSides(id, sha, path)),
     enabled: id.length > 0 && sha.length > 0 && path.length > 0,
     staleTime: Infinity,
+  });
+}
+
+export function useReviewChangedFiles(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "review", "files"],
+    queryFn: () => unwrap(commands.reviewChangedFiles(id)),
+    enabled: enabled && id.length > 0,
+  });
+}
+
+// Whole files in memory: let them go soon after the diff pane leaves them.
+export function useReviewFileSides(id: string, path: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "review", "sides", path],
+    queryFn: () => unwrap(commands.reviewFileSides(id, path)),
+    enabled: enabled && id.length > 0 && path.length > 0,
+    gcTime: 60_000,
+  });
+}
+
+export function invalidateReview(id: string) {
+  void queryClient.invalidateQueries({ queryKey: ["workstream", id, "review", "state"] });
+}
+
+// Creates the review on first read; refreshes on `reviewChanged` and with the worktree.
+export function useReview(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["workstream", id, "review", "state"],
+    queryFn: () => unwrap(commands.getReview(id)),
+    enabled: enabled && id.length > 0,
+  });
+}
+
+// The workstream id travels in the variables, never a hook argument, so a settled
+// mutation invalidates the review it changed.
+export function useSetReviewFileViewed() {
+  return useMutation({
+    mutationFn: (req: SetReviewFileViewedRequest) => unwrap(commands.setReviewFileViewed(req)),
+    onSettled: (_data, _error, req) => invalidateReview(req.workstreamId),
+  });
+}
+
+// Sequential, with one refetch at the end rather than one per file.
+export function useMarkReviewFilesViewed() {
+  return useMutation({
+    mutationFn: async (req: { workstreamId: string; files: { path: string; contentOid: string }[] }) => {
+      for (const f of req.files) {
+        await unwrap(
+          commands.setReviewFileViewed({
+            workstreamId: req.workstreamId,
+            path: f.path,
+            contentOid: f.contentOid,
+            viewed: true,
+          }),
+        );
+      }
+    },
+    onSettled: (_data, _error, req) => invalidateReview(req.workstreamId),
+  });
+}
+
+export function useAddReviewComment() {
+  return useMutation({
+    mutationFn: (req: AddReviewCommentRequest) => unwrap(commands.addReviewComment(req)),
+    onSettled: (_data, _error, req) => invalidateReview(req.workstreamId),
+  });
+}
+
+export function useEditReviewComment() {
+  return useMutation({
+    mutationFn: (v: { workstreamId: string; commentId: string; body: string }) =>
+      unwrap(commands.editReviewComment(v.workstreamId, v.commentId, v.body)),
+    onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
+  });
+}
+
+export function useDeleteReviewComment() {
+  return useMutation({
+    mutationFn: (v: { workstreamId: string; commentId: string }) =>
+      unwrap(commands.deleteReviewComment(v.workstreamId, v.commentId)),
+    onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
+  });
+}
+
+export function useResolveReviewComment() {
+  return useMutation({
+    mutationFn: (v: { workstreamId: string; commentId: string; resolved: boolean }) =>
+      unwrap(commands.resolveReviewComment(v.workstreamId, v.commentId, v.resolved)),
+    onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
+  });
+}
+
+export function useResolveReviewNote() {
+  return useMutation({
+    mutationFn: (v: { workstreamId: string; noteId: string; resolved: boolean }) =>
+      unwrap(commands.resolveReviewNote(v.workstreamId, v.noteId, v.resolved)),
+    onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
+  });
+}
+
+export function useSubmitReview() {
+  return useMutation({
+    mutationFn: (req: SubmitReviewRequest) => unwrap(commands.submitReview(req)),
+    onSettled: (_data, _error, req) => invalidateReview(req.workstreamId),
+  });
+}
+
+export function useMarkReviewRoundDelivered() {
+  return useMutation({
+    mutationFn: (v: { workstreamId: string; round: number }) =>
+      unwrap(commands.markReviewRoundDelivered(v.workstreamId, v.round)),
+    onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
   });
 }
 

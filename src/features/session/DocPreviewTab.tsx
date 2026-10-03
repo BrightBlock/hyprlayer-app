@@ -12,7 +12,7 @@ import { Icon } from "@/components/Icon";
 import { FrontmatterCard } from "@/features/library/FrontmatterCard";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { splitFrontmatter } from "@/features/library/text";
-import { codeBase } from "@/features/workstreams/codeView";
+import { codeBase } from "@/lib/codeView";
 
 const editorExtensions = [...codeBase, EditorView.lineWrapping, markdown()];
 

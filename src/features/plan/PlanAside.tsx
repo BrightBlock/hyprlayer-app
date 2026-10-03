@@ -12,6 +12,7 @@ import { PlanPanel } from "./PlanPanel";
 import { approvalFor, runApproval } from "./planApproval";
 import { checkOffTasks } from "./planDocActions";
 import { closePlanPreview } from "./planPreviewStore";
+import { reviewChecklistComponent } from "./reviewChecklistSlot";
 import { usePlanTracker } from "./usePlanTracker";
 
 export function PlanAside({
@@ -62,6 +63,34 @@ export function PlanAside({
     : indexed
       ? { label: "Open in Library", icon: "external" as const, onClick: () => onOpenDoc(key) }
       : { label: "Open file", icon: "external" as const, onClick: () => onOpenFile(key) };
+  const Checklist = tracker.tasksDone ? reviewChecklistComponent() : null;
+  const panel = (
+    <PlanPanel
+      tracker={tracker}
+      diff={repoSummary(view)}
+      approving={approving}
+      approve={action || blocked ? { blocked } : null}
+      changed={changed}
+      onClose={closePlanPreview}
+      headerAction={headerAction}
+      onReviewChanges={onReviewChanges}
+      onJump={(target) => sessionId && requestTranscriptJump(sessionId, target)}
+      onApprove={() => {
+        if (!action || !sessionId) return;
+        setApproving(true);
+        setApproveError(null);
+        runApproval(action, {
+          sessionId,
+          workstreamId: view.item.id,
+          shell,
+          key,
+          pendingQuestion: entry?.pendingQuestion ?? null,
+        })
+          .catch(setApproveError)
+          .finally(() => setApproving(false));
+      }}
+    />
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -70,33 +99,7 @@ export function PlanAside({
           <ErrorNote error={approveError} onDismiss={() => setApproveError(null)} />
         </div>
       )}
-      <div className="min-h-0 flex-1">
-        <PlanPanel
-          tracker={tracker}
-          diff={repoSummary(view)}
-          approving={approving}
-          approve={action || blocked ? { blocked } : null}
-          changed={changed}
-          onClose={closePlanPreview}
-          headerAction={headerAction}
-          onReviewChanges={onReviewChanges}
-          onJump={(target) => sessionId && requestTranscriptJump(sessionId, target)}
-          onApprove={() => {
-            if (!action || !sessionId) return;
-            setApproving(true);
-            setApproveError(null);
-            runApproval(action, {
-              sessionId,
-              workstreamId: view.item.id,
-              shell,
-              key,
-              pendingQuestion: entry?.pendingQuestion ?? null,
-            })
-              .catch(setApproveError)
-              .finally(() => setApproving(false));
-          }}
-        />
-      </div>
+      <div className="min-h-0 flex-1">{Checklist ? <Checklist view={view} fallback={panel} /> : panel}</div>
     </div>
   );
 }

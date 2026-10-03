@@ -28,6 +28,7 @@ use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
+use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::library::{
     CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
@@ -41,6 +42,10 @@ use hyprlayer_core::runtime::prompts::{
     PromptImportResult,
 };
 use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
+use hyprlayer_core::runtime::reviews::{
+    AddReviewCommentRequest, ReviewComment, ReviewView, SetReviewFileViewedRequest,
+    SubmitReviewRequest, SubmitReviewResult,
+};
 use hyprlayer_core::runtime::sessions::ActiveSession;
 use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
@@ -190,6 +195,17 @@ hyprlayer_proto::commands! {
     WorktreeUnstage: worktree_unstage(id: String, paths: Vec<String>) -> ();
     WorktreeDiscard: worktree_discard(id: String, paths: Vec<String>) -> ();
     WorktreeFileSides: worktree_file_sides(id: String, path: String, staged: bool) -> FileSides;
+    ReviewChangedFiles: review_changed_files(workstream_id: String) -> ReviewFileList;
+    ReviewFileSides: review_file_sides(workstream_id: String, path: String) -> ReviewFileSides;
+    GetReview: get_review(workstream_id: String) -> ReviewView;
+    SetReviewFileViewed: set_review_file_viewed(req: SetReviewFileViewedRequest) -> ();
+    AddReviewComment: add_review_comment(req: AddReviewCommentRequest) -> ReviewComment;
+    EditReviewComment: edit_review_comment(workstream_id: String, comment_id: String, body: String) -> ();
+    DeleteReviewComment: delete_review_comment(workstream_id: String, comment_id: String) -> ();
+    ResolveReviewComment: resolve_review_comment(workstream_id: String, comment_id: String, resolved: bool) -> ();
+    ResolveReviewNote: resolve_review_note(workstream_id: String, note_id: String, resolved: bool) -> ();
+    SubmitReview: submit_review(req: SubmitReviewRequest) -> SubmitReviewResult;
+    MarkReviewRoundDelivered: mark_review_round_delivered(workstream_id: String, round: u32) -> ();
     WorktreeListDir: worktree_list_dir(id: String, path: String) -> Vec<DirEntry>;
     WorktreeReadFile: worktree_read_file(id: String, path: String) -> WorktreeFile;
     WorktreeWriteFile: worktree_write_file(id: String, path: String, content: String, base_mtime_ms: f64) -> f64;

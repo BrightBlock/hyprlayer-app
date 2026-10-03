@@ -1,0 +1,985 @@
+{
+  "scenario": "review_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "baseResolved": true,
+            "files": [],
+            "mergeBase": "$MERGE_BASE"
+          },
+          "guard": "no files, against the commit the branch started from",
+          "ok": true
+        }
+      ],
+      "step": "a fresh branch has nothing to review"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "base": "main",
+            "baseResolved": true,
+            "git_merge_base_matches": true,
+            "mergeBase": "$MERGE_BASE"
+          },
+          "guard": "the list names its base and the commit the branch started from",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "files": [
+              {
+                "change": "added",
+                "oldPath": null,
+                "path": "assets/blob.bin"
+              },
+              {
+                "change": "added",
+                "oldPath": null,
+                "path": "big.txt"
+              },
+              {
+                "change": "modified",
+                "oldPath": null,
+                "path": "src/edit.rs"
+              },
+              {
+                "change": "deleted",
+                "oldPath": null,
+                "path": "src/gone.rs"
+              },
+              {
+                "change": "renamed",
+                "oldPath": "src/mv_from.rs",
+                "path": "src/mv_to.rs"
+              },
+              {
+                "change": "added",
+                "oldPath": null,
+                "path": "src/new.rs"
+              },
+              {
+                "change": "renamed",
+                "oldPath": "src/old_name.rs",
+                "path": "src/new_name.rs"
+              }
+            ]
+          },
+          "guard": "kinds and paths cover commits and uncommitted work, with each rename's old path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "git_lists_it": true,
+            "leaked": []
+          },
+          "guard": "`.hyprlayer/` stays out of the list, though git would list it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "git": {
+              "big.txt": [
+                49152,
+                0
+              ],
+              "src/edit.rs": [
+                3,
+                2
+              ],
+              "src/gone.rs": [
+                0,
+                3
+              ],
+              "src/mv_to.rs": [
+                1,
+                1
+              ],
+              "src/new.rs": [
+                2,
+                0
+              ],
+              "src/new_name.rs": [
+                1,
+                1
+              ]
+            },
+            "review": {
+              "big.txt": [
+                49152,
+                0
+              ],
+              "src/edit.rs": [
+                3,
+                2
+              ],
+              "src/gone.rs": [
+                0,
+                3
+              ],
+              "src/mv_to.rs": [
+                1,
+                1
+              ],
+              "src/new.rs": [
+                2,
+                0
+              ],
+              "src/new_name.rs": [
+                1,
+                1
+              ]
+            }
+          },
+          "guard": "text-file counts equal git's numstat against the merge-base",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": [
+              "D  src/gone.rs",
+              " D src/mv_from.rs",
+              "?? .hyprlayer/",
+              "?? assets/",
+              "?? big.txt",
+              "?? src/mv_to.rs",
+              "?? src/new.rs",
+              "?? thoughts/"
+            ]
+          },
+          "guard": "the numstat check leaves the index as it found it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "oids": {
+              "assets/blob.bin": "7ecd8e1584208a3f949a3741dab01aaf874bc5ef",
+              "big.txt": "31d35bc93dd789775b27d7533515ba58f640bbe9",
+              "src/edit.rs": "fc75ba3c40076c1d84954612e5131510012f5b19",
+              "src/gone.rs": "deleted",
+              "src/mv_to.rs": "d09874dda7e0a888a023ec549e60e19245a4c01f",
+              "src/new.rs": "9bee1283d906f96593d1d6050bf7db2e7684f1d8",
+              "src/new_name.rs": "367e6389d324cca45a45edf487055931aff3d725"
+            }
+          },
+          "guard": "contentOid is git's blob hash, and a deleted file says deleted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "binary": [
+              "assets/blob.bin"
+            ]
+          },
+          "guard": "only the binary file is flagged, with no line counts",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "additions": 49159,
+            "deletions": 7
+          },
+          "guard": "the list totals sum the per-file counts",
+          "ok": true
+        }
+      ],
+      "step": "review the branch against its base"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "contentOid": "fc75ba3c40076c1d84954612e5131510012f5b19",
+            "modified_is_working": true,
+            "original_is_base": true
+          },
+          "guard": "an edited file returns the base text and the working text",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "originalPath": "src/old_name.rs"
+          },
+          "guard": "a rename reads its original from the old path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "originalPath": "src/mv_from.rs"
+          },
+          "guard": "an unstaged mv is a rename too, read from its old path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "added": {
+              "modifiedExists": true,
+              "originalExists": false
+            },
+            "deleted": {
+              "contentOid": "deleted",
+              "modifiedExists": false,
+              "originalExists": true
+            }
+          },
+          "guard": "an added file has no original and a deleted file has no working copy",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "modifiedExists": true,
+            "tooLarge": true
+          },
+          "guard": "a file over 2 MiB is flagged too large and returns no content",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "binary": true,
+            "tooLarge": false
+          },
+          "guard": "a binary file is flagged and returns no content",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refused": true
+          },
+          "guard": "a path outside the worktree is refused",
+          "ok": true
+        }
+      ],
+      "step": "read both sides of a file"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "files": [
+              "assets/blob.bin",
+              "big.txt",
+              "src/edit.rs",
+              "src/gone.rs",
+              "src/mv_to.rs",
+              "src/new.rs",
+              "src/new_name.rs"
+            ],
+            "mergeBase": "$MERGE_BASE"
+          },
+          "guard": "work that landed on the base after the branch point is not in the review",
+          "ok": true
+        }
+      ],
+      "step": "the base moves on after the branch started"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "base": "origin/main",
+            "baseResolved": true
+          },
+          "guard": "an origin/ base that is not fetched falls back to the local branch",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "baseResolved": false,
+            "files": [
+              "assets/blob.bin",
+              "big.txt",
+              "src/gone.rs",
+              "src/mv_to.rs",
+              "src/new.rs"
+            ],
+            "mergeBase": null
+          },
+          "guard": "an unresolvable base is reported and the diff falls back to HEAD",
+          "ok": true
+        }
+      ],
+      "step": "resolve the base the way the branch names it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "again": "$REVIEW",
+            "id": "$REVIEW",
+            "workstreamId": "$WS"
+          },
+          "guard": "the first read creates the review and the next returns the same one",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changedSinceRound": [],
+            "comments": [],
+            "files": [
+              "assets/blob.bin",
+              "big.txt",
+              "src/edit.rs",
+              "src/gone.rs",
+              "src/mv_to.rs",
+              "src/new.rs",
+              "src/new_name.rs"
+            ],
+            "notes": [],
+            "rounds": [],
+            "status": "in_progress",
+            "viewed": []
+          },
+          "guard": "a new review lists the branch's files and holds nothing else",
+          "ok": true
+        }
+      ],
+      "step": "open the review"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "review_changed": 1
+          },
+          "guard": "a change announces ReviewChanged once, and the reads before it announced nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "viewed": [
+              "src/edit.rs",
+              "src/new.rs"
+            ]
+          },
+          "guard": "files marked viewed read back as viewed, and unmarking one clears it",
+          "ok": true
+        }
+      ],
+      "step": "mark files viewed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "body": "Why 3, and not 30?",
+            "currentLine": 4,
+            "id": "$COMMENT",
+            "line": 4,
+            "parentId": null,
+            "path": "src/edit.rs",
+            "resolved": true,
+            "side": "modified",
+            "state": "pending"
+          },
+          "guard": "a comment reads back on its line, edited, resolved and still pending",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "body": "It balances the sum.",
+            "currentLine": 4,
+            "id": "$REPLY",
+            "line": 4,
+            "parentId": "$COMMENT",
+            "path": "src/edit.rs",
+            "resolved": false,
+            "side": "modified",
+            "state": "pending"
+          },
+          "guard": "a reply takes its parent's place, whatever the request said",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "line_0": "review_comment_line_invalid",
+            "missing_parent": "review_comment_not_found",
+            "outside": "invalid_path"
+          },
+          "guard": "line 0, a missing parent and a path outside the worktree are refused",
+          "ok": true
+        }
+      ],
+      "step": "comment on a line, reply, edit and resolve"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "currentLine": {
+              "added file, base side": null,
+              "deleted file, base side": 2,
+              "deleted file, working side": null,
+              "renamed file, base side": 4
+            }
+          },
+          "guard": "the base side reads the merge-base, at a rename's old path; a side with no file has no line",
+          "ok": true
+        }
+      ],
+      "step": "comment on the base side"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "comment": {
+              "currentLine": 7,
+              "line": 4
+            },
+            "reply": {
+              "currentLine": 7,
+              "line": 4
+            }
+          },
+          "guard": "three lines inserted above move the comment and its reply to line 7",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "viewed": [
+              "src/new.rs"
+            ]
+          },
+          "guard": "the rewritten file is no longer viewed and the untouched one still is",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comment": null,
+            "reply": null
+          },
+          "guard": "deleting the commented line leaves the comment and its reply with no line",
+          "ok": true
+        }
+      ],
+      "step": "the commented file changes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "comments": [
+              "$COMMENT",
+              "$REPLY",
+              "$COMMENT_1",
+              "$COMMENT_2",
+              "$COMMENT_3"
+            ]
+          },
+          "guard": "a deleted comment is gone and the rest remain",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comment": {
+              "body": "Why 3, and not 30?",
+              "currentLine": null,
+              "id": "$COMMENT",
+              "line": 4,
+              "parentId": null,
+              "path": "src/edit.rs",
+              "resolved": true,
+              "side": "modified",
+              "state": "pending"
+            },
+            "delete": "review_comment_not_found",
+            "edit": "review_comment_not_found",
+            "reply": "review_comment_not_found",
+            "resolve": "review_comment_not_found"
+          },
+          "guard": "another workstream cannot edit, resolve, delete or reply to this one's comment",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "review_note_not_found"
+          },
+          "guard": "resolving a note that is not there is refused",
+          "ok": true
+        }
+      ],
+      "step": "delete a comment, and stay within the workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rules": [
+              "/.hyprlayer/review/"
+            ]
+          },
+          "guard": "reading a review leaves the rule in the common git dir, and never one for .hyprlayer/ itself",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "git_lists_it": true,
+            "rules": []
+          },
+          "guard": "without the rule git lists the sidecar directory, so the check below can fail",
+          "ok": true
+        }
+      ],
+      "step": "exclude the sidecar directory"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rules": [
+              "/.hyprlayer/review/"
+            ]
+          },
+          "guard": "starting the session writes the rule before any review is read",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "flag_present": true,
+            "is_the_instruction": true,
+            "sidecar": ".hyprlayer/review/$WS.jsonl"
+          },
+          "guard": "claude is spawned with the instruction as its appended system prompt, naming the sidecar",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "turn": "/implement_plan thoughts/shared/plans/e2e.md"
+          },
+          "guard": "the first user turn is still the bare skill invocation",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawned": true
+          },
+          "guard": "a session for any other stage gets no instruction",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "lists_it": false
+          },
+          "guard": "git status does not list the sidecar directory",
+          "ok": true
+        }
+      ],
+      "step": "an implement session is told to leave notes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "notes": [
+              {
+                "body": "Why `b` is 20 is a guess; confirm the constant.",
+                "currentLine": 6,
+                "kind": "needs_your_call",
+                "line": 6,
+                "path": "src/edit.rs",
+                "resolved": false,
+                "task": "Phase 1: edit"
+              },
+              {
+                "body": "This constant was not in the plan.",
+                "currentLine": 2,
+                "kind": "outside_plan_scope",
+                "line": 2,
+                "path": "src/new.rs",
+                "resolved": false,
+                "task": "Phase 2: new"
+              },
+              {
+                "body": "Prints the sum.",
+                "currentLine": 7,
+                "kind": "note",
+                "line": 7,
+                "path": "src/edit.rs",
+                "resolved": false,
+                "task": null
+              }
+            ]
+          },
+          "guard": "three valid lines become notes; malformed, unknown-kind, escaping, empty, line 0 and excluded ones, a duplicate and an unterminated line do not",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "last": {
+              "body": "Added after the first commit.",
+              "currentLine": 1,
+              "kind": "note",
+              "line": 1,
+              "path": "src/new.rs",
+              "resolved": false,
+              "task": "Phase 2: new"
+            },
+            "notes": 4
+          },
+          "guard": "finishing the line adds that note",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "notes": 4
+          },
+          "guard": "reading again adds nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "currentLine": [
+              7,
+              2,
+              8,
+              1
+            ]
+          },
+          "guard": "a note follows its line like a comment does",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after_reading_again": 5,
+            "last": {
+              "body": "Short.",
+              "currentLine": 2,
+              "kind": "note",
+              "line": 2,
+              "path": "src/new.rs",
+              "resolved": false,
+              "task": null
+            },
+            "notes": 5,
+            "shorter": true
+          },
+          "guard": "a recreated, shorter file is read from its start",
+          "ok": true
+        }
+      ],
+      "step": "read the notes the agent left"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comments": [
+              {
+                "body": "Why 3, and not 30?",
+                "currentLine": null,
+                "id": "$COMMENT",
+                "line": 4,
+                "parentId": null,
+                "path": "src/edit.rs",
+                "resolved": true,
+                "side": "modified",
+                "state": "pending"
+              },
+              {
+                "body": "It balances the sum.",
+                "currentLine": null,
+                "id": "$REPLY",
+                "line": 4,
+                "parentId": "$COMMENT",
+                "path": "src/edit.rs",
+                "resolved": false,
+                "side": "modified",
+                "state": "pending"
+              },
+              {
+                "body": "Why is this here?",
+                "currentLine": 2,
+                "id": "$COMMENT_1",
+                "line": 2,
+                "parentId": null,
+                "path": "src/gone.rs",
+                "resolved": false,
+                "side": "original",
+                "state": "pending"
+              },
+              {
+                "body": "Why is this here?",
+                "currentLine": null,
+                "id": "$COMMENT_2",
+                "line": 2,
+                "parentId": null,
+                "path": "src/gone.rs",
+                "resolved": false,
+                "side": "modified",
+                "state": "pending"
+              },
+              {
+                "body": "Why is this here?",
+                "currentLine": 4,
+                "id": "$COMMENT_3",
+                "line": 4,
+                "parentId": null,
+                "path": "src/new_name.rs",
+                "resolved": false,
+                "side": "original",
+                "state": "pending"
+              }
+            ],
+            "id": "$REVIEW",
+            "viewed": [
+              "src/new.rs"
+            ]
+          },
+          "guard": "comments and viewed files survive a restart",
+          "ok": true
+        }
+      ],
+      "step": "restart the server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "after": 5,
+            "again": 5,
+            "before": 5
+          },
+          "guard": "the stored offset keeps the file from being ingested twice",
+          "ok": true
+        }
+      ],
+      "step": "notes survive a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "comments": [
+              {
+                "id": "$COMMENT",
+                "round": 1,
+                "state": "saved"
+              },
+              {
+                "id": "$REPLY",
+                "round": 1,
+                "state": "saved"
+              },
+              {
+                "id": "$COMMENT_1",
+                "round": 1,
+                "state": "saved"
+              },
+              {
+                "id": "$COMMENT_2",
+                "round": 1,
+                "state": "saved"
+              },
+              {
+                "id": "$COMMENT_3",
+                "round": 1,
+                "state": "saved"
+              }
+            ],
+            "round": {
+              "commentCount": 5,
+              "delivered": false,
+              "fileCount": 7,
+              "number": 1,
+              "summary": null,
+              "verdict": "comment",
+              "viewedCount": 1
+            },
+            "status": "in_progress"
+          },
+          "guard": "a Comment verdict saves every pending comment on round 1 and sends nothing",
+          "ok": true
+        }
+      ],
+      "step": "save the comments with a Comment verdict"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "message": "Review · Changes requested · 2 / 7 viewed · 6 comments\n\nTighten the constants before this ships.\n\n- `src/edit.rs:4` Why 3, and not 30?\n- `src/edit.rs:4` It balances the sum.\n- `src/gone.rs:2 (removed line)` Why is this here?\n- `src/gone.rs:2` Why is this here?\n- `src/new_name.rs:4 (removed line)` Why is this here?\n- `src/edit.rs:7` Name this constant.\n  \n  It also needs a doc comment.\n\nAddress each comment, then stop. Files you change go back to unviewed in the review."
+          },
+          "guard": "the message follows the review grammar",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comments": [
+              {
+                "id": "$COMMENT",
+                "round": 2,
+                "state": "sending"
+              },
+              {
+                "id": "$REPLY",
+                "round": 2,
+                "state": "sending"
+              },
+              {
+                "id": "$COMMENT_1",
+                "round": 2,
+                "state": "sending"
+              },
+              {
+                "id": "$COMMENT_2",
+                "round": 2,
+                "state": "sending"
+              },
+              {
+                "id": "$COMMENT_3",
+                "round": 2,
+                "state": "sending"
+              },
+              {
+                "id": "$PENDING",
+                "round": 2,
+                "state": "sending"
+              }
+            ],
+            "round": {
+              "commentCount": 6,
+              "delivered": false,
+              "fileCount": 7,
+              "number": 2,
+              "summary": "Tighten the constants before this ships.",
+              "verdict": "request_changes",
+              "viewedCount": 2
+            },
+            "status": "in_progress"
+          },
+          "guard": "saved and pending comments are sending on round 2, undelivered, and the review is not yet changes requested",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "review_round_undelivered"
+          },
+          "guard": "a round still waiting on delivery refuses the next submit",
+          "ok": true
+        }
+      ],
+      "step": "request changes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "last_is_the_message": true,
+            "turns": 2
+          },
+          "guard": "the harness receives the message as the session's next turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "again": true,
+            "delivered": true,
+            "states": [
+              "sent",
+              "sent",
+              "sent",
+              "sent",
+              "sent",
+              "sent"
+            ],
+            "status": "changes_requested"
+          },
+          "guard": "marking the round delivered sends its comments and requests changes, and marking it again is harmless",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "comment_round": "review_round_not_found",
+            "missing": "review_round_not_found"
+          },
+          "guard": "only a change request round that exists can be marked delivered",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changedSinceRound": []
+          },
+          "guard": "nothing has changed since the review yet",
+          "ok": true
+        }
+      ],
+      "step": "deliver the review to the implement session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "changedSinceRound": [
+              "src/edit.rs"
+            ],
+            "viewed": [
+              "src/new.rs"
+            ]
+          },
+          "guard": "the touched file is changed since the review and no longer viewed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "addressed": {
+              "$COMMENT": true,
+              "$COMMENT_1": false,
+              "$COMMENT_2": false,
+              "$COMMENT_3": false,
+              "$PENDING": true,
+              "$REPLY": true
+            },
+            "pendingLine": 7
+          },
+          "guard": "comments in the touched file are addressed, whether their lines vanished or changed around them",
+          "ok": true
+        }
+      ],
+      "step": "the agent fixes the commented code"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "round": {
+              "commentCount": 0,
+              "delivered": false,
+              "fileCount": 7,
+              "number": 3,
+              "summary": null,
+              "verdict": "approve",
+              "viewedCount": 1
+            },
+            "status": "approved"
+          },
+          "guard": "approving after a delivered round marks the review approved",
+          "ok": true
+        }
+      ],
+      "step": "approve"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

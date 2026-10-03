@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
 
-const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -444,18 +444,18 @@ pub struct CommitEntry {
     pub time_ms: f64,
 }
 
-fn is_excluded(path: &str) -> bool {
+pub(crate) fn is_excluded(path: &str) -> bool {
     crate::worktree::is_thoughts_path(path) || is_hyprlayer_internal(path)
 }
 
-fn git_err(program: &str, e: git2::Error) -> CoreError {
+pub(crate) fn git_err(program: &str, e: git2::Error) -> CoreError {
     CoreError::OutputParse {
         program: program.to_string(),
         detail: e.message().to_string(),
     }
 }
 
-fn safe_join(worktree: &Path, rel: &str) -> Result<PathBuf> {
+pub(crate) fn safe_join(worktree: &Path, rel: &str) -> Result<PathBuf> {
     let rel_path = Path::new(rel);
     let unsafe_component = rel_path.is_absolute()
         || rel_path.components().any(|c| {
@@ -517,7 +517,7 @@ fn delta_change(status: git2::Delta) -> &'static str {
     }
 }
 
-fn delta_old_path(delta: &git2::DiffDelta<'_>, new_path: &str) -> Option<String> {
+pub(crate) fn delta_old_path(delta: &git2::DiffDelta<'_>, new_path: &str) -> Option<String> {
     if delta.status() != git2::Delta::Renamed {
         return None;
     }
@@ -942,7 +942,7 @@ fn commit_diff<'r>(
     Ok(diff)
 }
 
-fn renamed_from(diff: &git2::Diff<'_>, rel: &str) -> Option<String> {
+pub(crate) fn renamed_from(diff: &git2::Diff<'_>, rel: &str) -> Option<String> {
     diff.deltas().find_map(|delta| {
         (delta.new_file().path() == Some(Path::new(rel)))
             .then(|| delta_old_path(&delta, rel))

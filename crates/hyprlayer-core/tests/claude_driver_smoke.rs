@@ -26,6 +26,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         effort: None,
         chrome: false,
         agent: None,
+        append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
@@ -136,6 +137,7 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         effort: None,
         chrome: false,
         agent: None,
+        append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
@@ -213,6 +215,7 @@ fn spawn_haiku(
         effort: None,
         chrome: false,
         agent: None,
+        append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
     })
