@@ -7,13 +7,12 @@ import type { SettingsSection } from "./sections";
 
 type NavEntry =
   | { id: SettingsSection; label: string; icon: IconName }
-  | { href: "/agents"; label: string; icon: IconName };
+  | { href: "/workshop"; label: string; icon: IconName };
 
 const NAV: NavEntry[] = [
   { id: "general", label: "General", icon: "sliders" },
   { id: "harnesses", label: "Harnesses", icon: "agents" },
-  // Workshop is the Agents page; the entry leaves Settings.
-  { href: "/agents", label: "Workshop", icon: "workshop" },
+  { href: "/workshop", label: "Workshop", icon: "workshop" },
   { id: "git", label: "Git", icon: "branch" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
   { id: "keyboard", label: "Keyboard", icon: "keyboard" },

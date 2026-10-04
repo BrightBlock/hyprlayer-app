@@ -69,7 +69,7 @@ use hyprlayer_core::runtime::workstreams::{
     WorkstreamPrStatusRequest,
 };
 use hyprlayer_core::settings::AppSettings;
-use hyprlayer_core::skills::{self, AgentSkill, SlashCommand};
+use hyprlayer_core::skills::{self, AgentSkill, SkillFile, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, PullOutcome};
@@ -2062,6 +2062,25 @@ impl Dispatch for Server {
         project_path: Option<String>,
     ) -> Result<Vec<AgentSkill>, WireError> {
         self.runtime.agents().skills(project_path).await.wire()
+    }
+
+    async fn list_skill_files(
+        &self,
+        project_path: Option<String>,
+    ) -> Result<Vec<SkillFile>, WireError> {
+        self.runtime.agents().skill_files(project_path).await.wire()
+    }
+
+    async fn read_skill_file(
+        &self,
+        project_path: Option<String>,
+        path: String,
+    ) -> Result<String, WireError> {
+        self.runtime
+            .agents()
+            .read_skill_file(project_path, path)
+            .await
+            .wire()
     }
 
     async fn agent_harness_counts(&self) -> Result<Vec<HarnessCounts>, WireError> {

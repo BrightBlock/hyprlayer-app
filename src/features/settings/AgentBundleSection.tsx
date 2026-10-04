@@ -386,7 +386,7 @@ export function AgentBundleSection({ status }: { status: AiStatus | undefined })
             Clear pin
           </Button>
         )}
-        <Link to="/agents" className="shrink-0 px-1 text-ui text-accent hover:underline">
+        <Link to="/workshop" className="shrink-0 px-1 text-ui text-accent hover:underline">
           Manage
         </Link>
       </div>

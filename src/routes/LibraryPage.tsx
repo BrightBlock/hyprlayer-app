@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
-import { EmptyState } from "@/components/ui";
+import { EmptyState, PaneSeparator } from "@/components/ui";
 import { CreateDocDialog } from "@/features/library/CreateDocDialog";
 import { docQueryFromSearch } from "@/features/library/DocFilters";
 import { DocDetail } from "@/features/library/DocDetail";
@@ -12,7 +12,6 @@ import { useThoughtsSync } from "@/features/library/useThoughtsSync";
 import { useBootstrap, useDocs } from "@/lib/queries";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
-import { startEdgeDrag } from "@/lib/resize";
 import { useViewport } from "@/lib/useViewport";
 import { useCommand } from "@/lib/keybindings/registry";
 import { libraryFiltersActive, type LibrarySearch } from "@/features/library/librarySearch";
@@ -75,20 +74,12 @@ export function LibraryPage() {
       />
 
       {!libraryCollapsed && !narrow && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize library sidebar"
-          className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-          onPointerDown={(e) =>
-            startEdgeDrag(e, {
-              startWidth: libraryWidth,
-              min: SIDE_PANEL_MIN,
-              max: SIDE_PANEL_MAX,
-              direction: 1,
-              onResize: setLibraryWidth,
-            })
-          }
+        <PaneSeparator
+          label="Resize library sidebar"
+          width={libraryWidth}
+          min={SIDE_PANEL_MIN}
+          max={SIDE_PANEL_MAX}
+          onResize={setLibraryWidth}
         />
       )}
 

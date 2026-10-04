@@ -4,8 +4,12 @@ import type {
   CustomPrompt,
   PromptContext,
   PromptDefaults,
+  WorkstreamView,
+  WorktreeStatus,
 } from "@/lib/bindings";
+import { isFolderWorkstream, shortBranch } from "@/lib/domain/projects";
 import { PROMPT_VARS } from "@/lib/domain/promptVars";
+import { plural } from "@/lib/format";
 
 export type BuiltinPromptId = "commit" | "ship";
 
@@ -30,6 +34,29 @@ export const BUILTIN_PROMPTS: ReadonlyArray<{
 ];
 
 export { PROMPT_VARS };
+
+export type PromptFilter = "all" | "pinned" | "overrides";
+
+export const PROMPT_FILTERS: ReadonlyArray<{ key: PromptFilter; label: string }> = [
+  { key: "all", label: "All prompts" },
+  { key: "pinned", label: "Pinned to composer" },
+  { key: "overrides", label: "Project overrides" },
+];
+
+export function promptFilter(raw: string | undefined): PromptFilter {
+  return PROMPT_FILTERS.find((f) => f.key === raw)?.key ?? "all";
+}
+
+export function filterCustomPrompts(prompts: CustomPrompt[], filter: PromptFilter): CustomPrompt[] {
+  switch (filter) {
+    case "pinned":
+      return prompts.filter((p) => p.pinned);
+    case "overrides":
+      return prompts.filter((p) => Object.keys(p.overrides ?? {}).length > 0);
+    default:
+      return prompts;
+  }
+}
 
 export type PromptInput = { token: string; label: string };
 
@@ -180,4 +207,34 @@ export function prefillSlashCommand(draft: string, slug: string): string {
 
 export function promptFirstLine(body: string): string {
   return body.split("\n", 1)[0] ?? "";
+}
+
+export function previewArgs(body: string): Record<string, string> {
+  return Object.fromEntries(promptInputs(body).map((i) => [i.token, `‹${promptInputLabel(i)}›`]));
+}
+
+export function previewCandidates(views: WorkstreamView[]): WorkstreamView[] {
+  return views
+    .filter((v) => v.item.status !== "archived" && !isFolderWorkstream(v))
+    .sort((a, b) => (b.item.updatedAt ?? 0) - (a.item.updatedAt ?? 0));
+}
+
+export function defaultPreviewTarget(
+  candidates: WorkstreamView[],
+  scopeProject: string | null,
+): WorkstreamView | null {
+  return (
+    (scopeProject && candidates.find((v) => v.item.projectPath === scopeProject)) ||
+    candidates[0] ||
+    null
+  );
+}
+
+export function worktreeStatusLine(git: WorktreeStatus, baseBranch: string): string {
+  const line = `${plural(git.dirty + git.untracked, "file")} changed · ${plural(git.aheadOfBase, "commit")} ahead of ${shortBranch(baseBranch)}`;
+  return git.behind > 0 ? `${line} · ${git.behind} behind upstream` : line;
+}
+
+export function usedVars(body: string): typeof PROMPT_VARS {
+  return PROMPT_VARS.filter((v) => body.includes(v.token));
 }

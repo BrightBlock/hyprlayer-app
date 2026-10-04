@@ -5,19 +5,43 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import { PromptLibrary } from "./PromptLibrary";
+import type { WorkshopChrome } from "@/components/workshop";
 import type { AppSettings } from "@/lib/bindings";
+
+const chrome: WorkshopChrome = {
+  sections: [],
+  active: "prompts",
+  onSection: vi.fn(),
+  scope: null,
+  footer: null,
+};
 
 function Harness({ settings }: { settings: AppSettings }) {
   const [selectedId, setSelectedId] = useState("commit");
-  return <PromptLibrary settings={settings} selectedId={selectedId} onSelect={setSelectedId} />;
+  return (
+    <PromptLibrary
+      chrome={chrome}
+      settings={settings}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      filter="all"
+      onFilter={vi.fn()}
+    />
+  );
 }
 
 const mutate = vi.fn();
 const confirmMock = vi.fn(async (..._args: unknown[]) => true);
 
+vi.mock("@/lib/useViewport", () => ({
+  useViewport: () => ({ width: 1280, narrow: false, compact: false }),
+}));
+
 vi.mock("../../lib/queries", () => ({
   invalidateBootstrap: vi.fn(),
   useSetAppSettings: () => ({ mutate, isError: false, error: null }),
+  useAllWorkstreams: () => ({ data: [] }),
+  useWorkstreamPromptContext: () => ({ data: undefined, isError: false, isLoading: false }),
   useBootstrap: () => ({
     data: {
       settings: {},
@@ -94,7 +118,7 @@ describe("PromptLibrary", () => {
     expect(mutate).toHaveBeenCalledTimes(1);
     const saved = mutate.mock.calls[0][0] as AppSettings;
     expect(saved.prompts?.builtinBodies?.commit).toBe("/commit\n\nNever use chore:.");
-    expect(screen.getByText("Modified")).toBeTruthy();
+    expect(screen.getAllByText("Modified").length).toBeGreaterThan(0);
   });
 
   it("Reset to default drops the built-in override", () => {
@@ -129,7 +153,7 @@ describe("PromptLibrary", () => {
 
   it("adds a custom prompt, persists immediately, and selects it", () => {
     render(<Harness settings={EMPTY} />);
-    fireEvent.click(screen.getByLabelText("New prompt"));
+    fireEvent.click(screen.getByRole("button", { name: "New prompt" }));
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
     expect(saved.prompts?.custom).toHaveLength(1);
     expect(saved.prompts?.custom?.[0].name).toBe("Untitled prompt");

@@ -200,6 +200,137 @@ async fn agent_files() {
         json!({ "commands": commands.as_array().map(|c| c.len()) }),
     );
 
+    j.step("skill files");
+    let probe_dir = repo.join(".claude/skills/e2e-probe");
+    std::fs::create_dir_all(probe_dir.join("refs")).expect("create the probe skill dirs");
+    std::fs::write(
+        probe_dir.join("SKILL.md"),
+        "---\nname: e2e-probe\ndescription: Probe skill.\nallowed-tools: Read\n---\n\nProbe the skill reader.\n",
+    )
+    .expect("write the probe SKILL.md");
+    std::fs::write(probe_dir.join("refs/notes.md"), "notes\n").expect("write the probe asset");
+    let files = j
+        .call(
+            &client,
+            Request::ListSkillFiles {
+                project_path: Some(project.clone()),
+            },
+        )
+        .await
+        .expect("list_skill_files");
+    let skills = j
+        .call(
+            &client,
+            Request::AgentSkills {
+                project_path: Some(project.clone()),
+            },
+        )
+        .await
+        .expect("agent_skills");
+    let user_skills = entries_of(&skills, "user").len();
+    let mut user_slash_names: Vec<String> = entries_of(&files, "user")
+        .iter()
+        .map(|f| text(f, "/slashName"))
+        .collect();
+    user_slash_names.sort();
+    user_slash_names.dedup();
+    let project_files = entries_of(&files, "project");
+    let all_files = files.as_array().map(Vec::as_slice).unwrap_or_default();
+    let managed = all_files
+        .iter()
+        .filter(|f| f.pointer("/managed") == Some(&Value::Bool(true)))
+        .count();
+    j.guard(
+        "skill files list every installed skill plus the project probe",
+        user_slash_names.len() == user_skills && project_files.len() == 1,
+        json!({
+            "entries": all_files.len(),
+            "sources": sources(&files),
+            "managed": managed,
+        }),
+    );
+    let well_formed = all_files.iter().all(|f| {
+        text(f, "/path").ends_with("/SKILL.md")
+            && text(f, "/path").starts_with(&text(f, "/dir"))
+            && !text(f, "/slashName").is_empty()
+    });
+    j.guard(
+        "every skill file points at its SKILL.md and has a slash name",
+        !all_files.is_empty() && well_formed,
+        json!({ "entries": all_files.len(), "well_formed": well_formed }),
+    );
+    let probe = project_files.first();
+    let keys_of = |pointer: &str, key: &str| -> Vec<String> {
+        probe
+            .and_then(|p| p.pointer(pointer))
+            .and_then(Value::as_array)
+            .map(|items| items.iter().map(|i| text(i, key)).collect())
+            .unwrap_or_default()
+    };
+    let field_keys = keys_of("/frontmatter", "/key");
+    let asset_paths = keys_of("/assets", "/relPath");
+    let agent_ref = probe.map(|p| text(p, "/agentRef")).unwrap_or_default();
+    j.guard(
+        "the probe keeps frontmatter order and lists its assets",
+        field_keys == ["name", "description", "allowed-tools"]
+            && asset_paths == ["refs/notes.md"]
+            && agent_ref == "e2e-probe",
+        json!({ "frontmatter": field_keys, "assets": asset_paths, "agent_ref": agent_ref }),
+    );
+
+    let read = |path: String| Request::ReadSkillFile {
+        project_path: Some(project.clone()),
+        path,
+    };
+    let probe_path = probe.map(|p| text(p, "/path")).unwrap_or_default();
+    let probe_text = j.call(&client, read(probe_path)).await;
+    let probe_text = probe_text.as_ref().map(|v| text(v, "")).unwrap_or_default();
+    j.guard(
+        "reading the probe returns its whole SKILL.md",
+        probe_text.starts_with("---\nname: e2e-probe\n")
+            && probe_text.ends_with("Probe the skill reader.\n"),
+        json!({ "chars": probe_text.chars().count() }),
+    );
+    let managed_path = all_files
+        .iter()
+        .find(|f| f.pointer("/managed") == Some(&Value::Bool(true)))
+        .map(|f| text(f, "/path"))
+        .unwrap_or_default();
+    let managed_text = j.call(&client, read(managed_path)).await;
+    j.guard(
+        "a bundle skill reads through its symlinked directory",
+        managed_text
+            .as_ref()
+            .is_ok_and(|v| text(v, "").starts_with("---")),
+        json!({ "ok": managed_text.is_ok() }),
+    );
+    let asset = j
+        .call(
+            &client,
+            read(
+                probe_dir
+                    .join("refs/notes.md")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+        )
+        .await
+        .err()
+        .map(|e| e.code);
+    let stray = repo.join("stray/SKILL.md");
+    std::fs::create_dir_all(repo.join("stray")).expect("create the stray dir");
+    std::fs::write(&stray, "---\nname: stray\n---\n").expect("write the stray SKILL.md");
+    let outside = j
+        .call(&client, read(stray.to_string_lossy().into_owned()))
+        .await
+        .err()
+        .map(|e| e.code);
+    j.guard(
+        "only a SKILL.md inside a skill root can be read",
+        asset.is_some() && outside.is_some(),
+        json!({ "asset": asset, "outside_roots": outside }),
+    );
+
     j.step("bundle status");
     // Offline on a 1.6.0+ CLI: a comparison of the CLI's recorded assets
     // version against the pin, with nothing fetched (ADR-0002).
@@ -254,6 +385,17 @@ fn sources(agents: &Value) -> Vec<String> {
     all.sort();
     all.dedup();
     all
+}
+
+fn entries_of<'a>(items: &'a Value, source: &str) -> Vec<&'a Value> {
+    items
+        .as_array()
+        .map(|all| {
+            all.iter()
+                .filter(|i| text(i, "/source") == source)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn names(agents: &Value) -> Vec<String> {

@@ -15,6 +15,7 @@ import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord, type Chord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
+import { startEdgeDrag } from "@/lib/resize";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRovingRadio } from "@/lib/useRovingRadio";
 import { Icon, type IconSize } from "./Icon";
@@ -1159,4 +1160,90 @@ export function rowClass({
 
 export function RowSpine() {
   return <span className="absolute inset-y-0 left-0 w-[3px] bg-accent" aria-hidden="true" />;
+}
+
+export function PaneSeparator({
+  label,
+  width,
+  min,
+  max,
+  onResize,
+  onEnd,
+}: {
+  label: string;
+  width: number;
+  min: number;
+  max: number;
+  onResize: (width: number) => void;
+  onEnd?: () => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+      onPointerDown={(e) =>
+        startEdgeDrag(e, { startWidth: width, min, max, direction: 1, onResize, onEnd })
+      }
+    />
+  );
+}
+
+export function TabStrip<K extends string>({
+  tabs,
+  value,
+  onChange,
+  className,
+}: {
+  tabs: ReadonlyArray<{ key: K; label: ReactNode }>;
+  value: K;
+  onChange: (key: K) => void;
+  className?: string;
+}) {
+  return (
+    <div
+      role="tablist"
+      className={cx("flex h-9 shrink-0 items-center gap-1.5 border-b border-edge", className)}
+    >
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          aria-selected={t.key === value}
+          onClick={() => onChange(t.key)}
+          className={cx(
+            "rounded-md px-2 py-1 text-ui font-medium",
+            t.key === value ? "bg-panel-2 text-ink" : "text-ink-dim hover:text-ink",
+          )}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const CALLOUT_TONE = {
+  info: { box: "border-edge bg-panel-2", icon: "text-ink-dim" },
+  warn: { box: "border-warn/35 bg-warn/10", icon: "text-warn-ink" },
+  bad: { box: "border-bad/35 bg-bad/10", icon: "text-bad" },
+} as const;
+
+export function Callout({
+  tone,
+  icon,
+  children,
+}: {
+  tone: keyof typeof CALLOUT_TONE;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cx("flex gap-2.5 rounded-lg border p-3 text-ui text-ink-dim", CALLOUT_TONE[tone].box)}>
+      <span className={cx("shrink-0 pt-px", CALLOUT_TONE[tone].icon)}>{icon}</span>
+      <span className="text-pretty">{children}</span>
+    </div>
+  );
 }

@@ -2,33 +2,29 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, Card, ContextMenu, ContextMenuItem, Dialog, PageSpinner, TextInput } from "@/components/ui";
+import { Button, ContextMenu, ContextMenuItem, Dialog, PageSpinner, TextInput } from "@/components/ui";
 import { Icon } from "@/components/Icon";
+import { WorkshopFrame, WorkshopNav, type WorkshopChrome } from "@/components/workshop";
 import {
   commands,
   type AgentFile,
   type AgentLibrarySettings,
   type AppSettings,
   type Bootstrap,
-  type Project,
 } from "@/lib/bindings";
+import { claudeModels } from "@/lib/domain/models";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { basename } from "@/lib/path";
 import {
-  invalidateAgentBundle,
-  useAgentBundle,
   useAgentFiles,
   useAgentSkills,
   useBootstrap,
+  useClaudeProbe,
   useSetAppSettings,
 } from "@/lib/queries";
-import { startEdgeDrag } from "@/lib/resize";
 import { useToast } from "@/lib/toast";
-import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
-import { useViewport } from "@/lib/useViewport";
 import {
   agentRows,
-  bundleChipState,
   DEFAULT_OVERLAY,
   dotColor,
   duplicateAgent,
@@ -39,19 +35,19 @@ import {
   isUnsaved,
   newAgent,
   overlayFor,
+  systemFolderOf,
+  systemFolderResolver,
   visibleAgents,
   type AgentScope,
   type AgentSection,
   type AgentTab,
-  type BundleFailure,
-  type BundleReport,
   type EditorTab,
   type Overlay,
 } from "./agents";
 import { AgentEditor } from "./AgentEditor";
-import { AgentUpdateFailed, AgentUpdateReport } from "./AgentBundleDialogs";
-import { AgentSidebar } from "./AgentSidebar";
-import { FolderCombo, SoonBadge } from "./parts";
+import { AgentList } from "./AgentList";
+import { AgentNavFilters } from "./AgentNavFilters";
+import { FolderCombo } from "./parts";
 
 type LibraryPatch = Partial<AgentLibrarySettings>;
 
@@ -66,44 +62,40 @@ class MoveFailed extends Error {
 }
 
 type Props = {
-  projects: Project[];
-  selectedProject: string | null;
-  onSelectProject: (path: string | null) => void;
+  chrome: WorkshopChrome;
+  projectPath: string | null;
   selectedPath: string | null;
   onSelect: (path: string | null) => void;
   editorTab: EditorTab;
   onEditorTab: (tab: EditorTab) => void;
   section: AgentSection;
   onSection: (section: AgentSection) => void;
+  folder: string | null;
+  onFolder: (folder: string | null) => void;
 };
 
 const NEW_AGENT_PATH = "new";
 
 export function AgentLibrary({
-  projects,
-  selectedProject,
-  onSelectProject,
+  chrome,
+  projectPath,
   selectedPath,
   onSelect,
   editorTab,
   onEditorTab,
   section,
   onSection,
+  folder,
+  onFolder,
 }: Props) {
   const queryClient = useQueryClient();
   const bootstrap = useBootstrap();
   const setSettings = useSetAppSettings();
   const settings = bootstrap.data?.settings;
   const library = settings?.agents;
-  const agentsWidth = useUiStore((s) => s.agentsWidth);
-  const setAgentsWidth = useUiStore((s) => s.setAgentsWidth);
-  const { narrow } = useViewport();
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
-  const sidebarWidth = dragWidth ?? agentsWidth;
-  const agentsCollapsed = useUiStore((s) => s.agentsCollapsed);
+  const catalog = claudeModels(useClaudeProbe().data?.models);
 
-  const projectPath = selectedProject;
-  const scope: AgentScope = selectedProject ? "project" : "global";
+  const scope: AgentScope = projectPath ? "project" : "global";
 
   const agents = useAgentFiles(projectPath);
   const contextFiles = useQuery({
@@ -115,7 +107,6 @@ export function AgentLibrary({
     queryFn: () => unwrap(commands.agentMcpServers(projectPath)),
   });
   const skills = useAgentSkills(projectPath);
-  const agentBundle = useAgentBundle();
 
   const [search, setSearch] = useState("");
   const [menu, setMenu] = useState<{ agent: AgentFile; x: number; y: number } | null>(null);
@@ -125,8 +116,6 @@ export function AgentLibrary({
   const [dialog, setDialog] = useState<"folder" | "move" | "delete" | null>(null);
   const [folderName, setFolderName] = useState("");
   const [moveTarget, setMoveTarget] = useState("");
-  const [bundleReport, setBundleReport] = useState<BundleReport | null>(null);
-  const [bundleFailure, setBundleFailure] = useState<BundleFailure | null>(null);
   const [actionTarget, setActionTarget] = useState<AgentFile | null>(null);
   const [draft, setDraft] = useState<{
     base: { agent: AgentFile; overlay: Overlay };
@@ -147,8 +136,7 @@ export function AgentLibrary({
   const workingOverlay = live?.overlay ?? (stored ? overlayFor(library, stored.path) : null);
   const baseline = live?.base ?? (stored ? { agent: stored, overlay: overlayFor(library, stored.path) } : null);
 
-  const effectiveSection: AgentSection = working ? (isSystem(working) ? "system" : "agents") : section;
-  const tab: AgentTab = effectiveSection === "system" ? "system" : "yours";
+  const tab: AgentTab = section === "system" ? "system" : "yours";
 
   const inScope = useMemo(
     () => visibleAgents(all, { tab, scope, search: "" }),
@@ -158,13 +146,17 @@ export function AgentLibrary({
     () => (search.trim() ? visibleAgents(all, { tab, scope, search }) : inScope),
     [all, tab, scope, search, inScope],
   );
-  const folderOf = useMemo(
+  const userFolderOf = useMemo(
     () => folderResolver(library, groupUncategorized),
     [library, groupUncategorized],
   );
+  const folderOf = useMemo(
+    () => (section === "system" ? systemFolderResolver(library) : userFolderOf),
+    [section, library, userFolderOf],
+  );
   const folders = useMemo(
-    () => folderList(inScope, library, groupUncategorized),
-    [inScope, library, groupUncategorized],
+    () => folderList(inScope, library, groupUncategorized, folderOf),
+    [inScope, library, groupUncategorized, folderOf],
   );
   const closedFolders = useMemo(() => new Set(library?.closedFolders ?? []), [library]);
   const keepEmpty = useMemo(
@@ -176,12 +168,29 @@ export function AgentLibrary({
     () => agentRows({ agents: visible, folders, closedFolders, folderOf, keepEmpty }),
     [visible, folders, closedFolders, folderOf, keepEmpty],
   );
-  const agentsCount = useMemo(
-    () => visibleAgents(all, { tab: "yours", scope, search: "" }).length,
-    [all, scope],
+  const flat = useMemo(
+    () => (folder === null ? [] : visible.filter((a) => folderOf(a) === folder)),
+    [visible, folderOf, folder],
   );
+  const systemInFolder = useMemo(
+    () =>
+      section === "agents" && folder !== null
+        ? visibleAgents(all, { tab: "system", scope, search }).filter(
+            (a) => systemFolderOf(a, library) === folder,
+          )
+        : [],
+    [section, folder, all, scope, search, library],
+  );
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of inScope) {
+      const f = folderOf(a);
+      if (f) counts.set(f, (counts.get(f) ?? 0) + 1);
+    }
+    return counts;
+  }, [inScope, folderOf]);
 
-  const folderCount = (folder: string) => all.filter((a) => folderOf(a) === folder).length;
+  const folderCount = (name: string) => all.filter((a) => userFolderOf(a) === name).length;
 
   const flash = (message: string) => useToast.getState().show("Agents", message);
   const fail = (title: string, e: unknown) => {
@@ -338,44 +347,19 @@ export function AgentLibrary({
     onError: (e) => fail("Export failed", e),
   });
 
-  const updateBundle = useMutation({
-    mutationFn: (_vars: { from: string | null; to: string | null }) =>
-      unwrap(commands.updateAgentBundle()),
-    onSuccess: (result, { from, to }) => {
-      invalidateAgentBundle();
-      setBundleReport({ ...result, from, to });
-    },
-    onError: (e, { from }) => {
-      invalidateAgentBundle();
-      setBundleFailure({ message: errorMessage(e), stillOn: from });
-    },
-  });
-
-  const bundleChip = bundleChipState(agentBundle.data, {
-    loading: agentBundle.isLoading,
-    error: agentBundle.isError,
-  });
-
-  const startUpdate = () => {
-    updateBundle.mutate(
-      bundleChip.kind === "updateAvailable"
-        ? { from: bundleChip.from, to: bundleChip.to }
-        : { from: bundleChip.kind === "upToDate" ? bundleChip.label : null, to: null },
-    );
-  };
-
   const openDraft = (agent: AgentFile, overlay: Overlay, path: string) => {
     setDraft({ base: { agent, overlay }, agent, overlay });
     onSelect(path);
     onEditorTab("setup");
   };
 
-  const createAgent = (folder?: string) => {
+  const createAgent = (category?: string) => {
     setDefaultIntent(null);
-    onSection("agents");
+    // onSection resets the folder filter; skip it when already in the section.
+    if (section !== "agents") onSection("agents");
     const blank = newAgent(scope === "project" && projectName ? "project" : "user");
     openDraft(
-      folder ? { ...blank, category: folder } : blank,
+      category ? { ...blank, category } : blank,
       { ...DEFAULT_OVERLAY },
       NEW_AGENT_PATH,
     );
@@ -409,143 +393,122 @@ export function AgentLibrary({
     onSelect(null);
   };
 
-  const workingFolder = stored ? folderOf(stored) : "";
-  const breadcrumb = {
-    folder: workingFolder,
-    onAgents: () => {
-      onBack();
-      onSection("agents");
-    },
-    onFolder: () => {
-      onBack();
-      if (workingFolder) {
-        writeLibrary((current) => {
-          const next = new Set(current.closedFolders ?? []);
-          next.delete(workingFolder);
-          return { closedFolders: [...next] };
-        });
-      }
-    },
-  };
-
   if (agents.isLoading || bootstrap.isLoading) return <PageSpinner />;
 
+  const toggleFolder = (name: string) =>
+    writeLibrary((current) => {
+      const next = new Set(current.closedFolders ?? []);
+      if (!next.delete(name)) next.add(name);
+      return { closedFolders: [...next] };
+    });
+
   return (
-    <div className="flex h-full min-h-0">
-      <AgentSidebar
-        width={sidebarWidth}
-        collapsed={agentsCollapsed}
-        section={effectiveSection}
-        onSection={onSection}
-        selectedAgent={working}
-        onBack={onBack}
-        editorTab={editorTab}
-        onEditorTab={onEditorTab}
-        rows={rows}
-        agentsCount={agentsCount}
-        library={library}
-        projects={projects}
-        selectedProject={selectedProject}
-        onSelectProject={onSelectProject}
-        search={search}
-        onSearch={setSearch}
-        onToggleFolder={(folder) =>
-          writeLibrary((current) => {
-            const next = new Set(current.closedFolders ?? []);
-            if (!next.delete(folder)) next.add(folder);
-            return { closedFolders: [...next] };
-          })
-        }
-        onOpen={(agent) => {
-          setDefaultIntent(null);
-          onSelect(agent.path);
-        }}
-        onMenu={(agent, at) => setMenu({ agent, ...at })}
-        onFolderMenu={(folder, at) => setFolderMenu({ folder, ...at })}
-        dotColorOf={(agent) => dotColor(agent, overlayFor(library, agent.path), folderOf)}
-        loading={agents.isFetching}
-        onCreate={() => createAgent()}
-        onNewFolder={() => {
-          onSection("agents");
-          setFolderName("");
-          setDialog("folder");
-        }}
-        groupUncategorized={groupUncategorized}
-        onGroupUncategorized={(on) => writeLibrary({ groupUncategorized: on })}
-        bundle={{
-          state: bundleChip,
-          updating: updateBundle.isPending,
-          checking: agentBundle.isFetching,
-          onRefresh: () => void agentBundle.refetch(),
-          onUpdate: startUpdate,
-        }}
-      />
-
-      {!narrow && !agentsCollapsed && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize agents sidebar"
-          className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-          onPointerDown={(e) =>
-            startEdgeDrag(e, {
-              startWidth: agentsWidth,
-              min: SIDE_PANEL_MIN,
-              max: SIDE_PANEL_MAX,
-              direction: 1,
-              onResize: setDragWidth,
-              onEnd: () =>
-                setDragWidth((live) => {
-                  if (live !== null) setAgentsWidth(live);
-                  return null;
-                }),
-            })
-          }
-        />
-      )}
-
-      <section className="min-w-0 flex-1 overflow-y-auto">
-        {working && workingOverlay && baseline ? (
-          <AgentEditor
-            draft={working}
-            overlay={workingOverlay}
-            isDefault={isDefault}
-            patch={patch}
-            patchOverlay={patchOverlay}
-            onDefault={setDefaultIntent}
-            dirty={
-              JSON.stringify({ a: working, o: workingOverlay }) !==
-                JSON.stringify({ a: baseline.agent, o: baseline.overlay }) ||
-              isUnsaved(working) ||
-              (defaultIntent !== null && defaultIntent !== (library?.defaultAgent === working.path))
+    <>
+      <WorkshopFrame
+        navKey={`${section}:${folder ?? ""}`}
+        nav={
+          <WorkshopNav
+            chrome={chrome}
+            action={
+              <Button
+                variant="primary"
+                className="w-full justify-center"
+                onClick={() => createAgent(folder ?? undefined)}
+              >
+                New agent
+              </Button>
             }
-            tab={editorTab}
-            onTab={onEditorTab}
-            onBack={onBack}
-            breadcrumb={breadcrumb}
-            onSave={() => save.mutate({ agent: working, overlay: workingOverlay, isDefault })}
-            onStatus={(status) => patchOverlay({ status })}
-            onReset={() => {
-              if (!isManaged(working) && working.modified) remove.mutate([working]);
-              else flash("This agent is already the shipped version");
-            }}
-            onExport={() => exportAgents.mutate([working])}
-            onCopyPath={() => {
-              void navigator.clipboard.writeText(working.path);
-              flash("Agent path copied");
-            }}
-            saving={save.isPending}
-            projectName={projectName}
-            folders={folders}
-            contextFiles={contextFiles.data ?? []}
-            mcpServers={mcpServers.data ?? []}
-            skills={skills.data ?? []}
-            peers={all.filter((a) => a.path !== working.path)}
+            filters={
+              <AgentNavFilters
+                folders={folders}
+                counts={folderCounts}
+                total={inScope.length}
+                folder={folder}
+                onFolder={onFolder}
+                onFolderMenu={(f, at) => setFolderMenu({ folder: f, ...at })}
+                groupUncategorized={groupUncategorized}
+                onGroupUncategorized={(on) => writeLibrary({ groupUncategorized: on })}
+                showGroupToggle={section === "agents"}
+              />
+            }
           />
-        ) : (
-          <AgentsCta section={effectiveSection} onCreate={() => createAgent()} />
-        )}
-      </section>
+        }
+        list={
+          <AgentList
+            section={section}
+            folder={folder}
+            rows={rows}
+            flat={flat}
+            systemInFolder={systemInFolder}
+            total={folder === null ? visible.length : flat.length}
+            search={search}
+            onSearch={setSearch}
+            selectedPath={working?.path ?? null}
+            library={library}
+            catalog={catalog}
+            loading={agents.isFetching}
+            onOpen={(agent) => {
+              setDefaultIntent(null);
+              onSelect(agent.path);
+            }}
+            onMenu={(agent, at) => setMenu({ agent, ...at })}
+            onFolderMenu={(f, at) => setFolderMenu({ folder: f, ...at })}
+            onToggleFolder={toggleFolder}
+            onNewFolder={() => {
+              setFolderName("");
+              setDialog("folder");
+            }}
+            dotColorOf={(agent) =>
+              dotColor(
+                agent,
+                overlayFor(library, agent.path),
+                isSystem(agent) ? systemFolderResolver(library) : folderOf,
+              )
+            }
+          />
+        }
+        detail={
+          working && workingOverlay && baseline ? (
+            <AgentEditor
+              draft={working}
+              overlay={workingOverlay}
+              isDefault={isDefault}
+              patch={patch}
+              patchOverlay={patchOverlay}
+              onDefault={setDefaultIntent}
+              dirty={
+                JSON.stringify({ a: working, o: workingOverlay }) !==
+                  JSON.stringify({ a: baseline.agent, o: baseline.overlay }) ||
+                isUnsaved(working) ||
+                (defaultIntent !== null && defaultIntent !== (library?.defaultAgent === working.path))
+              }
+              tab={editorTab}
+              onTab={onEditorTab}
+              onBack={onBack}
+              onSave={() => save.mutate({ agent: working, overlay: workingOverlay, isDefault })}
+              onStatus={(status) => patchOverlay({ status })}
+              onReset={() => {
+                if (!isManaged(working) && working.modified) remove.mutate([working]);
+                else flash("This agent is already the shipped version");
+              }}
+              onExport={() => exportAgents.mutate([working])}
+              onCopyPath={() => {
+                void navigator.clipboard.writeText(working.path);
+                flash("Agent path copied");
+              }}
+              saving={save.isPending}
+              projectName={projectName}
+              folders={folders}
+              contextFiles={contextFiles.data ?? []}
+              mcpServers={mcpServers.data ?? []}
+              skills={skills.data ?? []}
+              peers={all.filter((a) => a.path !== working.path)}
+            />
+          ) : (
+            <AgentsCta onCreate={() => createAgent()} />
+          )
+        }
+      />
 
       {menu && (
         <ContextMenu position={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}>
@@ -722,43 +685,11 @@ export function AgentLibrary({
         </div>
       </Dialog>
 
-      <AgentUpdateReport
-        report={bundleReport}
-        open={bundleReport !== null}
-        onClose={() => setBundleReport(null)}
-      />
-      <AgentUpdateFailed
-        failure={bundleFailure}
-        open={bundleFailure !== null}
-        onClose={() => setBundleFailure(null)}
-        onRetry={() => {
-          setBundleFailure(null);
-          startUpdate();
-        }}
-      />
-    </div>
+    </>
   );
 }
 
-function AgentsCta({ section, onCreate }: { section: AgentSection; onCreate: () => void }) {
-  if (section === "skills") {
-    return (
-      <div className="mx-auto w-full max-w-5xl px-7 py-8">
-        <div className="mb-4 flex items-center gap-2">
-          <h1 className="text-h3 text-ink">Skills</h1>
-          <SoonBadge />
-        </div>
-        <Card>
-          <h3 className="text-body font-semibold text-ink">Not shipped yet</h3>
-          <p className="mt-1 text-ui text-ink-dim">
-            Skills will live beside agents on this page and drill in the same way. Reserving the
-            section now is what keeps the nav from being rebuilt when they land.
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
+function AgentsCta({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-12 text-center">
       <span

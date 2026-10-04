@@ -289,7 +289,7 @@ fn from_yaml_value(value: &serde_yaml::Value, warnings: &mut Vec<String>) -> Fro
     fm
 }
 
-fn yaml_value_display(v: &serde_yaml::Value) -> String {
+pub(crate) fn yaml_value_display(v: &serde_yaml::Value) -> String {
     match v {
         serde_yaml::Value::String(s) => s.clone(),
         serde_yaml::Value::Null => String::new(),

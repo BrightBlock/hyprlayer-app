@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { Button, CliOutput, Dialog } from "@/components/ui";
 
-import type { BundleFailure, BundleReport } from "./agents";
+import type { BundleFailure, BundleReport } from "@/features/agents/agents";
 
 export function AgentUpdateReport({
   report,

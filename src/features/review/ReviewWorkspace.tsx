@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
-import { cx, EmptyState, ErrorNote, Spinner } from "@/components/ui";
+import { EmptyState, ErrorNote, Spinner, TabStrip } from "@/components/ui";
 import { openReview, type ReviewTab } from "@/lib/appNav";
 import type { ReviewComment, ReviewFile, ReviewNote, WorkstreamView } from "@/lib/bindings";
 import { useMarkReviewFilesViewed, useReview, useSetReviewFileViewed } from "@/lib/queries";
@@ -23,23 +23,6 @@ const NO_COMMENTS: ReviewComment[] = [];
 const NO_NOTES: ReviewNote[] = [];
 const NO_ITEMS: TranscriptItem[] = [];
 const NO_PHASES: PlanDocPhase[] = [];
-
-function Tab({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      onClick={onClick}
-      className={cx(
-        "rounded-md px-2 py-1 text-ui font-medium",
-        selected ? "bg-panel-2 text-ink" : "text-ink-dim hover:text-ink",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
 
 function nextUnviewed(ordered: ReviewFile[], from: number, viewed: ReadonlySet<string>): ReviewFile | null {
   for (let step = 1; step < ordered.length; step++) {
@@ -161,21 +144,38 @@ export function ReviewWorkspace({
         }}
         onOpenDoc={onOpenDoc}
       />
-      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-edge bg-panel px-2.5" role="tablist">
-        <Tab selected={!planTab} onClick={() => showTab("files")}>
-          Files <span className="tabular-nums text-ink-dim">{ordered.length}</span>
-        </Tab>
-        {planKey !== null && (
-          <Tab selected={planTab} onClick={() => showTab("plan")}>
-            Plan{" "}
-            {tracker && (
-              <span className="tabular-nums text-ink-dim">
-                {tracker.done}/{tracker.total}
-              </span>
-            )}
-          </Tab>
-        )}
-      </div>
+      <TabStrip
+        tabs={[
+          {
+            key: "files",
+            label: (
+              <>
+                Files <span className="tabular-nums text-ink-dim">{ordered.length}</span>
+              </>
+            ),
+          },
+          ...(planKey !== null
+            ? [
+                {
+                  key: "plan" as const,
+                  label: (
+                    <>
+                      Plan{" "}
+                      {tracker && (
+                        <span className="tabular-nums text-ink-dim">
+                          {tracker.done}/{tracker.total}
+                        </span>
+                      )}
+                    </>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+        value={planTab ? "plan" : "files"}
+        onChange={showTab}
+        className="bg-panel px-2.5"
+      />
       {review.isLoading ? (
         <div className="flex flex-1 items-center justify-center">
           <Spinner />

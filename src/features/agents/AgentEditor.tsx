@@ -4,9 +4,10 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   Badge,
   Button,
+  Callout,
   ContextMenu,
   ContextMenuItem,
-  Spinner,
+  TabStrip,
   TextInput,
   Toggle,
 } from "@/components/ui";
@@ -56,13 +57,14 @@ import {
   type EditorTab,
   type Overlay,
 } from "./agents";
-import { Callout, CardGroup, EditorCard, FolderCombo, RadioRow, Segmented } from "./parts";
+import { EditorSection, FormRow } from "@/components/editorForm";
 
-const COLUMN = "mx-auto w-full max-w-5xl";
+import { FolderCombo, RadioRow, Segmented } from "./parts";
 
-const HEADER_ICON_BASE = "grid h-7 w-7 shrink-0 place-items-center rounded-md";
-const HEADER_ICON = `${HEADER_ICON_BASE} text-ink-dim hover:text-ink disabled:opacity-50`;
-const HEADER_ICON_PRIMARY = `${HEADER_ICON_BASE} text-accent hover:text-accent/80 disabled:text-ink-dim/50`;
+const COLUMN = "mx-auto w-full max-w-6xl";
+
+const HEADER_ICON =
+  "grid h-7 w-7 shrink-0 place-items-center rounded-md text-ink-dim hover:text-ink disabled:opacity-50";
 
 const DESC_MIN_H = 3 * 20 + 16;
 const DESC_MAX_H = 10 * 20 + 16;
@@ -78,11 +80,6 @@ type Props = {
   tab: EditorTab;
   onTab: (tab: EditorTab) => void;
   onBack: () => void;
-  breadcrumb: {
-    folder: string;
-    onAgents: () => void;
-    onFolder: () => void;
-  };
   onSave: () => void;
   onStatus: (status: "draft" | "published") => void;
   onReset: () => void;
@@ -101,11 +98,11 @@ export function AgentEditor(props: Props) {
   const {
     draft,
     overlay,
+    isDefault,
     dirty,
     tab,
     onTab,
     onBack,
-    breadcrumb,
     onSave,
     onStatus,
     onReset,
@@ -120,16 +117,8 @@ export function AgentEditor(props: Props) {
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <Breadcrumb
-        folder={breadcrumb.folder}
-        agentName={draft.name}
-        sectionLabel={tabs.find((t) => t.key === tab)?.label ?? tab}
-        onAgents={breadcrumb.onAgents}
-        onFolder={breadcrumb.onFolder}
-        onAgent={() => onTab("setup")}
-      />
-      <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-8 pt-1.5`}>
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-5 pt-6`}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="truncate text-h3 text-ink">
@@ -141,6 +130,7 @@ export function AgentEditor(props: Props) {
                     ? "Edit System Agent"
                     : "Edit Agent"}
             </h1>
+            {isDefault && <Badge tone="accent">Default</Badge>}
             {system && <Badge tone="dim">System</Badge>}
             {managed && <Badge tone="dim">Read-only</Badge>}
             {isDraftStatus && (
@@ -149,20 +139,16 @@ export function AgentEditor(props: Props) {
               </span>
             )}
           </div>
-          <div className="mt-0.5 truncate text-meta text-ink-dim">
-            {`${draft.name || "untitled"} · ${modelLabel(draft.model, catalog)} · ${
-              isAllProjects(draft) ? "all projects" : (props.projectName ?? "this project")
-            }`}
+          <div className="mt-0.5 flex min-w-0 text-meta text-ink-dim">
+            <span className="truncate">
+              {`${draft.name || "untitled"} · ${modelLabel(draft.model, catalog)} · ${
+                isAllProjects(draft) ? "all projects" : (props.projectName ?? "this project")
+              }`}
+            </span>
+            {dirty && <span className="shrink-0 whitespace-pre"> · Unsaved</span>}
           </div>
         </div>
         <div className="flex-1" />
-        {dirty && (
-          <span
-            aria-label="Unsaved changes"
-            title="Unsaved changes"
-            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"
-          />
-        )}
         {!managed && (
           <button
             type="button"
@@ -177,20 +163,13 @@ export function AgentEditor(props: Props) {
             <Icon name="more" />
           </button>
         )}
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="Cancel"
-          title="Cancel"
-          className={HEADER_ICON}
-        >
-          <Icon name="close" />
-        </button>
+        {(dirty || isNew) && <Button onClick={onBack}>Cancel</Button>}
         {!managed && (
-          <button
-            type="button"
+          <Button
+            variant="primary"
             onClick={onSave}
-            disabled={!dirty || !draft.name.trim() || saving}
+            busy={saving}
+            disabled={!dirty || !draft.name.trim()}
             aria-label="Save"
             title={
               saving
@@ -201,11 +180,19 @@ export function AgentEditor(props: Props) {
                     ? "No changes to save"
                     : "Save"
             }
-            className={HEADER_ICON_PRIMARY}
           >
-            {saving ? <Spinner /> : <Icon name="check" />}
-          </button>
+            Save
+          </Button>
         )}
+      </div>
+
+      <div className="shrink-0 border-b border-edge">
+        <TabStrip
+          tabs={tabs}
+          value={tab}
+          onChange={onTab}
+          className={`${COLUMN} border-b-0 px-7`}
+        />
       </div>
 
       {menuAt && (
@@ -235,8 +222,8 @@ export function AgentEditor(props: Props) {
       )}
 
       <fieldset disabled={managed} className="contents">
-        <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-2">
-          <div className={`${COLUMN} flex min-h-full flex-col gap-3.5 px-7`}>
+        <div className="min-h-0 flex-1 overflow-y-auto pb-8 pt-5">
+          <div className={`${COLUMN} @container flex min-h-full flex-col gap-5 px-7`}>
             {tab === "setup" && <SetupTab {...props} />}
             {tab === "prompt" && <PromptTab {...props} />}
             {tab === "capabilities" && <CapabilitiesTab {...props} />}
@@ -248,64 +235,6 @@ export function AgentEditor(props: Props) {
         </div>
       </fieldset>
     </div>
-  );
-}
-
-function Breadcrumb({
-  folder,
-  agentName,
-  sectionLabel,
-  onAgents,
-  onFolder,
-  onAgent,
-}: {
-  folder: string;
-  agentName: string;
-  sectionLabel: string;
-  onAgents: () => void;
-  onFolder: () => void;
-  onAgent: () => void;
-}) {
-  const sep = (
-    <span aria-hidden="true" className="shrink-0 text-ink-dim">
-      <Icon name="chevronRight" size="xs" />
-    </span>
-  );
-  return (
-    <nav
-      aria-label="Breadcrumb"
-      className={`${COLUMN} flex min-w-0 items-center gap-1.5 px-7 pt-4 text-ui`}
-    >
-      <button
-        type="button"
-        onClick={onAgents}
-        className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
-      >
-        Agents
-      </button>
-      {folder && (
-        <>
-          {sep}
-          <button
-            type="button"
-            onClick={onFolder}
-            className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
-          >
-            {folder}
-          </button>
-        </>
-      )}
-      {sep}
-      <button
-        type="button"
-        onClick={onAgent}
-        className="max-w-[200px] shrink truncate font-medium text-ink hover:text-ink"
-      >
-        {agentName || "untitled"}
-      </button>
-      {sep}
-      <span className="shrink truncate text-ink-dim">{sectionLabel}</span>
-    </nav>
   );
 }
 
@@ -347,30 +276,28 @@ function SetupTab({
         </Callout>
       ) : null}
 
-      <EditorCard className="flex flex-col gap-4">
-        <Labeled label="Name">
+      <EditorSection title="Identity">
+        <FormRow label="Name">
           <TextInput
             value={draft.name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder="e.g. Plan Reviewer"
           />
-        </Labeled>
-        <Labeled label="Description">
+        </FormRow>
+        <FormRow label="Description" hint="Claude reads this to decide when to use the agent.">
           <textarea
             ref={descRef}
             value={draft.description}
             onChange={(e) => patch({ description: e.target.value })}
-            placeholder="When should this agent be used? Claude reads this to decide."
+            placeholder="When should this agent be used?"
             className="selectable w-full resize-none rounded-md border border-edge bg-panel-2 px-2.5 py-2 text-body text-ink placeholder:text-ink-dim/70 focus:border-ink-dim/70 focus:outline-none"
           />
-        </Labeled>
+        </FormRow>
+      </EditorSection>
 
-        <div>
-          <div className="mb-2 flex items-baseline gap-2">
-            <span className="text-ui font-medium text-ink-dim">Model</span>
-            <span className="text-ui-sm text-ink-dim opacity-70">Fixed when a session spawns</span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-6">
+      <EditorSection title="Runtime">
+        <FormRow label="Model" hint="Fixed when a session spawns.">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
             <RadioRow
               name="agent-model"
               checked={!draft.model || draft.model === INHERIT_MODEL}
@@ -389,69 +316,52 @@ function SetupTab({
               />
             ))}
           </div>
-        </div>
+        </FormRow>
+        <FormRow label="Reasoning effort">
+          <Segmented
+            size="sm"
+            aria-label="Reasoning effort"
+            value={overlay.effort}
+            onChange={(effort) => patchOverlay({ effort })}
+            options={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
+          />
+        </FormRow>
+        <FormRow label="Harness">
+          <Segmented
+            size="sm"
+            aria-label="Harness"
+            value={overlay.harness}
+            onChange={(harness) => patchOverlay({ harness })}
+            options={HARNESSES.map((h) => ({ key: h.key as string, label: h.label }))}
+          />
+        </FormRow>
+        <FormRow
+          label="Persistent memory"
+          hint={
+            hasUnknownMemoryScope(draft.memory) ? (
+              <span className="text-warn-ink">
+                This file sets <code>memory: {draft.memory}</code>, a scope this editor doesn&apos;t
+                know. It is left untouched unless you pick one above.
+              </span>
+            ) : (
+              (MEMORY_SCOPES.find((s) => s.key === draft.memory)?.hint ??
+              "Starts fresh every invocation")
+            )
+          }
+        >
+          <Segmented
+            size="sm"
+            aria-label="Persistent memory"
+            value={draft.memory ?? "off"}
+            onChange={(key) => patch({ memory: key === "off" ? null : key })}
+            options={[{ key: "off", label: "Off" }, ...MEMORY_SCOPES.map((s) => ({ key: s.key, label: s.label }))]}
+          />
+        </FormRow>
+      </EditorSection>
 
-        <div>
-          <div className="mb-2 flex items-baseline gap-2">
-            <span className="text-ui font-medium text-ink-dim">Persistent memory</span>
-            <span className="text-ui-sm text-ink-dim opacity-70">
-              What this agent still knows next time it runs
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-6">
-            <RadioRow
-              name="agent-memory"
-              checked={!draft.memory}
-              onSelect={() => patch({ memory: null })}
-              label="Off"
-              hint="Starts fresh every invocation"
-            />
-            {MEMORY_SCOPES.map((s) => (
-              <RadioRow
-                key={s.key}
-                name="agent-memory"
-                checked={draft.memory === s.key}
-                onSelect={() => patch({ memory: s.key })}
-                label={s.label}
-                hint={s.hint}
-              />
-            ))}
-          </div>
-          {hasUnknownMemoryScope(draft.memory) && (
-            <p className="mt-1.5 text-ui-sm text-warn-ink">
-              This file sets <code>memory: {draft.memory}</code>, a scope this editor doesn&apos;t
-              know. It is left untouched unless you pick one above.
-            </p>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-8">
-          <div>
-            <div className="mb-1.5 text-ui font-medium text-ink-dim">Reasoning effort</div>
-            <Segmented
-              size="sm"
-              aria-label="Reasoning effort"
-              value={overlay.effort}
-              onChange={(effort) => patchOverlay({ effort })}
-              options={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
-            />
-          </div>
-          <div>
-            <div className="mb-1.5 text-ui font-medium text-ink-dim">Harness</div>
-            <Segmented
-              size="sm"
-              aria-label="Harness"
-              value={overlay.harness}
-              onChange={(harness) => patchOverlay({ harness })}
-              options={HARNESSES.map((h) => ({ key: h.key as string, label: h.label }))}
-            />
-          </div>
-        </div>
-      </EditorCard>
-
-      <EditorCard bare>
-        <Row
-          title="Available in all projects"
+      <EditorSection title="Where it appears">
+        <FormRow
+          label="All projects"
           hint={
             projectName ? (
               <>
@@ -462,51 +372,47 @@ function SetupTab({
               "Open a project to scope an agent to one repo."
             )
           }
-          control={
-            <Toggle
-              checked={isAllProjects(draft)}
-              disabled={!projectName}
-              onChange={(next) => patch({ source: next ? "user" : "project" })}
-              aria-label="Available in all projects"
-            />
-          }
-        />
-        <Row
-          title="Default agent for new sessions"
+        >
+          <Toggle
+            checked={isAllProjects(draft)}
+            disabled={!projectName}
+            onChange={(next) => patch({ source: next ? "user" : "project" })}
+            aria-label="Available in all projects"
+          />
+        </FormRow>
+        <FormRow
+          label="Default agent"
           hint="The composer opens on this agent unless a stage picks another."
-          control={
-            <Toggle checked={isDefault} onChange={onDefault} aria-label="Default agent" />
-          }
-        />
-        <Row
-          last
-          title="Folder"
+        >
+          <Toggle checked={isDefault} onChange={onDefault} aria-label="Default agent" />
+        </FormRow>
+        <FormRow
+          label="Folder"
           hint={
             isSystem(draft)
               ? "Groups this agent in the list only. The shipped file is untouched."
               : "Groups this agent in the list, and travels with the file wherever it goes."
           }
-          control={
-            <div className="w-55">
-              <FolderCombo
-                id="agent-folder"
-                value={isSystem(draft) ? overlay.folder : (draft.category ?? overlay.folder)}
-                onChange={(folder) => {
-                  if (isSystem(draft)) {
-                    patchOverlay({ folder });
-                    return;
-                  }
-                  patch({ category: folder.trim() || null });
-                  if (overlay.folder) patchOverlay({ folder: "" });
-                }}
-                folders={folders}
-                placeholder="No folder"
-                aria-label="Folder"
-              />
-            </div>
-          }
-        />
-      </EditorCard>
+        >
+          <div className="w-55">
+            <FolderCombo
+              id="agent-folder"
+              value={isSystem(draft) ? overlay.folder : (draft.category ?? overlay.folder)}
+              onChange={(folder) => {
+                if (isSystem(draft)) {
+                  patchOverlay({ folder });
+                  return;
+                }
+                patch({ category: folder.trim() || null });
+                if (overlay.folder) patchOverlay({ folder: "" });
+              }}
+              folders={folders}
+              placeholder="No folder"
+              aria-label="Folder"
+            />
+          </div>
+        </FormRow>
+      </EditorSection>
     </>
   );
 }
@@ -514,7 +420,7 @@ function SetupTab({
 function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props) {
   return (
     <>
-      <EditorCard
+      <EditorSection
         title="System prompt"
         description="Prepended to every session this agent starts, after the harness's own system prompt."
         action={
@@ -526,7 +432,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
           value={draft.prompt}
           spellCheck={false}
           onChange={(e) => patch({ prompt: e.target.value })}
-          className="selectable min-h-75 w-full flex-1 resize-y rounded-lg border border-edge bg-panel-2 p-3.5 text-meta leading-prose text-ink focus:border-ink-dim/70 focus:outline-none"
+          className="selectable min-h-75 w-full flex-1 resize-none rounded-lg border border-edge bg-panel-2 p-3.5 text-meta leading-prose text-ink focus:border-ink-dim/70 focus:outline-none"
         />
         <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
           <span className="text-ui-sm text-ink-dim">Insert variable</span>
@@ -547,9 +453,9 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
             </button>
           ))}
         </div>
-      </EditorCard>
+      </EditorSection>
 
-      <EditorCard
+      <EditorSection
         title="Appended context"
         description="Docs and rules stitched onto the prompt at launch, in this order."
       >
@@ -589,7 +495,7 @@ function PromptTab({ draft, overlay, patch, patchOverlay, contextFiles }: Props)
             })}
           </div>
         )}
-      </EditorCard>
+      </EditorSection>
     </>
   );
 }
@@ -599,248 +505,239 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
   const extraSkillNames = extraSkills(draft.skills, skills);
   return (
     <div className="flex flex-col gap-6">
-      <CardGroup label="Tools">
-        <EditorCard
-          title="Built-in tools"
-          description={toolSummary(draft)}
-          action={
-            <>
-              <MiniButton onClick={() => patch({ tools: [] })}>Enable all</MiniButton>
-              <MiniButton onClick={() => patch({ tools: readOnlyTools(draft) })}>
-                Read-only preset
-              </MiniButton>
-            </>
-          }
-        >
-          <div className="grid grid-cols-2 gap-x-5">
-            {AGENT_TOOLS.map((t) => {
-              const on = toolEnabled(draft, t.key);
+      <EditorSection
+        title="Built-in tools"
+        description={toolSummary(draft)}
+        action={
+          <>
+            <MiniButton onClick={() => patch({ tools: [] })}>Enable all</MiniButton>
+            <MiniButton onClick={() => patch({ tools: readOnlyTools(draft) })}>
+              Read-only preset
+            </MiniButton>
+          </>
+        }
+      >
+        <div className="grid grid-cols-2 gap-x-5">
+          {AGENT_TOOLS.map((t) => {
+            const on = toolEnabled(draft, t.key);
+            return (
+              <div
+                key={t.key}
+                className="flex items-center gap-3 border-b border-edge/45 py-2.5"
+              >
+                <span className={`grid shrink-0 ${on ? "text-accent" : "text-ink-dim/55"}`}>
+                  <Icon name="tool" size="sm" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-meta text-ink">{t.key}</div>
+                  <div className="truncate text-ui-sm text-ink-dim">{t.desc}</div>
+                </div>
+                <Toggle
+                  checked={on}
+                  aria-label={t.key}
+                  onChange={(next) => patch({ tools: setTool(draft, t.key, next) })}
+                />
+              </div>
+            );
+          })}
+        </div>
+        {extras.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-ui-sm text-ink-dim">Also in the file</span>
+            {extras.map((t) => (
+              <span
+                key={t}
+                className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+      </EditorSection>
+
+      <EditorSection
+        title="MCP servers"
+        description="Servers Claude Code is configured with. Turn one on to expose its tools to this agent."
+      >
+        {mcpServers.length === 0 ? (
+          <p className="text-ui text-ink-dim">
+            No MCP servers in <span className="font-mono">~/.claude.json</span> or this project&apos;s{" "}
+            <span className="font-mono">.mcp.json</span>.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {mcpServers.map((s) => {
+              const on = mcpEnabled(draft, s.name);
+              const chips = mcpTools(draft, s.name);
+              return (
+                <div key={s.name} className="rounded-lg border border-edge bg-panel-2 p-3">
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      aria-hidden="true"
+                      className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
+                    />
+                    <span className="text-meta text-ink">{s.name}</span>
+                    <span className="text-ui-sm text-ink-dim">
+                      {s.transport} · {s.scope}
+                    </span>
+                    <div className="flex-1" />
+                    <Toggle
+                      checked={on}
+                      aria-label={s.name}
+                      onChange={(next) => patch({ tools: setMcp(draft, s.name, next) })}
+                    />
+                  </div>
+                  {chips.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {chips.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-meta text-ink"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </EditorSection>
+
+      <EditorSection
+        title="Skills"
+        description={`Preloaded into this agent when it runs · ${skillSummary(draft, skills)}`}
+      >
+        {skills.length === 0 ? (
+          <p className="text-ui text-ink-dim">
+            No skills found in <span className="font-mono">.claude/skills</span> or{" "}
+            <span className="font-mono">~/.claude/skills</span>.
+          </p>
+        ) : (
+          <div className="flex flex-col">
+            {skills.map((s, i) => {
+              const on = skillEnabled(draft, s.name);
               return (
                 <div
-                  key={t.key}
-                  className="flex items-center gap-3 border-b border-edge/45 py-2.5"
+                  key={s.name}
+                  className={`flex items-center gap-3 py-2.5 ${
+                    i === skills.length - 1 ? "" : "border-b border-edge/45"
+                  }`}
                 >
-                  <span className={`grid shrink-0 ${on ? "text-accent" : "text-ink-dim/55"}`}>
-                    <Icon name="tool" size="sm" />
-                  </span>
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
+                  />
                   <div className="min-w-0 flex-1">
-                    <div className="text-meta text-ink">{t.key}</div>
-                    <div className="truncate text-ui-sm text-ink-dim">{t.desc}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-ui text-ink">{s.name}</span>
+                      {s.userOnly && (
+                        <span title="Reserved for direct user invocation, but still preloaded into this agent">
+                          <Badge tone="dim">user-only</Badge>
+                        </span>
+                      )}
+                    </div>
+                    <div className="truncate text-ui-sm text-ink-dim">
+                      {shortDescription(s.description)}
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right text-ui-sm text-ink-dim">
+                    <div>{s.source}</div>
+                    <div className="font-mono">~{(s.chars / 3.8 / 1000).toFixed(1)}k tokens</div>
                   </div>
                   <Toggle
                     checked={on}
-                    aria-label={t.key}
-                    onChange={(next) => patch({ tools: setTool(draft, t.key, next) })}
+                    aria-label={s.name}
+                    onChange={(next) => {
+                      const { skills: nextSkills, tools } = setSkill(draft, s.name, next);
+                      patch({ skills: nextSkills, tools });
+                      patchOverlay({
+                        rules: syncSkillRules(overlay.rules, nextSkills, skillsRestricted(overlay.rules)),
+                      });
+                    }}
                   />
                 </div>
               );
             })}
           </div>
-          {extras.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-ui-sm text-ink-dim">Also in the file</span>
-              {extras.map((t) => (
-                <span
-                  key={t}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
-                >
-                  {t}
-                </span>
-              ))}
-            </div>
-          )}
-        </EditorCard>
-
-        <EditorCard
-          title="MCP servers"
-          description="Servers Claude Code is configured with. Turn one on to expose its tools to this agent."
-        >
-          {mcpServers.length === 0 ? (
-            <p className="text-ui text-ink-dim">
-              No MCP servers in <span className="font-mono">~/.claude.json</span> or this project&apos;s{" "}
-              <span className="font-mono">.mcp.json</span>.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2.5">
-              {mcpServers.map((s) => {
-                const on = mcpEnabled(draft, s.name);
-                const chips = mcpTools(draft, s.name);
-                return (
-                  <div key={s.name} className="rounded-lg border border-edge bg-panel-2 p-3">
-                    <div className="flex items-center gap-2.5">
-                      <span
-                        aria-hidden="true"
-                        className={`h-[7px] w-[7px] rounded-full ${on ? "bg-ok" : "bg-ink-dim/55"}`}
-                      />
-                      <span className="text-meta text-ink">{s.name}</span>
-                      <span className="text-ui-sm text-ink-dim">
-                        {s.transport} · {s.scope}
-                      </span>
-                      <div className="flex-1" />
-                      <Toggle
-                        checked={on}
-                        aria-label={s.name}
-                        onChange={(next) => patch({ tools: setMcp(draft, s.name, next) })}
-                      />
-                    </div>
-                    {chips.length > 0 && (
-                      <div className="mt-2.5 flex flex-wrap gap-1.5">
-                        {chips.map((t) => (
-                          <span
-                            key={t}
-                            className="rounded-md border border-edge bg-panel px-1.5 py-0.5 text-meta text-ink"
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </EditorCard>
-      </CardGroup>
-
-      <CardGroup label="Knowledge">
-        <EditorCard
-          title="Skills"
-          description="Preloaded into this agent when it runs."
-          action={
-            <>
-              <span className="text-meta text-ink-dim">{skillSummary(draft, skills)}</span>
-              <Toggle
-                className="text-ui-sm text-ink-dim"
-                checked={skillsRestricted(overlay.rules)}
-                onChange={(next) =>
-                  patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
-                }
+        )}
+        {extraSkillNames.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-ui-sm text-ink-dim">Also in the file</span>
+            {extraSkillNames.map((name) => (
+              <span
+                key={name}
+                className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
               >
-                Only these skills
-              </Toggle>
-            </>
-          }
-        >
-          {skills.length === 0 ? (
-            <p className="text-ui text-ink-dim">
-              No skills found in <span className="font-mono">.claude/skills</span> or{" "}
-              <span className="font-mono">~/.claude/skills</span>.
-            </p>
-          ) : (
-            <div className="flex flex-col">
-              {skills.map((s, i) => {
-                const on = skillEnabled(draft, s.name);
-                return (
-                  <div
-                    key={s.name}
-                    className={`flex items-center gap-3 py-2.5 ${
-                      i === skills.length - 1 ? "" : "border-b border-edge/45"
-                    }`}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-ui text-ink">{s.name}</span>
-                        {s.userOnly && (
-                          <span title="Reserved for direct user invocation, but still preloaded into this agent">
-                            <Badge tone="dim">user-only</Badge>
-                          </span>
-                        )}
-                      </div>
-                      <div className="truncate text-ui-sm text-ink-dim">
-                        {shortDescription(s.description)}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-right text-ui-sm text-ink-dim">
-                      <div>{s.source}</div>
-                      <div className="font-mono">~{(s.chars / 3.8 / 1000).toFixed(1)}k tokens</div>
-                    </div>
-                    <Toggle
-                      checked={on}
-                      aria-label={s.name}
-                      onChange={(next) => {
-                        const { skills: nextSkills, tools } = setSkill(draft, s.name, next);
-                        patch({ skills: nextSkills, tools });
-                        patchOverlay({
-                          rules: syncSkillRules(overlay.rules, nextSkills, skillsRestricted(overlay.rules)),
-                        });
-                      }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {extraSkillNames.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-ui-sm text-ink-dim">Also in the file</span>
-              {extraSkillNames.map((name) => (
-                <span
-                  key={name}
-                  className="rounded-md border border-edge bg-panel-2 px-2 py-0.5 text-meta text-ink-dim"
-                >
-                  {name}
-                </span>
-              ))}
-            </div>
-          )}
-        </EditorCard>
-      </CardGroup>
+                {name}
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 border-t border-edge/60 pt-3">
+          <Toggle
+            className="text-ui text-ink-dim"
+            checked={skillsRestricted(overlay.rules)}
+            onChange={(next) =>
+              patchOverlay({ rules: syncSkillRules(overlay.rules, draft.skills, next) })
+            }
+          >
+            Only allow these skills
+          </Toggle>
+        </div>
+      </EditorSection>
 
-      <CardGroup label="Delegation">
-        <EditorCard
-          title="Can delegate to"
-          description={
-            <>
-              Agents this one may spawn with the <span className="font-mono">Task</span> tool.
-            </>
-          }
-        >
-          {peers.length === 0 ? (
-            <p className="text-ui text-ink-dim">No other agents to delegate to yet.</p>
-          ) : (
-            <div className="flex flex-col">
-              {peers.map((p, i) => {
-                const on = overlay.delegates.includes(p.path);
-                return (
-                  <div
-                    key={p.path}
-                    className={`flex items-center gap-3 py-2.5 ${
-                      i === peers.length - 1 ? "" : "border-b border-edge/45"
-                    }`}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-ui text-ink">{p.name}</div>
-                      <div className="truncate text-ui-sm text-ink-dim">
-                        {shortDescription(p.description)}
-                      </div>
+      <EditorSection
+        title="Can delegate to"
+        description={
+          <>
+            Agents this one may spawn with the <span className="font-mono">Task</span> tool.
+          </>
+        }
+      >
+        {peers.length === 0 ? (
+          <p className="text-ui text-ink-dim">No other agents to delegate to yet.</p>
+        ) : (
+          <div className="flex flex-col">
+            {peers.map((p, i) => {
+              const on = overlay.delegates.includes(p.path);
+              return (
+                <div
+                  key={p.path}
+                  className={`flex items-center gap-3 py-2.5 ${
+                    i === peers.length - 1 ? "" : "border-b border-edge/45"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? "bg-accent" : "bg-ink-dim/55"}`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-ui text-ink">{p.name}</div>
+                    <div className="truncate text-ui-sm text-ink-dim">
+                      {shortDescription(p.description)}
                     </div>
-                    <Toggle
-                      checked={on}
-                      aria-label={p.name}
-                      onChange={(next) =>
-                        patchOverlay({
-                          delegates: next
-                            ? [...overlay.delegates, p.path]
-                            : overlay.delegates.filter((d) => d !== p.path),
-                        })
-                      }
-                    />
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </EditorCard>
-      </CardGroup>
+                  <Toggle
+                    checked={on}
+                    aria-label={p.name}
+                    onChange={(next) =>
+                      patchOverlay({
+                        delegates: next
+                          ? [...overlay.delegates, p.path]
+                          : overlay.delegates.filter((d) => d !== p.path),
+                      })
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </EditorSection>
     </div>
   );
 }
@@ -857,11 +754,11 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
 
   return (
     <>
-      <EditorCard
+      <EditorSection
         title="Permission mode"
         description="The posture a session starts in. Rules below still take precedence."
       >
-        <div className="flex flex-col gap-0.5">
+        <div className="grid gap-0.5 @[560px]:grid-cols-2 @[560px]:gap-x-2.5">
           {PERMISSION_MODES.map((p) => (
             <RadioRow
               key={p.key}
@@ -882,9 +779,9 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
             </Callout>
           </div>
         )}
-      </EditorCard>
+      </EditorSection>
 
-      <EditorCard
+      <EditorSection
         title="Rules"
         description={
           <>
@@ -948,33 +845,27 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
             ))}
           </div>
         )}
-      </EditorCard>
+      </EditorSection>
 
-      <EditorCard bare>
-        <Row
-          title="Network access"
-          hint="Allow WebFetch and MCP calls to leave the machine."
-          control={
-            <Toggle
-              checked={overlay.network}
-              onChange={(network) => patchOverlay({ network })}
-              aria-label="Network access"
-            />
-          }
-        />
-        <Row
-          last
-          title="Reach outside the worktree"
+      <EditorSection title="Reach">
+        <FormRow label="Network access" hint="Allow WebFetch and MCP calls to leave the machine.">
+          <Toggle
+            checked={overlay.network}
+            onChange={(network) => patchOverlay({ network })}
+            aria-label="Network access"
+          />
+        </FormRow>
+        <FormRow
+          label="Outside the worktree"
           hint="Off confines every read and write to this workstream's worktree."
-          control={
-            <Toggle
-              checked={overlay.outsideWorktree}
-              onChange={(outsideWorktree) => patchOverlay({ outsideWorktree })}
-              aria-label="Reach outside the worktree"
-            />
-          }
-        />
-      </EditorCard>
+        >
+          <Toggle
+            checked={overlay.outsideWorktree}
+            onChange={(outsideWorktree) => patchOverlay({ outsideWorktree })}
+            aria-label="Reach outside the worktree"
+          />
+        </FormRow>
+      </EditorSection>
     </>
   );
 }
@@ -991,7 +882,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
   const [invite, setInvite] = useState("");
   return (
     <>
-      <EditorCard
+      <EditorSection
         title="Visibility"
         description="Team agents sync through the shared config repo; private ones stay on this machine."
       >
@@ -1005,9 +896,9 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
             { key: "team", label: "Team" },
           ]}
         />
-      </EditorCard>
+      </EditorSection>
 
-      <EditorCard title="People">
+      <EditorSection title="People">
         <div className="flex flex-col gap-1.5">
           {overlay.collaborators.map((c, i) => (
             <div
@@ -1063,9 +954,9 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
             Invite
           </Button>
         </div>
-      </EditorCard>
+      </EditorSection>
 
-      <EditorCard
+      <EditorSection
         title="Share outside the team"
         description={
           <>
@@ -1084,38 +975,6 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
   );
 }
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1.5 text-ui font-medium text-ink-dim">{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function Row({
-  title,
-  hint,
-  control,
-  last,
-}: {
-  title: ReactNode;
-  hint: ReactNode;
-  control: ReactNode;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-start justify-between gap-4 py-3.5 ${last ? "" : "border-b border-edge/60"}`}
-    >
-      <div className="min-w-0">
-        <div className="text-body text-ink">{title}</div>
-        <p className="mt-0.5 text-ui text-ink-dim">{hint}</p>
-      </div>
-      <div className="shrink-0 pt-0.5">{control}</div>
-    </div>
-  );
-}
 
 function MiniButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (

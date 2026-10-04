@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentUpdateFailed, AgentUpdateReport } from "./AgentBundleDialogs";
-import type { BundleFailure, BundleReport } from "./agents";
+import type { BundleFailure, BundleReport } from "@/features/agents/agents";
 
 const b = vi.hoisted(() => ({ navigate: vi.fn() }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => b.navigate }));

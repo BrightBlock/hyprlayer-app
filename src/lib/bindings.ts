@@ -232,6 +232,8 @@ export const commands = {
 	agentContextFiles: (projectPath: string | null) => typedError<AgentContextFile[], AppError>(__TAURI_INVOKE("agent_context_files", { projectPath })),
 	agentMcpServers: (projectPath: string | null) => typedError<AgentMcpServer[], AppError>(__TAURI_INVOKE("agent_mcp_servers", { projectPath })),
 	agentSkills: (projectPath: string | null) => typedError<AgentSkill[], AppError>(__TAURI_INVOKE("agent_skills", { projectPath })),
+	listSkillFiles: (projectPath: string | null) => typedError<SkillFile[], AppError>(__TAURI_INVOKE("list_skill_files", { projectPath })),
+	readSkillFile: (projectPath: string | null, path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_skill_file", { projectPath, path })),
 	agentHarnessCounts: () => typedError<HarnessCounts[], AppError>(__TAURI_INVOKE("agent_harness_counts")),
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
@@ -1568,6 +1570,34 @@ export type SetReviewFileViewedRequest = {
 	path: string,
 	contentOid: string,
 	viewed: boolean,
+};
+
+export type SkillAsset = {
+	relPath: string,
+	bytes: number | null,
+};
+
+export type SkillField = {
+	key: string,
+	value: string,
+};
+
+export type SkillFile = {
+	path: string,
+	dir: string,
+	source: string,
+	plugin: string | null,
+	rank: number,
+	managed: boolean,
+	name: string,
+	slashName: string,
+	agentRef: string,
+	description: string,
+	userOnly: boolean,
+	chars: number,
+	bytes: number | null,
+	frontmatter: SkillField[],
+	assets: SkillAsset[],
 };
 
 export type SlashCommand = {

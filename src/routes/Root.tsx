@@ -185,8 +185,7 @@ function routeProjectPath(pathname: string): string | null {
 function routeSection(pathname: string): string {
   if (pathname.startsWith("/projects/")) return "Agent";
   if (pathname.startsWith("/library")) return "Library";
-  if (pathname.startsWith("/prompts")) return "Prompt Library";
-  if (pathname.startsWith("/agents")) return "Agents";
+  if (pathname.startsWith("/workshop")) return "Workshop";
   if (pathname.startsWith("/pipeline")) return "Pipeline";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/onboarding")) return "Setup";
@@ -420,19 +419,23 @@ export function Root() {
     : null;
   const currentSection = routeSection(pathname);
   const onLibrary = pathname.startsWith("/library");
-  const onPrompts = pathname.startsWith("/prompts");
   const onSettings = pathname.startsWith("/settings");
-  const onAgents = pathname.startsWith("/agents");
+  const onWorkshop = pathname.startsWith("/workshop");
   const onOnboarding = pathname.startsWith("/onboarding");
   const onPipeline = pathname.startsWith("/pipeline");
-  const projectDrawerRoutable = !onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline;
+  const projectDrawerRoutable = !onLibrary && !onSettings && !onWorkshop && !onPipeline;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
     const open = useUiStore.getState().narrowDrawer;
     if (!open) return;
-    const routable = open === "project" ? projectDrawerRoutable : diffDrawerRoutable;
+    const routable =
+      open === "project"
+        ? projectDrawerRoutable
+        : open === "workshop"
+          ? onWorkshop
+          : diffDrawerRoutable;
     if (!routable) setNarrowDrawer(null);
-  }, [projectDrawerRoutable, diffDrawerRoutable, setNarrowDrawer]);
+  }, [projectDrawerRoutable, diffDrawerRoutable, onWorkshop, setNarrowDrawer]);
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
   const libDocTitle = libDoc.data ? docTitle(libDoc.data.meta) : undefined;
   const libDocUrl = useDocWebUrl(onLibrary ? (locationSearch.doc ?? "") : "");
@@ -535,9 +538,7 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (
-    target: "/library" | "/prompts" | "/agents" | "/pipeline",
-  ) => {
+  const toggleNav = (target: "/library" | "/workshop" | "/pipeline") => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
@@ -666,8 +667,8 @@ export function Root() {
   };
   const libraryCollapsed = useUiStore((state) => state.libraryCollapsed);
   const toggleLibrary = useUiStore((state) => state.toggleLibrary);
-  const agentsCollapsed = useUiStore((state) => state.agentsCollapsed);
-  const toggleAgents = useUiStore((state) => state.toggleAgents);
+  const workshopNavCollapsed = useUiStore((state) => state.workshopNavCollapsed);
+  const toggleWorkshopNav = useUiStore((state) => state.toggleWorkshopNav);
   const docRailOpen = useUiStore((state) => state.docRailOpen);
   const toggleDocRail = useUiStore((state) => state.toggleDocRail);
 
@@ -679,15 +680,20 @@ export function Root() {
       : projectSidebarWidth(sidebarWidth, width);
   const sidebarShown = onLibrary
     ? !libraryCollapsed
-    : onAgents
-      ? !agentsCollapsed
-      : onPrompts || onSettings || onPipeline
+    : onWorkshop
+      ? compact || narrow
+        ? narrowDrawer === "workshop"
+        : !workshopNavCollapsed
+      : onSettings || onPipeline
         ? true
         : projectSidebarShown;
   const toggleSidebar = () => {
-    if (onPrompts || onSettings || onPipeline) return;
+    if (onSettings || onPipeline) return;
     if (onLibrary) toggleLibrary();
-    else if (onAgents) toggleAgents();
+    else if (onWorkshop) {
+      if (narrow) setNarrowDrawer(narrowDrawer === "workshop" ? null : "workshop");
+      else toggleWorkshopNav();
+    }
     else if (compact) setNarrowDrawer(narrowDrawer === "project" ? null : "project");
     else toggleProjectSidebar();
   };
@@ -697,8 +703,7 @@ export function Root() {
   const leftClusterLeft = macTrafficLights
     ? TITLEBAR_INSET_LIGHTS
     : TITLEBAR_INSET;
-  const leftClusterIcons =
-    (IS_MACOS ? 0 : 1) + 1 + (currentProject && isGitProject(currentProject) ? 1 : 0);
+  const leftClusterIcons = (IS_MACOS ? 0 : 1) + 1;
   const leftClusterRight =
     leftClusterLeft +
     leftClusterIcons * LEFT_CLUSTER_ICON +
@@ -880,17 +885,6 @@ export function Root() {
           >
             <Icon name="panelLeft" />
           </button>
-          {currentProject && isGitProject(currentProject) && (
-            <button
-              type="button"
-              onClick={() => openProjectDocs(currentProject)}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
-              title="Project docs"
-              aria-label="Project docs"
-            >
-              <Icon name="library" />
-            </button>
-          )}
         </div>
 
         <div
@@ -1127,21 +1121,12 @@ export function Root() {
             </button>
             <button
               type="button"
-              onClick={() => toggleNav("/prompts")}
-              className={railNavClass(pathname.startsWith("/prompts"))}
-              title="Prompt library"
-              aria-label="Prompt library"
+              onClick={() => toggleNav("/workshop")}
+              className={railNavClass(pathname.startsWith("/workshop"))}
+              title="Workshop"
+              aria-label="Workshop"
             >
-              <Icon name="prompt" size="rail" />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleNav("/agents")}
-              className={railNavClass(pathname.startsWith("/agents"))}
-              title="Agents"
-              aria-label="Agents"
-            >
-              <Icon name="agents" size="rail" />
+              <Icon name="workshop" size="rail" />
             </button>
           </div>
         </nav>
@@ -1153,7 +1138,7 @@ export function Root() {
             onClick={() => setNarrowDrawer(null)}
           />
         )}
-        {!onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline && (
+        {!onLibrary && !onSettings && !onWorkshop && !onPipeline && (
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
               compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
@@ -1494,7 +1479,7 @@ export function Root() {
           </aside>
         )}
 
-        {!collapsed && !narrow && !onLibrary && !onPrompts && !onSettings && !onAgents && !onPipeline && (
+        {!collapsed && !narrow && !onLibrary && !onSettings && !onWorkshop && !onPipeline && (
           <div
             role="separator"
             aria-orientation="vertical"

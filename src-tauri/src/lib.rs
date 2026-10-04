@@ -211,6 +211,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::agent_context_files,
             commands::agents::agent_mcp_servers,
             commands::agents::agent_skills,
+            commands::agents::list_skill_files,
+            commands::agents::read_skill_file,
             commands::agents::agent_harness_counts,
             commands::agents::export_agent_file,
             commands::agents::agent_bundle_status,

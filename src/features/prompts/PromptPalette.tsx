@@ -123,7 +123,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         chord: null,
         icon: <Icon name="edit" size="sm" className="text-ink-dim" />,
         disabled: null,
-        run: () => void navigate({ to: "/prompts" }),
+        run: () => void navigate({ to: "/workshop", search: { section: "prompts" } }),
       });
     }
     return out;

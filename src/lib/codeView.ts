@@ -101,18 +101,19 @@ const linkRule = { tag: [t.link, t.url], color: "var(--color-brand)", textDecora
 
 const highlightStyle = HighlightStyle.define([...CODE_TOKEN_STYLES, headingRule, linkRule]);
 
-export const codeBase: Extension[] = [
-  lineNumbers(),
-  themeChrome,
-  syntaxHighlighting(highlightStyle),
-];
+const codeChrome: Extension[] = [themeChrome, syntaxHighlighting(highlightStyle)];
 
-export function readOnlyExtensions(lang: Extension | null): Extension[] {
+export const codeBase: Extension[] = [lineNumbers(), ...codeChrome];
+
+export function readOnlyExtensions(
+  lang: Extension | null,
+  { gutter = true }: { gutter?: boolean } = {},
+): Extension[] {
   return [
     EditorView.editable.of(false),
     EditorState.readOnly.of(true),
     EditorView.lineWrapping,
-    ...codeBase,
+    ...(gutter ? codeBase : codeChrome),
     ...(lang ? [lang] : []),
   ];
 }

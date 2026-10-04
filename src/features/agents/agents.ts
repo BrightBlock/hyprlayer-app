@@ -9,7 +9,7 @@ import type {
   AgentSkill,
 } from "@/lib/bindings";
 import { MODELS, type ModelOption } from "@/lib/domain/models";
-import { shortSha } from "@/lib/format";
+import { plural, shortSha } from "@/lib/format";
 import { treeIndent } from "@/lib/layout";
 import {
   AGENT_PHASE,
@@ -57,7 +57,7 @@ export function hasUnknownMemoryScope(memory: string | null): boolean {
 
 export type AgentTab = "yours" | "system";
 export type AgentScope = "global" | "project";
-export type AgentSection = "agents" | "system" | "skills";
+export type AgentSection = "agents" | "system";
 
 export type EditorTab = "setup" | "prompt" | "capabilities" | "permissions" | "collaborators";
 
@@ -288,14 +288,32 @@ export function folderResolver(
   return (agent) => folderOf(agent, overlayFor(library, agent.path), groupUncategorized);
 }
 
+// System agents file under SDLC phases like yours; the plugin name moves to the row meta.
+export function systemFolderOf(agent: AgentFile, library: AgentLibrarySettings | undefined): string {
+  return overlayFor(library, agent.path).folder || phaseFolder(agent);
+}
+
+export function systemFolderResolver(library: AgentLibrarySettings | undefined): FolderOf {
+  return (agent) => systemFolderOf(agent, library);
+}
+
+export function stagesForPhase(folder: string): StageKey[] {
+  return STAGES.filter((s) => STAGE_PHASE[s.key] === folder).map((s) => s.key);
+}
+
+export function agentMeta(agent: AgentFile, catalog: readonly ModelOption[]): string {
+  const tools = inheritsAllTools(agent) ? "all tools" : plural(agent.tools.length, "tool");
+  return `${modelLabel(agent.model, catalog)} · ${tools} · ${plural(agent.skills.length, "skill")}`;
+}
+
 const PHASE_RANK = new Map<string, number>(SDLC_PHASES.map((phase, i) => [phase, i]));
 
 export function folderList(
   agents: readonly AgentFile[],
   library: AgentLibrarySettings | undefined,
   groupUncategorized: boolean,
+  folderOfAgent: FolderOf = folderResolver(library, groupUncategorized),
 ): string[] {
-  const folderOfAgent = folderResolver(library, groupUncategorized);
   const occupied = agents.map(folderOfAgent).filter((folder) => folder !== "");
   const named = [...new Set([...occupied, ...(library?.folders ?? [])])];
   const [phases, rest] = partition(named, (folder) => PHASE_RANK.has(folder));

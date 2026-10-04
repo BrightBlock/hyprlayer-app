@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { clamp } from "./resize";
+
 export const DIFF_SIDEBAR_WIDTH = 420;
 
 export const DIFF_SIDEBAR_MIN = 380;
@@ -15,7 +17,11 @@ export const DOC_RAIL_WIDTH = SIDE_PANEL_WIDTH;
 export const DOC_RAIL_MIN = 220;
 export const DOC_RAIL_MAX = 420;
 
-type UiStore = {
+export const WORKSHOP_LIST_WIDTH = 330;
+export const WORKSHOP_LIST_MIN = 260;
+export const WORKSHOP_LIST_MAX = 480;
+
+export type UiStore = {
   diffHidden: boolean;
   toggleDiff: () => void;
   diffWidth: number;
@@ -30,21 +36,19 @@ type UiStore = {
   toggleDocs: () => void;
   libraryWidth: number;
   setLibraryWidth: (width: number) => void;
-  promptsWidth: number;
-  setPromptsWidth: (width: number) => void;
-  agentsWidth: number;
-  setAgentsWidth: (width: number) => void;
+  workshopListWidth: number;
+  setWorkshopListWidth: (width: number) => void;
   libraryCollapsed: boolean;
   toggleLibrary: () => void;
-  agentsCollapsed: boolean;
-  toggleAgents: () => void;
+  workshopNavCollapsed: boolean;
+  toggleWorkshopNav: () => void;
   projectSidebarCollapsed: boolean;
   setProjectSidebarCollapsed: (collapsed: boolean) => void;
   toggleProjectSidebar: () => void;
   docWide: boolean;
   setDocWide: (wide: boolean) => void;
-  narrowDrawer: "project" | "diff" | null;
-  setNarrowDrawer: (panel: "project" | "diff" | null) => void;
+  narrowDrawer: "project" | "diff" | "workshop" | null;
+  setNarrowDrawer: (panel: "project" | "diff" | "workshop" | null) => void;
   // Remote folder picker; a display preference of the person, not the server,
   // which is why it sits here and not in a host-scoped store.
   showDotFiles: boolean;
@@ -75,14 +79,13 @@ export const useUiStore = create<UiStore>()(
       toggleDocs: () => set((state) => ({ docsCollapsed: !state.docsCollapsed })),
       libraryWidth: SIDE_PANEL_WIDTH,
       setLibraryWidth: (width) => set({ libraryWidth: width }),
-      promptsWidth: SIDE_PANEL_WIDTH,
-      setPromptsWidth: (width) => set({ promptsWidth: width }),
-      agentsWidth: SIDE_PANEL_WIDTH,
-      setAgentsWidth: (width) => set({ agentsWidth: width }),
+      workshopListWidth: WORKSHOP_LIST_WIDTH,
+      setWorkshopListWidth: (width) => set({ workshopListWidth: width }),
       libraryCollapsed: false,
       toggleLibrary: () => set((state) => ({ libraryCollapsed: !state.libraryCollapsed })),
-      agentsCollapsed: false,
-      toggleAgents: () => set((state) => ({ agentsCollapsed: !state.agentsCollapsed })),
+      workshopNavCollapsed: false,
+      toggleWorkshopNav: () =>
+        set((state) => ({ workshopNavCollapsed: !state.workshopNavCollapsed })),
       projectSidebarCollapsed: false,
       setProjectSidebarCollapsed: (collapsed) => set({ projectSidebarCollapsed: collapsed }),
       toggleProjectSidebar: () =>
@@ -106,17 +109,39 @@ export const useUiStore = create<UiStore>()(
     }),
     {
       name: "hyprlayer:ui",
+      // A version bump would make an older build drop the whole blob; merge carries the pre-Workshop keys.
       version: 1,
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<UiStore> & {
+          agentsWidth?: unknown;
+          agentsCollapsed?: unknown;
+        };
+        const { agentsWidth, agentsCollapsed, ...rest } = p;
+        return {
+          ...current,
+          ...rest,
+          workshopListWidth:
+            typeof p.workshopListWidth === "number"
+              ? p.workshopListWidth
+              : typeof agentsWidth === "number" && agentsWidth !== SIDE_PANEL_WIDTH
+                ? clamp(agentsWidth, WORKSHOP_LIST_MIN, WORKSHOP_LIST_MAX)
+                : WORKSHOP_LIST_WIDTH,
+          workshopNavCollapsed:
+            typeof p.workshopNavCollapsed === "boolean"
+              ? p.workshopNavCollapsed
+              : agentsCollapsed === true,
+        };
+      },
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
         asideView: s.asideView,
         docsCollapsed: s.docsCollapsed,
         libraryCollapsed: s.libraryCollapsed,
-        agentsCollapsed: s.agentsCollapsed,
+        workshopNavCollapsed: s.workshopNavCollapsed,
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,
-        agentsWidth: s.agentsWidth,
+        workshopListWidth: s.workshopListWidth,
         showDotFiles: s.showDotFiles,
         docRailOpen: s.docRailOpen,
         docRailWidth: s.docRailWidth,

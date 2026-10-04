@@ -9,10 +9,10 @@ import { IS_MACOS } from "@/lib/platform";
 import { formatBytes } from "@/lib/format";
 import {
   useAgentFiles,
-  useAgentSkills,
   useArchivedWorkstreams,
   useBootstrap,
   useSetAppSettings,
+  useSkillFiles,
 } from "@/lib/queries";
 import { appearanceSegment, useThemeStore, type AppearanceSegment } from "@/lib/theme";
 import { Icon } from "@/components/Icon";
@@ -161,12 +161,12 @@ function ServerBackedRows({ settings }: { settings: AppSettings }) {
 
 function WorkshopLink({ onClose }: { onClose: () => void }) {
   const files = useAgentFiles(null).data;
-  const skills = useAgentSkills(null).data;
+  const skills = useSkillFiles(null).data;
   const agents = files
     ? visibleAgents(files, { tab: "yours", scope: "global", search: "" }).length
     : null;
   return (
-    <Link to="/agents" onClick={onClose} className={BAR_POPOVER_ROW}>
+    <Link to="/workshop" onClick={onClose} className={BAR_POPOVER_ROW}>
       <Icon name="workshop" size="sm" className="text-ink-dim" />
       <span className="flex-1">Workshop</span>
       <Meta>{workshopMeta(agents, skills?.length ?? null)}</Meta>

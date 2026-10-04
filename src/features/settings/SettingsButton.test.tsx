@@ -22,7 +22,7 @@ vi.mock("@/lib/queries", () => ({
   useHosts: () => ({ data: { hosts: [{ destination: "nexus", label: "Nexus" }], active: null } }),
   useHostProbes: () => ({ nexus: { ok: false, code: "remote_unreachable", at: 1 } }),
   useAgentFiles: () => ({ data: [] }),
-  useAgentSkills: () => ({ data: [] }),
+  useSkillFiles: () => ({ data: [] }),
   useArchivedWorkstreams: () => ({ data: [] }),
 }));
 
@@ -132,7 +132,7 @@ describe("SettingsButton", () => {
   it("links out to the Workshop, the Servers section, and General", () => {
     render(<SettingsButton />);
     open();
-    expect(screen.getByRole("link", { name: /Workshop/ }).getAttribute("href")).toBe("/agents");
+    expect(screen.getByRole("link", { name: /Workshop/ }).getAttribute("href")).toBe("/workshop");
     expect(screen.getByRole("link", { name: /Servers/ }).getAttribute("href")).toBe(
       "/settings?section=servers",
     );

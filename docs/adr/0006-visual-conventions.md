@@ -8,7 +8,8 @@ amended 2026-09-25 (v4 dark palette, status tints, elevation tokens; see "v4 dar
 amended 2026-09-26 (user text size via --text-scale and font families; see "Appearance scaling") ·
 amended 2026-09-28 (the Agent sessions status-bar button and popover) ·
 amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote chip, composer sync
-line and draft guard, presence badge; see "Remote sync surfaces")
+line and draft guard, presence badge; see "Remote sync surfaces") ·
+amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell")
 
 ## Decision
 
@@ -646,3 +647,21 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
 - **Reduced motion.** The entrance classes become a 100ms fade; press scale is `motion-safe`.
   Spinners and the working pulses keep their own `prefers-reduced-motion` blocks.
 - `animate-step-in` runs at `slow` (first-run only) and `animate-sync-in` at `gentle`.
+
+### Workshop: three-pane shell (2026-10)
+
+`/workshop` replaces `/agents` and supersedes "Agents: sidebar shell" above for layout.
+
+- **Panes.** A fixed 220px nav (`WORKSHOP_NAV_WIDTH`), a list column (330px default, 260–480,
+  persisted as `workshopListWidth`) resized through `PaneSeparator`, then the detail pane. The
+  chrome lives in `src/components/workshop.tsx`; each section container renders `WorkshopFrame`.
+- **Rows.** Nav section rows, nav filter rows and list rows keep the bordered Prompts-anatomy
+  idiom (`border-accent/30 bg-accent/10` selected, `border-transparent hover:bg-edge/40` idle).
+  `ListCardRow` (name + badges / description / meta) is a multi-line row outside the `rowClass`
+  tiers, like the ones listed under "Row tiers".
+- **Tabs.** The agent editor's sections are a horizontal `TabStrip` (`ui.tsx`), shared with the
+  review workspace, replacing the drilled-in sidebar nav.
+- **Narrow.** Below `NARROW_WIDTH` the nav is an overlay drawer (`narrowDrawer === "workshop"`)
+  opened from the header sidebar toggle, and the list column is fixed at `SIDE_PANEL_MIN`.
+- `AgentList.tsx` exists again as the Workshop's list column. It is unrelated to the table file
+  "Row tiers" says was removed.

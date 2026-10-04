@@ -483,7 +483,7 @@ fn reject_managed_link(path: &Path, store_root: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-fn link_targets_store(path: &Path, store_root: &Path) -> bool {
+pub(crate) fn link_targets_store(path: &Path, store_root: &Path) -> bool {
     if let Ok(target) = std::fs::read_link(path) {
         let resolved = if target.is_absolute() {
             target
@@ -503,7 +503,7 @@ fn link_targets_store(path: &Path, store_root: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn path_is_within(path: &Path, root: &Path) -> bool {
+pub(crate) fn path_is_within(path: &Path, root: &Path) -> bool {
     let Some(path) = absolute_lexical(path) else {
         return false;
     };

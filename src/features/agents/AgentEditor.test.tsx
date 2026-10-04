@@ -45,7 +45,6 @@ function renderEditor(draft: AgentFile) {
         tab="setup"
         onTab={vi.fn()}
         onBack={vi.fn()}
-        breadcrumb={{ folder: "", onAgents: vi.fn(), onFolder: vi.fn() }}
         onSave={vi.fn()}
         onStatus={vi.fn()}
         onReset={vi.fn()}

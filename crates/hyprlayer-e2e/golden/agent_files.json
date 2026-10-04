@@ -142,6 +142,68 @@
       "guards": [
         {
           "evidence": {
+            "entries": 15,
+            "managed": 14,
+            "sources": [
+              "project",
+              "user"
+            ]
+          },
+          "guard": "skill files list every installed skill plus the project probe",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "entries": 15,
+            "well_formed": true
+          },
+          "guard": "every skill file points at its SKILL.md and has a slash name",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "agent_ref": "e2e-probe",
+            "assets": [
+              "refs/notes.md"
+            ],
+            "frontmatter": [
+              "name",
+              "description",
+              "allowed-tools"
+            ]
+          },
+          "guard": "the probe keeps frontmatter order and lists its assets",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "chars": 95
+          },
+          "guard": "reading the probe returns its whole SKILL.md",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ok": true
+          },
+          "guard": "a bundle skill reads through its symlinked directory",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asset": "invalid_path",
+            "outside_roots": "invalid_path"
+          },
+          "guard": "only a SKILL.md inside a skill root can be read",
+          "ok": true
+        }
+      ],
+      "step": "skill files"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "manageable": true,
             "update_available": null
           },

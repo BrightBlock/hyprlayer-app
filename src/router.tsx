@@ -4,6 +4,7 @@ import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
 import type { LibrarySearch } from "./features/library/librarySearch";
+import type { WorkshopSearch } from "./features/workshop/workshopSearch";
 import { RouteError } from "./components/RouteError";
 import { RouteNotFound } from "./components/RouteNotFound";
 import { registerAppNav, type ReviewTab } from "./lib/appNav";
@@ -20,11 +21,8 @@ const ProjectPage = lazy(() =>
 const LibraryPage = lazy(() =>
   import("./routes/LibraryPage").then((m) => ({ default: m.LibraryPage })),
 );
-const PromptsPage = lazy(() =>
-  import("./routes/PromptsPage").then((m) => ({ default: m.PromptsPage })),
-);
-const AgentsPage = lazy(() =>
-  import("./routes/AgentsPage").then((m) => ({ default: m.AgentsPage })),
+const WorkshopPage = lazy(() =>
+  import("./routes/WorkshopPage").then((m) => ({ default: m.WorkshopPage })),
 );
 const PipelinePage = lazy(() =>
   import("./routes/PipelinePage").then((m) => ({ default: m.PipelinePage })),
@@ -79,13 +77,16 @@ export type PromptsSearch = {
   prompt?: string;
 };
 
+// Prompts moved into the Workshop; a persisted last route may still say /prompts.
 const promptsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/prompts",
-  component: PromptsPage,
   validateSearch: (search: Record<string, unknown>): PromptsSearch => ({
     prompt: optionalString(search.prompt),
   }),
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/workshop", search: { section: "prompts", prompt: search.prompt } });
+  },
 });
 
 export type AgentsSearch = {
@@ -95,16 +96,43 @@ export type AgentsSearch = {
   project?: string;
 };
 
+const workshopRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/workshop",
+  component: WorkshopPage,
+  validateSearch: (search: Record<string, unknown>): WorkshopSearch => ({
+    section: optionalString(search.section),
+    project: optionalString(search.project),
+    folder: optionalString(search.folder),
+    filter: optionalString(search.filter),
+    agent: optionalString(search.agent),
+    tab: optionalString(search.tab),
+    skill: optionalString(search.skill),
+    prompt: optionalString(search.prompt),
+  }),
+});
+
+// Agents moved into the Workshop; a persisted last route may still say /agents.
 const agentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/agents",
-  component: AgentsPage,
   validateSearch: (search: Record<string, unknown>): AgentsSearch => ({
     agent: optionalString(search.agent),
     tab: optionalString(search.tab),
     section: optionalString(search.section),
     project: optionalString(search.project),
   }),
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: "/workshop",
+      search: {
+        section: search.section,
+        project: search.project,
+        agent: search.agent,
+        tab: search.tab,
+      },
+    });
+  },
 });
 
 const pipelineRoute = createRoute({
@@ -160,6 +188,7 @@ const routeTree = rootRoute.addChildren([
   archiveRoute,
   promptsRoute,
   agentsRoute,
+  workshopRoute,
   pipelineRoute,
   libraryRoute,
   projectRoute,
@@ -205,7 +234,7 @@ registerAppNav({
     });
   },
   openPrompt: (prompt) => {
-    void router.navigate({ to: "/prompts", search: { prompt } });
+    void router.navigate({ to: "/workshop", search: { section: "prompts", prompt } });
   },
 });
 

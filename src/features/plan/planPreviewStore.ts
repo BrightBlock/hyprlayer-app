@@ -4,12 +4,12 @@ import { create } from "zustand";
 import { isInlinePlanKey } from "@/features/session/planPresentation";
 import { canonicalDocPath } from "@/features/session/toolDisplay";
 import { useWrittenDocs } from "@/features/session/writtenDocs";
-import { useUiStore } from "@/lib/uiStore";
+import { useUiStore, type UiStore } from "@/lib/uiStore";
 
 // `key` is a plan doc path or the inline key; `followLatest` keeps the newest revision's card active.
 export type PlanSelection = { key: string; cardId: string | null; followLatest: boolean };
 
-type AsideSnapshot = { view: "changes" | "plan"; hidden: boolean; drawer: "project" | "diff" | null };
+type AsideSnapshot = { view: "changes" | "plan"; hidden: boolean; drawer: UiStore["narrowDrawer"] };
 
 type PlanPreviewState = {
   bySession: Record<string, PlanSelection>;
@@ -41,7 +41,7 @@ export function setPlanPreviewNarrow(narrow: boolean): void {
 type UiSlice = {
   asideView: "changes" | "plan";
   diffHidden: boolean;
-  narrowDrawer: "project" | "diff" | null;
+  narrowDrawer: UiStore["narrowDrawer"];
 };
 
 export function asideShowsPlan(ui: UiSlice, narrow: boolean): boolean {

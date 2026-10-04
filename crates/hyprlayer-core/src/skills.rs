@@ -32,6 +32,47 @@ pub struct AgentSkill {
     pub user_only: bool,
 }
 
+const MAX_SKILL_BYTES: u64 = 1024 * 1024;
+const MAX_ASSET_DEPTH: usize = 4;
+const MAX_ASSETS: usize = 200;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SkillField {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SkillAsset {
+    pub rel_path: String,
+    pub bytes: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFile {
+    pub path: String,
+    pub dir: String,
+    pub source: String,
+    pub plugin: Option<String>,
+    pub rank: u32,
+    pub managed: bool,
+    pub name: String,
+    pub slash_name: String,
+    pub agent_ref: String,
+    pub description: String,
+    pub user_only: bool,
+    pub chars: u32,
+    pub bytes: f64,
+    pub frontmatter: Vec<SkillField>,
+    pub assets: Vec<SkillAsset>,
+}
+
 pub fn list_slash_commands(worktree: &Path, home: Option<&Path>) -> Vec<SlashCommand> {
     let mut found: Vec<SlashCommand> = Vec::new();
 
@@ -346,6 +387,234 @@ fn first_prose_line(body: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with('-') && !l.starts_with('#'))
         .map(|l| l.to_string())
+}
+
+pub fn list_skill_files(
+    worktree: Option<&Path>,
+    home: Option<&Path>,
+    store_root: Option<&Path>,
+) -> Vec<SkillFile> {
+    let mut out: Vec<SkillFile> = Vec::new();
+    if let Some(wt) = worktree {
+        out.extend(scan_skill_files(
+            &wt.join(".claude/skills"),
+            "project",
+            0,
+            None,
+            store_root,
+        ));
+    }
+    if let Some(home) = home {
+        out.extend(scan_skill_files(
+            &home.join(".claude/skills"),
+            "user",
+            1,
+            None,
+            store_root,
+        ));
+    }
+
+    let enabled = enabled_plugins(worktree, home);
+    let mut seen = std::collections::HashSet::new();
+    for install in plugin_installs(home) {
+        if !enabled.contains(&install.key) {
+            continue;
+        }
+        let found = scan_skill_files(
+            &install.path.join("skills"),
+            "plugin",
+            2,
+            Some(&install.label),
+            store_root,
+        );
+        out.extend(found.into_iter().filter(|s| seen.insert(s.path.clone())));
+    }
+
+    out.sort_by_cached_key(|s| (s.name.to_lowercase(), s.rank, s.path.clone()));
+    out
+}
+
+fn scan_skill_files(
+    root: &Path,
+    source: &str,
+    rank: u32,
+    plugin: Option<&str>,
+    store_root: Option<&Path>,
+) -> Vec<SkillFile> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let skill_file = dir.join("SKILL.md");
+        let Ok(meta) = std::fs::metadata(&skill_file) else {
+            continue;
+        };
+        if meta.len() > MAX_SKILL_BYTES {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&skill_file) else {
+            continue;
+        };
+        let parsed = crate::docs::frontmatter::parse(&text);
+        let pick = |key: &str| {
+            parsed
+                .fm
+                .extra
+                .get(key)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let name = pick("name").unwrap_or_else(|| dir_name.clone());
+        let agent_ref = match plugin {
+            Some(label) => format!("{label}:{dir_name}"),
+            None => name.clone(),
+        };
+        let body = &text[parsed.body_offset..];
+        out.push(SkillFile {
+            path: skill_file.to_string_lossy().into_owned(),
+            dir: dir.to_string_lossy().into_owned(),
+            source: source.to_string(),
+            plugin: plugin.map(str::to_string),
+            rank,
+            managed: store_root.is_some_and(|store| crate::agents::link_targets_store(&dir, store)),
+            slash_name: name.clone(),
+            name,
+            agent_ref,
+            description: pick("description")
+                .or_else(|| first_prose_line(body))
+                .unwrap_or_default(),
+            user_only: pick("disable-model-invocation").as_deref() == Some("true"),
+            chars: body.chars().count() as u32,
+            bytes: meta.len() as f64,
+            frontmatter: skill_fields(&text, &parsed.fm.extra),
+            assets: skill_assets(&dir),
+        });
+    }
+    out
+}
+
+pub fn read_skill_file(
+    worktree: Option<&Path>,
+    home: Option<&Path>,
+    path: &Path,
+) -> crate::error::Result<String> {
+    let refuse = || crate::error::CoreError::InvalidPath {
+        path: path.to_string_lossy().into_owned(),
+    };
+    if path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
+        return Err(refuse());
+    }
+    // Lexical containment: bundle skills are symlinks whose targets sit outside every root.
+    if !skill_file_roots(worktree, home)
+        .iter()
+        .any(|root| crate::agents::path_is_within(path, root))
+    {
+        return Err(refuse());
+    }
+    if std::fs::metadata(path)?.len() > MAX_SKILL_BYTES {
+        return Err(refuse());
+    }
+    Ok(std::fs::read_to_string(path)?)
+}
+
+fn skill_file_roots(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(wt) = worktree {
+        roots.push(wt.join(".claude/skills"));
+    }
+    if let Some(home) = home {
+        roots.push(home.join(".claude/skills"));
+    }
+    let enabled = enabled_plugins(worktree, home);
+    roots.extend(
+        plugin_installs(home)
+            .into_iter()
+            .filter(|install| enabled.contains(&install.key))
+            .map(|install| install.path.join("skills")),
+    );
+    roots
+}
+
+fn skill_fields(
+    text: &str,
+    recovered: &std::collections::BTreeMap<String, String>,
+) -> Vec<SkillField> {
+    use crate::docs::frontmatter::{extract_block, tokenize_keys, yaml_value_display};
+
+    let Some((block, _)) = extract_block(text) else {
+        return Vec::new();
+    };
+    if let Ok(map) = serde_yaml::from_str::<serde_yaml::Mapping>(block) {
+        return map
+            .iter()
+            .filter_map(|(key, value)| {
+                Some(SkillField {
+                    key: key.as_str()?.to_string(),
+                    value: yaml_value_display(value),
+                })
+            })
+            .collect();
+    }
+    let mut seen = std::collections::HashSet::new();
+    tokenize_keys(block)
+        .into_iter()
+        .filter(|key| seen.insert(key.clone()))
+        .map(|key| {
+            let value = recovered.get(&key).cloned().unwrap_or_default();
+            SkillField { key, value }
+        })
+        .collect()
+}
+
+fn skill_assets(dir: &Path) -> Vec<SkillAsset> {
+    fn walk(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<SkillAsset>) {
+        if depth == 0 {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if out.len() >= MAX_ASSETS {
+                return;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            let rel_path = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                walk(&entry.path(), &rel_path, depth - 1, out);
+            } else if rel_path != "SKILL.md" {
+                let Ok(meta) = std::fs::metadata(entry.path()) else {
+                    continue;
+                };
+                if meta.is_file() {
+                    out.push(SkillAsset {
+                        rel_path,
+                        bytes: meta.len() as f64,
+                    });
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, "", MAX_ASSET_DEPTH, &mut out);
+    out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    out
 }
 
 #[cfg(test)]

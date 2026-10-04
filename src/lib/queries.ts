@@ -568,6 +568,16 @@ export function useAllWorkstreams(enabled = true) {
   });
 }
 
+export function useWorkstreamPromptContext(workstreamId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["workstream-prompt-context", workstreamId],
+    queryFn: () => unwrap(commands.workstreamPromptContext(workstreamId!)),
+    enabled: enabled && workstreamId !== null,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function workstreamSessionsQuery(workstreamId: string) {
   return {
     queryKey: ["workstream-sessions", workstreamId],
@@ -1103,6 +1113,20 @@ export function useAgentSkills(projectPath: string | null) {
   });
 }
 
+export function useSkillFiles(projectPath: string | null) {
+  return useQuery({
+    queryKey: ["skill-files", projectPath],
+    queryFn: () => unwrap(commands.listSkillFiles(projectPath)),
+  });
+}
+
+export function useSkillFileText(projectPath: string | null, path: string) {
+  return useQuery({
+    queryKey: ["skill-file", projectPath, path],
+    queryFn: () => unwrap(commands.readSkillFile(projectPath, path)),
+  });
+}
+
 // An older server rejects the command; callers hide counts on error.
 export function useAgentHarnessCounts() {
   return useQuery({
@@ -1153,6 +1177,8 @@ export function invalidateAgentBundle() {
   invalidateCliBundleState();
   void queryClient.invalidateQueries({ queryKey: ["agent-files"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+  void queryClient.invalidateQueries({ queryKey: ["skill-files"] });
+  void queryClient.invalidateQueries({ queryKey: ["skill-file"] });
   void queryClient.invalidateQueries({ queryKey: ["agent-harness-counts"] });
 }
 

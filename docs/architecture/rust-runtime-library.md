@@ -346,7 +346,7 @@ real server without a webview.
 `list(Option<String>)`, `save(AgentFile)`, `delete(String)`,
 `new_file_path(String, String, Option<String>)`, `context_files(Option<String>)`,
 `mcp_servers(Option<String>)`, `skills(Option<String>)`,
-`harness_counts()`, `export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
+`skill_files(Option<String>)`, `read_skill_file(Option<String>, String)`, `harness_counts()`, `export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
 `bundle_versions()`, `repair_bundle()`, `install_bundle_version(Option<String>)`.
 
 The `Option<String>` in most positions is a project path; `None` means the

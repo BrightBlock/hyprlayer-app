@@ -56,7 +56,7 @@ use hyprlayer_core::runtime::workstreams::{
     ArchiveCleanupReport, ArchiveInfo, ProjectMemory, WorkstreamBases,
 };
 use hyprlayer_core::settings::AppSettings;
-use hyprlayer_core::skills::{AgentSkill, SlashCommand};
+use hyprlayer_core::skills::{AgentSkill, SkillFile, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::{PullOutcome, WorktreeStatus};
 use hyprlayer_core::{
@@ -313,6 +313,8 @@ hyprlayer_proto::commands! {
     AgentContextFiles: agent_context_files(project_path: Option<String>) -> Vec<AgentContextFile>;
     AgentMcpServers: agent_mcp_servers(project_path: Option<String>) -> Vec<AgentMcpServer>;
     AgentSkills: agent_skills(project_path: Option<String>) -> Vec<AgentSkill>;
+    ListSkillFiles: list_skill_files(project_path: Option<String>) -> Vec<SkillFile>;
+    ReadSkillFile: read_skill_file(project_path: Option<String>, path: String) -> String;
     AgentHarnessCounts: agent_harness_counts() -> Vec<HarnessCounts>;
     ExportAgentFile: export_agent_file(agent: AgentFile, overlay: AgentOverlay) -> String;
     AgentBundleStatus: agent_bundle_status() -> BundleStatus;
