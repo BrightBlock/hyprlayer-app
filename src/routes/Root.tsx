@@ -188,7 +188,6 @@ function routeSection(pathname: string): string {
   if (pathname.startsWith("/projects/")) return "Agent";
   if (pathname.startsWith("/library")) return "Library";
   if (pathname.startsWith("/workshop")) return "Workshop";
-  if (pathname.startsWith("/pipeline")) return "Pipeline";
   if (pathname.startsWith("/settings")) return "Settings";
   if (pathname.startsWith("/onboarding")) return "Setup";
   if (pathname === "/") return "Home";
@@ -425,8 +424,7 @@ export function Root() {
   const onSettings = pathname.startsWith("/settings");
   const onWorkshop = pathname.startsWith("/workshop");
   const onOnboarding = pathname.startsWith("/onboarding");
-  const onPipeline = pathname.startsWith("/pipeline");
-  const projectDrawerRoutable = !onLibrary && !onSettings && !onWorkshop && !onPipeline;
+  const projectDrawerRoutable = !onLibrary && !onSettings && !onWorkshop;
   const diffDrawerRoutable = pathname.startsWith("/projects");
   useEffect(() => {
     const open = useUiStore.getState().narrowDrawer;
@@ -519,7 +517,7 @@ export function Root() {
   const crumb =
     currentSection === "Agent"
       ? onBoard
-        ? "Board"
+        ? "Pipeline"
         : (activeWorkstream?.item.title ?? "Workstreams")
       : currentSection;
 
@@ -543,10 +541,10 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (target: "/library" | "/pipeline") => {
-    if (pathname.startsWith(target)) {
+  const toggleLibraryNav = () => {
+    if (onLibrary) {
       closeOrBack(() => void navigate({ to: "/" }));
-    } else if (target === "/library") {
+    } else {
       const lastSearch = useLibraryScope.getState().lastSearch;
       void navigate({
         to: "/library",
@@ -554,8 +552,6 @@ export function Root() {
           lastSearch ??
           (defaultLibraryProject ? { project: defaultLibraryProject } : {}),
       });
-    } else {
-      void navigate({ to: target });
     }
   };
   const openProjectDocs = (project: Project) => {
@@ -691,11 +687,11 @@ export function Root() {
       ? compact || narrow
         ? narrowDrawer === "workshop"
         : !workshopNavCollapsed
-      : onSettings || onPipeline
+      : onSettings
         ? true
         : projectSidebarShown;
   const toggleSidebar = () => {
-    if (onSettings || onPipeline) return;
+    if (onSettings) return;
     if (onLibrary) {
       if (narrow) setNarrowDrawer(narrowDrawer === "library" ? null : "library");
       else toggleLibrary();
@@ -742,7 +738,7 @@ export function Root() {
     bootstrap.data?.settings.keybindings?.overrides ?? EMPTY_OVERRIDES,
   );
   useCommand("nav.dashboard", onOnboarding ? SWALLOW : () => void navigate({ to: "/" }));
-  useCommand("nav.library", onOnboarding ? SWALLOW : () => toggleNav("/library"));
+  useCommand("nav.library", onOnboarding ? SWALLOW : toggleLibraryNav);
   useCommand("nav.settings", onOnboarding ? SWALLOW : toggleSettingsPopover);
   useCommand(
     "nav.projectDocs",
@@ -1132,16 +1128,7 @@ export function Root() {
             </button>
             <button
               type="button"
-              onClick={() => toggleNav("/pipeline")}
-              className={railNavClass(onPipeline)}
-              title="Pipeline"
-              aria-label="Pipeline"
-            >
-              <Icon name="pipeline" size="rail" />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleNav("/library")}
+              onClick={toggleLibraryNav}
               className={railNavClass(pathname.startsWith("/library"))}
               title="Library"
               aria-label="Library"
@@ -1158,7 +1145,7 @@ export function Root() {
             onClick={() => setNarrowDrawer(null)}
           />
         )}
-        {!onLibrary && !onSettings && !onWorkshop && !onPipeline && (
+        {!onLibrary && !onSettings && !onWorkshop && (
           <aside
             className={`shrink-0 overflow-hidden border-r border-edge bg-panel ${
               compact ? "absolute inset-y-0 z-30 shadow-lg" : "relative"
@@ -1499,7 +1486,7 @@ export function Root() {
           </aside>
         )}
 
-        {!collapsed && !narrow && !onLibrary && !onSettings && !onWorkshop && !onPipeline && (
+        {!collapsed && !narrow && !onLibrary && !onSettings && !onWorkshop && (
           <div
             role="separator"
             aria-orientation="vertical"

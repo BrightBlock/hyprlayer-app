@@ -1,5 +1,3 @@
-import { useNavigate } from "@tanstack/react-router";
-
 import { BLANK_CTA, BLANK_CTA_SECONDARY, BlankState } from "@/components/BlankState";
 import { Icon } from "@/components/Icon";
 import { Button, Kbd } from "@/components/ui";
@@ -18,7 +16,6 @@ export function NoWorktreeBlank({
   onNew: () => void;
   onRestore: () => void;
 }) {
-  const navigate = useNavigate();
   const newChord = useChord("ws.new");
   const archived = useArchivedWorkstreams();
   const archivedCount = (archived.data ?? []).filter((v) => v.item.projectPath === projectPath).length;
@@ -54,9 +51,6 @@ export function NoWorktreeBlank({
           <Button variant="primary" className={BLANK_CTA} onClick={onNew}>
             {!folder && <Icon name="branch" size="sm" />}
             {folder ? "New session" : "New worktree"}
-          </Button>
-          <Button className={BLANK_CTA_SECONDARY} onClick={() => void navigate({ to: "/pipeline" })}>
-            See the pipeline
           </Button>
           {archivedCount > 0 && (
             <Button className={BLANK_CTA_SECONDARY} onClick={onRestore}>
