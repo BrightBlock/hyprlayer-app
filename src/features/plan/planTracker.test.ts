@@ -29,7 +29,7 @@ const building: SessionSignal = {
 
 describe("progress", () => {
   it("is zero, not NaN, for a plan with no tasks", () => {
-    const t = trackPlan(parsePlanDoc("## Phase 1: A\n", PATH), [], building);
+    const t = trackPlan(parsePlanDoc("## Phase 1: A\n", PATH), [], { ...building, stage: "plan" });
     expect(t.total).toBe(0);
     expect(t.progress).toBe(0);
     expect(t.allDone).toBe(false);

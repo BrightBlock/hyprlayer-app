@@ -452,9 +452,9 @@ describe("StatusBar trailing items", () => {
         tools={<button type="button">Terminal</button>}
       />,
     );
-    const terminal = screen.getByRole("button", { name: "Terminal" });
-    expect(terminal.parentElement?.tagName).toBe("FOOTER");
-    expect(terminal.nextElementSibling?.className).toContain("border-l");
+    const group = screen.getByRole("button", { name: "Terminal" }).parentElement;
+    expect(group?.parentElement?.tagName).toBe("FOOTER");
+    expect(group?.nextElementSibling?.className).toContain("border-l");
   });
 
   it("puts the sessions slot flush against the Server button, one divider after thoughts", () => {

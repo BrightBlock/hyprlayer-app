@@ -538,7 +538,7 @@ export function Root() {
     if (canGoBack) router.history.back();
     else fallback();
   };
-  const toggleNav = (target: "/library" | "/workshop" | "/pipeline") => {
+  const toggleNav = (target: "/library" | "/pipeline") => {
     if (pathname.startsWith(target)) {
       closeOrBack(() => void navigate({ to: "/" }));
     } else if (target === "/library") {
@@ -1118,15 +1118,6 @@ export function Root() {
               aria-label="Library"
             >
               <Icon name="library" size="rail" />
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleNav("/workshop")}
-              className={railNavClass(pathname.startsWith("/workshop"))}
-              title="Workshop"
-              aria-label="Workshop"
-            >
-              <Icon name="workshop" size="rail" />
             </button>
           </div>
         </nav>

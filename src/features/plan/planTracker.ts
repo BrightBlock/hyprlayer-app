@@ -33,6 +33,8 @@ export type CurrentItem = {
   state: "in_progress" | "waiting" | "failed";
   reason: string | null;
   taskKey: string | null;
+  // The todo names the phase itself, so the card already says what its header would.
+  phaseLevel: boolean;
   subagent: RunningSubagent | null;
 };
 
@@ -201,7 +203,22 @@ export function trackPlan(
     phases[home].added = unmatched;
   }
 
-  const tracked: TrackedPhase[] = phases.map((p) => {
+  const started = (p: Phase) =>
+    (p.todo != null && p.todo.status !== "pending") || p.slots.some((s) => taskStateOf(s) !== "pending");
+  // Criteria-only phases get a row for the build itself; without a live todo, finished checks or a later
+  // phase starting mean it was built.
+  const implStates: (TaskState | null)[] = phases.map((p, i) => {
+    if (mode === "draft" || i >= doc.phases.length || p.slots.some((s) => !s.check)) return null;
+    if (p.todo) {
+      const state = todoState(p.todo);
+      if (state !== "pending") return state;
+    }
+    const checksDone = p.slots.length > 0 && p.slots.every((s) => taskStateOf(s) === "done");
+    return status === "implemented" || checksDone || phases.slice(i + 1).some(started) ? "done" : "pending";
+  });
+
+  const tracked: TrackedPhase[] = phases.map((p, i) => {
+    const impl = implStates[i];
     const tasks: TrackedTask[] = [
       ...p.slots.map((s) => ({
         key: s.key,
@@ -223,6 +240,21 @@ export function trackPlan(
         reason: null,
         jump: jumpOf(todo),
       })),
+      // Last, so slot and added rows keep their indices.
+      ...(impl
+        ? [
+            {
+              key: `impl:${p.label}`,
+              title: "Implementation",
+              state: impl,
+              added: false,
+              check: false,
+              group: null,
+              reason: null,
+              jump: jumpOf(p.todo),
+            },
+          ]
+        : []),
     ];
     return { label: p.label, name: p.name, state: phaseStateOf(p, tasks.map((t) => t.state)), tasks };
   });
@@ -238,12 +270,15 @@ export function trackPlan(
       if (slot >= 0) currentTask = tracked[i].tasks[slot];
       else if (added >= 0) currentTask = tracked[i].tasks[p.slots.length + added];
       else if (p.todo !== todo) continue;
+      const phaseLevel = slot < 0 && added < 0;
+      if (phaseLevel && implStates[i]) currentTask = tracked[i].tasks[p.slots.length + p.added.length];
       currentIndex = i;
       current = {
-        title: currentTask?.title ?? todo.subject,
+        title: phaseLevel ? todo.subject : (currentTask?.title ?? todo.subject),
         state: "in_progress",
         reason: null,
         taskKey: currentTask && !currentTask.added ? currentTask.key : null,
+        phaseLevel,
         subagent: session?.subagent ?? null,
       };
       break;
@@ -280,8 +315,9 @@ export function trackPlan(
   const half = units.filter((s) => s === "in_progress" || s === "waiting").length;
   const allDone = units.length > 0 && unitsDone === units.length;
   if (allDone) current = null;
-  const built = (p: Phase) =>
+  const built = (p: Phase, i: number) =>
     p.todo?.status === "completed" ||
+    implStates[i] === "done" ||
     (p.slots.some((s) => !s.check) && p.slots.every((s) => s.check || taskStateOf(s) === "done"));
   const tasksDone = allDone || (doc.phases.length > 0 && phases.slice(0, doc.phases.length).every(built));
 

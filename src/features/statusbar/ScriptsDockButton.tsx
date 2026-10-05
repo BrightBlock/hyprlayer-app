@@ -24,7 +24,7 @@ export function ScriptsDockButton({
         open && "bg-edge/60 text-ink",
       )}
     >
-      <Icon name="console" size="xs" />
+      <Icon name="console" size="sm" />
       {running && <Dot className="absolute right-0.5 top-0.5 bg-ship" />}
     </button>
   );

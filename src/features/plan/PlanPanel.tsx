@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Icon } from "@/components/Icon";
-import { Button } from "@/components/ui";
+import { Button, cx } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { plural } from "@/lib/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
@@ -9,7 +9,8 @@ import { useReducedMotion } from "@/lib/useReducedMotion";
 import { PhaseSection } from "./PhaseSection";
 import { PlanPreviewDraft } from "./PlanPreviewDraft";
 import { PlanProgressHeader } from "./PlanProgressHeader";
-import type { JumpTarget, PlanTracker } from "./planTracker";
+import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
+import type { JumpTarget, PlanTracker, TrackedPhase } from "./planTracker";
 
 const MANUAL_SCROLL_HOLD_MS = 10_000;
 
@@ -54,6 +55,74 @@ function useCompletionAnnouncement(tracker: PlanTracker): string {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the done set
   }, [doneKey]);
   return message;
+}
+
+type PhaseProps = {
+  tracker: PlanTracker;
+  changed: ReadonlySet<string>;
+  reduceMotion: boolean;
+  onJump: (target: JumpTarget) => void;
+};
+
+function TrackedPhaseSection({
+  phase,
+  index,
+  tracker,
+  changed,
+  reduceMotion,
+  onJump,
+}: PhaseProps & { phase: TrackedPhase; index: number }) {
+  return (
+    <PhaseSection
+      phase={phase}
+      // Keyed by the current phase, so finishing one drops earlier choices: it collapses and the next opens.
+      collapseKey={`${tracker.title}\0${tracker.currentPhase}\0${phase.label}:${phase.name}`}
+      defaultCollapsed={tracker.allDone || index + 1 !== tracker.currentPhase}
+      headless={tracker.current?.phaseLevel === true && index + 1 === tracker.currentPhase}
+      showState
+      pulse={tracker.pulsing && !reduceMotion}
+      flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
+      onJump={onJump}
+    />
+  );
+}
+
+// Finished phases sink below the remaining ones; open by default only once nothing remains.
+function TrackedPhases(props: PhaseProps) {
+  const indexed = props.tracker.phases.map((phase, index) => ({ phase, index }));
+  const remaining = indexed.filter((p) => p.phase.state !== "done");
+  const completed = indexed.filter((p) => p.phase.state === "done");
+  const collapseKey = `${props.tracker.title}\0completed\0${remaining.length === 0}`;
+  const collapsed = usePhaseCollapsed(collapseKey, remaining.length > 0);
+  return (
+    <>
+      {remaining.map(({ phase, index }) => (
+        <TrackedPhaseSection key={`${phase.label}:${phase.name}`} {...props} phase={phase} index={index} />
+      ))}
+      {completed.length > 0 && (
+        <section className={cx("space-y-[18px]", remaining.length > 0 && "border-t border-edge pt-4")}>
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
+            className="flex w-full items-center gap-1.5 text-left text-ui font-semibold text-ink-4 hover:text-ink-2"
+          >
+            <Icon
+              name="chevronDown"
+              size="xs"
+              className={cx("shrink-0 transition-transform", collapsed && "-rotate-90")}
+            />
+            Completed
+            <span className="font-normal tabular-nums">· {plural(completed.length, "phase")}</span>
+          </button>
+          {!collapsed &&
+            completed.map(({ phase, index }) => (
+              <TrackedPhaseSection key={`${phase.label}:${phase.name}`} {...props} phase={phase} index={index} />
+            ))}
+        </section>
+      )}
+    </>
+  );
 }
 
 export function PlanPanel({
@@ -123,19 +192,7 @@ export function PlanPanel({
           <>
             <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
             <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
-              {tracker.phases.map((phase, i) => (
-                <PhaseSection
-                  key={`${phase.label}:${phase.name}`}
-                  phase={phase}
-                  // Keyed by the current phase, so finishing one drops earlier choices: it collapses and the next opens.
-                  collapseKey={`${tracker.title}\0${tracker.currentPhase}\0${phase.label}:${phase.name}`}
-                  defaultCollapsed={tracker.allDone || i + 1 !== tracker.currentPhase}
-                  showState
-                  pulse={tracker.pulsing && !reduceMotion}
-                  flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
-                  onJump={onJump}
-                />
-              ))}
+              <TrackedPhases tracker={tracker} changed={changed} reduceMotion={reduceMotion} onJump={onJump} />
               {tracker.phases.length === 0 && (
                 <div className="text-body leading-prose text-ink-2">
                   <MarkdownPreview body={tracker.body} />

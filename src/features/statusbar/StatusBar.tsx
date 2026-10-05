@@ -42,8 +42,10 @@ export function StatusBar({
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
       <div className="flex-1" />
-      <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
-      {tools}
+      <div className="flex min-w-0 items-center gap-1">
+        <SessionControlsCluster workstreamId={workstreamId} compact={compact} />
+        {tools}
+      </div>
       <div
         className="flex shrink-0 items-center justify-end gap-2 self-stretch border-l border-edge pl-2"
         // A floor, not a width: a long server label would otherwise spill left over the session controls.

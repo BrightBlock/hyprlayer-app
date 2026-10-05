@@ -60,8 +60,14 @@ describe("PlanPanel phase collapse", () => {
   const header = (title: string) => screen.getByText(title).closest("button")!;
   const expanded = () => ["Phase 1 — A", "Phase 2 — B", "Phase 3 — C"].map((t) => header(t).getAttribute("aria-expanded"));
 
-  it("opens only the current phase", () => {
+  const completed = () => screen.getByRole("button", { name: /^Completed/ });
+
+  it("opens only the current phase, with finished ones folded into Completed below", () => {
     renderPanel(trackPlan(THREE("x  "), [], working));
+    expect(completed().getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Phase 1 — A")).toBeNull();
+    expect(header("Phase 3 — C").compareDocumentPosition(completed()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(completed());
     expect(expanded()).toEqual(["false", "true", "false"]);
     expect(screen.queryByText("first")).toBeNull();
     expect(screen.getByText("second")).toBeTruthy();
@@ -88,6 +94,7 @@ describe("PlanPanel phase collapse", () => {
     fireEvent.click(header("Phase 3 — C"));
     cleanup();
     renderPanel(trackPlan(THREE("x  "), [], working));
+    fireEvent.click(completed());
     expect(expanded()).toEqual(["false", "true", "false"]);
   });
 
@@ -122,9 +129,10 @@ describe("PlanPanel checks", () => {
     expect(follows(manual, screen.getByText("Looks right"))).toBe(true);
   });
 
-  it("counts checks as passed when a plan has no tasks", () => {
+  it("counts a criteria-only phase's implementation row as its task", () => {
     renderPanel(trackPlan(CHECKS("active", ""), [], working));
-    expect(screen.getByText("1 of 3 checks passed")).toBeTruthy();
+    expect(screen.getByText("Implementation")).toBeTruthy();
+    expect(screen.getByText("0 of 1 task · 1 of 3 checks")).toBeTruthy();
   });
 
   it("counts tasks and checks apart when a plan has both", () => {
@@ -186,8 +194,9 @@ describe("PlanPanel tracking", () => {
 
   it("labels phases with their state", () => {
     renderPanel(tracker());
+    fireEvent.click(screen.getByRole("button", { name: /^Completed/ }));
     const done = screen.getByText("Phase 1 — Scaffold").closest("[data-phase-label]")!;
-    expect(done.textContent).toContain("· done");
+    expect(done.textContent).not.toContain("· done");
     expect(done.className).toContain("text-ok");
     expect(screen.getByText("Phase 2 — Build").closest("[data-phase-label]")!.textContent).toContain("· in progress");
   });

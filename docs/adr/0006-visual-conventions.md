@@ -233,7 +233,7 @@ Three tiers:
 - **Rail — `h-8 w-8 rounded-[10px]`.** `RAIL_ICON_BASE` and `railNavClass`
   (`ui.tsx:655-662`, graduated out of `Root.tsx` by the remote-host-UI plan's
   Phase 3 so a feature component could reach them without a `routes/`
-  import), for the left icon rail's Projects/Library/Prompts/Agents buttons
+  import), for the left icon rail's Projects/Pipeline/Library buttons (Workshop is reached from Settings)
   (the host indicator, Settings gear and Scripts dock toggle moved to the status
   bar, and Archive to the header, left of the editor selector; see "v4" below). Selected state is `RAIL_ACTIVE_BAR`
   (`ui.tsx:657-659`), a left `::before` bar, not a background fill — the one
@@ -445,7 +445,7 @@ exception like those under "Typography".
 
 **Sizes recorded as exceptions.**
 - The status bar is 34px (`STATUS_BAR_HEIGHT`, `src/lib/layout.ts`).
-- Its gear and the Scripts dock toggle beside it are 26×24; the permission pill 24px; a meter's track 34×4; the avatar 20px.
+- Its gear and the Scripts dock toggle are 26×24; the toggle trails the session controls 4px after Effort, with an `sm` icon; the permission pill 24px; a meter's track 34×4; the avatar 20px.
 - The Settings nav's rows are 34px, which is not a third `rowClass` tier.
 - Toast sits `STATUS_BAR_HEIGHT + 24` above the window's bottom edge.
 - The header's Archive button is 26×26 beside 28×28 neighbours. Its Archived
