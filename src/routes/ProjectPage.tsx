@@ -136,8 +136,7 @@ import {
 } from "@/features/session/paneTree";
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
-import { ProjectBoard } from "@/features/board/ProjectBoard";
-import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
+import { ProjectPipeline } from "@/features/board/ProjectPipeline";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import {
   setNewWorkstreamStage,
@@ -1249,13 +1248,13 @@ export function ProjectPage() {
   if (showBoard) {
     return (
       <>
-        <ProjectBoard
+        <ProjectPipeline
           projectPath={projectPath}
+          projectName={project.mappedName}
           views={views}
           folder={folderProject}
-          onOpen={(id) => selectItem(id)}
-          onNewWorkstream={() => setCreateOpen(true)}
-          onRestore={openArchivedWorktrees}
+          onSelect={selectItem}
+          onNew={() => setCreateOpen(true)}
           onCardContextMenu={
             folderProject ? undefined : (view, x, y) => setCardMenu({ x, y, view })
           }

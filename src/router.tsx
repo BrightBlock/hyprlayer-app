@@ -25,9 +25,6 @@ const LibraryPage = lazy(() =>
 const WorkshopPage = lazy(() =>
   import("./routes/WorkshopPage").then((m) => ({ default: m.WorkshopPage })),
 );
-const PipelinePage = lazy(() =>
-  import("./routes/PipelinePage").then((m) => ({ default: m.PipelinePage })),
-);
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
@@ -136,10 +133,13 @@ const agentsRoute = createRoute({
   },
 });
 
+// The pipeline is the project view now; a persisted last route may still say /pipeline.
 const pipelineRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/pipeline",
-  component: PipelinePage,
+  beforeLoad: () => {
+    throw redirect({ to: "/" });
+  },
 });
 
 const libraryRoute = createRoute({
