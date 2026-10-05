@@ -1,14 +1,12 @@
 import { useEffect } from "react";
-import { relaunch } from "@tauri-apps/plugin-process";
 
 import { events } from "@/lib/bindings";
-import { flushPersistedWrites } from "@/lib/persistedStorage";
 import { useConnectionStatus } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
+import { isPlannedRestart } from "@/features/hosts/plannedRestart";
 
-// Nothing respawns the server (ADR-0009); relaunching the app takes the
-// supervisor's connect-or-spawn path. A toast with an action stays until acted
-// on or dismissed.
+// The reconnect loop (features/hosts/reconnect) dials again on every drop, so
+// there is nothing for the user to do here.
 const TITLE = "Lost connection to the Hyprlayer server";
 
 export function ServerDisconnectedNotice() {
@@ -24,23 +22,10 @@ export function ServerDisconnectedNotice() {
 
   useEffect(() => {
     const unlisten = events.serverDisconnected.listen(() => {
-      useToast.getState().show(
-        TITLE,
-        "Sessions and terminals keep running on it. Relaunch to reconnect.",
-        {
-          tone: "warn",
-          action: {
-            label: "Relaunch",
-            busyLabel: "Relaunching…",
-            // A relaunch fires neither pagehide nor visibilitychange, so the
-            // debounced writes have to be pushed by hand.
-            onClick: () => {
-              flushPersistedWrites();
-              return relaunch();
-            },
-          },
-        },
-      );
+      if (isPlannedRestart()) return;
+      useToast.getState().show(TITLE, "Sessions and terminals keep running on it. Reconnecting…", {
+        tone: "warn",
+      });
     });
     return () => {
       void unlisten.then((off) => off());

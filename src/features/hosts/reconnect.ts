@@ -62,8 +62,9 @@ export async function retryConnection(): Promise<void> {
     await queryClient.invalidateQueries();
     useReconnectStore.setState({ lostAt: null, halted: false });
   } catch (e) {
-    // The status already on screen is still the best answer; the log keeps why.
     log.info("reconnect", "retry failed", e);
+    // The failure may have changed, e.g. installed but the running server is too old.
+    void queryClient.invalidateQueries({ queryKey: ["connection-status"] });
   } finally {
     running = false;
   }

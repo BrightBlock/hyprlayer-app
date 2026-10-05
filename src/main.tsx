@@ -8,6 +8,7 @@ import { commands } from "./lib/bindings";
 import { attachEventListeners, onServerReconnected, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
 import { reconnectBridge } from "./features/hosts/reconnect";
+import { startServerAutoUpdate } from "./features/hosts/serverAutoUpdate";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
 import {
   activeWorkstreamIds,
@@ -80,6 +81,7 @@ void unwrap(commands.listRunningScripts())
   .then(hydrateRunning)
   .catch((e) => log.warn("startup", "running scripts did not load", e));
 useUpdate.getState().init();
+void startServerAutoUpdate();
 setupNotificationActions();
 startSessionTitleSync();
 setupTranscriptSync();

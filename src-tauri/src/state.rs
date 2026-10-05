@@ -186,6 +186,18 @@ impl AppState {
         guard.lost = false;
     }
 
+    /// A retry failed before this launch ever connected: its reason is newer
+    /// than the launch's. `Lost` keeps `server_disconnected`, what it can promise.
+    pub fn refailed(&self, error: AppError) {
+        let mut guard = self
+            .connection
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if guard.client.is_none() && !guard.lost {
+            guard.failure = Some(error);
+        }
+    }
+
     /// The handshake passed but the connection turned out unusable before it
     /// was ever handed to a command — `setup()`'s second exit, downgraded
     /// (plan Phase 1 §5). `Failed`, not `Lost`: this build never had a
@@ -273,6 +285,26 @@ mod tests {
         let guard = state.read();
         assert!(guard.failure.is_none());
         assert!(!guard.lost);
+    }
+
+    #[test]
+    fn a_failed_retry_replaces_the_launch_failure() {
+        let state = AppState::failed(Target::Own, AppError::server_unavailable("at launch"));
+        state.refailed(AppError::remote_cli_missing("nexus"));
+        let status = state.status();
+        assert_eq!(status.state, ConnectionState::Failed);
+        assert_eq!(status.error.unwrap().code, "remote_cli_missing");
+    }
+
+    #[tokio::test]
+    async fn a_failed_retry_leaves_a_lost_connection_lost() {
+        let client = connected_client().await;
+        let state = AppState::new(client.clone(), Target::Own, false);
+        assert!(state.mark_lost(&client));
+        state.refailed(AppError::remote_cli_missing("nexus"));
+        let status = state.status();
+        assert_eq!(status.state, ConnectionState::Lost);
+        assert_eq!(status.error.unwrap().code, "server_disconnected");
     }
 
     #[tokio::test]

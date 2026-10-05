@@ -25,6 +25,8 @@ import {
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
 import { HostList, LocalServerList, WorkStatus } from "./HostList";
 import { retryConnection } from "./reconnect";
+import { cancelPlannedRestart, planRestart } from "./plannedRestart";
+import { useServerAutoUpdate } from "./serverAutoUpdate";
 import { runProvision, runUpdate, SERVER_OUTDATED, STEP_LABEL } from "./serverInstall";
 import { relaunchNow, SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
 
@@ -130,12 +132,14 @@ function ServerUpdate({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const autoUpdating = useServerAutoUpdate((s) => s.updating);
   const [error, setError] = useState<unknown>(null);
   const label = host ? "Update server" : "Restart server";
 
   async function update() {
     setBusy(true);
     setError(null);
+    planRestart();
     try {
       if (host) {
         setConfirming(false);
@@ -153,6 +157,7 @@ function ServerUpdate({
         onStarted();
       }
     } catch (e) {
+      cancelPlannedRestart();
       setError(e);
     } finally {
       setBusy(false);
@@ -169,8 +174,13 @@ function ServerUpdate({
           this app ships a newer one.
         </p>
       )}
-      <Button variant="primary" onClick={() => setConfirming(true)} disabled={busy}>
-        {label}
+      <Button
+        variant="primary"
+        onClick={() => setConfirming(true)}
+        disabled={busy}
+        busy={autoUpdating}
+      >
+        {autoUpdating ? "Updating…" : label}
       </Button>
       {!confirming && <ErrorNote error={error} />}
       <ConfirmDialog
@@ -259,9 +269,12 @@ export function HostsDialog() {
             >
               Use this machine
             </Button>
-            <Button variant="primary" onClick={relaunchNow}>
-              Relaunch
-            </Button>
+            {/* Connected, the reconnect loop already covers any later drop. */}
+            {blocking && (
+              <Button variant="primary" onClick={relaunchNow}>
+                Relaunch
+              </Button>
+            )}
           </div>
         }
       >

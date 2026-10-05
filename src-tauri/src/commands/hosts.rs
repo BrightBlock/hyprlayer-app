@@ -12,7 +12,7 @@ use crate::error::{AppError, CmdResult};
 use crate::hosts::{self, Host, HostsFile, Target};
 use crate::provision::{self, HostProvisioning, ProvisionStep};
 use crate::state::AppState;
-use crate::supervisor::{self, HostProbe, LocalServer};
+use crate::supervisor::{self, HostActivity, HostProbe, LocalServer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -168,7 +168,10 @@ pub async fn reconnect_server(
             crate::attach_client(&app, client, &configured).await;
             Ok(state.status())
         }
-        supervisor::Outcome::Blocked { error, .. } => Err(error),
+        supervisor::Outcome::Blocked { error, .. } => {
+            state.refailed(error.clone());
+            Err(error)
+        }
     }
 }
 
@@ -189,6 +192,14 @@ pub async fn restart_server(state: State<'_, AppState>) -> CmdResult<()> {
         .request_shutdown()
         .await
         .map_err(AppError::from)
+}
+
+/// Reads what runs on a host refused as too old; the auto-updater waits for it to idle.
+#[tauri::command]
+#[specta::specta]
+pub async fn inspect_outdated_host(app: AppHandle, host: Host) -> CmdResult<HostActivity> {
+    let data_dir = app_data_dir(&app)?;
+    supervisor::outdated_host_activity(&host, &data_dir).await
 }
 
 /// What the connect surface needs before it can offer an install: the host's

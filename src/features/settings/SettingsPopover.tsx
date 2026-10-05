@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
+import { setServerAutoUpdate, useServerAutoUpdate } from "@/features/hosts/serverAutoUpdate";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
@@ -82,6 +83,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
       </div>
       <AppearanceRow />
       {settings ? <ServerBackedRows settings={settings} /> : null}
+      <ServerAutoUpdateRow />
       <div className="mx-1 my-1 h-px bg-edge-2" />
       <WorkshopLink onClose={onClose} />
       <Link to="/settings" search={{ section: "servers" }} onClick={onClose} className={BAR_POPOVER_ROW}>
@@ -156,6 +158,15 @@ function ServerBackedRows({ settings }: { settings: AppSettings }) {
         </div>
       )}
     </>
+  );
+}
+
+function ServerAutoUpdateRow() {
+  const enabled = useServerAutoUpdate((s) => s.enabled);
+  return (
+    <Toggle className={cx(ROW, "flex w-full")} checked={enabled} onChange={setServerAutoUpdate}>
+      <span className="flex-1">Update server when idle</span>
+    </Toggle>
   );
 }
 

@@ -164,13 +164,14 @@ describe("reconnect", () => {
     expect(q.invalidateQueries).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves the reported status alone when the retry does not connect", async () => {
+  it("refetches only the reported status when the retry does not connect", async () => {
     b.reconnectServer.mockResolvedValue(fails(DOWN));
 
     // Swallowed: the caller is a probe or an install, neither of which owns the
     // connection surface's error.
     await expect(driver.retryConnection()).resolves.toBeUndefined();
-    expect(q.invalidateQueries).not.toHaveBeenCalled();
+    expect(q.invalidateQueries).toHaveBeenCalledTimes(1);
+    expect(q.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["connection-status"] });
   });
 
   it("wakes the retry loop instead of dialling beside it", async () => {

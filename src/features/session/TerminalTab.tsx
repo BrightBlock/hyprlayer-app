@@ -15,6 +15,7 @@ import {
 } from "@/lib/terminal/terminalChrome";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
+import { noteActivity } from "@/features/hosts/serverAutoUpdate";
 
 export function TerminalTab({
   workstreamId,
@@ -58,8 +59,10 @@ export function TerminalTab({
       const channel = new Channel<TerminalEvent>();
       created.push(channel);
       channel.onmessage = (ev) => {
-        if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
-        else if (ev.kind === "exited")
+        if (ev.kind === "output") {
+          engine.write(b64ToBytes(ev.data));
+          noteActivity();
+        } else if (ev.kind === "exited")
           engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
       };
       return channel;

@@ -325,6 +325,13 @@ describe("HostsDialog", () => {
     );
   });
 
+  it("offers no relaunch while connected", () => {
+    mockStatus({ state: "connected", host: null, serverVersion: 3, serverRelease: null, serverOutdated: false, transcriptSync: false, error: null });
+    useHostsUiStore.setState({ open: true });
+    render(<HostsDialog />);
+    expect(screen.queryByRole("button", { name: "Relaunch" })).toBeNull();
+  });
+
   it("shows the restart on the header line until the server comes back", async () => {
     const connected: ConnectionStatus = {
       state: "connected",

@@ -291,6 +291,8 @@ export const commands = {
 	 *  the running one so the reconnect starts it. Ends every session there.
 	 */
 	updateHostServer: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("update_host_server", { host, onStep })),
+	/**  Reads what runs on a host refused as too old; the auto-updater waits for it to idle. */
+	inspectOutdatedHost: (host: Host) => typedError<HostActivity, AppError>(__TAURI_INVOKE("inspect_outdated_host", { host })),
 	listLocalServers: () => typedError<LocalServer[], AppError>(__TAURI_INVOKE("list_local_servers")),
 	revealLogs: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_logs")),
 	collectDiagnostics: () => typedError<string, AppError>(__TAURI_INVOKE("collect_diagnostics")),
@@ -984,6 +986,12 @@ export type Host = {
 	/**  The `ssh` destination, e.g. `nexus` or `jt@nexus.local`. */
 	destination: string,
 	label: string,
+};
+
+export type HostActivity = {
+	serverRelease: string | null,
+	sessions: Session[],
+	runningScripts: string[],
 };
 
 export type HostProbe = {

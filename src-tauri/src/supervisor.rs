@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
 use hyprlayer_core::CoreError;
+use hyprlayer_core::{Session, SessionState};
 use hyprlayer_proto::{check_version, WireError, PROTOCOL_VERSION};
 use hyprlayer_server::logging::{self as server_logging, RepeatGate};
 use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
@@ -359,7 +360,7 @@ pub async fn connect_or_spawn(
 /// would silently connect the app to the wrong profile's data, "the single
 /// most damaging mistake available in this plan" (plan, Migration Notes).
 pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
-    match ssh_relay_connect(host, app_data_dir).await {
+    match ssh_relay_connect(host, app_data_dir, false).await {
         Ok((client, relay, expected)) => {
             // The relay attaches to whatever daemon is already running there.
             let fit = server_version::exact_fit(client.server_semver());
@@ -415,9 +416,11 @@ fn host_name(host: &Host) -> String {
     Target::Remote(host.clone()).name()
 }
 
+/// `allow_too_old` keeps a server below `MIN_SERVER_VERSION`, for reading what runs on it.
 async fn ssh_relay_connect(
     host: &Host,
     app_data_dir: &Path,
+    allow_too_old: bool,
 ) -> Result<(Arc<RpcClient>, Relay, Option<String>), AppError> {
     // Never relay a binary this client has not confirmed is its own: the
     // version in the path cannot tell an unreleased build from the release it
@@ -464,7 +467,9 @@ async fn ssh_relay_connect(
 
     let joined = tokio::io::join(stdout, stdin);
     match RpcClient::connect(joined).await {
-        Ok(client) if server_version::fit(client.server_semver()) == Fit::TooOld => {
+        Ok(client)
+            if !allow_too_old && server_version::fit(client.server_semver()) == Fit::TooOld =>
+        {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(DRAIN_TIMEOUT, drained).await;
             Err(AppError::remote_server_outdated(
@@ -676,7 +681,7 @@ pub struct HostProbe {
 /// unconditionally on both the success and the failure path — the failure
 /// path already kills it inside `ssh_relay_connect`.
 pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
-    match ssh_relay_connect(host, app_data_dir).await {
+    match ssh_relay_connect(host, app_data_dir, false).await {
         Ok((client, mut relay, _)) => {
             let server_version = client.server_version();
             drop(client);
@@ -693,6 +698,68 @@ pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
             error: Some(error),
         },
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct HostActivity {
+    pub server_release: Option<String>,
+    pub sessions: Vec<Session>,
+    pub running_scripts: Vec<String>,
+}
+
+/// What runs on a host whose server this app refuses, so the frontend can
+/// update it unattended once it is idle. Closes the relay like `probe_remote`.
+pub async fn outdated_host_activity(
+    host: &Host,
+    app_data_dir: &Path,
+) -> Result<HostActivity, AppError> {
+    let read = async {
+        let (client, mut relay, _) = ssh_relay_connect(host, app_data_dir, true).await?;
+        let server_release = client.server_semver().map(str::to_string);
+        let read = async {
+            let active = client.list_active_sessions().await?;
+            Ok::<_, WireError>((active, client.list_running_scripts().await?))
+        }
+        .await;
+        drop(client);
+        let _ = relay.child.kill().await;
+        let (active, running_scripts) = read.map_err(AppError::from)?;
+        let guess_working = !reports_working(server_release.as_deref());
+        let sessions = active
+            .into_iter()
+            .map(|mut active| {
+                if guess_working {
+                    active.session.working = active.session.state == SessionState::Running;
+                }
+                active.session
+            })
+            .collect();
+        Ok(HostActivity {
+            server_release,
+            sessions,
+            running_scripts,
+        })
+    };
+    tokio::time::timeout(REMOTE_CONNECT_DEADLINE, read)
+        .await
+        .unwrap_or_else(|_| {
+            Err(AppError::remote_unreachable(
+                &host.label,
+                format!(
+                    "it did not respond within {}s.",
+                    REMOTE_CONNECT_DEADLINE.as_secs()
+                ),
+            ))
+        })
+}
+
+/// Servers before 0.8.5 send no `working`, so their idle live harness is
+/// indistinguishable from one mid-turn.
+fn reports_working(semver: Option<&str>) -> bool {
+    semver
+        .and_then(server_version::parse)
+        .is_some_and(|v| v >= semver::Version::new(0, 8, 5))
 }
 
 /// The one dialog that still shows the full message-plus-remedy text as one

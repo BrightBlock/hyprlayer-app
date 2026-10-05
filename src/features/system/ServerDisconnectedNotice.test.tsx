@@ -9,7 +9,6 @@ const b = vi.hoisted(() => {
   let listener: (() => void) | null = null;
   return {
     disconnect: () => listener?.(),
-    relaunch: vi.fn(() => Promise.resolve()),
     events: {
       serverDisconnected: {
         listen: (cb: () => void) => {
@@ -25,7 +24,8 @@ const b = vi.hoisted(() => {
 vi.mock("@/lib/bindings", () => ({ events: b.events }));
 const q = vi.hoisted(() => ({ useConnectionStatus: vi.fn() }));
 vi.mock("@/lib/queries", () => q);
-vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: b.relaunch }));
+const planned = vi.hoisted(() => ({ isPlannedRestart: vi.fn(() => false) }));
+vi.mock("@/features/hosts/plannedRestart", () => planned);
 
 function mockState(state: "connected" | "lost", dataUpdatedAt: number) {
   q.useConnectionStatus.mockReturnValue({ data: { state }, dataUpdatedAt });
@@ -47,16 +47,22 @@ describe("ServerDisconnectedNotice", () => {
     expect(useToast.getState().visible).toBe(false);
   });
 
-  it("raises a sticky warning toast whose action relaunches the app", async () => {
+  it("warns that it is reconnecting, with nothing to press", () => {
     render(<ServerDisconnectedNotice />);
     act(() => b.disconnect());
     const toast = useToast.getState();
     expect(toast.visible).toBe(true);
     expect(toast.tone).toBe("warn");
     expect(toast.title).toContain("Lost connection");
-    expect(toast.action?.label).toBe("Relaunch");
-    await toast.action?.onClick();
-    expect(b.relaunch).toHaveBeenCalledTimes(1);
+    expect(toast.message).toContain("Reconnecting");
+    expect(toast.action).toBeNull();
+  });
+
+  it("stays quiet for a restart this app asked for", () => {
+    planned.isPlannedRestart.mockReturnValueOnce(true);
+    render(<ServerDisconnectedNotice />);
+    act(() => b.disconnect());
+    expect(useToast.getState().visible).toBe(false);
   });
 
   it("takes the toast down once the connection is back", () => {

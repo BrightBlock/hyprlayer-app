@@ -233,6 +233,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::inspect_host_provisioning,
             commands::hosts::provision_host,
             commands::hosts::update_host_server,
+            commands::hosts::inspect_outdated_host,
             commands::hosts::list_local_servers,
             commands::diagnostics::reveal_logs,
             commands::diagnostics::collect_diagnostics,
