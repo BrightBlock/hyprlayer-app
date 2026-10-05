@@ -130,6 +130,7 @@ pub async fn run_codex_followup_for_test(
     let actors = SessionActors::new(
         Arc::new(crate::store::Db::open_in_memory().expect("in-memory db for a test followup")),
         broadcast::channel(8).0,
+        None,
     );
     run_followup(
         "test",

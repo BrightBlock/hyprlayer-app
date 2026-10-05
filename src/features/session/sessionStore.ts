@@ -33,7 +33,7 @@ import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
-import type { DocKind } from "@/lib/domain/docs";
+import type { DocType } from "@/lib/domain/docs";
 import { docTitle, sessionDocs } from "./toolDisplay";
 import { artifactsFromItems, type SessionArtifact } from "./artifacts";
 import { forgetWorkstreamDocs, useWrittenDocs } from "./writtenDocs";
@@ -1736,7 +1736,7 @@ export function useSession(sessionId: string | undefined): SessionEntry | undefi
   return useSessionStore((s) => (sessionId ? s.sessions[sessionId] : undefined));
 }
 
-export type CreatedDoc = { path: string; kind: DocKind; title: string };
+export type CreatedDoc = { path: string; kind: DocType; title: string };
 
 export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
   const written = useWrittenDocs(workstreamId);
@@ -1760,7 +1760,7 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
     () =>
       keys.map((k) => {
         const tab = k.indexOf("\t");
-        const kind = k.slice(0, tab) as DocKind;
+        const kind = k.slice(0, tab) as DocType;
         const path = k.slice(tab + 1);
         return { kind, path, title: docTitle(path) };
       }),
@@ -1770,7 +1770,7 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
 
 export function useMostRecentDoc(
   workstreamId: string | null,
-  kind: DocKind | null,
+  kind: DocType | null,
 ): CreatedDoc | null {
   const written = useWrittenDocs(workstreamId);
   const key = useSessionStore(
@@ -1784,7 +1784,7 @@ export function useMostRecentDoc(
     }),
   );
   return useMemo(
-    () => (key ? { kind: kind as DocKind, path: key, title: docTitle(key) } : null),
+    () => (key ? { kind: kind as DocType, path: key, title: docTitle(key) } : null),
     [key, kind],
   );
 }

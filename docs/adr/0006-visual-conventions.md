@@ -9,7 +9,8 @@ amended 2026-09-26 (user text size via --text-scale and font families; see "Appe
 amended 2026-09-28 (the Agent sessions status-bar button and popover) ·
 amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote chip, composer sync
 line and draft guard, presence badge; see "Remote sync surfaces") ·
-amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell")
+amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell") ·
+amended 2026-10 (the Library's mail shell; see "Library: mail shell")
 
 ## Decision
 
@@ -71,12 +72,11 @@ row primitive existed. Resist adding a third tier for a row that merely
 
 Left unmigrated, by design, not oversight:
 
-- **The 32px row band** — `Root.tsx`'s pinned-workstream row (`:1824-1838`),
-  `LibrarySidebar.tsx`'s theme/profile switcher rows, and
+- **The 32px row band** — `Root.tsx`'s pinned-workstream row (`:1824-1838`) and
   `ComposerAutocomplete.tsx`'s autocomplete row (`:396-398`). A third row tier
   would defeat the two-tier point; these stay hand-rolled.
-- **The multi-line rows** — `WorkstreamDocsPanel`'s doc row (~63px) and
-  `LibrarySidebar`'s doc row (~73px) (`ArchivedAgentsView`'s ~70px row was a
+- **The multi-line rows** — `WorkstreamDocsPanel`'s doc row (~63px) and the
+  Library's `MailRow` (see "Library: mail shell") (`ArchivedAgentsView`'s ~70px row was a
   third, until the view was deleted on 2026-09-25 in favour of the status-bar
   popover). None of these are single-line content, so the 28/36px vocabulary
   doesn't apply to them.
@@ -84,13 +84,13 @@ Left unmigrated, by design, not oversight:
   "Tree indent" below.
 - **`Root.tsx`'s hand-tuned `pl-10`** (`style={{ paddingLeft: 40 }}` at
   `:2020`) — see "Tree indent" below.
-- **Three of the four `RowSpine`-shaped literals.** `RowSpine` (`ui.tsx:1059-1061`)
+- **Two of the three `RowSpine`-shaped literals.** `RowSpine` (`ui.tsx:1059-1061`)
   replaced the inline `<span className="absolute inset-y-0 left-0 w-[3px]
   bg-accent">` only at its one canonical call site, `Root.tsx:2035`. The
-  identical literal still stands, un-migrated, at `Settings.tsx:1138`,
-  `Root.tsx:1901` (the pinned row, deliberately off the row tiers per above),
-  and `LibrarySidebar.tsx:146`. Recorded here rather than silently claiming
-  the spine is a single mechanism everywhere it appears.
+  identical literal still stands, un-migrated, at `Settings.tsx:1138` and
+  `Root.tsx:1901` (the pinned row, deliberately off the row tiers per above).
+  Recorded here rather than silently claiming the spine is a single mechanism
+  everywhere it appears.
 
 ### Hover and selection
 
@@ -128,7 +128,7 @@ wrong. Verified examples: `Dialog`'s close button (`ui.tsx:593`, on the
 panel's `bg-panel` surface but styled as inline chrome), `RefreshButton`'s
 icon-only branch (`:787`), `ScriptDock.tsx`'s Run/Configure button-group
 controls (`:302`, `:476`, `:495`, `:555`, `:566`, all resting on `bg-panel-2`),
-and `DocDetail.tsx`'s two header icon buttons (`:152`, `:168`). A sibling,
+and `DocDetail.tsx`'s Reveal button in its header. A sibling,
 unnamed case — `hover:bg-panel` on `AgentEditor.tsx:997`'s collaborator-remove
 button — was left alone for the identical reason and is recorded here rather
 than pretending the app converged on exactly two values everywhere.
@@ -612,8 +612,8 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
     equivalent to alias. They are not part of the design vocabulary — nothing
     in the app may use `bg-ansi-*`; they exist solely for
     `xtermThemeFromCss()` to read.
-  - **The two `h-11` Library headers** (`DocDetail.tsx:108`,
-    `LibrarySidebar.tsx:70`), 4px taller than the 40px window bar. PR #213
+  - **The two `h-11` Library headers** (`DocDetail.tsx`'s toolbar and
+    `DocRail.tsx`'s header), 4px taller than the 40px window bar. PR #213
     recorded this as known-and-left; still left.
   - **The 32px row band and the multi-line rows** — named above under "Row
     tiers." Three tiers would defeat a two-tier vocabulary.
@@ -625,9 +625,9 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
     tier** — named above under "Hover and selection." Not a gap in the
     two-value split; a third, deliberate value for a case the two-value split
     was never meant to cover.
-  - **Three of the four `RowSpine`-shaped literals** (`Settings.tsx:1138`,
-    `Root.tsx:1901`, `LibrarySidebar.tsx:146`) — named above under "Row
-    tiers." Only `Root.tsx:2035` runs through the `RowSpine` component.
+  - **Two of the three `RowSpine`-shaped literals** (`Settings.tsx:1138`,
+    `Root.tsx:1901`) — named above under "Row tiers." Only `Root.tsx:2035`
+    runs through the `RowSpine` component.
 
 ### Motion (2026-10-01)
 
@@ -665,3 +665,34 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   opened from the header sidebar toggle, and the list column is fixed at `SIDE_PANEL_MIN`.
 - `AgentList.tsx` exists again as the Workshop's list column. It is unrelated to the table file
   "Row tiers" says was removed.
+
+### Library: mail shell (2026-10)
+
+`/library` is a mail view; the single `LibrarySidebar` and its by-type grouping are gone.
+
+- **Panes.** A fixed 208px nav (`LIBRARY_NAV_WIDTH`), a list column (344px default, 280–480,
+  persisted as `libraryListWidth`), the doc column, then a 300px rail (`DOC_RAIL_WIDTH`; a persisted
+  `docRailWidth` wins, so only fresh profiles see 300). Nav and list render through `PaneFrame`
+  (`src/components/paneFrame.tsx`), which `WorkshopFrame` also renders. Below `NARROW_WIDTH` the nav
+  is an overlay drawer (`narrowDrawer === "library"`) and the list is fixed at `SIDE_PANEL_MIN`.
+- **Nav rows.** `rowClass({ tier: "compact", selected: "spine" })` plus `RowSpine` on the active box
+  or project, with mono `text-meta text-ink-4` counts. Projects list pins first, then the busiest
+  projects up to five rows.
+- **Message row.** `MailRow` is a multi-line row outside the tiers (`px-3.5 py-2.5`): selected is
+  `bg-accent-soft` plus `RowSpine`, hover `hover:bg-edge/50`. The list divides with
+  `divide-y divide-edge/60`. The type chip is lowercase.
+- **Size exceptions.** The 28px mail avatar (two-letter `initials()` from `src/lib/format.ts`), its
+  16px agent badge (neutral `bg-panel-2`, `ring-2 ring-panel`), and the 7px `info` unread dot.
+- **Status pill.** `DocStatusPill` (`src/components/DocStatusPill.tsx`) is the one doc-status style,
+  wherever a status renders: draft `bg-tag-draft-bg text-warn-ink`, active `bg-ok/10 text-diff-add`,
+  implemented `bg-accent-soft text-ink-2`, superseded, archived and unknown values
+  `bg-panel-2 text-ink-4`. `diff-add` and `warn-ink` resolve per theme, so the pills hold on dark.
+- **Project picker.** A fixed 300px `Popover` with `trapFocus` and a `Kbd` footer on `bg-panel-2`
+  (`↵` scopes, `⌘↵` pins); a row's hover star also pins.
+- **Doc column and rail header.** The doc toolbar's width toggle is `SegmentedControl
+  variant="bordered"` (`border-edge`, `accent-soft` selected segment), for a toggle sitting on a
+  panel toolbar. "Written by" links quietly (`text-ink-2`, underline on hover). The rail's
+  `h-11` header owns `SaveStatus`, Edit/Done and Save while the rail is open; with it closed they
+  move to the toolbar, so there is one set of save controls.
+- **Blank.** `LibraryBlank` replaces the whole frame only when thoughts is unconfigured or the
+  unscoped count is 0. An empty scoped project keeps the frame and says so in the list.

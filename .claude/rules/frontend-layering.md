@@ -24,7 +24,7 @@ feature in at startup. Examples: `lib/events.registerEventBridge`,
 
 ## Domain types
 
-- Shared vocabulary (Stage, Harness, DocKind, PermissionMode) lives in `src/lib/domain/`,
+- Shared vocabulary (Stage, Harness, DocType, PermissionMode) lives in `src/lib/domain/`,
   derived from Rust enum bindings. Never re-declare.
 - Feature-owned domain types (e.g. `ShellTab`, `WsTabState`) live in the feature that
   owns their persistence, never in a route file.

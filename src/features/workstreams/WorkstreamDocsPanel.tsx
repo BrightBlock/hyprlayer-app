@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 
+import { DocStatusPill } from "@/components/DocStatusPill";
 import { Badge, Button, DropdownSelect, ErrorNote, Spinner, TextInput } from "@/components/ui";
-import { DOC_TYPES, STATUS_TONE } from "@/features/library/constants";
 import { docTitle } from "@/features/library/text";
 import type { DocMeta, ThoughtQuery } from "@/lib/bindings";
+import { DOC_TYPES } from "@/lib/domain/docs";
 import { useDocs, MIN_DOC_TEXT_QUERY } from "@/lib/queries";
 
 export function roleForDoc(doc: DocMeta): string {
@@ -110,9 +111,7 @@ export function WorkstreamDocsPanel({
                 </button>
                 <div className="flex shrink-0 items-center gap-1.5">
                   {doc.fm.type && <Badge tone="accent">{doc.fm.type}</Badge>}
-                  {doc.fm.status && (
-                    <Badge tone={STATUS_TONE[doc.fm.status] ?? "dim"}>{doc.fm.status}</Badge>
-                  )}
+                  {doc.fm.status && <DocStatusPill status={doc.fm.status} />}
                   <Button
                     onClick={() =>
                       isAttached ? onDetach(doc.id) : onAttach(doc.id, roleForDoc(doc))

@@ -186,6 +186,34 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE review_comments
         ADD COLUMN reply_to_note_id TEXT REFERENCES review_notes(id) ON DELETE SET NULL;
     ",
+    // No FK: rows key on the thoughts index's doc id, which is not a DB entity.
+    "
+    CREATE TABLE doc_reads (
+        doc_id        TEXT PRIMARY KEY,
+        read_mtime_ms REAL NOT NULL,
+        read_hash     INTEGER NOT NULL DEFAULT 0,
+        read_size     REAL NOT NULL DEFAULT 0,
+        unread        INTEGER NOT NULL DEFAULT 0,
+        updated_at    REAL NOT NULL
+    );
+    CREATE TABLE library_state (
+        key   TEXT PRIMARY KEY,
+        value REAL NOT NULL
+    );
+    ",
+    // No FK to sessions/workstreams: authorship is history and outlives archive cascades.
+    "
+    CREATE TABLE doc_agents (
+        doc_id        TEXT NOT NULL,
+        session_id    TEXT NOT NULL,
+        harness       TEXT NOT NULL,
+        workstream_id TEXT NOT NULL,
+        first_at      REAL NOT NULL,
+        last_at       REAL NOT NULL,
+        PRIMARY KEY (doc_id, session_id)
+    );
+    CREATE INDEX idx_doc_agents_doc ON doc_agents(doc_id, last_at);
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

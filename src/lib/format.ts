@@ -59,6 +59,17 @@ export function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
 
+// Two letters even for a one-word handle ("jt" → "JT").
+export function initials(handle: string | null | undefined): string | null {
+  const words = (handle ?? "").split(/[\s._-]+/).filter(Boolean);
+  if (words.length === 0) return null;
+  const letters =
+    words.length === 1
+      ? Array.from(words[0]).slice(0, 2)
+      : [Array.from(words[0])[0], Array.from(words[words.length - 1])[0]];
+  return letters.join("").toUpperCase();
+}
+
 export function initialsOf(name: string): string {
   return name
     .split(/\s+/)

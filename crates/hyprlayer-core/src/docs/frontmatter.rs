@@ -3,6 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::vocab::DocType;
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", default)]
@@ -331,14 +333,7 @@ pub fn apply_path_fallbacks(fm: &mut Frontmatter, abs_path: &Path) {
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str())
             .unwrap_or_default();
-        fm.doc_type = match parent {
-            "plans" => Some("plan".into()),
-            "research" => Some("research".into()),
-            "handoffs" => Some("handoff".into()),
-            "prs" => Some("pr".into()),
-            "notes" => Some("note".into()),
-            _ => None,
-        };
+        fm.doc_type = DocType::from_dir_name(parent).map(|t| t.as_str().into());
     }
 }
 

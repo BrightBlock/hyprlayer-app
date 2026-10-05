@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
+import { Button, SaveStatus } from "@/components/ui";
 import type { DocContent } from "@/lib/bindings";
 import { useUiStore } from "@/lib/uiStore";
 import type { ActiveHeading } from "./editor/contentsNav";
@@ -112,6 +113,12 @@ type Props = {
   active: ActiveHeading;
   onJumpToHeading: (index: number) => void;
   width: number;
+  saving: boolean;
+  dirty: boolean;
+  justSaved: boolean;
+  editing: boolean;
+  onEdit: () => void;
+  onSave: () => void;
 };
 
 export function DocRail({
@@ -125,6 +132,12 @@ export function DocRail({
   active,
   onJumpToHeading,
   width,
+  saving,
+  dirty,
+  justSaved,
+  editing,
+  onEdit,
+  onSave,
 }: Props) {
   const contentsCollapsed = useUiStore((s) => s.docRailContentsCollapsed);
   const toggleContents = useUiStore((s) => s.toggleDocRailContents);
@@ -133,6 +146,17 @@ export function DocRail({
 
   return (
     <div className="flex min-h-0 shrink-0 flex-col border-l border-edge bg-panel" style={{ width }}>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-edge px-3">
+        <SaveStatus saving={saving} dirty={dirty} justSaved={justSaved} readOnly={false} />
+        <span className="flex-1" />
+        {/* Keeps the editor focused, so its blur-to-exit doesn't race this toggle. */}
+        <Button size="sm" onMouseDown={(e) => e.preventDefault()} onClick={onEdit}>
+          {editing ? "Done" : "Edit"}
+        </Button>
+        <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={onSave}>
+          Save
+        </Button>
+      </div>
       <RailSection title="Contents" count={headings.length} collapsed={contentsCollapsed} onToggle={toggleContents}>
         <ContentsList headings={headings} active={active} onJumpToHeading={onJumpToHeading} />
       </RailSection>

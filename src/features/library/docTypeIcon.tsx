@@ -1,14 +1,8 @@
 import type { IconName } from "@/components/Icon";
-
-const TYPE_ICON: Record<string, IconName> = {
-  plan: "tasks",
-  research: "research",
-  handoff: "handoff",
-  note: "note",
-  pr: "pullRequest",
-  external: "external",
-};
+import { DOC_TYPE_META, asDocType } from "@/lib/domain/docs";
 
 export function docTypeIcon(type: string | null): IconName {
-  return (type && TYPE_ICON[type]) || "docText";
+  if (type === "external") return "external";
+  const known = asDocType(type);
+  return known ? DOC_TYPE_META[known].icon : "docText";
 }

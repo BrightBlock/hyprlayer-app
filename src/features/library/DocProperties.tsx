@@ -1,6 +1,11 @@
-import type { DocContent } from "@/lib/bindings";
-import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES } from "./constants";
-import { fieldValue, placeholder as placeholderFor, type FmDraft, type SchemaKey } from "./fmDraft";
+import { useNavigate } from "@tanstack/react-router";
+
+import { BrandMark, harnessBrand } from "@/components/BrandMark";
+import { selectAgentTab } from "@/features/search/selectAgentTab";
+import type { DocAgent, DocContent } from "@/lib/bindings";
+import { DOC_SCOPES, DOC_STATUSES, DOC_TYPES } from "@/lib/domain/docs";
+import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
+import { fieldValue, fileValue, placeholder as placeholderFor, type FmDraft, type SchemaKey } from "./fmDraft";
 import { AuthorField, DateField, EnumSelect, PropertyRow, TagsField, TextField, TicketField } from "./propertyControls";
 import { RawFrontmatter } from "./RawFrontmatter";
 import { RelatedField } from "./RelatedField";
@@ -22,6 +27,7 @@ export function DocProperties({ doc, draft, onChange, raw, setRaw, disabled }: P
   const str = (key: SchemaKey) => fieldValue(fm, fmKeys, draft, key) as string;
   const list = (key: SchemaKey) => fieldValue(fm, fmKeys, draft, key) as string[];
   const hint = (key: SchemaKey) => placeholderFor(fm, fmKeys, key);
+  const savedStatus = fileValue(fm, fmKeys, "status") as string;
 
   return (
     <div>
@@ -50,6 +56,9 @@ export function DocProperties({ doc, draft, onChange, raw, setRaw, disabled }: P
               placeholder={hint("status")}
               onChange={(v) => onChange("status", v)}
             />
+            {draft.status && savedStatus && (
+              <span className="mx-2 mt-0.5 block text-ui-sm text-warn-ink">was {savedStatus} · unsaved</span>
+            )}
           </PropertyRow>
           <PropertyRow id="fm-ticket" label="Ticket">
             <TicketField
@@ -86,6 +95,7 @@ export function DocProperties({ doc, draft, onChange, raw, setRaw, disabled }: P
               placeholder={hint("author")}
               onChange={(v) => onChange("author", v)}
             />
+            {doc.meta.agent && <WrittenBy agent={doc.meta.agent} />}
           </PropertyRow>
           <PropertyRow id="fm-related" label="Related">
             <RelatedField id={doc.meta.id} values={list("related")} onChange={(v) => onChange("related", v)} />
@@ -100,5 +110,33 @@ export function DocProperties({ doc, draft, onChange, raw, setRaw, disabled }: P
         disabled={disabled}
       />
     </div>
+  );
+}
+
+function WrittenBy({ agent }: { agent: DocAgent }) {
+  const navigate = useNavigate();
+  const { projectPath, workstreamId, sessionId } = agent;
+  const name = HARNESS_SHORT_LABEL[agent.harness];
+  return (
+    <span className="mx-2 mt-1 flex items-center gap-1.5 text-ui-sm text-ink-dim">
+      <BrandMark brand={harnessBrand(agent.harness)} size="xs" />
+      <span>
+        Written by{" "}
+        {projectPath ? (
+          <button
+            type="button"
+            className="text-ink-2 hover:text-ink hover:underline"
+            onClick={() => {
+              void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: { item: workstreamId } });
+              void selectAgentTab(workstreamId, sessionId);
+            }}
+          >
+            {name}
+          </button>
+        ) : (
+          name
+        )}
+      </span>
+    </span>
   );
 }

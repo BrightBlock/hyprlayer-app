@@ -99,12 +99,20 @@ pub(crate) fn text_score(matcher: &TextMatcher, meta: &DocMeta, body: &[u8]) -> 
         .as_deref()
         .map(str::to_lowercase)
         .unwrap_or_default();
+    let ticket_lc = meta
+        .fm
+        .ticket
+        .as_deref()
+        .map(str::to_lowercase)
+        .unwrap_or_default();
     let tags_lc: Vec<String> = meta.fm.tags.iter().map(|t| t.to_lowercase()).collect();
     let body_hits = matcher.count_each(body);
 
     let mut score: u32 = 0;
     for (i, needle) in matcher.needles().iter().enumerate() {
         let title_hits = count_occurrences(&title_lc, needle);
+        // An exact ticket is as strong a signal as the title.
+        let ticket_hits = count_occurrences(&ticket_lc, needle);
         let tag_hits = u32::try_from(
             tags_lc
                 .iter()
@@ -113,11 +121,12 @@ pub(crate) fn text_score(matcher: &TextMatcher, meta: &DocMeta, body: &[u8]) -> 
         )
         .unwrap_or(u32::MAX);
         let body_hits = body_hits[i];
-        if title_hits == 0 && tag_hits == 0 && body_hits == 0 {
+        if title_hits == 0 && ticket_hits == 0 && tag_hits == 0 && body_hits == 0 {
             return None;
         }
         score = score
             .saturating_add(title_hits.saturating_mul(8))
+            .saturating_add(ticket_hits.saturating_mul(8))
             .saturating_add(tag_hits.saturating_mul(4))
             .saturating_add(body_hits);
     }
@@ -215,6 +224,9 @@ mod tests {
             fm_warnings: vec![],
             mtime_ms: mtime,
             size_bytes: 0.0,
+            excerpt: String::new(),
+            unread: false,
+            agent: None,
         }
     }
 

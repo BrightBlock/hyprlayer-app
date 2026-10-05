@@ -13,6 +13,15 @@ pub enum ThoughtsIndexUpdateKind {
     Rescanned,
 }
 
+/// Why a doc's Library state changed: a read toggle, or an agent wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum DocStateChange {
+    Read,
+    Agent,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -22,6 +31,11 @@ pub enum RuntimeEvent {
     ThoughtsIndexUpdated {
         update: ThoughtsIndexUpdateKind,
         ids: Vec<String>,
+    },
+    /// Never folded into `ThoughtsIndexUpdated`, whose ids clients credit to active workstreams.
+    DocStateChanged {
+        ids: Vec<String>,
+        change: DocStateChange,
     },
     ProjectsChanged,
     PrStatusChanged {

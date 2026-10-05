@@ -79,7 +79,7 @@ user data, and carry their own automated and manual verification.
 
 ### Runtime events
 
-`hyprlayer-models::RuntimeEvent` contains exactly:
+`hyprlayer-models::RuntimeEvent` contains, among others:
 
 ```rust
 pub enum RuntimeEvent {
@@ -119,12 +119,21 @@ pub enum RuntimeEvent {
         status: StepStatus,
         detail: Option<String>,
     },
+    DocStateChanged {
+        ids: Vec<String>,
+        change: DocStateChange,
+    },
 }
 
 pub enum ThoughtsIndexUpdateKind {
     Updated,
     Removed,
     Rescanned,
+}
+
+pub enum DocStateChange {
+    Read,
+    Agent,
 }
 ```
 
@@ -142,6 +151,7 @@ Tauri maps each variant to today's existing event:
 | `SessionLifecycle` | `events::SessionLifecycle` |
 | `ScriptRunChanged` | `events::ScriptRunChanged` |
 | `ProjectCreateProgress` | `events::ProjectCreateProgress` |
+| `DocStateChanged` | `events::DocStateChanged` |
 
 `OmarchyThemeChanged` and `QuitRequested` remain Tauri-only; they never become
 `RuntimeEvent` variants.

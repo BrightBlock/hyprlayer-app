@@ -199,7 +199,7 @@ subscribe before the call whose event you want to observe; a slow subscriber
 lags and receives `RecvError::Lagged`.
 
 `RuntimeEvent` (defined in `hyprlayer-models`, re-exported at
-`hyprlayer_core::RuntimeEvent`) has exactly ten variants:
+`hyprlayer_core::RuntimeEvent`) has these variants, among others:
 
 | Variant | Payload |
 |---|---|
@@ -213,8 +213,9 @@ lags and receives `RecvError::Lagged`.
 | `SessionLifecycle` | `session_id`, `workstream_id`, `state: SessionState` |
 | `ScriptRunChanged` | `workstream_id`, `kind: ScriptKind`, `phase: RunPhase`, `exit_code: Option<i32>`, `port: Option<u16>` |
 | `ProjectCreateProgress` | `op_id`, `step: CreateStep`, `status: StepStatus`, `detail: Option<String>` |
+| `DocStateChanged` | `ids: Vec<String>`, `change: DocStateChange` |
 
-`ThoughtsIndexUpdateKind` is `Updated | Removed | Rescanned`.
+`ThoughtsIndexUpdateKind` is `Updated | Removed | Rescanned`. `DocStateChange` is `Read | Agent`; read state never rides `ThoughtsIndexUpdated`, which clients treat as a write.
 
 ## Services
 
@@ -329,10 +330,11 @@ registered project directory.
 
 ### `LibraryService`
 
-`resolve_path(&str)` (sync), `query(ThoughtQuery)`, `get(&str)`,
-`save(&str, String, base_mtime_ms: f64)`, `patch_frontmatter(&str, FmPatch, f64)`,
-`save_parts(&str, String, FrontmatterEdit, f64)`, `resolve_related(&str, Vec<String>)`,
-`create(CreateDocumentRequest)`, `thoughts_git_status(&str)`.
+`resolve_path(&str)` (sync), `query(ThoughtQuery)`, `counts(Option<String>)`,
+`get(&str)`, `save(&str, String, base_mtime_ms: f64)`,
+`patch_frontmatter(&str, FmPatch, f64)`, `save_parts(&str, String, FrontmatterEdit, f64)`,
+`resolve_related(&str, Vec<String>)`, `create(CreateDocumentRequest)`,
+`mark_read(&str)`, `mark_unread(&str)`, `thoughts_git_status(&str)`.
 
 The `base_mtime_ms` argument on `save`, `patch_frontmatter` and `save_parts` is the
 optimistic concurrency token: a stale value fails the write rather than clobbering

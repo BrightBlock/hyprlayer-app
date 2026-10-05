@@ -1,7 +1,9 @@
 import type { ThoughtQuery } from "@/lib/bindings";
 import { MIN_DOC_TEXT_QUERY } from "@/lib/queries";
+import { asLibraryBox, boxQuery } from "./libraryBoxes";
 import type { LibrarySearch } from "./librarySearch";
-import { DOC_PAGE_SIZE } from "./constants";
+
+export const DOC_PAGE_SIZE = 50;
 
 export function splitParam(value: string | undefined): string[] {
   return value
@@ -23,8 +25,9 @@ export function docQueryFromSearch(search: LibrarySearch): ThoughtQuery {
     authors: splitParam(search.author),
     tags: splitParam(search.tag),
     tagMode: "or",
-    sort: hasText ? "relevance" : "date",
+    sort: hasText ? "relevance" : (search.sort ?? "mtime"),
     limit: DOC_PAGE_SIZE,
-    offset: 0,
+    // The box wins on its own dimension.
+    ...boxQuery(asLibraryBox(search.box)),
   };
 }

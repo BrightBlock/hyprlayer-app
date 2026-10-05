@@ -10,6 +10,7 @@ use hyprlayer_models::{ClientRef, RevisedTurn, RuntimeEvent, SessionTurns};
 use crate::agent::AgentDriver;
 use crate::claude::{ExitOutcome, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
+use crate::runtime::attribution::{self, DocAttribution};
 use crate::store::session_event_codec::encode_raw_event;
 use crate::store::{
     ApplySessionEventOutcome, Db, FieldOp, LogCursor, SessionLogEntry, SessionRowMutation,
@@ -285,6 +286,7 @@ pub(crate) fn spawn(
     session_id: String,
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
+    attribution: Option<Arc<DocAttribution>>,
 ) -> ActorHandle {
     let (ingress_tx, ingress_rx) = mpsc::channel(INGRESS_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel();
@@ -292,6 +294,7 @@ pub(crate) fn spawn(
         session_id,
         db,
         events,
+        attribution,
         ingress_tx.clone(),
         ingress_rx,
         control_rx,
@@ -307,11 +310,12 @@ async fn run(
     session_id: String,
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
+    attribution: Option<Arc<DocAttribution>>,
     ingress_sender: mpsc::Sender<SessionEvent>,
     mut ingress_rx: mpsc::Receiver<SessionEvent>,
     mut control_rx: mpsc::UnboundedReceiver<Control>,
 ) {
-    let mut state = ActorState::new(session_id, db, events, ingress_sender).await;
+    let mut state = ActorState::new(session_id, db, events, attribution, ingress_sender).await;
     loop {
         tokio::select! {
             biased;
@@ -395,6 +399,9 @@ struct ActorState {
     /// Rows visible since the last announced revision; flushed onto it.
     riders: Vec<RevisedTurn>,
     reservations: HashMap<String, Reservation>,
+    attribution: Option<Arc<DocAttribution>>,
+    /// Write tool id → its paths, until the result says whether it landed.
+    pending_writes: HashMap<String, Vec<String>>,
 }
 
 impl ActorState {
@@ -402,6 +409,7 @@ impl ActorState {
         session_id: String,
         db: Arc<Db>,
         events: broadcast::Sender<RuntimeEvent>,
+        attribution: Option<Arc<DocAttribution>>,
         ingress_sender: mpsc::Sender<SessionEvent>,
     ) -> Self {
         let sid = session_id.clone();
@@ -438,6 +446,8 @@ impl ActorState {
             next_turn: None,
             riders: Vec::new(),
             reservations: HashMap::new(),
+            attribution,
+            pending_writes: HashMap::new(),
         }
     }
 
@@ -728,6 +738,7 @@ impl ActorState {
                 }
             }
         }
+        self.track_writes(&event);
 
         let unreportable_exit =
             matches!(&event, SessionEvent::Exited { outcome, .. } if !outcome.is_reportable());
@@ -890,6 +901,36 @@ impl ActorState {
             self.next_turn = None;
         }
         author
+    }
+
+    /// Recording runs in its own task: it reads config and disk, which the actor never waits on.
+    fn track_writes(&mut self, event: &SessionEvent) {
+        let Some(attribution) = &self.attribution else {
+            return;
+        };
+        match event {
+            SessionEvent::ToolUse {
+                id, name, input, ..
+            } => {
+                let paths = attribution::write_paths(name, input);
+                if !paths.is_empty() {
+                    self.pending_writes.insert(id.clone(), paths);
+                }
+            }
+            SessionEvent::ToolResult {
+                tool_use_id,
+                is_error,
+                ..
+            } => {
+                if let Some(paths) = self.pending_writes.remove(tool_use_id) {
+                    if !is_error {
+                        tokio::spawn(attribution.clone().record(self.session_id.clone(), paths));
+                    }
+                }
+            }
+            SessionEvent::Exited { .. } => self.pending_writes.clear(),
+            _ => {}
+        }
     }
 
     fn current_author(&self) -> Option<ClientRef> {

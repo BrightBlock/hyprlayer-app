@@ -10,7 +10,7 @@ use notify_debouncer_full::{
 };
 
 use super::indexer::ThoughtsIndex;
-use super::roots::ThoughtsRoot;
+use super::roots::{canon_roots, rebase_onto_roots, RootCanon, ThoughtsRoot};
 use crate::error::{CoreError, Result};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,25 +30,12 @@ impl std::fmt::Debug for WatchHandle {
     }
 }
 
-struct WatchedRoot {
-    root: ThoughtsRoot,
-    canon: Option<PathBuf>,
-}
-
 pub fn watch_roots(
     index: Arc<ThoughtsIndex>,
     roots: Vec<ThoughtsRoot>,
     on_event: Box<dyn Fn(IndexEvent) + Send + Sync>,
 ) -> Result<WatchHandle> {
-    let watched: Vec<WatchedRoot> = roots
-        .iter()
-        .map(|root| WatchedRoot {
-            canon: std::fs::canonicalize(&root.root)
-                .ok()
-                .filter(|c| c != &root.root),
-            root: root.clone(),
-        })
-        .collect();
+    let watched = canon_roots(&roots);
 
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
@@ -263,7 +250,7 @@ fn is_build_noise(path: &Path) -> bool {
 
 fn handle_batch(
     index: &ThoughtsIndex,
-    watched: &[WatchedRoot],
+    watched: &[RootCanon],
     on_event: &(dyn Fn(IndexEvent) + Send + Sync),
     events: Vec<DebouncedEvent>,
 ) {
@@ -297,7 +284,7 @@ fn handle_batch(
     let mut updated: Vec<String> = Vec::new();
     let mut removed: Vec<String> = Vec::new();
     for path in paths {
-        let Some((root, local)) = resolve_owner(watched, &path) else {
+        let Some((root, local)) = rebase_onto_roots(watched, &path) else {
             continue;
         };
         match std::fs::metadata(&local) {
@@ -333,32 +320,6 @@ fn handle_batch(
     }
 }
 
-fn resolve_owner<'a>(
-    watched: &'a [WatchedRoot],
-    path: &Path,
-) -> Option<(&'a ThoughtsRoot, PathBuf)> {
-    let mut best: Option<(&ThoughtsRoot, PathBuf, usize)> = None;
-    let mut consider = |root: &'a ThoughtsRoot, local: PathBuf, depth: usize| {
-        if best.as_ref().is_none_or(|(_, _, d)| depth > *d) {
-            best = Some((root, local, depth));
-        }
-    };
-    for w in watched {
-        if path.starts_with(&w.root.root) {
-            consider(
-                &w.root,
-                path.to_path_buf(),
-                w.root.root.components().count(),
-            );
-        } else if let Some(canon) = &w.canon {
-            if let Ok(rel) = path.strip_prefix(canon) {
-                consider(&w.root, w.root.root.join(rel), canon.components().count());
-            }
-        }
-    }
-    best.map(|(root, local, _)| (root, local))
-}
-
 pub(crate) fn notify_to_core(err: notify::Error) -> CoreError {
     CoreError::Io(std::io::Error::other(err))
 }
@@ -376,34 +337,6 @@ mod tests {
             backend: BackendKind::Git,
             profile: None,
         }
-    }
-
-    #[test]
-    fn resolve_owner_prefers_deepest_root_and_rebases_canonical_paths() {
-        let watched = vec![
-            WatchedRoot {
-                root: root_at("/a"),
-                canon: None,
-            },
-            WatchedRoot {
-                root: root_at("/a/nested"),
-                canon: None,
-            },
-            WatchedRoot {
-                root: root_at("/sym/root"),
-                canon: Some(PathBuf::from("/real/root")),
-            },
-        ];
-
-        let (root, local) = resolve_owner(&watched, Path::new("/a/nested/x.md")).unwrap();
-        assert_eq!(root.root, PathBuf::from("/a/nested"));
-        assert_eq!(local, PathBuf::from("/a/nested/x.md"));
-
-        let (root, local) = resolve_owner(&watched, Path::new("/real/root/global/x.md")).unwrap();
-        assert_eq!(root.root, PathBuf::from("/sym/root"));
-        assert_eq!(local, PathBuf::from("/sym/root/global/x.md"));
-
-        assert!(resolve_owner(&watched, Path::new("/elsewhere/x.md")).is_none());
     }
 
     #[test]

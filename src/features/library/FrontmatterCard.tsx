@@ -2,8 +2,8 @@ import { Fragment } from "react";
 
 import type { DocMeta } from "@/lib/bindings";
 import { Badge, Card } from "@/components/ui";
+import { DocStatusPill } from "@/components/DocStatusPill";
 import { Icon } from "@/components/Icon";
-import { STATUS_TONE } from "./constants";
 
 export function FrontmatterCard({ meta }: { meta: DocMeta }) {
   const fm = meta.fm;
@@ -25,7 +25,7 @@ export function FrontmatterCard({ meta }: { meta: DocMeta }) {
     <Card>
       <div className="flex flex-wrap items-center gap-2">
         {fm.type && <Badge tone="accent">{fm.type}</Badge>}
-        {fm.status && <Badge tone={STATUS_TONE[fm.status] ?? "dim"}>{fm.status}</Badge>}
+        {fm.status && <DocStatusPill status={fm.status} />}
         <Badge tone="dim">{meta.scope}</Badge>
         {meta.fmWarnings.length > 0 && (
           <span

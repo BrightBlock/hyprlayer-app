@@ -1,3 +1,4 @@
+mod library;
 mod migrations;
 mod projects;
 mod reviews;
@@ -5,6 +6,7 @@ pub mod session_event_codec;
 mod sessions;
 mod workstreams;
 
+pub use library::*;
 pub use projects::*;
 pub use reviews::*;
 pub use sessions::*;

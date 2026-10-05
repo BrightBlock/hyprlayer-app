@@ -16,6 +16,7 @@ use hyprlayer_models::{ClientRef, RuntimeEvent, SessionTurns};
 use crate::agent::AgentDriver;
 use crate::claude::SessionEvent;
 use crate::error::Result;
+use crate::runtime::attribution::DocAttribution;
 use crate::store::{Db, LogCursor, SessionLogEntry};
 
 pub use delivery::{LiveReceiver, SessionAttachment, SessionStreamError};
@@ -32,16 +33,31 @@ pub use followup::run_codex_followup_for_test;
 pub(crate) struct SessionActors {
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
+    attribution: Option<Arc<DocAttribution>>,
     handles: AsyncMutex<HashMap<String, forwarder::ActorHandle>>,
 }
 
 impl SessionActors {
-    pub(crate) fn new(db: Arc<Db>, events: broadcast::Sender<RuntimeEvent>) -> Self {
+    pub(crate) fn new(
+        db: Arc<Db>,
+        events: broadcast::Sender<RuntimeEvent>,
+        attribution: Option<Arc<DocAttribution>>,
+    ) -> Self {
         Self {
             db,
             events,
+            attribution,
             handles: AsyncMutex::new(HashMap::new()),
         }
+    }
+
+    fn spawn_actor(&self, session_id: &str) -> forwarder::ActorHandle {
+        forwarder::spawn(
+            session_id.to_string(),
+            self.db.clone(),
+            self.events.clone(),
+            self.attribution.clone(),
+        )
     }
 
     pub(crate) async fn ingress(&self, session_id: &str) -> mpsc::Sender<SessionEvent> {
@@ -49,7 +65,7 @@ impl SessionActors {
         if let Some(handle) = handles.get(session_id) {
             return handle.ingress.clone();
         }
-        let handle = forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone());
+        let handle = self.spawn_actor(session_id);
         let sender = handle.ingress.clone();
         handles.insert(session_id.to_string(), handle);
         sender
@@ -62,10 +78,7 @@ impl SessionActors {
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.attach(echo_user_messages).await
@@ -79,10 +92,7 @@ impl SessionActors {
     ) -> Result<Vec<SessionLogEntry>> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.log_after(caller_epoch, after_seq).await
@@ -97,10 +107,7 @@ impl SessionActors {
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle
@@ -116,10 +123,7 @@ impl SessionActors {
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.attach_from(cursor, echo_user_messages).await
@@ -133,10 +137,7 @@ impl SessionActors {
     ) -> Result<forwarder::RewindOutcome> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.rewind(cutoff, live).await
@@ -162,10 +163,7 @@ impl SessionActors {
     ) -> Result<()> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.set_workflow(workflow).await
@@ -180,10 +178,7 @@ impl SessionActors {
     ) -> Result<()> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle
@@ -194,10 +189,7 @@ impl SessionActors {
     pub(crate) async fn release_user_turn(&self, session_id: &str, client_message_id: String) {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.release_user_turn(client_message_id).await;
@@ -212,10 +204,7 @@ impl SessionActors {
     ) -> Result<SessionTurns> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
-            handles.insert(
-                session_id.to_string(),
-                forwarder::spawn(session_id.to_string(), self.db.clone(), self.events.clone()),
-            );
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle.list_turns(cursor, limit, caller).await
@@ -257,7 +246,7 @@ impl SessionRuntimeHandle {
     pub fn new(db: Arc<Db>) -> Self {
         let (events, _) = broadcast::channel(64);
         Self {
-            actors: Arc::new(SessionActors::new(db, events.clone())),
+            actors: Arc::new(SessionActors::new(db, events.clone(), None)),
             events,
         }
     }

@@ -23,7 +23,7 @@ enums or raw `string` types** — use the generated binding.
 | `WorkstreamStatus` | `crates/hyprlayer-core/src/store/workstreams.rs` | Direct binding via specta |
 | `Harness` | `crates/hyprlayer-core/src/agent.rs` | `lib/domain/harnessing.ts` |
 | `PermissionMode` | `crates/hyprlayer-core/src/claude/driver.rs` | `lib/domain/permissions.ts` |
-| `DocKind` / doc taxonomy | `crates/hyprlayer-core/src/docs/frontmatter.rs` | `lib/domain/docs.ts` |
+| `DocType` / `DocStatus` / `DocScope` | `crates/hyprlayer-core/src/docs/vocab.rs` | `lib/domain/docs.ts` |
 
 SQLite columns stay TEXT. Core `parse()` functions do tolerant parsing so legacy
 rows keep loading.

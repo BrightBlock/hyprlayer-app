@@ -1,0 +1,545 @@
+{
+  "scenario": "library_mail",
+  "steps": [
+    {
+      "guards": [],
+      "step": "set up the fixtures"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "archived": "Old news.",
+            "audit": "Two advisories affect time and chrono; neither is reachable.",
+            "empty": "",
+            "long": "Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet.…",
+            "og-plan": "The open graph card renders from the spec and ships behind a flag.",
+            "other-plan": "Shipped behind the flag.",
+            "paused": "Index excerpts Facet counts",
+            "spec": "A spec in a type the vocabulary lacks."
+          },
+          "guard": "each excerpt equals its expected literal (heading and fence skipped, markers stripped, inline markup dropped)",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "chars": 196,
+            "endsWithEllipsis": true
+          },
+          "guard": "long.md is cut at a word boundary within 201 chars and ends with …",
+          "ok": true
+        }
+      ],
+      "step": "excerpts are computed at index time"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "disjoint": true,
+            "firstPage": [
+              "spec",
+              "archived",
+              "other-plan"
+            ],
+            "secondPage": [
+              "empty",
+              "long",
+              "paused"
+            ],
+            "totals": [
+              10,
+              10,
+              10
+            ],
+            "unionIsFirstSix": true
+          },
+          "guard": "both pages report the unpaged total, share no id, and together are the first six",
+          "ok": true
+        }
+      ],
+      "step": "paging splits the mtime order without overlap"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "projects": 2
+          },
+          "guard": "QueryResult.projects counts demo and other",
+          "ok": true
+        }
+      ],
+      "step": "the unscoped result spans both projects"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hits": [
+              "og-plan"
+            ]
+          },
+          "guard": "searching POR-214 returns only og-plan, whose title and body never mention it",
+          "ok": true
+        }
+      ],
+      "step": "a ticket id finds its doc"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "authors": [
+              {
+                "count": 2,
+                "name": "e2e"
+              },
+              {
+                "count": 1,
+                "name": "jt"
+              }
+            ],
+            "projects": [
+              {
+                "count": 6,
+                "name": "demo"
+              },
+              {
+                "count": 4,
+                "name": "other"
+              }
+            ],
+            "statuses": [
+              {
+                "count": 3,
+                "status": "draft"
+              },
+              {
+                "count": 2,
+                "status": "active"
+              },
+              {
+                "count": 1,
+                "status": "implemented"
+              },
+              {
+                "count": 0,
+                "status": "superseded"
+              },
+              {
+                "count": 1,
+                "status": "archived"
+              }
+            ],
+            "total": 10,
+            "types": [
+              {
+                "count": 2,
+                "docType": "plan"
+              },
+              {
+                "count": 1,
+                "docType": "research"
+              },
+              {
+                "count": 1,
+                "docType": "handoff"
+              },
+              {
+                "count": 4,
+                "docType": "note"
+              },
+              {
+                "count": 1,
+                "docType": "pr"
+              }
+            ],
+            "unread": 8
+          },
+          "guard": "unscoped: every type and status listed (spec and wip uncounted), both projects, authors jt and the CLI user",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "authors": [
+              {
+                "count": 1,
+                "name": "e2e"
+              },
+              {
+                "count": 1,
+                "name": "jt"
+              }
+            ],
+            "projects": [
+              {
+                "count": 6,
+                "name": "demo"
+              },
+              {
+                "count": 4,
+                "name": "other"
+              }
+            ],
+            "statuses": [
+              {
+                "count": 2,
+                "status": "draft"
+              },
+              {
+                "count": 2,
+                "status": "active"
+              },
+              {
+                "count": 0,
+                "status": "implemented"
+              },
+              {
+                "count": 0,
+                "status": "superseded"
+              },
+              {
+                "count": 0,
+                "status": "archived"
+              }
+            ],
+            "total": 6,
+            "types": [
+              {
+                "count": 1,
+                "docType": "plan"
+              },
+              {
+                "count": 1,
+                "docType": "research"
+              },
+              {
+                "count": 1,
+                "docType": "handoff"
+              },
+              {
+                "count": 2,
+                "docType": "note"
+              },
+              {
+                "count": 1,
+                "docType": "pr"
+              }
+            ],
+            "unread": 5
+          },
+          "guard": "scoped to demo: totals narrow while projects still lists both",
+          "ok": true
+        }
+      ],
+      "step": "facet counts label every mailbox"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "old": false
+          },
+          "guard": "old.md, modified before the read baseline, is not unread",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": true,
+            "audit": true,
+            "demo-seed": false,
+            "empty": true,
+            "long": true,
+            "og-plan": true,
+            "old": false,
+            "other-plan": true,
+            "other-seed": false,
+            "paused": true,
+            "spec": true
+          },
+          "guard": "every fixture written after the baseline is unread; docs created through the Library are not",
+          "ok": true
+        }
+      ],
+      "step": "read state starts from the baseline"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "allTotal": 11,
+            "allUnread": 8,
+            "countsUnread": 8,
+            "demoCountsUnread": 5,
+            "unreadOnly": [
+              "archived",
+              "audit",
+              "empty",
+              "long",
+              "og-plan",
+              "other-plan",
+              "paused",
+              "spec"
+            ],
+            "unreadOnlyTotal": 8,
+            "unreadOnlyUnread": 8
+          },
+          "guard": "unreadOnly returns exactly the fresh fixtures; QueryResult.unread and CountDocs.unread match",
+          "ok": true
+        }
+      ],
+      "step": "the unread filter and counts agree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "getAfter": false,
+            "getBefore": true,
+            "queryAfter": false
+          },
+          "guard": "GetDoc reports og-plan unread until MarkDocRead clears it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "bodyChanged": true,
+            "queryUnread": false,
+            "savedUnread": false
+          },
+          "guard": "a save that changes og-plan's body leaves it read",
+          "ok": true
+        }
+      ],
+      "step": "marking read, then the user's own save"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "unread": false
+          },
+          "guard": "identical bytes under a later mtime keep og-plan read",
+          "ok": true
+        }
+      ],
+      "step": "a sync rewrite of the same bytes stays read"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "unread": true
+          },
+          "guard": "new bytes under a later mtime make og-plan unread",
+          "ok": true
+        }
+      ],
+      "step": "an external edit makes it new again"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterRead": false,
+            "afterUnread": true,
+            "sameMtime": true
+          },
+          "guard": "MarkDocUnread after MarkDocRead makes audit unread at the same mtime",
+          "ok": true
+        }
+      ],
+      "step": "marking unread sticks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "countsUnread": 7,
+            "unread": {
+              "archived": true,
+              "audit": true,
+              "demo-seed": false,
+              "empty": true,
+              "long": true,
+              "og-plan": true,
+              "old": false,
+              "other-plan": true,
+              "other-seed": false,
+              "paused": false,
+              "spec": true
+            }
+          },
+          "guard": "every doc's unread flag and CountDocs.unread are unchanged after a restart",
+          "ok": true
+        }
+      ],
+      "step": "read state survives a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agent": {
+              "harness": "claude",
+              "projectPath": "$SANDBOX/home/code/demo",
+              "sessionId": "$SESSION",
+              "workstreamId": "$WS"
+            },
+            "unread": true
+          },
+          "guard": "the claude session's Write credits live-plan to it, its workstream and project; the doc is new",
+          "ok": true
+        }
+      ],
+      "step": "a live agent write is attributed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agent": null,
+            "indexed": true
+          },
+          "guard": "failed.md is indexed but carries no agent",
+          "ok": true
+        }
+      ],
+      "step": "a failed write is not"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "linked": true
+          },
+          "guard": "the isolated worktree links thoughts/shared",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the second server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "livePlan": "claude",
+            "seeded": "codex",
+            "seededNote": "codex"
+          },
+          "guard": "the relative path (via the worktree link) and the absolute one (via a symlinked root) both credit codex",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the third server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rows": [
+              [
+                "$SEEDED_NOTE",
+                "e2e-codex-session",
+                "codex",
+                "$WS"
+              ],
+              [
+                "$LIVE_PLAN",
+                "$SESSION",
+                "claude",
+                "$WS"
+              ],
+              [
+                "$SEEDED",
+                "e2e-codex-session",
+                "codex",
+                "$WS"
+              ]
+            ]
+          },
+          "guard": "doc_agents holds exactly live-plan and the two seeded docs; nothing for README.md or failed.md",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "seeded": [
+              [
+                1767225600000.0,
+                1767225600000.0
+              ],
+              [
+                1767225600000.0,
+                1767225600000.0
+              ]
+            ]
+          },
+          "guard": "backfilled rows carry the stored tool use's created_at, not the time the backfill ran",
+          "ok": true
+        }
+      ],
+      "step": "stored history is backfilled on start"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "markRestored": true,
+            "rows": 3,
+            "unchanged": true
+          },
+          "guard": "the walk from rowid 0 reaches the old mark and leaves every row and its first_at/last_at as they were",
+          "ok": true
+        }
+      ],
+      "step": "a forced full re-backfill changes nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "livePlan": {
+              "harness": "claude",
+              "projectPath": null
+            },
+            "seeded": {
+              "harness": "codex",
+              "projectPath": null
+            }
+          },
+          "guard": "agent.projectPath becomes null while the harness stays",
+          "ok": true
+        }
+      ],
+      "step": "archiving the workstream unlinks the session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

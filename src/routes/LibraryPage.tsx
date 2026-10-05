@@ -1,107 +1,14 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
 
-import { EmptyState, PaneSeparator } from "@/components/ui";
-import { CreateDocDialog } from "@/features/library/CreateDocDialog";
-import { docQueryFromSearch } from "@/features/library/DocFilters";
-import { DocDetail } from "@/features/library/DocDetail";
-import { LibraryBlank } from "@/features/library/LibraryBlank";
-import { LibrarySidebar } from "@/features/library/LibrarySidebar";
-import { resolveSyncProjectPath } from "@/features/library/thoughtsSync";
-import { useThoughtsSync } from "@/features/library/useThoughtsSync";
-import { useBootstrap, useDocs } from "@/lib/queries";
-import { useLibraryScope } from "@/features/library/libraryScope";
-import { SIDE_PANEL_MAX, SIDE_PANEL_MIN, useUiStore } from "@/lib/uiStore";
-import { useViewport } from "@/lib/useViewport";
-import { useCommand } from "@/lib/keybindings/registry";
-import { libraryFiltersActive, type LibrarySearch } from "@/features/library/librarySearch";
+import { LibraryView } from "@/features/library/LibraryView";
 
 export function LibraryPage() {
   const search = useSearch({ from: "/library" });
   const navigate = useNavigate({ from: "/library" });
-  const bootstrap = useBootstrap();
-  const config = bootstrap.data?.config;
-  // Assume configured until bootstrap lands so "Set up thoughts" never flashes.
-  const thoughtsConfigured = bootstrap.data === undefined || (config?.state === "ready" && config.configured);
-  const [createOpen, setCreateOpen] = useState(false);
-
-  useCommand("doc.new", () => setCreateOpen(true));
-
-  const setLastProject = useLibraryScope((s) => s.setLastProject);
-  useEffect(() => {
-    if (search.project) setLastProject(search.project);
-  }, [search.project, setLastProject]);
-
-  const setLastSearch = useLibraryScope((s) => s.setLastSearch);
-  const setProjectSearch = useLibraryScope((s) => s.setProjectSearch);
-  useEffect(() => {
-    const view = { ...search };
-    delete view.from;
-    setLastSearch(view);
-    if (view.project) setProjectSearch(view.project, view);
-  }, [search, setLastSearch, setProjectSearch]);
-
-  const lastProject = useLibraryScope((s) => s.lastProject);
-  const targetProject = resolveSyncProjectPath(search, lastProject, bootstrap.data?.projects ?? []);
-  const thoughtsSync = useThoughtsSync(targetProject);
-
-  const libraryWidth = useUiStore((s) => s.libraryWidth);
-  const setLibraryWidth = useUiStore((s) => s.setLibraryWidth);
-  const libraryCollapsed = useUiStore((s) => s.libraryCollapsed);
-  const { narrow } = useViewport();
-
-  const query = useMemo(() => docQueryFromSearch(search), [search]);
-  const docs = useDocs(query);
-
-  const update = (patch: Partial<LibrarySearch>) =>
-    void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
-
   return (
-    <div className="flex h-full min-h-0">
-      <LibrarySidebar
-        search={search}
-        onUpdate={update}
-        projects={bootstrap.data?.projects ?? []}
-        result={docs.data}
-        isLoading={docs.isLoading}
-        isError={docs.isError}
-        error={docs.error}
-        onNewDoc={() => setCreateOpen(true)}
-        sync={thoughtsSync}
-        thoughtsConfigured={thoughtsConfigured}
-        width={narrow ? SIDE_PANEL_MIN : libraryWidth}
-        collapsed={libraryCollapsed}
-      />
-
-      {!libraryCollapsed && !narrow && (
-        <PaneSeparator
-          label="Resize library sidebar"
-          width={libraryWidth}
-          min={SIDE_PANEL_MIN}
-          max={SIDE_PANEL_MAX}
-          onResize={setLibraryWidth}
-        />
-      )}
-
-      <section className="min-w-0 flex-1">
-        {search.doc ? (
-          <DocDetail id={search.doc} />
-        ) : !thoughtsConfigured || (docs.data?.total === 0 && !libraryFiltersActive(search)) ? (
-          <LibraryBlank
-            thoughtsConfigured={thoughtsConfigured}
-            targetProject={targetProject}
-            onNewNote={() => setCreateOpen(true)}
-          />
-        ) : (
-          <EmptyState title="Select a document" />
-        )}
-      </section>
-
-      <CreateDocDialog
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        initialProjectName={search.project}
-      />
-    </div>
+    <LibraryView
+      search={search}
+      onUpdate={(patch) => void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true })}
+    />
   );
 }

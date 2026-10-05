@@ -3,10 +3,18 @@ import { useRouterState } from "@tanstack/react-router";
 import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { Button, ConfirmDialog, ErrorNote, PageError, PageSpinner, SaveStatus } from "@/components/ui";
+import {
+  Button,
+  ConfirmDialog,
+  ErrorNote,
+  PageError,
+  PageSpinner,
+  SaveStatus,
+  SegmentedControl,
+} from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import type { DocContent } from "@/lib/bindings";
-import { useDoc, useRevealDoc } from "@/lib/queries";
+import { useDoc, useMarkDocRead, useRevealDoc } from "@/lib/queries";
 import { clearActiveFileSave, setActiveFileSave } from "@/lib/fileSave";
 import { IS_MACOS } from "@/lib/platform";
 import { startEdgeDrag } from "@/lib/resize";
@@ -22,6 +30,11 @@ import { useDocSave } from "./useDocSave";
 
 const HEADINGS_DEBOUNCE_MS = 150;
 
+const WIDTH_OPTIONS = [
+  { value: "narrow", label: "Narrow" },
+  { value: "wide", label: "Wide" },
+] as const;
+
 type Props = { id: string };
 
 type Anchor = { line: number; offset: number };
@@ -33,16 +46,25 @@ export function DocDetail({ id }: Props) {
   if (doc.isLoading) return <PageSpinner />;
   if (doc.isError) return <PageError error={doc.error} />;
   if (!doc.data) return null;
-  return <DocBody key={id} id={id} doc={doc.data} />;
+  return <DocBody key={id} id={id} doc={doc.data} settled={!doc.isFetching} />;
 }
 
-type BodyProps = Props & { doc: DocContent };
+type BodyProps = Props & { doc: DocContent; settled: boolean };
 
-function DocBody({ id, doc }: BodyProps) {
+function DocBody({ id, doc, settled }: BodyProps) {
   const revealDoc = useRevealDoc();
   const docWide = useUiStore((s) => s.docWide);
   const setDocWide = useUiStore((s) => s.setDocWide);
   const { meta } = doc;
+
+  // Decided once per open, on settled data, so an explicit "Mark as unread" on the open doc sticks.
+  const { mutate: markRead } = useMarkDocRead();
+  const readDecided = useRef(false);
+  useEffect(() => {
+    if (readDecided.current || !settled) return;
+    readDecided.current = true;
+    if (meta.unread) markRead(id);
+  }, [settled, meta.unread, id, markRead]);
 
   const {
     body,
@@ -211,11 +233,13 @@ function DocBody({ id, doc }: BodyProps) {
     return () => clearActiveFileSave(token);
   }, []);
 
+  const toggleEdit = () => (editing ? exitEdit() : enterEdit(null));
+
   const revealLabel = IS_MACOS ? "Reveal in Finder" : "Show in folder";
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col"
+      className="flex h-full min-h-0"
       onFocus={registerActive}
       onKeyDown={(e) => {
         if (!IS_MACOS && (e.metaKey || e.ctrlKey) && e.key === "s") {
@@ -224,75 +248,60 @@ function DocBody({ id, doc }: BodyProps) {
         }
       }}
     >
-      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-edge bg-panel px-6">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="selectable truncate text-meta text-ink-dim">{meta.relPath}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div
-            role="group"
-            aria-label="Document width"
-            className="inline-flex h-7 items-center gap-0.5 rounded-md border border-edge bg-panel-2 p-0.5"
-          >
-            {([
-              ["Narrow", false],
-              ["Wide", true],
-            ] as const).map(([label, wide]) => (
-              <button
-                key={label}
-                type="button"
-                onClick={() => setDocWide(wide)}
-                aria-pressed={docWide === wide}
-                className={`rounded px-2.5 py-0.5 text-ui font-medium transition-colors ${
-                  docWide === wide
-                    ? "bg-accent/20 text-accent"
-                    : "text-ink-dim hover:text-ink"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+      {/* The toolbar spans only the doc column, so the rail's header sits beside it. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-edge bg-panel px-6">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="selectable truncate text-meta text-ink-dim">{meta.relPath}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => revealDoc.mutate(meta.id)}
-            disabled={revealDoc.isPending}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink disabled:opacity-50"
-            title={revealLabel}
-            aria-label={revealLabel}
-          >
-            <Icon name="folder" />
-          </button>
-          <Button
-            size="sm"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => (editing ? exitEdit() : enterEdit(null))}
-          >
-            {editing ? "Done" : "Edit"}
-          </Button>
-          <SaveStatus saving={saving} dirty={dirty} justSaved={justSaved} readOnly={false} />
-          <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={() => void save()}>
-            Save
-          </Button>
-        </div>
-      </header>
+          <div className="flex shrink-0 items-center gap-2">
+            <SegmentedControl
+              aria-label="Document width"
+              variant="bordered"
+              value={docWide ? "wide" : "narrow"}
+              options={WIDTH_OPTIONS}
+              onChange={(v) => setDocWide(v === "wide")}
+            />
+            <button
+              type="button"
+              onClick={() => revealDoc.mutate(meta.id)}
+              disabled={revealDoc.isPending}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink disabled:opacity-50"
+              title={revealLabel}
+              aria-label={revealLabel}
+            >
+              <Icon name="folder" />
+            </button>
+            {/* The open rail's header owns the save controls. */}
+            {!docRailOpen && (
+              <>
+                <Button size="sm" onMouseDown={(e) => e.preventDefault()} onClick={toggleEdit}>
+                  {editing ? "Done" : "Edit"}
+                </Button>
+                <SaveStatus saving={saving} dirty={dirty} justSaved={justSaved} readOnly={false} />
+                <Button size="sm" variant="primary" disabled={!dirty} busy={saving} onClick={() => void save()}>
+                  Save
+                </Button>
+              </>
+            )}
+          </div>
+        </header>
 
-      {(error != null || revealDoc.isError) && (
-        <div className="shrink-0 space-y-2 border-b border-edge p-4">
-          {error != null && (
-            <div className="space-y-2">
-              <ErrorNote error={error} />
-              {conflict && <Button onClick={() => void reloadFromDisk()}>Reload from disk</Button>}
-            </div>
-          )}
-          {revealDoc.isError && (
-            <ErrorNote error={revealDoc.error} onDismiss={() => revealDoc.reset()} />
-          )}
-        </div>
-      )}
+        {(error != null || revealDoc.isError) && (
+          <div className="shrink-0 space-y-2 border-b border-edge p-4">
+            {error != null && (
+              <div className="space-y-2">
+                <ErrorNote error={error} />
+                {conflict && <Button onClick={() => void reloadFromDisk()}>Reload from disk</Button>}
+              </div>
+            )}
+            {revealDoc.isError && (
+              <ErrorNote error={revealDoc.error} onDismiss={() => revealDoc.reset()} />
+            )}
+          </div>
+        )}
 
-      <div className="flex min-h-0 flex-1">
-        <div ref={scrollerRef} className="min-w-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
+        <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
           <div className={`mx-auto px-8 py-6 ${docWide ? "max-w-none" : "max-w-[600px]"}`}>
             {editing ? (
               <div
@@ -346,38 +355,44 @@ function DocBody({ id, doc }: BodyProps) {
             )}
           </div>
         </div>
-        {docRailOpen && (
-          <>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize panels"
-              className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
-              onPointerDown={(e) =>
-                startEdgeDrag(e, {
-                  startWidth: docRailWidth,
-                  min: DOC_RAIL_MIN,
-                  max: DOC_RAIL_MAX,
-                  direction: -1,
-                  onResize: setDocRailWidth,
-                })
-              }
-            />
-            <DocRail
-              doc={doc}
-              draft={draft}
-              onChange={setField}
-              raw={raw}
-              setRaw={setRaw}
-              disabled={saving}
-              headings={headings}
-              active={active}
-              onJumpToHeading={handleJumpToHeading}
-              width={docRailWidth}
-            />
-          </>
-        )}
       </div>
+      {docRailOpen && (
+        <>
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize panels"
+            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            onPointerDown={(e) =>
+              startEdgeDrag(e, {
+                startWidth: docRailWidth,
+                min: DOC_RAIL_MIN,
+                max: DOC_RAIL_MAX,
+                direction: -1,
+                onResize: setDocRailWidth,
+              })
+            }
+          />
+          <DocRail
+            doc={doc}
+            draft={draft}
+            onChange={setField}
+            raw={raw}
+            setRaw={setRaw}
+            disabled={saving}
+            headings={headings}
+            active={active}
+            onJumpToHeading={handleJumpToHeading}
+            width={docRailWidth}
+            saving={saving}
+            dirty={dirty}
+            justSaved={justSaved}
+            editing={editing}
+            onEdit={toggleEdit}
+            onSave={() => void save()}
+          />
+        </>
+      )}
 
       <ConfirmDialog
         open={blocker.status === "blocked"}

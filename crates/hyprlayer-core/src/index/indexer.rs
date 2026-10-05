@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::UNIX_EPOCH;
@@ -9,6 +9,8 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use super::roots::ThoughtsRoot;
 use super::search;
+use crate::agent::Harness;
+use crate::docs::excerpt::excerpt;
 use crate::docs::frontmatter::{self, Frontmatter};
 
 const BODY_SEARCH_CAP: usize = 256 * 1024;
@@ -43,6 +45,33 @@ pub struct DocMeta {
     pub fm_warnings: Vec<String>,
     pub mtime_ms: f64,
     pub size_bytes: f64,
+    // New response fields stay tolerant while `PROTOCOL_VERSION` is pinned.
+    #[serde(default)]
+    pub excerpt: String,
+    #[serde(default)]
+    pub unread: bool,
+    // No `skip_serializing_if`: specta would split every type holding a DocMeta into ser/de variants.
+    #[serde(default)]
+    pub agent: Option<DocAgent>,
+}
+
+/// The newest harness session that wrote a doc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct DocAgent {
+    pub harness: Harness,
+    pub session_id: String,
+    pub workstream_id: String,
+    /// `None` once the workstream is archived or gone.
+    pub project_path: Option<String>,
+    pub at_ms: f64,
+}
+
+impl DocMeta {
+    pub(crate) fn project_key(&self) -> Option<&str> {
+        self.project.as_deref().or(self.fm.project.as_deref())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -82,6 +111,7 @@ pub struct ThoughtQuery {
     pub sort: SortKey,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
+    pub unread_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +120,12 @@ pub struct ThoughtQuery {
 pub struct QueryResult {
     pub total: u32,
     pub items: Vec<DocMeta>,
+    /// Distinct projects across the whole matched set, not just this page.
+    #[serde(default)]
+    pub projects: u32,
+    /// Unread docs across the whole matched set.
+    #[serde(default)]
+    pub unread: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -102,14 +138,14 @@ pub struct ScanStats {
 }
 
 #[derive(Debug)]
-struct DocRecord {
-    meta: DocMeta,
-    content_hash: u64,
+pub(super) struct DocRecord {
+    pub(super) meta: DocMeta,
+    pub(super) content_hash: u64,
 }
 
 #[derive(Debug, Default)]
 pub struct ThoughtsIndex {
-    records: RwLock<HashMap<String, Arc<DocRecord>>>,
+    pub(super) records: RwLock<HashMap<String, Arc<DocRecord>>>,
 }
 
 impl ThoughtsIndex {
@@ -253,19 +289,30 @@ impl ThoughtsIndex {
     }
 
     pub fn query(&self, q: &ThoughtQuery) -> QueryResult {
+        self.query_with(q, |_, _| false)
+    }
+
+    /// `is_unread` gets each record's content hash; it runs under the read
+    /// lock, before any body is read.
+    pub fn query_with(
+        &self,
+        q: &ThoughtQuery,
+        is_unread: impl Fn(&DocMeta, u64) -> bool,
+    ) -> QueryResult {
         let matcher = search::TextMatcher::new(search::parse_needles(q.text.as_deref()));
         let has_text = matcher.is_some();
 
-        let candidates: Vec<Arc<DocRecord>> = {
+        let candidates: Vec<(Arc<DocRecord>, bool)> = {
             let map = self.records.read().expect("index lock poisoned");
             map.values()
                 .filter(|r| search::passes_filters(q, &r.meta))
-                .map(Arc::clone)
+                .map(|r| (Arc::clone(r), is_unread(&r.meta, r.content_hash)))
+                .filter(|(_, unread)| *unread || !q.unread_only)
                 .collect()
         };
 
-        let mut matched: Vec<(Arc<DocRecord>, u32)> = Vec::with_capacity(candidates.len());
-        for record in candidates {
+        let mut matched: Vec<(Arc<DocRecord>, bool, u32)> = Vec::with_capacity(candidates.len());
+        for (record, unread) in candidates {
             let score = match &matcher {
                 Some(m) => {
                     let Some(body) = read_body_for_search(Path::new(&record.meta.id)) else {
@@ -278,23 +325,37 @@ impl ThoughtsIndex {
                 }
                 None => 0,
             };
-            matched.push((record, score));
+            matched.push((record, unread, score));
         }
 
         matched.sort_by(|a, b| {
-            search::compare_docs(q.sort, has_text, (&a.0.meta, a.1), (&b.0.meta, b.1))
+            search::compare_docs(q.sort, has_text, (&a.0.meta, a.2), (&b.0.meta, b.2))
         });
 
         let total = matched.len() as u32;
+        let projects = matched
+            .iter()
+            .filter_map(|(record, _, _)| record.meta.project_key())
+            .collect::<HashSet<_>>()
+            .len() as u32;
+        let unread = matched.iter().filter(|(_, unread, _)| *unread).count() as u32;
         let offset = q.offset.unwrap_or(0) as usize;
         let limit = q.limit.map_or(usize::MAX, |l| l as usize);
         let items = matched
             .into_iter()
             .skip(offset)
             .take(limit)
-            .map(|(record, _)| record.meta.clone())
+            .map(|(record, unread, _)| DocMeta {
+                unread,
+                ..record.meta.clone()
+            })
             .collect();
-        QueryResult { total, items }
+        QueryResult {
+            total,
+            items,
+            projects,
+            unread,
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<DocMeta> {
@@ -303,6 +364,14 @@ impl ThoughtsIndex {
             .expect("index lock poisoned")
             .get(id)
             .map(|r| r.meta.clone())
+    }
+
+    pub(crate) fn content_hash(&self, id: &str) -> Option<u64> {
+        self.records
+            .read()
+            .expect("index lock poisoned")
+            .get(id)
+            .map(|r| r.content_hash)
     }
 
     pub fn doc_path(&self, id: &str) -> Option<PathBuf> {
@@ -422,6 +491,7 @@ fn build_record(
     let content_hash = xxh3_64(&prefix);
     let content = String::from_utf8_lossy(&prefix);
     let parsed = frontmatter::parse(&content);
+    let excerpt = excerpt(content.get(parsed.body_offset..).unwrap_or(""));
     let mut fm = parsed.fm;
     frontmatter::apply_path_fallbacks(&mut fm, abs);
 
@@ -447,6 +517,9 @@ fn build_record(
             fm_warnings: parsed.warnings,
             mtime_ms: mtime_ms_from(meta),
             size_bytes,
+            excerpt,
+            unread: false,
+            agent: None,
         },
         content_hash,
     }
@@ -454,6 +527,7 @@ fn build_record(
 
 pub fn unindexed_meta(abs: &Path, content: &str) -> DocMeta {
     let parsed = frontmatter::parse(content);
+    let excerpt = excerpt(content.get(parsed.body_offset..).unwrap_or(""));
     let mut fm = parsed.fm;
     frontmatter::apply_path_fallbacks(&mut fm, abs);
 
@@ -485,6 +559,9 @@ pub fn unindexed_meta(abs: &Path, content: &str) -> DocMeta {
         fm_warnings: parsed.warnings,
         mtime_ms,
         size_bytes: content.len() as f64,
+        excerpt,
+        unread: false,
+        agent: None,
     }
 }
 
@@ -615,6 +692,9 @@ mod tests {
             fm_warnings: vec![],
             mtime_ms: 1.0,
             size_bytes: 2.0,
+            excerpt: String::new(),
+            unread: false,
+            agent: None,
         };
         let v = serde_json::to_value(&meta).unwrap();
         for key in ["relPath", "fmWarnings", "mtimeMs", "sizeBytes"] {

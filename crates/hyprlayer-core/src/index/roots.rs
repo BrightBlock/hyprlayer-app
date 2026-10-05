@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::{BackendConfig, BackendKind, HyprlayerConfig};
 
@@ -62,6 +62,49 @@ fn non_empty_or(value: &str, default: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+pub(crate) struct RootCanon {
+    pub(crate) root: ThoughtsRoot,
+    pub(crate) canon: Option<PathBuf>,
+}
+
+pub(crate) fn canon_roots(roots: &[ThoughtsRoot]) -> Vec<RootCanon> {
+    roots
+        .iter()
+        .map(|root| RootCanon {
+            canon: std::fs::canonicalize(&root.root)
+                .ok()
+                .filter(|c| c != &root.root),
+            root: root.clone(),
+        })
+        .collect()
+}
+
+pub(crate) fn rebase_onto_roots<'a>(
+    roots: &'a [RootCanon],
+    path: &Path,
+) -> Option<(&'a ThoughtsRoot, PathBuf)> {
+    let mut best: Option<(&ThoughtsRoot, PathBuf, usize)> = None;
+    let mut consider = |root: &'a ThoughtsRoot, local: PathBuf, depth: usize| {
+        if best.as_ref().is_none_or(|(_, _, d)| depth > *d) {
+            best = Some((root, local, depth));
+        }
+    };
+    for w in roots {
+        if path.starts_with(&w.root.root) {
+            consider(
+                &w.root,
+                path.to_path_buf(),
+                w.root.root.components().count(),
+            );
+        } else if let Some(canon) = &w.canon {
+            if let Ok(rel) = path.strip_prefix(canon) {
+                consider(&w.root, w.root.root.join(rel), canon.components().count());
+            }
+        }
+    }
+    best.map(|(root, local, _)| (root, local))
 }
 
 #[cfg(test)]
@@ -144,6 +187,44 @@ mod tests {
         assert_eq!(roots[1].profile.as_deref(), Some("vault"));
         assert_eq!(roots[1].repos_dir, "repos");
         assert_eq!(roots[1].global_dir, "global");
+    }
+
+    fn root_at(path: &str) -> ThoughtsRoot {
+        ThoughtsRoot {
+            root: PathBuf::from(path),
+            repos_dir: "repos".into(),
+            global_dir: "global".into(),
+            backend: BackendKind::Git,
+            profile: None,
+        }
+    }
+
+    #[test]
+    fn rebase_onto_roots_prefers_deepest_root_and_rebases_canonical_paths() {
+        let roots = vec![
+            RootCanon {
+                root: root_at("/a"),
+                canon: None,
+            },
+            RootCanon {
+                root: root_at("/a/nested"),
+                canon: None,
+            },
+            RootCanon {
+                root: root_at("/sym/root"),
+                canon: Some(PathBuf::from("/real/root")),
+            },
+        ];
+
+        let (root, local) = rebase_onto_roots(&roots, Path::new("/a/nested/x.md")).unwrap();
+        assert_eq!(root.root, PathBuf::from("/a/nested"));
+        assert_eq!(local, PathBuf::from("/a/nested/x.md"));
+
+        let (root, local) = rebase_onto_roots(&roots, Path::new("/real/root/global/x.md")).unwrap();
+        assert_eq!(root.root, PathBuf::from("/sym/root"));
+        assert_eq!(local, PathBuf::from("/sym/root/global/x.md"));
+
+        assert!(rebase_onto_roots(&roots, Path::new("/elsewhere/x.md")).is_none());
     }
 
     #[test]

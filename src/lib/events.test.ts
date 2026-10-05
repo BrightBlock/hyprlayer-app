@@ -25,6 +25,7 @@ vi.mock("./bindings", () => ({
     sessionLifecycle: stub("sessionLifecycle"),
     scriptRunChanged: stub("scriptRunChanged"),
     thoughtsIndexUpdated: stub("thoughtsIndexUpdated"),
+    docStateChanged: stub("docStateChanged"),
     serverDisconnected: stub("serverDisconnected"),
   },
 }));

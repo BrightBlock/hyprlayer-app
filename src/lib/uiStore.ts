@@ -12,14 +12,18 @@ export const SIDE_PANEL_WIDTH = 288;
 export const SIDE_PANEL_MIN = 220;
 export const SIDE_PANEL_MAX = 480;
 
-// Matches the left sidebar's default width (SIDE_PANEL_WIDTH) by design.
-export const DOC_RAIL_WIDTH = SIDE_PANEL_WIDTH;
+export const DOC_RAIL_WIDTH = 300;
 export const DOC_RAIL_MIN = 220;
 export const DOC_RAIL_MAX = 420;
 
 export const WORKSHOP_LIST_WIDTH = 330;
 export const WORKSHOP_LIST_MIN = 260;
 export const WORKSHOP_LIST_MAX = 480;
+
+export const LIBRARY_NAV_WIDTH = 208;
+export const LIBRARY_LIST_WIDTH = 344;
+export const LIBRARY_LIST_MIN = 280;
+export const LIBRARY_LIST_MAX = 480;
 
 export type UiStore = {
   diffHidden: boolean;
@@ -34,8 +38,8 @@ export type UiStore = {
   setAsideView: (view: "changes" | "plan") => void;
   docsCollapsed: boolean;
   toggleDocs: () => void;
-  libraryWidth: number;
-  setLibraryWidth: (width: number) => void;
+  libraryListWidth: number;
+  setLibraryListWidth: (width: number) => void;
   workshopListWidth: number;
   setWorkshopListWidth: (width: number) => void;
   libraryCollapsed: boolean;
@@ -47,8 +51,8 @@ export type UiStore = {
   toggleProjectSidebar: () => void;
   docWide: boolean;
   setDocWide: (wide: boolean) => void;
-  narrowDrawer: "project" | "diff" | "workshop" | null;
-  setNarrowDrawer: (panel: "project" | "diff" | "workshop" | null) => void;
+  narrowDrawer: "project" | "diff" | "workshop" | "library" | null;
+  setNarrowDrawer: (panel: "project" | "diff" | "workshop" | "library" | null) => void;
   // Remote folder picker; a display preference of the person, not the server,
   // which is why it sits here and not in a host-scoped store.
   showDotFiles: boolean;
@@ -77,8 +81,8 @@ export const useUiStore = create<UiStore>()(
       setAsideView: (view) => set({ asideView: view, asideViewChosen: true }),
       docsCollapsed: false,
       toggleDocs: () => set((state) => ({ docsCollapsed: !state.docsCollapsed })),
-      libraryWidth: SIDE_PANEL_WIDTH,
-      setLibraryWidth: (width) => set({ libraryWidth: width }),
+      libraryListWidth: LIBRARY_LIST_WIDTH,
+      setLibraryListWidth: (width) => set({ libraryListWidth: width }),
       workshopListWidth: WORKSHOP_LIST_WIDTH,
       setWorkshopListWidth: (width) => set({ workshopListWidth: width }),
       libraryCollapsed: false,
@@ -90,7 +94,7 @@ export const useUiStore = create<UiStore>()(
       setProjectSidebarCollapsed: (collapsed) => set({ projectSidebarCollapsed: collapsed }),
       toggleProjectSidebar: () =>
         set((state) => ({ projectSidebarCollapsed: !state.projectSidebarCollapsed })),
-      docWide: false,
+      docWide: true,
       setDocWide: (wide) => set({ docWide: wide }),
       narrowDrawer: null,
       setNarrowDrawer: (panel) => set({ narrowDrawer: panel }),
@@ -142,6 +146,7 @@ export const useUiStore = create<UiStore>()(
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,
         workshopListWidth: s.workshopListWidth,
+        libraryListWidth: s.libraryListWidth,
         showDotFiles: s.showDotFiles,
         docRailOpen: s.docRailOpen,
         docRailWidth: s.docRailWidth,

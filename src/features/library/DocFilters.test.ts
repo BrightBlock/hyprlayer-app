@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { docQueryFromSearch, splitParam } from "./DocFilters";
-import { DOC_PAGE_SIZE } from "./constants";
+import { DOC_PAGE_SIZE, docQueryFromSearch, splitParam } from "./DocFilters";
 import type { LibrarySearch } from "./librarySearch";
 
 function search(q: string | undefined): LibrarySearch {
@@ -13,7 +12,7 @@ describe("docQueryFromSearch", () => {
     for (const q of [undefined, "", "a", "au"]) {
       const query = docQueryFromSearch(search(q));
       expect(query.text).toBeNull();
-      expect(query.sort).toBe("date");
+      expect(query.sort).toBe("mtime");
     }
   });
 
@@ -48,7 +47,6 @@ describe("docQueryFromSearch", () => {
       expect(query.tags).toEqual(["security", "backend"]);
       expect(query.tagMode).toBe("or");
       expect(query.limit).toBe(DOC_PAGE_SIZE);
-      expect(query.offset).toBe(0);
     }
   });
 });

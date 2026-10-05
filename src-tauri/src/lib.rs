@@ -17,6 +17,7 @@ mod window_geometry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use hyprlayer_core::docs::{DocScope, DocStatus, DocType};
 use hyprlayer_server::events::{TARGETED_EVENTS, TRANSCRIPT_SYNC};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
@@ -52,6 +53,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::projects::check_worktree_files,
             commands::projects::browse_directory,
             commands::library::query_docs,
+            commands::library::count_docs,
+            commands::library::mark_doc_read,
+            commands::library::mark_doc_unread,
             commands::library::get_doc,
             commands::library::save_doc,
             commands::library::patch_doc_frontmatter,
@@ -239,6 +243,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::OmarchyThemeChanged,
             events::BinariesChanged,
             events::ThoughtsIndexUpdated,
+            events::DocStateChanged,
             events::PrStatusChanged,
             events::WorktreeChanged,
             events::ReviewChanged,
@@ -251,6 +256,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::QuitRequested,
             events::ServerDisconnected
         ])
+        // Vocabulary no command signature carries yet.
+        .typ::<DocType>()
+        .typ::<DocStatus>()
+        .typ::<DocScope>()
 }
 
 /// The vars a daemonized server has none of on its own (ADR-0009 §7):

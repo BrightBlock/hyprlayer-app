@@ -1,6 +1,6 @@
 # ADR 0004: Vocabulary standard — typed enums and naming glossary
 
-**Status:** accepted · 2026-07-05
+**Status:** accepted · 2026-07-05 · amended 2026-10 (DocKind is DocType/DocStatus/DocScope, `crates/hyprlayer-core/src/docs/vocab.rs`)
 
 ## Decision
 

@@ -1,5 +1,5 @@
 
-import type { DocKind } from "@/lib/domain/docs";
+import type { DocType } from "@/lib/domain/docs";
 import { diffStrings, type PatchLine } from "@/lib/diff";
 
 import type { TranscriptItem } from "./transcript";
@@ -170,7 +170,7 @@ export function prettyToolInput(input: string): string {
   }
 }
 
-export function docKindForPath(path: string): DocKind | null {
+export function docKindForPath(path: string): DocType | null {
   if (!path.endsWith(".md")) return null;
   if (path.includes("/research/")) return "research";
   if (path.includes("/plans/") || path.includes("/plan/")) return "plan";
@@ -304,7 +304,7 @@ export function docFromTool(
   name: string,
   input: string,
   written: WrittenDocs,
-): { path: string; kind: DocKind } | null {
+): { path: string; kind: DocType } | null {
   const obj = parseToolInput(input);
   if (!obj) return null;
   if (name === "Write" || name === "Edit" || name === "MultiEdit") {
@@ -322,17 +322,17 @@ export function docFromTool(
   return null;
 }
 
-type SessionDocs = { written: WrittenDocs; docs: { path: string; kind: DocKind }[] };
+type SessionDocs = { written: WrittenDocs; docs: { path: string; kind: DocType }[] };
 
 const sessionDocsCache = new WeakMap<TranscriptItem[], SessionDocs>();
 
 export function sessionDocs(
   items: TranscriptItem[],
   written: WrittenDocs,
-): { path: string; kind: DocKind }[] {
+): { path: string; kind: DocType }[] {
   const hit = sessionDocsCache.get(items);
   if (hit && hit.written === written) return hit.docs;
-  const docs: { path: string; kind: DocKind }[] = [];
+  const docs: { path: string; kind: DocType }[] = [];
   for (const item of items) {
     if (item.kind !== "tool") continue;
     const doc = docFromTool(item.name, item.input, written);

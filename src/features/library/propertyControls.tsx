@@ -1,10 +1,10 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { cx } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { initialsOf } from "@/lib/format";
-import { useDocs } from "@/lib/queries";
+import { useDocCounts } from "@/lib/queries";
 
 const CONTROL =
   "h-7 w-full rounded-control border border-transparent bg-transparent px-2 text-body text-ink " +
@@ -130,15 +130,7 @@ export function TicketField({ id, value, placeholder, onChange }: FieldProps) {
 }
 
 export function AuthorField({ id, value, placeholder, onChange }: FieldProps) {
-  const docsQuery = useDocs({});
-  const authors = useMemo(() => {
-    const seen = new Set<string>();
-    for (const meta of docsQuery.data?.items ?? []) {
-      const author = meta.fm.author?.trim();
-      if (author) seen.add(author);
-    }
-    return Array.from(seen).sort();
-  }, [docsQuery.data]);
+  const authors = useDocCounts(undefined).data?.authors ?? [];
 
   return (
     <div className="flex items-center gap-1.5">
@@ -156,7 +148,7 @@ export function AuthorField({ id, value, placeholder, onChange }: FieldProps) {
       />
       <datalist id="fm-author-options">
         {authors.map((a) => (
-          <option key={a} value={a} />
+          <option key={a.name} value={a.name} />
         ))}
       </datalist>
     </div>

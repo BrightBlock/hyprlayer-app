@@ -1,6 +1,6 @@
 
 import type { Stage, WorkstreamView } from "@/lib/bindings";
-import type { DocKind } from "./docs";
+import type { DocType } from "./docs";
 
 export type StageKey = Stage;
 
@@ -79,7 +79,7 @@ export function nextModeStage(stage: string): StageKey {
   return MODE_STAGES[(i + 1) % MODE_STAGES.length].key;
 }
 
-export function suggestedDocKind(stage: string): DocKind | null {
+export function suggestedDocKind(stage: string): DocType | null {
   switch (asStageKey(stage)) {
     case "plan":
       return "research";

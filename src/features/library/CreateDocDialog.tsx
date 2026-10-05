@@ -2,9 +2,9 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
+import { DOC_SCOPES, DOC_TYPES } from "@/lib/domain/docs";
 import { isGitProject } from "@/lib/domain/projects";
 import { useBootstrap, useCreateDoc } from "@/lib/queries";
-import { DOC_SCOPES, DOC_TYPES } from "./constants";
 import { parseTagsInput } from "./text";
 
 type Props = {

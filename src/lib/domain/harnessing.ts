@@ -16,6 +16,12 @@ export const HARNESSES: HarnessOption[] = [
   { key: "opencode", label: "OpenCode" },
 ];
 
+export const HARNESS_SHORT_LABEL: Record<Harness, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+};
+
 export const DEFAULT_HARNESS_OPTIONS: { key: string; label: string }[] = [
   { key: "claude", label: "Claude Code" },
   { key: "codex", label: "Codex" },

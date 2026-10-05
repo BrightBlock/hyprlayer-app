@@ -83,13 +83,3 @@ export function syncLabel(
   if (failed || r.lostAt === null) return { text: "offline", title, tone, ticking: false };
   return { text: `offline · ${sinceDrop(r.lostAt, now)}`, title, tone, ticking: true };
 }
-
-export function initials(handle: string | null | undefined): string | null {
-  const words = (handle ?? "").split(/[\s._-]+/).filter(Boolean);
-  if (words.length === 0) return null;
-  const letters =
-    words.length === 1
-      ? Array.from(words[0]).slice(0, 2)
-      : [Array.from(words[0])[0], Array.from(words[words.length - 1])[0]];
-  return letters.join("").toUpperCase();
-}

@@ -9,8 +9,9 @@ import {
 } from "@/lib/uiStore";
 import { useViewport } from "@/lib/useViewport";
 import { Icon, type IconName } from "./Icon";
+import { PaneFrame } from "./paneFrame";
 import { RepoAvatar } from "./RepoAvatar";
-import { Badge, cx, PaneSeparator, Popover } from "./ui";
+import { Badge, cx, Popover } from "./ui";
 
 export const WORKSHOP_NAV_WIDTH = 220;
 
@@ -55,48 +56,25 @@ export function WorkshopFrame({
   const setNarrowDrawer = useUiStore((s) => s.setNarrowDrawer);
   const listWidth = useUiStore((s) => s.workshopListWidth);
   const setListWidth = useUiStore((s) => s.setWorkshopListWidth);
-  const [dragWidth, setDragWidth] = useState<number | null>(null);
 
   useEffect(() => {
     if (useUiStore.getState().narrowDrawer === "workshop") setNarrowDrawer(null);
   }, [navKey, setNarrowDrawer]);
 
-  const navShown = narrow ? narrowDrawer === "workshop" : !navCollapsed;
-  const width = narrow ? SIDE_PANEL_MIN : (dragWidth ?? listWidth);
-
   return (
-    <div className="relative flex h-full min-h-0">
-      {navShown && (
-        <aside
-          className={cx(
-            "flex shrink-0 flex-col border-r border-edge bg-panel",
-            narrow && "absolute inset-y-0 left-0 z-30 shadow-lg",
-          )}
-          style={{ width: WORKSHOP_NAV_WIDTH }}
-        >
-          {nav}
-        </aside>
-      )}
-      <div className="flex min-h-0 shrink-0 flex-col border-r border-edge" style={{ width }}>
-        {list}
-      </div>
-      {!narrow && (
-        <PaneSeparator
-          label="Resize workshop list"
-          width={listWidth}
-          min={WORKSHOP_LIST_MIN}
-          max={WORKSHOP_LIST_MAX}
-          onResize={setDragWidth}
-          onEnd={() =>
-            setDragWidth((live) => {
-              if (live !== null) setListWidth(live);
-              return null;
-            })
-          }
-        />
-      )}
-      <section className="min-w-0 flex-1 overflow-y-auto">{detail}</section>
-    </div>
+    <PaneFrame
+      nav={nav}
+      list={list}
+      detail={detail}
+      navWidth={WORKSHOP_NAV_WIDTH}
+      navShown={narrow ? narrowDrawer === "workshop" : !navCollapsed}
+      overlayNav={narrow}
+      listWidth={narrow ? SIDE_PANEL_MIN : listWidth}
+      listMin={WORKSHOP_LIST_MIN}
+      listMax={WORKSHOP_LIST_MAX}
+      onListWidth={setListWidth}
+      listLabel="Resize workshop list"
+    />
   );
 }
 

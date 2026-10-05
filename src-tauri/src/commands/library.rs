@@ -1,7 +1,7 @@
 use hyprlayer_core::docs::frontmatter::{FmPatch, FmValue};
 use hyprlayer_core::gitops::ThoughtsRepoStatus;
 use hyprlayer_core::index::related::RelatedLink;
-use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
+use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::runtime::library::{CreateDocumentRequest, Document, FrontmatterEdit};
 use serde::Deserialize;
 use serde::Serialize;
@@ -137,6 +137,39 @@ pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdR
     state
         .client()?
         .query_docs(query)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn count_docs(
+    state: State<'_, AppState>,
+    project: Option<String>,
+) -> CmdResult<DocCounts> {
+    state
+        .client()?
+        .count_docs(project)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_doc_read(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state
+        .client()?
+        .mark_doc_read(id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_doc_unread(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    state
+        .client()?
+        .mark_doc_unread(id)
         .await
         .map_err(AppError::from)
 }

@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod attachments;
+mod attribution;
 pub mod builder;
 pub mod library;
 pub mod migrations;
@@ -42,6 +43,7 @@ use crate::settings::SettingsStore;
 use crate::store::Db;
 use crate::worktree::WorktreeManager;
 
+use attribution::DocAttribution;
 use operation_locks::WorkstreamLocks;
 use ports::{CliConfigCli, ConfigCli, LifecycleRunner, ProviderHttp, ReqwestProviderHttp};
 use pr_watcher::{PrWatcherContext, WorktreeWatch};
@@ -84,6 +86,7 @@ pub struct HyprlayerRuntime {
     index: Arc<ThoughtsIndex>,
     session_registry: Arc<SessionRegistry>,
     session_actors: Arc<SessionActors>,
+    attribution: Arc<DocAttribution>,
     session_titler: Arc<sessions::titles::SessionTitler>,
     terminals: Arc<TerminalRegistry>,
     scripts: Arc<ScriptRegistry>,
@@ -184,7 +187,16 @@ impl HyprlayerRuntime {
         );
 
         let (events, _) = broadcast::channel(EVENT_CAP);
-        let session_actors = Arc::new(SessionActors::new(db.clone(), events.clone()));
+        let attribution = Arc::new(DocAttribution::new(
+            db.clone(),
+            config.clone(),
+            events.clone(),
+        ));
+        let session_actors = Arc::new(SessionActors::new(
+            db.clone(),
+            events.clone(),
+            Some(attribution.clone()),
+        ));
 
         let config_cli =
             config_cli.unwrap_or_else(|| Arc::new(CliConfigCli::new(binaries.clone())));
@@ -207,6 +219,7 @@ impl HyprlayerRuntime {
             index: Arc::new(ThoughtsIndex::new()),
             session_registry: Arc::new(SessionRegistry::new()),
             session_actors,
+            attribution,
             session_titler: Arc::default(),
             terminals: Arc::new(TerminalRegistry::new()),
             scripts: Arc::new(ScriptRegistry::new()),
@@ -251,6 +264,8 @@ impl HyprlayerRuntime {
                     let _ = startup_events.send(RuntimeEvent::ConfigChanged);
                 }
                 runtime.rebuild_thoughts_index().await;
+                // After the rebuild: tool paths resolve against the loaded roots.
+                runtime.attribution.backfill().await;
             };
             tokio::select! {
                 _ = work => {}
@@ -467,6 +482,22 @@ impl HyprlayerRuntime {
             } else {
                 tracing::debug!("{summary}");
             }
+        }
+
+        // Per root path, so a profile added or repointed later also starts read.
+        let db = self.db.clone();
+        let stamp_roots = roots.clone();
+        let stamped = tokio::task::spawn_blocking(move || {
+            let at = crate::store::now_ms();
+            for root in stamp_roots.iter().filter(|r| r.root.is_dir()) {
+                if let Err(e) = db.ensure_read_baseline(&root.root.to_string_lossy(), at) {
+                    tracing::warn!(root = %root.root.display(), "read baseline not stamped: {e}");
+                }
+            }
+        })
+        .await;
+        if let Err(e) = stamped {
+            tracing::warn!("read baseline task failed: {e}");
         }
 
         let watch = if roots.is_empty() {

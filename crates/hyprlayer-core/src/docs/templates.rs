@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::frontmatter::{patch_frontmatter, FmPatch, FmValue};
+use super::vocab::DocType;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -38,12 +39,12 @@ pub fn new_doc(t: &DocTemplate) -> NewDoc {
     file_name.push_str(&slugify(&t.title));
     file_name.push_str(".md");
 
-    let body = match t.doc_type.as_str() {
-        "plan" => "\n## Overview\n\n## Phases\n",
-        "research" => "\n## Question\n\n## Findings\n",
-        "handoff" => "\n## Context\n\n## Next steps\n",
-        "pr" => "\n## Summary\n",
-        _ => "",
+    let body = match DocType::try_parse(&t.doc_type) {
+        Some(DocType::Plan) => "\n## Overview\n\n## Phases\n",
+        Some(DocType::Research) => "\n## Question\n\n## Findings\n",
+        Some(DocType::Handoff) => "\n## Context\n\n## Next steps\n",
+        Some(DocType::Pr) => "\n## Summary\n",
+        Some(DocType::Note) | None => "",
     };
 
     let mut set: Vec<(String, FmValue)> = Vec::new();

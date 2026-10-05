@@ -19,7 +19,7 @@ use hyprlayer_core::gitops::{
     self, CommitEntry, DirEntry, FileSides, GitFileEntry, ThoughtsRepoStatus, WorktreeGitStatus,
 };
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
-use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
+use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
@@ -519,6 +519,18 @@ impl Dispatch for Server {
 
     async fn query_docs(&self, query: ThoughtQuery) -> Result<QueryResult, WireError> {
         self.runtime.library().query(query).await.wire()
+    }
+
+    async fn count_docs(&self, project: Option<String>) -> Result<DocCounts, WireError> {
+        self.runtime.library().counts(project).await.wire()
+    }
+
+    async fn mark_doc_read(&self, id: String) -> Result<(), WireError> {
+        self.runtime.library().mark_read(&id).await.wire()
+    }
+
+    async fn mark_doc_unread(&self, id: String) -> Result<(), WireError> {
+        self.runtime.library().mark_unread(&id).await.wire()
     }
 
     async fn get_doc(&self, id: String) -> Result<Document, WireError> {

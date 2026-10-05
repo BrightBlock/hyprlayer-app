@@ -76,6 +76,7 @@ export function attachEventListeners(): () => void {
     }),
     events.thoughtsIndexUpdated.listen((event) => {
       void queryClient.invalidateQueries({ queryKey: ["docs"] });
+      void queryClient.invalidateQueries({ queryKey: ["doc-counts"] });
       void queryClient.invalidateQueries({ queryKey: ["related"] });
       void queryClient.invalidateQueries({ queryKey: ["thoughts-git-status"] });
       const { ids } = event.payload;
@@ -85,6 +86,18 @@ export function attachEventListeners(): () => void {
         for (const id of ids) {
           void queryClient.invalidateQueries({ queryKey: ["doc", id] });
         }
+      }
+    }),
+    events.docStateChanged.listen((event) => {
+      void queryClient.invalidateQueries({ queryKey: ["docs"] });
+      void queryClient.invalidateQueries({ queryKey: ["doc-counts"] });
+      // Read toggles leave the bytes alone: an open doc isn't re-read, only refetched on its next open.
+      const { ids, change } = event.payload;
+      for (const id of ids) {
+        void queryClient.invalidateQueries({
+          queryKey: ["doc", id],
+          refetchType: change === "agent" ? "active" : "none",
+        });
       }
     }),
   ];

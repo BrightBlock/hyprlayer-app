@@ -70,6 +70,8 @@ import {
 } from "@/features/workstreams/pinStore";
 import { useProjectTreeStore } from "@/features/projects/projectTreeStore";
 import { useLibraryScope } from "@/features/library/libraryScope";
+import { asLibraryBox, LIBRARY_BOXES } from "@/features/library/libraryBoxes";
+import { LibrarySyncButton } from "@/features/library/LibrarySyncButton";
 import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
@@ -384,6 +386,7 @@ export function Root() {
     doc?: string;
     from?: string;
     section?: string;
+    box?: string;
   };
   const collapsed = useUiStore((state) => state.projectSidebarCollapsed);
   const setProjectSidebarCollapsed = useUiStore(
@@ -433,9 +436,11 @@ export function Root() {
         ? projectDrawerRoutable
         : open === "workshop"
           ? onWorkshop
-          : diffDrawerRoutable;
+          : open === "library"
+            ? onLibrary
+            : diffDrawerRoutable;
     if (!routable) setNarrowDrawer(null);
-  }, [projectDrawerRoutable, diffDrawerRoutable, onWorkshop, setNarrowDrawer]);
+  }, [projectDrawerRoutable, diffDrawerRoutable, onWorkshop, onLibrary, setNarrowDrawer]);
   const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
   const libDocTitle = libDoc.data ? docTitle(libDoc.data.meta) : undefined;
   const libDocUrl = useDocWebUrl(onLibrary ? (locationSearch.doc ?? "") : "");
@@ -679,7 +684,9 @@ export function Root() {
       ? 0
       : projectSidebarWidth(sidebarWidth, width);
   const sidebarShown = onLibrary
-    ? !libraryCollapsed
+    ? compact || narrow
+      ? narrowDrawer === "library"
+      : !libraryCollapsed
     : onWorkshop
       ? compact || narrow
         ? narrowDrawer === "workshop"
@@ -689,7 +696,10 @@ export function Root() {
         : projectSidebarShown;
   const toggleSidebar = () => {
     if (onSettings || onPipeline) return;
-    if (onLibrary) toggleLibrary();
+    if (onLibrary) {
+      if (narrow) setNarrowDrawer(narrowDrawer === "library" ? null : "library");
+      else toggleLibrary();
+    }
     else if (onWorkshop) {
       if (narrow) setNarrowDrawer(narrowDrawer === "workshop" ? null : "workshop");
       else toggleWorkshopNav();
@@ -959,6 +969,24 @@ export function Root() {
                 >
                   Library
                 </button>
+                <span className="text-ink-dim">
+                  <Icon name="chevronRight" />
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/library",
+                      search: (prev) => ({
+                        ...prev,
+                        doc: undefined,
+                      }),
+                    })
+                  }
+                  className="shrink-0 font-medium text-ink hover:text-ink"
+                >
+                  {LIBRARY_BOXES[asLibraryBox(locationSearch.box)].label}
+                </button>
                 {libDocTitle && (
                   <>
                     <span className="text-ink-dim">
@@ -1007,6 +1035,7 @@ export function Root() {
                 dir={activeWorkstream?.item.worktreePath ?? currentProject.path}
               />
             )}
+            {onLibrary && <LibrarySyncButton />}
             <SettingsButton />
             {currentProject && (
               <>

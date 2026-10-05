@@ -22,7 +22,7 @@ use hyprlayer_core::gitops::{
     CommitEntry, DirEntry, FileSides, GitFileEntry, ThoughtsRepoStatus, WorktreeGitStatus,
 };
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
-use hyprlayer_core::index::{DocMeta, QueryResult, ThoughtQuery};
+use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
@@ -154,6 +154,9 @@ hyprlayer_proto::commands! {
     ProjectSourceOf: project_source_of(path: String) -> ProjectSource;
 
     QueryDocs: query_docs(query: ThoughtQuery) -> QueryResult;
+    CountDocs: count_docs(project: Option<String>) -> DocCounts;
+    MarkDocRead: mark_doc_read(id: String) -> ();
+    MarkDocUnread: mark_doc_unread(id: String) -> ();
     GetDoc: get_doc(id: String) -> Document;
     SaveDoc: save_doc(id: String, content: String, base_mtime_ms: f64) -> DocMeta;
     PatchDocFrontmatter: patch_doc_frontmatter(id: String, patch: FmPatch, base_mtime_ms: f64) -> DocMeta;

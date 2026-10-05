@@ -218,6 +218,7 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::ConfigChanged => "ConfigChanged",
         E::BinariesChanged => "BinariesChanged",
         E::ThoughtsIndexUpdated { .. } => "ThoughtsIndexUpdated",
+        E::DocStateChanged { .. } => "DocStateChanged",
         E::ProjectsChanged => "ProjectsChanged",
         E::PrStatusChanged { .. } => "PrStatusChanged",
         E::WorktreeChanged { .. } => "WorktreeChanged",

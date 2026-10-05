@@ -1,5 +1,5 @@
 use hyprlayer_core::claude::SessionState;
-use hyprlayer_core::models::{ClientRef, TurnKind};
+use hyprlayer_core::models::{ClientRef, DocStateChange, TurnKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
@@ -16,6 +16,13 @@ pub struct BinariesChanged;
 pub struct ThoughtsIndexUpdated {
     pub kind: String,
     pub ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct DocStateChanged {
+    pub ids: Vec<String>,
+    pub change: DocStateChange,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

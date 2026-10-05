@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ConnectionStatus, Host } from "@/lib/bindings";
 import type { ReconnectSnapshot } from "@/features/hosts/reconnectState";
+import { initials } from "@/lib/format";
 import {
-  initials,
   meterClasses,
   meterPercent,
   meterState,

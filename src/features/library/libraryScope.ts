@@ -13,6 +13,9 @@ type LibraryScopeStore = {
   setLastSearch: (search: LibrarySearch) => void;
   lastSearchByProject: Record<string, LibrarySearch>;
   setProjectSearch: (project: string, search: LibrarySearch) => void;
+  // Thoughts project names.
+  pinnedProjects: string[];
+  togglePinnedProject: (name: string) => void;
 };
 
 export const useLibraryScope = create<LibraryScopeStore>()(
@@ -26,6 +29,13 @@ export const useLibraryScope = create<LibraryScopeStore>()(
       setProjectSearch: (project, search) =>
         set((s) => ({
           lastSearchByProject: { ...s.lastSearchByProject, [project]: search },
+        })),
+      pinnedProjects: [],
+      togglePinnedProject: (name) =>
+        set((s) => ({
+          pinnedProjects: s.pinnedProjects.includes(name)
+            ? s.pinnedProjects.filter((p) => p !== name)
+            : [...s.pinnedProjects, name],
         })),
     }),
     { name: scopedKey("hyprlayer:library-scope"), version: 1 },

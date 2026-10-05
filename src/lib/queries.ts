@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { keepPreviousData, skipToken, useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, skipToken, useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 
 import {
   commands,
@@ -12,6 +12,7 @@ import {
   type CliInstallMethodId,
   type CreateDocInput,
   type CreateProjectRequest,
+  type DocContent,
   type FrontmatterEditDto,
   type Host,
   type HostsFile,
@@ -186,6 +187,53 @@ export function useDocs(query: ThoughtQuery, enabled = true) {
     queryFn: () => unwrap(commands.queryDocs(query)),
     enabled,
     placeholderData: keepPreviousData,
+  });
+}
+
+// Under the ["docs"] prefix so every doc-list invalidation refetches its pages.
+export function useDocPages(query: ThoughtQuery) {
+  return useInfiniteQuery({
+    queryKey: ["docs", "pages", query],
+    queryFn: ({ pageParam }) => unwrap(commands.queryDocs({ ...query, offset: pageParam })),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
+      return loaded < last.total && last.items.length > 0 ? loaded : undefined;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useDocCounts(project: string | undefined) {
+  return useQuery({
+    queryKey: ["doc-counts", project ?? null],
+    queryFn: () => unwrap(commands.countDocs(project ?? null)),
+  });
+}
+
+function invalidateDocLists() {
+  void queryClient.invalidateQueries({ queryKey: ["docs"] });
+  void queryClient.invalidateQueries({ queryKey: ["doc-counts"] });
+}
+
+// Patched, not refetched: a read toggle never changes the bytes worth re-reading.
+function setCachedUnread(id: string, unread: boolean) {
+  queryClient.setQueryData<DocContent>(["doc", id], (d) => d && { ...d, meta: { ...d.meta, unread } });
+}
+
+export function useMarkDocRead() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.markDocRead(id)),
+    onSuccess: (_, id) => setCachedUnread(id, false),
+    onSettled: invalidateDocLists,
+  });
+}
+
+export function useMarkDocUnread() {
+  return useMutation({
+    mutationFn: (id: string) => unwrap(commands.markDocUnread(id)),
+    onSuccess: (_, id) => setCachedUnread(id, true),
+    onSettled: invalidateDocLists,
   });
 }
 

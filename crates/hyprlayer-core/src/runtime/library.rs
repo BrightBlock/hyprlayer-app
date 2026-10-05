@@ -1,17 +1,18 @@
 use std::path::{Path, PathBuf};
 
-use hyprlayer_models::runtime::ThoughtsIndexUpdateKind;
+use hyprlayer_models::runtime::{DocStateChange, ThoughtsIndexUpdateKind};
 use hyprlayer_models::RuntimeEvent;
 
 use crate::config::{BackendConfig, EffectiveConfig};
 use crate::docs::frontmatter::{patch_frontmatter, FmPatch};
 use crate::docs::parts::{self, compose};
 use crate::docs::templates::{new_doc, DocTemplate};
+use crate::docs::vocab::DocType;
 use crate::error::{CoreError, Result};
 use crate::gitops::{self, ThoughtsRepoStatus};
 use crate::index::related;
 use crate::index::{
-    thoughts_roots, unindexed_meta, DocMeta, QueryResult, ThoughtQuery, ThoughtsRoot,
+    thoughts_roots, unindexed_meta, DocCounts, DocMeta, QueryResult, ThoughtQuery, ThoughtsRoot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -152,6 +153,7 @@ impl LibraryService<'_> {
             .index
             .get(&id)
             .ok_or_else(|| CoreError::DocNotIndexed { id: id.clone() })?;
+        let meta = self.mark_saved(meta).await?;
         let _ = self
             .runtime
             .events
@@ -176,16 +178,110 @@ impl LibraryService<'_> {
             .ok_or(CoreError::DocNotIndexed { id: resolved })
     }
 
+    fn indexed_id(&self, id: &str) -> Result<String> {
+        self.runtime
+            .index
+            .resolve_id(id)
+            .ok_or_else(|| CoreError::DocNotIndexed { id: id.to_string() })
+    }
+
+    fn announce_read_state(&self, id: String) {
+        let _ = self.runtime.events.send(RuntimeEvent::DocStateChanged {
+            ids: vec![id],
+            change: DocStateChange::Read,
+        });
+    }
+
+    /// The user's own save, even a no-op one, is never news to them; its attribution survives it.
+    async fn mark_saved(&self, mut meta: DocMeta) -> Result<DocMeta> {
+        let hash =
+            self.runtime
+                .index
+                .content_hash(&meta.id)
+                .ok_or_else(|| CoreError::DocNotIndexed {
+                    id: meta.id.clone(),
+                })?;
+        let db = self.runtime.db.clone();
+        let (id, mtime_ms, size) = (meta.id.clone(), meta.mtime_ms, meta.size_bytes);
+        meta.agent = blocking(move || {
+            db.mark_doc_read(&id, mtime_ms, hash, size)?;
+            Ok(db.doc_agents()?.remove(&id))
+        })
+        .await?;
+        meta.unread = false;
+        Ok(meta)
+    }
+
     pub async fn query(&self, query: ThoughtQuery) -> Result<QueryResult> {
         ensure_running(self.runtime)?;
         let index = self.runtime.index.clone();
-        blocking(move || Ok(index.query(&query))).await
+        let db = self.runtime.db.clone();
+        blocking(move || {
+            let reads = db.doc_read_state()?;
+            // The whole table, not an `IN` list an unbounded query could push past SQLite's limit.
+            let mut agents = db.doc_agents()?;
+            let mut result = index.query_with(&query, |meta, hash| reads.is_unread(meta, hash));
+            for item in &mut result.items {
+                item.agent = agents.remove(&item.id);
+            }
+            Ok(result)
+        })
+        .await
+    }
+
+    pub async fn counts(&self, project: Option<String>) -> Result<DocCounts> {
+        ensure_running(self.runtime)?;
+        let index = self.runtime.index.clone();
+        let db = self.runtime.db.clone();
+        blocking(move || {
+            let reads = db.doc_read_state()?;
+            Ok(index.counts(project.as_deref(), |meta, hash| reads.is_unread(meta, hash)))
+        })
+        .await
+    }
+
+    pub async fn mark_read(&self, id: &str) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let id = self.indexed_id(id)?;
+        let index = &self.runtime.index;
+        let (meta, hash) = index
+            .get(&id)
+            .zip(index.content_hash(&id))
+            .ok_or_else(|| CoreError::DocNotIndexed { id: id.clone() })?;
+        let db = self.runtime.db.clone();
+        let read_id = id.clone();
+        blocking(move || db.mark_doc_read(&read_id, meta.mtime_ms, hash, meta.size_bytes)).await?;
+        self.announce_read_state(id);
+        Ok(())
+    }
+
+    pub async fn mark_unread(&self, id: &str) -> Result<()> {
+        ensure_running(self.runtime)?;
+        let id = self.indexed_id(id)?;
+        let db = self.runtime.db.clone();
+        let unread_id = id.clone();
+        blocking(move || db.mark_doc_unread(&unread_id)).await?;
+        self.announce_read_state(id);
+        Ok(())
     }
 
     pub async fn get(&self, id: &str) -> Result<Document> {
         ensure_running(self.runtime)?;
         if let Some(resolved) = self.runtime.index.resolve_id(id) {
-            if let Some(meta) = self.runtime.index.get(&resolved) {
+            if let Some(mut meta) = self.runtime.index.get(&resolved) {
+                let hash = self.runtime.index.content_hash(&resolved);
+                let db = self.runtime.db.clone();
+                let doc = meta.clone();
+                let (unread, agent) = blocking(move || {
+                    let unread = match hash {
+                        Some(hash) => db.doc_read_state()?.is_unread(&doc, hash),
+                        None => false,
+                    };
+                    Ok((unread, db.doc_agents()?.remove(&doc.id)))
+                })
+                .await?;
+                meta.unread = unread;
+                meta.agent = agent;
                 let path = PathBuf::from(&resolved);
                 let content = tokio::fs::read_to_string(&path)
                     .await
@@ -254,11 +350,14 @@ impl LibraryService<'_> {
         if composed == original {
             // No write: bytes, mtime and the watcher stay put.
             let key = abs.to_string_lossy().into_owned();
-            return self
+            let meta = self
                 .runtime
                 .index
                 .get(&key)
-                .ok_or(CoreError::DocNotIndexed { id: key });
+                .ok_or(CoreError::DocNotIndexed { id: key })?;
+            let meta = self.mark_saved(meta).await?;
+            self.announce_read_state(meta.id.clone());
+            return Ok(meta);
         }
         let root = self.root_for_doc(&abs).await?;
         self.write_and_reindex(abs, root, composed).await
@@ -322,13 +421,9 @@ impl LibraryService<'_> {
             "shared" | "global" => "shared".to_string(),
             _ => effective.user.clone(),
         };
-        let type_dir = match req.doc_type.as_str() {
-            "plan" => "plans",
-            "research" => "research",
-            "handoff" => "handoffs",
-            "pr" => "prs",
-            _ => "notes",
-        };
+        let type_dir = DocType::try_parse(&req.doc_type)
+            .unwrap_or(DocType::Note)
+            .dir_name();
         let dir = if req.scope == "global" {
             root.join(&global_dir).join(&area_dir).join(type_dir)
         } else {

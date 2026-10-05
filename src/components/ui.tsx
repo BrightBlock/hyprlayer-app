@@ -536,6 +536,8 @@ type SegmentedControlProps<T extends string> = {
   disabled?: boolean;
   className?: string;
   "aria-label": string;
+  /** `bordered`: a toolbar toggle that sits on a panel (the Library's width control). */
+  variant?: "default" | "bordered";
 };
 
 export function SegmentedControl<T extends string>({
@@ -545,13 +547,19 @@ export function SegmentedControl<T extends string>({
   disabled,
   className,
   "aria-label": ariaLabel,
+  variant = "default",
 }: SegmentedControlProps<T>) {
   const { groupProps, itemProps } = useRovingRadio(options, value, onChange, disabled);
+  const bordered = variant === "bordered";
   return (
     <div
       {...groupProps}
       aria-label={ariaLabel}
-      className={cx("inline-flex rounded-control bg-panel-2 p-0.5", className)}
+      className={cx(
+        "inline-flex rounded-control bg-panel-2 p-0.5",
+        bordered && "items-center gap-0.5 border border-edge",
+        className,
+      )}
     >
       {options.map((o, i) => (
         <button
@@ -559,12 +567,17 @@ export function SegmentedControl<T extends string>({
           type="button"
           {...itemProps(i)}
           className={cx(
-            "rounded-[2px] px-2.5 py-0.5 text-ui transition-colors",
+            "rounded-[2px] text-ui transition-colors",
+            bordered ? "flex h-5 items-center px-2" : "px-2.5 py-0.5",
             FOCUS_RING,
             "disabled:cursor-not-allowed disabled:opacity-50",
             o.value === value
-              ? "bg-panel font-semibold text-ink shadow-sm"
-              : "text-ink-2 enabled:hover:text-ink",
+              ? bordered
+                ? "bg-accent-soft font-semibold text-ink ring-1 ring-inset ring-edge"
+                : "bg-panel font-semibold text-ink shadow-sm"
+              : bordered
+                ? "font-medium text-ink-dim enabled:hover:text-ink"
+                : "text-ink-2 enabled:hover:text-ink",
           )}
         >
           {o.label}
@@ -837,6 +850,7 @@ export function PageError({ error }: { error: unknown }) {
 
 type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   active?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 };
 
 export function IconButton({ active, className, ...rest }: IconButtonProps) {

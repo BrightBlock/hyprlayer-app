@@ -26,6 +26,9 @@ export const commands = {
 	checkWorktreeFiles: (path: string) => typedError<SeedReport, AppError>(__TAURI_INVOKE("check_worktree_files", { path })),
 	browseDirectory: (path: string | null) => typedError<DirListing, AppError>(__TAURI_INVOKE("browse_directory", { path })),
 	queryDocs: (query: ThoughtQuery) => typedError<QueryResult, AppError>(__TAURI_INVOKE("query_docs", { query })),
+	countDocs: (project: string | null) => typedError<DocCounts, AppError>(__TAURI_INVOKE("count_docs", { project })),
+	markDocRead: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("mark_doc_read", { id })),
+	markDocUnread: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("mark_doc_unread", { id })),
 	getDoc: (id: string) => typedError<DocContent, AppError>(__TAURI_INVOKE("get_doc", { id })),
 	saveDoc: (id: string, content: string, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("save_doc", { id, content, baseMtimeMs })),
 	patchDocFrontmatter: (id: string, patch: FmPatchDto, baseMtimeMs: number | null) => typedError<DocMeta, AppError>(__TAURI_INVOKE("patch_doc_frontmatter", { id, patch, baseMtimeMs })),
@@ -297,6 +300,7 @@ export const commands = {
 export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
+	docStateChanged: makeEvent<DocStateChanged>("doc-state-changed"),
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
@@ -791,6 +795,16 @@ export type DirListing = {
 	entries: DirBrowseEntry[],
 };
 
+/**  The newest harness session that wrote a doc. */
+export type DocAgent = {
+	harness: Harness,
+	sessionId: string,
+	workstreamId: string,
+	/**  `None` once the workstream is archived or gone. */
+	projectPath: string | null,
+	atMs: number | null,
+};
+
 export type DocContent = {
 	meta: DocMeta,
 	content: string,
@@ -799,6 +813,17 @@ export type DocContent = {
 	frontmatter: string | null,
 	fmError: string | null,
 	fmKeys: string[],
+};
+
+export type DocCounts = {
+	total: number,
+	types: TypeCount[],
+	statuses: StatusCount[],
+	/**  Count desc, then name; ignores the project scope so a picker can list every project. */
+	projects: NameCount[],
+	/**  Name asc. */
+	authors: NameCount[],
+	unread: number,
 };
 
 export type DocMeta = {
@@ -813,7 +838,24 @@ export type DocMeta = {
 	fmWarnings: string[],
 	mtimeMs: number | null,
 	sizeBytes: number | null,
+	excerpt?: string,
+	unread?: boolean,
+	agent?: DocAgent | null,
 };
+
+export type DocScope = "user" | "shared" | "global";
+
+/**  Why a doc's Library state changed: a read toggle, or an agent wrote it. */
+export type DocStateChange = "read" | "agent";
+
+export type DocStateChanged = {
+	ids: string[],
+	change: DocStateChange,
+};
+
+export type DocStatus = "draft" | "active" | "implemented" | "superseded" | "archived";
+
+export type DocType = "plan" | "research" | "handoff" | "note" | "pr";
 
 export type EditorKind = "files" | "editor" | "terminal";
 
@@ -1032,6 +1074,11 @@ export type MultiplexerSettings = {
 	notifyOnBlocked?: boolean,
 	persistAcrossRestarts?: boolean,
 	engines?: Engine[],
+};
+
+export type NameCount = {
+	name: string,
+	count: number,
 };
 
 export type NotificationSettings = {
@@ -1262,6 +1309,10 @@ export type PullOutcome = { kind: "upToDate" } | { kind: "merged" } | { kind: "c
 export type QueryResult = {
 	total: number,
 	items: DocMeta[],
+	/**  Distinct projects across the whole matched set, not just this page. */
+	projects?: number,
+	/**  Unread docs across the whole matched set. */
+	unread?: number,
 };
 
 export type Question = {
@@ -1634,6 +1685,11 @@ export type StartedSession = {
 	prompt: string,
 };
 
+export type StatusCount = {
+	status: DocStatus,
+	count: number,
+};
+
 export type StepStatus = "running" | "done" | "failed" | "skipped";
 
 export type StorageInfo = {
@@ -1699,6 +1755,7 @@ export type ThoughtQuery = {
 	sort?: SortKey,
 	limit?: number | null,
 	offset?: number | null,
+	unreadOnly?: boolean,
 };
 
 export type ThoughtsIndexUpdated = {
@@ -1733,6 +1790,11 @@ export type ThoughtsRepoStatus = {
 export type ThoughtsSource = { mode: "clone"; url: string; location: string | null } | { mode: "disk"; path: string } | { mode: "create"; path: string };
 
 export type TurnKind = "user" | "assistant" | "tool";
+
+export type TypeCount = {
+	docType: DocType,
+	count: number,
+};
 
 export type WatchedSessionDto = {
 	sessionId: string,

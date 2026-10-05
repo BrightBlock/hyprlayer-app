@@ -3,7 +3,8 @@ import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/
 
 import { Root } from "./routes/Root";
 import { Dashboard } from "./routes/Dashboard";
-import type { LibrarySearch } from "./features/library/librarySearch";
+import { asLibraryBox } from "./features/library/libraryBoxes";
+import { LIBRARY_SORTS, type LibrarySearch } from "./features/library/librarySearch";
 import type { WorkshopSearch } from "./features/workshop/workshopSearch";
 import { RouteError } from "./components/RouteError";
 import { RouteNotFound } from "./components/RouteNotFound";
@@ -146,6 +147,8 @@ const libraryRoute = createRoute({
   path: "/library",
   component: LibraryPage,
   validateSearch: (search: Record<string, unknown>): LibrarySearch => ({
+    box: optionalString(search.box) ? asLibraryBox(optionalString(search.box)) : undefined,
+    sort: LIBRARY_SORTS.find((s) => s === search.sort),
     type: optionalString(search.type),
     status: optionalString(search.status),
     scope: optionalString(search.scope),

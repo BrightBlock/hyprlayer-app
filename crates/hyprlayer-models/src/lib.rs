@@ -20,7 +20,7 @@ pub use project::{CreateStep, ProjectRecord, ProjectSource, StepStatus};
 pub use review::{
     FileChangeKind, ReviewCommentState, ReviewNoteKind, ReviewSide, ReviewStatus, ReviewVerdict,
 };
-pub use runtime::{RuntimeEvent, ThoughtsIndexUpdateKind};
+pub use runtime::{DocStateChange, RuntimeEvent, ThoughtsIndexUpdateKind};
 pub use script::{RunPhase, ScriptKind, ScriptRuntime, ScriptStatus};
 pub use session::{
     ClientRef, ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, RevisedTurn,

@@ -29,7 +29,7 @@ import {
 } from "@/lib/queries";
 import { useUiStore } from "@/lib/uiStore";
 import { useWorkstreamArtifacts, useWorkstreamDocs } from "@/features/session/sessionStore";
-import type { DocKind } from "@/lib/domain/docs";
+import type { DocType } from "@/lib/domain/docs";
 import { glyphForStatus } from "@/lib/domain/review";
 import { CommitsPanel } from "./CommitsPanel";
 import { renamedLabel } from "./renamedLabel";
@@ -272,10 +272,12 @@ function ChangeSection({
 }
 
 
-const DOC_TONE: Record<DocKind, string> = {
+const DOC_TONE: Record<DocType, string> = {
   research: "bg-research/10 text-research",
   plan: "bg-plan/10 text-plan",
   handoff: "bg-handoff/10 text-handoff",
+  note: "bg-panel-2 text-ink-dim",
+  pr: "bg-panel-2 text-ink-dim",
 };
 
 function DocsSection({
