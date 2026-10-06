@@ -617,10 +617,13 @@ impl OpenCodeDriver {
             let cwd = cwd.to_string();
             let home = server.home().to_path_buf();
             move || {
-                crate::skills::list_skills(Some(std::path::Path::new(&cwd)), Some(&home))
-                    .into_iter()
-                    .map(|skill| skill.name)
-                    .collect::<std::collections::HashSet<String>>()
+                crate::skills::list_skills(
+                    Some(std::path::Path::new(&cwd)),
+                    &crate::skills::SkillHome::under(&home),
+                )
+                .into_iter()
+                .map(|skill| skill.name)
+                .collect::<std::collections::HashSet<String>>()
             }
         });
         let (skills, commands) = tokio::join!(

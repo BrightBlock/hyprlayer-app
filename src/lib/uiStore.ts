@@ -51,6 +51,8 @@ export type UiStore = {
   toggleProjectSidebar: () => void;
   docWide: boolean;
   setDocWide: (wide: boolean) => void;
+  skillDetailWide: boolean;
+  setSkillDetailWide: (wide: boolean) => void;
   narrowDrawer: "project" | "diff" | "workshop" | "library" | null;
   setNarrowDrawer: (panel: "project" | "diff" | "workshop" | "library" | null) => void;
   // Remote folder picker; a display preference of the person, not the server,
@@ -96,6 +98,8 @@ export const useUiStore = create<UiStore>()(
         set((state) => ({ projectSidebarCollapsed: !state.projectSidebarCollapsed })),
       docWide: true,
       setDocWide: (wide) => set({ docWide: wide }),
+      skillDetailWide: true,
+      setSkillDetailWide: (wide) => set({ skillDetailWide: wide }),
       narrowDrawer: null,
       setNarrowDrawer: (panel) => set({ narrowDrawer: panel }),
       showDotFiles: false,
@@ -145,6 +149,7 @@ export const useUiStore = create<UiStore>()(
         workshopNavCollapsed: s.workshopNavCollapsed,
         projectSidebarCollapsed: s.projectSidebarCollapsed,
         docWide: s.docWide,
+        skillDetailWide: s.skillDetailWide,
         workshopListWidth: s.workshopListWidth,
         libraryListWidth: s.libraryListWidth,
         showDotFiles: s.showDotFiles,

@@ -23,7 +23,7 @@ use crate::rpc::{Request, Response};
 use crate::socket;
 use crate::streams::{StreamRequest, StreamResponse};
 use crate::transport::{
-    label, parse_control, undecodable_event, Control, FrameReader, FrameWriter,
+    label, parse_control, undecodable_event, undecodable_id, Control, FrameReader, FrameWriter,
     OUTBOUND_QUEUE_FRAMES,
 };
 
@@ -398,14 +398,41 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     let _ = events.send(event);
                 }
                 Ok(other) => tracing::warn!("unexpected {} frame from server", label(&other)),
+                // Never fatal: an unreadable frame fails its own call at most,
+                // so the connection and its sessions stay up.
                 Err(e) => match undecodable_event(&line) {
-                    // A newer server's event kind; the rest of the connection is still good.
                     Some(kind) => {
                         if skipped.insert(kind.clone()) {
                             tracing::warn!("skipping {kind} events this build cannot decode: {e}");
                         }
                     }
-                    None => break format!("an unreadable control frame ({e})"),
+                    None => match undecodable_id(&line) {
+                        Some((kind, id)) if kind == "response" => {
+                            tracing::warn!("failing request {id}: its response is unreadable: {e}");
+                            let waiter = pending
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .remove(&id);
+                            if let Some(tx) = waiter {
+                                let _ = tx.send(Err(WireError::unreadable_response()));
+                            }
+                        }
+                        Some((kind, id)) if kind == "stream_response" => {
+                            tracing::warn!(
+                                "failing stream request {id}: its response is unreadable: {e}"
+                            );
+                            let waiter = pending_streams
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .remove(&id);
+                            if let Some(tx) = waiter {
+                                let _ = tx.send(Err(WireError::unreadable_response()));
+                            }
+                        }
+                        _ => tracing::warn!(
+                            "skipped an unreadable control frame from the server: {e}"
+                        ),
+                    },
                 },
             },
             Ok(Some(Frame::Data(payload))) => match frame::decode_stream_frame(&payload) {
@@ -599,10 +626,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_malformed_line_that_is_not_an_event_still_ends_the_connection() {
-        let client = scripted_client(vec![r#"{"response":42}"#]).await;
+    async fn a_malformed_line_with_no_id_is_skipped_and_the_connection_keeps_serving() {
+        let client = scripted_client(vec![r#"{"response":42}"#, "not json"]).await;
 
-        let err = client.call(any_call()).await.expect_err("the call fails");
-        assert_eq!(err.code, WireError::disconnected().code);
+        client
+            .call(any_call())
+            .await
+            .expect("the real answer still arrives after the unreadable lines");
     }
 }

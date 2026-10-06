@@ -140,7 +140,7 @@ fn link_dir(target: &Path, link: &Path) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
+pub(crate) fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
     if meta.is_dir() {
         std::fs::remove_dir_all(link)?;
     } else {
@@ -150,7 +150,7 @@ fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
+pub(crate) fn remove_existing_link(link: &Path, meta: &std::fs::Metadata) -> Result<()> {
     use std::os::windows::fs::MetadataExt;
     const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;

@@ -54,10 +54,28 @@ impl WireError {
 
     /// A well-formed request this server cannot decode: a newer client's
     /// command, or arguments this build does not accept.
-    pub fn unsupported_command(command: &str) -> Self {
+    pub fn unreadable_request() -> Self {
+        Self {
+            code: "unreadable_request".into(),
+            message: "The server couldn't read that request.".into(),
+            remedy: Some("Update the Hyprlayer server on this host.".into()),
+            stale_transcript: None,
+        }
+    }
+
+    pub fn unreadable_response() -> Self {
+        Self {
+            code: "unreadable_response".into(),
+            message: "The app couldn't read the server's reply.".into(),
+            remedy: Some("Update the Hyprlayer app.".into()),
+            stale_transcript: None,
+        }
+    }
+
+    pub fn unsupported_command() -> Self {
         Self {
             code: "unsupported_command".into(),
-            message: format!("This Hyprlayer server does not support `{command}`."),
+            message: "The server doesn't support this yet.".into(),
             remedy: Some("Update the Hyprlayer server on this host.".into()),
             stale_transcript: None,
         }
@@ -79,12 +97,11 @@ impl WireError {
     /// itself, and a newer client evicting an older server gets no remedy text
     /// because it already knows what to do next (Phase 4 §5).
     pub fn version_mismatch(ours: u32, theirs: u32) -> Self {
-        let remedy = (ours < theirs)
-            .then(|| "This server was started by a newer Hyprlayer. Update this client.".into());
+        let remedy = (ours < theirs).then(|| "Update this app to match the newer server.".into());
         Self {
             code: "protocol_version_mismatch".into(),
             message: format!(
-                "This side speaks Hyprlayer protocol version {ours}; the peer sent version {theirs}."
+                "The app and server use different protocol versions ({ours} and {theirs})."
             ),
             remedy,
             stale_transcript: None,
@@ -293,7 +310,7 @@ mod tests {
         let older = WireError::version_mismatch(1, 2);
         assert_eq!(
             older.remedy.as_deref(),
-            Some("This server was started by a newer Hyprlayer. Update this client.")
+            Some("Update this app to match the newer server.")
         );
 
         // We are newer than the peer: no remedy — we're about to evict them

@@ -37,7 +37,7 @@ pub fn reject_undecodable(line: &str) -> Option<(String, Control)> {
         Some(tagged) => tagged.keys().next()?.clone(),
         None => body.as_str()?.to_string(),
     };
-    let error = WireError::unsupported_command(&command);
+    let error = WireError::unsupported_command();
     let reply = match kind.as_str() {
         "request" => Control::Response {
             id,
@@ -50,6 +50,14 @@ pub fn reject_undecodable(line: &str) -> Option<(String, Control)> {
         _ => return None,
     };
     Some((command, reply))
+}
+
+/// The envelope kind and id of a control line this build cannot decode, so the
+/// reader can answer or fail that one call instead of the connection.
+pub fn undecodable_id(line: &str) -> Option<(String, u64)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let (kind, envelope) = value.as_object()?.iter().next()?;
+    Some((kind.clone(), envelope.get("id")?.as_u64()?))
 }
 
 /// The kind of an event this build cannot decode, so the reader can skip it.

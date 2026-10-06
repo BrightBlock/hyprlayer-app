@@ -17,6 +17,7 @@ pub mod scripts;
 pub mod sessions;
 pub mod settings_service;
 pub mod shutdown;
+pub mod skills;
 pub mod terminal_registry;
 pub mod terminals;
 pub mod workstreams;
@@ -44,7 +45,7 @@ use crate::store::Db;
 use crate::worktree::WorktreeManager;
 
 use attribution::DocAttribution;
-use operation_locks::WorkstreamLocks;
+use operation_locks::{SkillLocks, WorkstreamLocks};
 use ports::{CliConfigCli, ConfigCli, LifecycleRunner, ProviderHttp, ReqwestProviderHttp};
 use pr_watcher::{PrWatcherContext, WorktreeWatch};
 use profile_lock::ProfileLock;
@@ -102,6 +103,7 @@ pub struct HyprlayerRuntime {
     provider_http: Arc<dyn ProviderHttp + Send + Sync>,
     lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     workstream_locks: WorkstreamLocks,
+    skill_locks: SkillLocks,
     coordinator: ShutdownCoordinator,
     tasks: AsyncMutex<Vec<TrackedTask>>,
     _profile_lock: ProfileLock,
@@ -208,6 +210,7 @@ impl HyprlayerRuntime {
             provider_http,
             lifecycle_runner,
             workstream_locks: WorkstreamLocks::new(),
+            skill_locks: SkillLocks::default(),
             config,
             binaries,
             settings,

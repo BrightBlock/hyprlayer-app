@@ -103,6 +103,7 @@ const workshopRoute = createRoute({
     project: optionalString(search.project),
     folder: optionalString(search.folder),
     filter: optionalString(search.filter),
+    view: optionalString(search.view),
     agent: optionalString(search.agent),
     tab: optionalString(search.tab),
     skill: optionalString(search.skill),

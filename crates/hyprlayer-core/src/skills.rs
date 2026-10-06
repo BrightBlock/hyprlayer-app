@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
+use hyprlayer_models::{SkillSourceKind, SkillTarget};
 use serde::{Deserialize, Serialize};
+
+use crate::skill_sources::lock::{self, SkillLock};
+use crate::skill_sources::{layout, SkillOrigin};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -32,7 +36,7 @@ pub struct AgentSkill {
     pub user_only: bool,
 }
 
-const MAX_SKILL_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_SKILL_BYTES: u64 = 1024 * 1024;
 const MAX_ASSET_DEPTH: usize = 4;
 const MAX_ASSETS: usize = 200;
 
@@ -50,6 +54,15 @@ pub struct SkillField {
 pub struct SkillAsset {
     pub rel_path: String,
     pub bytes: f64,
+}
+
+/// A bundled file for the detail viewer: `text` is `None` for a binary or oversized file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct SkillAssetText {
+    pub bytes: f64,
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,21 +84,48 @@ pub struct SkillFile {
     pub bytes: f64,
     pub frontmatter: Vec<SkillField>,
     pub assets: Vec<SkillAsset>,
+    pub targets: Vec<SkillTarget>,
+    pub installed: bool,
+    pub origin: Option<SkillOrigin>,
 }
 
-pub fn list_slash_commands(worktree: &Path, home: Option<&Path>) -> Vec<SlashCommand> {
+#[derive(Debug, Clone, Default)]
+pub struct SkillHome {
+    /// Claude's config dir: `CLAUDE_CONFIG_DIR`, else `<home>/.claude`.
+    pub claude: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+}
+
+impl SkillHome {
+    pub fn under(home: &Path) -> Self {
+        Self {
+            claude: Some(home.join(".claude")),
+            home: Some(home.to_path_buf()),
+        }
+    }
+}
+
+/// 1-64 of `[A-Za-z0-9_-]`, first character alphanumeric.
+pub fn is_valid_skill_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && name.len() <= 64
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+pub fn list_slash_commands(worktree: &Path, home: &SkillHome) -> Vec<SlashCommand> {
     let mut found: Vec<SlashCommand> = Vec::new();
 
     let mut roots: Vec<(PathBuf, &str)> = vec![(worktree.join(".claude"), "project")];
-    if let Some(home) = home {
-        roots.push((home.join(".claude"), "user"));
+    if let Some(claude) = &home.claude {
+        roots.push((claude.clone(), "user"));
     }
     for (root, source) in &roots {
         collect_skills(&root.join("skills"), source, &mut found);
         collect_commands(&root.join("commands"), "", source, &mut found);
     }
 
-    collect_plugins(&mut found, home);
+    collect_plugins(&mut found, home.claude.as_deref());
 
     found.extend(builtin_commands());
 
@@ -95,15 +135,15 @@ pub fn list_slash_commands(worktree: &Path, home: Option<&Path>) -> Vec<SlashCom
     found
 }
 
-pub fn list_skills(worktree: Option<&Path>, home: Option<&Path>) -> Vec<AgentSkill> {
+pub fn list_skills(worktree: Option<&Path>, home: &SkillHome) -> Vec<AgentSkill> {
     let mut out: Vec<AgentSkill> = Vec::new();
 
     let mut roots: Vec<(PathBuf, &str)> = Vec::new();
     if let Some(wt) = worktree {
         roots.push((wt.join(".claude"), "project"));
     }
-    if let Some(home) = home {
-        roots.push((home.join(".claude"), "user"));
+    if let Some(claude) = &home.claude {
+        roots.push((claude.clone(), "user"));
     }
     for (root, source) in &roots {
         for entry in scan_skills(&root.join("skills")) {
@@ -122,8 +162,8 @@ pub fn list_skills(worktree: Option<&Path>, home: Option<&Path>) -> Vec<AgentSki
         }
     }
 
-    let enabled = enabled_plugins(worktree, home);
-    for install in plugin_installs(home) {
+    let enabled = enabled_plugins(worktree, home.claude.as_deref());
+    for install in plugin_installs(home.claude.as_deref()) {
         if !enabled.contains(&install.key) {
             continue;
         }
@@ -147,13 +187,13 @@ pub fn list_skills(worktree: Option<&Path>, home: Option<&Path>) -> Vec<AgentSki
     out
 }
 
-pub fn skill_roots(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+pub fn skill_roots(worktree: Option<&Path>, home: &SkillHome) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(wt) = worktree {
         roots.push(wt.join(".claude/skills"));
     }
-    if let Some(home) = home {
-        roots.push(home.join(".claude/skills"));
+    if let Some(claude) = &home.claude {
+        roots.push(claude.join("skills"));
     }
     roots.retain(|r| r.is_dir());
     roots
@@ -165,12 +205,12 @@ struct PluginInstall {
     path: PathBuf,
 }
 
-fn plugin_installs(home: Option<&Path>) -> Vec<PluginInstall> {
+fn plugin_installs(claude: Option<&Path>) -> Vec<PluginInstall> {
     let mut out = Vec::new();
-    let Some(home) = home else {
+    let Some(claude) = claude else {
         return out;
     };
-    let manifest = home.join(".claude/plugins/installed_plugins.json");
+    let manifest = claude.join("plugins/installed_plugins.json");
     let Ok(text) = std::fs::read_to_string(&manifest) else {
         return out;
     };
@@ -198,10 +238,10 @@ fn plugin_installs(home: Option<&Path>) -> Vec<PluginInstall> {
     out
 }
 
-fn settings_chain(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+fn settings_chain(worktree: Option<&Path>, claude: Option<&Path>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    if let Some(home) = home {
-        files.push(home.join(".claude/settings.json"));
+    if let Some(claude) = claude {
+        files.push(claude.join("settings.json"));
     }
     if let Some(wt) = worktree {
         files.push(wt.join(".claude/settings.json"));
@@ -219,10 +259,10 @@ fn settings_chain(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> 
 
 fn enabled_plugins(
     worktree: Option<&Path>,
-    home: Option<&Path>,
+    claude: Option<&Path>,
 ) -> std::collections::HashSet<String> {
     let mut on = std::collections::HashSet::new();
-    for file in settings_chain(worktree, home) {
+    for file in settings_chain(worktree, claude) {
         let Ok(text) = std::fs::read_to_string(&file) else {
             continue;
         };
@@ -243,8 +283,8 @@ fn enabled_plugins(
     on
 }
 
-fn collect_plugins(out: &mut Vec<SlashCommand>, home: Option<&Path>) {
-    for install in plugin_installs(home) {
+fn collect_plugins(out: &mut Vec<SlashCommand>, claude: Option<&Path>) {
+    for install in plugin_installs(claude) {
         collect_skills(&install.path.join("skills"), "plugin", out);
         collect_commands(&install.path.join("commands"), "", "plugin", out);
     }
@@ -382,7 +422,7 @@ fn parse_meta(text: &str) -> (Option<String>, Option<String>) {
     (name, description)
 }
 
-fn first_prose_line(body: &str) -> Option<String> {
+pub(crate) fn first_prose_line(body: &str) -> Option<String> {
     body.lines()
         .map(str::trim)
         .find(|l| !l.is_empty() && !l.starts_with('-') && !l.starts_with('#'))
@@ -391,61 +431,141 @@ fn first_prose_line(body: &str) -> Option<String> {
 
 pub fn list_skill_files(
     worktree: Option<&Path>,
-    home: Option<&Path>,
-    store_root: Option<&Path>,
+    home: &SkillHome,
+    bundle_store: Option<&Path>,
+    global_store: Option<&Path>,
 ) -> Vec<SkillFile> {
-    let mut out: Vec<SkillFile> = Vec::new();
+    let project_store = worktree.map(layout::project_store);
+    let project_lock = worktree.map(|wt| read_lock(&wt.join(".agents/hyprlayer/skills.lock")));
+    let global_lock = global_store.map(|s| read_lock(&layout::global_lock_path(s)));
+    let project = |root: PathBuf, target| Scan {
+        root,
+        source: "project",
+        rank: 0,
+        plugin: None,
+        target,
+        installed_in: project_store.as_deref().zip(project_lock.as_ref()),
+    };
+    let user = |root: PathBuf, target| Scan {
+        root,
+        source: "user",
+        rank: 1,
+        plugin: None,
+        target,
+        installed_in: global_store.zip(global_lock.as_ref()),
+    };
+
+    let mut found: Vec<SkillFile> = Vec::new();
     if let Some(wt) = worktree {
-        out.extend(scan_skill_files(
-            &wt.join(".claude/skills"),
-            "project",
-            0,
-            None,
-            store_root,
+        found.extend(scan_skill_files(
+            &project(wt.join(".claude/skills"), SkillTarget::Claude),
+            bundle_store,
+        ));
+        found.extend(scan_skill_files(
+            &project(wt.join(".agents/skills"), SkillTarget::Agents),
+            bundle_store,
         ));
     }
-    if let Some(home) = home {
-        out.extend(scan_skill_files(
-            &home.join(".claude/skills"),
-            "user",
-            1,
-            None,
-            store_root,
+    if let Some(claude) = &home.claude {
+        found.extend(scan_skill_files(
+            &user(claude.join("skills"), SkillTarget::Claude),
+            bundle_store,
+        ));
+    }
+    if let Some(root) = &home.home {
+        found.extend(scan_skill_files(
+            &user(root.join(".agents/skills"), SkillTarget::Agents),
+            bundle_store,
         ));
     }
 
-    let enabled = enabled_plugins(worktree, home);
+    let enabled = enabled_plugins(worktree, home.claude.as_deref());
     let mut seen = std::collections::HashSet::new();
-    for install in plugin_installs(home) {
+    for install in plugin_installs(home.claude.as_deref()) {
         if !enabled.contains(&install.key) {
             continue;
         }
-        let found = scan_skill_files(
-            &install.path.join("skills"),
-            "plugin",
-            2,
-            Some(&install.label),
-            store_root,
-        );
-        out.extend(found.into_iter().filter(|s| seen.insert(s.path.clone())));
+        let scan = Scan {
+            root: install.path.join("skills"),
+            source: "plugin",
+            rank: 2,
+            plugin: Some(&install.label),
+            target: SkillTarget::Claude,
+            installed_in: None,
+        };
+        let rows = scan_skill_files(&scan, bundle_store);
+        found.extend(rows.into_iter().filter(|s| seen.insert(s.path.clone())));
     }
 
+    let mut out = collapse_links(found);
     out.sort_by_cached_key(|s| (s.name.to_lowercase(), s.rank, s.path.clone()));
     out
 }
 
-fn scan_skill_files(
-    root: &Path,
-    source: &str,
+/// An unreadable lock lists nothing as installed; install and remove surface the error.
+fn read_lock(path: &Path) -> SkillLock {
+    lock::read(path).unwrap_or_default()
+}
+
+/// One row per real folder: the lowest rank wins, a `.claude` link beating `.agents` on a tie.
+fn collapse_links(found: Vec<SkillFile>) -> Vec<SkillFile> {
+    let mut index: std::collections::HashMap<PathBuf, usize> = std::collections::HashMap::new();
+    let mut out: Vec<SkillFile> = Vec::new();
+    let mut scanned_as: Vec<SkillTarget> = Vec::new();
+    for row in found {
+        let own = row.targets[0];
+        let dir = PathBuf::from(&row.dir);
+        let key = std::fs::canonicalize(&dir).unwrap_or(dir);
+        let Some(&at) = index.get(&key) else {
+            index.insert(key, out.len());
+            scanned_as.push(own);
+            out.push(row);
+            continue;
+        };
+        let kept = &mut out[at];
+        let mut targets = std::mem::take(&mut kept.targets);
+        targets.extend(row.targets.iter().copied());
+        targets.sort();
+        targets.dedup();
+        let managed = kept.managed || row.managed;
+        let installed = kept.installed || row.installed;
+        let origin = kept.origin.take().or_else(|| row.origin.clone());
+        if row.rank < kept.rank
+            || (row.rank == kept.rank
+                && own == SkillTarget::Claude
+                && scanned_as[at] != SkillTarget::Claude)
+        {
+            *kept = row;
+            scanned_as[at] = own;
+        }
+        kept.targets = targets;
+        kept.managed = managed;
+        kept.installed = installed;
+        kept.origin = origin;
+    }
+    out
+}
+
+struct Scan<'a> {
+    root: PathBuf,
+    source: &'a str,
     rank: u32,
-    plugin: Option<&str>,
-    store_root: Option<&Path>,
-) -> Vec<SkillFile> {
+    plugin: Option<&'a str>,
+    target: SkillTarget,
+    /// The store and lock whose links make a row installed; none for plugins.
+    installed_in: Option<(&'a Path, &'a SkillLock)>,
+}
+
+fn scan_skill_files(scan: &Scan, store_root: Option<&Path>) -> Vec<SkillFile> {
     let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root) else {
+    let Ok(entries) = std::fs::read_dir(&scan.root) else {
         return out;
     };
     for entry in entries.flatten() {
+        // Dot entries are install scratch (`.<folder>.tmp-*`), never skills.
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let dir = entry.path();
         if !dir.is_dir() {
             continue;
@@ -470,8 +590,24 @@ fn scan_skill_files(
                 .filter(|s| !s.is_empty())
         };
         let dir_name = entry.file_name().to_string_lossy().to_string();
+        let installed = scan
+            .installed_in
+            .is_some_and(|(store, lock)| layout::owned(&dir, store, &dir_name, lock));
+        let origin = scan
+            .installed_in
+            .filter(|_| installed)
+            .and_then(|(_, lock)| lock.skills.get(&dir_name))
+            .and_then(|entry| {
+                Some(SkillOrigin {
+                    source: SkillSourceKind::parse(&entry.source)?,
+                    repo: entry.repo.clone(),
+                    path: entry.path.clone(),
+                    git_ref: entry.git_ref.clone(),
+                    commit: entry.commit.clone(),
+                })
+            });
         let name = pick("name").unwrap_or_else(|| dir_name.clone());
-        let agent_ref = match plugin {
+        let agent_ref = match scan.plugin {
             Some(label) => format!("{label}:{dir_name}"),
             None => name.clone(),
         };
@@ -479,9 +615,9 @@ fn scan_skill_files(
         out.push(SkillFile {
             path: skill_file.to_string_lossy().into_owned(),
             dir: dir.to_string_lossy().into_owned(),
-            source: source.to_string(),
-            plugin: plugin.map(str::to_string),
-            rank,
+            source: scan.source.to_string(),
+            plugin: scan.plugin.map(str::to_string),
+            rank: scan.rank,
             managed: store_root.is_some_and(|store| crate::agents::link_targets_store(&dir, store)),
             slash_name: name.clone(),
             name,
@@ -494,6 +630,9 @@ fn scan_skill_files(
             bytes: meta.len() as f64,
             frontmatter: skill_fields(&text, &parsed.fm.extra),
             assets: skill_assets(&dir),
+            targets: vec![scan.target],
+            installed,
+            origin,
         });
     }
     out
@@ -501,7 +640,7 @@ fn scan_skill_files(
 
 pub fn read_skill_file(
     worktree: Option<&Path>,
-    home: Option<&Path>,
+    home: &SkillHome,
     path: &Path,
 ) -> crate::error::Result<String> {
     let refuse = || crate::error::CoreError::InvalidPath {
@@ -523,17 +662,68 @@ pub fn read_skill_file(
     Ok(std::fs::read_to_string(path)?)
 }
 
-fn skill_file_roots(worktree: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+/// `rel_path` inside the folder of `skill_path` (a SKILL.md the read model lists).
+pub fn read_skill_asset(
+    worktree: Option<&Path>,
+    home: &SkillHome,
+    skill_path: &Path,
+    rel_path: &str,
+) -> crate::error::Result<SkillAssetText> {
+    let refuse = || crate::error::CoreError::InvalidPath {
+        path: rel_path.to_string(),
+    };
+    let rel = Path::new(rel_path);
+    if rel_path.is_empty()
+        || !rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(refuse());
+    }
+    if skill_path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md")
+        || !skill_file_roots(worktree, home)
+            .iter()
+            .any(|root| crate::agents::path_is_within(skill_path, root))
+    {
+        return Err(refuse());
+    }
+    let dir = skill_path.parent().ok_or_else(refuse)?;
+    // Canonical containment: a symlink inside the folder must not reach a file outside it.
+    let real_dir = std::fs::canonicalize(dir)?;
+    let real = std::fs::canonicalize(dir.join(rel))?;
+    if !real.starts_with(&real_dir) || !real.is_file() {
+        return Err(refuse());
+    }
+    let len = std::fs::metadata(&real)?.len();
+    let text = if len > MAX_SKILL_BYTES {
+        None
+    } else {
+        let raw = std::fs::read(&real)?;
+        (!raw.contains(&0))
+            .then(|| String::from_utf8(raw).ok())
+            .flatten()
+    };
+    Ok(SkillAssetText {
+        bytes: len as f64,
+        text,
+    })
+}
+
+fn skill_file_roots(worktree: Option<&Path>, home: &SkillHome) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(wt) = worktree {
         roots.push(wt.join(".claude/skills"));
+        roots.push(wt.join(".agents/skills"));
     }
-    if let Some(home) = home {
-        roots.push(home.join(".claude/skills"));
+    if let Some(claude) = &home.claude {
+        roots.push(claude.join("skills"));
     }
-    let enabled = enabled_plugins(worktree, home);
+    if let Some(root) = &home.home {
+        roots.push(root.join(".agents/skills"));
+    }
+    let enabled = enabled_plugins(worktree, home.claude.as_deref());
     roots.extend(
-        plugin_installs(home)
+        plugin_installs(home.claude.as_deref())
             .into_iter()
             .filter(|install| enabled.contains(&install.key))
             .map(|install| install.path.join("skills")),
@@ -680,7 +870,7 @@ mod tests {
             "---\nname: demo\ndescription: A demo skill.\n---\n",
         )
         .unwrap();
-        let cmds = list_slash_commands(wt, None);
+        let cmds = list_slash_commands(wt, &SkillHome::default());
         assert!(cmds
             .iter()
             .any(|c| c.name == "demo" && c.source == "project"));
@@ -714,7 +904,7 @@ mod tests {
     #[test]
     fn includes_builtin_commands() {
         let dir = tempfile::tempdir().unwrap();
-        let cmds = list_slash_commands(dir.path(), None);
+        let cmds = list_slash_commands(dir.path(), &SkillHome::default());
         for name in ["init", "review", "security-review"] {
             assert!(
                 cmds.iter().any(|c| c.name == name && c.source == "builtin"),
@@ -744,7 +934,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt), Some(home.path()));
+        let skills = list_skills(Some(wt), &SkillHome::under(home.path()));
         let demo: Vec<_> = skills.iter().filter(|s| s.name == "demo").collect();
         assert_eq!(demo.len(), 1, "expected one demo entry, got {demo:?}");
         assert_eq!(demo[0].source, "project");
@@ -769,7 +959,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt), None);
+        let skills = list_skills(Some(wt), &SkillHome::default());
 
         let counted = skills.iter().find(|s| s.name == "counted").unwrap();
         let body_offset = crate::docs::frontmatter::parse(text).body_offset;
@@ -808,7 +998,7 @@ mod tests {
         let project = install_plugin(home.path());
         let wt = project.path();
 
-        let disabled = list_skills(Some(wt), Some(home.path()));
+        let disabled = list_skills(Some(wt), &SkillHome::under(home.path()));
         assert!(
             !disabled.iter().any(|s| s.name == "demoplug:greet"),
             "installed-but-disabled plugin should contribute nothing: {:?}",
@@ -822,7 +1012,7 @@ mod tests {
         )
         .unwrap();
 
-        let enabled = list_skills(Some(wt), Some(home.path()));
+        let enabled = list_skills(Some(wt), &SkillHome::under(home.path()));
         let hit = enabled
             .iter()
             .find(|s| s.name == "demoplug:greet")
@@ -842,7 +1032,7 @@ mod tests {
             r#"{"enabledPlugins": {"demoplug@mkt": true}}"#,
         )
         .unwrap();
-        assert!(list_skills(Some(wt), Some(home.path()))
+        assert!(list_skills(Some(wt), &SkillHome::under(home.path()))
             .iter()
             .any(|s| s.name == "demoplug:greet"));
 
@@ -853,7 +1043,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !list_skills(Some(wt), Some(home.path()))
+            !list_skills(Some(wt), &SkillHome::under(home.path()))
                 .iter()
                 .any(|s| s.name == "demoplug:greet"),
             "local settings should win over the user-level enable",
@@ -862,7 +1052,7 @@ mod tests {
 
     #[test]
     fn list_skills_without_worktree_never_panics() {
-        let skills = list_skills(None, None);
+        let skills = list_skills(None, &SkillHome::default());
         assert!(skills.iter().all(|s| s.source != "project"));
     }
 
@@ -878,10 +1068,10 @@ mod tests {
         )
         .unwrap();
 
-        let skills = list_skills(Some(wt), None);
+        let skills = list_skills(Some(wt), &SkillHome::default());
         assert!(!skills.iter().any(|s| s.name == "sync"));
 
-        let cmds = list_slash_commands(wt, None);
+        let cmds = list_slash_commands(wt, &SkillHome::default());
         assert!(cmds.iter().any(|c| c.name == "sync"));
     }
 
@@ -902,7 +1092,7 @@ mod tests {
         )
         .unwrap();
 
-        let cmds = list_slash_commands(wt, None);
+        let cmds = list_slash_commands(wt, &SkillHome::default());
         let kind = |name: &str| cmds.iter().find(|c| c.name == name).map(|c| c.kind);
         assert_eq!(kind("plan"), Some(SlashKind::Skill));
         assert_eq!(kind("sync"), Some(SlashKind::Command));
@@ -914,14 +1104,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let wt = dir.path();
         assert!(
-            !skill_roots(Some(wt), None)
+            !skill_roots(Some(wt), &SkillHome::default())
                 .iter()
                 .any(|r| r.starts_with(wt)),
             "a worktree with no .claude/skills contributes no root"
         );
 
         std::fs::create_dir_all(wt.join(".claude/skills")).unwrap();
-        let roots = skill_roots(Some(wt), None);
+        let roots = skill_roots(Some(wt), &SkillHome::default());
         assert_eq!(roots.first(), Some(&wt.join(".claude/skills")));
         assert!(roots.iter().all(|r| r.ends_with("skills")));
         assert!(roots.iter().all(|r| r.is_dir()));

@@ -24,11 +24,11 @@
           "evidence": {
             "error": [
               "unsupported_command",
-              "This Hyprlayer server does not support `from_a_newer_client`.",
+              "The server doesn't support this yet.",
               "Update the Hyprlayer server on this host."
             ]
           },
-          "guard": "the error names the command and says to update the server",
+          "guard": "the error is one plain sentence that says to update the server",
           "ok": true
         }
       ],
@@ -50,6 +50,21 @@
       "guards": [
         {
           "evidence": {
+            "reply": [
+              10,
+              "unreadable_request"
+            ]
+          },
+          "guard": "a frame with no id is skipped, and one with an id is answered with an error",
+          "ok": true
+        }
+      ],
+      "step": "send frames this server cannot read"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "answered": true
           },
           "guard": "a known command on that connection still succeeds",
@@ -64,6 +79,19 @@
         }
       ],
       "step": "the same connection keeps serving"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "garbled": "unreadable_response",
+            "next_ok": true
+          },
+          "guard": "the unreadable answer fails its call and the next call still succeeds",
+          "ok": true
+        }
+      ],
+      "step": "an answer the client cannot read fails only that call"
     }
   ]
 }

@@ -449,7 +449,7 @@ async fn probe_version(path: &PathBuf) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn parse_semver(s: &str) -> Option<[u64; 3]> {
+pub(crate) fn parse_semver(s: &str) -> Option<[u64; 3]> {
     let core = s.trim_start_matches('v').split(['-', '+']).next()?;
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;

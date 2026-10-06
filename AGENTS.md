@@ -47,6 +47,7 @@ automatically, other agents should read them).
 | Is a shared formatting / path helper | `src/lib/format.ts` / `src/lib/path.ts` |
 | Is a terminal/PTY concern | `src/lib/terminal/` |
 | Is an agent-bundle (`~/.claude`) backup/restore/diff concern | `crates/hyprlayer-core/src/agent_bundle.rs`; its GitHub probe goes through `ProviderHttp` in `runtime/agents.rs` |
+| Is a skill install, source, lock or link concern | `crates/hyprlayer-core/src/skill_sources/` via `SkillService` |
 | Is used by one feature / by two or more | that feature's directory / graduate to `src/lib/` or `src/components/` |
 | Is a route | `src/routes/` — layout, params, pane wiring only; no domain types or store imports |
 
@@ -113,3 +114,4 @@ automatically: **read the relevant ADR before changing its area.**
 | 0007 | stage guardrails, harness launch policy, codex | `capability::launch_policy` is the single stage → harness mapping; codex floor is 0.155.1 |
 | 0008 | crate boundaries, runtime facade, core hermeticity | No Tauri in core; no HTTP client or `Db` handle in the shell; core reads no ambient env/home paths |
 | 0009 | `hyprlayer-server`, RPC, remote hosts, server versioning | The runtime runs in the server; the desktop is always a client |
+| 0010 | skill installs, skill stores, skills.lock | Installed skills live in app-owned stores reached by per-skill links; the CLI must not claim them |

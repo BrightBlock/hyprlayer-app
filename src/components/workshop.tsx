@@ -298,6 +298,7 @@ export function ListCardRow({
   description,
   meta,
   leading,
+  trailing,
   selected,
   onClick,
   onContextMenu,
@@ -307,6 +308,7 @@ export function ListCardRow({
   description?: string;
   meta?: ReactNode;
   leading?: ReactNode;
+  trailing?: ReactNode;
   selected: boolean;
   onClick: () => void;
   onContextMenu?: (at: { x: number; y: number }) => void;
@@ -331,15 +333,16 @@ export function ListCardRow({
     >
       {leading && <span className="flex h-5 shrink-0 items-center">{leading}</span>}
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="min-w-0 truncate text-body font-medium text-ink">{title}</span>
-          {badges && <span className="flex shrink-0 items-center gap-1">{badges}</span>}
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="min-w-0 max-w-full truncate text-body font-medium text-ink">{title}</span>
+          {badges && <span className="flex flex-wrap items-center gap-1">{badges}</span>}
         </span>
         {description && (
           <span className="mt-0.5 line-clamp-1 text-ui text-ink-dim">{description}</span>
         )}
         {meta && <span className="mt-0.5 block truncate text-meta text-ink-dim">{meta}</span>}
       </span>
+      {trailing && <span className="shrink-0 pt-0.5 text-right text-meta tabular-nums text-ink-dim">{trailing}</span>}
     </button>
   );
 }

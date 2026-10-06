@@ -1,12 +1,13 @@
-import type { AgentFile, SkillFile } from "@/lib/bindings";
-import { formatBytes, formatCompactCount, plural } from "@/lib/format";
-import { basename } from "@/lib/path";
+import type { AgentFile, SkillFile, SkillInstallPreview, SkillScope, SkillsShView, SkillTarget } from "@/lib/bindings";
+import { formatBytes, formatCompactCount, plural, shortSha } from "@/lib/format";
+import { basename, dirname } from "@/lib/path";
 
-export type SkillFilter = "all" | "yours" | "bundle" | "plugins";
+export type SkillFilter = "all" | "yours" | "installed" | "bundle" | "plugins";
 
 export const SKILL_FILTERS: ReadonlyArray<{ key: SkillFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "yours", label: "Yours" },
+  { key: "installed", label: "Installed" },
   { key: "bundle", label: "Hyprlayer bundle" },
   { key: "plugins", label: "Plugins" },
 ];
@@ -20,7 +21,9 @@ export function skillFilter(raw: string | undefined): SkillFilter {
 export function filterSkills(skills: readonly SkillFile[], filter: SkillFilter): SkillFile[] {
   switch (filter) {
     case "yours":
-      return skills.filter((s) => !s.managed && s.source !== "plugin");
+      return skills.filter((s) => !s.managed && !s.installed && s.source !== "plugin");
+    case "installed":
+      return skills.filter((s) => s.installed);
     case "bundle":
       return skills.filter((s) => s.managed);
     case "plugins":
@@ -40,9 +43,39 @@ export function skillSourceLabel(s: SkillFile): string {
 
 export function skillLocation(s: SkillFile, projectName: string | null): string {
   const dir = basename(s.dir);
-  if (s.source === "project") return `${projectName ?? "project"}/.claude/skills/${dir}`;
-  if (s.source === "user") return `~/.claude/skills/${dir}`;
+  const root = basename(dirname(dirname(s.dir))) === ".agents" ? ".agents/skills" : ".claude/skills";
+  if (s.source === "project") return `${projectName ?? "project"}/${root}/${dir}`;
+  // A CLAUDE_CONFIG_DIR user root shows its real path.
+  if (s.source === "user") return root === ".agents/skills" || /[/\\]\.claude[/\\]skills[/\\]/.test(s.dir) ? `~/${root}/${dir}` : s.dir;
   return `${s.plugin ?? "plugin"} · skills/${dir}`;
+}
+
+export const SKILLS_SH_VIEWS: ReadonlyArray<{ value: SkillsShView; label: string }> = [
+  { value: "all-time", label: "All time" },
+  { value: "trending", label: "Trending" },
+  { value: "hot", label: "Hot" },
+];
+
+export const SKILL_TARGETS: readonly SkillTarget[] = ["claude", "agents"];
+export const SKILL_TARGET_LABEL: Record<SkillTarget, string> = { claude: "Claude Code", agents: "Codex, OpenCode & others" };
+export const SKILL_TARGET_BADGE: Record<SkillTarget, string> = { claude: "Claude Code", agents: "Codex & others" };
+
+// The lock and remove/update key; the frontmatter name can differ.
+export function skillFolder(s: SkillFile): string {
+  return basename(s.dir);
+}
+
+export function skillOriginLine(s: SkillFile): string | null {
+  return s.origin ? `${s.origin.repo}@${s.origin.ref} · ${shortSha(s.origin.commit)}` : null;
+}
+
+export function skillScope(s: SkillFile): SkillScope {
+  return s.source === "project" ? "project" : "global";
+}
+
+export function sourceLine(p: SkillInstallPreview): string {
+  const base = `${p.repo}@${p.ref}${p.path ? ` · ${p.path}` : ""} · ${shortSha(p.commit)}`;
+  return p.fetchedFrom ? `${base} · via ${p.fetchedFrom}` : base;
 }
 
 export function attachedAgents(skill: SkillFile, agents: readonly AgentFile[]): AgentFile[] {
@@ -60,17 +93,18 @@ export function skillMeta(s: SkillFile): string {
   return `SKILL.md ${formatBytes(s.bytes ?? 0)} · ${plural(s.assets.length, "file")} · /${s.slashName}`;
 }
 
-export type SkillTab = "source" | "setup" | "tools" | "files";
+export type SkillTab = "instructions" | "files";
 
-export const SKILL_TABS: ReadonlyArray<{ key: SkillTab; label: string }> = [
-  { key: "source", label: "SKILL.md" },
-  { key: "setup", label: "Setup" },
-  { key: "tools", label: "Tools & agents" },
-  { key: "files", label: "Files" },
-];
+export const SKILL_TABS: readonly SkillTab[] = ["instructions", "files"];
 
 export function skillTab(raw: string | undefined): SkillTab {
-  return SKILL_TABS.find((t) => t.key === raw)?.key ?? "source";
+  return SKILL_TABS.find((t) => t === raw) ?? "instructions";
+}
+
+// The frontmatter is already shown as fields; the Instructions tab renders what follows it.
+export function skillBody(text: string): string {
+  const m = /^---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(text);
+  return m ? text.slice(m[0].length) : text;
 }
 
 export function frontmatterValue(s: SkillFile, key: string): string | null {

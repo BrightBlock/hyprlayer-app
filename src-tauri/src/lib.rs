@@ -27,7 +27,6 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use crate::client_identity::ClientIdentity;
-use crate::error::AppError;
 use crate::state::AppState;
 
 fn specta_builder() -> Builder<tauri::Wry> {
@@ -217,8 +216,19 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::agents::agent_context_files,
             commands::agents::agent_mcp_servers,
             commands::agents::agent_skills,
-            commands::agents::list_skill_files,
-            commands::agents::read_skill_file,
+            commands::skills::list_skill_files,
+            commands::skills::read_skill_file,
+            commands::skills::read_skill_asset,
+            commands::skills::preview_skill_install,
+            commands::skills::install_skill,
+            commands::skills::remove_skill,
+            commands::skills::search_skill_source,
+            commands::skills::skill_leaderboard,
+            commands::skills::list_skill_locks,
+            commands::skills::check_skill_updates,
+            commands::skills::preview_skill_update,
+            commands::skills::restore_skills,
+            commands::skills::list_skillfish_candidates,
             commands::agents::agent_harness_counts,
             commands::agents::export_agent_file,
             commands::agents::agent_bundle_status,
@@ -514,9 +524,7 @@ pub fn run() {
                             e.message
                         );
                         app.state::<AppState>()
-                            .mark_failed(AppError::server_unavailable(
-                                supervisor::incompatible_server_detail(),
-                            ));
+                            .mark_failed(supervisor::incompatible_server_error());
                         client = None;
                     }
                     Err(e) => log::warn!(

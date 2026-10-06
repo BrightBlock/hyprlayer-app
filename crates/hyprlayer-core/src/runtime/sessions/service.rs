@@ -987,7 +987,7 @@ impl SessionService<'_> {
                     add_dirs,
                     skill_roots: skills::skill_roots(
                         Some(std::path::Path::new(&session.cwd)),
-                        Some(&self.runtime.environment.home_dir),
+                        &self.runtime.skills().skill_home(),
                     ),
                     resume: resume_thread,
                     prior_user_turns,

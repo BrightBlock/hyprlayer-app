@@ -238,6 +238,17 @@ export const commands = {
 	agentSkills: (projectPath: string | null) => typedError<AgentSkill[], AppError>(__TAURI_INVOKE("agent_skills", { projectPath })),
 	listSkillFiles: (projectPath: string | null) => typedError<SkillFile[], AppError>(__TAURI_INVOKE("list_skill_files", { projectPath })),
 	readSkillFile: (projectPath: string | null, path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_skill_file", { projectPath, path })),
+	readSkillAsset: (projectPath: string | null, skillPath: string, relPath: string) => typedError<SkillAssetText, AppError>(__TAURI_INVOKE("read_skill_asset", { projectPath, skillPath, relPath })),
+	previewSkillInstall: (projectPath: string | null, source: SkillSourceInput) => typedError<SkillInstallPreview, AppError>(__TAURI_INVOKE("preview_skill_install", { projectPath, source })),
+	installSkill: (projectPath: string | null, token: string, scope: SkillScope, targets: SkillTarget[]) => typedError<SkillInstallReport, AppError>(__TAURI_INVOKE("install_skill", { projectPath, token, scope, targets })),
+	removeSkill: (projectPath: string | null, scope: SkillScope, name: string) => typedError<null, AppError>(__TAURI_INVOKE("remove_skill", { projectPath, scope, name })),
+	searchSkillSource: (query: string) => typedError<SkillSearchResult[], AppError>(__TAURI_INVOKE("search_skill_source", { query })),
+	skillLeaderboard: (view: SkillsShView, page: number) => typedError<SkillLeaderboardPage, AppError>(__TAURI_INVOKE("skill_leaderboard", { view, page })),
+	listSkillLocks: (projectPath: string | null) => typedError<SkillLockStatus[], AppError>(__TAURI_INVOKE("list_skill_locks", { projectPath })),
+	checkSkillUpdates: (projectPath: string | null) => typedError<SkillUpdate[], AppError>(__TAURI_INVOKE("check_skill_updates", { projectPath })),
+	previewSkillUpdate: (projectPath: string | null, scope: SkillScope, name: string) => typedError<SkillInstallPreview, AppError>(__TAURI_INVOKE("preview_skill_update", { projectPath, scope, name })),
+	restoreSkills: (projectPath: string | null, scope: SkillScope) => typedError<SkillRestoreReport, AppError>(__TAURI_INVOKE("restore_skills", { projectPath, scope })),
+	listSkillfishCandidates: (projectPath: string | null) => typedError<SkillfishCandidate[], AppError>(__TAURI_INVOKE("list_skillfish_candidates", { projectPath })),
 	agentHarnessCounts: () => typedError<HarnessCounts[], AppError>(__TAURI_INVOKE("agent_harness_counts")),
 	exportAgentFile: (agent: AgentFile, overlay: AgentOverlay) => typedError<string, AppError>(__TAURI_INVOKE("export_agent_file", { agent, overlay })),
 	agentBundleStatus: () => typedError<AgentBundleStatus, AppError>(__TAURI_INVOKE("agent_bundle_status")),
@@ -1637,6 +1648,25 @@ export type SkillAsset = {
 	bytes: number | null,
 };
 
+/**  A bundled file for the detail viewer: `text` is `None` for a binary or oversized file. */
+export type SkillAssetText = {
+	bytes: number | null,
+	text: string | null,
+};
+
+export type SkillChanges = {
+	added: string[],
+	removed: string[],
+	changed: string[],
+};
+
+export type SkillConflict = {
+	scope: SkillScope,
+	reason: SkillConflictReason,
+};
+
+export type SkillConflictReason = "reserved" | "installed" | "taken";
+
 export type SkillField = {
 	key: string,
 	value: string,
@@ -1658,7 +1688,135 @@ export type SkillFile = {
 	bytes: number | null,
 	frontmatter: SkillField[],
 	assets: SkillAsset[],
+	targets: SkillTarget[],
+	installed: boolean,
+	origin: SkillOrigin | null,
 };
+
+export type SkillInstallPreview = {
+	token: string,
+	/**  The folder name it installs as. */
+	name: string,
+	description: string,
+	/**
+	 *  SKILL.md after its frontmatter, for the review to render. Defaulted so a
+	 *  server from before this field doesn't drop the client's connection.
+	 */
+	instructions?: string,
+	source: SkillSourceKind,
+	repo: string,
+	path: string,
+	ref: string,
+	commit: string,
+	hash: string,
+	/**  Set only when `HYPRLAYER_SKILLS_GIT_BASE` overrides the base. */
+	fetchedFrom: string | null,
+	files: SkillPreviewFile[],
+	flags: SkillTrustFlags,
+	conflicts: SkillConflict[],
+	/**  Set for update and restore-approval previews that replace an installed skill. */
+	changes: SkillChanges | null,
+};
+
+export type SkillInstallReport = {
+	name: string,
+	scope: SkillScope,
+	steps: SkillInstallStep[],
+};
+
+export type SkillInstallStep = {
+	kind: SkillInstallStepKind,
+	target: SkillTarget | null,
+	status: StepStatus,
+	detail: string | null,
+	elapsedMs: number | null,
+};
+
+export type SkillInstallStepKind = "verify" | "store" | "link" | "lock";
+
+export type SkillLeaderboardPage = {
+	skills: SkillSearchResult[],
+	hasMore: boolean,
+};
+
+export type SkillLockState = "ok" | "missing" | "broken";
+
+export type SkillLockStatus = {
+	/**  The folder name. */
+	name: string,
+	scope: SkillScope,
+	state: SkillLockState,
+};
+
+export type SkillOrigin = {
+	source: SkillSourceKind,
+	repo: string,
+	path: string,
+	ref: string,
+	commit: string,
+};
+
+export type SkillPreviewFile = {
+	relPath: string,
+	bytes: number | null,
+	executable: boolean,
+	script: boolean,
+};
+
+export type SkillRestoreEntry = {
+	/**  The folder name. */
+	name: string,
+	outcome: SkillRestoreOutcome,
+	preview: SkillInstallPreview | null,
+	detail: string | null,
+};
+
+export type SkillRestoreOutcome = "ok" | "relinked" | "refetched" | "needsApproval" | "skipped" | "failed";
+
+export type SkillRestoreReport = {
+	scope: SkillScope,
+	entries: SkillRestoreEntry[],
+};
+
+export type SkillScope = "project" | "global";
+
+export type SkillSearchResult = {
+	name: string,
+	source: string,
+	skillId: string,
+	installs: number | null,
+};
+
+export type SkillSourceInput = { kind: "url"; url: string } | { kind: "skillsSh"; source: string; skillId: string };
+
+export type SkillSourceKind = "github" | "skills.sh";
+
+export type SkillTarget = "claude" | "agents";
+
+export type SkillTrustFlags = {
+	scripts: boolean,
+	executables: boolean,
+	bashAllowed: boolean,
+};
+
+export type SkillUpdate = {
+	/**  The folder name. */
+	name: string,
+	scope: SkillScope,
+	ref: string,
+	current: string,
+	latest: string | null,
+	updateAvailable: boolean,
+};
+
+export type SkillfishCandidate = {
+	scope: SkillScope,
+	spec: string,
+	installed: boolean,
+};
+
+/**  The skills.sh leaderboards its own site pages through (`/api/skills/{view}/{page}`). */
+export type SkillsShView = "all-time" | "trending" | "hot";
 
 export type SlashCommand = {
 	name: string,

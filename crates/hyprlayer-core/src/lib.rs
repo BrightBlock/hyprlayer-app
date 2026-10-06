@@ -4,7 +4,7 @@
 //!
 //! The supported surface is the [`HyprlayerRuntime`] facade and nothing else:
 //! construct it with [`RuntimeOptions`] over an explicit [`RuntimeEnvironment`]
-//! and [`RuntimePaths`], drive it through the twelve service handles re-exported
+//! and [`RuntimePaths`], drive it through the thirteen service handles re-exported
 //! below, observe [`RuntimeEvent`] through [`HyprlayerRuntime::subscribe`], and
 //! stop it with [`HyprlayerRuntime::shutdown`]. Errors are [`CoreError`] and the
 //! crate's [`Result`] alias; durable values are [`models`].
@@ -14,7 +14,8 @@
 //! [`runtime::settings_service`], [`runtime::providers`], [`runtime::sessions`],
 //! [`runtime::projects`], [`runtime::library`], [`runtime::agents`],
 //! [`runtime::prompts`], [`runtime::workstreams`], [`runtime::attachments`],
-//! [`runtime::terminals`], [`runtime::scripts`], [`runtime::reviews`].
+//! [`runtime::terminals`], [`runtime::scripts`], [`runtime::reviews`],
+//! [`runtime::skills`].
 //!
 //! `docs/architecture/rust-runtime-library.md` is the consumer-facing guide.
 //!
@@ -53,6 +54,7 @@ pub mod review;
 pub mod runtime;
 pub mod scripts;
 pub mod settings;
+pub mod skill_sources;
 pub mod skills;
 pub mod store;
 pub mod system;
@@ -82,5 +84,6 @@ pub use runtime::reviews::ReviewService;
 pub use runtime::scripts::ScriptService;
 pub use runtime::sessions::SessionService;
 pub use runtime::settings_service::SettingsService;
+pub use runtime::skills::SkillService;
 pub use runtime::terminals::TerminalService;
 pub use runtime::workstreams::WorkstreamService;

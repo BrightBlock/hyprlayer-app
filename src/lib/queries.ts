@@ -21,6 +21,10 @@ import {
   type ScriptKind,
   type ScriptSettings,
   type SetReviewFileViewedRequest,
+  type SkillScope,
+  type SkillsShView,
+  type SkillSourceInput,
+  type SkillTarget,
   type SubmitReviewRequest,
   type Stage,
   type WorktreeMode,
@@ -1172,6 +1176,111 @@ export function useSkillFileText(projectPath: string | null, path: string) {
   return useQuery({
     queryKey: ["skill-file", projectPath, path],
     queryFn: () => unwrap(commands.readSkillFile(projectPath, path)),
+  });
+}
+
+export function useSkillAssetText(projectPath: string | null, skillPath: string, relPath: string) {
+  return useQuery({
+    queryKey: ["skill-asset", projectPath, skillPath, relPath],
+    queryFn: () => unwrap(commands.readSkillAsset(projectPath, skillPath, relPath)),
+  });
+}
+
+export function invalidateSkills(): void {
+  void queryClient.invalidateQueries({ queryKey: ["skill-files"] });
+  void queryClient.invalidateQueries({ queryKey: ["skill-file"] });
+  void queryClient.invalidateQueries({ queryKey: ["skill-asset"] });
+  void queryClient.invalidateQueries({ queryKey: ["agent-skills"] });
+  void queryClient.invalidateQueries({ queryKey: ["skill-locks"] });
+  void queryClient.invalidateQueries({ queryKey: ["skillfish-candidates"] });
+  // Disabled, so invalidating would leave stale "Update" badges; a reset drops them until re-checked.
+  void queryClient.resetQueries({ queryKey: ["skill-updates"] });
+}
+
+export function usePreviewSkillInstall() {
+  return useMutation({
+    mutationFn: (v: { projectPath: string | null; source: SkillSourceInput }) =>
+      unwrap(commands.previewSkillInstall(v.projectPath, v.source)),
+  });
+}
+
+export function useInstallSkill() {
+  return useMutation({
+    mutationFn: (v: { projectPath: string | null; token: string; scope: SkillScope; targets: SkillTarget[] }) =>
+      unwrap(commands.installSkill(v.projectPath, v.token, v.scope, v.targets)),
+    onSuccess: invalidateSkills,
+  });
+}
+
+export function useRemoveSkill() {
+  return useMutation({
+    mutationFn: (v: { projectPath: string | null; scope: SkillScope; name: string }) =>
+      unwrap(commands.removeSkill(v.projectPath, v.scope, v.name)),
+    onSuccess: invalidateSkills,
+  });
+}
+
+export function useSkillLocks(projectPath: string | null) {
+  return useQuery({
+    queryKey: ["skill-locks", projectPath],
+    queryFn: () => unwrap(commands.listSkillLocks(projectPath)),
+  });
+}
+
+// Network: runs only when `refetch()` is called.
+export function useSkillUpdates(projectPath: string | null) {
+  return useQuery({
+    queryKey: ["skill-updates", projectPath],
+    queryFn: () => unwrap(commands.checkSkillUpdates(projectPath)),
+    enabled: false,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function usePreviewSkillUpdate() {
+  return useMutation({
+    mutationFn: (v: { projectPath: string | null; scope: SkillScope; name: string }) =>
+      unwrap(commands.previewSkillUpdate(v.projectPath, v.scope, v.name)),
+  });
+}
+
+export function useRestoreSkills() {
+  return useMutation({
+    mutationFn: (v: { projectPath: string | null; scope: SkillScope }) =>
+      unwrap(commands.restoreSkills(v.projectPath, v.scope)),
+    onSuccess: invalidateSkills,
+  });
+}
+
+export function useSkillfishCandidates(projectPath: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["skillfish-candidates", projectPath],
+    queryFn: () => unwrap(commands.listSkillfishCandidates(projectPath)),
+    enabled,
+  });
+}
+
+export function useSkillSourceSearch(query: string) {
+  return useQuery({
+    queryKey: ["skill-source-search", query],
+    queryFn: () => unwrap(commands.searchSkillSource(query)),
+    enabled: query.trim().length >= 2,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useSkillLeaderboard(view: SkillsShView, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: ["skill-leaderboard", view],
+    queryFn: ({ pageParam }) => unwrap(commands.skillLeaderboard(view, pageParam)),
+    initialPageParam: 0,
+    getNextPageParam: (last, _pages, page) => (last.hasMore ? page + 1 : undefined),
+    enabled,
+    staleTime: 10 * 60_000,
+    retry: false,
   });
 }
 

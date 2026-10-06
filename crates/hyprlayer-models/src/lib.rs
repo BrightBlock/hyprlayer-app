@@ -12,6 +12,7 @@ pub mod review;
 pub mod runtime;
 pub mod script;
 pub mod session;
+pub mod skill;
 pub mod terminal;
 pub mod workstream;
 
@@ -27,5 +28,6 @@ pub use session::{
     Session, SessionEvent, SessionLogEntry, SessionRev, SessionState, SessionStreamItem,
     SessionTurns, TurnKind, TurnStatus,
 };
+pub use skill::{SkillScope, SkillSourceKind, SkillTarget};
 pub use terminal::TerminalEvent;
 pub use workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};

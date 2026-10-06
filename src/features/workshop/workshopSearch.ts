@@ -7,6 +7,7 @@ export type WorkshopSearch = {
   project?: string;
   folder?: string;
   filter?: string;
+  view?: string;
   agent?: string;
   tab?: string;
   skill?: string;

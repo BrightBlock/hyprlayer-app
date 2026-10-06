@@ -1,0 +1,902 @@
+{
+  "scenario": "skill_sources",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "installed": true,
+            "path": "$SANDBOX/home/code/app/.claude/skills/sibling/SKILL.md",
+            "rows": 1,
+            "source": "project",
+            "targets": [
+              "claude",
+              "agents"
+            ]
+          },
+          "guard": "a sibling store reached by two links lists once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "installed": false,
+            "path": "$SANDBOX/home/.agents/skills/agents-only/SKILL.md",
+            "read_ok": true,
+            "rows": 1,
+            "source": "user",
+            "targets": [
+              "agents"
+            ]
+          },
+          "guard": "an .agents-only skill is listed and readable",
+          "ok": true
+        },
+        {
+          "evidence": [
+            {
+              "rel": "refs/notes.md",
+              "result": {
+                "text": "notes\n"
+              }
+            },
+            {
+              "rel": "data.bin",
+              "result": {
+                "text": null
+              }
+            },
+            {
+              "rel": "escape.txt",
+              "result": {
+                "error": "invalid_path"
+              }
+            },
+            {
+              "rel": "../ccd-probe/SKILL.md",
+              "result": {
+                "error": "invalid_path"
+              }
+            }
+          ],
+          "guard": "a bundled file reads as text, a binary as none, and nothing outside the folder",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ccd_probe": {
+              "path": "$CLAUDE_CONFIG_DIR/skills/ccd-probe/SKILL.md",
+              "source": "user",
+              "targets": [
+                "claude"
+              ]
+            },
+            "ccd_probe_in_agent_skills": true,
+            "home_probe_in_agent_skills": false,
+            "home_probe_in_files": false
+          },
+          "guard": "Claude's user root follows CLAUDE_CONFIG_DIR",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ccd_probe": true,
+            "home_probe": false
+          },
+          "guard": "slash commands follow CLAUDE_CONFIG_DIR",
+          "ok": true
+        }
+      ],
+      "step": "read model"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "commit_is_head": true,
+            "conflicts": [],
+            "fetchedFrom": "file://$SANDBOX/home/code/skill-src",
+            "files": [
+              {
+                "bytes": 89.0,
+                "executable": false,
+                "relPath": "SKILL.md",
+                "script": false
+              },
+              {
+                "bytes": 6.0,
+                "executable": false,
+                "relPath": "refs/notes.md",
+                "script": false
+              },
+              {
+                "bytes": 20.0,
+                "executable": true,
+                "relPath": "scripts/run.sh",
+                "script": true
+              }
+            ],
+            "flags": {
+              "bashAllowed": true,
+              "executables": true,
+              "scripts": true
+            },
+            "hash": "sha256:161bc1508f223ad6354cfcfdb848b8cfeaca21eb4752c44e30e108abdd0e5791",
+            "instructions": "\nDemo body.\n",
+            "name": "demo",
+            "path": "skills/demo",
+            "ref": "main",
+            "repo": "code/skill-src"
+          },
+          "guard": "a GitHub link previews its skill, instructions, files and trust flags",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "log_has_filter": true
+          },
+          "guard": "the filtered fetch path ran",
+          "ok": true
+        }
+      ],
+      "step": "preview from a GitHub link"
+    },
+    {
+      "guards": [
+        {
+          "evidence": [
+            {
+              "form": "blob",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "shorthand",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "slashed branch",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "tag",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "dot git",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "trailing slash",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "pathless shorthand",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "no scheme",
+              "same_hash_and_ref": true
+            },
+            {
+              "form": "no scheme, www",
+              "same_hash_and_ref": true
+            }
+          ],
+          "guard": "blob, shorthand, slashed-branch, tag, .git, slash and scheme-less forms agree",
+          "ok": true
+        },
+        {
+          "evidence": [
+            {
+              "as_expected": true,
+              "code": "skill_not_found_in_source",
+              "link": "no path, several skills"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "dotdot segment"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "other host"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "ssh form"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "backslash"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "empty segment"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "leading slash"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "empty owner"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_source_invalid",
+              "link": "unknown subpage"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_fetch_failed",
+              "link": "dead repo"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_fetch_failed",
+              "link": "unknown ref"
+            },
+            {
+              "as_expected": true,
+              "code": "skill_name_invalid",
+              "link": "invalid name"
+            }
+          ],
+          "guard": "malformed, dead and invalid links are refused with their codes",
+          "ok": true
+        }
+      ],
+      "step": "every link form resolves the same skill"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agents_link": "$SKILL_STORE/demo",
+            "claude_link": "$SKILL_STORE/demo",
+            "run_sh_executable": true,
+            "staging_left": [
+              false,
+              false
+            ],
+            "store_files": [
+              true,
+              true,
+              true
+            ],
+            "symlink_copied": false
+          },
+          "guard": "a global install stores once and links both targets",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "steps": [
+              {
+                "kind": "verify",
+                "status": "done",
+                "target": null
+              },
+              {
+                "kind": "store",
+                "status": "done",
+                "target": null
+              },
+              {
+                "kind": "link",
+                "status": "done",
+                "target": "claude"
+              },
+              {
+                "kind": "link",
+                "status": "done",
+                "target": "agents"
+              },
+              {
+                "kind": "lock",
+                "status": "done",
+                "target": null
+              }
+            ]
+          },
+          "guard": "the install report lists each step",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_preview_expired"
+          },
+          "guard": "a token installs once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "installed": true,
+            "origin": {
+              "commit": "$HEAD",
+              "path": "skills/demo",
+              "ref": "main",
+              "repo": "code/skill-src",
+              "source": "github"
+            },
+            "targets": [
+              "claude",
+              "agents"
+            ]
+          },
+          "guard": "the list shows the install with its origin",
+          "ok": true
+        }
+      ],
+      "step": "install global for both targets"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agents_link_absent": true,
+            "claude_link": "../../.agents/hyprlayer/skills/demo",
+            "commits_unchanged": true,
+            "row_sources": [
+              "project",
+              "user"
+            ],
+            "store_has_skill": true,
+            "untracked": [
+              "?? .agents/hyprlayer/skills.lock",
+              "?? .agents/hyprlayer/skills/demo/SKILL.md",
+              "?? .agents/hyprlayer/skills/demo/refs/notes.md",
+              "?? .agents/hyprlayer/skills/demo/scripts/run.sh",
+              "?? .claude/skills/demo"
+            ]
+          },
+          "guard": "a project install lands in the checkout, uncommitted",
+          "ok": true
+        }
+      ],
+      "step": "install project for Claude only"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lock_keys": [
+              "demo",
+              "other"
+            ],
+            "skill_name_taken": 1,
+            "succeeded": 1,
+            "tmp_dirs": []
+          },
+          "guard": "two installs of one name leave one winner and no debris",
+          "ok": true
+        }
+      ],
+      "step": "concurrent installs serialize"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "conflicts": [
+              {
+                "reason": "reserved",
+                "scope": "project"
+              },
+              {
+                "reason": "reserved",
+                "scope": "global"
+              }
+            ],
+            "install_code": "skill_name_reserved"
+          },
+          "guard": "a stage command name is reserved in both scopes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_name_taken",
+            "conflicts": [
+              {
+                "reason": "installed",
+                "scope": "project"
+              },
+              {
+                "reason": "installed",
+                "scope": "global"
+              }
+            ],
+            "remedy": "Remove it first."
+          },
+          "guard": "an installed name conflicts in the scopes that hold it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_name_taken",
+            "managed": true,
+            "remedy": null
+          },
+          "guard": "a bundle skill's name is taken and not removable here",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_name_taken",
+            "conflicts": [
+              {
+                "reason": "taken",
+                "scope": "project"
+              }
+            ],
+            "remedy": null
+          },
+          "guard": "a hand-made folder is never overwritten",
+          "ok": true
+        }
+      ],
+      "step": "collisions are refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "installed_anywhere": false,
+            "tampered": "skill_content_changed"
+          },
+          "guard": "edited staging is refused and installs nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "traversal": "skill_preview_expired",
+            "unknown": "skill_preview_expired"
+          },
+          "guard": "an unknown or path-like token has expired",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_targets_empty"
+          },
+          "guard": "an install with no targets is refused and installs nothing",
+          "ok": true
+        }
+      ],
+      "step": "the staged content is what was approved"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lock": [
+              "{",
+              "  \"skills\": {",
+              "    \"demo\": {",
+              "      \"commit\": \"$HEAD\",",
+              "      \"hash\": \"sha256:161bc1508f223ad6354cfcfdb848b8cfeaca21eb4752c44e30e108abdd0e5791\",",
+              "      \"path\": \"skills/demo\",",
+              "      \"ref\": \"main\",",
+              "      \"repo\": \"code/skill-src\",",
+              "      \"source\": \"github\",",
+              "      \"targets\": [",
+              "        \"claude\"",
+              "      ]",
+              "    }",
+              "  },",
+              "  \"version\": 1",
+              "}"
+            ]
+          },
+          "guard": "the project lock is sorted, has no installedAt, and ends at version",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "lock": {
+              "skills": {
+                "demo": {
+                  "commit": "$HEAD",
+                  "hash": "sha256:161bc1508f223ad6354cfcfdb848b8cfeaca21eb4752c44e30e108abdd0e5791",
+                  "installedAt": "$TIME",
+                  "path": "skills/demo",
+                  "ref": "main",
+                  "repo": "code/skill-src",
+                  "source": "github",
+                  "targets": [
+                    "agents",
+                    "claude"
+                  ]
+                }
+              },
+              "version": 1
+            }
+          },
+          "guard": "the global lock adds installedAt and sorts targets by wire string",
+          "ok": true
+        }
+      ],
+      "step": "lockfiles"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "edited_has_origin": false,
+            "edited_installed": false,
+            "pristine_has_origin": true,
+            "pristine_installed": true
+          },
+          "guard": "a pristine copy is installed; an edited copy is not",
+          "ok": true
+        }
+      ],
+      "step": "a copied install still counts"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "requests": [
+              "GET /api/search?q=demo+tools&limit=20 HTTP/1.1"
+            ],
+            "results": [
+              {
+                "installs": 42.0,
+                "name": "demo",
+                "skillId": "demo",
+                "source": "code/skill-src"
+              },
+              {
+                "installs": 1.0,
+                "name": "tools",
+                "skillId": "tools",
+                "source": "code/skill-src"
+              }
+            ]
+          },
+          "guard": "search maps results",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "requests": 1,
+            "results": []
+          },
+          "guard": "a short query never calls out",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "page": {
+              "hasMore": true,
+              "skills": [
+                {
+                  "installs": 3700000.0,
+                  "name": "demo",
+                  "skillId": "demo",
+                  "source": "code/skill-src"
+                }
+              ]
+            },
+            "request": "GET /api/skills/trending/1 HTTP/1.1"
+          },
+          "guard": "a leaderboard page maps rows and paging",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "path": "skills/demo",
+            "same_hash": true,
+            "source": "skills.sh",
+            "traversal": "skill_source_invalid"
+          },
+          "guard": "a pick previews the folder it names",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "install_ok": true,
+            "lock_source": "skills.sh",
+            "name": "tools",
+            "path": "skills/tools-v2",
+            "store_folder_tools": true
+          },
+          "guard": "a frontmatter name resolves",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "error": null,
+            "name": "solo",
+            "path": ""
+          },
+          "guard": "a pick whose skill is the repo root falls back to the root SKILL.md",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "skill_not_found_in_source"
+          },
+          "guard": "an unknown id is refused",
+          "ok": true
+        }
+      ],
+      "step": "skills.sh"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "updates": [
+              {
+                "current_is_head": true,
+                "latest_is_current": false,
+                "latest_is_new_head": true,
+                "name": "demo",
+                "ref": "main",
+                "scope": "project",
+                "updateAvailable": true
+              },
+              {
+                "current_is_head": true,
+                "latest_is_current": false,
+                "latest_is_new_head": true,
+                "name": "demo",
+                "ref": "main",
+                "scope": "global",
+                "updateAvailable": true
+              },
+              {
+                "current_is_head": true,
+                "latest_is_current": true,
+                "latest_is_new_head": false,
+                "name": "other",
+                "ref": "v1",
+                "scope": "global",
+                "updateAvailable": false
+              }
+            ]
+          },
+          "guard": "a branch install floats; a tag install is pinned",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changes": {
+              "added": [],
+              "changed": [
+                "SKILL.md"
+              ],
+              "removed": []
+            },
+            "commit_is_new_head": true,
+            "hash_differs": true,
+            "name": "demo"
+          },
+          "guard": "an update preview keeps the folder and summarizes the change",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "debris": [],
+            "links_unchanged": [
+              true,
+              true
+            ],
+            "lock_commit_is_new_head": true,
+            "lock_hash_is_previewed": true,
+            "steps": [
+              {
+                "detail": null,
+                "kind": "verify",
+                "target": null
+              },
+              {
+                "detail": null,
+                "kind": "store",
+                "target": null
+              },
+              {
+                "detail": null,
+                "kind": "link",
+                "target": "claude"
+              },
+              {
+                "detail": null,
+                "kind": "link",
+                "target": "agents"
+              },
+              {
+                "detail": null,
+                "kind": "lock",
+                "target": null
+              }
+            ],
+            "store_has_new_line": true
+          },
+          "guard": "applying an update swaps the store in place",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "copy_has_new_line": true,
+            "copy_is_dir": true,
+            "debris": [],
+            "installed": true
+          },
+          "guard": "a copy-fallback install is refreshed and stays installed",
+          "ok": true
+        }
+      ],
+      "step": "updates"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "states": [
+              {
+                "name": "demo",
+                "scope": "project",
+                "state": "ok"
+              },
+              {
+                "name": "demo",
+                "scope": "global",
+                "state": "missing"
+              }
+            ]
+          },
+          "guard": "a missing store shows as missing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "agents_link": "$SKILL_STORE/demo",
+            "report": {
+              "entries": [
+                {
+                  "detail": null,
+                  "name": "demo",
+                  "outcome": "refetched",
+                  "preview": null
+                }
+              ],
+              "scope": "global"
+            },
+            "store_hash_matches_lock": true
+          },
+          "guard": "restore refetches the locked commit and relinks",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "is_symlink": true,
+            "outcome": "relinked",
+            "state": "broken"
+          },
+          "guard": "a text-file link is broken, then relinked as a symlink",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changes": null,
+            "outcome": "needsApproval",
+            "preview_hash_is_real": true
+          },
+          "guard": "content that differs from the lock needs approval",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "install_ok": true,
+            "links_resolve": [
+              true,
+              true
+            ],
+            "lock_hash_fixed": true,
+            "store_back": true
+          },
+          "guard": "approving a restore refills the store and fixes the lock",
+          "ok": true
+        }
+      ],
+      "step": "restore repairs from the lock"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "candidates": [
+              {
+                "installed": true,
+                "scope": "project",
+                "spec": "code/skill-src@main/skills/demo"
+              },
+              {
+                "installed": false,
+                "scope": "project",
+                "spec": "code/skill-src/skills/other"
+              },
+              {
+                "installed": false,
+                "scope": "global",
+                "spec": "code/skill-src/skills/other"
+              }
+            ],
+            "files_untouched": true,
+            "preview_name": "other"
+          },
+          "guard": "candidates list uninstalled specs, skip nonsense, and never rewrite the file",
+          "ok": true
+        }
+      ],
+      "step": "skillfish.json lists candidates"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agents_link_gone": true,
+            "bundle_link_kept": true,
+            "claude_link_gone": true,
+            "lock_gone": true,
+            "store_gone": true
+          },
+          "guard": "removing a global install deletes its links, store and lock",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "links_gone": [
+              true,
+              true
+            ],
+            "store_gone": true,
+            "store_root_kept": true
+          },
+          "guard": "a lockless owned skill is removed, leaving the store root while demo stays",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "copy_gone": true,
+            "store_gone": true,
+            "store_root_gone": true
+          },
+          "guard": "a copy-fallback install is removed with its store, lock and empty root",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "again": "skill_not_installed",
+            "handmade": "skill_not_installed",
+            "handmade_kept": true
+          },
+          "guard": "nothing owned means skill_not_installed, and foreign folders survive",
+          "ok": true
+        }
+      ],
+      "step": "remove"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

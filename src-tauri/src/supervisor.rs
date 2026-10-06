@@ -53,23 +53,27 @@ const ALREADY_RUNNING: &str = "Hyprlayer is already running";
 const STOP_THE_SERVER_REMEDY: &str = "Stop the running Hyprlayer server (`hyprlayer-server stop`, \
      or `systemctl --user stop hyprlayer-server`) and reopen the app.";
 
-/// `tauri dev` never rebuilds the sibling server binary, so a dev build names
-/// the fix; a release build ships a matching pair and needs no such hint.
-fn dev_rebuild_hint() -> &'static str {
-    if cfg!(debug_assertions) {
-        " In a dev build, rebuild it first: `cargo build -p hyprlayer-server`."
-    } else {
-        ""
+fn step_aside_failed() -> Outcome {
+    Outcome::Blocked {
+        title: CANNOT_START.to_string(),
+        error: AppError::server_unavailable_with(
+            "The running Hyprlayer server wouldn't step aside for this app.",
+            STOP_THE_SERVER_REMEDY,
+        ),
     }
 }
 
 /// For a server that accepted the handshake and then dropped the first
 /// request: same protocol version, different build.
-pub fn incompatible_server_detail() -> String {
-    format!(
-        "The Hyprlayer server closed the connection as soon as the app spoke to it, \
-         which usually means it is running a build this app cannot talk to.\n\n{STOP_THE_SERVER_REMEDY}{}",
-        dev_rebuild_hint()
+pub fn incompatible_server_error() -> AppError {
+    let remedy = if cfg!(debug_assertions) {
+        "Rebuild it with `cargo build -p hyprlayer-server`, stop it with `hyprlayer-server stop`, and reopen the app."
+    } else {
+        STOP_THE_SERVER_REMEDY
+    };
+    AppError::server_unavailable_with(
+        "The Hyprlayer server on this machine is a build this app can't use.",
+        remedy,
     )
 }
 
@@ -946,16 +950,23 @@ async fn spawn_and_connect(
         match wait_for_spawn(&mut child, app_data_dir).await {
             SpawnWait::Connected(client) => return Outcome::connected(client),
             SpawnWait::Refused(e) => {
-                return Outcome::blocked(
-                    CANNOT_START,
-                    format!(
-                        "The Hyprlayer server this app started ({}) is not the build it expects: {}\n\n\
-                         Reinstall Hyprlayer so the app and its server match, then reopen the app.{}",
-                        bin.display(),
-                        e.message,
-                        dev_rebuild_hint()
-                    ),
+                log::warn!(
+                    "{} is not the build this app expects: {}",
+                    bin.display(),
+                    e.message
                 );
+                let remedy = if cfg!(debug_assertions) {
+                    "Rebuild it with `cargo build -p hyprlayer-server` and reopen the app."
+                } else {
+                    "Reinstall Hyprlayer and reopen the app."
+                };
+                return Outcome::Blocked {
+                    title: CANNOT_START.to_string(),
+                    error: AppError::server_unavailable_with(
+                        "The server this app started isn't the build it expects.",
+                        remedy,
+                    ),
+                };
             }
             SpawnWait::ExitedEarly(status) => {
                 let seen = stderr.as_ref().map(StderrFile::written).unwrap_or_default();
@@ -1079,13 +1090,8 @@ async fn replace_own_server(
 ) -> Outcome {
     let socket_path = socket::socket_path(app_data_dir);
     if let Err(e) = client.request_shutdown().await {
-        return Outcome::blocked(
-            CANNOT_START,
-            format!(
-                "Could not ask the running Hyprlayer server to step aside: {}\n\n{STOP_THE_SERVER_REMEDY}",
-                e.message
-            ),
-        );
+        log::warn!("the running server would not step aside: {}", e.message);
+        return step_aside_failed();
     }
     drop(client);
     if !wait_for_socket_gone(&socket_path, CONNECT_RETRIES, CONNECT_RETRY_DELAY).await {
@@ -1106,10 +1112,8 @@ async fn evict_and_respawn(
     let socket_path = socket::socket_path(app_data_dir);
     log::warn!("asking the running server to stop; its sessions and terminals end");
     if let Err(e) = request_shutdown_of_refusing_server(&socket_path).await {
-        return Outcome::blocked(
-            CANNOT_START,
-            format!("Could not ask the running Hyprlayer server to step aside: {e}\n\n{STOP_THE_SERVER_REMEDY}"),
-        );
+        log::warn!("the running server would not step aside: {e}");
+        return step_aside_failed();
     }
 
     if !wait_for_socket_gone(&socket_path, CONNECT_RETRIES, CONNECT_RETRY_DELAY).await {

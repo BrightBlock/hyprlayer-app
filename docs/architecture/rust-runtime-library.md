@@ -219,18 +219,19 @@ lags and receives `RecvError::Lagged`.
 
 ## Services
 
-Twelve handles, each borrowed from the runtime for the duration of one call:
+Thirteen handles, each borrowed from the runtime for the duration of one call:
 
 ```rust
 runtime.settings()   runtime.providers()  runtime.sessions()   runtime.projects()
 runtime.library()    runtime.agents()     runtime.prompts()    runtime.workstreams()
 runtime.attachments() runtime.terminals() runtime.scripts()    runtime.reviews()
+runtime.skills()
 ```
 
 Each handle's operational request/result types live in that service's module and
 are supported alongside it: `hyprlayer_core::runtime::{settings_service,
 providers, sessions, projects, library, agents, prompts, workstreams,
-attachments, terminals, scripts, reviews}`. The handles themselves are also
+attachments, terminals, scripts, reviews, skills}`. The handles themselves are also
 re-exported at the crate root.
 
 Every method takes `&self` and returns `Result<T>` unless shown otherwise.
@@ -348,13 +349,46 @@ real server without a webview.
 `list(Option<String>)`, `save(AgentFile)`, `delete(String)`,
 `new_file_path(String, String, Option<String>)`, `context_files(Option<String>)`,
 `mcp_servers(Option<String>)`, `skills(Option<String>)`,
-`skill_files(Option<String>)`, `read_skill_file(Option<String>, String)`, `harness_counts()`, `export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
+`harness_counts()`, `export(AgentFile, AgentOverlay)`, `bundle_status()`, `update_bundle()`,
 `bundle_versions()`, `repair_bundle()`, `install_bundle_version(Option<String>)`.
 
 The `Option<String>` in most positions is a project path; `None` means the
 user-global scope. `harness_counts()` counts each `ai status` platform's `agents/`
 files (`.md`; `.toml` for codex) and `skills/*/SKILL.md` dirs on the server host;
 `agent_files` is its headless test.
+
+### `SkillService`
+
+`list(Option<String>)`, `read_file(Option<String>, String)`,
+`read_asset(Option<String>, String, String)`,
+`preview_install(Option<String>, SkillSourceInput)`,
+`install(Option<String>, String, SkillScope, Vec<SkillTarget>)`,
+`remove(Option<String>, SkillScope, String)`, `search(String)`,
+`leaderboard(SkillsShView, u32)`,
+`lock_status(Option<String>)`, `check_updates(Option<String>)`,
+`preview_update(Option<String>, SkillScope, String)`,
+`restore(Option<String>, SkillScope)`, `list_skillfish_candidates(Option<String>)`.
+
+`None` is user-global. `list` returns one row per real skill folder, carrying
+`targets` (`claude`, `agents`) and `installed`; links to one folder from
+`.claude/skills` and `.agents/skills` collapse. The Claude user root follows
+`CLAUDE_CONFIG_DIR`. `read_file` refuses a path outside the skill roots, or not a
+`SKILL.md`, with `invalid_path`. `read_asset` reads a file inside a listed skill's folder
+and refuses anything whose canonical path leaves it; a binary or over-1 MiB file comes back
+with `text: None`. `install` with no targets refuses with `skill_targets_empty`. `leaderboard` reads one 200-row page of the
+skills.sh All time, Trending or Hot list from the `/api/skills/{view}/{page}` JSON the
+site pages through itself; rows whose source isn't `owner/repo` drop out, as in `search`. `preview_install` stages a GitHub skill
+and returns its files, trust flags and conflicts; `install` commits the staged files
+after re-verifying their hash, and consumes the token. `name` on `remove` is the folder
+name. `search` queries skills.sh (a query under 2 characters returns `[]` with no request);
+`preview_install` also takes a `SkillsSh` pick. Writes serialize per scope, and refusals
+use the `skill_*` codes. `lock_status` is local; `check_updates` runs one `ls-remote` per
+repo, and only a branch ref can report an update (tags and SHAs are pinned).
+`preview_update` returns a preview with a change summary whose token installs as a replace
+(the lock's scope and targets win). `restore` refetches missing stores and re-creates
+missing links; changed content comes back as `needsApproval` with a preview. Candidates
+come from a read-only `skillfish.json`. The
+`skill_sources` E2E scenario is its headless integration test.
 
 ### `PromptService`
 

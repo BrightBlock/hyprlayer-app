@@ -11,6 +11,7 @@ import type {
   TextareaHTMLAttributes,
 } from "react";
 
+import type { StepStatus } from "@/lib/bindings";
 import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord, type Chord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
@@ -1282,6 +1283,58 @@ export function Callout({
     <div className={cx("flex gap-2.5 rounded-lg border p-3 text-ui text-ink-dim", CALLOUT_TONE[tone].box)}>
       <span className={cx("shrink-0 pt-px", CALLOUT_TONE[tone].icon)}>{icon}</span>
       <span className="text-pretty">{children}</span>
+    </div>
+  );
+}
+
+export function StepList({ children }: { children: ReactNode }) {
+  return <div className="divide-y divide-edge/60 rounded-md border border-edge bg-panel-2/40">{children}</div>;
+}
+
+export function StepRow({
+  label,
+  status,
+  detail,
+}: {
+  label: string;
+  status?: StepStatus;
+  detail?: string | null;
+}) {
+  const shown = status === "failed" ? "failed" : status === "skipped" ? "skipped" : detail;
+  return (
+    <div className="flex h-9 items-center gap-2.5 px-3">
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+        {status === "done" ? (
+          <Icon name="check" size="sm" className="text-ok" />
+        ) : status === "running" ? (
+          <Spinner size="sm" />
+        ) : status === "failed" ? (
+          <Icon name="close" size="xs" className="text-bad-ink" />
+        ) : (
+          <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-edge" />
+        )}
+      </span>
+      <span
+        className={cx(
+          "min-w-0 flex-1 truncate text-body",
+          status === "running" || status === "failed" ? "text-ink" : "text-ink-dim",
+          status === undefined || status === "skipped" ? "opacity-60" : null,
+        )}
+      >
+        {label}
+      </span>
+      {shown && (
+        <span
+          className={cx(
+            "shrink-0 truncate text-ui",
+            status === "failed" ? "font-mono text-bad" : "font-mono text-ink-dim",
+            status === "skipped" && "font-sans opacity-60",
+          )}
+          style={{ maxWidth: 190 }}
+        >
+          {shown}
+        </span>
+      )}
     </div>
   );
 }

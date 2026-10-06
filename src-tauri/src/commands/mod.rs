@@ -11,6 +11,7 @@ pub mod prompts;
 pub mod reviews;
 pub mod scripts;
 pub mod sessions;
+pub mod skills;
 pub mod system;
 pub mod terminal;
 pub mod workstreams;

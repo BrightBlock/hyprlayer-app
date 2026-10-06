@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
@@ -31,6 +32,21 @@ fn checkout(
     map.insert(key.to_string(), Arc::downgrade(&created));
     map.retain(|_, weak| weak.strong_count() > 0);
     created
+}
+
+/// Per-store async mutexes for skill installs, removes and restores, keyed by the
+/// canonical path of the store's owning directory (ADR-0010).
+#[derive(Default)]
+pub(crate) struct SkillLocks {
+    stores: StdMutex<HashMap<String, Weak<AsyncMutex<()>>>>,
+}
+
+impl SkillLocks {
+    pub(crate) async fn lock(&self, key: &Path) -> OwnedMutexGuard<()> {
+        checkout(&self.stores, &key.to_string_lossy())
+            .lock_owned()
+            .await
+    }
 }
 
 /// Holds both guards for the lifetime of a locked workstream operation. The

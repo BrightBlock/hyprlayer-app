@@ -24,6 +24,7 @@ use hyprlayer_core::gitops::{
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
+use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
 use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
@@ -56,7 +57,14 @@ use hyprlayer_core::runtime::workstreams::{
     ArchiveCleanupReport, ArchiveInfo, ProjectMemory, WorkstreamBases,
 };
 use hyprlayer_core::settings::AppSettings;
-use hyprlayer_core::skills::{AgentSkill, SkillFile, SlashCommand};
+use hyprlayer_core::skill_sources::skills_sh::{
+    SkillLeaderboardPage, SkillSearchResult, SkillsShView,
+};
+use hyprlayer_core::skill_sources::{
+    SkillInstallPreview, SkillInstallReport, SkillLockStatus, SkillRestoreReport, SkillSourceInput,
+    SkillUpdate, SkillfishCandidate,
+};
+use hyprlayer_core::skills::{AgentSkill, SkillAssetText, SkillFile, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::{PullOutcome, WorktreeStatus};
 use hyprlayer_core::{
@@ -318,6 +326,17 @@ hyprlayer_proto::commands! {
     AgentSkills: agent_skills(project_path: Option<String>) -> Vec<AgentSkill>;
     ListSkillFiles: list_skill_files(project_path: Option<String>) -> Vec<SkillFile>;
     ReadSkillFile: read_skill_file(project_path: Option<String>, path: String) -> String;
+    ReadSkillAsset: read_skill_asset(project_path: Option<String>, skill_path: String, rel_path: String) -> SkillAssetText;
+    PreviewSkillInstall: preview_skill_install(project_path: Option<String>, source: SkillSourceInput) -> SkillInstallPreview;
+    InstallSkill: install_skill(project_path: Option<String>, token: String, scope: SkillScope, targets: Vec<SkillTarget>) -> SkillInstallReport;
+    RemoveSkill: remove_skill(project_path: Option<String>, scope: SkillScope, name: String) -> ();
+    SearchSkillSource: search_skill_source(query: String) -> Vec<SkillSearchResult>;
+    SkillLeaderboard: skill_leaderboard(view: SkillsShView, page: u32) -> SkillLeaderboardPage;
+    ListSkillLocks: list_skill_locks(project_path: Option<String>) -> Vec<SkillLockStatus>;
+    CheckSkillUpdates: check_skill_updates(project_path: Option<String>) -> Vec<SkillUpdate>;
+    PreviewSkillUpdate: preview_skill_update(project_path: Option<String>, scope: SkillScope, name: String) -> SkillInstallPreview;
+    RestoreSkills: restore_skills(project_path: Option<String>, scope: SkillScope) -> SkillRestoreReport;
+    ListSkillfishCandidates: list_skillfish_candidates(project_path: Option<String>) -> Vec<SkillfishCandidate>;
     AgentHarnessCounts: agent_harness_counts() -> Vec<HarnessCounts>;
     ExportAgentFile: export_agent_file(agent: AgentFile, overlay: AgentOverlay) -> String;
     AgentBundleStatus: agent_bundle_status() -> BundleStatus;

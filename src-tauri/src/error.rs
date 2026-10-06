@@ -239,6 +239,13 @@ impl AppError {
             stale_transcript: None,
         }
     }
+
+    pub fn server_unavailable_with(message: impl Into<String>, remedy: impl Into<String>) -> Self {
+        Self {
+            remedy: Some(remedy.into()),
+            ..Self::server_unavailable(message)
+        }
+    }
 }
 
 pub type CmdResult<T> = Result<T, AppError>;

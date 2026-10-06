@@ -1,6 +1,5 @@
 import type { CreateStep, ProjectCreateProgress, StepStatus } from "@/lib/bindings";
-import { Spinner, cx } from "@/components/ui";
-import { Icon } from "@/components/Icon";
+import { StepList, StepRow } from "@/components/ui";
 
 export type StepState = { status: StepStatus; detail: string | null };
 export type ProgressMap = Partial<Record<CreateStep, StepState>>;
@@ -54,58 +53,17 @@ export function CreateProgressPanel({
 }) {
   const steps = [...LOCAL_STEPS, ...(withGithub ? GITHUB_STEPS : [])];
   return (
-    <div className="divide-y divide-edge/60 rounded-md border border-edge bg-panel-2/40">
-      {steps.map((step) => (
-        <Row key={step} step={step} state={progress[step]} />
-      ))}
-    </div>
-  );
-}
-
-function Row({ step, state }: { step: CreateStep; state: StepState | undefined }) {
-  const status = state?.status;
-  const label =
-    status === "done"
-      ? LABELS[step].done
-      : status === "running"
-        ? LABELS[step].running
-        : LABELS[step].idle;
-  const detail = status === "failed" ? "failed" : status === "skipped" ? "skipped" : state?.detail;
-
-  return (
-    <div className="flex h-9 items-center gap-2.5 px-3">
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-        {status === "done" ? (
-          <Icon name="check" size="sm" className="text-ok" />
-        ) : status === "running" ? (
-          <Spinner size="sm" />
-        ) : status === "failed" ? (
-          <Icon name="close" size="xs" className="text-bad-ink" />
-        ) : (
-          <span aria-hidden="true" className="h-[5px] w-[5px] rounded-full bg-edge" />
-        )}
-      </span>
-      <span
-        className={cx(
-          "min-w-0 flex-1 truncate text-body",
-          status === "running" || status === "failed" ? "text-ink" : "text-ink-dim",
-          status === undefined || status === "skipped" ? "opacity-60" : null,
-        )}
-      >
-        {label}
-      </span>
-      {detail && (
-        <span
-          className={cx(
-            "shrink-0 truncate text-ui",
-            status === "failed" ? "font-mono text-bad" : "font-mono text-ink-dim",
-            status === "skipped" && "font-sans opacity-60",
-          )}
-          style={{ maxWidth: 190 }}
-        >
-          {detail}
-        </span>
-      )}
-    </div>
+    <StepList>
+      {steps.map((step) => {
+        const state = progress[step];
+        const label =
+          state?.status === "done"
+            ? LABELS[step].done
+            : state?.status === "running"
+              ? LABELS[step].running
+              : LABELS[step].idle;
+        return <StepRow key={step} label={label} status={state?.status} detail={state?.detail} />;
+      })}
+    </StepList>
   );
 }

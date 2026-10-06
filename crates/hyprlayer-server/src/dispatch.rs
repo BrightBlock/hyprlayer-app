@@ -21,6 +21,7 @@ use hyprlayer_core::gitops::{
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
 use hyprlayer_core::models::session::QuestionAnswers;
+use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
 use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
@@ -69,7 +70,14 @@ use hyprlayer_core::runtime::workstreams::{
     WorkstreamPrStatusRequest,
 };
 use hyprlayer_core::settings::AppSettings;
-use hyprlayer_core::skills::{self, AgentSkill, SkillFile, SlashCommand};
+use hyprlayer_core::skill_sources::skills_sh::{
+    SkillLeaderboardPage, SkillSearchResult, SkillsShView,
+};
+use hyprlayer_core::skill_sources::{
+    SkillInstallPreview, SkillInstallReport, SkillLockStatus, SkillRestoreReport, SkillSourceInput,
+    SkillUpdate, SkillfishCandidate,
+};
+use hyprlayer_core::skills::{self, AgentSkill, SkillAssetText, SkillFile, SlashCommand};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, PullOutcome};
@@ -126,6 +134,10 @@ fn connection(command: &str) -> Result<u64, WireError> {
 }
 
 pub fn wire_error(e: CoreError) -> WireError {
+    // The message stays one sentence; the git or HTTP detail goes to the log.
+    if let CoreError::SkillFetchFailed { detail } = &e {
+        tracing::warn!("skill fetch failed: {detail}");
+    }
     WireError {
         code: e.code().to_string(),
         message: e.to_string(),
@@ -1227,8 +1239,9 @@ impl Dispatch for Server {
     }
 
     async fn list_slash_commands(&self, id: String) -> Result<Vec<SlashCommand>, WireError> {
-        self.with_worktree(&id, "list_slash_commands", |p| {
-            Ok(skills::list_slash_commands(p, dirs::home_dir().as_deref()))
+        let home = self.runtime.skills().skill_home();
+        self.with_worktree(&id, "list_slash_commands", move |p| {
+            Ok(skills::list_slash_commands(p, &home))
         })
         .await
     }
@@ -2080,7 +2093,7 @@ impl Dispatch for Server {
         &self,
         project_path: Option<String>,
     ) -> Result<Vec<SkillFile>, WireError> {
-        self.runtime.agents().skill_files(project_path).await.wire()
+        self.runtime.skills().list(project_path).await.wire()
     }
 
     async fn read_skill_file(
@@ -2089,8 +2102,129 @@ impl Dispatch for Server {
         path: String,
     ) -> Result<String, WireError> {
         self.runtime
-            .agents()
-            .read_skill_file(project_path, path)
+            .skills()
+            .read_file(project_path, path)
+            .await
+            .wire()
+    }
+
+    async fn read_skill_asset(
+        &self,
+        project_path: Option<String>,
+        skill_path: String,
+        rel_path: String,
+    ) -> Result<SkillAssetText, WireError> {
+        self.runtime
+            .skills()
+            .read_asset(project_path, skill_path, rel_path)
+            .await
+            .wire()
+    }
+
+    async fn preview_skill_install(
+        &self,
+        project_path: Option<String>,
+        source: SkillSourceInput,
+    ) -> Result<SkillInstallPreview, WireError> {
+        self.runtime
+            .skills()
+            .preview_install(project_path, source)
+            .await
+            .wire()
+    }
+
+    async fn install_skill(
+        &self,
+        project_path: Option<String>,
+        token: String,
+        scope: SkillScope,
+        targets: Vec<SkillTarget>,
+    ) -> Result<SkillInstallReport, WireError> {
+        self.runtime
+            .skills()
+            .install(project_path, token, scope, targets)
+            .await
+            .wire()
+    }
+
+    async fn remove_skill(
+        &self,
+        project_path: Option<String>,
+        scope: SkillScope,
+        name: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .skills()
+            .remove(project_path, scope, name)
+            .await
+            .wire()
+    }
+
+    async fn search_skill_source(
+        &self,
+        query: String,
+    ) -> Result<Vec<SkillSearchResult>, WireError> {
+        self.runtime.skills().search(query).await.wire()
+    }
+
+    async fn skill_leaderboard(
+        &self,
+        view: SkillsShView,
+        page: u32,
+    ) -> Result<SkillLeaderboardPage, WireError> {
+        self.runtime.skills().leaderboard(view, page).await.wire()
+    }
+
+    async fn list_skill_locks(
+        &self,
+        project_path: Option<String>,
+    ) -> Result<Vec<SkillLockStatus>, WireError> {
+        self.runtime.skills().lock_status(project_path).await.wire()
+    }
+
+    async fn check_skill_updates(
+        &self,
+        project_path: Option<String>,
+    ) -> Result<Vec<SkillUpdate>, WireError> {
+        self.runtime
+            .skills()
+            .check_updates(project_path)
+            .await
+            .wire()
+    }
+
+    async fn preview_skill_update(
+        &self,
+        project_path: Option<String>,
+        scope: SkillScope,
+        name: String,
+    ) -> Result<SkillInstallPreview, WireError> {
+        self.runtime
+            .skills()
+            .preview_update(project_path, scope, name)
+            .await
+            .wire()
+    }
+
+    async fn restore_skills(
+        &self,
+        project_path: Option<String>,
+        scope: SkillScope,
+    ) -> Result<SkillRestoreReport, WireError> {
+        self.runtime
+            .skills()
+            .restore(project_path, scope)
+            .await
+            .wire()
+    }
+
+    async fn list_skillfish_candidates(
+        &self,
+        project_path: Option<String>,
+    ) -> Result<Vec<SkillfishCandidate>, WireError> {
+        self.runtime
+            .skills()
+            .list_skillfish_candidates(project_path)
             .await
             .wire()
     }

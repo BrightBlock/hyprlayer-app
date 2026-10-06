@@ -5,7 +5,7 @@ use crate::agent_bundle::{self, BundleSource, CollisionReport};
 use crate::agents::{AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts};
 use crate::error::{CoreError, Result};
 use crate::hyprcli::{AiVersions, BundleSelection, HyprCli};
-use crate::skills::{AgentSkill, SkillFile};
+use crate::skills::AgentSkill;
 use serde::{Deserialize, Serialize};
 
 use super::ports::ProviderHttpRequest;
@@ -167,43 +167,12 @@ impl AgentService<'_> {
 
     pub async fn skills(&self, project_path: Option<String>) -> Result<Vec<AgentSkill>> {
         ensure_running(self.runtime)?;
-        let home = self.home();
+        let home = self.runtime.skills().skill_home();
         blocking(move || {
             Ok(crate::skills::list_skills(
                 project_path.as_deref().map(Path::new),
-                Some(home.as_path()),
+                &home,
             ))
-        })
-        .await
-    }
-
-    pub async fn skill_files(&self, project_path: Option<String>) -> Result<Vec<SkillFile>> {
-        ensure_running(self.runtime)?;
-        let home = self.home();
-        let store_root = self.store_root();
-        blocking(move || {
-            Ok(crate::skills::list_skill_files(
-                project_path.as_deref().map(Path::new),
-                Some(home.as_path()),
-                store_root.as_deref(),
-            ))
-        })
-        .await
-    }
-
-    pub async fn read_skill_file(
-        &self,
-        project_path: Option<String>,
-        path: String,
-    ) -> Result<String> {
-        ensure_running(self.runtime)?;
-        let home = self.home();
-        blocking(move || {
-            crate::skills::read_skill_file(
-                project_path.as_deref().map(Path::new),
-                Some(home.as_path()),
-                Path::new(&path),
-            )
         })
         .await
     }

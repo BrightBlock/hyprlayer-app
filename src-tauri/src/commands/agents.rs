@@ -7,7 +7,7 @@ use hyprlayer_core::agents::{
 };
 use hyprlayer_core::hyprcli::AiVersions;
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
-use hyprlayer_core::skills::{AgentSkill, SkillFile};
+use hyprlayer_core::skills::AgentSkill;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
@@ -95,33 +95,6 @@ pub async fn agent_skills(
     state
         .client()?
         .agent_skills(project_path)
-        .await
-        .map_err(AppError::from)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_skill_files(
-    state: State<'_, AppState>,
-    project_path: Option<String>,
-) -> CmdResult<Vec<SkillFile>> {
-    state
-        .client()?
-        .list_skill_files(project_path)
-        .await
-        .map_err(AppError::from)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn read_skill_file(
-    state: State<'_, AppState>,
-    project_path: Option<String>,
-    path: String,
-) -> CmdResult<String> {
-    state
-        .client()?
-        .read_skill_file(project_path, path)
         .await
         .map_err(AppError::from)
 }

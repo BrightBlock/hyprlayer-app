@@ -300,6 +300,39 @@ pub enum CoreError {
     #[error("The prompt file changed on disk after it was previewed.")]
     PromptsSourceChanged,
 
+    #[error("That isn't a GitHub repository or skill link.")]
+    SkillSourceInvalid { input: String },
+
+    #[error("Couldn't reach the skill source.")]
+    SkillFetchFailed { detail: String },
+
+    #[error("{detail}")]
+    SkillNotFoundInSource { detail: String },
+
+    #[error("That skill is too large to install ({files} files).")]
+    SkillTooLarge { files: usize, bytes: u64 },
+
+    #[error("{name} isn't a valid skill name.")]
+    SkillNameInvalid { name: String },
+
+    #[error("/{name} is already a Hyprlayer stage command.")]
+    SkillNameReserved { name: String },
+
+    #[error("A skill named {name} already exists there.")]
+    SkillNameTaken { name: String, installed: bool },
+
+    #[error("That preview expired.")]
+    SkillPreviewExpired,
+
+    #[error("The fetched files changed after the preview.")]
+    SkillContentChanged,
+
+    #[error("{name} wasn't installed from a skill source.")]
+    SkillNotInstalled { name: String },
+
+    #[error("No agents were picked for this skill.")]
+    SkillTargetsEmpty,
+
     #[error("Node.js (npm) isn't installed, so OpenCode can't be installed automatically.")]
     NpmMissing,
 
@@ -640,6 +673,25 @@ impl CoreError {
             CoreError::PromptsSourceChanged => {
                 Some("Choose the file again to review what it holds now.".into())
             }
+            CoreError::SkillSourceInvalid { .. } => {
+                Some("Paste a github.com link or owner/repo.".into())
+            }
+            CoreError::SkillFetchFailed { .. } => {
+                Some("Check the link and your connection, then try again.".into())
+            }
+            CoreError::SkillNotFoundInSource { .. } => Some("Link to the skill's folder.".into()),
+            CoreError::SkillNameInvalid { .. } => Some(
+                "Use letters, numbers, hyphens or underscores, up to 64 characters.".into(),
+            ),
+            CoreError::SkillNameTaken {
+                installed: true, ..
+            } => Some("Remove it first.".into()),
+            CoreError::SkillPreviewExpired | CoreError::SkillContentChanged => {
+                Some("Preview the skill again.".into())
+            }
+            CoreError::SkillTargetsEmpty => {
+                Some("Pick Claude Code, Codex & others, or both.".into())
+            }
             CoreError::Frontmatter(crate::docs::frontmatter::FmError::InvalidRaw(_)) => {
                 Some("Fix the YAML and save again.".into())
             }
@@ -749,6 +801,17 @@ impl CoreError {
             CoreError::PromptsFileUnreadable { .. } => "prompts_file_unreadable",
             CoreError::PromptsFileInvalid { .. } => "prompts_file_invalid",
             CoreError::PromptsSourceChanged => "prompts_source_changed",
+            CoreError::SkillSourceInvalid { .. } => "skill_source_invalid",
+            CoreError::SkillFetchFailed { .. } => "skill_fetch_failed",
+            CoreError::SkillNotFoundInSource { .. } => "skill_not_found_in_source",
+            CoreError::SkillTooLarge { .. } => "skill_too_large",
+            CoreError::SkillNameInvalid { .. } => "skill_name_invalid",
+            CoreError::SkillNameReserved { .. } => "skill_name_reserved",
+            CoreError::SkillNameTaken { .. } => "skill_name_taken",
+            CoreError::SkillPreviewExpired => "skill_preview_expired",
+            CoreError::SkillContentChanged => "skill_content_changed",
+            CoreError::SkillNotInstalled { .. } => "skill_not_installed",
+            CoreError::SkillTargetsEmpty => "skill_targets_empty",
             CoreError::NpmMissing => "npm_missing",
             CoreError::OpencodeInstallFailed { .. } => "opencode_install_failed",
             CoreError::CliInstallUnsupported => "cli_install_unsupported",

@@ -36,6 +36,7 @@ export function WorkshopPage() {
             tab: undefined,
             folder: undefined,
             filter: undefined,
+            view: undefined,
             skill: undefined,
             prompt: undefined,
           }),
@@ -80,14 +81,21 @@ export function WorkshopPage() {
           filter={search.filter}
           onFilter={(filter) =>
             void navigate({
-              search: (prev) => ({ ...prev, filter: filter === "all" ? undefined : filter }),
+              search: (prev) => ({ ...prev, filter: filter === "all" ? undefined : filter, view: undefined }),
+              replace: true,
+            })
+          }
+          view={search.view}
+          onView={(view) =>
+            void navigate({
+              search: (prev) => ({ ...prev, view: view ?? undefined, skill: undefined }),
               replace: true,
             })
           }
           tab={skillTab(search.tab)}
           onTab={(next) =>
             void navigate({
-              search: (prev) => ({ ...prev, tab: next === "source" ? undefined : next }),
+              search: (prev) => ({ ...prev, tab: next === "instructions" ? undefined : next }),
               replace: true,
             })
           }

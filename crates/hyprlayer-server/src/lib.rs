@@ -33,8 +33,8 @@ use logging::RepeatGate;
 use rpc::Dispatch;
 use streams::StreamRegistry;
 use transport::{
-    encode_control, label, parse_control, reject_undecodable, Control, FrameReader, FrameWriter,
-    OUTBOUND_QUEUE_FRAMES,
+    encode_control, label, parse_control, reject_undecodable, undecodable_id, Control, FrameReader,
+    FrameWriter, OUTBOUND_QUEUE_FRAMES,
 };
 
 /// The bundle identifier Tauri derives the desktop's app dirs from; a
@@ -569,15 +569,39 @@ async fn read_requests<R: AsyncRead + Unpin>(
             Ok(control) => control,
             // Answered rather than dropped: a client newer than this server
             // would otherwise lose every in-flight call and reconnect.
-            Err(e) => match reject_undecodable(&line) {
-                Some((command, reply)) => {
-                    tracing::warn!("conn {conn}: refused {command}: this build cannot decode it");
+            // Never fatal: one unreadable frame must not end the sessions this
+            // connection carries.
+            Err(e) => {
+                let reply = match reject_undecodable(&line) {
+                    Some((command, reply)) => {
+                        tracing::warn!(
+                            "conn {conn}: refused {command}: this build cannot decode it"
+                        );
+                        Some(reply)
+                    }
+                    None => {
+                        tracing::warn!("conn {conn}: skipped an unreadable control frame: {e}");
+                        match undecodable_id(&line) {
+                            Some((kind, id)) if kind == "request" => Some(Control::Response {
+                                id,
+                                outcome: Outcome::Err(WireError::unreadable_request()),
+                            }),
+                            Some((kind, id)) if kind == "stream_request" => {
+                                Some(Control::StreamResponse {
+                                    id,
+                                    outcome: Outcome::Err(WireError::unreadable_request()),
+                                })
+                            }
+                            _ => None,
+                        }
+                    }
+                };
+                if let Some(reply) = reply {
                     let bytes = encode_control(&reply).expect("an error outcome always serializes");
                     let _ = tx.send(bytes).await;
-                    continue;
                 }
-                None => return Err(e),
-            },
+                continue;
+            }
         };
         match control {
             Control::Request { id, body } => {
