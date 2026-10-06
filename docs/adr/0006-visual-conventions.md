@@ -11,7 +11,7 @@ amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote ch
 line and draft guard, presence badge; see "Remote sync surfaces") ·
 amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell") ·
 amended 2026-10 (the Library's mail shell; see "Library: mail shell") ·
-amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom)
+amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom; `Popover` hover cards)
 
 ## Decision
 
@@ -438,6 +438,9 @@ exception like those under "Typography".
   hand, because WKWebView skips buttons unless macOS keyboard navigation is
   on, and only while focus is inside the panel, so a nested DropdownSelect
   listbox keeps its own keys. There is deliberately no `focusin` guard.
+- `Popover` gains `modal={false}` for hover cards (the thoughts sync failure card): no
+  click-away backdrop and no Escape, which a card under a resting pointer would otherwise
+  take from the composer or a terminal.
 - `Button` gains `size="sm"` (`h-6`). `SettingsCard`
   (`src/components/SettingsCard.tsx`) is the v4 card: title 14px/700,
   description 12.5px `ink-dim`.

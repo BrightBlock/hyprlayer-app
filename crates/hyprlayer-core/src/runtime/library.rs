@@ -472,6 +472,10 @@ impl LibraryService<'_> {
                 })
             }
         }
+        // `hyprlayer thoughts sync` refuses a repository that was never mapped.
+        if effective.mapped_name.is_none() {
+            return Err(CoreError::ThoughtsNotConfigured);
+        }
         let root = effective
             .backend
             .thoughts_root()

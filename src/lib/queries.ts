@@ -179,7 +179,8 @@ export function useThoughtsGitStatus(path: string | undefined) {
     queryFn: () => unwrap(commands.getThoughtsGitStatus(path ?? "")),
     enabled: !!path,
     retry: false,
-    refetchInterval: 30_000,
+    // An unconfigured repo errors by design; focus and the post-sync invalidate still recover.
+    refetchInterval: (query) => (query.state.error ? false : 30_000),
   });
 }
 

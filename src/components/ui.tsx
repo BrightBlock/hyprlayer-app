@@ -1028,6 +1028,8 @@ type PopoverProps = {
   restoreFocusRef?: RefObject<HTMLElement | null>;
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  /** False makes a hover card: no click-away backdrop, and Escape stays with whoever had it. */
+  modal?: boolean;
 };
 
 const POP_ORIGIN = {
@@ -1054,8 +1056,9 @@ export function Popover({
   restoreFocusRef,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  modal = true,
 }: PopoverProps) {
-  useEscape(open ? onClose : null);
+  useEscape(open && modal ? onClose : null);
   const panelRef = useRef<HTMLDivElement>(null);
   const onTrapKeyDown = useFocusTrap(panelRef, open && trapFocus, {
     initialFocusRef,
@@ -1111,7 +1114,7 @@ export function Popover({
   if (!open) return null;
   return createPortal(
     <>
-      <div className="fixed inset-0 z-50" onClick={onClose} aria-hidden="true" />
+      {modal && <div className="fixed inset-0 z-50" onClick={onClose} aria-hidden="true" />}
       <div
         ref={panelRef}
         role={trapFocus ? "dialog" : undefined}

@@ -139,6 +139,16 @@
         },
         {
           "evidence": {
+            "codes": [
+              "config_missing",
+              "config_missing"
+            ]
+          },
+          "guard": "a folder or repository with no thoughts mapping reports thoughts as not configured",
+          "ok": true
+        },
+        {
+          "evidence": {
             "profiles": 1
           },
           "guard": "the configured thoughts profiles are listed",

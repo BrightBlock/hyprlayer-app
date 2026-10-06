@@ -294,6 +294,26 @@ async fn project_management() {
         !thoughts.is_null(),
         json!({ "keys": thoughts.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()) }),
     );
+    // The app hides its sync button on this code, since syncing these fails.
+    let unmapped_repo = sandbox.fixture_repo("unmapped", &[("README.md", "# unmapped\n")]);
+    let mut codes = Vec::new();
+    for path in [
+        text(&imported_folder, "/path"),
+        unmapped_repo.display().to_string(),
+    ] {
+        let status = j
+            .call(
+                &client,
+                Request::GetThoughtsGitStatus { project_path: path },
+            )
+            .await;
+        codes.push(status.err().map(|e| e.code));
+    }
+    j.guard(
+        "a folder or repository with no thoughts mapping reports thoughts as not configured",
+        codes.iter().all(|c| c.as_deref() == Some("config_missing")),
+        json!({ "codes": codes }),
+    );
     let profiles = j
         .call(&client, Request::ListThoughtsProfiles {})
         .await
