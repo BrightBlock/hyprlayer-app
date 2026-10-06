@@ -55,6 +55,7 @@ describe("runningSubagent", () => {
       tools: 2,
       lastTool: "Edit diff.rs",
       steps: null,
+      phase: "1",
     });
     expect(runningSubagent([foreman("f1", ok("done")), ...children])).toBeNull();
   });

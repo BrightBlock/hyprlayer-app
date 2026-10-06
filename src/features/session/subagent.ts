@@ -14,6 +14,8 @@ export type RunningSubagent = {
   tools: number;
   lastTool: string | null;
   steps: SubagentSteps | null;
+  // The plan phase it was spawned to build, from its description or prompt.
+  phase: string | null;
 };
 
 type Tool = Extract<TranscriptItem, { kind: "tool" }>;
@@ -21,6 +23,12 @@ type Children = { tools: number; last: Tool | null; todos: Tool | null };
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+const PHASE = /\bphase\s+(\d+[a-z]?)\b/i;
+
+function phaseOf(input: Record<string, unknown> | null): string | null {
+  return PHASE.exec(str(input?.description))?.[1] ?? PHASE.exec(str(input?.prompt))?.[1] ?? null;
 }
 
 function describeTool(item: Tool): string {
@@ -70,6 +78,7 @@ export function runningSubagent(items: TranscriptItem[]): RunningSubagent | null
       tools: c?.tools ?? 0,
       lastTool: c?.last ? describeTool(c.last) : null,
       steps: stepsOf(c?.todos ?? null),
+      phase: phaseOf(input),
     };
     break;
   }

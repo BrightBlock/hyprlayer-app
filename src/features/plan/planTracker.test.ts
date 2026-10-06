@@ -184,10 +184,27 @@ describe("session status overlay", () => {
   });
 
   it("carries the running subagent on the current task", () => {
-    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 3, lastTool: "Edit diff.rs", steps: null };
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 3, lastTool: "Edit diff.rs", steps: null, phase: "1" };
     const t = trackPlan(plan(), [todo("Phase 1: Scaffold", "in_progress")], { ...building, subagent });
     expect(t.current?.subagent).toEqual(subagent);
     expect(t.pulsing).toBe(true);
+  });
+
+  it("builds the phase a foreman was spawned for when no todo tracks it", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [x] fmt\n\n## Phase 2: B\n### Success Criteria:\n- [ ] clippy\n", PATH);
+    const subagent = { toolUseId: "f2", agent: "foreman", background: false, tools: 0, lastTool: null, steps: null, phase: "2" };
+    const t = trackPlan(doc, [], { ...building, subagent });
+    expect(t.phases[1].tasks[1]).toMatchObject({ title: "Implementation", state: "in_progress", jump: { toolUseId: "f2" } });
+    expect(t.phases[1].state).toBe("in_progress");
+    expect(t.current).toMatchObject({ phaseLevel: true, taskKey: "impl:2", subagent });
+    expect([t.currentPhase, t.pulsing]).toEqual([2, true]);
+  });
+
+  it("leaves a phase todo's own status alone while its foreman runs", () => {
+    const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [ ] fmt\n", PATH);
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 0, lastTool: null, steps: null, phase: "1" };
+    const t = trackPlan(doc, [todo("Phase 1: A", "completed", "tu-1")], { ...building, subagent });
+    expect(t.phases[0].tasks[1]).toMatchObject({ state: "done", jump: { toolUseId: "tu-1" } });
   });
 
   it("leaves in-progress static once the session stops working", () => {
