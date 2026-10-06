@@ -1,6 +1,24 @@
 {
   "versions": [
     {
+      "version": "0.8.7",
+      "summary": "Install and manage skills, open existing worktrees, and update idle servers automatically.",
+      "notes": [
+        "This version needs hyprlayer-server 0.8.8. A host running an older server is updated once it has been idle for two minutes; turn off \"Update server when idle\" in Settings to update it yourself.",
+        "Workshop is the home for agents, skills, and prompts. Install a skill from a GitHub link or skills.sh, browse skills.sh leaderboards, and update, restore, or remove installed skills. Skills can include scripts or executables, and the app warns before installing them.",
+        "The skill detail view shows bundled files and opens the skill folder in your editor.",
+        "Open a git worktree created outside the app as a workstream.",
+        "Library is a three-pane view with excerpts, read state that syncs across devices, and the agent that wrote each doc.",
+        "The code review workspace diffs a workstream against its base branch. Reply to an agent's review note to answer it.",
+        "The project pipeline is the project view, with board, table, and triage layouts.",
+        "Plan panel: finished phases fold into a Completed section, and a phase with a running foreman shows as building.",
+        "Removed decorative UI, including placeholder dashboard stats and glow animations.",
+        "App zoom now steps 1.2× per level, up to level 8. Stored zoom values snap to the nearest step.",
+        "Fixed one unreadable message dropping the server connection and every session on it."
+      ],
+      "date": "2026-10-06"
+    },
+    {
       "version": "0.8.6",
       "summary": "Sessions sync across devices, with new appearance controls and a cleaner workspace.",
       "notes": [

@@ -1993,7 +1993,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-app"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
@@ -2035,7 +2035,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-core"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "aho-corasick",
  "base64 0.22.1",
@@ -2090,7 +2090,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-models"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -2099,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "hyprlayer-proto"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "serde",
  "serde_json",
