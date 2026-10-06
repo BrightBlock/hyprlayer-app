@@ -101,12 +101,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
 
   return (
     <>
-      <div>
-        <h1 className="text-h3 text-ink">Advanced</h1>
-        <p className={cx("mt-0.5", SETTINGS_CARD_DESCRIPTION)}>
-          Power-user features. Some change how Hyprlayer runs.
-        </p>
-      </div>
+      <h1 className="text-h3 text-ink">Advanced</h1>
 
       {save.isError && <ErrorNote error={save.error} onDismiss={() => save.reset()} />}
 
@@ -206,9 +201,7 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
                 onChange={(v) => patchMux({ persistAcrossRestarts: v })}
               />
             }
-          >
-            Reattach running PTYs when Hyprlayer relaunches.
-          </SettingRow>
+          />
           <SettingRow
             title="Developer tools"
             control={

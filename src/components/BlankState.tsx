@@ -12,7 +12,7 @@ type Props = {
   align: "start" | "center";
   eyebrow?: ReactNode;
   title: ReactNode;
-  lede: ReactNode;
+  lede?: ReactNode;
   actions: ReactNode;
   hint?: ReactNode;
   footer?: ReactNode;
@@ -26,7 +26,7 @@ export function BlankState({ art, mirror, align, eyebrow, title, lede, actions, 
       <div className={cx("relative z-[1]", center ? "mx-auto max-w-[680px] px-10 text-center" : "max-w-[760px] px-24")}>
         {eyebrow && <div className="mb-[22px] text-ui-sm font-semibold text-ink-dim">{eyebrow}</div>}
         <h1 className="mb-[18px] font-serif text-display text-ink">{title}</h1>
-        <p className={cx("mb-[30px] max-w-[520px] text-body-lg text-ink-dim", center && "mx-auto")}>{lede}</p>
+        {lede && <p className={cx("mb-[30px] max-w-[520px] text-body-lg text-ink-dim", center && "mx-auto")}>{lede}</p>}
         <div className={cx("flex items-center gap-2.5", center && "justify-center")}>{actions}</div>
         {hint && (
           <div className={cx("mt-[26px] flex items-center gap-2 text-ui text-ink-dim", center && "justify-center")}>

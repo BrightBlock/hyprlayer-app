@@ -162,6 +162,7 @@ export const commands = {
 	 */
 	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
+	setTrafficLightInset: (x: number | null, y: number | null) => typedError<null, AppError>(__TAURI_INVOKE("set_traffic_light_inset", { x, y })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),
 	detectCliInstallMethods: () => typedError<CliInstallMethod[], AppError>(__TAURI_INVOKE("detect_cli_install_methods")),
 	hyprlayerCliUpdateCheck: () => typedError<CliUpdateCheck, AppError>(__TAURI_INVOKE("hyprlayer_cli_update_check")),

@@ -106,7 +106,8 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
       ariaLabel="Discover repositories"
       padded={false}
       scroll={false}
-      className="max-w-[940px] h-[600px]"
+      size="4xl"
+      className="h-[600px]"
     >
       <div className="flex h-full bg-panel">
         <div className="flex w-52 flex-none flex-col border-r border-edge bg-surface px-3 py-4">
@@ -163,7 +164,7 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
               <TextInput
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder={`Filter ${scoped.length} ${scoped.length === 1 ? "repository" : "repositories"}…`}
+                placeholder="Filter repositories…"
                 autoFocus
                 aria-label="Filter repositories"
                 className="pl-8"
@@ -255,7 +256,7 @@ function RepoRow({
       type="button"
       onClick={onPick}
       disabled={cloned}
-      className="group flex h-10 w-full flex-none items-center gap-3 rounded-md px-3 text-left enabled:hover:bg-panel-2 disabled:cursor-not-allowed disabled:opacity-60"
+      className="group flex h-9 w-full flex-none items-center gap-3 rounded-md px-3 text-left enabled:hover:bg-edge/50 disabled:cursor-not-allowed disabled:opacity-60"
     >
       <RepoAvatar source={repo.nameWithOwner} name={owner} size={22} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden whitespace-nowrap">
@@ -278,7 +279,7 @@ function RepoRow({
       ) : (
         <>
           <span className="flex-none text-ui-sm text-ink-dim group-hover:hidden">{age}</span>
-          <span className="hidden flex-none items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-ui font-semibold text-accent-ink group-hover:flex">
+          <span className="hidden flex-none items-center gap-1.5 text-ui font-medium text-ink group-hover:flex">
             <Icon name="download" size="xs" />
             Clone…
           </span>

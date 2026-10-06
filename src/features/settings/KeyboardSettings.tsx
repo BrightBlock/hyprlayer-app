@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
-import { Button, Card, ErrorNote } from "@/components/ui";
+import { Button, Card, ChordPill, ErrorNote } from "@/components/ui";
 import { useSetAppSettings } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import type { AppSettings } from "@/lib/bindings";
-import {
-  eventToChord,
-  formatChord,
-  normalizeChord,
-  type Chord,
-} from "@/lib/keybindings/chord";
+import { eventToChord, normalizeChord, type Chord } from "@/lib/keybindings/chord";
 import {
   COMMANDS_BY_CATEGORY,
   commandById,
@@ -35,19 +30,6 @@ const WHEN_HINT: Record<CommandWhen, string> = {
   session: "In a session",
 };
 
-function ChordPill({ chord }: { chord: Chord | null }) {
-  if (!chord) {
-    return <span className="text-ui italic text-ink-dim">Unbound</span>;
-  }
-  return (
-    <kbd
-      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body font-medium text-ink"
-      style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
-    >
-      {formatChord(chord, IS_MACOS)}
-    </kbd>
-  );
-}
 
 function CommandRow({
   cmd,
@@ -118,7 +100,7 @@ function CommandRow({
           <>
             <div className="flex items-center gap-2">
               {candidate ? (
-                <ChordPill chord={candidate} />
+                <ChordPill chord={candidate} unsetLabel="Unbound" />
               ) : (
                 <span className="text-ui text-ink-dim">Press a shortcut…</span>
               )}
@@ -147,11 +129,11 @@ function CommandRow({
           <div className="flex items-center gap-2">
             {alternates.map((alt) => (
               <span key={alt} className="flex items-center gap-2 text-ui text-ink-dim">
-                <ChordPill chord={alt} />
+                <ChordPill chord={alt} unsetLabel="Unbound" />
                 or
               </span>
             ))}
-            <ChordPill chord={effective} />
+            <ChordPill chord={effective} unsetLabel="Unbound" />
             <Button onClick={onStartRecord}>Edit</Button>
             <Button onClick={onReset} disabled={!hasOverride(overrides, cmd.id)}>
               Reset

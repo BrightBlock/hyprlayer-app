@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
-import { ChordHint, rowClass } from "@/components/ui";
+import { ChordHint, Kbd, rowClass } from "@/components/ui";
 import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
 import { Icon } from "@/components/Icon";
 import { isFolderWorkstream } from "@/lib/domain/projects";
@@ -189,9 +189,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
             aria-autocomplete="list"
             aria-controls="prompt-palette-results"
           />
-          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm font-medium text-ink-dim">
-            esc
-          </kbd>
+          <Kbd className="shrink-0">esc</Kbd>
         </div>
 
         <div
@@ -238,10 +236,10 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
 
         <div className="flex items-center gap-3 border-t border-edge px-4 py-2 text-ui-sm text-ink-dim">
           <span>
-            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-ui-sm">↑↓</kbd> navigate
+            <Kbd>↑↓</Kbd> navigate
           </span>
           <span>
-            <kbd className="rounded bg-edge/60 px-1 py-0.5 text-ui-sm">↵</kbd> run
+            <Kbd>↵</Kbd> run
           </span>
           <span className="ml-auto text-ink-dim/60">
             {activeWorkstream

@@ -226,7 +226,7 @@ function TabCloseControl({
         if (archivable) onArchive();
         else onClose();
       }}
-      className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[2px] text-ink-dim hover:bg-edge hover:text-ink ${
+      className={`inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink ${
         hoverOnly ? "invisible group-hover:visible focus-visible:visible" : ""
       }`}
       title={label}
@@ -1064,7 +1064,7 @@ export function ProjectPage() {
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {shell.diffView ? (
-          <span className="rounded bg-accent/15 p-0.5 text-accent" title="Diff view">
+          <span className="text-ink-dim" title="Diff view">
             <Icon name="diff" size="sm" />
           </span>
         ) : isTerminalShell(shell) ? (
@@ -1087,7 +1087,7 @@ export function ProjectPage() {
             <Icon name="doc" size="sm" />
           </span>
         ) : (
-          <SessionTabIcon mode={shell.mode} sessionId={shell.sessionId} />
+          <SessionTabIcon mode={shell.mode} />
         )}
         <span className="max-w-[160px] truncate" title={shell.title}>
           <TabTitle workstreamId={wsId ?? ""} shellId={shell.id} title={shell.title} />

@@ -62,13 +62,12 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
   }
 
   return (
-    <Dialog open onClose={onClose} title="New document">
+    <Dialog open onClose={onClose} title="New thought">
       <form onSubmit={submit} className="space-y-3">
         <Field label="Title">
           <TextInput
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="What is this document about?"
             autoFocus
             required
           />
@@ -110,14 +109,14 @@ function CreateDocForm({ onClose, initialProjectName }: Omit<Props, "open">) {
             )}
           </Field>
         )}
-        <Field label="Ticket (optional)">
+        <Field label="Ticket">
           <TextInput
             value={ticket}
             onChange={(e) => setTicket(e.target.value)}
             placeholder="ENG-1234"
           />
         </Field>
-        <Field label="Tags (comma-separated, optional)">
+        <Field label="Tags">
           <TextInput
             value={tags}
             onChange={(e) => setTags(e.target.value)}

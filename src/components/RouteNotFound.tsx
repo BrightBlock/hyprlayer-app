@@ -13,7 +13,7 @@ export function RouteNotFound() {
       align="center"
       title={
         <>
-          Nothing <em className="italic">here.</em>
+          Nothing here.
         </>
       }
       lede={<span className="font-mono text-ui">{pathname}</span>}

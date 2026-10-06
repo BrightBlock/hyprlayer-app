@@ -355,8 +355,10 @@ export function AgentPtyTab({
                   : "Restart in bypass-permissions mode. Auto-approves every command"
               }
               aria-label="Toggle bypass-permissions mode"
-              className={`inline-flex items-center justify-center rounded-md border border-bad/40 px-2 py-0.5 text-bad ${
-                bypassOn ? "bg-bad/15" : "hover:bg-bad/10"
+              className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 ${
+                bypassOn
+                  ? "border-bad/40 bg-bad/15 text-bad-ink"
+                  : "border-edge text-ink-dim hover:border-bad/40 hover:bg-bad/10 hover:text-bad-ink"
               }`}
             >
               <Icon name="permissions" size="xs" className={bypassOn ? "fill-current" : undefined} />

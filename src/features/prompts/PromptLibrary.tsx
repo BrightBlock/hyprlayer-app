@@ -12,6 +12,7 @@ import {
   Button,
   Card,
   ChordHint,
+  ChordPill,
   ErrorNote,
   MenuItem,
   MenuSeparator,
@@ -110,17 +111,6 @@ function useChordRecorder(
   return candidate;
 }
 
-function ChordPill({ chord }: { chord: Chord | null }) {
-  if (!chord) return <span className="text-ui italic text-ink-dim">Not set</span>;
-  return (
-    <kbd
-      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body font-medium text-ink"
-      style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
-    >
-      {formatChord(chord, IS_MACOS)}
-    </kbd>
-  );
-}
 
 type Selection =
   | { kind: "builtin"; id: BuiltinPromptId }
@@ -600,20 +590,6 @@ export function PromptLibrary({
                     />
                   ))}
                 </div>
-                <div>
-                  <NavGroupLabel>Run them from</NavGroupLabel>
-                  <div className="space-y-1 px-1.5 text-ui leading-prose text-ink-dim">
-                    <p>
-                      <ChordHint
-                        chord={effectiveChord(kbOverrides, "prompts.palette", IS_MACOS) ?? "mod+k"}
-                        className="rounded bg-edge/60 px-1 py-0.5"
-                      />{" "}
-                      palette
-                    </p>
-                    <p>/name in composer</p>
-                    <p>chips above composer</p>
-                  </div>
-                </div>
               </>
             }
           />
@@ -788,7 +764,7 @@ export function PromptLibrary({
               </div>
               {builtinDef ? (
                 <p className="text-ui text-ink-dim">
-                  Built-in prompts are global, so they apply to every project and can't be scoped.
+                  Built-in prompts are global and can't be scoped.
                 </p>
               ) : (
                 <>
@@ -980,7 +956,7 @@ export function PromptLibrary({
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2">
                       {candidate ? (
-                        <ChordPill chord={candidate} />
+                        <ChordPill chord={candidate} unsetLabel="Not set" />
                       ) : (
                         <span className="text-ui text-ink-dim">Press a shortcut…</span>
                       )}
@@ -1006,7 +982,7 @@ export function PromptLibrary({
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <ChordPill chord={selChord} />
+                    <ChordPill chord={selChord} unsetLabel="Not set" />
                     <Button onClick={() => setRecording(true)}>Edit</Button>
                     <Button onClick={clearChord} disabled={selChord === null}>
                       Clear
@@ -1022,13 +998,7 @@ export function PromptLibrary({
                   {builtinDef ? "Availability" : "Pin to composer"}
                 </div>
                 {builtinDef ? (
-                  <>
-                    <p className="text-body text-ink">Available in every project</p>
-                    <p className="text-ui leading-prose text-ink-dim">
-                      Built-ins are always at hand. Run them from the git panel, the ⌘K palette, or
-                      their shortcut.
-                    </p>
-                  </>
+                  <p className="text-body text-ink">Available in every project</p>
                 ) : (
                   <>
                     <div className="flex items-center gap-2.5">
@@ -1046,9 +1016,6 @@ export function PromptLibrary({
                         {selPrompt?.pinned ? "Shown in the composer bar" : "Hidden from the composer bar"}
                       </span>
                     </div>
-                    <p className="text-ui leading-prose text-ink-dim">
-                      Pinned prompts show as one-click chips above the message box in every session.
-                    </p>
                   </>
                 )}
               </div>

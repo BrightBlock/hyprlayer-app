@@ -14,12 +14,10 @@ import { FirstRunBlank } from "@/features/dashboard/FirstRunBlank";
 import { KnowledgeGraph } from "@/features/dashboard/KnowledgeGraph";
 import {
   ActivityPanel,
-  FirstNodeField,
   GraphPins,
   HeroSearch,
   LiveNowPanel,
   SetupPill,
-  StarterStats,
   StatPills,
   heroStatus,
   liveTone,
@@ -242,10 +240,8 @@ export function Dashboard() {
           <div className="absolute inset-0">
             <KnowledgeGraph graph={EMPTY_GRAPH} />
           </div>
-          <FirstNodeField />
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 flex-col items-center gap-3.5 px-7 lg:px-11">
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 flex-col items-center px-7 lg:px-11">
             <HeroSearch total={docsQuery.data?.total ?? 0} />
-            <StarterStats agentsLive={fleet.counts.running} />
           </div>
         </>
       ) : (

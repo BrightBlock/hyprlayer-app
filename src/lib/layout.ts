@@ -5,6 +5,12 @@ export const PROJECT_SIDEBAR_MAX = 360;
 export const NAV_RAIL_WIDTH = 48;
 export const STATUS_BAR_HEIGHT = 34;
 export const TITLEBAR_INSET_LIGHTS = 92;
+export const TRAFFIC_LIGHTS = { x: 18, y: 20 };
+
+// Native lights sit at TRAFFIC_LIGHTS * zoom; the gap after them stays a fixed native width.
+export function titlebarInsetLights(zoom: number): number {
+  return TRAFFIC_LIGHTS.x + (TITLEBAR_INSET_LIGHTS - TRAFFIC_LIGHTS.x) / zoom;
+}
 export const TITLEBAR_INSET = 12;
 
 export const NARROW_WIDTH = 900;

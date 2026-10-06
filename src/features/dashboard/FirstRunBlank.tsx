@@ -32,7 +32,7 @@ export function FirstRunBlank({
           running yet.
         </>
       }
-      lede="Point Hyprlayer at a repository and it opens a worktree, a chat and a terminal for every piece of work you start. Your plans, research and handoffs are written to files you can read without it."
+      lede="Point Hyprlayer at a repository and it opens a worktree, a chat and a terminal for every piece of work you start."
       actions={
         <>
           <Button variant="primary" className={BLANK_CTA} onClick={onOpenProject}>

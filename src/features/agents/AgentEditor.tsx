@@ -1,5 +1,5 @@
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   Badge,
@@ -7,6 +7,7 @@ import {
   Callout,
   ContextMenu,
   ContextMenuItem,
+  SegmentedControl,
   TabStrip,
   TextInput,
   Toggle,
@@ -59,7 +60,7 @@ import {
 } from "./agents";
 import { EditorSection, FormRow } from "@/components/editorForm";
 
-import { FolderCombo, RadioRow, Segmented } from "./parts";
+import { FolderCombo, RadioRow } from "./parts";
 
 const COLUMN = "mx-auto w-full max-w-6xl";
 
@@ -121,15 +122,7 @@ export function AgentEditor(props: Props) {
       <div className={`${COLUMN} flex shrink-0 items-center gap-3 px-7 pb-5 pt-6`}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-h3 text-ink">
-              {isNew
-                ? "New Agent"
-                : managed
-                  ? "View Managed Agent"
-                  : system
-                    ? "Edit System Agent"
-                    : "Edit Agent"}
-            </h1>
+            <h1 className="truncate text-h3 text-ink">{draft.name || "Untitled agent"}</h1>
             {isDefault && <Badge tone="accent">Default</Badge>}
             {system && <Badge tone="dim">System</Badge>}
             {managed && <Badge tone="dim">Read-only</Badge>}
@@ -141,7 +134,7 @@ export function AgentEditor(props: Props) {
           </div>
           <div className="mt-0.5 flex min-w-0 text-meta text-ink-dim">
             <span className="truncate">
-              {`${draft.name || "untitled"} · ${modelLabel(draft.model, catalog)} · ${
+              {`${modelLabel(draft.model, catalog)} · ${
                 isAllProjects(draft) ? "all projects" : (props.projectName ?? "this project")
               }`}
             </span>
@@ -318,21 +311,19 @@ function SetupTab({
           </div>
         </FormRow>
         <FormRow label="Reasoning effort">
-          <Segmented
-            size="sm"
+          <SegmentedControl
             aria-label="Reasoning effort"
             value={overlay.effort}
             onChange={(effort) => patchOverlay({ effort })}
-            options={EFFORTS.map((e) => ({ key: e.key, label: e.label }))}
+            options={EFFORTS.map((e) => ({ value: e.key, label: e.label }))}
           />
         </FormRow>
         <FormRow label="Harness">
-          <Segmented
-            size="sm"
+          <SegmentedControl
             aria-label="Harness"
             value={overlay.harness}
             onChange={(harness) => patchOverlay({ harness })}
-            options={HARNESSES.map((h) => ({ key: h.key as string, label: h.label }))}
+            options={HARNESSES.map((h) => ({ value: h.key as string, label: h.label }))}
           />
         </FormRow>
         <FormRow
@@ -349,12 +340,11 @@ function SetupTab({
             )
           }
         >
-          <Segmented
-            size="sm"
+          <SegmentedControl
             aria-label="Persistent memory"
             value={draft.memory ?? "off"}
             onChange={(key) => patch({ memory: key === "off" ? null : key })}
-            options={[{ key: "off", label: "Off" }, ...MEMORY_SCOPES.map((s) => ({ key: s.key, label: s.label }))]}
+            options={[{ value: "off", label: "Off" }, ...MEMORY_SCOPES.map((s) => ({ value: s.key, label: s.label }))]}
           />
         </FormRow>
       </EditorSection>
@@ -510,10 +500,10 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
         description={toolSummary(draft)}
         action={
           <>
-            <MiniButton onClick={() => patch({ tools: [] })}>Enable all</MiniButton>
-            <MiniButton onClick={() => patch({ tools: readOnlyTools(draft) })}>
+            <Button size="sm" onClick={() => patch({ tools: [] })}>Enable all</Button>
+            <Button size="sm" onClick={() => patch({ tools: readOnlyTools(draft) })}>
               Read-only preset
-            </MiniButton>
+            </Button>
           </>
         }
       >
@@ -558,7 +548,6 @@ function CapabilitiesTab({ draft, overlay, patch, patchOverlay, mcpServers, skil
 
       <EditorSection
         title="MCP servers"
-        description="Servers Claude Code is configured with. Turn one on to expose its tools to this agent."
       >
         {mcpServers.length === 0 ? (
           <p className="text-ui text-ink-dim">
@@ -756,7 +745,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
     <>
       <EditorSection
         title="Permission mode"
-        description="The posture a session starts in. Rules below still take precedence."
+        description="Rules below take precedence."
       >
         <div className="grid gap-0.5 @[560px]:grid-cols-2 @[560px]:gap-x-2.5">
           {PERMISSION_MODES.map((p) => (
@@ -837,7 +826,7 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
                   onClick={() =>
                     patchOverlay({ rules: overlay.rules.filter((x) => x.id !== r.id) })
                   }
-                  className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-bad"
+                  className="grid h-6 w-6 place-items-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-bad-ink"
                 >
                   <Icon name="close" size="xs" />
                 </button>
@@ -886,14 +875,13 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
         title="Visibility"
         description="Team agents sync through the shared config repo; private ones stay on this machine."
       >
-        <Segmented
-          size="sm"
+        <SegmentedControl
           aria-label="Visibility"
           value={overlay.visibility}
           onChange={(visibility) => patchOverlay({ visibility })}
           options={[
-            { key: "private", label: "Private" },
-            { key: "team", label: "Team" },
+            { value: "private", label: "Private" },
+            { value: "team", label: "Team" },
           ]}
         />
       </EditorSection>
@@ -938,7 +926,7 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
             <TextInput
               value={invite}
               onChange={(e) => setInvite(e.target.value)}
-              placeholder="name@brightblock.ai"
+              placeholder="Email"
               aria-label="Invite by email"
             />
           </div>
@@ -975,15 +963,3 @@ function CollaboratorsTab({ overlay, patchOverlay, onExport, onCopyPath }: Props
   );
 }
 
-
-function MiniButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-md border border-edge bg-panel-2 px-2 py-1 text-ui-sm text-ink-dim hover:text-ink"
-    >
-      {children}
-    </button>
-  );
-}

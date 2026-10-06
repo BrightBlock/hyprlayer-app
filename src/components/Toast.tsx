@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useToast, type ToastTone } from "@/lib/toast";
 import { Icon, type IconName } from "./Icon";
+import { Button } from "./ui";
 
 const DURATION_MS = 5000;
 const EXIT_MS = 380;
@@ -101,20 +102,21 @@ export function Toast() {
         <Icon name="close" size="xs" />
         {!sticky && <span className="text-ui-sm tabular-nums leading-none">{remaining}s</span>}
       </button>
-      <div className="flex min-w-72 max-w-sm items-start gap-3 rounded-lg border border-edge bg-panel px-4 py-3.5 shadow-2xl">
+      <div className="flex min-w-72 max-w-sm items-start gap-3 rounded-lg border border-edge bg-panel px-4 py-3.5 shadow-pop">
         <ToastIcon tone={tone} />
         <div className="min-w-0">
           <p className="text-body font-semibold text-ink">{title}</p>
-          <p className="mt-0.5 text-ui text-ink-dim">{message}</p>
+          {message && <p className="mt-0.5 text-ui text-ink-dim">{message}</p>}
           {action && (
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => void runAction()}
               disabled={acting}
-              className="mt-2.5 inline-flex items-center rounded-md bg-accent px-2.5 py-1 text-ui font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-60"
+              className="mt-2.5"
             >
               {acting ? (action.busyLabel ?? action.label) : action.label}
-            </button>
+            </Button>
           )}
         </div>
       </div>

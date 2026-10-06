@@ -11,6 +11,7 @@ mod runtime_events;
 mod server_version;
 mod state;
 mod supervisor;
+mod traffic_lights;
 mod webview_gestures;
 mod window_geometry;
 
@@ -148,6 +149,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::attachments::save_attachment,
             commands::attachments::read_attachment,
             commands::system::set_binary_override,
+            commands::system::set_traffic_light_inset,
             commands::system::redetect_binaries,
             commands::system::detect_cli_install_methods,
             commands::system::hyprlayer_cli_update_check,
@@ -422,6 +424,7 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 webview_gestures::disable_pinch_zoom(&window);
+                traffic_lights::install(&window);
             }
 
             let app_config_dir = app.path().app_config_dir()?;

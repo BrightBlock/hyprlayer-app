@@ -50,6 +50,15 @@ pub fn play_sound() -> CmdResult<()> {
 
 #[tauri::command]
 #[specta::specta]
+pub fn set_traffic_light_inset(window: tauri::WebviewWindow, x: f64, y: f64) -> CmdResult<()> {
+    let target = window.clone();
+    window
+        .run_on_main_thread(move || crate::traffic_lights::set_inset(&target, x, y))
+        .map_err(|e| AppError::internal(format!("traffic lights: {e}")))
+}
+
+#[tauri::command]
+#[specta::specta]
 pub fn full_disk_access_status() -> FullDiskAccess {
     hyprlayer_core::system::full_disk_access(dirs::home_dir().as_deref())
 }

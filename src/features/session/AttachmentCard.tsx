@@ -6,7 +6,7 @@ import { useAttachmentSrc, useCanOpenAttachment, type Attachment } from "./attac
 
 function Glyph({ children }: { children: ReactNode }) {
   return (
-    <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-accent/15 text-accent">
+    <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-ink-dim">
       {children}
     </span>
   );
@@ -51,7 +51,7 @@ export function AttachmentCard({
 
   return (
     <span
-      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-ui text-ink"
+      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-edge bg-panel p-0.5 pr-1 text-ui text-ink"
       title={name}
     >
       {kind === "image" ? (

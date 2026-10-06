@@ -18,8 +18,6 @@ export function CheckDot({ className }: { className: string }) {
 }
 
 export type StepProps = {
-  number: number;
-  total: number;
   title: ReactNode;
   lede?: ReactNode;
   children: ReactNode;
@@ -47,8 +45,6 @@ function useEnterToContinue(onNext: (() => void) | null) {
 }
 
 export function Step({
-  number,
-  total,
   title,
   lede,
   children,
@@ -62,20 +58,6 @@ export function Step({
 
   return (
     <div>
-      <div className="mb-3 flex gap-1.5" aria-hidden>
-        {Array.from({ length: total }, (_, i) => (
-          <span
-            key={i}
-            className={cx(
-              "h-[3px] w-10 rounded-full",
-              i + 1 < number ? "bg-ink-dim" : i + 1 === number ? "bg-ink" : "bg-edge",
-            )}
-          />
-        ))}
-      </div>
-      <p className="mb-[22px] text-ui-sm font-semibold text-ink-dim">
-        Setup {number} of {total}
-      </p>
       <h1 className="mb-4 font-serif text-display text-ink">{title}</h1>
       {lede && <p className="mb-6 max-w-[520px] text-body-lg text-ink-dim">{lede}</p>}
       <div>{children}</div>

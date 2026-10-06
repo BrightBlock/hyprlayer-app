@@ -28,7 +28,7 @@ function DiffPopover({
     <div
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="fixed z-50 overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
+      className="fixed z-50 overflow-hidden rounded-md border border-edge bg-panel shadow-pop"
       style={{ left: anchor.left, top: anchor.top, bottom: anchor.bottom, width: anchor.width }}
     >
       <div className="flex items-center gap-2 border-b border-edge px-2.5 py-1.5">
@@ -36,10 +36,10 @@ function DiffPopover({
           {path}
         </span>
         {diff.additions > 0 && (
-          <span className="shrink-0 text-meta text-ok">+{diff.additions}</span>
+          <span className="shrink-0 text-meta text-diff-add">+{diff.additions}</span>
         )}
         {diff.deletions > 0 && (
-          <span className="shrink-0 text-meta text-bad">-{diff.deletions}</span>
+          <span className="shrink-0 text-meta text-diff-del">-{diff.deletions}</span>
         )}
       </div>
       <pre
@@ -94,10 +94,10 @@ export function FileCard({ path, diff }: { path: string; diff?: EditDiff | null 
       ref={ref}
       onMouseEnter={show}
       onMouseLeave={diff ? scheduleHide : undefined}
-      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-accent/40 bg-accent/10 p-0.5 pr-1 text-ui text-ink"
+      className="inline-flex max-w-56 items-center gap-1 rounded-md border border-edge bg-panel-2 p-0.5 pr-1 text-ui text-ink"
       title={path}
     >
-      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-accent/15 text-accent">
+      <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded text-ink-dim">
         <Icon name={diff ? "edit" : "doc"} size="xs" />
       </span>
       <button

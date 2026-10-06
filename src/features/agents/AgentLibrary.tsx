@@ -2,8 +2,16 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button, ContextMenu, ContextMenuItem, Dialog, PageSpinner, TextInput } from "@/components/ui";
-import { Icon } from "@/components/Icon";
+import {
+  Button,
+  ConfirmDialog,
+  ContextMenu,
+  ContextMenuItem,
+  Dialog,
+  EmptyState,
+  PageSpinner,
+  TextInput,
+} from "@/components/ui";
 import { WorkshopFrame, WorkshopNav, type WorkshopChrome } from "@/components/workshop";
 import {
   commands,
@@ -505,7 +513,7 @@ export function AgentLibrary({
               peers={all.filter((a) => a.path !== working.path)}
             />
           ) : (
-            <AgentsCta onCreate={() => createAgent()} />
+            <EmptyState title="Select an agent" />
           )
         }
       />
@@ -659,55 +667,23 @@ export function AgentLibrary({
         </div>
       </Dialog>
 
-      <Dialog open={dialog === "delete"} onClose={() => setDialog(null)} title="Delete agent">
-        <div className="flex flex-col gap-3.5">
-          <p className="text-body leading-prose text-ink-dim">This deletes the file from disk:</p>
-          {actionTarget && (
-            <ul className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-              <li className="truncate text-meta text-ink">{actionTarget.path}</li>
-            </ul>
-          )}
-          <p className="text-ui text-ink-dim">
-            Sessions already running are unaffected; a modified system agent goes back to the
-            version its plugin ships.
-          </p>
-          <div className="flex justify-end gap-2">
-            <Button onClick={() => setDialog(null)}>Cancel</Button>
-            <Button
-              variant="danger"
-              busy={remove.isPending}
-              disabled={!actionTarget}
-              onClick={() => actionTarget && remove.mutate([actionTarget])}
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
-      </Dialog>
+      <ConfirmDialog
+        open={dialog === "delete"}
+        onClose={() => setDialog(null)}
+        title="Delete agent"
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        busy={remove.isPending}
+        onConfirm={() => actionTarget && remove.mutate([actionTarget])}
+      >
+        <p className="text-body leading-prose text-ink-dim">This deletes the file from disk:</p>
+        {actionTarget && <p className="truncate text-meta text-ink">{actionTarget.path}</p>}
+        <p className="text-ui text-ink-dim">
+          Sessions already running are unaffected; a modified system agent goes back to the
+          version its plugin ships.
+        </p>
+      </ConfirmDialog>
 
     </>
-  );
-}
-
-function AgentsCta({ onCreate }: { onCreate: () => void }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-12 text-center">
-      <span
-        aria-hidden="true"
-        className="mb-2 grid h-14 w-14 place-items-center rounded-full border border-edge bg-panel text-ink-dim"
-      >
-        <Icon name="layers" size="lg" />
-      </span>
-      <p className="text-title text-ink">No agent selected</p>
-      <div className="max-w-md text-body text-ink-dim">
-        Pick one from the sidebar to edit its prompt, model, tools and permissions — or create a
-        new agent so a workstream can start the same way every time.
-      </div>
-      <div className="mt-2.5">
-        <Button variant="primary" onClick={onCreate}>
-          Create Agent
-        </Button>
-      </div>
-    </div>
   );
 }

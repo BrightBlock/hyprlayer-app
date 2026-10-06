@@ -6,7 +6,8 @@ import { HyprlayerMark } from "@/components/Logo";
 import { cx } from "@/components/ui";
 import { WindowControls } from "@/components/WindowControls";
 import { dragRegion } from "@/lib/dragRegion";
-import { TITLEBAR_INSET, TITLEBAR_INSET_LIGHTS } from "@/lib/layout";
+import { useTitlebarInsetLights } from "@/lib/appearance";
+import { TITLEBAR_INSET } from "@/lib/layout";
 import { IS_MACOS } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 
@@ -31,13 +32,14 @@ export function WizardFrame({
   children: ReactNode;
 }) {
   const fullscreen = useIsFullscreen();
+  const insetLights = useTitlebarInsetLights();
   const { art, mirror } = STEP_ART[step];
 
   return (
     <div className="flex h-full flex-col bg-surface">
       <header
         className="relative flex h-10 shrink-0 items-center border-b border-edge bg-panel"
-        style={{ paddingLeft: IS_MACOS && !fullscreen ? TITLEBAR_INSET_LIGHTS : TITLEBAR_INSET }}
+        style={{ paddingLeft: IS_MACOS && !fullscreen ? insetLights : TITLEBAR_INSET }}
         {...dragRegion()}
       >
         <div className="flex items-center gap-2" {...dragRegion("deep")}>

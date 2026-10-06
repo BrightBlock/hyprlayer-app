@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { Popover } from "@/components/ui";
+import { Kbd, Popover } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { commands, type ScriptKind, type ScriptStatus } from "@/lib/bindings";
 import {
@@ -355,14 +355,6 @@ function Dot({ pulse }: { pulse?: boolean }) {
   );
 }
 
-function Kbd({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded border border-edge bg-surface px-1 py-px text-meta text-ink-dim">
-      {children}
-    </span>
-  );
-}
-
 function RunSplit({
   running,
   label,
@@ -536,7 +528,7 @@ function SetupBody({
         <div className="flex flex-1 items-center justify-center px-6 text-center text-body text-ink-dim/70">
           {loading
             ? ""
-            : "Setup hasn't run in this session yet. It runs automatically when a workstream is created."}
+            : "Setup hasn't run in this session yet."}
         </div>
       )}
     </div>

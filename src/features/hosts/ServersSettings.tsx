@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 import type { ConnectionStatus, Host, HostsFile, ProvisionStep } from "@/lib/bindings";
 import {
@@ -15,9 +15,9 @@ import {
   useHosts,
   useSaveHosts,
 } from "@/lib/queries";
-import { Icon } from "@/components/Icon";
+import { Icon, type IconName } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
-import { Button, ConfirmDialog, cx, ErrorNote, TextInput } from "@/components/ui";
+import { Button, ConfirmDialog, cx, ErrorNote, Popover, TextInput } from "@/components/ui";
 import { WorkStatus } from "./HostList";
 import { openHostsUi } from "./hostsUi";
 import { retryConnection } from "./reconnect";
@@ -40,6 +40,40 @@ function destinationProblem(destination: string, hosts: Host[], own?: string): s
 }
 
 type Draft = { destination: string; label: string };
+
+function ConnectionInfo() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="How servers connect"
+        aria-expanded={open}
+        className="grid h-6 w-6 place-items-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink"
+      >
+        <Icon name="info" size="sm" />
+      </button>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={ref}
+        align="end"
+        className="w-80 space-y-2 p-3 text-ui leading-prose text-ink-dim"
+      >
+        <p>This machine's server is found automatically.</p>
+        <p>
+          Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
+          your SSH config and agent, so keys, ports and jump hosts come from ~/.ssh/config. It
+          stores only the destination and label.
+        </p>
+        <p>If the host has no Hyprlayer server, Test offers to install one.</p>
+      </Popover>
+    </>
+  );
+}
 
 export function ServersSettings() {
   const file = useHosts().data ?? EMPTY;
@@ -119,10 +153,7 @@ export function ServersSettings() {
     <div className="space-y-3.5">
       <ErrorNote error={save.error} onDismiss={() => save.reset()} />
 
-      <SettingsCard
-        title="Add a Hyprlayer server"
-        description="Point the app at a Hyprlayer server over SSH. This machine's server is found automatically; add remote machines here."
-      >
+      <SettingsCard title="Add a Hyprlayer server" actions={<ConnectionInfo />}>
         <form onSubmit={(e) => void add(e)} className="space-y-2.5">
           <div className="flex items-center gap-2">
             <TextInput
@@ -135,7 +166,7 @@ export function ServersSettings() {
             />
             <TextInput
               aria-label="Label"
-              placeholder="optional"
+              placeholder="Label"
               className="w-[170px] shrink-0"
               value={draft.label}
               disabled={save.isPending}
@@ -150,15 +181,6 @@ export function ServersSettings() {
               {addProblem}
             </p>
           )}
-          <p className="flex gap-2 text-ui leading-4 text-ink-dim">
-            <Icon name="info" className="text-info" />
-            <span>
-              Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
-              your SSH config and agent, so keys, ports and jump hosts come from ~/.ssh/config. It
-              stores only the destination and label. If the host has no Hyprlayer server, Test offers
-              to install one.
-            </span>
-          </p>
         </form>
       </SettingsCard>
 
@@ -220,10 +242,6 @@ export function ServersSettings() {
         </ul>
       </SettingsCard>
 
-      <p className="text-meta text-ink-dim">
-        servers are per machine · sessions keep running on the server they started on
-      </p>
-
       <ConfirmDialog
         open={removing !== null}
         onClose={() => setRemoving(null)}
@@ -248,6 +266,38 @@ export function ServersSettings() {
         onConfirm={() => void serverSwitch.confirm()}
       />
     </div>
+  );
+}
+
+function RowIcon({
+  label,
+  icon,
+  danger = false,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: IconName;
+  danger?: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cx(
+        "grid h-6 w-6 place-items-center rounded-control disabled:opacity-50",
+        danger
+          ? "text-bad-ink hover:bg-bad/10"
+          : "text-ink-dim hover:bg-edge/60 hover:text-ink",
+      )}
+    >
+      <Icon name={icon} size="sm" />
+    </button>
   );
 }
 
@@ -324,19 +374,11 @@ function ServerItem({
               </Button>
             )}
             {!unreachable && !row.isDefault && (
-              <Button size="sm" disabled={saving} onClick={onSetDefault}>
-                Set default
-              </Button>
+              <RowIcon label="Set default" icon="star" disabled={saving} onClick={onSetDefault} />
             )}
-            {row.host && (
-              <Button size="sm" disabled={saving} onClick={onEdit}>
-                Edit
-              </Button>
-            )}
+            {row.host && <RowIcon label="Edit" icon="edit" disabled={saving} onClick={onEdit} />}
             {row.host && !row.isDefault && (
-              <Button size="sm" variant="danger" disabled={saving} onClick={onRemove}>
-                Remove
-              </Button>
+              <RowIcon label="Remove" icon="close" danger disabled={saving} onClick={onRemove} />
             )}
           </>
         )}
@@ -393,7 +435,7 @@ function ServerEditor({
           />
           <TextInput
             aria-label={`Label for ${row.name}`}
-            placeholder="optional"
+            placeholder="Label"
             className="w-[170px] shrink-0 py-1"
             value={draft.label}
             disabled={saving}

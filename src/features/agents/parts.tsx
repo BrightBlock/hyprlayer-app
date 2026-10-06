@@ -5,57 +5,6 @@ import { MenuItem, Popover, TextInput } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { folderColor } from "./agents";
 
-export type SegmentedOption<T extends string> = {
-  key: T;
-  label: ReactNode;
-  mono?: boolean;
-};
-
-export function Segmented<T extends string>({
-  options,
-  value,
-  onChange,
-  size = "md",
-  disabled,
-  "aria-label": ariaLabel,
-}: {
-  options: ReadonlyArray<SegmentedOption<T>>;
-  value: T;
-  onChange: (next: T) => void;
-  size?: "sm" | "md";
-  disabled?: boolean;
-  "aria-label"?: string;
-}) {
-  return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      className="inline-flex gap-0.5 rounded-lg bg-panel-2 p-0.5 ring-1 ring-inset ring-edge"
-    >
-      {options.map((o) => {
-        const active = o.key === value;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            aria-pressed={active}
-            disabled={disabled}
-            onClick={() => onChange(o.key)}
-            className={[
-              "rounded-md font-medium transition-colors disabled:cursor-default",
-              size === "sm" ? "px-2.5 py-1 text-ui" : "px-3 py-1 text-body",
-              o.mono ? "font-mono" : "",
-              active ? "bg-panel text-ink" : "text-ink-dim enabled:hover:text-ink",
-            ].join(" ")}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export function FolderCombo({
   id,
   value,

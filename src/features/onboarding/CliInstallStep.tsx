@@ -15,27 +15,17 @@ import {
 import type { CliInstallMethod } from "@/lib/bindings";
 import { CARD_CLASS, CheckDot, Step } from "./StepShell";
 
-const STEP_NUMBER = 2;
-const TITLE = (
-  <>
-    Install the
-    <br />
-    Hyprlayer <em className="italic">CLI.</em>
-  </>
-);
+const TITLE = "Install the CLI";
 const LEDE = (
   <>
-    The app drives every agent through the <span className="font-mono">hyprlayer</span> command. Install it
-    once; the next steps use it to link your agents and your notes.
+    The app drives every agent through the <span className="font-mono">hyprlayer</span> command.
   </>
 );
 
 export function CliInstallStep({
-  total,
   onBack,
   onNext,
 }: {
-  total: number;
   onBack: () => void;
   onNext: () => void;
 }) {
@@ -45,7 +35,7 @@ export function CliInstallStep({
 
   if (bootstrap.isLoading) {
     return (
-      <Step number={STEP_NUMBER} total={total} title={TITLE} lede={LEDE} onBack={onBack}>
+      <Step title={TITLE} lede={LEDE} onBack={onBack}>
         <Card className={`${CARD_CLASS} flex items-center justify-center py-12`}>
           <Spinner />
         </Card>
@@ -55,8 +45,6 @@ export function CliInstallStep({
 
   return (
     <Step
-      number={STEP_NUMBER}
-      total={total}
       title={TITLE}
       lede={LEDE}
       onBack={onBack}
@@ -162,7 +150,7 @@ function InstallPicker() {
           </>
         )}
         {install.isError && (
-          <p className="selectable break-words text-ui text-bad">
+          <p className="selectable break-words text-ui text-bad-ink">
             Couldn't install: {errorMessage(install.error)}
           </p>
         )}
@@ -177,16 +165,13 @@ function InstallPicker() {
             ))}
           </div>
         )}
-        <div className="flex items-center gap-2 pt-1">
+        <div className="pt-1">
           <Button onClick={() => void locate()} busy={override.isPending}>
             <Icon name="folder" size="sm" /> Locate existing install…
           </Button>
-          <span className="text-ui text-ink-dim">
-            Already have <span className="font-mono">hyprlayer</span>? Point us at it.
-          </span>
         </div>
         {override.isError && (
-          <p className="selectable break-words text-ui text-bad">
+          <p className="selectable break-words text-ui text-bad-ink">
             Couldn't save the path: {errorMessage(override.error)}
           </p>
         )}

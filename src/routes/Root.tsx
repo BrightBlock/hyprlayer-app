@@ -57,7 +57,6 @@ import {
   PROJECT_SIDEBAR_MAX,
   PROJECT_SIDEBAR_MIN,
   TITLEBAR_INSET,
-  TITLEBAR_INSET_LIGHTS,
 } from "@/lib/layout";
 import { IS_MACOS } from "@/lib/platform";
 import { dragRegion } from "@/lib/dragRegion";
@@ -76,7 +75,7 @@ import { onboardingDismissed } from "./onboardingState";
 import { useCommand, useEscape } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
-import { useAppZoomCommands } from "@/lib/appearance";
+import { useAppZoomCommands, useTitlebarInsetLights } from "@/lib/appearance";
 import {
   ContextMenu,
   ContextMenuItem,
@@ -706,9 +705,8 @@ export function Root() {
 
   const isFullscreen = useIsFullscreen();
   const macTrafficLights = IS_MACOS && !isFullscreen;
-  const leftClusterLeft = macTrafficLights
-    ? TITLEBAR_INSET_LIGHTS
-    : TITLEBAR_INSET;
+  const insetLights = useTitlebarInsetLights();
+  const leftClusterLeft = macTrafficLights ? insetLights : TITLEBAR_INSET;
   const leftClusterIcons = (IS_MACOS ? 0 : 1) + 1;
   const leftClusterRight =
     leftClusterLeft +
@@ -950,21 +948,7 @@ export function Root() {
                     </span>
                   </>
                 )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    void navigate({
-                      to: "/library",
-                      search: (prev) => ({
-                        ...prev,
-                        doc: undefined,
-                      }),
-                    })
-                  }
-                  className="shrink-0 font-medium text-ink hover:text-ink"
-                >
-                  Library
-                </button>
+                <span className="shrink-0 font-medium text-ink">Library</span>
                 <span className="text-ink-dim">
                   <Icon name="chevronRight" />
                 </span>

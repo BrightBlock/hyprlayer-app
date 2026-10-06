@@ -8,7 +8,7 @@ import { selectAgentTab } from "./selectAgentTab";
 import { openDocPreviewTab } from "@/features/session/workstreamTabs";
 import { Icon, type IconName } from "@/components/Icon";
 import { ActivityDot } from "@/components/ActivityDot";
-import { rowClass } from "@/components/ui";
+import { Kbd, rowClass } from "@/components/ui";
 
 
 const KIND_ICON: Record<SearchResult["kind"], IconName> = {
@@ -235,9 +235,7 @@ export function SearchPalette() {
             aria-autocomplete="list"
             aria-controls="search-palette-results"
           />
-          <kbd className="shrink-0 rounded bg-edge/60 px-1.5 py-0.5 text-ui-sm font-medium text-ink-dim">
-            esc
-          </kbd>
+          <Kbd className="shrink-0">esc</Kbd>
         </div>
 
         <div

@@ -10,9 +10,8 @@ import {
   useSetAppSettings,
 } from "@/lib/queries";
 import { useUpdate } from "@/lib/updater";
-import { Icon } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
-import { Button, ErrorNote, SettingRow, Toggle } from "@/components/ui";
+import { Button, DropdownSelect, ErrorNote, SettingRow, Toggle } from "@/components/ui";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { HyprlayerCard } from "./HyprlayerCard";
@@ -115,38 +114,16 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
         <SettingRow
           title="Title model"
           control={
-            <div className="relative w-[190px]">
-              <select
-                aria-label="Title model"
-                disabled={!enabled}
-                value={titleModelValue(pinned)}
-                onChange={(e) => patch({ model: titleModelFromValue(e.target.value) })}
-                className="h-7 w-full appearance-none truncate rounded-control border border-edge bg-panel-2 pl-2.5 pr-7 text-ui text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {groups.map((g) =>
-                  g.label ? (
-                    <optgroup key={g.label} label={g.label}>
-                      {g.options.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : (
-                    g.options.map((o) => (
-                      <option key={o.value || "follow"} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))
-                  ),
-                )}
-              </select>
-              <Icon
-                name="chevronDown"
-                size="xs"
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-ink-4"
-              />
-            </div>
+            <DropdownSelect
+              aria-label="Title model"
+              disabled={!enabled}
+              value={titleModelValue(pinned)}
+              onChange={(v) => patch({ model: titleModelFromValue(v) })}
+              options={groups.flatMap((g) =>
+                g.options.map((o) => ({ ...o, group: g.label || undefined })),
+              )}
+              className="w-[190px]"
+            />
           }
         >
           {defaultHarness === "codex"

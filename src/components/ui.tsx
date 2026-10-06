@@ -53,6 +53,19 @@ export function ChordHint({ chord, className }: { chord: string; className?: str
   );
 }
 
+/** A shortcut shown as an editable field's value (keybinding and prompt editors). */
+export function ChordPill({ chord, unsetLabel }: { chord: Chord | null; unsetLabel: string }) {
+  if (!chord) return <span className="text-ui italic text-ink-dim">{unsetLabel}</span>;
+  return (
+    <kbd
+      className="inline-flex items-center rounded-md border border-edge bg-panel-2 px-2.5 py-1.5 text-body font-medium text-ink"
+      style={IS_MACOS ? { letterSpacing: "0.1em", paddingRight: "calc(0.625rem - 0.1em)" } : undefined}
+    >
+      {formatChord(chord, IS_MACOS)}
+    </kbd>
+  );
+}
+
 const KBD_CHIP = "inline-flex items-center rounded-control border border-edge bg-panel/70 px-1.5 py-0.5 text-meta text-ink-dim";
 
 export function Kbd({ chord, children, className }: { chord?: Chord | null; children?: ReactNode; className?: string }) {
@@ -301,7 +314,8 @@ export function DropdownSelect({
     const list = listRef.current;
     if (!open || !el || !list) return;
     const desiredLeft = el.getBoundingClientRect().left;
-    const width = list.getBoundingClientRect().width;
+    // Layout width: the rect is scaled down while `animate-pop-in` runs.
+    const width = list.offsetWidth;
     const clamped = Math.max(MARGIN, Math.min(desiredLeft, window.innerWidth - width - MARGIN));
     if (Math.abs(clamped - pos.left) > 0.5) setPos((p) => ({ ...p, left: clamped }));
   }, [open, pos.left, options]);
@@ -531,7 +545,7 @@ export function Toggle({
 
 type SegmentedControlProps<T extends string> = {
   value: T | null;
-  options: ReadonlyArray<{ value: T; label: ReactNode; disabled?: boolean }>;
+  options: ReadonlyArray<{ value: T; label: ReactNode; disabled?: boolean; title?: string }>;
   onChange: (value: T) => void;
   disabled?: boolean;
   className?: string;
@@ -566,6 +580,7 @@ export function SegmentedControl<T extends string>({
           key={o.value}
           type="button"
           {...itemProps(i)}
+          title={o.title}
           className={cx(
             "rounded-[2px] text-ui transition-colors",
             bordered ? "flex h-5 items-center px-2" : "px-2.5 py-0.5",
@@ -594,6 +609,7 @@ const DIALOG_SIZE = {
   xl: "max-w-xl",
   "2xl": "max-w-2xl",
   "3xl": "max-w-3xl",
+  "4xl": "max-w-4xl",
 } as const;
 
 type DialogProps = {
@@ -936,7 +952,8 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const { width, height } = el.getBoundingClientRect();
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
     setPos({
       x: Math.max(MARGIN, Math.min(position.x, window.innerWidth - width - MARGIN)),
       y: Math.max(MARGIN, Math.min(position.y, window.innerHeight - height - MARGIN)),
@@ -1053,34 +1070,41 @@ export function Popover({
   }>({ left: 0 });
 
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    const panel = panelRef.current;
-    if (!open || !anchor || !panel) return;
-    const a = anchor.getBoundingClientRect();
-    const natural = panel.getBoundingClientRect();
-    const width = matchAnchorWidth ? Math.max(natural.width, a.width) : natural.width;
-    const height = natural.height;
+    if (!open) return;
+    // Re-placed on resize, which app zoom also fires.
+    const place = () => {
+      const anchor = anchorRef.current;
+      const panel = panelRef.current;
+      if (!anchor || !panel) return;
+      const a = anchor.getBoundingClientRect();
+      // Layout size: the rect is scaled down while `animate-pop-in` runs.
+      const width = matchAnchorWidth ? Math.max(panel.offsetWidth, a.width) : panel.offsetWidth;
+      const height = panel.offsetHeight;
 
-    const spaceBelow = window.innerHeight - a.bottom - sideOffset - MARGIN;
-    const spaceAbove = a.top - sideOffset - MARGIN;
-    const preferredFits = side === "bottom" ? spaceBelow >= height : spaceAbove >= height;
-    const openBelow = preferredFits ? side === "bottom" : spaceBelow > spaceAbove;
+      const spaceBelow = window.innerHeight - a.bottom - sideOffset - MARGIN;
+      const spaceAbove = a.top - sideOffset - MARGIN;
+      const preferredFits = side === "bottom" ? spaceBelow >= height : spaceAbove >= height;
+      const openBelow = preferredFits ? side === "bottom" : spaceBelow > spaceAbove;
 
-    const desired = align === "start" ? a.left : a.right - width;
-    const left = Math.max(MARGIN, Math.min(desired, window.innerWidth - width - MARGIN));
-    const caretLeft = Math.max(
-      CARET_INSET,
-      Math.min(a.left + a.width / 2 - left - CARET / 2, width - CARET_INSET - CARET),
-    );
-    setPos({
-      left,
-      minWidth: matchAnchorWidth ? a.width : undefined,
-      caretLeft,
-      below: openBelow,
-      ...(openBelow
-        ? { top: a.bottom + sideOffset }
-        : { bottom: window.innerHeight - a.top + sideOffset }),
-    });
+      const desired = align === "start" ? a.left : a.right - width;
+      const left = Math.max(MARGIN, Math.min(desired, window.innerWidth - width - MARGIN));
+      const caretLeft = Math.max(
+        CARET_INSET,
+        Math.min(a.left + a.width / 2 - left - CARET / 2, width - CARET_INSET - CARET),
+      );
+      setPos({
+        left,
+        minWidth: matchAnchorWidth ? a.width : undefined,
+        caretLeft,
+        below: openBelow,
+        ...(openBelow
+          ? { top: a.bottom + sideOffset }
+          : { bottom: window.innerHeight - a.top + sideOffset }),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
   }, [open, anchorRef, side, align, matchAnchorWidth, sideOffset]);
 
   if (!open) return null;

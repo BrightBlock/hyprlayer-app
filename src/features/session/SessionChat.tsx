@@ -186,11 +186,9 @@ export function SessionTabDot({ sessionId }: { sessionId?: string }) {
   );
 }
 
-export function SessionTabIcon({ mode, sessionId }: { mode: StageKey; sessionId?: string }) {
-  const session = useSession(sessionId);
-  const working = session ? isWorking(session) : false;
+export function SessionTabIcon({ mode }: { mode: StageKey }) {
   return (
-    <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge} ${working ? "animate-tab-glow" : ""}`}>
+    <span className={`rounded p-0.5 ${MODE_STYLES[mode].badge}`}>
       <Icon name={stageIconName(mode)} />
     </span>
   );
@@ -306,7 +304,7 @@ function HandoffBanner({
         onClick={onDismiss}
         title={isReady ? "Dismiss, keep working in this session" : "Dismiss"}
         aria-label="Dismiss"
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge hover:text-ink"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
       >
         <Icon name="close" size="xs" />
       </button>
@@ -382,7 +380,7 @@ function QuestionPrompt({
 
   if (!question) {
     return (
-      <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
+      <div className="mb-2 flex items-center justify-between gap-2 rounded-card border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
         <span className="text-body text-ink-dim">
           The agent asked a question that couldn’t be displayed.
         </span>
@@ -452,7 +450,7 @@ function QuestionPrompt({
   );
 
   return (
-    <div className="mb-2 rounded-xl border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
+    <div className="mb-2 rounded-card border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
       <div className="mb-2.5 flex items-center gap-2 text-q-label">
         <Icon name="question" className="text-warn" />
         <span className="text-body font-medium">The agent is asking</span>
@@ -482,7 +480,7 @@ function QuestionPrompt({
               disabled={submitted}
               onClick={() => toggle(opt.label)}
               aria-pressed={selected}
-              className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+              className={`flex w-full items-start gap-2.5 rounded-control border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
                 selected
                   ? "border-accent bg-accent/15"
                   : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"
@@ -510,7 +508,7 @@ function QuestionPrompt({
           );
         })}
         <div
-          className={`rounded-lg border transition-colors ${
+          className={`rounded-control border transition-colors ${
             otherOpen
               ? "border-accent bg-accent/15"
               : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"
@@ -555,12 +553,7 @@ function QuestionPrompt({
               className="flex w-full items-start gap-2.5 px-3 py-2 text-left disabled:opacity-50"
             >
               {otherDot("mt-0.5")}
-              <span className="min-w-0">
-                <span className="block text-body text-ink">Other…</span>
-                <span className="mt-0.5 block text-ui text-ink-dim">
-                  Write a custom answer
-                </span>
-              </span>
+              <span className="block text-body text-ink">Other…</span>
             </button>
           )}
         </div>
@@ -1531,7 +1524,7 @@ export function SessionChat({
                 <span className="text-body text-ink-dim">
                   {resuming
                     ? "Resuming the previous session…"
-                    : "This session has ended. Resume to continue, or start fresh."}
+                    : "Session ended."}
                 </span>
                 <div className="flex items-center gap-2">
                   <Button onClick={onResetSession} disabled={resuming}>
@@ -1675,7 +1668,7 @@ export function SessionChat({
                         aria-label="Clear context"
                         className={
                           showHandoffReady
-                            ? "flex h-8 w-8 animate-pulse items-center justify-center rounded-md text-warn-ink ring-1 ring-warn/50 hover:bg-warn/10"
+                            ? "flex h-8 w-8 items-center justify-center rounded-md text-warn-ink ring-1 ring-warn/50 hover:bg-warn/10"
                             : "flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink"
                         }
                       >

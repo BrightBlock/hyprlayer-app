@@ -31,16 +31,16 @@ export function LibraryBlank({
         <>
           An empty
           <br />
-          <em className="italic">shelf.</em>
+          shelf.
         </>
       }
-      lede="Research, plans, handoffs and notes land here as markdown files the moment an agent writes one. Start one yourself, or ask a session to."
+      lede="Research, plans, handoffs and notes land here as markdown the moment an agent writes one."
       actions={
         thoughtsConfigured ? (
           <>
             <Button variant="primary" className={BLANK_CTA} onClick={onNewNote}>
               <Icon name="doc" size="sm" />
-              New note
+              New thought
             </Button>
             {targetProject &&
               PROMPT_BUTTONS.map(({ stage, command }) => (

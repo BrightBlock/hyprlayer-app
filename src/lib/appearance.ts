@@ -4,16 +4,27 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { commands } from "./bindings";
+import { unwrap } from "./ipc";
 import { useCommand } from "./keybindings/registry";
+import { TRAFFIC_LIGHTS, titlebarInsetLights } from "./layout";
 import { log } from "./log";
+import { IS_MACOS } from "./platform";
 
-export const ZOOM_MIN = 0.8;
-export const ZOOM_MAX = 1.5;
+// VS Code's model, zoom = 1.2^level, without its negative levels (they break UI alignment).
+const ZOOM_BASE = 1.2;
+const ZOOM_LEVELS = 8;
+export const ZOOM_MIN = 1;
+export const ZOOM_MAX = ZOOM_BASE ** ZOOM_LEVELS;
 export const ZOOM_DEFAULT = 1;
-const ZOOM_STEP = 0.1;
 
-const clampZoom = (z: number): number =>
-  Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 10) / 10;
+const clampZoom = (z: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
+const zoomLevel = (z: number): number => Math.log(z) / Math.log(ZOOM_BASE);
+const atLevel = (level: number): number =>
+  ZOOM_BASE ** Math.min(ZOOM_LEVELS, Math.max(0, level));
+// The epsilon lets an older 0.1-step zoom (e.g. 1.3) snap onto the nearest level.
+const nextZoom = (z: number): number => atLevel(Math.floor(zoomLevel(z) + 1e-6) + 1);
+const prevZoom = (z: number): number => atLevel(Math.ceil(zoomLevel(z) - 1e-6) - 1);
 
 export const TEXT_SIZES = [
   { id: "small", label: "Small", scale: 0.9 },
@@ -67,8 +78,8 @@ export const useAppearance = create<AppearanceStore>()(
   persist(
     (set) => ({
       zoom: ZOOM_DEFAULT,
-      zoomIn: () => set((s) => ({ zoom: clampZoom(s.zoom + ZOOM_STEP) })),
-      zoomOut: () => set((s) => ({ zoom: clampZoom(s.zoom - ZOOM_STEP) })),
+      zoomIn: () => set((s) => ({ zoom: nextZoom(s.zoom) })),
+      zoomOut: () => set((s) => ({ zoom: prevZoom(s.zoom) })),
       resetZoom: () => set({ zoom: ZOOM_DEFAULT }),
       textSize: "default",
       setTextSize: (id) => set({ textSize: id }),
@@ -109,6 +120,15 @@ function applyZoom(zoom: number): void {
     .setZoom(zoom)
     .then(() => window.dispatchEvent(new Event("resize")))
     .catch((e) => log.warn("appearance", "could not set the app zoom", e));
+  if (IS_MACOS) {
+    void unwrap(
+      commands.setTrafficLightInset(TRAFFIC_LIGHTS.x * zoom, TRAFFIC_LIGHTS.y * zoom),
+    ).catch((e) => log.warn("appearance", "could not move the traffic lights", e));
+  }
+}
+
+export function useTitlebarInsetLights(): number {
+  return titlebarInsetLights(useAppearance((s) => s.zoom));
 }
 
 function applyStyle(s: AppearanceStore): void {

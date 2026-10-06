@@ -82,7 +82,7 @@ function WorktreeFilesCard({ projectPath }: { projectPath: string }) {
     <SettingsSection>
       <SectionHeading>Files copied into new worktrees</SectionHeading>
       <p className="mb-3 mt-1.5 max-w-xl text-ui leading-prose text-ink-dim">
-        Copied into every new worktree. Glob patterns supported.
+        Glob patterns supported.
       </p>
       {files.isLoading && <Spinner />}
       {files.isError && <ErrorNote error={files.error} />}

@@ -72,7 +72,7 @@ function UserMessageToolbar({
   const now = useTickingNow(createdAt);
   const rel = createdAt === null ? "" : formatRelativeTime(createdAt, now);
   const btn =
-    "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100";
+    "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition hover:bg-edge/60 hover:text-ink group-hover:opacity-100";
   return (
     <div className="mt-1 flex items-center justify-end gap-1 text-ui-sm text-ink-dim">
       <button
@@ -382,14 +382,13 @@ const ToolBlock = memo(function ToolBlock({
         className={`${STEP_ROW} cursor-pointer`}
       >
         <ToolStatusDot result={result} busy={busy} running={bgRunning} />
-        <Icon name="tool" size="xs" className="text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
         <ToolArg name={item.name} input={item.input} />
         <StepChevron open={open} reveal="hover" />
       </div>
 
       {!open && preview && (
-        <div className="flex gap-1.5 pl-[1.45rem] text-ink-dim">
+        <div className="flex gap-1.5 pl-4 text-ink-dim">
           <span aria-hidden="true" className="select-none text-ink-dim/50">
             ⎿
           </span>
@@ -478,12 +477,12 @@ const PermissionCard = memo(function PermissionCard({
   }
 
   return (
-    <div className="rounded-lg border border-q-card-border bg-q-card-bg p-3 shadow-card">
+    <div className="rounded-card border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
       <div className="flex items-center gap-2 text-q-label">
         <Icon name="permissions" size="sm" />
         <span className="text-body font-medium">Permission required</span>
       </div>
-      <div className="mt-2 flex items-center gap-1.5 rounded-md border border-warn/20 bg-surface/40 px-2.5 py-2">
+      <div className="mt-2 flex items-center gap-1.5 rounded-control border border-warn/20 bg-surface/40 px-2.5 py-2">
         <span className="shrink-0 text-meta font-medium text-ink">{item.toolName}</span>
         {filePath ? (
           <FileChip path={filePath} />
@@ -860,7 +859,6 @@ function SubagentBlock({
     <div className="text-ui" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
-        <Icon name="tool" size="xs" className="text-ink-dim" />
         <span className="shrink-0 font-mono font-medium text-ink">
           {item.name === "Workflow" ? "Workflow" : "Subagent"}
         </span>

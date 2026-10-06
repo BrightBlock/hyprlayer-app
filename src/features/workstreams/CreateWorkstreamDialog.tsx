@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
-import { Button, Dialog, DropdownSelect, ErrorNote, Field, TextInput } from "@/components/ui";
+import {
+  Button,
+  Dialog,
+  DropdownSelect,
+  ErrorNote,
+  Field,
+  SegmentedControl,
+  TextInput,
+} from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import type { WorktreeMode } from "@/lib/bindings";
 import { previewSlug, suggestPrefix } from "@/lib/domain/branchPrefix";
@@ -377,7 +385,8 @@ export function CreateWorkstreamDialog({
           </Field>
         ) : (
           <Field label="Where">
-            <Segmented
+            <SegmentedControl
+              aria-label="Where"
               value={place}
               onChange={setPlace}
               disabled={create.isPending}
@@ -593,40 +602,5 @@ function BranchRow({
         {detail && <span className="shrink-0 text-ui text-ink-dim">{detail}</span>}
       </button>
     </li>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  onChange,
-  options,
-  disabled,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string; disabled?: boolean; title?: string }[];
-  disabled?: boolean;
-}) {
-  return (
-    <div className="inline-flex rounded-md border border-edge p-0.5">
-      {options.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            disabled={disabled || opt.disabled}
-            title={opt.title}
-            aria-pressed={active}
-            className={`rounded px-3 py-1 text-body disabled:cursor-not-allowed disabled:opacity-50 ${
-              active ? "bg-accent/20 text-ink ring-1 ring-inset ring-accent/30" : "text-ink-dim hover:text-ink"
-            }`}
-          >
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }

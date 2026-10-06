@@ -535,25 +535,6 @@ a {
   display: none;
 }
 
-@keyframes tab-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 currentColor;
-  }
-  50% {
-    box-shadow: 0 0 3px 0 currentColor;
-  }
-}
-.animate-tab-glow {
-  animation: tab-glow 1.5s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .animate-tab-glow {
-    animation: none;
-    box-shadow: 0 0 2px 0 currentColor;
-  }
-}
-
 @keyframes kg-pulse {
   0% {
     transform: scale(1);
@@ -660,7 +641,6 @@ a {
   }
 }
 
-:root[data-window-blurred] .animate-tab-glow,
 :root[data-window-blurred] .kg-pulse,
 :root[data-window-blurred] .animate-work-pulse,
 :root[data-window-blurred] .hl-layer,

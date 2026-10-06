@@ -10,7 +10,8 @@ amended 2026-09-28 (the Agent sessions status-bar button and popover) ·
 amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote chip, composer sync
 line and draft guard, presence badge; see "Remote sync surfaces") ·
 amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell") ·
-amended 2026-10 (the Library's mail shell; see "Library: mail shell")
+amended 2026-10 (the Library's mail shell; see "Library: mail shell") ·
+amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom)
 
 ## Decision
 
@@ -284,7 +285,7 @@ border-edge` was the other) that had drifted into the tree independently.
 ### The Dialog API
 
 `Dialog` (`ui.tsx:537-617`) takes `size: keyof typeof DIALOG_SIZE`
-(`sm`/`md`/`lg`/`xl`/`2xl`/`3xl`, `ui.tsx:487-494`) instead of a `className`
+(`sm`/`md`/`lg`/`xl`/`2xl`/`3xl`/`4xl`, `ui.tsx:590-598`) instead of a `className`
 width override — never hand a `Dialog` a `max-w-*` in `className`; before
 `cx()` merged correctly that pattern is exactly what shipped the five
 448px-wide dialogs described above. `align="top"` pins the panel near the
@@ -430,8 +431,8 @@ exception like those under "Typography".
   does not swallow bare-key shortcuts.
 - `SegmentedControl` and `HarnessPicker`'s radio row share `useRovingRadio`
   (`src/lib/useRovingRadio.ts`): one tab stop, arrows move and select,
-  wrapping past disabled options. The feature-local segmented controls in
-  `agents/parts.tsx` and `CreateWorkstreamDialog.tsx` are unmigrated.
+  wrapping past disabled options. The Agents editor and `CreateWorkstreamDialog.tsx` use
+  `SegmentedControl`; an option's `title` becomes its tooltip.
 - `Popover` gains opt-in `caret` and `trapFocus` (with `initialFocusRef`,
   `restoreFocusRef`, dialog role) through `useFocusTrap`. Tab is cycled by
   hand, because WKWebView skips buttons unless macOS keyboard navigation is
@@ -527,6 +528,10 @@ Tailwind inlines a literal `--shadow-*` into its utility, so each maps to a per-
 - `--text-scale` is set on `documentElement` by `src/lib/appearance.ts`, with presets
   0.9 / 1 / 1.12 / 1.25.
 - Spacing and row tiers don't scale with text; app zoom scales everything.
+- On macOS the traffic lights follow app zoom: `appearance.ts` sends `TRAFFIC_LIGHTS × zoom` to
+  `set_traffic_light_inset`, and `src-tauri/src/traffic_lights.rs` re-applies it after AppKit relayouts.
+  The header's left inset is `titlebarInsetLights(zoom)`, so the gap after the lights stays fixed.
+  `tauri.conf.json` no longer sets `trafficLightPosition`; tao would re-pin it on every redraw.
 - `--font-sans` and `--font-mono` may be overridden at runtime, but only with the six
   bundled families listed in `src/lib/appearance.ts`.
 - The terminal family follows the Code font selection.

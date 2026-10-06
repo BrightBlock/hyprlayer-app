@@ -3,8 +3,8 @@ import { useState } from "react";
 import type { AppSettings, GitSettings } from "@/lib/bindings";
 import { useGithubUsername, useSetAppSettings } from "@/lib/queries";
 import { BranchPrefixEditor } from "@/components/BranchPrefixEditor";
-import { SETTINGS_CARD_DESCRIPTION, SettingsCardTitle } from "@/components/SettingsCard";
-import { Card, cx, ErrorNote, SettingRow, TextInput, Toggle } from "@/components/ui";
+import { SettingsCardTitle } from "@/components/SettingsCard";
+import { Card, ErrorNote, SettingRow, TextInput, Toggle } from "@/components/ui";
 
 const DEFAULT_GIT: Required<GitSettings> = {
   branchPrefix: null,
@@ -82,9 +82,6 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
   return (
     <Card>
       <SettingsCardTitle>Git</SettingsCardTitle>
-      <p className={cx("mt-1", SETTINGS_CARD_DESCRIPTION)}>
-        Branch naming, and what archiving or merging does to a workstream's worktree.
-      </p>
 
       {save.isError && (
         <div className="mt-3">
@@ -135,7 +132,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
         <div className="py-3.5">
           <BranchPrefixEditor
             title={<p className="text-body text-ink">Branch types</p>}
-            description="Customize the branch types for what you're working on. Picking one replaces the prefix above for that workstream."
+            description="Picking one replaces the prefix above for that workstream."
             value={git.prefixes ?? []}
             onChange={(next) => patch({ prefixes: next.length ? next : null })}
             disabled={save.isPending}
@@ -193,7 +190,7 @@ export function GitSettings({ settings }: { settings: AppSettings }) {
             />
           }
         >
-          Remove git-ignored files when archiving. Files in{" "}
+          Files in{" "}
           <code className="text-meta">worktree.copy</code> (e.g.{" "}
           <code className="text-meta">.env</code>) are kept.
         </SettingRow>

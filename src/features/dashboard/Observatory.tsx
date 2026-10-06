@@ -1,8 +1,7 @@
-import { Button } from "@/components/ui";
+import { Button, Kbd } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { effectiveChord } from "@/lib/keybindings/resolve";
-import { formatChord } from "@/lib/keybindings/chord";
 import { IS_MACOS } from "@/lib/platform";
 import { useBootstrap } from "@/lib/queries";
 import { MODE_STYLES, stageLabel, stageOf, type StageKey } from "@/lib/domain/stages";
@@ -110,11 +109,7 @@ export function HeroSearch({ total }: { total: number }) {
         Search {total > 0 ? `${total} ${total === 1 ? "document" : "documents"}, ` : ""}
         workstreams, agents…
       </span>
-      {chord && (
-        <span className="shrink-0 rounded-[5px] border border-edge bg-panel-2/80 px-1.5 py-px text-meta text-ink-dim">
-          {formatChord(chord, IS_MACOS)}
-        </span>
-      )}
+      <Kbd chord={chord} className="shrink-0" />
     </button>
   );
 }
@@ -163,47 +158,6 @@ export function StatPills({
   );
 }
 
-
-export function FirstNodeField() {
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      <div className="absolute left-1/2 top-[36%] -translate-x-1/2 -translate-y-1/2">
-        <span
-          className="block h-[11px] w-[11px] rounded-full bg-accent"
-          style={{
-            boxShadow: "0 0 20px 5px color-mix(in srgb, var(--color-accent) 45%, transparent)",
-          }}
-        />
-      </div>
-      <div
-        className="absolute left-1/2 top-[36%] flex -translate-x-1/2 -translate-y-[calc(100%+18px)] items-center rounded-full border border-accent/25 bg-panel/70 px-2.5 py-1 text-ui-sm backdrop-blur-md"
-        style={{ color: "color-mix(in srgb, var(--color-accent) 40%, var(--color-ink))" }}
-      >
-        hyprlayer, your first node
-      </div>
-    </div>
-  );
-}
-
-export function StarterStats({ agentsLive }: { agentsLive: number }) {
-  const stat = (n: number, label: string) => (
-    <span className="rounded-full border border-edge/60 bg-panel/40 px-3 py-1 text-ui-sm text-ink-dim/70 backdrop-blur-md">
-      <b className="font-semibold text-ink-dim">{n}</b> {label}
-    </span>
-  );
-  return (
-    <div className="pointer-events-none flex flex-wrap items-center justify-center gap-2">
-      {stat(1, "node")}
-      {stat(0, "links")}
-      {stat(0, "projects")}
-      {agentsLive > 0 && (
-        <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-ui-sm text-accent backdrop-blur-md">
-          <b className="font-semibold">{agentsLive}</b> {agentsLive === 1 ? "agent" : "agents"} live
-        </span>
-      )}
-    </div>
-  );
-}
 
 export function SetupPill({ onClick }: { onClick: () => void }) {
   return (

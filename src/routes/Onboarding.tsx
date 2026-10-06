@@ -34,23 +34,9 @@ import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
 import { dismissOnboarding } from "./onboardingState";
 
-const TOTAL_STEPS = 4;
-
-const NAME_OUTCOMES = [
-  "Claude Code and Codex agent workflows linked and ready to use",
-  "A thoughts repository for your project notes and docs",
-  "A dashboard where you can add projects and start coding",
-];
-
-const AGENTS_TITLE = (
-  <>
-    Your agents,
-    <br />
-    <em className="italic">linked.</em>
-  </>
-);
+const AGENTS_TITLE = "Link your agents";
 const AGENTS_LEDE =
-  "Hyprlayer's agents, skills and commands are installed once and shared by Claude Code and Codex, so either harness can run the same workflows.";
+  "Hyprlayer's agents, skills and commands are installed once and shared by Claude Code and Codex.";
 
 function NameStep({
   user,
@@ -63,29 +49,12 @@ function NameStep({
 }) {
   return (
     <Step
-      number={1}
-      total={TOTAL_STEPS}
-      title={
-        <>
-          Welcome to
-          <br />
-          <em className="italic">Hyprlayer.</em>
-        </>
-      }
-      lede="This takes about two minutes. You'll end up with:"
+      title="Your name"
       onNext={onNext}
       nextEnabled={!!user.trim()}
     >
       <Card className={CARD_CLASS}>
-        <ul className="mb-5 space-y-2.5">
-          {NAME_OUTCOMES.map((outcome) => (
-            <li key={outcome} className="flex items-center gap-3 text-body text-ink-2">
-              <CheckDot className="bg-ink" />
-              {outcome}
-            </li>
-          ))}
-        </ul>
-        <Field label="Your name">
+        <Field label="Name">
           <TextInput
             value={user}
             onChange={(e) => onChange(e.target.value)}
@@ -96,9 +65,6 @@ function NameStep({
               if (e.key === "Enter" && user.trim()) onNext();
             }}
           />
-          <p className="mt-1 text-ui text-ink-dim">
-            Used to attribute your thought documents.
-          </p>
         </Field>
       </Card>
     </Step>
@@ -128,7 +94,7 @@ function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void
 
   if (aiStatus.isLoading) {
     return (
-      <Step number={3} total={TOTAL_STEPS} title={AGENTS_TITLE} lede={AGENTS_LEDE} onBack={onBack}>
+      <Step title={AGENTS_TITLE} lede={AGENTS_LEDE} onBack={onBack}>
         <Card className={`${CARD_CLASS} flex items-center justify-center gap-2 py-12 text-body text-ink-dim`}>
           <Spinner /> Setting up Claude Code and Codex agents…
         </Card>
@@ -139,8 +105,6 @@ function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void
   if (phase.kind === "running") {
     return (
       <Step
-        number={3}
-        total={TOTAL_STEPS}
         title={AGENTS_TITLE}
         lede={AGENTS_LEDE}
         onBack={onBack}
@@ -150,8 +114,7 @@ function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void
         <div className="space-y-3">
           <Card className={CARD_CLASS}>
             <p className="text-body text-ink-dim">
-              Repairing the shared Claude Code and Codex agent installation. This step checks the
-              result when the command finishes.
+              Repairing the shared Claude Code and Codex agent installation.
             </p>
           </Card>
           <div className="relative h-80 overflow-hidden rounded-lg border border-edge bg-surface">
@@ -168,8 +131,6 @@ function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void
 
   return (
     <Step
-      number={3}
-      total={TOTAL_STEPS}
       title={AGENTS_TITLE}
       lede={AGENTS_LEDE}
       onBack={onBack}
@@ -217,13 +178,10 @@ function AgentsStep({ onBack, onNext }: { onBack: () => void; onNext: () => void
               to see separate Claude Code and Codex link status.
             </p>
           )}
-          <div className="flex items-center gap-3 border-t border-edge-2 pt-3.5">
+          <div className="border-t border-edge-2 pt-3.5">
             <Button type="button" onClick={startRepair}>
               <Icon name="tool" size="sm" /> Repair installation
             </Button>
-            <span className="text-ui-sm text-ink-dim">
-              Re-links the shared install if an agent goes missing.
-            </span>
           </div>
         </Card>
       ) : (
@@ -300,15 +258,7 @@ function ThoughtsStep({ user, onBack }: { user: string; onBack: () => void }) {
 
   return (
     <Step
-      number={4}
-      total={TOTAL_STEPS}
-      title={
-        <>
-          Where your
-          <br />
-          <em className="italic">thoughts</em> live.
-        </>
-      }
+      title="Thoughts repository"
       lede="Hyprlayer stores your project notes, plans, and research in a git repository."
       onBack={onBack}
       footer={
@@ -393,10 +343,6 @@ function ThoughtsStep({ user, onBack }: { user: string; onBack: () => void }) {
                       browseTitle="Choose where to create the repo"
                     />
                   </Field>
-                  <p className="mt-2 text-ui-sm text-ink-dim">
-                    Each project gets a folder here. Plans, research and handoffs are plain markdown
-                    you can read, diff and push without the app.
-                  </p>
                 </Card>
               )
             }
@@ -434,7 +380,7 @@ export function Onboarding() {
   return (
     <WizardFrame step={step} onExit={exit}>
       {step === 1 && <NameStep user={user} onChange={setUser} onNext={() => setStep(2)} />}
-      {step === 2 && <CliInstallStep total={TOTAL_STEPS} onBack={() => setStep(1)} onNext={() => setStep(3)} />}
+      {step === 2 && <CliInstallStep onBack={() => setStep(1)} onNext={() => setStep(3)} />}
       {step === 3 && <AgentsStep onBack={() => setStep(2)} onNext={() => setStep(4)} />}
       {step === 4 && <ThoughtsStep user={user} onBack={() => setStep(3)} />}
     </WizardFrame>

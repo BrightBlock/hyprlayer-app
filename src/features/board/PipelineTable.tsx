@@ -11,7 +11,7 @@ import {
   type PipelineSession,
 } from "./pipeline";
 
-const HEAD = "px-2 py-2 text-left font-mono text-meta font-semibold uppercase tracking-wider text-ink-4";
+const HEAD = "px-2 py-2 text-left font-mono text-label text-ink-4";
 const CELL = "px-2 py-2 align-middle";
 
 export function PipelineTable({

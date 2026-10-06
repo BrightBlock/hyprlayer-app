@@ -31,20 +31,20 @@ export function NoWorktreeBlank({
           <>
             Start the
             <br />
-            first <em className="italic">session.</em>
+            first session.
           </>
         ) : (
           <>
             Start the
             <br />
-            first <em className="italic">branch.</em>
+            first branch.
           </>
         )
       }
       lede={
         folder
-          ? "Every session is its own conversation, all running in this folder. Start as many as you need."
-          : "Every piece of work gets its own worktree, so two agents never fight over the same files. Name the work and Hyprlayer cuts the branch, opens the chat and starts the terminal."
+          ? "Every session is its own conversation in this folder."
+          : "Every piece of work gets its own worktree, so two agents never fight over the same files."
       }
       actions={
         <>

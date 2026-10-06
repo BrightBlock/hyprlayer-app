@@ -66,7 +66,7 @@ describe("AgentEditor managed agents", () => {
   it("renders a store-linked agent as read-only with no save or reset actions", () => {
     renderEditor(agent(true));
 
-    expect(screen.getByText("View Managed Agent")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "cartographer" })).toBeTruthy();
     expect(screen.getByText("Read-only")).toBeTruthy();
     expect(screen.getByText(/manages this linked agent/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
@@ -78,7 +78,7 @@ describe("AgentEditor managed agents", () => {
   it("keeps a regular personal agent editable", () => {
     renderEditor(agent(false));
 
-    expect(screen.getByText("Edit Agent")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "cartographer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "More actions" })).toBeTruthy();
     expect((screen.getByDisplayValue("cartographer") as HTMLInputElement).disabled).toBe(false);
