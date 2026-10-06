@@ -214,13 +214,13 @@ describe("PlanPanel tracking", () => {
   });
 
   it("shows the running subagent's steps under the current task", () => {
-    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: { done: 1, total: 3, current: "Diff layer" } };
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: { done: 1, total: 3, current: "Diff layer" }, phase: "1" };
     renderPanel(trackPlan(DOC("active", "    "), [todo("Phase 1: Scaffold", "in_progress")], { ...working, subagent }));
     expect(screen.getByText("foreman · 1 of 3 steps · Diff layer")).toBeTruthy();
   });
 
   it("falls back to the subagent's tool count and last call", () => {
-    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: null };
+    const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 160, lastTool: "Edit diff.rs", steps: null, phase: "1" };
     renderPanel(trackPlan(DOC("active", "    "), [todo("Phase 1: Scaffold", "in_progress")], { ...working, subagent }));
     expect(screen.getByText("foreman · 160 tools · Edit diff.rs")).toBeTruthy();
   });

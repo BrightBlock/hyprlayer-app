@@ -167,7 +167,7 @@ export function trackPlan(
         ? "tracking"
         : "draft";
   // A planning agent's own todos are research steps, not the plan's tasks.
-  const todos = mode === "draft" ? [] : sessionTodos;
+  const todos = mode === "draft" ? [] : [...sessionTodos];
   const phases: Phase[] = doc.phases.map((p) => ({
     label: p.label,
     name: p.name,
@@ -187,6 +187,19 @@ export function trackPlan(
     if (slot) slot.todo = todo;
     else if (phase) phase.todo = todo;
     else unmatched.push(todo);
+  }
+
+  // A foreman spawned with no todo for its phase still marks that phase as building.
+  const subagent = mode === "tracking" ? session?.subagent : null;
+  const spawned = subagent?.phase ? phases.find((p) => p.label.toLowerCase() === subagent.phase?.toLowerCase()) : undefined;
+  if (subagent && spawned && (spawned.todo == null || spawned.todo.status === "pending")) {
+    spawned.todo = {
+      id: null,
+      subject: `Phase ${spawned.label}: ${spawned.name}`,
+      status: "in_progress",
+      jumpToolUseId: subagent.toolUseId,
+    };
+    todos.push(spawned.todo);
   }
 
   const inProgress = (p: Phase) =>
