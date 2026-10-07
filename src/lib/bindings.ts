@@ -190,6 +190,10 @@ export const commands = {
 	codexProbe: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_probe")),
 	codexLoginWithApiKey: (apiKey: string) => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_login_with_api_key", { apiKey })),
 	codexLogout: () => typedError<CodexProbe, AppError>(__TAURI_INVOKE("codex_logout")),
+	accountStatus: () => typedError<AccountStatus, AppError>(__TAURI_INVOKE("account_status")),
+	accountSignIn: () => typedError<AccountStatus, AppError>(__TAURI_INVOKE("account_sign_in")),
+	accountCancelSignIn: () => __TAURI_INVOKE<void>("account_cancel_sign_in"),
+	accountSignOut: () => typedError<AccountStatus, AppError>(__TAURI_INVOKE("account_sign_out")),
 	ollamaStatus: () => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_status")),
 	ollamaSetEndpoint: (endpoint: string | null) => typedError<OllamaStatus, AppError>(__TAURI_INVOKE("ollama_set_endpoint", { endpoint })),
 	ollamaSetSelectedModels: (models: string[]) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_selected_models", { models })),
@@ -312,6 +316,7 @@ export const commands = {
 
 /** Events */
 export const events = {
+	accountChanged: makeEvent<AccountChanged>("account-changed"),
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	docStateChanged: makeEvent<DocStateChanged>("doc-state-changed"),
@@ -332,6 +337,10 @@ export const events = {
 };
 
 /* Types */
+export type AccountChanged = null;
+
+export type AccountStatus = { state: "signedOut" } | { state: "signedIn"; name: string; email: string | null };
+
 export type ActiveSessionView = {
 	session: Session,
 	workstreamTitle: string,

@@ -90,13 +90,26 @@ impl std::fmt::Display for ProviderHttpError {
 
 impl std::error::Error for ProviderHttpError {}
 
-/// A GET-only network seam: every provider network call this plan moves into
-/// core (Claude's `/v1/models`, Ollama's `/api/tags`) is a plain GET, so this
-/// stays narrow rather than wrapping the whole of `reqwest`.
+/// A GET and form-POST to `String` network seam: every network call core makes
+/// is one of the two, so this stays narrow rather than wrapping the whole of
+/// `reqwest`.
 pub trait ProviderHttp: Send + Sync {
     fn get<'a>(
         &'a self,
         request: ProviderHttpRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<ProviderHttpResponse, ProviderHttpError>>
+                + Send
+                + 'a,
+        >,
+    >;
+
+    /// `application/x-www-form-urlencoded`; the form may carry secrets, so it is never logged.
+    fn post_form<'a>(
+        &'a self,
+        request: ProviderHttpRequest,
+        form: Vec<(String, String)>,
     ) -> Pin<
         Box<
             dyn Future<Output = std::result::Result<ProviderHttpResponse, ProviderHttpError>>
@@ -132,29 +145,53 @@ impl ProviderHttp for ReqwestProviderHttp {
                 + 'a,
         >,
     > {
-        Box::pin(async move {
-            let mut builder = self.client.get(&request.url);
-            for (key, value) in &request.headers {
-                builder = builder.header(key, value);
-            }
-            if let Some(timeout) = request.timeout {
-                builder = builder.timeout(timeout);
-            }
-            let response = builder
-                .send()
-                .await
-                .map_err(|e| ProviderHttpError(e.to_string()))?;
-            let status = response.status().as_u16();
-            let body = match request.max_bytes {
-                Some(max) => read_capped(response, max).await?,
-                None => response
-                    .text()
-                    .await
-                    .map_err(|e| ProviderHttpError(e.to_string()))?,
-            };
-            Ok(ProviderHttpResponse { status, body })
-        })
+        Box::pin(send(self.client.get(&request.url), request))
     }
+
+    fn post_form<'a>(
+        &'a self,
+        request: ProviderHttpRequest,
+        form: Vec<(String, String)>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = std::result::Result<ProviderHttpResponse, ProviderHttpError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(send(self.client.post(&request.url).form(&form), request))
+    }
+}
+
+async fn send(
+    mut builder: reqwest::RequestBuilder,
+    request: ProviderHttpRequest,
+) -> std::result::Result<ProviderHttpResponse, ProviderHttpError> {
+    for (key, value) in &request.headers {
+        let mut value = reqwest::header::HeaderValue::from_str(value)
+            .map_err(|e| ProviderHttpError(format!("header {key}: {e}")))?;
+        // Keeps a bearer token out of `Debug` output and HPACK tables.
+        if key.eq_ignore_ascii_case("authorization") {
+            value.set_sensitive(true);
+        }
+        builder = builder.header(key.as_str(), value);
+    }
+    if let Some(timeout) = request.timeout {
+        builder = builder.timeout(timeout);
+    }
+    let response = builder
+        .send()
+        .await
+        .map_err(|e| ProviderHttpError(e.to_string()))?;
+    let status = response.status().as_u16();
+    let body = match request.max_bytes {
+        Some(max) => read_capped(response, max).await?,
+        None => response
+            .text()
+            .await
+            .map_err(|e| ProviderHttpError(e.to_string()))?,
+    };
+    Ok(ProviderHttpResponse { status, body })
 }
 
 /// Runs a workstream's configured Setup/Archive command line and reports

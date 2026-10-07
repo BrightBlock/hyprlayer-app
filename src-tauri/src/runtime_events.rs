@@ -38,6 +38,9 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
         RuntimeEvent::BinariesChanged => {
             let _ = events::BinariesChanged.emit(handle);
         }
+        RuntimeEvent::AccountChanged => {
+            let _ = events::AccountChanged.emit(handle);
+        }
         RuntimeEvent::ThoughtsIndexUpdated { update, ids } => {
             let kind = match update {
                 ThoughtsIndexUpdateKind::Updated => "updated",

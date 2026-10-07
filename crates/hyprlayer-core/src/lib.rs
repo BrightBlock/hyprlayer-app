@@ -4,7 +4,7 @@
 //!
 //! The supported surface is the [`HyprlayerRuntime`] facade and nothing else:
 //! construct it with [`RuntimeOptions`] over an explicit [`RuntimeEnvironment`]
-//! and [`RuntimePaths`], drive it through the thirteen service handles re-exported
+//! and [`RuntimePaths`], drive it through the fourteen service handles re-exported
 //! below, observe [`RuntimeEvent`] through [`HyprlayerRuntime::subscribe`], and
 //! stop it with [`HyprlayerRuntime::shutdown`]. Errors are [`CoreError`] and the
 //! crate's [`Result`] alias; durable values are [`models`].
@@ -15,7 +15,7 @@
 //! [`runtime::projects`], [`runtime::library`], [`runtime::agents`],
 //! [`runtime::prompts`], [`runtime::workstreams`], [`runtime::attachments`],
 //! [`runtime::terminals`], [`runtime::scripts`], [`runtime::reviews`],
-//! [`runtime::skills`].
+//! [`runtime::skills`], [`runtime::account`].
 //!
 //! `docs/architecture/rust-runtime-library.md` is the consumer-facing guide.
 //!
@@ -28,6 +28,7 @@
 //! ADR-0008 names; that is a migration aid, not a contract. Renamed fields and
 //! inherent methods may change under any of them without notice.
 
+pub mod account;
 pub mod agent;
 pub mod agent_bundle;
 pub mod agents;
@@ -74,6 +75,7 @@ pub use models::{
 pub use runtime::shutdown::ShutdownReport;
 pub use runtime::{HyprlayerRuntime, RuntimeOptions};
 
+pub use runtime::account::AccountService;
 pub use runtime::agents::AgentService;
 pub use runtime::attachments::AttachmentService;
 pub use runtime::library::LibraryService;

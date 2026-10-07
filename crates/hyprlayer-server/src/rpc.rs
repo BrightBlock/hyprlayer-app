@@ -32,6 +32,7 @@ use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
+use hyprlayer_core::runtime::account::{AccountStatus, SignInStart};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::library::{
     CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
@@ -273,6 +274,11 @@ hyprlayer_proto::commands! {
     WorktreeRoot: worktree_root() -> String;
     SetForeground: set_foreground(foreground: bool) -> ();
     SetEnvOverlay: set_env_overlay(vars: BTreeMap<String, String>) -> ();
+
+    AccountStatus: account_status() -> AccountStatus;
+    AccountStartSignIn: account_start_sign_in(port: u16) -> SignInStart;
+    AccountFinishSignIn: account_finish_sign_in(state: String, code: String) -> AccountStatus;
+    AccountSignOut: account_sign_out() -> AccountStatus;
 
     OpencodeCatalog: opencode_catalog(force: bool) -> OpencodeCatalog;
     OpencodeAuthList: opencode_auth_list() -> Vec<OpencodeAuthEntry>;

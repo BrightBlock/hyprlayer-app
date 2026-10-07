@@ -1,0 +1,435 @@
+{
+  "scenario": "account_sign_in",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileExists": false,
+            "status": {
+              "state": "signedOut"
+            }
+          },
+          "guard": "status reads signed out and there is no account file",
+          "ok": true
+        }
+      ],
+      "step": "signed out before any sign-in"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": {
+              "state": "signedOut"
+            },
+            "unchanged": true
+          },
+          "guard": "it reads as signed out and is left byte for byte",
+          "ok": true
+        }
+      ],
+      "step": "a file from another pool reads as signed out"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "skipped": true
+          },
+          "guard": "the loopback passes over a port another listener has on ::1",
+          "ok": true
+        }
+      ],
+      "step": "a port held on ::1 alone is not free"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "at": "$CLOUD/oauth2/authorize",
+            "challengeLength": 43,
+            "params": {
+              "client_id": "e2e-client",
+              "code_challenge_method": "S256",
+              "identity_provider": "GitHubOidc",
+              "redirect_uri": "$LOOPBACK/auth/callback",
+              "response_type": "code",
+              "scope": "openid email profile",
+              "state": "$STATE"
+            }
+          },
+          "guard": "authorize asks GitHub for a PKCE S256 code back at the loopback",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "at": "$CLOUD/logout",
+            "params": {
+              "client_id": "e2e-client",
+              "logout_uri": "$LOOPBACK/auth/loggedout"
+            }
+          },
+          "guard": "logout returns to the loopback's loggedout path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "keys": [
+              "authorize_url",
+              "logout_url",
+              "state"
+            ]
+          },
+          "guard": "the start answer carries the state and the two URLs, and no verifier",
+          "ok": true
+        }
+      ],
+      "step": "start keeps the verifier"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "browserWaiting": true,
+            "codeArrived": true
+          },
+          "guard": "the code arrives while the browser still waits on the callback",
+          "ok": true
+        }
+      ],
+      "step": "the browser follows logout → loggedout → authorize → callback"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "account_sign_in_stale",
+            "tokenRequests": 0
+          },
+          "guard": "a foreign state is stale and nothing is exchanged",
+          "ok": true
+        }
+      ],
+      "step": "finish rejects a foreign state and keeps the attempt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "result": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            }
+          },
+          "guard": "the real state still finishes, as the session's identity",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hops": [
+              "$CLOUD/logout",
+              "$LOOPBACK/auth/loggedout",
+              "$CLOUD/oauth2/authorize",
+              "$LOOPBACK/auth/callback",
+              "https://hyprlayer.dev/signin/success"
+            ]
+          },
+          "guard": "after the exchange, the hops are logout, loggedout, authorize, callback, then the website",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "callbackStatus": 302,
+            "favicon": 404,
+            "forgedCallback": 400,
+            "redirectedToWebsite": true
+          },
+          "guard": "a forged callback and a stray probe are turned away, and the real one redirects",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "clientId": "e2e-client",
+            "grantType": "authorization_code",
+            "redirectUri": "$LOOPBACK/auth/callback",
+            "redirectUriMatchesAuthorize": true,
+            "s256MatchesChallenge": true,
+            "tokenRequests": 1,
+            "verifierLength": 43
+          },
+          "guard": "the code is redeemed with the verifier its challenge was made from",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "bearerIsTheAccessToken": true,
+            "sessionRequests": 1
+          },
+          "guard": "the session is read with the issued access token",
+          "ok": true
+        }
+      ],
+      "step": "finish exchanges with PKCE S256"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "account_sign_in_stale",
+            "tokenRequests": 1
+          },
+          "guard": "a second finish with the same state is stale",
+          "ok": true
+        }
+      ],
+      "step": "the state is one-shot"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "a": 1,
+            "b": 0,
+            "c": 0
+          },
+          "guard": "A hears it once; B (session kinds only) and C (never announced) do not",
+          "ok": true
+        }
+      ],
+      "step": "only clients that announced AccountChanged hear it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "clientId": "e2e-client",
+            "keys": [
+              "accessToken",
+              "clientId",
+              "email",
+              "expiresAt",
+              "loginUrl",
+              "name",
+              "refreshToken"
+            ],
+            "loginUrl": "$CLOUD",
+            "mode": "600"
+          },
+          "guard": "the file is owner-only and records the pool that issued it",
+          "ok": true
+        }
+      ],
+      "step": "account.json is private and names its pool"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            }
+          },
+          "guard": "status reads the same identity from disk",
+          "ok": true
+        }
+      ],
+      "step": "the account survives a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileExists": false,
+            "heard": 1,
+            "result": {
+              "state": "signedOut"
+            }
+          },
+          "guard": "sign-out answers signed out, deletes the file, and A hears it",
+          "ok": true
+        }
+      ],
+      "step": "sign out"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "clientId": "e2e-client",
+            "grantType": "refresh_token",
+            "heard": 0,
+            "refreshGrants": 1,
+            "sentTheIssuedRefreshToken": true,
+            "status": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            }
+          },
+          "guard": "one refresh grant carries the issued refresh token, and A hears nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accessTokenReplaced": true,
+            "refreshTokenKept": true
+          },
+          "guard": "the answer has no refresh token, so the stored one is carried forward",
+          "ok": true
+        }
+      ],
+      "step": "a stale token refreshes on status, once, and emits nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileExists": false,
+            "heard": 1,
+            "status": {
+              "state": "signedOut"
+            }
+          },
+          "guard": "a dead refresh token signs out, deletes the file, and A hears it",
+          "ok": true
+        }
+      ],
+      "step": "invalid_grant signs out"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heard": 0,
+            "sessionUsedTheNewToken": true,
+            "status": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            },
+            "trail": [
+              "POST /oauth2/token",
+              "GET /v1/session"
+            ]
+          },
+          "guard": "one refresh, then session 200 with the new token, unprompted",
+          "ok": true
+        }
+      ],
+      "step": "start refreshes a fresh token, then reads the session with the new one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileUnchanged": true,
+            "first": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            },
+            "heard": 0,
+            "second": {
+              "email": "octo@hyprlayer.invalid",
+              "name": "Octo Cat",
+              "state": "signedIn"
+            },
+            "tokenRequests": 1
+          },
+          "guard": "a 503 keeps the session, is tried once, and leaves the file and A alone",
+          "ok": true
+        }
+      ],
+      "step": "a transient failure keeps the session and backs off"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "clientId": "e2e-client",
+            "fileExists": false,
+            "result": {
+              "state": "signedOut"
+            },
+            "revokeRequests": 1,
+            "revokedTheStoredToken": true
+          },
+          "guard": "the stored refresh token is revoked for the client, and the file is gone",
+          "ok": true
+        }
+      ],
+      "step": "sign-out revokes the refresh token"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileExists": false,
+            "result": {
+              "state": "signedOut"
+            },
+            "revokeRequests": 1
+          },
+          "guard": "a 503 from revoke is only logged: signed out, file gone",
+          "ok": true
+        }
+      ],
+      "step": "a failed revoke still signs out"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "callbackStatus": 200,
+            "code": "account_sign_in_failed",
+            "failurePage": true,
+            "fileExists": false,
+            "reachedWebsite": false
+          },
+          "guard": "the browser gets the failure page from the callback, and no file is written",
+          "ok": true
+        }
+      ],
+      "step": "a failed exchange never sends the browser to the website"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "inAnswers": false,
+            "inLogs": false,
+            "logsRead": true,
+            "tokensIssued": 7
+          },
+          "guard": "no issued token is in an RPC answer or a server log",
+          "ok": true
+        }
+      ],
+      "step": "no token left the server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

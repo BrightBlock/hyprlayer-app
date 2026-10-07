@@ -333,6 +333,24 @@ pub enum CoreError {
     #[error("No agents were picked for this skill.")]
     SkillTargetsEmpty,
 
+    #[error("That sign-in attempt is no longer current.")]
+    AccountSignInStale,
+
+    #[error("GitHub sign-in didn't finish.")]
+    AccountSignInFailed { detail: String },
+
+    #[error("GitHub sign-in timed out.")]
+    AccountSignInTimedOut,
+
+    #[error("Sign-in was cancelled.")]
+    AccountSignInCancelled,
+
+    #[error("Sign-in needs port {ports} free.")]
+    AccountPortsBusy { ports: String },
+
+    #[error("Couldn't reach Hyprlayer Cloud.")]
+    AccountUnreachable { detail: String },
+
     #[error("Node.js (npm) isn't installed, so OpenCode can't be installed automatically.")]
     NpmMissing,
 
@@ -692,6 +710,15 @@ impl CoreError {
             CoreError::SkillTargetsEmpty => {
                 Some("Pick Claude Code, Codex & others, or both.".into())
             }
+            CoreError::AccountSignInStale
+            | CoreError::AccountSignInFailed { .. }
+            | CoreError::AccountSignInTimedOut => Some("Sign in again.".into()),
+            CoreError::AccountPortsBusy { .. } => {
+                Some("Quit whatever is using it, then sign in again.".into())
+            }
+            CoreError::AccountUnreachable { .. } => {
+                Some("Check your connection, then sign in again.".into())
+            }
             CoreError::Frontmatter(crate::docs::frontmatter::FmError::InvalidRaw(_)) => {
                 Some("Fix the YAML and save again.".into())
             }
@@ -812,6 +839,12 @@ impl CoreError {
             CoreError::SkillContentChanged => "skill_content_changed",
             CoreError::SkillNotInstalled { .. } => "skill_not_installed",
             CoreError::SkillTargetsEmpty => "skill_targets_empty",
+            CoreError::AccountSignInStale => "account_sign_in_stale",
+            CoreError::AccountSignInFailed { .. } => "account_sign_in_failed",
+            CoreError::AccountSignInTimedOut => "account_sign_in_timed_out",
+            CoreError::AccountSignInCancelled => "account_sign_in_cancelled",
+            CoreError::AccountPortsBusy { .. } => "account_ports_busy",
+            CoreError::AccountUnreachable { .. } => "account_unreachable",
             CoreError::NpmMissing => "npm_missing",
             CoreError::OpencodeInstallFailed { .. } => "opencode_install_failed",
             CoreError::CliInstallUnsupported => "cli_install_unsupported",

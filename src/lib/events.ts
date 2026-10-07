@@ -48,6 +48,9 @@ export function attachEventListeners(): () => void {
     events.serverDisconnected.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["connection-status"] });
     }),
+    events.accountChanged.listen(() => {
+      void queryClient.invalidateQueries({ queryKey: ["account"] });
+    }),
     events.omarchyThemeChanged.listen(() => {
       void refreshOmarchyTheme();
     }),

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConfigSummary, ConnectionStatus, Host, WorkstreamView } from "@/lib/bindings";
+import type { ConnectionStatus, Host, WorkstreamView } from "@/lib/bindings";
 import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import { useHostsUiStore } from "@/features/hosts/hostsUi";
 import { useReconnectStore } from "@/features/hosts/reconnectState";
@@ -13,13 +13,11 @@ import {
   type SessionControlsSnapshot,
 } from "@/features/session/sessionControls";
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
-import { Avatar } from "./parts";
 import { StatusBar } from "./StatusBar";
 
-const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), useBootstrap: vi.fn() }));
+const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn() }));
 vi.mock("@/lib/queries", () => ({
   useConnectionStatus: b.useConnectionStatus,
-  useBootstrap: b.useBootstrap,
 }));
 
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
@@ -49,10 +47,6 @@ const FAILED: ConnectionStatus = {
 
 function mockStatus(data: ConnectionStatus | undefined) {
   b.useConnectionStatus.mockReturnValue({ data, isSuccess: data !== undefined });
-}
-
-function mockConfig(config: ConfigSummary | undefined) {
-  b.useBootstrap.mockReturnValue({ data: config ? { config } : undefined });
 }
 
 function makeView(
@@ -158,7 +152,6 @@ const dot = (el: HTMLElement) => el.querySelector("span[aria-hidden]");
 
 beforeEach(() => {
   mockStatus(CONNECTED);
-  mockConfig({ state: "ready", path: "/c", user: "jon tsiros", backendKind: "git", configured: true });
   useHostsUiStore.setState({ open: false, menu: false });
   useReconnectStore.setState({ lostAt: null, attempting: false, halted: false });
   useSessionControlsStore.setState({ byShell: {} });
@@ -486,20 +479,6 @@ describe("StatusBar trailing items", () => {
     const sessions = screen.getByRole("button", { name: "Agent sessions" });
     expect(sessions.previousElementSibling).toBeNull();
     expect(sessions.parentElement!.previousElementSibling).toBeNull();
-  });
-
-
-  it("renders the handle's initials", () => {
-    render(<Avatar />);
-    const avatar = screen.getByRole("img", { name: "jon tsiros" });
-    expect(avatar.textContent).toBe("JT");
-    expect(avatar.getAttribute("title")).toBe("jon tsiros");
-  });
-
-  it("has no avatar without a ready config", () => {
-    mockConfig({ state: "missing", path: "/c" });
-    render(<Avatar />);
-    expect(screen.queryByRole("img")).toBeNull();
   });
 });
 

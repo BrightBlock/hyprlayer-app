@@ -630,9 +630,9 @@ describe("PHASE_COLOR", () => {
 });
 
 describe("editorTabs", () => {
-  it("hides Collaborators until there's an account behind it", () => {
+  it("hides Collaborators while there is no collaboration backend, signed in or not", () => {
     expect(editorTabs(false).map((t) => t.key)).not.toContain("collaborators");
-    expect(editorTabs(true).map((t) => t.key)).toContain("collaborators");
+    expect(editorTabs(true).map((t) => t.key)).not.toContain("collaborators");
   });
 });
 

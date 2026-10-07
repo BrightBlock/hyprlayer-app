@@ -114,7 +114,7 @@ import {
 } from "@/features/settings/settingsPopoverStore";
 import { ScriptsDockButton } from "@/features/statusbar/ScriptsDockButton";
 import { StatusBar } from "@/features/statusbar/StatusBar";
-import { Avatar } from "@/features/statusbar/parts";
+import { AccountButton } from "@/features/account/AccountButton";
 import { ThoughtsSyncStatus } from "@/features/library/ThoughtsSyncButton";
 import { useThoughtsSync } from "@/features/library/useThoughtsSync";
 import { useAgentTabCount } from "@/features/session/workstreamTabs";
@@ -1053,7 +1053,7 @@ export function Root() {
               </button>
             )}
             <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-edge" />
-            <Avatar />
+            <AccountButton />
           </div>
         </div>
 

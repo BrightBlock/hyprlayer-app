@@ -69,8 +69,11 @@ export const EDITOR_TABS: ReadonlyArray<{ key: EditorTab; label: string }> = [
   { key: "collaborators", label: "Collaborators" },
 ];
 
+// No collaboration backend yet; the tab stays hidden even when signed in.
+const COLLABORATION = false;
+
 export function editorTabs(signedIn: boolean): ReadonlyArray<{ key: EditorTab; label: string }> {
-  return signedIn ? EDITOR_TABS : EDITOR_TABS.filter((t) => t.key !== "collaborators");
+  return signedIn && COLLABORATION ? EDITOR_TABS : EDITOR_TABS.filter((t) => t.key !== "collaborators");
 }
 
 export const AGENT_TOOLS: ReadonlyArray<{ key: string; desc: string }> = [

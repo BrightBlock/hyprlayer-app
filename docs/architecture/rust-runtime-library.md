@@ -214,25 +214,26 @@ lags and receives `RecvError::Lagged`.
 | `ScriptRunChanged` | `workstream_id`, `kind: ScriptKind`, `phase: RunPhase`, `exit_code: Option<i32>`, `port: Option<u16>` |
 | `ProjectCreateProgress` | `op_id`, `step: CreateStep`, `status: StepStatus`, `detail: Option<String>` |
 | `DocStateChanged` | `ids: Vec<String>`, `change: DocStateChange` |
+| `AccountChanged` | — |
 
 `ThoughtsIndexUpdateKind` is `Updated | Removed | Rescanned`. `DocStateChange` is `Read | Agent`; read state never rides `ThoughtsIndexUpdated`, which clients treat as a write.
 
 ## Services
 
-Thirteen handles, each borrowed from the runtime for the duration of one call:
+Fourteen handles, each borrowed from the runtime for the duration of one call:
 
 ```rust
 runtime.settings()   runtime.providers()  runtime.sessions()   runtime.projects()
 runtime.library()    runtime.agents()     runtime.prompts()    runtime.workstreams()
 runtime.attachments() runtime.terminals() runtime.scripts()    runtime.reviews()
-runtime.skills()
+runtime.skills()     runtime.account()
 ```
 
 Each handle's operational request/result types live in that service's module and
 are supported alongside it: `hyprlayer_core::runtime::{settings_service,
 providers, sessions, projects, library, agents, prompts, workstreams,
-attachments, terminals, scripts, reviews, skills}`. The handles themselves are also
-re-exported at the crate root.
+attachments, terminals, scripts, reviews, skills, account}`. The handles themselves
+are also re-exported at the crate root.
 
 Every method takes `&self` and returns `Result<T>` unless shown otherwise.
 
@@ -266,8 +267,8 @@ an internal type, and they are supported for that reason.
 `opencode_set_provider_key(&str, &str)`, `opencode_remove_provider(&str)`,
 `opencode_set_default_model(Option<String>)`.
 
-Network calls go through the internal `ProviderHttp` port; the desktop shell has
-no HTTP client of its own.
+Network calls go through the internal `ProviderHttp` port, which GETs and
+form-POSTs to `String`; the desktop shell has no HTTP client of its own.
 
 The OpenCode key and default-model methods edit `RuntimePaths::opencode_auth_file`
 and `opencode_config_file`. Setting or removing a key invalidates the cached
@@ -389,6 +390,24 @@ repo, and only a branch ref can report an update (tags and SHAs are pinned).
 missing links; changed content comes back as `needsApproval` with a preview. Candidates
 come from a read-only `skillfish.json`. The
 `skill_sources` E2E scenario is its headless integration test.
+
+### `AccountService`
+
+`status()`, `finish_sign_in(&str, &str)` and `sign_out()` return `AccountStatus`
+(`signedOut`, or `signedIn` with `name` and `email`); `start_sign_in(u16)` returns
+`SignInStart { state, logout_url, authorize_url }` for the browser leg.
+
+The port is a loopback the caller bound with `account::loopback::Loopback` on the
+machine running the browser; the PKCE verifier stays in the runtime (ADR-0011).
+`finish_sign_in` takes the pending attempt only on an exact `state`, once: a mismatch
+is `account_sign_in_stale` and leaves the attempt in place. Success writes
+`<app_config_dir>/account.json` (0600 on unix) and sends `AccountChanged`, as does a
+`sign_out` that removed a file. A file from the other Cognito pool reads as signed out
+and is left alone. `status()` may refresh a stale token and re-check the session, but
+never waits behind a refresh in flight: it answers from the last status then. A stored
+session is also refreshed at runtime start and every hour; only `invalid_grant` signs out, and
+`sign_out` revokes the refresh token best-effort (ADR-0011). The `account_sign_in` E2E
+scenario is its headless integration test.
 
 ### `PromptService`
 

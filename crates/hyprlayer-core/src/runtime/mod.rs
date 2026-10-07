@@ -1,3 +1,4 @@
+pub mod account;
 pub mod agents;
 pub mod attachments;
 mod attribution;
@@ -34,6 +35,7 @@ use hyprlayer_models::RuntimeEvent;
 
 pub use crate::env::{RuntimeEnvironment, RuntimePaths};
 
+use crate::account::endpoints::CloudEndpoints;
 use crate::config::ConfigService;
 use crate::error::Result;
 use crate::index::watcher::WatchHandle;
@@ -104,6 +106,7 @@ pub struct HyprlayerRuntime {
     lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     workstream_locks: WorkstreamLocks,
     skill_locks: SkillLocks,
+    account_state: account::AccountState,
     coordinator: ShutdownCoordinator,
     tasks: AsyncMutex<Vec<TrackedTask>>,
     _profile_lock: ProfileLock,
@@ -204,6 +207,12 @@ impl HyprlayerRuntime {
             config_cli.unwrap_or_else(|| Arc::new(CliConfigCli::new(binaries.clone())));
         let provider_http: Arc<dyn ProviderHttp + Send + Sync> =
             Arc::new(ReqwestProviderHttp::new(PROVIDER_HTTP_TIMEOUT));
+        let cloud = CloudEndpoints::resolve(&environment);
+        tracing::info!(
+            "Cloud account: {} pool, sign-in at {}",
+            cloud.pool.as_str(),
+            cloud.login_url
+        );
 
         Ok(Arc::new(Self {
             config_cli,
@@ -211,6 +220,7 @@ impl HyprlayerRuntime {
             lifecycle_runner,
             workstream_locks: WorkstreamLocks::new(),
             skill_locks: SkillLocks::default(),
+            account_state: account::AccountState::new(cloud, &paths.app_config_dir),
             config,
             binaries,
             settings,
@@ -338,6 +348,26 @@ impl HyprlayerRuntime {
             }
         });
 
+        // A `Weak` like startup; a stored session is checked off the open path, then on a timer.
+        let account_check = Arc::downgrade(self);
+        let account_task = TrackedTask::spawn(move |stop| async move {
+            loop {
+                let Some(runtime) = account_check.upgrade() else {
+                    return;
+                };
+                let account = runtime.account();
+                tokio::select! {
+                    _ = account.check() => {}
+                    _ = stop.notified() => return,
+                }
+                drop(runtime);
+                tokio::select! {
+                    _ = tokio::time::sleep(account::CHECK_INTERVAL) => {}
+                    _ = stop.notified() => return,
+                }
+            }
+        });
+
         let title_task =
             sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
 
@@ -346,6 +376,7 @@ impl HyprlayerRuntime {
             config_task,
             pr_watcher_task,
             sweep_task,
+            account_task,
             title_task,
         ]);
 

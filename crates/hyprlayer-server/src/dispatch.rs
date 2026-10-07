@@ -30,6 +30,7 @@ use hyprlayer_core::repo_settings::{self, ScriptSettings};
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::review;
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
+use hyprlayer_core::runtime::account::{AccountStatus, SignInStart};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::attachments::{ImportAttachmentRequest, SaveAttachmentRequest};
 use hyprlayer_core::runtime::library::{
@@ -135,8 +136,15 @@ fn connection(command: &str) -> Result<u64, WireError> {
 
 pub fn wire_error(e: CoreError) -> WireError {
     // The message stays one sentence; the git or HTTP detail goes to the log.
-    if let CoreError::SkillFetchFailed { detail } = &e {
-        tracing::warn!("skill fetch failed: {detail}");
+    match &e {
+        CoreError::SkillFetchFailed { detail } => tracing::warn!("skill fetch failed: {detail}"),
+        CoreError::AccountSignInFailed { detail } => {
+            tracing::warn!("Cloud sign-in failed: {detail}")
+        }
+        CoreError::AccountUnreachable { detail } => {
+            tracing::warn!("Hyprlayer Cloud unreachable: {detail}")
+        }
+        _ => {}
     }
     WireError {
         code: e.code().to_string(),
@@ -1623,6 +1631,30 @@ impl Dispatch for Server {
 
     async fn github_username(&self) -> Result<Option<String>, WireError> {
         Ok(self.runtime.settings().github_username().await)
+    }
+
+    async fn account_status(&self) -> Result<AccountStatus, WireError> {
+        self.runtime.account().status().await.wire()
+    }
+
+    async fn account_start_sign_in(&self, port: u16) -> Result<SignInStart, WireError> {
+        self.runtime.account().start_sign_in(port).await.wire()
+    }
+
+    async fn account_finish_sign_in(
+        &self,
+        state: String,
+        code: String,
+    ) -> Result<AccountStatus, WireError> {
+        self.runtime
+            .account()
+            .finish_sign_in(&state, &code)
+            .await
+            .wire()
+    }
+
+    async fn account_sign_out(&self) -> Result<AccountStatus, WireError> {
+        self.runtime.account().sign_out().await.wire()
     }
 
     async fn default_username(&self) -> Result<String, WireError> {

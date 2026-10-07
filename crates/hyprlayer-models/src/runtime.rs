@@ -88,4 +88,6 @@ pub enum RuntimeEvent {
         status: StepStatus,
         detail: Option<String>,
     },
+    /// Re-read `account_status`; carries no identity or token.
+    AccountChanged,
 }

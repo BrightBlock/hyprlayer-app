@@ -587,6 +587,33 @@ export function useGithubUsername() {
   });
 }
 
+export function useAccountStatus() {
+  return useQuery({
+    queryKey: ["account"],
+    queryFn: () => unwrap(commands.accountStatus()),
+    staleTime: 60_000,
+  });
+}
+
+export function useAccountSignIn() {
+  return useMutation({
+    mutationKey: ["account-sign-in"],
+    mutationFn: () => unwrap(commands.accountSignIn()),
+    onSuccess: (status) => queryClient.setQueryData(["account"], status),
+  });
+}
+
+export function useAccountCancelSignIn() {
+  return useMutation({ mutationFn: () => commands.accountCancelSignIn() });
+}
+
+export function useAccountSignOut() {
+  return useMutation({
+    mutationFn: () => unwrap(commands.accountSignOut()),
+    onSuccess: (status) => queryClient.setQueryData(["account"], status),
+  });
+}
+
 export function useDefaultUsername() {
   return useQuery({
     queryKey: ["default-username"],

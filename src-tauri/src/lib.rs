@@ -176,6 +176,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::harnesses::codex_probe,
             commands::harnesses::codex_login_with_api_key,
             commands::harnesses::codex_logout,
+            commands::account::account_status,
+            commands::account::account_sign_in,
+            commands::account::account_cancel_sign_in,
+            commands::account::account_sign_out,
             commands::ollama::ollama_status,
             commands::ollama::ollama_set_endpoint,
             commands::ollama::ollama_set_selected_models,
@@ -267,7 +271,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::SessionViewers,
             events::ScriptRunChanged,
             events::QuitRequested,
-            events::ServerDisconnected
+            events::ServerDisconnected,
+            events::AccountChanged
         ])
         // Vocabulary no command signature carries yet.
         .typ::<DocType>()
@@ -442,6 +447,7 @@ pub fn run() {
             let app_log_dir = app.path().app_log_dir()?;
             // Before any `attach_client`, which announces it.
             app.manage(client_identity::load_or_create(&app_config_dir));
+            app.manage(commands::account::SignInFlight::default());
 
             // hosts.json is read before connecting anything, because it's the
             // one thing that has to be decided locally: there is no server to

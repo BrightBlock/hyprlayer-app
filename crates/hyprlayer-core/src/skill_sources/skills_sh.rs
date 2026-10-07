@@ -2,7 +2,7 @@ use std::sync::Once;
 
 use serde::{Deserialize, Serialize};
 
-use crate::env::RuntimeEnvironment;
+use crate::env::{https_or_loopback_http, RuntimeEnvironment};
 use crate::error::{CoreError, Result};
 
 use super::github::parse_owner_repo;
@@ -73,28 +73,11 @@ pub fn api_base(env: &RuntimeEnvironment) -> String {
         return DEFAULT_API.to_string();
     };
     WARNED.call_once(|| tracing::warn!("{API_VAR} is set; skills.sh searches go to {raw}"));
-    if base_allowed(raw) {
+    if https_or_loopback_http(raw) {
         return raw.trim_end_matches('/').to_string();
     }
     tracing::warn!("{API_VAR} must be https:// or loopback http://; ignoring it");
     DEFAULT_API.to_string()
-}
-
-fn base_allowed(raw: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(raw) else {
-        return false;
-    };
-    match url.scheme() {
-        "https" => true,
-        "http" => url.host_str().is_some_and(|host| {
-            let host = host.trim_start_matches('[').trim_end_matches(']');
-            host == "localhost"
-                || host
-                    .parse::<std::net::IpAddr>()
-                    .is_ok_and(|ip| ip.is_loopback())
-        }),
-        _ => false,
-    }
 }
 
 pub fn search_url(base: &str, query: &str, limit: u32) -> Result<String> {

@@ -1,3 +1,4 @@
+pub mod account;
 pub mod agents;
 pub mod attachments;
 pub mod diagnostics;

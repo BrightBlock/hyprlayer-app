@@ -150,6 +150,24 @@ fn claude_config_dir(env: &RuntimeEnvironment) -> PathBuf {
         .unwrap_or_else(|| env.home_dir.join(".claude"))
 }
 
+/// The rule every URL test knob shares: `https://`, or `http://` to a loopback host.
+pub(crate) fn https_or_loopback_http(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    match url.scheme() {
+        "https" => true,
+        "http" => url.host_str().is_some_and(|host| {
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            host == "localhost"
+                || host
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        }),
+        _ => false,
+    }
+}
+
 fn claude_managed_settings_files() -> Vec<PathBuf> {
     vec![PathBuf::from(if cfg!(target_os = "windows") {
         r"C:\Program Files\ClaudeCode\managed-settings.json"

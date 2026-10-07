@@ -114,8 +114,9 @@ reconnect:
   an `SSH_AUTH_SOCK` that is not a socket on its host, and a remote client sends
   no `SSH_AUTH_SOCK` or `DISPLAY`.
 - **`AnnounceClient`** — the client id, device name and the targeted event
-  kinds this build decodes. Display-only (ADR-0009): it attributes user turns
-  and grants nothing. A server that answers `unsupported_command` predates
+  kinds this build decodes (`SessionRevised`, `SessionReset`, `SessionViewers`,
+  `AccountChanged`). Display-only (ADR-0009): it attributes user turns and
+  grants nothing. A server that answers `unsupported_command` predates
   transcript sync.
 - **`WatchSessions`** — the sessions the client views and the rev each last
   applied, re-sent as that set changes and on a poll. It replaces the
@@ -454,8 +455,10 @@ The runtime broadcasts `RuntimeEvent`s. The server subscribes **once**
 `SessionRevised`, `SessionReset` and `SessionViewers` are targeted: they reach
 only a connection that announced the kind and is watching that session, because
 a released desktop tears its connection down on a kind it cannot decode.
+`AccountChanged` is targeted by capability alone: it reaches every connection
+that announced it, whatever that connection watches (ADR-0011).
 `RpcClient` from 0.8.6 instead skips an event kind it cannot decode, logging it
-once, and keeps the connection. A targeted event dropped on a full queue is
+once, and keeps the connection. A session event dropped on a full queue is
 recovered by the next `watch_sessions` reply, which carries the same state.
 
 On the client, `runtime_events::map` turns each variant into its Tauri event,
@@ -515,8 +518,8 @@ an unreleased build from the release it descends from, and a stale one is
 otherwise caught only by the handshake — after connecting.
 
 The download shells out to `curl` rather than using an HTTP client. ADR-0008's
-manifest rule forbids the shell owning one, and core's `ProviderHttp` port is
-GET-to-`String` and cannot carry a binary. This is ADR-0005's shape borrowed for
+manifest rule forbids the shell owning one, and core's `ProviderHttp` port GETs
+and form-POSTs to `String`, so it cannot carry a binary. This is ADR-0005's shape borrowed for
 its shape only; ADR-0005's reasoning is about credentials, and a public asset
 download has no credential story.
 

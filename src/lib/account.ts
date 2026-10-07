@@ -1,3 +1,5 @@
+import { useAccountStatus } from "./queries";
+
 export function useSignedIn(): boolean {
-  return false;
+  return useAccountStatus().data?.state === "signedIn";
 }

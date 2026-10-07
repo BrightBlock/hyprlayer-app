@@ -13,7 +13,12 @@ use tokio::task::JoinHandle;
 use crate::transport::{encode_control, Control};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
-pub const TARGETED_EVENTS: [&str; 3] = ["SessionRevised", "SessionReset", "SessionViewers"];
+pub const TARGETED_EVENTS: [&str; 4] = [
+    "SessionRevised",
+    "SessionReset",
+    "SessionViewers",
+    "AccountChanged",
+];
 /// Reported by `announce_client` when this server targets them.
 pub const TRANSCRIPT_SYNC: &str = "transcript_sync";
 
@@ -32,13 +37,28 @@ struct Outbound {
 }
 
 impl Outbound {
-    fn receives(&self, kind: &str, session_id: &str) -> bool {
-        self.watching.contains(session_id)
-            && self
-                .announced
+    fn receives(&self, audience: &Audience) -> bool {
+        let announced = |kind: &str| {
+            self.announced
                 .as_ref()
                 .is_some_and(|a| a.capabilities.contains(kind))
+        };
+        match audience {
+            Audience::Everyone => true,
+            Audience::Watchers(kind, session_id) => {
+                self.watching.contains(session_id) && announced(kind)
+            }
+            Audience::Announced(kind) => announced(kind),
+        }
     }
+}
+
+enum Audience {
+    Everyone,
+    /// Announced connections watching this session.
+    Watchers(&'static str, String),
+    /// Announced connections, whatever they watch.
+    Announced(&'static str),
 }
 
 /// The outbound queues of every connected client, keyed by connection id.
@@ -135,10 +155,10 @@ impl Clients {
 
     /// Non-blocking on purpose: a client that has stopped draining loses the
     /// event, the same outcome a lagged broadcast subscriber had in-process.
-    /// A dropped targeted event is recovered by the client's next `watch_sessions`.
+    /// A dropped session event is recovered by the client's next `watch_sessions`.
     pub fn send_event(&self, event: RuntimeEvent) {
         let kind = event_kind(&event);
-        let target = audience(&event).map(|(kind, session_id)| (kind, session_id.to_string()));
+        let audience = audience(&event);
         let bytes = match encode_control(&Control::Event { event }) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -148,10 +168,8 @@ impl Clients {
         };
         let mut clients = self.lock();
         clients.retain(|conn, outbound| {
-            if let Some((kind, session_id)) = &target {
-                if !outbound.receives(kind, session_id) {
-                    return true;
-                }
+            if !outbound.receives(&audience) {
+                return true;
             }
             match outbound.sender.try_send(bytes.clone()) {
                 Ok(()) => {
@@ -183,13 +201,19 @@ impl Clients {
     }
 }
 
-/// The kind and session of a targeted event; `None` goes to everyone.
-fn audience(event: &RuntimeEvent) -> Option<(&'static str, &str)> {
+fn audience(event: &RuntimeEvent) -> Audience {
     match event {
-        RuntimeEvent::SessionRevised { session_id, .. } => Some(("SessionRevised", session_id)),
-        RuntimeEvent::SessionReset { session_id, .. } => Some(("SessionReset", session_id)),
-        RuntimeEvent::SessionViewers { session_id, .. } => Some(("SessionViewers", session_id)),
-        _ => None,
+        RuntimeEvent::SessionRevised { session_id, .. } => {
+            Audience::Watchers("SessionRevised", session_id.clone())
+        }
+        RuntimeEvent::SessionReset { session_id, .. } => {
+            Audience::Watchers("SessionReset", session_id.clone())
+        }
+        RuntimeEvent::SessionViewers { session_id, .. } => {
+            Audience::Watchers("SessionViewers", session_id.clone())
+        }
+        RuntimeEvent::AccountChanged => Audience::Announced("AccountChanged"),
+        _ => Audience::Everyone,
     }
 }
 
@@ -230,5 +254,6 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::SessionViewers { .. } => "SessionViewers",
         E::ScriptRunChanged { .. } => "ScriptRunChanged",
         E::ProjectCreateProgress { .. } => "ProjectCreateProgress",
+        E::AccountChanged => "AccountChanged",
     }
 }

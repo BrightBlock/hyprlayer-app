@@ -13,7 +13,9 @@ of the daemon/`Host`/remote-terminal bullet under "What we're not doing" is supe
 by ADR-0009 — the one runtime moves into a `hyprlayer-server` process; the other two
 thirds stand) · amended 2026-09-18 (the macOS Keychain carve-out and
 `commands/models.rs` are deleted; nothing in the workspace reads provider credentials) ·
-amended 2026-09-19 (the `commands/harnesses.rs` OpenCode config divergence is retired)
+amended 2026-09-19 (the `commands/harnesses.rs` OpenCode config divergence is retired) ·
+amended 2026-10-06 (the Cloud sign-in loopback is a shell carve-out; `ProviderHttp`
+form-POSTs too)
 
 ## Decision
 
@@ -272,6 +274,9 @@ architecture — not a temporary gap the runtime will eventually absorb:
   watcher.
 - Omarchy theme polling and the `OmarchyThemeChanged` event; core's `omarchy.rs`
   helpers take their paths as explicit parameters.
+- The Cloud sign-in loopback and the browser open it waits on (ADR-0011): core's
+  `account::loopback`, run by the shell, because the browser's `localhost` is the
+  desktop's. *(Added 2026-10-06.)*
 
 All other HTTP calls move to core with their owning service. The desktop `reqwest`
 dependency remains only until its final command-layer caller moves, then is
@@ -317,6 +322,12 @@ an install step. Every spawn goes through `supervisor::hide_console`, which sets
 console window, several times per connect, since provisioning probes, uploads and
 installs. The shell's `ssh` spawns were missing that flag too and gained it in the
 same change; core's spawns have always set it.)*
+
+*(Amended 2026-10-06 — `ProviderHttp` now form-POSTs as well, still to `String`, for
+ADR-0011's token exchange; it still cannot carry a binary, so the `curl` exception
+stands. The manifest rule still holds with the shell running core's sign-in loopback: a
+listener that answers the browser's redirect is not an HTTP client, and every request to
+Cognito or the Cloud API is the server's, through `ProviderHttp`.)*
 
 **Core.** No `tauri::` or `tauri_specta::` imports in `hyprlayer-core` or
 `hyprlayer-models` — move the Tauri type into `src-tauri` and convert at the

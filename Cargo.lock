@@ -2042,6 +2042,7 @@ dependencies = [
  "dirs 5.0.1",
  "dunce",
  "fs4",
+ "getrandom 0.4.2",
  "git2",
  "globset",
  "hyprlayer-models",
@@ -2082,8 +2083,10 @@ dependencies = [
  "hyprlayer-core",
  "hyprlayer-proto",
  "hyprlayer-server",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
 ]

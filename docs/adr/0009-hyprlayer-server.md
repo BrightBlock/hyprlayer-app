@@ -7,7 +7,8 @@ files; a spawned server's stderr goes to a file, not a pipe) · amended 2026-09-
 (the server is versioned and released apart from the app; the app sets a minimum) ·
 amended 2026-09-26 (the environment overlay merges per key and validates the agent
 socket) · amended 2026-09-30 (connections announce a display-only client identity;
-transcript-sync events are targeted)
+transcript-sync events are targeted) · amended 2026-10-06 (the Cloud account belongs to the
+server profile; `AccountChanged` is targeted by capability alone)
 
 ## Decision
 
@@ -99,6 +100,10 @@ it; the server hands it to core as data. "Multi-client" means your laptop and yo
 desktop attached to your server; a second user means a second server on a second
 profile.
 
+*(Amended 2026-10-06 — the Hyprlayer Cloud account (ADR-0011) belongs to the server
+profile too: one `account.json` per server host, so every attached client sees one
+signed-in state, and signing in on one host signs in none of the others.)*
+
 Three consequences follow, accepted rather than designed around:
 
 - **`set_foreground` is last-writer-wins.** It is a single `AtomicBool`
@@ -113,6 +118,8 @@ Three consequences follow, accepted rather than designed around:
 - **Some events are targeted.** `SessionRevised`, `SessionReset` and `SessionViewers`
   reach only connections that announced them and are watching that session, because a
   released desktop tears its connection down on an event kind it cannot decode.
+  *(Amended 2026-10-06 — `AccountChanged` is targeted by capability alone: it reaches
+  every connection that announced it, watching a session or not.)*
 
 ### The environment overlay: the exception to freeze-at-construction
 
@@ -146,7 +153,9 @@ relaunch, destroying live sessions to fix a variable. Surviving a client relaunc
 the whole point of the server (Phase 4); trading it away here would be the larger bug.
 
 What makes the asymmetry tolerable is what the overlay actually carries:
-`SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, `LC_*`. No secrets, no tokens. A stale
+`SSH_AUTH_SOCK`, `DISPLAY`, `TERM`, `LANG`, `LC_*`. No secrets, no tokens *(amended
+2026-10-06: still true; the Cloud tokens live only in the server's `account.json`,
+ADR-0011)*. A stale
 `SSH_AUTH_SOCK` fails the same way an absent one does — `ssh` cannot reach either
 agent, so a non-interactive push fails rather than succeeding wrongly — which makes
 first-attach-wins strictly better than the no-overlay behaviour it replaced, never
@@ -307,6 +316,8 @@ frontend leak figure and is not comparable.
   is display-only.
 - No network listener, TLS, bearer tokens, or certificate management. Filesystem
   permissions on the socket are the authorization; SSH is the only remote path.
+  *(Amended 2026-10-06 — still no listener. Since ADR-0011 the server sends a bearer
+  token to the Cloud API as a client; nothing reaches the server with one.)*
 - No browser or mobile client — there is no listener one could reach, and adding one
   means adding authentication, which this decision deliberately does not design.
 - No change to `TerminalEvent` or `SessionEvent`. `src/lib/bindings.ts` gains two

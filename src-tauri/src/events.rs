@@ -12,6 +12,9 @@ pub struct OmarchyThemeChanged;
 pub struct BinariesChanged;
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct AccountChanged;
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
 pub struct ThoughtsIndexUpdated {
     pub kind: String,

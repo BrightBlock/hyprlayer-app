@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
-import { formatCompactCount, initials } from "@/lib/format";
-import { useBootstrap } from "@/lib/queries";
+import { formatCompactCount } from "@/lib/format";
 import type { RepoSummary } from "./statusBarState";
 
 export const BAR_BUTTON = cx(
@@ -46,23 +45,5 @@ export function RepoStatus({ repo, compact }: { repo: RepoSummary; compact: bool
         </span>
       )}
     </div>
-  );
-}
-
-export function Avatar() {
-  const config = useBootstrap().data?.config;
-  const handle = config?.state === "ready" ? config.user : null;
-  const letters = initials(handle);
-  if (!handle || !letters) return null;
-  // TODO(statusbar): initials come from the thoughts handle until accounts exist (src/lib/account.ts is a stub).
-  return (
-    <span
-      role="img"
-      aria-label={handle}
-      title={handle}
-      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-ui-sm font-semibold leading-none text-accent-ink"
-    >
-      {letters}
-    </span>
   );
 }

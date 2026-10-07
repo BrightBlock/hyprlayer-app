@@ -16,8 +16,17 @@ export function HyprlayerLogo({ height = 28 }: { height?: number }) {
   );
 }
 
-export function HyprlayerMark({ size = 28, animated = false }: { size?: number; animated?: boolean }) {
+export function HyprlayerMark({
+  size = 28,
+  animated = false,
+  tone = "accent",
+}: {
+  size?: number;
+  animated?: boolean;
+  tone?: "accent" | "muted";
+}) {
   const cls = animated ? "hl-layer" : undefined;
+  const fill = tone === "muted" ? "var(--color-ink-dim)" : "var(--color-accent)";
   return (
     <svg
       aria-hidden="true"
@@ -28,21 +37,21 @@ export function HyprlayerMark({ size = 28, animated = false }: { size?: number; 
     >
       <path
         d="M16 26 4 20l12-6 12 6-12 6Z"
-        fill="var(--color-accent)"
+        fill={fill}
         className={cls}
         opacity={animated ? undefined : 0.35}
         style={animated ? ({ "--hl-base": 0.35 } as CSSProperties) : undefined}
       />
       <path
         d="M16 22 4 16l12-6 12 6-12 6Z"
-        fill="var(--color-accent)"
+        fill={fill}
         className={cls}
         opacity={animated ? undefined : 0.6}
         style={animated ? ({ "--hl-base": 0.6 } as CSSProperties) : undefined}
       />
       <path
         d="M16 18 4 12l12-6 12 6-12 6Z"
-        fill="var(--color-accent)"
+        fill={fill}
         className={cls}
         style={animated ? ({ "--hl-base": 1 } as CSSProperties) : undefined}
       />

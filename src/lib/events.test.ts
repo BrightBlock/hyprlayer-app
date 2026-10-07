@@ -27,6 +27,7 @@ vi.mock("./bindings", () => ({
     thoughtsIndexUpdated: stub("thoughtsIndexUpdated"),
     docStateChanged: stub("docStateChanged"),
     serverDisconnected: stub("serverDisconnected"),
+    accountChanged: stub("accountChanged"),
   },
 }));
 
@@ -71,5 +72,19 @@ describe("serverDisconnected", () => {
 
     const keys = invalidate.mock.calls.map(([arg]) => (arg?.queryKey as string[])?.[0]);
     expect(keys).toContain("connection-status");
+  });
+});
+
+describe("accountChanged", () => {
+  beforeEach(() => {
+    listeners.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("re-reads the account", () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    attachEventListeners();
+    listeners.get("accountChanged")?.({});
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["account"] });
   });
 });

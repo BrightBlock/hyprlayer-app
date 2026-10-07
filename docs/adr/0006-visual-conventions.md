@@ -449,7 +449,7 @@ exception like those under "Typography".
 
 **Sizes recorded as exceptions.**
 - The status bar is 34px (`STATUS_BAR_HEIGHT`, `src/lib/layout.ts`).
-- Its gear and the Scripts dock toggle are 26×24; the toggle trails the session controls 4px after Effort, with an `sm` icon; the permission pill 24px; a meter's track 34×4; the avatar 20px.
+- Its gear and the Scripts dock toggle are 26×24; the toggle trails the session controls 4px after Effort, with an `sm` icon; the permission pill 24px; a meter's track 34×4; the account button 26×26, its initials or mark 20px.
 - The Settings nav's rows are 34px, which is not a third `rowClass` tier.
 - Toast sits `STATUS_BAR_HEIGHT + 24` above the window's bottom edge.
 - The header's Archive button is 26×26 beside 28×28 neighbours. Its Archived
