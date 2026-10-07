@@ -1,6 +1,20 @@
 {
   "versions": [
     {
+      "version": "0.8.8",
+      "date": "2026-10-07",
+      "summary": "Sign in with GitHub, switch permission modes mid-turn, and navigate library lists by keyboard.",
+      "notes": [
+        "This version needs hyprlayer-server 0.8.9. A host running an older server is updated once it has been idle for two minutes; turn off \"Update server when idle\" in Settings to update it yourself.",
+        "Sign in to Hyprlayer Cloud with GitHub from the account button in the top bar.",
+        "Changing a Claude session's permission mode no longer restarts it or interrupts the running turn.",
+        "Cmd/Ctrl + Enter stops the running turn and sends your message right away, with a hint beside the stop button. The \"Request interrupted by user\" notice is hidden.",
+        "Library lists respond to Up, Down, PageUp, PageDown, Home, and End, and the detail pane follows the selection without flashing.",
+        "Library mailbox counts now match the list each one opens when filters are applied.",
+        "Thoughts sync is hidden for projects without thoughts set up, and sync failures show in a hover card."
+      ]
+    },
+    {
       "version": "0.8.7",
       "summary": "Install and manage skills, open existing worktrees, and update idle servers automatically.",
       "notes": [
