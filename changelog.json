@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.8.10",
+      "date": "2026-10-07",
+      "summary": "Sign in to ssh hosts that need a password, passphrase or new host key.",
+      "notes": [
+        "Remote hosts that need an ssh password, key passphrase, one-time code, or trust in a new host key now ask in an in-app dialog instead of failing or hanging. Nothing is stored.",
+        "You're asked once per host, not on every connect or install step.",
+        "A changed host key is never offered for trust; the error shows the ssh-keygen -R command to run instead.",
+        "Cancelling a sign-in stops the reconnect attempts, and a failed host's button reads \"Sign in\" when a prompt can fix it.",
+        "On Windows, ssh sign-in is unchanged."
+      ]
+    },
+    {
       "version": "0.8.9",
       "date": "2026-10-07",
       "summary": "Fixes adding a Mac host with no server installed, and collapsed text areas.",
