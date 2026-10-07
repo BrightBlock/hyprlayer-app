@@ -201,7 +201,8 @@ export function TextArea({
 
   useLayoutEffect(() => {
     const el = inner.current;
-    if (!el) return;
+    // A portal into a not-yet-attached container (CodeMirror widgets) measures as zero height.
+    if (!el?.isConnected) return;
     const cs = getComputedStyle(el);
     const px = (v: string) => parseFloat(v) || 0;
     const border = px(cs.borderTopWidth) + px(cs.borderBottomWidth);
