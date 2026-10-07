@@ -209,10 +209,10 @@ export function useDocPages(query: ThoughtQuery) {
   });
 }
 
-export function useDocCounts(project: string | undefined) {
+export function useDocCounts(project: string | undefined, filters: ThoughtQuery | null = null) {
   return useQuery({
-    queryKey: ["doc-counts", project ?? null],
-    queryFn: () => unwrap(commands.countDocs(project ?? null)),
+    queryKey: ["doc-counts", project ?? null, filters],
+    queryFn: () => unwrap(commands.countDocs(project ?? null, filters ?? {})),
   });
 }
 

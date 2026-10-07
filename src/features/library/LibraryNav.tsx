@@ -5,6 +5,7 @@ import { RepoAvatar } from "@/components/RepoAvatar";
 import { Button, cx, rowClass, RowSpine } from "@/components/ui";
 import type { Project } from "@/lib/bindings";
 import { useDocCounts } from "@/lib/queries";
+import { countFiltersFromSearch } from "./DocFilters";
 import { asLibraryBox, boxCount, LIBRARY_BOX_KEYS, LIBRARY_BOXES, type LibraryBox } from "./libraryBoxes";
 import { useLibraryScope } from "./libraryScope";
 import type { LibrarySearch } from "./librarySearch";
@@ -23,7 +24,7 @@ export function LibraryNav({
   projects: Project[];
   onNewDoc: () => void;
 }) {
-  const counts = useDocCounts(search.project).data;
+  const counts = useDocCounts(search.project, countFiltersFromSearch(search)).data;
   const pinned = useLibraryScope((s) => s.pinnedProjects);
   const togglePinned = useLibraryScope((s) => s.togglePinnedProject);
   const box = asLibraryBox(search.box);
@@ -90,7 +91,7 @@ export function LibraryNav({
         <span className="min-w-0 flex-1 truncate text-left text-ui font-semibold text-ink">
           {current?.label ?? "All projects"}
         </span>
-        {counts && <span className="shrink-0 text-meta text-ink-4">{counts.projects.length}</span>}
+        {counts && !current && <span className="shrink-0 text-meta text-ink-4">{counts.projects.length}</span>}
         <Icon name="chevronDown" size="xs" className="text-ink-4" />
       </button>
 

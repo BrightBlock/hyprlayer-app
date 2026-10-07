@@ -331,7 +331,7 @@ registered project directory.
 
 ### `LibraryService`
 
-`resolve_path(&str)` (sync), `query(ThoughtQuery)`, `counts(Option<String>)`,
+`resolve_path(&str)` (sync), `query(ThoughtQuery)`, `counts(Option<String>, ThoughtQuery)`,
 `get(&str)`, `save(&str, String, base_mtime_ms: f64)`,
 `patch_frontmatter(&str, FmPatch, f64)`, `save_parts(&str, String, FrontmatterEdit, f64)`,
 `resolve_related(&str, Vec<String>)`, `create(CreateDocumentRequest)`,

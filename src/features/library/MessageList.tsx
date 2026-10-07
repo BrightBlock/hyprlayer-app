@@ -6,10 +6,10 @@ import { EmptyState, ErrorNote, IconButton, Popover, Spinner, TextInput } from "
 import type { DocMeta, Project } from "@/lib/bindings";
 import { plural } from "@/lib/format";
 import { useDocCounts, useDocPages } from "@/lib/queries";
-import { docQueryFromSearch } from "./DocFilters";
+import { countFiltersFromSearch, docQueryFromSearch } from "./DocFilters";
 import { asLibraryBox, LIBRARY_BOXES } from "./libraryBoxes";
-import { libraryFiltersActive, type LibrarySearch, type LibrarySort } from "./librarySearch";
-import { ListFilterPopover, listFiltersActive } from "./ListFilterPopover";
+import { libraryFiltersActive, listFiltersActive, type LibrarySearch, type LibrarySort } from "./librarySearch";
+import { ListFilterPopover } from "./ListFilterPopover";
 import { dateGroup, mailTime, parseDocDate, type DateGroup } from "./mailDates";
 import { MailRow, MailRowMenu, type MailRowMenuTarget } from "./MailRow";
 
@@ -40,7 +40,7 @@ export function MessageList({
   // By content: `search` also changes on every row click.
   const queryKey = JSON.stringify(query);
   const docs = useDocPages(query);
-  const authors = useDocCounts(search.project).data?.authors ?? [];
+  const authors = useDocCounts(search.project, countFiltersFromSearch(search)).data?.authors ?? [];
 
   const scrollerRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -107,8 +107,16 @@ export function MessageList({
           aria-expanded={filterOpen}
           aria-label="Filter"
           title="Filter"
+          className="relative"
         >
           <Icon name="filter" size="sm" />
+          {listFiltersActive(search) && (
+            <span
+              role="img"
+              aria-label="Filters applied"
+              className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent"
+            />
+          )}
         </IconButton>
         <IconButton
           ref={sortRef}

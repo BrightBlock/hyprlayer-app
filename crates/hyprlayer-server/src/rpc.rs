@@ -162,7 +162,7 @@ hyprlayer_proto::commands! {
     ProjectSourceOf: project_source_of(path: String) -> ProjectSource;
 
     QueryDocs: query_docs(query: ThoughtQuery) -> QueryResult;
-    CountDocs: count_docs(project: Option<String>) -> DocCounts;
+    CountDocs: count_docs(project: Option<String>, filters: Option<ThoughtQuery>) -> DocCounts;
     MarkDocRead: mark_doc_read(id: String) -> ();
     MarkDocUnread: mark_doc_unread(id: String) -> ();
     GetDoc: get_doc(id: String) -> Document;

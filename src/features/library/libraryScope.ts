@@ -18,6 +18,23 @@ type LibraryScopeStore = {
   togglePinnedProject: (name: string) => void;
 };
 
+// v1 searches can hold the retired sidebar's type tab and status pick; the nav's boxes own those now.
+function dropRetiredFilters(search: LibrarySearch): LibrarySearch {
+  return { ...search, type: undefined, status: undefined };
+}
+
+function migrateLibraryScope(persisted: unknown, version: number): LibraryScopeStore {
+  const state = persisted as LibraryScopeStore;
+  if (version >= 2) return state;
+  return {
+    ...state,
+    lastSearch: state.lastSearch ? dropRetiredFilters(state.lastSearch) : null,
+    lastSearchByProject: Object.fromEntries(
+      Object.entries(state.lastSearchByProject ?? {}).map(([project, search]) => [project, dropRetiredFilters(search)]),
+    ),
+  };
+}
+
 export const useLibraryScope = create<LibraryScopeStore>()(
   persist(
     (set) => ({
@@ -38,6 +55,6 @@ export const useLibraryScope = create<LibraryScopeStore>()(
             : [...s.pinnedProjects, name],
         })),
     }),
-    { name: scopedKey("hyprlayer:library-scope"), version: 1 },
+    { name: scopedKey("hyprlayer:library-scope"), version: 2, migrate: migrateLibraryScope },
   ),
 );

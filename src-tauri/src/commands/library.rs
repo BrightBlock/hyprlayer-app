@@ -146,10 +146,11 @@ pub async fn query_docs(state: State<'_, AppState>, query: ThoughtQuery) -> CmdR
 pub async fn count_docs(
     state: State<'_, AppState>,
     project: Option<String>,
+    filters: ThoughtQuery,
 ) -> CmdResult<DocCounts> {
     state
         .client()?
-        .count_docs(project)
+        .count_docs(project, Some(filters))
         .await
         .map_err(AppError::from)
 }

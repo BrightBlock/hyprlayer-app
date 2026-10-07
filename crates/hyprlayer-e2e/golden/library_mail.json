@@ -239,6 +239,175 @@
       "guards": [
         {
           "evidence": {
+            "authors": [
+              {
+                "count": 2,
+                "name": "e2e"
+              },
+              {
+                "count": 1,
+                "name": "jt"
+              }
+            ],
+            "projects": [
+              {
+                "count": 6,
+                "name": "demo"
+              },
+              {
+                "count": 4,
+                "name": "other"
+              }
+            ],
+            "statuses": [
+              {
+                "count": 1,
+                "status": "draft"
+              },
+              {
+                "count": 0,
+                "status": "active"
+              },
+              {
+                "count": 1,
+                "status": "implemented"
+              },
+              {
+                "count": 0,
+                "status": "superseded"
+              },
+              {
+                "count": 0,
+                "status": "archived"
+              }
+            ],
+            "total": 2,
+            "types": [
+              {
+                "count": 2,
+                "docType": "plan"
+              },
+              {
+                "count": 1,
+                "docType": "research"
+              },
+              {
+                "count": 1,
+                "docType": "handoff"
+              },
+              {
+                "count": 4,
+                "docType": "note"
+              },
+              {
+                "count": 1,
+                "docType": "pr"
+              }
+            ],
+            "unread": 2
+          },
+          "guard": "a type filter narrows every box but the type boxes, which replace it; projects and authors ignore it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "all": {
+              "count": 2,
+              "listed": 2
+            },
+            "archived": {
+              "count": 0,
+              "listed": 0
+            },
+            "drafts": {
+              "count": 1,
+              "listed": 1
+            },
+            "handoffs": {
+              "count": 1,
+              "listed": 1
+            },
+            "implemented": {
+              "count": 1,
+              "listed": 1
+            },
+            "new": {
+              "count": 2,
+              "listed": 2
+            },
+            "notes": {
+              "count": 4,
+              "listed": 4
+            },
+            "plans": {
+              "count": 2,
+              "listed": 2
+            },
+            "prs": {
+              "count": 1,
+              "listed": 1
+            },
+            "research": {
+              "count": 1,
+              "listed": 1
+            }
+          },
+          "guard": "type filter, unscoped: every box's count is its list's total",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "all": {
+              "count": 2,
+              "listed": 2
+            },
+            "archived": {
+              "count": 0,
+              "listed": 0
+            },
+            "drafts": {
+              "count": 2,
+              "listed": 2
+            },
+            "handoffs": {
+              "count": 1,
+              "listed": 1
+            },
+            "implemented": {
+              "count": 0,
+              "listed": 0
+            },
+            "new": {
+              "count": 2,
+              "listed": 2
+            },
+            "notes": {
+              "count": 0,
+              "listed": 0
+            },
+            "plans": {
+              "count": 0,
+              "listed": 0
+            },
+            "prs": {
+              "count": 0,
+              "listed": 0
+            },
+            "research": {
+              "count": 1,
+              "listed": 1
+            }
+          },
+          "guard": "status filter, scoped to demo: every box's count is its list's total",
+          "ok": true
+        }
+      ],
+      "step": "under a list filter, each box counts the list it opens"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "old": false
           },
           "guard": "old.md, modified before the read baseline, is not unread",

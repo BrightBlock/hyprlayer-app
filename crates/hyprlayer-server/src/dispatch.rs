@@ -533,8 +533,16 @@ impl Dispatch for Server {
         self.runtime.library().query(query).await.wire()
     }
 
-    async fn count_docs(&self, project: Option<String>) -> Result<DocCounts, WireError> {
-        self.runtime.library().counts(project).await.wire()
+    async fn count_docs(
+        &self,
+        project: Option<String>,
+        filters: Option<ThoughtQuery>,
+    ) -> Result<DocCounts, WireError> {
+        self.runtime
+            .library()
+            .counts(project, filters.unwrap_or_default())
+            .await
+            .wire()
     }
 
     async fn mark_doc_read(&self, id: String) -> Result<(), WireError> {

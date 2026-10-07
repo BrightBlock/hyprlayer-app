@@ -19,6 +19,9 @@ export type LibrarySearch = {
   from?: string;
 };
 
+export const listFiltersActive = (s: LibrarySearch): boolean =>
+  Boolean(s.type || s.status || s.scope || s.author || s.tag);
+
 // `project` scopes the library; it is not a filter. A box is, so an empty New box isn't an empty library.
 export const libraryFiltersActive = (s: LibrarySearch): boolean =>
   Boolean(s.type || s.status || s.scope || s.author || s.tag || (s.box && s.box !== "all")) ||

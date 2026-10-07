@@ -4,10 +4,7 @@ import { Button, DropdownSelect, Field, Popover, TextInput } from "@/components/
 import type { NameCount } from "@/lib/bindings";
 import { DOC_SCOPE_LABEL, DOC_SCOPES, DOC_STATUS_LABEL, DOC_STATUSES, DOC_TYPE_META, DOC_TYPES } from "@/lib/domain/docs";
 import { asLibraryBox, boxQuery } from "./libraryBoxes";
-import type { LibrarySearch } from "./librarySearch";
-
-export const listFiltersActive = (s: LibrarySearch): boolean =>
-  Boolean(s.type || s.status || s.scope || s.author || s.tag);
+import { listFiltersActive, type LibrarySearch } from "./librarySearch";
 
 const CLEARED = { type: undefined, status: undefined, scope: undefined, author: undefined, tag: undefined };
 

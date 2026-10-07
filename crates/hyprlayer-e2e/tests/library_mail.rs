@@ -367,14 +367,84 @@ fn seed_codex_history(
 }
 
 async fn counts(j: &mut Journey, client: &RpcClient, project: Option<&str>) -> Value {
+    filtered_counts(j, client, project, None).await
+}
+
+async fn filtered_counts(
+    j: &mut Journey,
+    client: &RpcClient,
+    project: Option<&str>,
+    filters: Option<ThoughtQuery>,
+) -> Value {
     j.call(
         client,
         Request::CountDocs {
             project: project.map(str::to_string),
+            filters,
         },
     )
     .await
     .expect("count_docs")
+}
+
+/// Each mailbox as the frontend's `boxQuery` builds it: (box, type, status, unread only).
+/// A box replaces the list filter on its own dimension.
+const BOXES: [(&str, Option<&str>, Option<&str>, bool); 10] = [
+    ("all", None, None, false),
+    ("new", None, None, true),
+    ("drafts", None, Some("draft"), false),
+    ("plans", Some("plan"), None, false),
+    ("research", Some("research"), None, false),
+    ("handoffs", Some("handoff"), None, false),
+    ("notes", Some("note"), None, false),
+    ("prs", Some("pr"), None, false),
+    ("implemented", None, Some("implemented"), false),
+    ("archived", None, Some("archived"), false),
+];
+
+/// Every box's count beside the total of the list it opens, off the transcript.
+async fn box_agreement(
+    client: &RpcClient,
+    project: Option<&str>,
+    filters: &ThoughtQuery,
+) -> (bool, Value) {
+    let counted = client
+        .count_docs(project.map(str::to_string), Some(filters.clone()))
+        .await
+        .expect("count_docs");
+    let mut agree = true;
+    let mut evidence = serde_json::Map::new();
+    for (name, doc_type, status, unread_only) in BOXES {
+        let mut list = ThoughtQuery {
+            projects: project.map(str::to_string).into_iter().collect(),
+            unread_only,
+            ..filters.clone()
+        };
+        if let Some(t) = doc_type {
+            list.types = vec![t.into()];
+        }
+        if let Some(s) = status {
+            list.statuses = vec![s.into()];
+        }
+        let listed = client.query_docs(list).await.expect("query_docs").total;
+        let count = match (doc_type, status) {
+            (Some(t), _) => counted
+                .types
+                .iter()
+                .find(|c| c.doc_type.as_str() == t)
+                .map(|c| c.count),
+            (_, Some(s)) => counted
+                .statuses
+                .iter()
+                .find(|c| c.status.as_str() == s)
+                .map(|c| c.count),
+            _ if unread_only => Some(counted.unread),
+            _ => Some(counted.total),
+        };
+        agree &= count == Some(listed);
+        evidence.insert(name.into(), json!({ "count": count, "listed": listed }));
+    }
+    (agree, Value::Object(evidence))
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -655,6 +725,51 @@ async fn library_mail() {
         scoped == expected_scoped,
         scoped.clone(),
     );
+
+    j.step("under a list filter, each box counts the list it opens");
+    let plans_only = ThoughtQuery {
+        types: vec!["plan".into()],
+        ..Default::default()
+    };
+    let filtered = filtered_counts(&mut j, &client, None, Some(plans_only.clone())).await;
+    let expected_filtered = json!({
+        "total": 2,
+        "types": expected_unscoped["types"],
+        "statuses": [
+            { "status": "draft", "count": 1 },
+            { "status": "active", "count": 0 },
+            { "status": "implemented", "count": 1 },
+            { "status": "superseded", "count": 0 },
+            { "status": "archived", "count": 0 },
+        ],
+        "projects": both_projects,
+        "authors": expected_unscoped["authors"],
+        "unread": 2,
+    });
+    j.guard(
+        "a type filter narrows every box but the type boxes, which replace it; projects and authors ignore it",
+        filtered == expected_filtered,
+        filtered.clone(),
+    );
+    let active_only = ThoughtQuery {
+        statuses: vec!["active".into()],
+        ..Default::default()
+    };
+    for (project, filters, guard) in [
+        (
+            None,
+            &plans_only,
+            "type filter, unscoped: every box's count is its list's total",
+        ),
+        (
+            Some(demo_mapped.as_str()),
+            &active_only,
+            "status filter, scoped to demo: every box's count is its list's total",
+        ),
+    ] {
+        let (agree, evidence) = box_agreement(&client, project, filters).await;
+        j.guard(guard, agree, evidence);
+    }
 
     j.step("read state starts from the baseline");
     let old_path = demo_shared.join("notes/old.md");

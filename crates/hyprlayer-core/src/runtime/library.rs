@@ -229,13 +229,19 @@ impl LibraryService<'_> {
         .await
     }
 
-    pub async fn counts(&self, project: Option<String>) -> Result<DocCounts> {
+    pub async fn counts(
+        &self,
+        project: Option<String>,
+        filters: ThoughtQuery,
+    ) -> Result<DocCounts> {
         ensure_running(self.runtime)?;
         let index = self.runtime.index.clone();
         let db = self.runtime.db.clone();
         blocking(move || {
             let reads = db.doc_read_state()?;
-            Ok(index.counts(project.as_deref(), |meta, hash| reads.is_unread(meta, hash)))
+            Ok(index.counts(project.as_deref(), &filters, |meta, hash| {
+                reads.is_unread(meta, hash)
+            }))
         })
         .await
     }

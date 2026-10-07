@@ -45,16 +45,30 @@ pub struct NameCount {
 }
 
 impl ThoughtsIndex {
-    /// Mailbox labels: scoped to `project` and no other filter, since each
-    /// mailbox is itself a filter. Unknown types and statuses are not counted.
+    /// Each mailbox counts the list it opens: `filters` apply except on the box's own
+    /// dimension, and text never does (no body reads). Projects and authors ignore
+    /// `filters` so their pickers keep every option. Unknown types and statuses are not counted.
     pub fn counts(
         &self,
         project: Option<&str>,
+        filters: &ThoughtQuery,
         is_unread: impl Fn(&DocMeta, u64) -> bool,
     ) -> DocCounts {
         let scope = ThoughtQuery {
             projects: project.map(str::to_string).into_iter().collect(),
             ..Default::default()
+        };
+        let filtered = ThoughtQuery {
+            projects: scope.projects.clone(),
+            ..filters.clone()
+        };
+        let any_type = ThoughtQuery {
+            types: Vec::new(),
+            ..filtered.clone()
+        };
+        let any_status = ThoughtQuery {
+            statuses: Vec::new(),
+            ..filtered.clone()
         };
         let mut total = 0u32;
         let mut unread = 0u32;
@@ -72,16 +86,6 @@ impl ThoughtsIndex {
             if !search::passes_filters(&scope, meta) {
                 continue;
             }
-            total += 1;
-            if is_unread(meta, record.content_hash) {
-                unread += 1;
-            }
-            if let Some(t) = meta.fm.doc_type.as_deref().and_then(DocType::try_parse) {
-                *types.entry(t).or_default() += 1;
-            }
-            if let Some(s) = meta.fm.status.as_deref().and_then(DocStatus::try_parse) {
-                *statuses.entry(s).or_default() += 1;
-            }
             if let Some(author) = meta
                 .fm
                 .author
@@ -90,6 +94,23 @@ impl ThoughtsIndex {
                 .filter(|a| !a.is_empty())
             {
                 *authors.entry(author.to_string()).or_default() += 1;
+            }
+            if search::passes_filters(&any_type, meta) {
+                if let Some(t) = meta.fm.doc_type.as_deref().and_then(DocType::try_parse) {
+                    *types.entry(t).or_default() += 1;
+                }
+            }
+            if search::passes_filters(&any_status, meta) {
+                if let Some(s) = meta.fm.status.as_deref().and_then(DocStatus::try_parse) {
+                    *statuses.entry(s).or_default() += 1;
+                }
+            }
+            if !search::passes_filters(&filtered, meta) {
+                continue;
+            }
+            total += 1;
+            if is_unread(meta, record.content_hash) {
+                unread += 1;
             }
         }
         drop(map);
