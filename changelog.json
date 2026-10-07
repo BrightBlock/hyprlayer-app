@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.8.9",
+      "date": "2026-10-07",
+      "summary": "Fixes adding a Mac host with no server installed, and collapsed text areas.",
+      "notes": [
+        "Fixed the host connection test failing on a Mac with no server installed, so a fresh Mac can now be added as a host.",
+        "Fixed a text area collapsing to zero height when it was measured before being attached to the page, as in editor widgets."
+      ]
+    },
+    {
       "version": "0.8.8",
       "date": "2026-10-07",
       "summary": "Sign in with GitHub, switch permission modes mid-turn, and navigate library lists by keyboard.",
