@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 
+import { onListNavKeyDown } from "@/lib/listNav";
 import { cx, PaneSeparator } from "./ui";
 
 // Nav, resizable list, detail. Reads no stores: each feature passes its own layout state.
@@ -44,7 +45,11 @@ export function PaneFrame({
           {nav}
         </aside>
       )}
-      <div className="flex min-h-0 shrink-0 flex-col border-r border-edge" style={{ width }}>
+      <div
+        className="flex min-h-0 shrink-0 flex-col border-r border-edge"
+        style={{ width }}
+        onKeyDown={onListNavKeyDown}
+      >
         {list}
       </div>
       {/* The overlay layout is the narrow one, where the list width is fixed. */}

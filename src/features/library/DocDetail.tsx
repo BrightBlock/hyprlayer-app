@@ -42,11 +42,13 @@ type Anchor = { line: number; offset: number };
 const lineOf = (el: Element) => Number(el.getAttribute("data-line"));
 
 export function DocDetail({ id }: Props) {
-  const doc = useDoc(id);
+  // The previous doc stays up until the next one loads, so the toolbar and rail don't blink.
+  const doc = useDoc(id, true);
   if (doc.isLoading) return <PageSpinner />;
   if (doc.isError) return <PageError error={doc.error} />;
   if (!doc.data) return null;
-  return <DocBody key={id} id={id} doc={doc.data} settled={!doc.isFetching} />;
+  const shown = doc.data.meta.id;
+  return <DocBody key={shown} id={shown} doc={doc.data} settled={!doc.isFetching} />;
 }
 
 type BodyProps = Props & { doc: DocContent; settled: boolean };

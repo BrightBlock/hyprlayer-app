@@ -5,6 +5,7 @@ import { Icon } from "@/components/Icon";
 import { ContextMenu, cx, MenuItem, RowSpine } from "@/components/ui";
 import type { DocMeta } from "@/lib/bindings";
 import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
+import { LIST_ROW } from "@/lib/listNav";
 import { useMarkDocRead, useMarkDocUnread } from "@/lib/queries";
 import { DocAvatar } from "./DocAvatar";
 import { docTypeIcon } from "./docTypeIcon";
@@ -53,6 +54,7 @@ export const MailRow = memo(function MailRow({
   return (
     <button
       type="button"
+      {...LIST_ROW}
       onClick={() => onOpen(doc.id)}
       onContextMenu={(e: MouseEvent) => {
         e.preventDefault();

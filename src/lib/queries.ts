@@ -242,11 +242,12 @@ export function useMarkDocUnread() {
   });
 }
 
-export function useDoc(id: string) {
+export function useDoc(id: string, keepPrevious = false) {
   return useQuery({
     queryKey: ["doc", id],
     queryFn: () => unwrap(commands.getDoc(id)),
     enabled: id.length > 0,
+    placeholderData: keepPrevious && id ? keepPreviousData : undefined,
   });
 }
 
@@ -308,6 +309,7 @@ export function useDocWebUrl(id: string) {
     queryKey: ["doc-web-url", id],
     queryFn: () => unwrap(commands.docWebUrl(id)),
     enabled: id.length > 0,
+    placeholderData: id ? keepPreviousData : undefined,
     staleTime: 5 * 60_000,
   });
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { Project } from "@/lib/bindings";
+import { LIST_ROW } from "@/lib/listNav";
 import {
   SIDE_PANEL_MIN,
   useUiStore,
@@ -316,6 +317,7 @@ export function ListCardRow({
   return (
     <button
       type="button"
+      {...LIST_ROW}
       onClick={onClick}
       onContextMenu={
         onContextMenu

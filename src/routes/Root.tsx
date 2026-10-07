@@ -438,7 +438,7 @@ export function Root() {
             : diffDrawerRoutable;
     if (!routable) setNarrowDrawer(null);
   }, [projectDrawerRoutable, diffDrawerRoutable, onWorkshop, onLibrary, setNarrowDrawer]);
-  const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "");
+  const libDoc = useDoc(onLibrary ? (locationSearch.doc ?? "") : "", true);
   const libDocTitle = libDoc.data ? docTitle(libDoc.data.meta) : undefined;
   const libDocUrl = useDocWebUrl(onLibrary ? (locationSearch.doc ?? "") : "");
   const backProject =
