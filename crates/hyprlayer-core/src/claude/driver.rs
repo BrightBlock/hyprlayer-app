@@ -78,6 +78,8 @@ impl ClaudeDriver {
             .arg("--verbose")
             .arg("--include-partial-messages")
             .args(["--permission-prompt-tool", "stdio"])
+            // Without it, a live switch to bypass is refused with `bypass_not_launched`.
+            .arg("--allow-dangerously-skip-permissions")
             .args([
                 "--permission-mode",
                 permission_mode_flag(config.permission_mode),

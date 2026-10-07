@@ -139,6 +139,7 @@ export const commands = {
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
+	setSessionPermissionMode: (sessionId: string, mode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_permission_mode", { sessionId, mode })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<SessionLogEntryDto[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
 	listSessionTurns: (sessionId: string, cursor: LogCursorDto, limit: number) => typedError<SessionTurnsDto, AppError>(__TAURI_INVOKE("list_session_turns", { sessionId, cursor, limit })),

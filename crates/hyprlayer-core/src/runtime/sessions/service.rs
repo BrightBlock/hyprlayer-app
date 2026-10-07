@@ -258,6 +258,24 @@ impl SessionService<'_> {
         Ok(())
     }
 
+    pub async fn set_permission_mode(
+        &self,
+        session_id: &str,
+        mode: Option<PermissionMode>,
+    ) -> Result<()> {
+        let driver = self.require_live(session_id).await?;
+        let mode = match mode {
+            Some(mode) => mode,
+            None => pipeline::policy_for(self.require_row(session_id).await?.stage).permission_mode,
+        };
+        driver.set_permission_mode(mode)?;
+        self.runtime
+            .session_registry
+            .set_permission_mode(session_id, mode)
+            .await;
+        Ok(())
+    }
+
     pub async fn permission_mode(&self, session_id: &str) -> Option<PermissionMode> {
         self.runtime
             .session_registry

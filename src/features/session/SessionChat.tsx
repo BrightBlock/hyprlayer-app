@@ -11,7 +11,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
+import { Button, ErrorNote, Kbd, MenuItem, Popover, Spinner } from "@/components/ui";
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
@@ -1345,7 +1345,8 @@ export function SessionChat({
   const handlePermissionModeChange = async (key: string) => {
     const opt = permissionModeOption(key);
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
-    if (live && session && opt.flag !== session.permissionMode && isBusy(session)) {
+    const inPlace = harness.key === "claude";
+    if (live && session && !inPlace && opt.flag !== session.permissionMode && isBusy(session)) {
       const ok = await confirm(
         `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
         { title: "Restart session?", kind: "warning" },
@@ -1353,7 +1354,7 @@ export function SessionChat({
       if (!ok) return;
     }
     onPermissionModeChange(key);
-    if (live && sid) await applyPermissionMode(sid, opt.flag);
+    if (live && sid) await applyPermissionMode(sid, opt.flag, inPlace);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1371,6 +1372,8 @@ export function SessionChat({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!started) void handleStart();
+      else if (busy && sid && eventToChord(e.nativeEvent, IS_MACOS) === "mod+enter")
+        void stopSession(sid).then(handleSend);
       else void handleSend();
     }
   };
@@ -1680,6 +1683,11 @@ export function SessionChat({
                       onFiles={onAddFiles}
                       onScreenshots={onAddScreenshots}
                     />
+                    {busy && started && canSubmit && sendable && (
+                      <span className="flex shrink-0 items-center gap-1 text-ui-sm text-ink-dim">
+                        <Kbd chord="mod+enter" /> send now
+                      </span>
+                    )}
                     {busy && started && (
                       <button
                         type="button"

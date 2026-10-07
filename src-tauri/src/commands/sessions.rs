@@ -484,6 +484,20 @@ pub async fn set_session_effort(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn set_session_permission_mode(
+    state: State<'_, AppState>,
+    session_id: String,
+    mode: Option<PermissionMode>,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .set_session_permission_mode(session_id, mode)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn list_sessions(
     state: State<'_, AppState>,
     workstream_id: String,

@@ -889,13 +889,15 @@ function truncateAtUserOrdinal(view: SessionView, ordinal: number): SessionView 
 export async function applyPermissionMode(
   sessionId: string,
   mode: PermissionMode | null,
+  inPlace = false,
 ): Promise<void> {
   const current = entryOf(sessionId);
   if (!current || current.permissionMode === mode) return;
 
   setEntry(sessionId, { ...current, permissionMode: mode, autoAllow: [] });
   if (!channels.has(sessionId)) return;
-  await restartSession(sessionId, mode);
+  if (inPlace) await unwrap(commands.setSessionPermissionMode(sessionId, mode));
+  else await restartSession(sessionId, mode);
 }
 
 export async function applyModel(

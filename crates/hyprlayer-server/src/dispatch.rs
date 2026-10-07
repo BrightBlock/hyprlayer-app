@@ -11,7 +11,7 @@ use hyprlayer_core::agents::{
     AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
 };
 use hyprlayer_core::branch_prefix::{self, BranchPrefix};
-use hyprlayer_core::claude::ClaudeProbe;
+use hyprlayer_core::claude::{ClaudeProbe, PermissionMode};
 use hyprlayer_core::codex::CodexProbe;
 use hyprlayer_core::config::ThoughtsProfile;
 use hyprlayer_core::docs::frontmatter::FmPatch;
@@ -1446,6 +1446,18 @@ impl Dispatch for Server {
         self.runtime
             .sessions()
             .set_effort(&session_id, effort)
+            .await
+            .wire()
+    }
+
+    async fn set_session_permission_mode(
+        &self,
+        session_id: String,
+        mode: Option<PermissionMode>,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .sessions()
+            .set_permission_mode(&session_id, mode)
             .await
             .wire()
     }

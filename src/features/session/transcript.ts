@@ -91,6 +91,8 @@ export function isCompactSummary(text: string): boolean {
 }
 
 const THINK_TAG = /<\/?think(?:ing)?>/gi;
+// Claude Code sends this as a plain user message after every interrupt.
+const INTERRUPT_NOTICE = /^\[Request interrupted by user( for tool use)?\]$/;
 
 export function splitInlineThinking(text: string): { reasoning: string | null; answer: string } {
   THINK_TAG.lastIndex = 0;
@@ -480,6 +482,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     }
 
     case "assistantText": {
+      if (INTERRUPT_NOTICE.test(event.text)) return view;
       const skill = skillBodyName(event.text);
       if (skill || event.injected) {
         const toolIdx = firstSkillToolAwaitingBody(view.items, event.parentId ?? null);

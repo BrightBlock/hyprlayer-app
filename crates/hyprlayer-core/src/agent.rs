@@ -7,7 +7,7 @@ use tokio::sync::broadcast;
 pub use hyprlayer_models::agent::Harness;
 use hyprlayer_models::session::QuestionAnswers;
 
-use crate::claude::{ClaudeDriver, ExitOutcome, SessionEvent};
+use crate::claude::{ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent};
 use crate::codex::{CodexDriver, CollabMode};
 use crate::error::{CoreError, Result};
 
@@ -66,6 +66,13 @@ pub trait AgentDriver: Send + Sync {
 
     fn set_collab_mode(&self, _mode: Option<CollabMode>) {}
 
+    fn set_permission_mode(&self, _mode: PermissionMode) -> Result<()> {
+        Err(CoreError::OutputParse {
+            program: "agent".into(),
+            detail: "this harness cannot change permission mode without a restart".into(),
+        })
+    }
+
     /// The collaboration mode the harness last confirmed (codex only): the
     /// ADR-0007 tripwire for a plan mode it silently ignored.
     fn observed_collab_mode(&self) -> Option<String> {
@@ -123,6 +130,9 @@ impl AgentDriver for ClaudeDriver {
     }
     fn interrupt(&self) -> Result<()> {
         self.interrupt()
+    }
+    fn set_permission_mode(&self, mode: PermissionMode) -> Result<()> {
+        self.set_permission_mode(mode)
     }
     fn rewind_to_ordinal<'a>(
         &'a self,

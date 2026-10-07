@@ -14,7 +14,7 @@ use hyprlayer_core::agents::{
     AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
 };
 use hyprlayer_core::branch_prefix::{BranchPrefix, PrefixSource};
-use hyprlayer_core::claude::ClaudeProbe;
+use hyprlayer_core::claude::{ClaudeProbe, PermissionMode};
 use hyprlayer_core::codex::CodexProbe;
 use hyprlayer_core::config::ThoughtsProfile;
 use hyprlayer_core::docs::frontmatter::FmPatch;
@@ -243,6 +243,7 @@ hyprlayer_proto::commands! {
     KillSession: kill_session(session_id: String) -> ();
     SetSessionModel: set_session_model(session_id: String, model: Option<String>) -> ();
     SetSessionEffort: set_session_effort(session_id: String, effort: Option<String>) -> ();
+    SetSessionPermissionMode: set_session_permission_mode(session_id: String, mode: Option<PermissionMode>) -> ();
     ListSessions: list_sessions(workstream_id: String) -> Vec<Session>;
     GetSessionLog: get_session_log(session_id: String) -> Vec<SessionLogEntry>;
     ListSessionTurns: list_session_turns(session_id: String, cursor: LogCursor, limit: u32) -> SessionTurns;
