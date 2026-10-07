@@ -201,14 +201,15 @@ fn commit_script(version: &str, bytes: u64) -> String {
 /// what this version's binary hashes to there, and what else this client family
 /// has installed. Always exits 0 — an absent directory is an answer, not a
 /// failure. `sha256sum` on Linux, `shasum` on macOS; a host with neither emits
-/// no `@sha` and is trusted on its version.
+/// no `@sha` and is trusted on its version. Versions are listed with `ls`, not a
+/// glob: zsh, the macOS login shell, fails an unmatched glob.
 fn inspect_script(version: &str) -> String {
     format!(
         "uname -sm; r=\"$HOME/.hyprlayer/server\"; b=\"$r/{version}/hyprlayer-server\"; \
          if [ -x \"$b\" ]; then echo '@installed'; \
          echo \"@sha $({{ sha256sum \"$b\" || shasum -a 256 \"$b\"; }} 2>/dev/null \
          | awk '{{print $1}}')\"; fi; \
-         for d in \"$r\"/*/; do [ -d \"$d\" ] && echo \"@version $(basename \"$d\")\"; done; \
+         ls \"$r\" 2>/dev/null | while read -r d; do [ -d \"$r/$d\" ] && echo \"@version $d\"; done; \
          exit 0"
     )
 }
