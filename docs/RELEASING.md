@@ -244,13 +244,6 @@ cross-build an MSI; the release ships NSIS only.
 anything. Debian's `makepkg` fails on these PKGBUILDs, so `run.sh` renders each
 `.SRCINFO` with Arch's, in a two-second amd64 step (`scripts/builders/aur/`).
 
-The SSH builders this replaced (`scripts/release-win-remote.ps1`,
-`scripts/release-linux-remote.sh`, `.github/workflows/windows-build.yml`) stay in
-the tree until the first container-built release ships. To fall back to them, on
-`main` run `git show v0.8.9:scripts/release-local.sh > scripts/release-local.sh`,
-release, then `git checkout scripts/release-local.sh`; the v0.8.9
-`docs/RELEASING.md` has their host setup.
-
 ### Smoke tests (`--smoke`)
 
 `release-local.sh --smoke` install-tests what it built before the `Proceed?`
