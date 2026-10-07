@@ -153,7 +153,7 @@ const dot = (el: HTMLElement) => el.querySelector("span[aria-hidden]");
 beforeEach(() => {
   mockStatus(CONNECTED);
   useHostsUiStore.setState({ open: false, menu: false });
-  useReconnectStore.setState({ lostAt: null, attempting: false, halted: false });
+  useReconnectStore.setState({ lostAt: null, attempting: false, halted: null });
   useSessionControlsStore.setState({ byShell: {} });
   useWorkstreamTabsStore.setState({ byWs: {} });
 });

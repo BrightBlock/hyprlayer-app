@@ -200,12 +200,17 @@ describe("reconnect state", () => {
 
   it("records the drop time when the loop starts, and a new drop clears an old halt", () => {
     vi.setSystemTime(DROP);
-    useReconnectStore.setState({ halted: true });
+    useReconnectStore.setState({ halted: "protocol" });
     b.reconnectServer.mockResolvedValue(fails(DOWN));
 
     driver.startReconnecting();
 
-    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: false });
+    expect(useReconnectStore.getState()).toEqual({
+      lostAt: DROP,
+      attempting: false,
+      halted: null,
+      keyChanged: null,
+    });
   });
 
   it("marks an attempt only while its call is pending", async () => {
@@ -248,7 +253,12 @@ describe("reconnect state", () => {
 
     refetched();
     await vi.advanceTimersByTimeAsync(0);
-    expect(useReconnectStore.getState()).toEqual({ lostAt: null, attempting: false, halted: false });
+    expect(useReconnectStore.getState()).toEqual({
+      lostAt: null,
+      attempting: false,
+      halted: null,
+      keyChanged: null,
+    });
   });
 
   it("halts on a protocol mismatch and keeps the drop time", async () => {
@@ -257,19 +267,29 @@ describe("reconnect state", () => {
     driver.startReconnecting();
 
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: true });
+    expect(useReconnectStore.getState()).toEqual({
+      lostAt: DROP,
+      attempting: false,
+      halted: "protocol",
+      keyChanged: null,
+    });
   });
 
   it("clears a halted drop once a retry connects", async () => {
     b.reconnectServer.mockResolvedValue(fails(MISMATCH));
     driver.startReconnecting();
     await vi.advanceTimersByTimeAsync(1_000);
-    expect(useReconnectStore.getState().halted).toBe(true);
+    expect(useReconnectStore.getState().halted).toBe("protocol");
 
     b.reconnectServer.mockResolvedValue(ok());
     await driver.retryConnection();
 
-    expect(useReconnectStore.getState()).toEqual({ lostAt: null, attempting: false, halted: false });
+    expect(useReconnectStore.getState()).toEqual({
+      lostAt: null,
+      attempting: false,
+      halted: null,
+      keyChanged: null,
+    });
   });
 
   it("leaves the drop alone when a retry does not connect", async () => {
@@ -281,6 +301,11 @@ describe("reconnect state", () => {
     b.reconnectServer.mockResolvedValue(fails(DOWN));
     await driver.retryConnection();
 
-    expect(useReconnectStore.getState()).toEqual({ lostAt: DROP, attempting: false, halted: true });
+    expect(useReconnectStore.getState()).toEqual({
+      lostAt: DROP,
+      attempting: false,
+      halted: "protocol",
+      keyChanged: null,
+    });
   });
 });

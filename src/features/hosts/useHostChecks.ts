@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import type { Host, ProvisionStep } from "@/lib/bindings";
 import type { HostProbeResult } from "@/lib/domain/hosts";
-import { errorMessage } from "@/lib/ipc";
+import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { useTestHostConnection } from "@/lib/queries";
 import { shortFailure } from "./failures";
 import { retryConnection } from "./reconnect";
@@ -11,7 +11,7 @@ import { NO_SERVER, runProvision } from "./serverInstall";
 // `code` is kept because a missing server is a failure a row can act on, not only report.
 export type HostCheck =
   | { ok: true; at: number }
-  | { ok: false; code?: string; short: string; detail?: string; at: number };
+  | { ok: false; code?: string; short: string; detail?: string; remedy?: string | null; at: number };
 
 function fromProbe(probe: HostProbeResult): HostCheck {
   return probe.ok
@@ -64,6 +64,7 @@ export function useHostChecks(active: string | null, shared?: Record<string, Hos
           code: probe.error?.code,
           short: shortFailure(probe.error?.code),
           detail: errorMessage(probe.error ?? "Could not connect."),
+          remedy: errorRemedy(probe.error),
           at: Date.now(),
         });
       }

@@ -22,9 +22,12 @@ import {
   ErrorNote,
   type BadgeTone,
 } from "@/components/ui";
+import { signInAction } from "./failures";
 import { closeHostsUi, useHostsUiStore } from "./hostsUi";
 import { HostList, LocalServerList, WorkStatus } from "./HostList";
-import { retryConnection } from "./reconnect";
+import { retryConnection, signInAfterLaunch } from "./reconnect";
+import { useReconnectStore } from "./reconnectState";
+import { Remedy } from "./Remedy";
 import { cancelPlannedRestart, planRestart } from "./plannedRestart";
 import { useServerAutoUpdate } from "./serverAutoUpdate";
 import { runProvision, runUpdate, SERVER_OUTDATED, STEP_LABEL } from "./serverInstall";
@@ -219,6 +222,12 @@ export function HostsDialog() {
   }, [restart, state]);
   const work = installWork ?? (restart ? "Restarting" : null);
   const requestRestart = useCallback(() => setRestart("requested"), []);
+  const reconnect = useReconnectStore();
+  // The launch connect could not ask for anything; now the window can.
+  const launchFailure = state === "failed" ? status.data?.error?.code : undefined;
+  useEffect(() => {
+    if (launchFailure === "remote_sign_in_required") signInAfterLaunch();
+  }, [launchFailure]);
 
   // There is no initialData, so `data` is undefined on the first render of every
   // launch; gating on `isSuccess` is what keeps a reasonless "Not connected"
@@ -236,7 +245,10 @@ export function HostsDialog() {
     ? connection.host.label || connection.host.destination
     : (connection?.localServerName ?? null);
   const where = hostName ?? "This machine";
-  const message = connection?.error ? errorMessage(connection.error) : null;
+  // A lost connection reads `server_disconnected`; a changed key is why it stays lost.
+  const lost = connection?.state === "lost";
+  const error = (lost && reconnect.keyChanged) || connection?.error;
+  const message = error ? errorMessage(error) : null;
   // `remote_cli_missing` is the one failure provisioning answers — Phase 1 named
   // it as the trigger this phase would give it.
   const showInstall = Boolean(connection?.host) && connection?.error?.code === "remote_cli_missing";
@@ -244,7 +256,15 @@ export function HostsDialog() {
   const showUpdate = (connection?.state === "connected" && connection.serverOutdated) || tooOld;
   // Its remedy reads "Install it from the Hyprlayer server panel", which is the
   // panel rendered directly below — a call to action pointing at itself.
-  const remedy = connection?.error && !showInstall && !tooOld ? errorRemedy(connection.error) : null;
+  const remedy = error && !showInstall && !tooOld ? errorRemedy(error) : null;
+  // While lost, the loop says what the user can act on: a cancelled sign-in or a changed key.
+  const signIn = !connection?.host
+    ? null
+    : lost
+      ? reconnect.halted === "signIn"
+        ? "Sign in"
+        : signInAction(reconnect.keyChanged?.code)
+      : signInAction(connection.error?.code);
   const localFailed = blocking && connection?.host === null && !connection?.localServerName;
   const localProfile = file.active ? null : (file.localProfile ?? null);
   const usingLocal = (file.active ?? null) === null && localProfile === null;
@@ -285,8 +305,18 @@ export function HostsDialog() {
               <span className="min-w-0 truncate text-body text-ink">{where}</span>
               {work && !connection?.host && <WorkStatus label={work} />}
             </div>
-            {message && <p className="mt-2 text-body text-ink-dim">{message}</p>}
-            {remedy && <p className="mt-1 text-body text-ink-dim">{remedy}</p>}
+            {message && <p className="selectable mt-2 text-body text-ink-dim">{message}</p>}
+            {remedy && <Remedy text={remedy} className="mt-1" />}
+            {signIn && (
+              <Button
+                variant="primary"
+                className="mt-3"
+                busy={reconnect.attempting}
+                onClick={() => void retryConnection()}
+              >
+                {signIn}
+              </Button>
+            )}
           </div>
 
           {showInstall && connection?.host && <ServerInstall host={connection.host} onWork={setInstallWork} />}

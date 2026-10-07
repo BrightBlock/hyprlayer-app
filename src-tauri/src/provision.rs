@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use crate::error::AppError;
 use crate::hosts::Host;
 use crate::server_version::{self, SERVER_VERSION};
+use crate::ssh::Ssh;
 use crate::supervisor;
 
 const RELEASE_BASE: &str = "https://github.com/BrightBlock/hyprlayer-releases/releases/download";
@@ -162,15 +163,16 @@ pub async fn update(
     host: &Host,
     app_data_dir: &Path,
     on_step: impl Fn(ProvisionStep),
+    ssh: &Ssh,
 ) -> Result<(), AppError> {
-    if readiness(host, app_data_dir).await?.state != HostServerState::Ready {
-        provision(host, app_data_dir, &on_step).await?;
+    if readiness(host, app_data_dir, ssh).await?.state != HostServerState::Ready {
+        provision(host, app_data_dir, &on_step, ssh).await?;
     }
     log::warn!(
         "stopping the server on {} to start {SERVER_VERSION}; its sessions and terminals end",
         host.destination
     );
-    supervisor::ssh_capture(host, &stop_script(SERVER_VERSION)).await?;
+    supervisor::ssh_capture(host, &stop_script(SERVER_VERSION), ssh).await?;
     on_step(ProvisionStep::Done);
     Ok(())
 }
@@ -290,8 +292,12 @@ pub(crate) fn sha256_file(path: &Path) -> Option<String> {
 
 /// What the connect path checks before it relays, and what the install offer
 /// reads. Never downloads.
-pub async fn readiness(host: &Host, app_data_dir: &Path) -> Result<HostProvisioning, AppError> {
-    Ok(inspect(host, app_data_dir).await?.0)
+pub async fn readiness(
+    host: &Host,
+    app_data_dir: &Path,
+    ssh: &Ssh,
+) -> Result<HostProvisioning, AppError> {
+    Ok(inspect(host, app_data_dir, ssh).await?.0)
 }
 
 /// `readiness`, plus the hash of the binary the relay will run — what a
@@ -299,8 +305,9 @@ pub async fn readiness(host: &Host, app_data_dir: &Path) -> Result<HostProvision
 pub async fn inspect(
     host: &Host,
     app_data_dir: &Path,
+    ssh: &Ssh,
 ) -> Result<(HostProvisioning, Option<String>), AppError> {
-    let stdout = supervisor::ssh_capture(host, &inspect_script(SERVER_VERSION)).await?;
+    let stdout = supervisor::ssh_capture(host, &inspect_script(SERVER_VERSION), ssh).await?;
     let seen = parse_inspect(&stdout);
     let triple = supervisor::triple_for_uname(host, &seen.uname)?;
     let local = resolve_local(app_data_dir, exe_dir().as_deref(), triple);
@@ -328,10 +335,11 @@ pub async fn provision(
     host: &Host,
     app_data_dir: &Path,
     on_step: impl Fn(ProvisionStep),
+    ssh: &Ssh,
 ) -> Result<(), AppError> {
     let started = std::time::Instant::now();
     let current = std::sync::Mutex::new(ProvisionStep::Probe);
-    let result = install(host, app_data_dir, |step| {
+    let result = install(host, app_data_dir, ssh, |step| {
         log::info!(
             "installing hyprlayer-server {SERVER_VERSION} on {}: {step:?}",
             host.destination
@@ -364,10 +372,11 @@ pub async fn provision(
 async fn install(
     host: &Host,
     app_data_dir: &Path,
+    ssh: &Ssh,
     on_step: impl Fn(ProvisionStep),
 ) -> Result<(), AppError> {
     on_step(ProvisionStep::Probe);
-    let uname = supervisor::ssh_capture(host, "uname -sm").await?;
+    let uname = supervisor::ssh_capture(host, "uname -sm", ssh).await?;
     let triple = supervisor::triple_for_uname(host, &uname)?;
 
     let local = match resolve_local(app_data_dir, exe_dir().as_deref(), triple) {
@@ -386,9 +395,9 @@ async fn install(
         .len();
 
     on_step(ProvisionStep::Upload);
-    supervisor::ssh_send_file(host, &stage_script(SERVER_VERSION), &local).await?;
+    supervisor::ssh_send_file(host, &stage_script(SERVER_VERSION), &local, ssh).await?;
     on_step(ProvisionStep::Install);
-    supervisor::ssh_capture(host, &commit_script(SERVER_VERSION, bytes)).await?;
+    supervisor::ssh_capture(host, &commit_script(SERVER_VERSION, bytes), ssh).await?;
     on_step(ProvisionStep::Done);
     Ok(())
 }

@@ -1,0 +1,441 @@
+{
+  "scenario": "ssh_sign_in",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "blocked": "remote_sign_in_required"
+            }
+          },
+          "guard": "a launch connect to an unknown host reports sign-in needed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": []
+          },
+          "guard": "it asks nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "known": false
+          },
+          "guard": "it trusts nothing on its own",
+          "ok": true
+        }
+      ],
+      "step": "launch never asks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [
+              "hostKey"
+            ]
+          },
+          "guard": "an unknown host asks to trust its key first",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "key_type": "ED25519",
+            "offered": "$FINGERPRINT"
+          },
+          "guard": "the fingerprint offered is the one the host presents",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "key_host": "[127.0.0.1]:$PORT"
+          },
+          "guard": "the prompt names the host whose key it is",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": 1,
+            "code": "remote_sign_in_cancelled"
+          },
+          "guard": "declining ends the attempt there",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "known": false
+          },
+          "guard": "a declined key is not written",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pending": 0
+          },
+          "guard": "nothing waits once it ends",
+          "ok": true
+        }
+      ],
+      "step": "decline the host key"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "known": true
+          },
+          "guard": "trusting the key writes it to known_hosts",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": [
+              "hostKey",
+              "secret"
+            ]
+          },
+          "guard": "a password-only host asks for its password next",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "failed_passwords": 0,
+            "logins": 0
+          },
+          "guard": "cancelling stops ssh before it sends an empty password",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": 2,
+            "code": "remote_sign_in_cancelled"
+          },
+          "guard": "the attempt ends as cancelled",
+          "ok": true
+        }
+      ],
+      "step": "cancel the password"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [
+              "secret",
+              "secret"
+            ]
+          },
+          "guard": "a trusted host does not ask about its key again",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "retries": [
+              false,
+              true
+            ]
+          },
+          "guard": "a refused password comes back marked as a retry",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "remote_cli_missing"
+          },
+          "guard": "the right password reaches the host",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": 1,
+            "failed": 1
+          },
+          "guard": "sshd saw exactly the one wrong password",
+          "ok": true
+        }
+      ],
+      "step": "a refused password is asked again"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": []
+          },
+          "guard": "installing and connecting ask nothing more",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": null,
+            "install": null,
+            "ok": true
+          },
+          "guard": "the installed server answers",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "logins": 0
+          },
+          "guard": "it all rode the one sign-in",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "control_sockets": 1
+          },
+          "guard": "the shared connection is Hyprlayer's own",
+          "ok": true
+        }
+      ],
+      "step": "install over the shared connection"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "connected": 1
+            }
+          },
+          "guard": "a launch connect over the live shared connection connects",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": []
+          },
+          "guard": "it asks nothing",
+          "ok": true
+        }
+      ],
+      "step": "an established connection asks nothing at launch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [],
+            "outcome": {
+              "blocked": "remote_sign_in_required"
+            }
+          },
+          "guard": "launch reports sign-in needed, not a failed login",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": 0,
+            "failed": 0
+          },
+          "guard": "it sends no password",
+          "ok": true
+        }
+      ],
+      "step": "launch after the shared connection closes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "connected": 1
+            },
+            "waited_past_deadline": true
+          },
+          "guard": "an answer after the 15s deadline still connects",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asked": [
+              "secret"
+            ]
+          },
+          "guard": "the connect asked once",
+          "ok": true
+        }
+      ],
+      "step": "a slow answer outlasts the connect deadline"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "appeared": true,
+            "withdrawn": true
+          },
+          "guard": "the prompt is withdrawn when its attempt goes away",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": 0,
+            "failed": 0
+          },
+          "guard": "no password was sent",
+          "ok": true
+        }
+      ],
+      "step": "a dropped attempt withdraws its prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [
+              "secret"
+            ],
+            "code": "remote_sign_in_cancelled"
+          },
+          "guard": "an unanswered prompt ends as timed out",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "under_a_minute": true
+          },
+          "guard": "well before sshd's login grace time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": 0,
+            "failed": 0
+          },
+          "guard": "no password was sent",
+          "ok": true
+        }
+      ],
+      "step": "an unanswered prompt gives up"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [],
+            "code": null,
+            "ok": true
+          },
+          "guard": "a host your key opens connects without a prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "control_sockets": 1
+          },
+          "guard": "Hyprlayer shares the connection for keys too",
+          "ok": true
+        }
+      ],
+      "step": "a key you already use asks nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": null,
+            "ok": true,
+            "user_sockets": 1
+          },
+          "guard": "your ControlPath carries the connection",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "control_sockets": 0
+          },
+          "guard": "Hyprlayer adds no master of its own",
+          "ok": true
+        }
+      ],
+      "step": "your ControlPath wins"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": [
+              [
+                "secret"
+              ],
+              [
+                "secret"
+              ]
+            ]
+          },
+          "guard": "a PAM password prompt is asked as a secret",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "remote_sign_in_cancelled",
+            "pam_failures": 0,
+            "pam_logins": 0
+          },
+          "guard": "cancelling it sends PAM nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": null,
+            "ok": true,
+            "pam_logins": 1
+          },
+          "guard": "answering it signs in",
+          "ok": true
+        }
+      ],
+      "step": "keyboard-interactive asks the same way"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": []
+          },
+          "guard": "a changed key is never offered for trust",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "remote_host_key_changed"
+          },
+          "guard": "it is reported as a changed key",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "remedy": "If you expected it, remove the old key with `ssh-keygen -R '[127.0.0.1]:$PORT' -f '$SANDBOX/desktop/known_hosts'` and connect again."
+          },
+          "guard": "the remedy names the key to remove",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "accepted": 0,
+            "failed": 0
+          },
+          "guard": "no login was attempted",
+          "ok": true
+        }
+      ],
+      "step": "a changed host key is refused without asking"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "files": []
+          },
+          "guard": "neither password appears in any log",
+          "ok": true
+        }
+      ],
+      "step": "secrets stay out of the logs"
+    }
+  ]
+}

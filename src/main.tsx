@@ -8,6 +8,7 @@ import { commands } from "./lib/bindings";
 import { attachEventListeners, onServerReconnected, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
 import { reconnectBridge } from "./features/hosts/reconnect";
+import { sshPromptBridge } from "./features/hosts/sshPrompts";
 import { startServerAutoUpdate } from "./features/hosts/serverAutoUpdate";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
 import {
@@ -62,6 +63,7 @@ initAppearance();
 registerEventBridge(scriptRunBridge);
 registerEventBridge(writtenDocsBridge);
 registerEventBridge(reconnectBridge);
+registerEventBridge(sshPromptBridge);
 registerEventBridge(sessionBridge);
 registerEventBridge(transcriptSyncBridge);
 // Ahead of the reattach, whose folds ask whether the new connection syncs.

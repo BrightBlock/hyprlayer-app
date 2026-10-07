@@ -295,7 +295,7 @@ export const commands = {
 	/**
 	 *  What the connect surface needs before it can offer an install: the host's
 	 *  platform, whether this version is already there, and what else this client
-	 *  family has put there (plan Phase 7 §4).
+	 *  family has put there (plan Phase 7 §4). A query, so it never asks.
 	 */
 	inspectHostProvisioning: (host: Host) => typedError<HostProvisioning, AppError>(__TAURI_INVOKE("inspect_host_provisioning", { host })),
 	/**
@@ -308,9 +308,19 @@ export const commands = {
 	 *  the running one so the reconnect starts it. Ends every session there.
 	 */
 	updateHostServer: (host: Host, onStep: Channel<ProvisionStep>) => typedError<null, AppError>(__TAURI_INVOKE("update_host_server", { host, onStep })),
-	/**  Reads what runs on a host refused as too old; the auto-updater waits for it to idle. */
+	/**
+	 *  Reads what runs on a host refused as too old; the auto-updater waits for it
+	 *  to idle. Nobody pressed anything, so it never asks.
+	 */
 	inspectOutdatedHost: (host: Host) => typedError<HostActivity, AppError>(__TAURI_INVOKE("inspect_outdated_host", { host })),
 	listLocalServers: () => typedError<LocalServer[], AppError>(__TAURI_INVOKE("list_local_servers")),
+	/**
+	 *  What ssh is waiting on the user for, oldest first; `SshPromptsChanged`
+	 *  carries every later change.
+	 */
+	listSshPrompts: () => typedError<SshPrompt[], AppError>(__TAURI_INVOKE("list_ssh_prompts")),
+	/**  `None` cancels, which stops that ssh run. */
+	answerSshPrompt: (id: string, answer: string | null) => typedError<null, AppError>(__TAURI_INVOKE("answer_ssh_prompt", { id, answer })),
 	revealLogs: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_logs")),
 	collectDiagnostics: () => typedError<string, AppError>(__TAURI_INVOKE("collect_diagnostics")),
 };
@@ -332,6 +342,7 @@ export const events = {
 	sessionReset: makeEvent<SessionReset>("session-reset"),
 	sessionRevised: makeEvent<SessionRevised>("session-revised"),
 	sessionViewers: makeEvent<SessionViewers>("session-viewers"),
+	sshPromptsChanged: makeEvent<SshPromptsChanged>("ssh-prompts-changed"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
@@ -1838,6 +1849,35 @@ export type SlashCommand = {
 export type SlashKind = "skill" | "command";
 
 export type SortKey = "relevance" | "date" | "mtime" | "title";
+
+export type SshPrompt = {
+	id: string,
+	host: Host,
+	kind: SshPromptKind,
+	/**  ssh's own words. */
+	message: string,
+	keyType: string | null,
+	fingerprint: string | null,
+	/**  The host a key prompt is about, as ssh names it. A jump host's is not `host`. */
+	keyHost: string | null,
+	/**  ssh asked this again: the last answer was refused. */
+	retry: boolean,
+};
+
+export type SshPromptKind = 
+/**  First contact: trust this host's key? */
+"hostKey" | 
+/**  A password, passphrase, PIN or one-time code. */
+"secret" | 
+/**  A yes/no question (`SSH_ASKPASS_PROMPT=confirm`). */
+"confirm" | 
+/**  Nothing to answer, such as "touch your security key". */
+"notice";
+
+/**  Everything ssh is waiting on the user for, after any change. */
+export type SshPromptsChanged = {
+	prompts: SshPrompt[],
+};
 
 export type Stage = "research" | "plan" | "implement" | "validate" | "commit" | "ship" | "revise" | "general";
 

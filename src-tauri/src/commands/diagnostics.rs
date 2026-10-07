@@ -10,6 +10,7 @@ use crate::commands::hosts::{app_data_dir, app_log_dir};
 use crate::error::{AppError, CmdResult};
 use crate::hosts::Target;
 use crate::provision;
+use crate::ssh::Ssh;
 use crate::state::AppState;
 use crate::supervisor;
 
@@ -39,7 +40,11 @@ pub fn reveal_logs(app: AppHandle) -> CmdResult<()> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn collect_diagnostics(app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
+pub async fn collect_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ssh: State<'_, Ssh>,
+) -> CmdResult<String> {
     let package = app.package_info();
     let status = state.status();
     let target = state.target();
@@ -84,11 +89,18 @@ pub async fn collect_diagnostics(app: AppHandle, state: State<'_, AppState>) -> 
     out.push_str(&format!("\n== {} ==\n", client_log.display()));
     out.push_str(&server_logging::tail_file(&client_log, TAIL_BYTES));
     out.push_str("\n== server ==\n");
-    out.push_str(&server_logs(&target, &app_log_dir(&app)?, &app_data_dir(&app)?).await);
+    // A report never stops to ask for a password; it says sign-in is needed.
+    let ssh = ssh.batch();
+    out.push_str(&server_logs(&target, &app_log_dir(&app)?, &app_data_dir(&app)?, &ssh).await);
     Ok(mask(&out))
 }
 
-async fn server_logs(target: &Target, own_log_dir: &Path, app_data_dir: &Path) -> String {
+async fn server_logs(
+    target: &Target,
+    own_log_dir: &Path,
+    app_data_dir: &Path,
+    ssh: &Ssh,
+) -> String {
     match target {
         Target::Own => server_logging::tail_logs(own_log_dir, TAIL_BYTES),
         Target::LocalProfile(data_dir) => {
@@ -97,7 +109,7 @@ async fn server_logs(target: &Target, own_log_dir: &Path, app_data_dir: &Path) -
         Target::Remote(host) => {
             // A stale install cannot be relayed through but can still print logs.
             let version =
-                match provision::readiness(host, app_data_dir).await {
+                match provision::readiness(host, app_data_dir, ssh).await {
                     Ok(found) => found
                         .usable_version
                         .or((found.state == provision::HostServerState::Stale)
@@ -112,7 +124,7 @@ async fn server_logs(target: &Target, own_log_dir: &Path, app_data_dir: &Path) -
             let Some(version) = version else {
                 return format!("no usable server is installed on {}\n", host.destination);
             };
-            match supervisor::ssh_capture(host, &provision::logs_command(&version)).await {
+            match supervisor::ssh_capture(host, &provision::logs_command(&version), ssh).await {
                 Ok(text) => format!("on {}:\n{text}", host.destination),
                 Err(e) => format!(
                     "could not read the server logs on {}: {}: {}\n",

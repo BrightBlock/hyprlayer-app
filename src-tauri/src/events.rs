@@ -14,6 +14,13 @@ pub struct BinariesChanged;
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct AccountChanged;
 
+/// Everything ssh is waiting on the user for, after any change.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SshPromptsChanged {
+    pub prompts: Vec<crate::ssh::SshPrompt>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
 pub struct ThoughtsIndexUpdated {

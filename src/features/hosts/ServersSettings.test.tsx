@@ -291,7 +291,7 @@ describe("ServersSettings", () => {
     expect(nexus.className).toContain("bg-warn/5");
     const reason = within(nexus).getByText("nexus · Auth failed");
     expect(reason.className).toContain("text-warn-ink");
-    expect(within(nexus).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(within(nexus).getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(within(nexus).queryByRole("button", { name: "Set default" })).toBeNull();
   });
 

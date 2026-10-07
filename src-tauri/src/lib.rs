@@ -4,13 +4,14 @@ pub mod commands;
 mod editors;
 pub mod error;
 mod events;
-mod hosts;
+pub mod hosts;
 mod logging;
-mod provision;
+pub mod provision;
 mod runtime_events;
 mod server_version;
+pub mod ssh;
 mod state;
-mod supervisor;
+pub mod supervisor;
 mod traffic_lights;
 mod webview_gestures;
 mod window_geometry;
@@ -252,6 +253,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::hosts::update_host_server,
             commands::hosts::inspect_outdated_host,
             commands::hosts::list_local_servers,
+            commands::hosts::list_ssh_prompts,
+            commands::hosts::answer_ssh_prompt,
             commands::diagnostics::reveal_logs,
             commands::diagnostics::collect_diagnostics,
         ])
@@ -273,7 +276,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ScriptRunChanged,
             events::QuitRequested,
             events::ServerDisconnected,
-            events::AccountChanged
+            events::AccountChanged,
+            events::SshPromptsChanged
         ])
         // Vocabulary no command signature carries yet.
         .typ::<DocType>()
@@ -449,6 +453,9 @@ pub fn run() {
             // Before any `attach_client`, which announces it.
             app.manage(client_identity::load_or_create(&app_config_dir));
             app.manage(commands::account::SignInFlight::default());
+            let ssh = ssh::Ssh::new(ssh::SshSetup::for_app(&app_data_dir));
+            forward_ssh_prompts(app.handle().clone(), &ssh);
+            app.manage(ssh.clone());
 
             // hosts.json is read before connecting anything, because it's the
             // one thing that has to be decided locally: there is no server to
@@ -472,11 +479,13 @@ pub fn run() {
                 target.name(),
                 app_log_dir.display(),
             );
+            // Batch: nothing can answer a prompt before the window exists.
             let outcome = tauri::async_runtime::block_on(supervisor::connect(
                 &target,
                 &app_config_dir,
                 &app_data_dir,
                 &app_log_dir,
+                &ssh.batch(),
             ));
             // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
             // regardless of whether the connection succeeded. The one
@@ -636,6 +645,18 @@ pub fn run() {
                 log::info!("exiting");
             }
         });
+}
+
+fn forward_ssh_prompts(handle: tauri::AppHandle, ssh: &ssh::Ssh) {
+    let mut rx = ssh.prompts();
+    tauri::async_runtime::spawn(async move {
+        while rx.changed().await.is_ok() {
+            let prompts = rx.borrow_and_update().clone();
+            if let Err(e) = (events::SshPromptsChanged { prompts }).emit(&handle) {
+                log::warn!("could not send ssh prompts to the window: {e}");
+            }
+        }
+    });
 }
 
 fn request_quit(handle: &tauri::AppHandle) {

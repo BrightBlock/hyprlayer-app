@@ -2001,6 +2001,7 @@ dependencies = [
  "gethostname",
  "gtk",
  "hyprlayer-core",
+ "hyprlayer-e2e",
  "hyprlayer-proto",
  "hyprlayer-server",
  "log",

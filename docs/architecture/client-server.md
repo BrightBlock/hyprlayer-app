@@ -534,6 +534,34 @@ no protocol knowledge of its own.
 The relay is killed on drop, unlike the local server's deliberate orphan: ending
 the SSH connection ends the relay, not the daemon behind it.
 
+### Signing in
+
+Every `ssh` the desktop runs is built in `src-tauri/src/ssh/`. When ssh needs
+something only the user has (trust in a new host key, a password, a key
+passphrase), it runs the app's own binary as `SSH_ASKPASS`
+(`SSH_ASKPASS_REQUIRE=force`). That run forwards the question over a 0600 socket
+to the window's `SshPromptDialog`. Cancelling kills ssh rather than answering
+it: a declined answer makes ssh send an empty password and ask again.
+
+Runs nobody pressed a button for use `BatchMode` and fail with
+`remote_sign_in_required` instead. That is the launch connect, which happens
+before the window exists, and background reads. The server dialog then signs
+in. A changed host key is never offered for trust; it fails as
+`remote_host_key_changed` with the `ssh-keygen -R` to run.
+
+Each host gets one shared connection (`ControlMaster=auto`,
+`ControlPersist=10m`) in a short private directory, so a password is asked once
+rather than on each ssh run a connect or an install makes. It is keyed on the
+host's whole `ssh -G` config, so aliases share one only when every setting matches. A `ControlPath` in the
+user's own config wins, and is the only way to opt a host out: `ssh -G` reports an
+explicit `ControlMaster no` or `ControlPath none` exactly as it reports the
+default, so give the host its own `ControlPath` with `ControlMaster no`. Windows
+keeps plain `ssh`, since its OpenSSH has no working `ControlMaster`. Prompts need
+OpenSSH 8.4 or newer (`SSH_ASKPASS_REQUIRE`); an older ssh behaves as it did
+before them: it cannot ask, so the sign-in fails. `HYPRLAYER_SSH` overrides the program, as `GIT_SSH`
+does for git; the `ssh_sign_in` container scenario uses it to run against a
+sandboxed config.
+
 ### What is disabled remotely, and why
 
 Four commands are permanently guarded, each for a reason of its own, not because

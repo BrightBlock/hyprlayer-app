@@ -1,7 +1,7 @@
 import type { ConnectionStatus, WorkstreamView } from "@/lib/bindings";
 import { isDetachedHead, isFolderWorkstream } from "@/lib/domain/projects";
 import { formatCompactAge } from "@/lib/format";
-import type { ReconnectSnapshot } from "@/features/hosts/reconnectState";
+import type { ReconnectHalt, ReconnectSnapshot } from "@/features/hosts/reconnectState";
 
 export type RepoSummary = { branch: string; additions: number; deletions: number };
 
@@ -57,6 +57,11 @@ function sinceDrop(lostAt: number, now: number): string {
 
 // TODO(statusbar): latency needs a ping RPC; `Ping` exists only under #[cfg(test)] in crates/hyprlayer-proto/src/commands.rs.
 // TODO(statusbar): a `paused` state needs something that pauses sync; nothing does.
+const HALT_REASON: Record<ReconnectHalt, string> = {
+  protocol: "protocol mismatch",
+  signIn: "sign-in cancelled",
+};
+
 export function syncLabel(
   status: ConnectionStatus | null,
   r: ReconnectSnapshot,
@@ -77,7 +82,7 @@ export function syncLabel(
   const tone: SyncTone = failed ? "bad" : "warn";
   const title = failed
     ? `Not connected to ${label}`
-    : `Connection to ${label} lost${r.halted ? " · stopped retrying (protocol mismatch)" : ""}`;
+    : `Connection to ${label} lost${r.halted ? ` · stopped retrying (${HALT_REASON[r.halted]})` : ""}`;
   if (r.attempting && !r.halted) return { text: "retrying", title, tone, ticking: false };
   // A launch that never connected dropped nothing, so there is no drop to count from.
   if (failed || r.lostAt === null) return { text: "offline", title, tone, ticking: false };

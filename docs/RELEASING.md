@@ -83,7 +83,8 @@ it *is* the update signal (see "How Linux updates work").
 The script first runs the verification gate — `cargo test`, which includes the
 local E2E scenarios in `crates/hyprlayer-e2e`, then that crate's container tier
 (`cargo test -p hyprlayer-e2e -- --ignored`: a Linux host in Docker reached over
-real SSH), a standalone `cargo check` of the two library crates (see "Library
+real SSH) and the desktop's ssh sign-in scenario (`cargo test -p hyprlayer-app
+--test ssh_sign_in -- --ignored`), a standalone `cargo check` of the two library crates (see "Library
 target checks"), `pnpm typecheck && pnpm lint && pnpm test` — which
 `RELEASE_SKIP_CHECKS=1` skips. The gate needs Docker running, and `git` and the
 hyprlayer CLI installed; it stops at once if Docker is not up. A failing E2E

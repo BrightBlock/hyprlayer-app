@@ -111,6 +111,8 @@ Point the desktop at it by adding the host to `<app config dir>/hosts.json`:
 
 `destination` is passed straight to `ssh`, so any alias your `~/.ssh/config`
 resolves works. The app then runs `ssh <destination> hyprlayer-server relay`.
+If ssh needs a password or asks you to trust a new host, the app asks in a
+dialog and stores neither.
 
 Four things to know before you rely on it:
 

@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::error::{AppError, CmdResult};
 use crate::hosts::{self, Host, HostsFile, Target};
 use crate::provision::{self, HostProvisioning, ProvisionStep};
+use crate::ssh::{Ssh, SshPrompt};
 use crate::state::AppState;
 use crate::supervisor::{self, HostActivity, HostProbe, LocalServer};
 
@@ -93,9 +94,13 @@ pub fn save_hosts(app: AppHandle, file: HostsFile) -> CmdResult<()> {
 /// the host without touching `AppState` or leaving a relay behind.
 #[tauri::command]
 #[specta::specta]
-pub async fn test_host_connection(app: AppHandle, host: Host) -> CmdResult<HostProbe> {
+pub async fn test_host_connection(
+    app: AppHandle,
+    ssh: State<'_, Ssh>,
+    host: Host,
+) -> CmdResult<HostProbe> {
     let data_dir = app_data_dir(&app)?;
-    let probe = supervisor::probe_remote(&host, &data_dir).await;
+    let probe = supervisor::probe_remote(&host, &data_dir, &ssh).await;
     match &probe.error {
         None => log::info!("connection test to {} passed", host.destination),
         Some(e) => log::warn!(
@@ -139,6 +144,7 @@ pub async fn list_local_servers(app: AppHandle) -> CmdResult<Vec<LocalServer>> {
 pub async fn reconnect_server(
     app: AppHandle,
     state: State<'_, AppState>,
+    ssh: State<'_, Ssh>,
 ) -> CmdResult<ConnectionStatus> {
     let config_dir = app_config_dir(&app)?;
     let data_dir = app_data_dir(&app)?;
@@ -158,7 +164,7 @@ pub async fn reconnect_server(
         return Ok(state.status());
     }
 
-    match supervisor::connect(&configured, &config_dir, &data_dir, &log_dir).await {
+    match supervisor::connect(&configured, &config_dir, &data_dir, &log_dir, &ssh).await {
         supervisor::Outcome::Connected { client, outdated } => {
             // Swapped before the bridge is spawned: a connection that dies in
             // between then retires against the client the state holds, so it
@@ -194,22 +200,31 @@ pub async fn restart_server(state: State<'_, AppState>) -> CmdResult<()> {
         .map_err(AppError::from)
 }
 
-/// Reads what runs on a host refused as too old; the auto-updater waits for it to idle.
+/// Reads what runs on a host refused as too old; the auto-updater waits for it
+/// to idle. Nobody pressed anything, so it never asks.
 #[tauri::command]
 #[specta::specta]
-pub async fn inspect_outdated_host(app: AppHandle, host: Host) -> CmdResult<HostActivity> {
+pub async fn inspect_outdated_host(
+    app: AppHandle,
+    ssh: State<'_, Ssh>,
+    host: Host,
+) -> CmdResult<HostActivity> {
     let data_dir = app_data_dir(&app)?;
-    supervisor::outdated_host_activity(&host, &data_dir).await
+    supervisor::outdated_host_activity(&host, &data_dir, &ssh.batch()).await
 }
 
 /// What the connect surface needs before it can offer an install: the host's
 /// platform, whether this version is already there, and what else this client
-/// family has put there (plan Phase 7 §4).
+/// family has put there (plan Phase 7 §4). A query, so it never asks.
 #[tauri::command]
 #[specta::specta]
-pub async fn inspect_host_provisioning(app: AppHandle, host: Host) -> CmdResult<HostProvisioning> {
+pub async fn inspect_host_provisioning(
+    app: AppHandle,
+    ssh: State<'_, Ssh>,
+    host: Host,
+) -> CmdResult<HostProvisioning> {
     let data_dir = app_data_dir(&app)?;
-    provision::readiness(&host, &data_dir).await
+    provision::readiness(&host, &data_dir, &ssh.batch()).await
 }
 
 /// Installs this client's server on the host. A fresh `Channel` per invoke —
@@ -218,13 +233,19 @@ pub async fn inspect_host_provisioning(app: AppHandle, host: Host) -> CmdResult<
 #[specta::specta]
 pub async fn provision_host(
     app: AppHandle,
+    ssh: State<'_, Ssh>,
     host: Host,
     on_step: Channel<ProvisionStep>,
 ) -> CmdResult<()> {
     let data_dir = app_data_dir(&app)?;
-    provision::provision(&host, &data_dir, |step| {
-        let _ = on_step.send(step);
-    })
+    provision::provision(
+        &host,
+        &data_dir,
+        |step| {
+            let _ = on_step.send(step);
+        },
+        &ssh,
+    )
     .await
 }
 
@@ -234,14 +255,38 @@ pub async fn provision_host(
 #[specta::specta]
 pub async fn update_host_server(
     app: AppHandle,
+    ssh: State<'_, Ssh>,
     host: Host,
     on_step: Channel<ProvisionStep>,
 ) -> CmdResult<()> {
     let data_dir = app_data_dir(&app)?;
-    provision::update(&host, &data_dir, |step| {
-        let _ = on_step.send(step);
-    })
+    provision::update(
+        &host,
+        &data_dir,
+        |step| {
+            let _ = on_step.send(step);
+        },
+        &ssh,
+    )
     .await
+}
+
+/// What ssh is waiting on the user for, oldest first; `SshPromptsChanged`
+/// carries every later change.
+#[tauri::command]
+#[specta::specta]
+pub fn list_ssh_prompts(ssh: State<'_, Ssh>) -> CmdResult<Vec<SshPrompt>> {
+    Ok(ssh.prompts().borrow().clone())
+}
+
+/// `None` cancels, which stops that ssh run.
+#[tauri::command]
+#[specta::specta]
+pub fn answer_ssh_prompt(ssh: State<'_, Ssh>, id: String, answer: Option<String>) -> CmdResult<()> {
+    if !ssh.answer(&id, answer) {
+        log::info!("ssh prompt {id} was already gone when it was answered");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

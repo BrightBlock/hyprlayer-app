@@ -103,6 +103,7 @@ import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
 import { HostsDialog } from "@/features/hosts/HostsDialog";
+import { SshPromptDialog } from "@/features/hosts/SshPromptDialog";
 import { ServerMenu } from "@/features/hosts/ServerMenu";
 import { SettingsButton } from "@/features/settings/SettingsButton";
 import { SettingsCrumb, SettingsHeaderMeta } from "@/features/settings/SettingsHeader";
@@ -1707,6 +1708,8 @@ export function Root() {
       <FullDiskAccessNotice />
       <ServerDisconnectedNotice />
       <HostsDialog />
+      {/* Above HostsDialog: signing in is how its blocking state gets resolved. */}
+      <SshPromptDialog />
       <ConfirmQuitDialog />
       {/* After HostsDialog: when the server cannot start, its blocking overlay
           must not cover the update toast, the one way out of a broken build. */}

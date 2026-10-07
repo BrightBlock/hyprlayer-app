@@ -167,6 +167,53 @@ impl AppError {
         }
     }
 
+    /// A run that may not ask, such as the launch connect, needed the user: a
+    /// password, a passphrase, or trust in a host key it has not seen.
+    pub fn remote_sign_in_required(host: &str) -> Self {
+        Self {
+            code: "remote_sign_in_required".into(),
+            message: format!("{host} needs you to sign in."),
+            remedy: None,
+            stale_transcript: None,
+        }
+    }
+
+    pub fn remote_sign_in_cancelled(host: &str, timed_out: bool) -> Self {
+        Self {
+            code: "remote_sign_in_cancelled".into(),
+            message: if timed_out {
+                format!("Signing in to {host} timed out waiting for an answer.")
+            } else {
+                format!("Signing in to {host} was cancelled.")
+            },
+            remedy: None,
+            stale_transcript: None,
+        }
+    }
+
+    /// Never offered for trust in the app: ssh refuses a changed key outright.
+    /// `key_host` is the name `known_hosts` files it under.
+    pub fn remote_host_key_changed(host: &str, key_host: &str, known_hosts: Option<&str>) -> Self {
+        let default = dirs::home_dir().map(|home| home.join(".ssh").join("known_hosts"));
+        let file = known_hosts
+            .filter(|file| default.as_deref() != Some(std::path::Path::new(file)))
+            .map(|file| format!(" -f {}", shell_quote(file)))
+            .unwrap_or_default();
+        Self {
+            code: "remote_host_key_changed".into(),
+            message: format!(
+                "The host key for {host} has changed. A rebuilt host does this, and so does \
+                 someone intercepting the connection."
+            ),
+            remedy: Some(format!(
+                "If you expected it, remove the old key with `ssh-keygen -R {}{file}` \
+                 and connect again.",
+                shell_quote(key_host)
+            )),
+            stale_transcript: None,
+        }
+    }
+
     /// ssh could not reach the host at all, or could not even spawn on this
     /// machine (plan Phase 1 §1). Also the fallback arm of
     /// `supervisor::classify_ssh_failure` — a stderr this doesn't recognise
@@ -249,6 +296,11 @@ impl AppError {
 }
 
 pub type CmdResult<T> = Result<T, AppError>;
+
+/// Both halves come from ssh config values, and the remedy is meant to be pasted.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
 
 #[cfg(test)]
 mod tests {

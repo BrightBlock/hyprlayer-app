@@ -23,6 +23,7 @@ use crate::error::AppError;
 use crate::hosts::{self, Host, Target};
 use crate::provision;
 use crate::server_version::{self, Fit, MIN_SERVER_VERSION, SERVER_VERSION};
+use crate::ssh::{self, Ended, Ssh, SshCommand};
 
 const CONNECT_RETRIES: u32 = 10;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
@@ -36,10 +37,9 @@ const SPAWN_RETRIES: u32 = 5;
 const SPAWN_RETRY_DELAY: Duration = Duration::from_secs(1);
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-/// ssh's default is the OS TCP timeout, over a minute for an asleep host.
-const SSH_CONNECT_TIMEOUT: &str = "ConnectTimeout=5";
 /// For a host that accepts the connection and then stalls; the handshake alone
 /// allows 60s. `setup()` blocks on this, so it is how long a launch can hang.
+/// Time spent waiting on the user to sign in does not count.
 const REMOTE_CONNECT_DEADLINE: Duration = Duration::from_secs(15);
 
 /// The reconnect loop retries every 30s forever; one report per window.
@@ -126,6 +126,7 @@ pub async fn connect(
     app_config_dir: &Path,
     app_data_dir: &Path,
     app_log_dir: &Path,
+    ssh: &Ssh,
 ) -> Outcome {
     let started = Instant::now();
     let outcome = match target {
@@ -150,18 +151,23 @@ pub async fn connect(
         Target::LocalProfile(dir) => connect_local_profile(dir, &target.name()).await,
         Target::Remote(host) => {
             // Dropping the attempt kills its ssh children (`kill_on_drop`).
-            tokio::time::timeout(REMOTE_CONNECT_DEADLINE, connect_remote(host, app_data_dir))
-                .await
-                .unwrap_or_else(|_| Outcome::Blocked {
-                    title: CANNOT_START.to_string(),
-                    error: AppError::remote_unreachable(
-                        &host.label,
-                        format!(
-                            "it did not respond within {}s.",
-                            REMOTE_CONNECT_DEADLINE.as_secs()
-                        ),
+            // A dead link's shared connection ends itself (`ServerAliveInterval`);
+            // closing it here would also end a healthy one that a slow start timed out.
+            ssh.within(
+                REMOTE_CONNECT_DEADLINE,
+                connect_remote(host, app_data_dir, ssh),
+            )
+            .await
+            .unwrap_or_else(|| Outcome::Blocked {
+                title: CANNOT_START.to_string(),
+                error: AppError::remote_unreachable(
+                    &host.label,
+                    format!(
+                        "it did not respond within {}s.",
+                        REMOTE_CONNECT_DEADLINE.as_secs()
                     ),
-                })
+                ),
+            })
         }
     };
     log_outcome(target, started.elapsed(), &outcome);
@@ -363,8 +369,8 @@ pub async fn connect_or_spawn(
 /// Phase 7 §3). A failure here must never fall back to the local server — that
 /// would silently connect the app to the wrong profile's data, "the single
 /// most damaging mistake available in this plan" (plan, Migration Notes).
-pub async fn connect_remote(host: &Host, app_data_dir: &Path) -> Outcome {
-    match ssh_relay_connect(host, app_data_dir, false).await {
+pub async fn connect_remote(host: &Host, app_data_dir: &Path, ssh: &Ssh) -> Outcome {
+    match ssh_relay_connect(host, app_data_dir, false, ssh).await {
         Ok((client, relay, expected)) => {
             // The relay attaches to whatever daemon is already running there.
             let fit = server_version::exact_fit(client.server_semver());
@@ -425,12 +431,13 @@ async fn ssh_relay_connect(
     host: &Host,
     app_data_dir: &Path,
     allow_too_old: bool,
+    ssh: &Ssh,
 ) -> Result<(Arc<RpcClient>, Relay, Option<String>), AppError> {
     // Never relay a binary this client has not confirmed is its own: the
     // version in the path cannot tell an unreleased build from the release it
     // descends from, and a stale one is only caught by the handshake, after
     // connecting (plan Phase 7 §3.2).
-    let (provisioning, host_sha) = provision::inspect(host, app_data_dir).await?;
+    let (provisioning, host_sha) = provision::inspect(host, app_data_dir, ssh).await?;
     let Some(version) = provisioning.usable_version.clone() else {
         let key = format!("{}:{:?}", host.destination, provisioning.state);
         if CONNECT_FAILURES.admit(&key).is_some() {
@@ -448,11 +455,12 @@ async fn ssh_relay_connect(
     // nothing about an older one the relay falls back to.
     let host_sha = host_sha.filter(|_| version == SERVER_VERSION);
 
-    let mut cmd = tokio::process::Command::new("ssh");
-    hide_console(&mut cmd);
-    cmd.args(["-o", SSH_CONNECT_TIMEOUT])
-        .arg(&host.destination)
-        .arg(provision::relay_command(&version))
+    let SshCommand {
+        mut cmd,
+        mut sign_in,
+        batch,
+    } = ssh.command(host).await;
+    cmd.arg(provision::relay_command(&version))
         .kill_on_drop(true)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -470,7 +478,14 @@ async fn ssh_relay_connect(
     let (tail, drained) = drain_stderr(stderr);
 
     let joined = tokio::io::join(stdout, stdin);
-    match RpcClient::connect(joined).await {
+    let handshake = match ssh::unless_cancelled(&mut sign_in, RpcClient::connect(joined)).await {
+        Ok(handshake) => handshake,
+        Err(ended) => {
+            let _ = child.start_kill();
+            return Err(sign_in_ended(host, ended));
+        }
+    };
+    match handshake {
         Ok(client)
             if !allow_too_old && server_version::fit(client.server_semver()) == Fit::TooOld =>
         {
@@ -538,14 +553,32 @@ async fn ssh_relay_connect(
                 host_name(host),
                 seen.trim()
             );
-            Err(classify_ssh_failure(
-                host,
-                RemoteCall::Server,
-                exit_code,
-                &seen,
-            ))
+            Err(classify(host, RemoteCall::Server, exit_code, &seen, batch))
         }
     }
+}
+
+fn sign_in_ended(host: &Host, ended: Ended) -> AppError {
+    AppError::remote_sign_in_cancelled(&host.label, ended == Ended::TimedOut)
+}
+
+/// A run that could not ask turns a login it could not finish into a request
+/// to sign in; "too many authentication failures" is not one a prompt fixes.
+fn classify(
+    host: &Host,
+    call: RemoteCall,
+    exit_code: Option<i32>,
+    stderr: &str,
+    batch: bool,
+) -> AppError {
+    let error = classify_ssh_failure(host, call, exit_code, stderr);
+    if batch
+        && error.code == "remote_auth_failed"
+        && !stderr.contains("Too many authentication failures")
+    {
+        return AppError::remote_sign_in_required(&host.label);
+    }
+    error
 }
 
 /// What was on the far end of the pipe. ssh reports its own failures as 255 and
@@ -574,6 +607,14 @@ fn classify_ssh_failure(
     // 255, or no status at all, is ssh failing to deliver the command; only
     // then is the stderr ssh's own to read.
     if exit_code == Some(255) || exit_code.is_none() {
+        // Never offered for trust: ssh refuses it outright, and so does this app.
+        if let Some((key_host, known_hosts)) = changed_host_key(seen) {
+            return AppError::remote_host_key_changed(
+                &host.label,
+                &key_host,
+                known_hosts.as_deref(),
+            );
+        }
         // "Too many authentication failures" is what an agent holding several
         // keys hits before it ever reaches "Permission denied".
         if seen.contains("Permission denied")
@@ -611,34 +652,73 @@ fn classify_ssh_failure(
     AppError::remote_command_failed(&host.label, detail)
 }
 
+/// `ssh` names the host the way `known_hosts` does: `[127.0.0.1]:2222`, or
+/// `nexus.local` once an alias resolves. OpenSSH 10 drops the key type that
+/// older releases put first.
+fn changed_host_key(stderr: &str) -> Option<(String, Option<String>)> {
+    let line = stderr
+        .lines()
+        .find(|l| l.contains("has changed and you have requested strict checking"))?;
+    let key_host = line
+        .split_once("key for ")
+        .and_then(|(_, rest)| rest.split_once(" has changed"))
+        .map(|(host, _)| host.trim().to_string())?;
+    // "Offending ED25519 key in /home/me/.ssh/known_hosts:12"
+    let known_hosts = stderr.lines().find_map(|l| {
+        let (_, file) = l.strip_prefix("Offending ")?.split_once(" key in ")?;
+        file.trim()
+            .rsplit_once(':')
+            .map(|(path, _)| path.to_string())
+    });
+    Some((key_host, known_hosts))
+}
+
 /// Runs a short script on the host and returns its stdout. Separate from
 /// `ssh_relay_connect`, which goes straight into relay mode and so cannot
 /// carry a second command (plan Phase 7 §2).
-pub(crate) async fn ssh_capture(host: &Host, script: &str) -> Result<String, AppError> {
-    let output = ssh_run(host, script, Stdio::null()).await?;
+pub(crate) async fn ssh_capture(host: &Host, script: &str, ssh: &Ssh) -> Result<String, AppError> {
+    let output = ssh_run(host, script, Stdio::null(), ssh).await?;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 /// Streams a local file into a script's stdin on the host — the push half of
 /// an install. `ssh` rather than `scp` so the transfer and the rename stay two
 /// round trips: an interrupted push cannot reach the rename (plan Phase 7 §3).
-pub(crate) async fn ssh_send_file(host: &Host, script: &str, file: &Path) -> Result<(), AppError> {
+pub(crate) async fn ssh_send_file(
+    host: &Host,
+    script: &str,
+    file: &Path,
+    ssh: &Ssh,
+) -> Result<(), AppError> {
     let handle = std::fs::File::open(file)
         .map_err(|e| AppError::internal(format!("could not read {}: {e}", file.display())))?;
-    ssh_run(host, script, Stdio::from(handle)).await.map(|_| ())
+    ssh_run(host, script, Stdio::from(handle), ssh)
+        .await
+        .map(|_| ())
 }
 
-async fn ssh_run(host: &Host, script: &str, stdin: Stdio) -> Result<Vec<u8>, AppError> {
-    let mut cmd = tokio::process::Command::new("ssh");
-    hide_console(&mut cmd);
-    let output = cmd
-        .args(["-o", SSH_CONNECT_TIMEOUT])
-        .arg(&host.destination)
+async fn ssh_run(host: &Host, script: &str, stdin: Stdio, ssh: &Ssh) -> Result<Vec<u8>, AppError> {
+    let SshCommand {
+        mut cmd,
+        mut sign_in,
+        batch,
+    } = ssh.command(host).await;
+    let child = cmd
         .arg(script)
         .kill_on_drop(true)
         .stdin(stdin)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            AppError::remote_unreachable(
+                &host.label,
+                format!("Could not run ssh to reach {}: {e}", host.label),
+            )
+        })?;
+    let output = ssh::unless_cancelled(&mut sign_in, child.wait_with_output())
         .await
+        .map_err(|ended| sign_in_ended(host, ended))?
         .map_err(|e| {
             AppError::remote_unreachable(
                 &host.label,
@@ -646,11 +726,12 @@ async fn ssh_run(host: &Host, script: &str, stdin: Stdio) -> Result<Vec<u8>, App
             )
         })?;
     if !output.status.success() {
-        return Err(classify_ssh_failure(
+        return Err(classify(
             host,
             RemoteCall::Script,
             output.status.code(),
             &String::from_utf8_lossy(&output.stderr),
+            batch,
         ));
     }
     Ok(output.stdout)
@@ -684,8 +765,8 @@ pub struct HostProbe {
 /// keeps the child, so it can drop the client and kill the child
 /// unconditionally on both the success and the failure path — the failure
 /// path already kills it inside `ssh_relay_connect`.
-pub async fn probe_remote(host: &Host, app_data_dir: &Path) -> HostProbe {
-    match ssh_relay_connect(host, app_data_dir, false).await {
+pub async fn probe_remote(host: &Host, app_data_dir: &Path, ssh: &Ssh) -> HostProbe {
+    match ssh_relay_connect(host, app_data_dir, false, ssh).await {
         Ok((client, mut relay, _)) => {
             let server_version = client.server_version();
             drop(client);
@@ -717,9 +798,10 @@ pub struct HostActivity {
 pub async fn outdated_host_activity(
     host: &Host,
     app_data_dir: &Path,
+    ssh: &Ssh,
 ) -> Result<HostActivity, AppError> {
     let read = async {
-        let (client, mut relay, _) = ssh_relay_connect(host, app_data_dir, true).await?;
+        let (client, mut relay, _) = ssh_relay_connect(host, app_data_dir, true, ssh).await?;
         let server_release = client.server_semver().map(str::to_string);
         let read = async {
             let active = client.list_active_sessions().await?;

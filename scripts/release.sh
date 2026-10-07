@@ -27,6 +27,8 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   node scripts/build-server-sidecar.mjs --debug
   cargo test --workspace --quiet
   cargo test --package hyprlayer-e2e --quiet -- --ignored
+  # The desktop's own ssh sign-in path: it needs the app binary as its askpass helper.
+  cargo test --package hyprlayer-app --test ssh_sign_in --quiet -- --ignored
   cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
   pnpm typecheck && pnpm lint && pnpm test
   if [[ -n "$(git status --porcelain -- src/lib/bindings.ts)" ]]; then

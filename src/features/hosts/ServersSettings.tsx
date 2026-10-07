@@ -18,9 +18,11 @@ import {
 import { Icon, type IconName } from "@/components/Icon";
 import { SettingsCard } from "@/components/SettingsCard";
 import { Button, ConfirmDialog, cx, ErrorNote, Popover, TextInput } from "@/components/ui";
+import { HOST_KEY_CHANGED, signInAction } from "./failures";
 import { WorkStatus } from "./HostList";
 import { openHostsUi } from "./hostsUi";
 import { retryConnection } from "./reconnect";
+import { Remedy } from "./Remedy";
 import { NO_SERVER, STEP_LABEL } from "./serverInstall";
 import { ServerSummary, worktreeCount } from "./ServerSummary";
 import { SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
@@ -68,6 +70,11 @@ function ConnectionInfo() {
           Hyprlayer runs <code className="font-mono text-ink-2">ssh &lt;destination&gt;</code> with
           your SSH config and agent, so keys, ports and jump hosts come from ~/.ssh/config. It
           stores only the destination and label.
+        </p>
+        <p>
+          When ssh needs a password or a new host's key trusted, Hyprlayer asks here and stores
+          neither. One connection per host is shared for 10 minutes after its last use, unless your
+          config sets its own ControlPath.
         </p>
         <p>If the host has no Hyprlayer server, Test offers to install one.</p>
       </Popover>
@@ -333,56 +340,56 @@ function ServerItem({
   const unreachable = row.state === "unreachable";
   const outdated = row.isConnected && connection?.state === "connected" && connection.serverOutdated;
   const canInstall = unreachable && !!row.host && row.failureCode === NO_SERVER;
+  const failure = row.isConnected ? connection?.error : check && !check.ok ? check : null;
+  const remedy = unreachable && failure?.code === HOST_KEY_CHANGED ? failure.remedy : null;
 
   return (
-    <li
-      className={cx(
-        "flex items-center gap-3 border-t border-edge-2 px-4 py-3",
-        unreachable && "bg-warn/5",
-      )}
-    >
-      <ServerSummary
-        row={row}
-        check={check}
-        connection={connection}
-        worktrees={worktrees}
-        testing={testing}
-      />
-      <div className="flex shrink-0 items-center gap-1.5">
-        {installStep ? (
-          <WorkStatus label={STEP_LABEL[installStep]} />
-        ) : (
-          <>
-            {canInstall && (
-              <Button
-                size="sm"
-                disabled={probing}
-                title={`Install the server on ${row.name}`}
-                onClick={onInstall}
-              >
-                Install
-              </Button>
-            )}
-            {unreachable && (
-              <Button size="sm" disabled={probing} onClick={onRetry}>
-                Retry
-              </Button>
-            )}
-            {outdated && (
-              <Button size="sm" onClick={openHostsUi}>
-                Update
-              </Button>
-            )}
-            {!unreachable && !row.isDefault && (
-              <RowIcon label="Set default" icon="star" disabled={saving} onClick={onSetDefault} />
-            )}
-            {row.host && <RowIcon label="Edit" icon="edit" disabled={saving} onClick={onEdit} />}
-            {row.host && !row.isDefault && (
-              <RowIcon label="Remove" icon="close" danger disabled={saving} onClick={onRemove} />
-            )}
-          </>
-        )}
+    <li className={cx("border-t border-edge-2 px-4 py-3", unreachable && "bg-warn/5")}>
+      <div className="flex items-center gap-3">
+        <ServerSummary
+          row={row}
+          check={check}
+          connection={connection}
+          worktrees={worktrees}
+          testing={testing}
+        />
+        <div className="flex shrink-0 items-center gap-1.5">
+          {installStep ? (
+            <WorkStatus label={STEP_LABEL[installStep]} />
+          ) : (
+            <>
+              {canInstall && (
+                <Button
+                  size="sm"
+                  disabled={probing}
+                  title={`Install the server on ${row.name}`}
+                  onClick={onInstall}
+                >
+                  Install
+                </Button>
+              )}
+              {unreachable && (
+                <Button size="sm" disabled={probing} onClick={onRetry}>
+                  {signInAction(row.failureCode) ?? "Retry"}
+                </Button>
+              )}
+              {outdated && (
+                <Button size="sm" onClick={openHostsUi}>
+                  Update
+                </Button>
+              )}
+              {!unreachable && !row.isDefault && (
+                <RowIcon label="Set default" icon="star" disabled={saving} onClick={onSetDefault} />
+              )}
+              {row.host && <RowIcon label="Edit" icon="edit" disabled={saving} onClick={onEdit} />}
+              {row.host && !row.isDefault && (
+                <RowIcon label="Remove" icon="close" danger disabled={saving} onClick={onRemove} />
+              )}
+            </>
+          )}
+        </div>
       </div>
+      {remedy && <Remedy text={remedy} className="mt-2 pl-5.5" />}
     </li>
   );
 }

@@ -60,4 +60,5 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 gtk = { version = "0.18", features = ["v3_24"] }
 
 [dev-dependencies]
+hyprlayer-e2e = { path = "../crates/hyprlayer-e2e" }
 tempfile = "3"

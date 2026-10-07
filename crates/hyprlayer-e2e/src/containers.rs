@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use hyprlayer_core::models::RuntimeEvent;
@@ -29,12 +29,62 @@ pub enum Build {
     Debug,
 }
 
+/// The host's architecture.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    /// Whatever Docker runs natively; `aarch64` on Apple silicon, which the
+    /// desktop has no server for.
+    Native,
+    /// The triple the desktop provisions. Emulated on Apple silicon.
+    Amd64,
+}
+
+impl Platform {
+    fn docker(self) -> Option<&'static str> {
+        match self {
+            Platform::Native => None,
+            Platform::Amd64 => Some("linux/amd64"),
+        }
+    }
+
+    fn suffix(self) -> &'static str {
+        match self {
+            Platform::Native => "",
+            Platform::Amd64 => "-amd64",
+        }
+    }
+}
+
+pub struct HostOptions {
+    pub build: Build,
+    pub platform: Platform,
+    /// `e2e` may also log in with this password, as `password` or as PAM's
+    /// keyboard-interactive (how macOS's sshd asks).
+    pub password: Option<&'static str>,
+    /// The server at its version-keyed path, as on a provisioned host.
+    pub install: bool,
+}
+
+impl Default for HostOptions {
+    fn default() -> Self {
+        Self {
+            build: Build::Release,
+            platform: Platform::Native,
+            password: None,
+            install: true,
+        }
+    }
+}
+
 /// A running host container, removed on drop.
 pub struct RemoteHost {
     name: String,
     ssh_config: PathBuf,
     home: PathBuf,
     logs: PathBuf,
+    port: String,
+    identity: PathBuf,
+    binary: PathBuf,
     relays: AtomicU32,
 }
 
@@ -51,14 +101,37 @@ impl RemoteHost {
     }
 
     pub fn start_with(sandbox: &Sandbox, build: Build) -> Self {
-        let binary = linux_server(build);
-        docker(&["build", "--quiet", "--tag", IMAGE, &dockerfile_dir()]);
+        Self::start_opts(
+            sandbox,
+            HostOptions {
+                build,
+                ..HostOptions::default()
+            },
+        )
+    }
+
+    pub fn start_opts(sandbox: &Sandbox, options: HostOptions) -> Self {
+        let binary = linux_server(options.build, options.platform);
+        let platform: Vec<&str> = options
+            .platform
+            .docker()
+            .map(|p| vec!["--platform", p])
+            .unwrap_or_default();
+        let image = match options.platform {
+            Platform::Native => IMAGE.to_string(),
+            Platform::Amd64 => format!("{IMAGE}:amd64"),
+        };
+        let dockerfile = dockerfile_dir();
+        let mut build_args = vec!["build", "--quiet", "--tag", &image];
+        build_args.extend(&platform);
+        build_args.push(&dockerfile);
+        docker(&build_args);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.subsec_nanos())
             .unwrap_or_default();
         let name = format!("hyprlayer-e2e-{}-{nanos}", std::process::id());
-        docker(&[
+        let mut run_args = vec![
             "run",
             "--detach",
             "--rm",
@@ -68,8 +141,21 @@ impl RemoteHost {
             &name,
             "--publish",
             "127.0.0.1::22",
-            IMAGE,
-        ]);
+        ];
+        run_args.extend(&platform);
+        run_args.push(&image);
+        // sshd's command line outranks the image's `PasswordAuthentication no`.
+        let with_password = options.password.map(|password| {
+            format!(
+                "echo 'e2e:{password}' | chpasswd && exec /usr/sbin/sshd -D -e \
+                 -o PasswordAuthentication=yes -o KbdInteractiveAuthentication=yes"
+            )
+        });
+        if let Some(script) = &with_password {
+            run_args.extend(["sh", "-c", script]);
+        }
+        docker(&run_args);
+        let mut started = Started(Some(name.clone()));
         let port = docker(&["port", &name, "22/tcp"])
             .lines()
             .next()
@@ -99,11 +185,15 @@ impl RemoteHost {
         )
         .expect("write the ssh config");
 
+        started.0 = None;
         let host = Self {
             name,
             ssh_config,
             home: sandbox.home.clone(),
             logs: sandbox.logs.clone(),
+            port,
+            identity: key.clone(),
+            binary,
             relays: AtomicU32::new(0),
         };
         let public = std::fs::read(key.with_extension("pub")).expect("read the public key");
@@ -111,17 +201,44 @@ impl RemoteHost {
             .args(["exec", "--interactive", "--user", "e2e", &host.name, "sh", "-c"])
             .arg("mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat > ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys")
             .stdin_bytes(&public));
-        docker(&[
-            "cp",
-            &binary.display().to_string(),
-            &format!("{}:/tmp/hyprlayer-server", host.name),
-        ]);
-        host.exec(&format!(
-            "install -D -m 755 /tmp/hyprlayer-server \"$HOME/.hyprlayer/server/{}/hyprlayer-server\"",
-            hyprlayer_server::VERSION
-        ));
+        if options.install {
+            docker(&[
+                "cp",
+                &host.binary.display().to_string(),
+                &format!("{}:/tmp/hyprlayer-server", host.name),
+            ]);
+            host.exec(&format!(
+                "install -D -m 755 /tmp/hyprlayer-server \"$HOME/.hyprlayer/server/{}/hyprlayer-server\"",
+                hyprlayer_server::VERSION
+            ));
+        }
         host.wait_for_sshd();
         host
+    }
+
+    /// The published sshd port on 127.0.0.1.
+    pub fn port(&self) -> &str {
+        &self.port
+    }
+
+    /// The private key `e2e` accepts.
+    pub fn identity(&self) -> &Path {
+        &self.identity
+    }
+
+    /// The server built for this host's platform.
+    pub fn server_binary(&self) -> &Path {
+        &self.binary
+    }
+
+    /// Everything sshd has logged, logins included.
+    pub fn sshd_log(&self) -> String {
+        let output = Command::new("docker")
+            .args(["logs", &self.name])
+            .output()
+            .expect("run docker logs");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+            + &String::from_utf8_lossy(&output.stderr)
     }
 
     fn wait_for_sshd(&self) {
@@ -247,6 +364,19 @@ impl RemoteHost {
     }
 }
 
+/// Removes a container whose setup panicked before `RemoteHost`, whose `Drop` takes over.
+struct Started(Option<String>);
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        if let Some(name) = self.0.take() {
+            let _ = Command::new("docker")
+                .args(["rm", "--force", &name])
+                .output();
+        }
+    }
+}
+
 impl Drop for RemoteHost {
     fn drop(&mut self) {
         let _ = Command::new("docker")
@@ -264,53 +394,66 @@ impl Relay {
 }
 
 /// `hyprlayer-server` for the host's platform, built from this tree inside
-/// `BUILDER` with its target and registry cached in named volumes.
-fn linux_server(build: Build) -> &'static Path {
-    static RELEASE: OnceLock<PathBuf> = OnceLock::new();
-    static DEBUG: OnceLock<PathBuf> = OnceLock::new();
-    let (cell, flag, profile) = match build {
-        Build::Release => (&RELEASE, "--release", "release"),
-        Build::Debug => (&DEBUG, "", "debug"),
+/// `BUILDER` with its target and registry cached in named volumes, one set
+/// per platform.
+fn linux_server(build: Build, platform: Platform) -> PathBuf {
+    static BUILT: Mutex<Vec<(Build, Platform, PathBuf)>> = Mutex::new(Vec::new());
+    let mut built = BUILT.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((.., path)) = built.iter().find(|(b, p, _)| *b == build && *p == platform) {
+        return path.clone();
+    }
+    let (flag, profile) = match build {
+        Build::Release => ("--release", "release"),
+        Build::Debug => ("", "debug"),
     };
-    cell.get_or_init(|| {
-        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .ancestors()
-            .nth(2)
-            .expect("crates/hyprlayer-e2e sits two levels under the workspace");
-        let out = crate::journey::target_dir()
-            .join("e2e")
-            .join("linux")
-            .join(profile);
-        std::fs::create_dir_all(&out).expect("create the linux output dir");
-        docker(&[
-            "run",
-            "--rm",
-            "--volume",
-            &format!("{}:/src:ro", workspace.display()),
-            "--volume",
-            "hyprlayer-e2e-cargo:/usr/local/cargo/registry",
-            "--volume",
-            "hyprlayer-e2e-target:/target",
-            "--volume",
-            &format!("{}:/out", out.display()),
-            "--env",
-            "CARGO_TARGET_DIR=/target",
-            "--env",
-            "CARGO_PROFILE_RELEASE_LTO=off",
-            "--env",
-            "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16",
-            "--workdir",
-            "/src",
-            BUILDER,
-            "sh",
-            "-c",
-            &format!(
-                "cargo build {flag} --locked --quiet --package hyprlayer-server --bin hyprlayer-server \
-                 && cp /target/{profile}/hyprlayer-server /out/"
-            ),
-        ]);
-        out.join("hyprlayer-server")
-    })
+    let suffix = platform.suffix();
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates/hyprlayer-e2e sits two levels under the workspace");
+    let out = crate::journey::target_dir()
+        .join("e2e")
+        .join(format!("linux{suffix}"))
+        .join(profile);
+    std::fs::create_dir_all(&out).expect("create the linux output dir");
+    let src = format!("{}:/src:ro", workspace.display());
+    let cargo = format!("hyprlayer-e2e-cargo{suffix}:/usr/local/cargo/registry");
+    let target = format!("hyprlayer-e2e-target{suffix}:/target");
+    let out_volume = format!("{}:/out", out.display());
+    let script = format!(
+        "cargo build {flag} --locked --quiet --package hyprlayer-server --bin hyprlayer-server \
+         && cp /target/{profile}/hyprlayer-server /out/"
+    );
+    let mut args = vec!["run", "--rm"];
+    if let Some(p) = platform.docker() {
+        args.extend(["--platform", p]);
+    }
+    args.extend([
+        "--volume",
+        &src,
+        "--volume",
+        &cargo,
+        "--volume",
+        &target,
+        "--volume",
+        &out_volume,
+        "--env",
+        "CARGO_TARGET_DIR=/target",
+        "--env",
+        "CARGO_PROFILE_RELEASE_LTO=off",
+        "--env",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16",
+        "--workdir",
+        "/src",
+        BUILDER,
+        "sh",
+        "-c",
+        &script,
+    ]);
+    docker(&args);
+    let path = out.join("hyprlayer-server");
+    built.push((build, platform, path.clone()));
+    path
 }
 
 fn dockerfile_dir() -> String {

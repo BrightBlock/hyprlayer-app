@@ -13,7 +13,7 @@ import {
 
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
 const NEXUS: Host = { destination: "nexus", label: "Nexus" };
-const IDLE: ReconnectSnapshot = { lostAt: null, attempting: false, halted: false };
+const IDLE: ReconnectSnapshot = { lostAt: null, attempting: false, halted: null, keyChanged: null };
 
 function status(patch: Partial<ConnectionStatus> = {}): ConnectionStatus {
   return {
@@ -188,7 +188,7 @@ describe("syncLabel", () => {
   });
 
   it("never reads 'retrying' once halted, and says why it stopped", () => {
-    const halted = { ...droppedAgo(9_000), halted: true, attempting: true };
+    const halted = { ...droppedAgo(9_000), halted: "protocol" as const, attempting: true };
     const label = syncLabel(lost(), halted, NOW);
     expect(label?.text).toBe("offline · 9s");
     expect(label?.title).toBe(
@@ -197,7 +197,7 @@ describe("syncLabel", () => {
   });
 
   it("lets a live connection win over a stale reconnect state", () => {
-    const stale = { lostAt: NOW - 9_000, attempting: true, halted: true };
+    const stale = { ...IDLE, lostAt: NOW - 9_000, attempting: true, halted: "protocol" as const };
     expect(syncLabel(status({ host: NEXUS }), stale, NOW)?.text).toBe("connected · Nexus");
   });
 
@@ -209,7 +209,7 @@ describe("syncLabel", () => {
       droppedAgo(45_000),
       droppedAgo(5 * 60_000),
       { ...droppedAgo(9_000), attempting: true },
-      { ...droppedAgo(9_000), halted: true },
+      { ...droppedAgo(9_000), halted: "protocol" },
     ];
     for (const s of statuses) {
       for (const r of snapshots) {

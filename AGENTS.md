@@ -13,7 +13,8 @@
 Run all of these before pushing. There is no CI (releases are built locally), so
 unformatted code or a drifted `bindings.ts` stays in the tree until someone trips on
 it. The release gate, `scripts/release.sh`, also runs the container tier
-(`cargo test -p hyprlayer-e2e -- --ignored`), which needs Docker.
+(`cargo test -p hyprlayer-e2e -- --ignored`, plus `cargo test -p hyprlayer-app --test
+ssh_sign_in -- --ignored`), which needs Docker.
 
 When a clippy lint is wrong for the code (a `#[tauri::command]` whose arity *is* the
 IPC contract), add `#[allow(clippy::...)]` with a comment saying why rather than
@@ -83,7 +84,9 @@ in a sandboxed profile (needs `git` and the hyprlayer CLI). Each scenario writes
 `target/e2e/<scenario>/` and compares its `report.json` with
 `crates/hyprlayer-e2e/golden/`: `HYPRLAYER_E2E_BLESS=1` rewrites a golden (review the
 diff like code), `HYPRLAYER_E2E_KEEP=1` keeps the sandbox. The `--ignored` container
-tier runs a Linux host in Docker over the same `ssh … relay` the desktop uses.
+tier runs a Linux host in Docker over the same `ssh … relay` the desktop uses; the
+desktop's own ssh sign-in (askpass prompts, shared connections) is
+`src-tauri/tests/ssh_sign_in.rs`, in the app package because its helper is the app binary.
 Isolated tests sit beside their code (`mod tests`, `*.test.tsx`) and in
 `crates/hyprlayer-core/tests/`, which need the feature flag:
 `cargo test -p hyprlayer-core --features test-support <name>`.
