@@ -13,9 +13,9 @@ which holds releases only — no source.
 
 There is **no CI release** — GitHub Actions was removed to save minutes.
 Everything is built, signed, and published from the release Mac by
-`scripts/release-local.sh`, which farms the two non-Mac bundles out to headless
-builders over SSH and signs their output locally, so the ed25519 signing key
-never leaves the Mac.
+`scripts/release-local.sh`, which builds the two non-Mac bundles in Docker
+containers on the same Mac and signs their output locally, so the ed25519
+signing key never leaves it.
 
 ```
 private: BrightBlock/hyprlayer-app  (source)
@@ -28,10 +28,11 @@ public:  aur.archlinux.org/hyprlayer-desktop-bin  (PKGBUILD only)
 ./scripts/release-local.sh        # build + sign + publish, all from the Mac
   ├─ mac    (here)      → Hyprlayer_<v>_aarch64.dmg + Hyprlayer.app.tar.gz(.sig)
   │                       Developer ID–signed + notarized during the build
-  ├─ win  (nexus-win VM) → Hyprlayer_<v>_x64-setup.exe  built unsigned, scp'd
-  │                                                    back, ed25519-signed here
-  ├─ linux  (nexus)     → Hyprlayer_<v>_amd64.deb + Hyprlayer-<v>-1.x86_64.rpm
+  ├─ win  (container)   → Hyprlayer_<v>_x64-setup.exe  built unsigned in Docker,
+  │                                                    ed25519-signed here
+  ├─ linux  (container) → Hyprlayer_<v>_amd64.deb + Hyprlayer-<v>-1.x86_64.rpm
   │                       + a rendered PKGBUILD/.SRCINFO (no signature — see below)
+  ├─ --smoke (optional) → install-tests both before publishing (see "Smoke tests")
   ├─ release      → GitHub Release on hyprlayer-releases (public) w/ assets
   ├─ manifest     → latest.json + changelog.json → jtsiros/hyprlayer.dev
   │                 (darwin-aarch64 + windows-x86_64) → Vercel
@@ -43,9 +44,8 @@ Running apps  check() → https://brightblock.ai/hyprlayer/updates/latest.json
               downloadAndInstall() → relaunch()
 ```
 
-Both remote builders compile a clean `git archive` of the release tag shipped to
-them — never their own working clone — so what they produce matches the tag byte
-for byte. Neither holds any secret.
+Both container legs compile a clean `git archive` of the release tag — never the
+working tree — so they build exactly what was tagged. Neither holds any secret.
 
 | Flag | Builds |
 | --- | --- |
@@ -55,6 +55,7 @@ for byte. Neither holds any secret.
 | `--no-aur` | everything, but don't push the AUR package |
 | `--mac-only` | macOS only |
 | `--rebuild` | ignore cached artifacts, force a clean build of everything |
+| `--smoke` | install-test the Windows and Linux builds before publishing (see "Smoke tests") |
 
 A platform left out is simply absent from `latest.json`, so its installs see
 "no update" until the next all-platform release — they are never served a
@@ -65,8 +66,8 @@ on disk before that leg builds, so re-running after a transient failure (a
 flaky builder, a missing tool) reuses whatever already succeeded instead of
 rebuilding everything — mac and Windows artifacts are keyed by their
 version-stamped filename, Linux by its deb/rpm filenames plus the rendered
-AUR PKGBUILD/.SRCINFO. Pass `--rebuild` to ignore all of that and force a
-fresh build.
+AUR PKGBUILD/.SRCINFO. A release stopped by `--smoke` reruns the same way.
+Pass `--rebuild` to ignore all of that and force a fresh build.
 
 Update packages are **ed25519-signed**; the public key is baked into the app
 (`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`) and verifies every
@@ -197,8 +198,9 @@ signs. Verify a cut build with `spctl -a -vvv -t install <app>` and
 
 ### Windows (not yet signed)
 
-Still unsigned. To drop the SmartScreen prompt, add a signing step with an EV/OV
-(or Azure Trusted Signing) certificate to `scripts/release-win-remote.ps1`.
+Still unsigned. To drop the SmartScreen prompt, add an Authenticode step with an
+EV/OV (or Azure Trusted Signing) certificate to the Windows container leg
+(`scripts/builders/windows/build.sh`), through `osslsigncode` or `jsign`.
 
 ### Linux (no OS signing)
 
@@ -207,56 +209,93 @@ go up unsigned; the AUR package's integrity is the `sha256sum` the PKGBUILD pins
 against the published `.deb`. There is no ed25519 signature either, because
 nothing on Linux self-installs — see below.
 
-## Remote builders
+## Build containers
 
-Both are headless compile boxes reached over SSH. They need no secrets, no Git
-credentials, and no signing key.
+`release-local.sh` builds the Windows and Linux legs in Docker containers on the
+Mac, through `scripts/builders/run.sh <windows|linux> <source.tgz> <out-dir>`.
+Both cross-compile at native arm64 speed, so neither needs Rosetta, and neither
+holds a secret, a Git credential or the signing key.
 
-`nexus` hosts both legs. The Windows builder used to be its own physical machine;
-it is now a Windows 11 guest running on `nexus` under Docker, so a release drives
-one box twice. To make room, `nexus`'s iGPU carve-out was dropped from 16 GB to
-HP's 512 MB default in the firmware — Ollama still runs models at 100% GPU
-because the iGPU borrows system RAM through GTT on demand, so the large
-dedicated reservation was walling off memory nothing used. That took Linux from
-16 GB to 30 GB.
+| Leg | Image (`scripts/builders/`) | Produces |
+| --- | --- | --- |
+| Windows | `windows/`: `rust:<version>-slim-trixie` with cargo-xwin (the MSVC CRT and Windows SDK baked in), LLVM and Debian's NSIS | `target/windows-release/`: `Hyprlayer_<v>_x64-setup.exe`, `hyprlayer-server-x86_64-pc-windows-msvc.exe` |
+| Linux | `linux/`: `rust:<version>-slim-bookworm` with an amd64 bookworm sysroot | `target/linux-release/`: the `.deb`, the `.rpm`, `hyprlayer-server-x86_64-unknown-linux-gnu`, `aur/` and `aur-server/` |
 
-| Builder | Host (override) | Helper | Produces |
-| --- | --- | --- | --- |
-| Windows | `nexus-win` (`HYPRLAYER_WIN_SSH_HOST`) — a Windows guest **on `nexus`** | `scripts/release-win-remote.ps1` | `*-setup.exe` |
-| Linux | `nexus` (`HYPRLAYER_LINUX_SSH_HOST`) | `scripts/release-linux-remote.sh` | `*.deb`, `*.rpm`, `PKGBUILD` + `.SRCINFO` |
+`run.sh` passes the Mac's `rustc` version and `package.json`'s pnpm version as
+build args, so all three legs compile with the same toolchain. Each leg keeps
+named volumes for its cargo target dir, registry, pnpm store and `~/.cache`, so a
+release after the first rebuilds only the workspace crates; budget about 16 GB of
+Docker disk. The image layers are cached too: after changing a Dockerfile's pinned
+versions, rebuild it with `docker build --no-cache` so its downloads run again.
 
-Windows also has a CI fallback: `HYPRLAYER_WIN_BUILDER=actions` runs
-`.github/workflows/windows-build.yml` on a `windows-latest` runner and downloads
-the artifact instead of using SSH. Linux has no such fallback yet — build hosted
-if you need one, or run with `--no-linux`.
+**Memory.** The legs peak near 5.6 GB (Windows) and 4.2 GB (Linux). With Docker
+Desktop at 12 GB or more, `release-local.sh` builds them at once; below that it
+builds them one after the other and says so. It reads `MemTotal` from
+`docker info`, which reports a little less than the setting (8 GB reads 7.75 GiB,
+16 GB reads 15.59), so the cut-off is 11 GiB.
 
-**Windows builder prerequisites.** The guest is the omarchy-managed
-`dockurr/windows` container on `nexus`. There is one VM and one disk
-(`~/.windows`, bind-mounted into a root-owned anchor under
-`/var/lib/omarchy/windows/mounts/`), started with `omarchy-windows-vm launch`.
-`release-local.sh` waits for that guest and never starts or stops it: the
-container name `omarchy-windows` is shared by design — it is what stops two QEMU
-processes writing one image — so bringing up a second compose would recreate the
-guest under a different profile mid-release.
+**Windows.** `makensis` crashes on macOS arm64, so the whole leg runs in the
+container, where Debian's works. The installer matches an official one apart from
+NSIS's stubs, which Debian builds with mingw (`uninstall.exe` is about 149 KB
+rather than 79 KB). Tauri calls cross-compiling experimental and cannot
+cross-build an MSI; the release ships NSIS only.
 
-A dedicated builder compose at `~/.config/hyprlayer-winbuilder/docker-compose.yml`
-used to own the lifecycle, adding `RAM_SIZE: 10G` / `CPU_CORES: 8` and a
-`2222 -> 22` SSH publish. It is no longer used; sizing now comes from whatever
-`omarchy-windows-vm install` configured.
+**Linux.** `mmdebstrap --variant=extract` unpacks the sysroot without running
+anything. Debian's `makepkg` fails on these PKGBUILDs, so `run.sh` renders each
+`.SRCINFO` with Arch's, in a two-second amd64 step (`scripts/builders/aur/`).
 
-**Reaching the guest.** The omarchy compose publishes only `8006` and `3389`,
-both on loopback, and hard-codes its port bindings — there is no SSH publish to
-add one to. The guest is reached at its docker-bridge address instead, and docker
-rotates both the bridge and its subnet on every container recreate (observed:
-`172.22.0.2` -> `172.21.0.2` across one restart), so a pinned address does not
-survive. `~/.ssh/nexus-win-proxy.sh` resolves it on the VM host per connect and
-is wired in as the `nexus-win` `ProxyCommand`; `ssh`/`scp nexus-win` therefore
-work unchanged. `Host nexus` carries `ControlMaster auto` so the extra hop the
-resolver costs is amortized.
+The SSH builders this replaced (`scripts/release-win-remote.ps1`,
+`scripts/release-linux-remote.sh`, `.github/workflows/windows-build.yml`) stay in
+the tree until the first container-built release ships. To fall back to them, on
+`main` run `git show v0.8.9:scripts/release-local.sh > scripts/release-local.sh`,
+release, then `git checkout scripts/release-local.sh`; the v0.8.9
+`docs/RELEASING.md` has their host setup.
+
+### Smoke tests (`--smoke`)
+
+`release-local.sh --smoke` install-tests what it built before the `Proceed?`
+prompt, and before publishing under `-y`. Any failure, including a Windows test
+host that is unreachable or busy, stops the release with nothing published; the
+rerun reuses every built artifact. The Windows host is checked up front
+(`windows.sh --check`), so a stopped or busy one fails before anything builds.
+
+- **Linux** (`scripts/builders/smoke/linux.sh`) needs only Docker. It installs the
+  deb on Ubuntu 24.04 and Debian 13, the rpm on Fedora (`fedora:latest`, which
+  floats) and the AUR package on Arch through `makepkg -si`, then launches the
+  Arch install under Xvfb and checks that it reaches its server. The distros run
+  as amd64 containers under emulation. Expect 6–18 minutes, mostly Ubuntu's apt
+  mirror.
+- **Windows** (`scripts/builders/smoke/windows.sh`) installs, launches, closes and
+  uninstalls the build on a real Windows host over SSH (`HYPRLAYER_WIN_TEST_HOST`,
+  default `nexus-win`), then puts back whatever install was there. It refuses to
+  start while Hyprlayer or its server runs on the host, because installing closes
+  the app and uninstalling kills the server along with any agents it hosts. For
+  the run it moves the host's Hyprlayer profile
+  (`%APPDATA%\ai.brightblock.hyprlayer` and `%LOCALAPPDATA%\ai.brightblock.hyprlayer`)
+  into `%LOCALAPPDATA%\hl-smoke-backup`, so the build under test starts fresh and
+  never opens the real database, settings or `hosts.json`; the CLI's shared config
+  and skill stores under `%APPDATA%\hyprlayer` stay where they are. If the restore
+  fails, the script says where the profile is and how to move it back. The app's
+  quit confirmation keeps it open after WM_CLOSE, so the test stops it before
+  uninstalling.
+
+**The Windows test host.** `nexus-win` is the omarchy-managed `dockurr/windows`
+guest on `nexus`: one VM and one disk (`~/.windows`), started with
+`omarchy-windows-vm launch`. Nothing in the release scripts starts or stops it.
+Launch it with `--keep-alive` before a `--smoke` run, or it stops when its RDP
+window closes.
+
+The omarchy compose publishes only `8006` and `3389`, both on loopback, so the
+guest is reached at its docker-bridge address, which docker changes on every
+container recreate. `~/.ssh/nexus-win-proxy.sh` resolves it on `nexus` per
+connect and is the `nexus-win` `ProxyCommand`, so `ssh`/`scp nexus-win` work
+unchanged; `Host nexus` carries `ControlMaster auto` to amortize the extra hop.
+The `nexus-win` entry also needs `IdentitiesOnly yes`, because the 1Password
+agent offers enough keys to trip sshd's `MaxAuthTries 6`, and
+`HostKeyAlias nexus-win`.
 
 ```sh
-# start/stop the guest (release-local.sh waits for it, never starts it)
-omarchy-windows-vm launch          # add --keep-alive to survive RDP closing
+omarchy-windows-vm launch --keep-alive   # start the guest for a smoke run
 omarchy-windows-vm stop
 
 # RDP from the Mac: tunnel first, then point Windows App at localhost:13389
@@ -271,78 +310,13 @@ Inside the guest:
 - **OpenSSH Server**: `Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0`,
   then `Set-Service sshd -StartupType Automatic; Start-Service sshd`.
 - **The public key goes in `C:\ProgramData\ssh\administrators_authorized_keys`**,
-  not `~/.ssh/authorized_keys`, because the build account is an Administrator.
-  Its ACL must grant only `Administrators` and `SYSTEM`
+  not `~/.ssh/authorized_keys`, because the account is an Administrator. Its ACL
+  must grant only `Administrators` and `SYSTEM`
   (`icacls <file> /inheritance:r /grant Administrators:F /grant SYSTEM:F`).
   A wrong ACL is a silent auth failure, not an error.
-- **Leave sshd's `DefaultShell` alone — it must stay `cmd.exe`.**
-  `scripts/release-local.sh` invokes the helper via
-  `%USERPROFILE%\release-win-remote.ps1`, and that variable only expands under
-  `cmd`. Switching the default shell to PowerShell is the most commonly applied
-  Windows-OpenSSH tweak and it breaks the build with a literal-path error that
-  looks nothing like its cause.
-- **Rust** via `rustup`, host target `x86_64-pc-windows-msvc` —
-  `release-win-remote.ps1` checks the libraries against it before the bundle
-  build.
-- **VS Build Tools 2022** ("Desktop development with C++") **plus the Windows 11
-  SDK**. The SDK supplies `rc.exe`, which `release-win-remote.ps1` pins into
-  `$env:RC` because an SSH session's PATH does not include the SDK bin dir.
-- **Node + pnpm** via `corepack enable; corepack prepare pnpm@<pinned> --activate`,
-  matching `packageManager` in `package.json`.
-- `tar` ships with Windows 10+ and needs no install.
-
-Two things that bite when rebuilding this guest from scratch:
-
-**The port mapping must be `2222:22`, not `2222:2222`.** The container DNATs
-inbound traffic to the *same* port number inside the VM, so the guest's `sshd`
-has to be on 22.
-
-**Growing `DISK_SIZE` does not grow `C:`.** The image resizes on next boot, but
-Windows leaves the new space unallocated — and a Recovery partition sitting
-after `C:` will cap `Get-PartitionSupportedSize` at the old size, so a plain
-`diskpart extend` silently does nothing. Detach it and remove it first:
-
-```powershell
-reagentc /disable
-Remove-Partition -DiskNumber 0 -PartitionNumber <recovery> -Confirm:$false
-Resize-Partition -DriveLetter C -Size (Get-PartitionSupportedSize -DriveLetter C).SizeMax
-```
-
-On the Mac, `nexus-win` reaches the guest through `nexus` because the container
-binds 2222 to loopback:
-
-```sshconfig
-Host nexus-win
-    HostName 127.0.0.1
-    Port 2222
-    User jt
-    ProxyJump nexus
-    IdentityFile ~/.ssh/nexus-win_ed25519
-    IdentitiesOnly yes
-    HostKeyAlias nexus-win
-```
-
-`IdentitiesOnly` is load-bearing: `Host *` points at the 1Password agent, and a
-vault with more than ~5 keys trips sshd's `MaxAuthTries 6` before the right key
-is offered. `HostKeyAlias` keys `known_hosts` by name rather than
-`[127.0.0.1]:2222`, which any other local forward on that port would collide
-with. If the retired physical `nexus-win`'s keys are still in `known_hosts`, the
-first connection fails as `REMOTE HOST IDENTIFICATION HAS CHANGED` — clear them
-with `ssh-keygen -R nexus-win`.
-
-**Linux builder prerequisites** (Arch package names; the helper resolves
-toolchains through a login shell, so mise/nvm/volta shims are fine):
-
-```sh
-# toolchains
-rustup default stable
-# system deps for Tauri 2
-sudo pacman -S --needed webkit2gtk-4.1 gtk3 librsvg base-devel
-```
-
-Both bundlers are pure Rust — no `dpkg`, no `rpmbuild`, no FUSE. `makepkg`
-(from `pacman`, always present) renders the `.SRCINFO`, which is why that file
-is generated on the builder rather than on the Mac.
+- **Leave sshd's `DefaultShell` alone — it must stay `cmd.exe`.** The smoke test
+  addresses its working dir as `%LOCALAPPDATA%\Temp\hl-smoke`, and that variable
+  only expands under `cmd`.
 
 ### Library target checks
 
@@ -351,7 +325,7 @@ is published:
 
 ```sh
 cargo check -p hyprlayer-models -p hyprlayer-core                                    # host target
-cargo check -p hyprlayer-models -p hyprlayer-core --target x86_64-pc-windows-msvc   # Windows builder
+cargo check -p hyprlayer-models -p hyprlayer-core --target x86_64-pc-windows-msvc   # Windows container
 ```
 
 This is not redundant with the bundle build that follows it, though it looks it.
@@ -360,11 +334,9 @@ features across a workspace build — so `cargo test --workspace` and `tauri bui
 only ever compile core *with* specta. A headless embedder gets neither the app nor
 that feature, and this is the only check that compiles core the way they will.
 
-It runs in `release.sh`'s gate (the Mac), `release-linux-remote.sh` (nexus),
-`release-win-remote.ps1`, and the Windows workflow. If the Windows target isn't
-installed, `rustup target add x86_64-pc-windows-msvc`; if core fails to build
-there it is usually the MSVC C toolchain, which needs VS Build Tools 2022 with
-"Desktop development with C++" plus the Windows 11 SDK.
+It runs in `release.sh`'s gate (the Mac) and at the start of both container legs:
+`scripts/builders/linux/build.sh`, and `scripts/builders/windows/build.sh`, where
+cargo-xwin supplies the MSVC CRT and Windows SDK that core's C dependencies need.
 
 `x86_64-pc-windows-gnu` is not a support target and nothing gates on it, but
 `cargo check -p hyprlayer-core --target x86_64-pc-windows-gnu` is a cheap way to
@@ -372,12 +344,12 @@ compile the Windows `cfg` arms from a Linux or macOS box.
 
 ### Linux packaging
 
-The builder is an **Arch** box, and Arch is the primary Linux target, so the ELF
-it produces links Arch's `webkit2gtk-4.1` — exactly what the AUR package wants.
-The same binary is wrapped as `.deb` and `.rpm` for everyone else, which sets a
-glibc floor: those install cleanly on Ubuntu 24.04, Debian 13 and Fedora 40 and
-newer, but not on older LTS releases. Targeting those properly means building in
-an old-glibc container; that isn't wired up.
+The Linux leg cross-compiles against a Debian **bookworm** sysroot, so the ELF
+needs glibc 2.34 at most and links WebKitGTK 4.1 and GTK 3 by soname. One binary
+is wrapped as `.deb` and `.rpm` and repackaged for the AUR. The packages install
+on Ubuntu 24.04, Debian 13, Fedora and Arch, which is what `--smoke` checks, and
+the standalone server also starts on Ubuntu 22.04, Debian 12 and RHEL 9 remote
+hosts.
 
 Runtime dependencies are declared in three places, and they must stay in step:
 
@@ -396,8 +368,10 @@ openSUSE (`libwebkit2gtk-4_1-0`) disagree on the latter.
 
 The AUR package is `hyprlayer-desktop-bin` — a **binary** package, because the
 source repo is private and there is nothing for an AUR user to build from. Its
-`package()` unpacks the published `.deb`; since that `.deb` was itself built on
-Arch, this is transport only, with no Debian runtime involved.
+`package()` unpacks the published `.deb`, which is transport only, with no Debian
+runtime involved: the ELF was built against bookworm's libraries but links them by
+soname and runs on Arch's newer ones. `--smoke` installs the AUR package on Arch and
+launches it.
 
 ### How Linux updates work
 

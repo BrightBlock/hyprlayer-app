@@ -14,15 +14,7 @@ APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: JON 
 APPLE_API_KEY="${APPLE_API_KEY:-JUMDZ7DQF5}"
 APPLE_API_ISSUER="${APPLE_API_ISSUER:-4724564e-817f-4077-8b88-b4411b7978e9}"
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:-$HOME/.tauri/AuthKey_JUMDZ7DQF5.p8}"
-WIN_BUILDER="${HYPRLAYER_WIN_BUILDER:-ssh}"
-WIN_SSH_HOST="${HYPRLAYER_WIN_SSH_HOST:-nexus-win}"
-WIN_HELPER="scripts/release-win-remote.ps1"
-WIN_ACTIONS_REPO="${HYPRLAYER_WIN_ACTIONS_REPO:-BrightBlock/hyprlayer-app}"
-WIN_ACTIONS_WORKFLOW="windows-build.yml"
-WIN_VM_HOST="${HYPRLAYER_WIN_VM_HOST:-nexus}"
-WIN_VM_WAIT_TRIES="${HYPRLAYER_WIN_VM_WAIT_TRIES:-30}"
-LINUX_SSH_HOST="${HYPRLAYER_LINUX_SSH_HOST:-nexus}"
-LINUX_HELPER="scripts/release-linux-remote.sh"
+BUILDERS="scripts/builders/run.sh"
 AUR_PKGNAME="hyprlayer-desktop-bin"
 AUR_SERVER_PKGNAME="hyprlayer-server-bin"
 AUR_SSH="${HYPRLAYER_AUR_SSH:-aur@aur.archlinux.org}"
@@ -42,6 +34,7 @@ INCLUDE_WINDOWS=1
 INCLUDE_LINUX=1
 INCLUDE_AUR=1
 FORCE_REBUILD=0
+SMOKE=0
 for arg in "$@"; do
   case "$arg" in
     -y|--yes)     ASSUME_YES=1 ;;
@@ -50,7 +43,8 @@ for arg in "$@"; do
     --no-linux)   INCLUDE_LINUX=0 ;;
     --no-aur)     INCLUDE_AUR=0 ;;
     --rebuild)    FORCE_REBUILD=1 ;;
-    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows, --no-linux, --no-aur or --rebuild)" >&2; exit 1 ;;
+    --smoke)      SMOKE=1 ;;
+    *) echo "unknown arg: $arg (expected -y/--yes, --mac-only, --no-windows, --no-linux, --no-aur, --rebuild or --smoke)" >&2; exit 1 ;;
   esac
 done
 [[ "$INCLUDE_LINUX" == "1" ]] || INCLUDE_AUR=0
@@ -66,10 +60,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-REQUIRED_TOOLS=(gh cargo pnpm shasum node rustup curl)
-if [[ "$INCLUDE_LINUX" == "1" || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" ) ]]; then
-  REQUIRED_TOOLS+=(ssh scp git)
-fi
+REQUIRED_TOOLS=(gh cargo pnpm shasum node rustup curl git)
+[[ "$INCLUDE_LINUX" == "1" || "$INCLUDE_WINDOWS" == "1" ]] && REQUIRED_TOOLS+=(docker)
+[[ "$INCLUDE_AUR" == "1" ]] && REQUIRED_TOOLS+=(ssh)
+[[ "$SMOKE" == "1" && "$INCLUDE_WINDOWS" == "1" ]] && REQUIRED_TOOLS+=(ssh scp)
 # The formula is rendered and syntax-checked after the release is already live.
 [[ "$INCLUDE_LINUX" == "1" ]] && REQUIRED_TOOLS+=(python3 ruby)
 for tool in "${REQUIRED_TOOLS[@]}"; do
@@ -142,41 +136,19 @@ fi
 rustup target list --installed 2>/dev/null | grep -q '^aarch64-apple-darwin$' \
   || rustup target add aarch64-apple-darwin
 
-if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
-  case "$WIN_BUILDER" in
-    ssh)
-      [[ -f "$WIN_HELPER" ]] || die "missing $WIN_HELPER"
-      # The guest's lifecycle belongs to omarchy-windows-vm, which owns both the
-      # container name and a root-owned compose; bringing up a second compose
-      # here would recreate the container under a different profile mid-release.
-      say "Checking Windows builder ($WIN_SSH_HOST) is reachable…"
-      win_ready=0
-      for i in $(seq 1 "$WIN_VM_WAIT_TRIES"); do
-        if ssh -o BatchMode=yes -o ConnectTimeout=10 "$WIN_SSH_HOST" "echo ok" >/dev/null 2>&1; then
-          win_ready=1
-          break
-        fi
-        [[ $((i % 6)) -eq 0 ]] && say "  …still waiting for the guest ($((i * 5))s)"
-        sleep 5
-      done
-      [[ "$win_ready" == "1" ]] \
-        || die "Windows builder '$WIN_SSH_HOST' unreachable over SSH — start the guest on $WIN_VM_HOST with 'omarchy-windows-vm launch', set HYPRLAYER_WIN_SSH_HOST, run with HYPRLAYER_WIN_BUILDER=actions, or run with --mac-only"
-      ;;
-    actions)
-      say "Checking GitHub Actions Windows builder ($WIN_ACTIONS_REPO) is reachable…"
-      gh workflow view "$WIN_ACTIONS_WORKFLOW" --repo "$WIN_ACTIONS_REPO" >/dev/null 2>&1 \
-        || die "workflow $WIN_ACTIONS_WORKFLOW not found on $WIN_ACTIONS_REPO — push .github/workflows/windows-build.yml to main first"
-      ;;
-    *) die "unknown HYPRLAYER_WIN_BUILDER '$WIN_BUILDER' (expected ssh or actions)" ;;
-  esac
+BUILD_WINDOWS=0; BUILD_LINUX=0
+[[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]] && BUILD_WINDOWS=1
+[[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ]] && BUILD_LINUX=1
+if [[ "$BUILD_WINDOWS" == "1" || "$BUILD_LINUX" == "1" || ( "$SMOKE" == "1" && "$INCLUDE_LINUX" == "1" ) ]]; then
+  docker info >/dev/null 2>&1 \
+    || die "Docker is not running — the Windows and Linux legs build in containers, and the Linux smoke test runs in them. Start Docker Desktop, or run with --mac-only"
 fi
-
-if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ]]; then
-  [[ -f "$LINUX_HELPER" ]] || die "missing $LINUX_HELPER"
-  [[ -f "packaging/aur/PKGBUILD.in" ]] || die "missing packaging/aur/PKGBUILD.in (the builder renders it)"
-  say "Checking Linux builder ($LINUX_SSH_HOST) is reachable…"
-  ssh -o BatchMode=yes -o ConnectTimeout=10 "$LINUX_SSH_HOST" "echo ok" >/dev/null 2>&1 \
-    || die "Linux builder '$LINUX_SSH_HOST' unreachable over SSH — wake it / check Tailscale, set HYPRLAYER_LINUX_SSH_HOST, or run with --no-linux"
+[[ "$BUILD_LINUX" != "1" || -f "packaging/aur/PKGBUILD.in" ]] \
+  || die "missing packaging/aur/PKGBUILD.in (the builder renders it)"
+if [[ "$SMOKE" == "1" && "$INCLUDE_WINDOWS" == "1" ]]; then
+  say "Checking the Windows smoke-test host is up and idle…"
+  scripts/builders/smoke/windows.sh --check \
+    || die "the Windows smoke test cannot run (see above): start or free its host, or drop --smoke"
 fi
 
 if [[ "$INCLUDE_AUR" == "1" ]]; then
@@ -194,56 +166,51 @@ say "Releasing Hyprlayer $TAG — $PLATFORM_DESC, locally"
 TMP="$(mktemp -d)"; TMPDIRS+=("$TMP")
 
 SRC_TGZ="$TMP/hyprlayer-src.tgz"
-if [[ ( "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ) || ( "$INCLUDE_WINDOWS" == "1" && "$WIN_BUILDER" == "ssh" && "$WIN_CACHED" != "1" ) ]]; then
-  git archive --format=tar.gz -o "$SRC_TGZ" "$TAG"
-fi
-
-WIN_PID=""
 WIN_LOG="$TMP/windows-build.log"
-if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" != "1" ]]; then
-  case "$WIN_BUILDER" in
-    ssh)
-      say "Shipping $TAG source to $WIN_SSH_HOST and starting NSIS build (background)…"
-      scp -q "$SRC_TGZ" "$WIN_SSH_HOST:hyprlayer-src.tgz"
-      scp -q "$WIN_HELPER" "$WIN_SSH_HOST:release-win-remote.ps1"
-      ssh "$WIN_SSH_HOST" \
-        "powershell -NoProfile -ExecutionPolicy Bypass -File %USERPROFILE%\\release-win-remote.ps1" \
-        >"$WIN_LOG" 2>&1 &
-      WIN_PID=$!
-      ;;
-    actions)
-      say "Triggering GitHub Actions Windows build for $TAG (background)…"
-      (
-        set -euo pipefail
-        TRIGGERED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        gh workflow run "$WIN_ACTIONS_WORKFLOW" --repo "$WIN_ACTIONS_REPO" -f "tag=$TAG"
-        RUN_ID=""
-        for _ in $(seq 1 15); do
-          sleep 4
-          RUN_ID="$(gh run list --repo "$WIN_ACTIONS_REPO" --workflow "$WIN_ACTIONS_WORKFLOW" \
-            --limit 5 --json databaseId,createdAt,event \
-            -q "[.[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"$TRIGGERED_AT\")] | sort_by(.createdAt) | .[0].databaseId")"
-          [[ -n "$RUN_ID" ]] && break
-        done
-        [[ -n "$RUN_ID" ]] || { echo "could not find the triggered Actions run"; exit 1; }
-        echo "RUN_ID=$RUN_ID"
-        gh run watch "$RUN_ID" --repo "$WIN_ACTIONS_REPO" --exit-status
-      ) >"$WIN_LOG" 2>&1 &
-      WIN_PID=$!
-      ;;
-  esac
+LINUX_LOG="$TMP/linux-build.log"
+BUILDERS_PID=""
+build_leg() {  # build_leg <leg> <out-dir> <log>
+  if "$BUILDERS" "$1" "$SRC_TGZ" "$2" >"$3" 2>&1; then echo 0; else echo $?; fi >"$TMP/$1.rc"
+}
+if [[ "$BUILD_WINDOWS" == "1" || "$BUILD_LINUX" == "1" ]]; then
+  git archive --format=tar.gz -o "$SRC_TGZ" "$TAG"
+  # Both legs at once peak near 10 GB. Docker Desktop's 8 GB setting reports a
+  # MemTotal of 7.75 GiB and its 16 GB setting 15.59, so 11 GiB means 12 GB or more.
+  DOCKER_MEM="$(docker info --format '{{.MemTotal}}' 2>/dev/null || true)"
+  [[ "$DOCKER_MEM" =~ ^[0-9]+$ ]] || DOCKER_MEM=0
+  PARALLEL=0
+  (( DOCKER_MEM >= 11 * 1024 ** 3 )) && PARALLEL=1
+  say "Building the Windows/Linux legs in containers from $TAG (background)…"
+  if [[ "$BUILD_WINDOWS" == "1" && "$BUILD_LINUX" == "1" ]]; then
+    if (( PARALLEL )); then
+      say "  …both at once: Docker Desktop has $(( DOCKER_MEM / 1024 ** 3 )) GiB"
+    else
+      say "  …one after the other: Docker Desktop has under 12 GB"
+    fi
+  fi
+  (
+    if [[ "$BUILD_WINDOWS" == "1" ]]; then
+      if (( PARALLEL )); then build_leg windows "$WIN_OUT" "$WIN_LOG" & else build_leg windows "$WIN_OUT" "$WIN_LOG"; fi
+    fi
+    [[ "$BUILD_LINUX" != "1" ]] || build_leg linux "$LINUX_OUT" "$LINUX_LOG"
+    wait
+  ) &
+  BUILDERS_PID=$!
 fi
 
-LINUX_PID=""
-LINUX_LOG="$TMP/linux-build.log"
-if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" != "1" ]]; then
-  say "Shipping $TAG source to $LINUX_SSH_HOST and starting deb/rpm build (background)…"
-  scp -q "$SRC_TGZ" "$LINUX_SSH_HOST:hyprlayer-src.tgz"
-  scp -q "$LINUX_HELPER" "$LINUX_SSH_HOST:release-linux-remote.sh"
-  ssh "$LINUX_SSH_HOST" "bash -lc 'bash ~/release-linux-remote.sh'" \
-    >"$LINUX_LOG" 2>&1 &
-  LINUX_PID=$!
-fi
+wait_for_builders() {
+  [[ -n "$BUILDERS_PID" ]] || return 0
+  say "Waiting for the container builds…"
+  wait "$BUILDERS_PID" || true
+  BUILDERS_PID=""
+}
+
+builder_failed() {  # builder_failed <leg> <log>
+  echo "── $1 build log ─────────────────────────────────────────"
+  cat "$2"
+  echo "──────────────────────────────────────────────────────────"
+  die "$1 build failed in its container (log above)"
+}
 
 if [[ "$MAC_CACHED" == "1" ]]; then
   DMG="$MAC_DMG"
@@ -283,56 +250,17 @@ cp "$BUNDLE/macos/Hyprlayer.app/Contents/MacOS/hyprlayer-server" "$MAC_SERVER_BI
 SETUP_NAME=""; WIN_SIG=""
 if [[ "$INCLUDE_WINDOWS" == "1" && "$WIN_CACHED" == "1" ]]; then
   SETUP_NAME="$WIN_SETUP_NAME"
+  [[ -f "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" ]] \
+    || die "cached Windows build has no hyprlayer-server-x86_64-pc-windows-msvc.exe — re-run with --rebuild"
   WIN_SIG="$(cat "$WIN_OUT/$SETUP_NAME.sig")"
   WIN_SHA="$(shasum -a 256 "$WIN_OUT/$SETUP_NAME" | awk '{print $1}')"
   ok "Reused $SETUP_NAME (sha256 $WIN_SHA)"
 elif [[ "$INCLUDE_WINDOWS" == "1" ]]; then
-  case "$WIN_BUILDER" in
-    ssh)
-      say "Waiting for the Windows build on ${WIN_SSH_HOST}…"
-      if ! wait "$WIN_PID"; then
-        echo "── Windows build log ─────────────────────────────────────"
-        cat "$WIN_LOG"
-        echo "──────────────────────────────────────────────────────────"
-        die "Windows build failed on $WIN_SSH_HOST (log above)"
-      fi
-      SETUP_REMOTE="$(grep -E '^SETUP_EXE=' "$WIN_LOG" | tail -n1 | sed 's/^SETUP_EXE=//' | tr -d '\r')"
-      [[ -n "$SETUP_REMOTE" ]] || { cat "$WIN_LOG"; die "no SETUP_EXE line in Windows build output"; }
-      SETUP_REMOTE_FWD="${SETUP_REMOTE//\\//}"
-      SETUP_NAME="$(basename "$SETUP_REMOTE_FWD")"
-      mkdir -p "$WIN_OUT"
-      scp -q "$WIN_SSH_HOST:${SETUP_REMOTE_FWD}" "$WIN_OUT/$SETUP_NAME" \
-        || die "failed to copy $SETUP_NAME down from $WIN_SSH_HOST"
-      SERVER_REMOTE_WIN="$(grep -E '^SERVER_EXE=' "$WIN_LOG" | tail -n1 | sed 's/^SERVER_EXE=//' | tr -d '\r')"
-      [[ -n "$SERVER_REMOTE_WIN" ]] \
-        || { cat "$WIN_LOG"; die "no SERVER_EXE line in Windows build output"; }
-      scp -q "$WIN_SSH_HOST:${SERVER_REMOTE_WIN//\\//}" \
-        "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" \
-        || die "failed to copy the Windows hyprlayer-server down from $WIN_SSH_HOST"
-      ;;
-    actions)
-      say "Waiting for the GitHub Actions Windows build (${WIN_ACTIONS_REPO})…"
-      if ! wait "$WIN_PID"; then
-        echo "── Windows build log ─────────────────────────────────────"
-        cat "$WIN_LOG"
-        echo "──────────────────────────────────────────────────────────"
-        die "Windows build failed on GitHub Actions (log above)"
-      fi
-      RUN_ID="$(grep -E '^RUN_ID=' "$WIN_LOG" | tail -n1 | sed 's/^RUN_ID=//' | tr -d '\r')"
-      [[ -n "$RUN_ID" ]] || { cat "$WIN_LOG"; die "no RUN_ID line in Actions trigger output"; }
-      mkdir -p "$WIN_OUT"
-      gh run download "$RUN_ID" --repo "$WIN_ACTIONS_REPO" -n windows-installer -D "$WIN_OUT" \
-        || die "failed to download windows-installer artifact from run $RUN_ID"
-      # windows-build.yml uploads the installer only. The server asset needs the
-      # ssh builder until that workflow uploads the sidecar too.
-      [[ -f "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" ]] \
-        || die "the Actions builder produces no hyprlayer-server asset — re-run with HYPRLAYER_WIN_BUILDER=ssh, or --no-windows"
-      # $WIN_OUT keeps every past release's installer, so glob order would pick the oldest.
-      SETUP_NAME="$WIN_SETUP_NAME"
-      [[ -f "$WIN_OUT/$SETUP_NAME" ]] \
-        || die "run $RUN_ID's artifact has no $SETUP_NAME — it built a different version than $TAG"
-      ;;
-  esac
+  wait_for_builders
+  [[ "$(cat "$TMP/windows.rc" 2>/dev/null)" == "0" ]] || builder_failed Windows "$WIN_LOG"
+  SETUP_NAME="$WIN_SETUP_NAME"
+  [[ -f "$WIN_OUT/$SETUP_NAME" && -f "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" ]] \
+    || builder_failed Windows "$WIN_LOG"
   say "Signing $SETUP_NAME on the Mac (key stays local)…"
   TAURI_SIGNING_PRIVATE_KEY="$(cat "$SIGNING_KEY_PATH")" \
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" \
@@ -361,51 +289,42 @@ if [[ "$INCLUDE_LINUX" == "1" && "$LINUX_CACHED" == "1" ]]; then
   ok "Reused $DEB_NAME (sha256 $DEB_SHA)"
   ok "Reused $RPM_NAME (sha256 $RPM_SHA)"
 elif [[ "$INCLUDE_LINUX" == "1" ]]; then
-  say "Waiting for the Linux build on ${LINUX_SSH_HOST}…"
-  if ! wait "$LINUX_PID"; then
-    echo "── Linux build log ───────────────────────────────────────"
-    cat "$LINUX_LOG"
-    echo "──────────────────────────────────────────────────────────"
-    die "Linux build failed on $LINUX_SSH_HOST (log above)"
-  fi
-  DEB_REMOTE="$(linux_out_path DEB)"
-  RPM_REMOTE="$(linux_out_path RPM)"
-  AUR_REMOTE="$(linux_out_path AUR_DIR)"
-  SERVER_REMOTE="$(linux_out_path SERVER_BIN)"
-  AUR_SERVER_REMOTE="$(linux_out_path AUR_SERVER_DIR)"
-  [[ -n "$DEB_REMOTE" && -n "$RPM_REMOTE" && -n "$AUR_REMOTE" \
-     && -n "$SERVER_REMOTE" && -n "$AUR_SERVER_REMOTE" ]] \
-    || { cat "$LINUX_LOG"; die "Linux build output is missing a DEB/RPM/AUR_DIR/SERVER_BIN/AUR_SERVER_DIR line"; }
-  DEB_NAME="$(basename "$DEB_REMOTE")"
-  RPM_NAME="$(basename "$RPM_REMOTE")"
-  mkdir -p "$LINUX_OUT"
-  rm -rf "$LINUX_OUT/aur"
-  scp -q "$LINUX_SSH_HOST:${DEB_REMOTE}" "$LINUX_OUT/$DEB_NAME" \
-    || die "failed to copy $DEB_NAME down from $LINUX_SSH_HOST"
-  scp -q "$LINUX_SSH_HOST:${RPM_REMOTE}" "$LINUX_OUT/$RPM_NAME" \
-    || die "failed to copy $RPM_NAME down from $LINUX_SSH_HOST"
-  scp -qr "$LINUX_SSH_HOST:${AUR_REMOTE}" "$LINUX_OUT/aur" \
-    || die "failed to copy the AUR files down from $LINUX_SSH_HOST"
+  wait_for_builders
+  [[ "$(cat "$TMP/linux.rc" 2>/dev/null)" == "0" ]] || builder_failed Linux "$LINUX_LOG"
+  DEB_NAME="$LINUX_DEB_NAME"
+  RPM_NAME="$(basename "$(linux_out_path RPM)")"
+  [[ -f "$LINUX_OUT/$DEB_NAME" && -f "$LINUX_OUT/$RPM_NAME" && -f "$LINUX_SERVER_BIN" ]] \
+    || builder_failed Linux "$LINUX_LOG"
   [[ -f "$LINUX_OUT/aur/PKGBUILD" && -s "$LINUX_OUT/aur/.SRCINFO" ]] \
     || die "AUR files incomplete under $LINUX_OUT/aur (need PKGBUILD + .SRCINFO)"
-  scp -q "$LINUX_SSH_HOST:${SERVER_REMOTE}" "$LINUX_SERVER_BIN" \
-    || die "failed to copy the Linux hyprlayer-server down from $LINUX_SSH_HOST"
-  rm -rf "$LINUX_OUT/aur-server"
-  scp -qr "$LINUX_SSH_HOST:${AUR_SERVER_REMOTE}" "$LINUX_OUT/aur-server" \
-    || die "failed to copy the server AUR files down from $LINUX_SSH_HOST"
   [[ -f "$LINUX_OUT/aur-server/PKGBUILD" && -s "$LINUX_OUT/aur-server/.SRCINFO" ]] \
     || die "server AUR files incomplete under $LINUX_OUT/aur-server (need PKGBUILD + .SRCINFO)"
-  SERVER_SHA_REMOTE="$(linux_out_path SERVER_SHA)"
-  grep -qF "$SERVER_SHA_REMOTE" "$LINUX_OUT/aur-server/PKGBUILD" \
+  # $LINUX_OUT keeps past releases, so tie the PKGBUILDs to these exact bytes.
+  SERVER_SHA_BUILT="$(linux_out_path SERVER_SHA)"
+  grep -qF "$SERVER_SHA_BUILT" "$LINUX_OUT/aur-server/PKGBUILD" \
     || die "server PKGBUILD sha256 does not match the built server binary"
-  [[ "$(shasum -a 256 "$LINUX_SERVER_BIN" | awk '{print $1}')" == "$SERVER_SHA_REMOTE" ]] \
-    || die "the copied-down hyprlayer-server does not match the sha the builder reported"
+  [[ "$(shasum -a 256 "$LINUX_SERVER_BIN" | awk '{print $1}')" == "$SERVER_SHA_BUILT" ]] \
+    || die "$LINUX_SERVER_BIN does not match the sha the builder reported"
   DEB_SHA="$(shasum -a 256 "$LINUX_OUT/$DEB_NAME" | awk '{print $1}')"
   grep -qF "$DEB_SHA" "$LINUX_OUT/aur/PKGBUILD" \
-    || die "PKGBUILD sha256 does not match the copied-down $DEB_NAME ($DEB_SHA)"
+    || die "PKGBUILD sha256 does not match $DEB_NAME ($DEB_SHA)"
   RPM_SHA="$(shasum -a 256 "$LINUX_OUT/$RPM_NAME" | awk '{print $1}')"
   ok "Built $DEB_NAME (sha256 $DEB_SHA)"
   ok "Built $RPM_NAME (sha256 $RPM_SHA)"
+fi
+
+# Windows first: a stopped or busy test host fails in seconds, the Linux matrix takes minutes.
+if [[ "$SMOKE" == "1" && "$INCLUDE_WINDOWS" == "1" ]]; then
+  say "Smoke-testing $SETUP_NAME on the Windows test host…"
+  scripts/builders/smoke/windows.sh "$WIN_OUT/$SETUP_NAME" "$WIN_OUT/hyprlayer-server-x86_64-pc-windows-msvc.exe" \
+    || die "Windows smoke test failed, or its host was unreachable or busy (output above). Nothing was published: rerun once it passes, or without --smoke"
+  ok "Windows smoke test passed"
+fi
+if [[ "$SMOKE" == "1" && "$INCLUDE_LINUX" == "1" ]]; then
+  say "Smoke-testing the Linux packages on four distros (several minutes)…"
+  scripts/builders/smoke/linux.sh "$LINUX_OUT" \
+    || die "Linux smoke test failed (logs under target/smoke/linux/). Nothing was published: rerun once it passes, or without --smoke"
+  ok "Linux smoke test passed"
 fi
 
 if [[ "$ASSUME_YES" -ne 1 ]]; then
