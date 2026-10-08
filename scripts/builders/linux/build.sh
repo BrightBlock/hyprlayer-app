@@ -15,10 +15,15 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$SRC_TARBALL" ]] || die "source tarball not found: $SRC_TARBALL"
 
+# One build at a time in /target: --touch below only orders runs that don't overlap.
+exec 9>"$CARGO_TARGET_DIR/.hyprlayer-build.lock"
+flock -n 9 || { step "Waiting for another build in /target"; flock 9; }
+
 step "Extracting source tarball"
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
-tar -xzf "$SRC_TARBALL" -C "$BUILD_DIR"
+# Dev stages build into /target too, and cargo trusts source mtimes.
+tar -xzf "$SRC_TARBALL" -C "$BUILD_DIR" --touch
 cd "$BUILD_DIR"
 
 step "Disabling updater artifacts (Linux installs update through their package manager)"

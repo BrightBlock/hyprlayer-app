@@ -37,4 +37,5 @@ ENV PKG_CONFIG_ALLOW_CROSS=1 \
     AR_x86_64_unknown_linux_gnu=x86_64-linux-gnu-ar
 
 COPY build.sh /usr/local/bin/hyprlayer-build
+COPY build-server.sh /usr/local/bin/hyprlayer-build-server
 ENTRYPOINT ["bash", "/usr/local/bin/hyprlayer-build"]

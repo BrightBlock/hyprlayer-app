@@ -239,6 +239,14 @@ release after the first rebuilds only the workspace crates; budget about 16 GB o
 Docker disk. The image layers are cached too: after changing a Dockerfile's pinned
 versions, rebuild it with `docker build --no-cache` so its downloads run again.
 
+`run.sh linux <source.tgz> <out-dir> --server-only` runs the image's second
+entrypoint, which builds only `hyprlayer-server` against the same volumes. Because
+trees other than a release tag then build into `/target`, both entrypoints hold a
+lock on it for the whole run and extract with `tar --touch`: cargo judges workspace
+crates by source mtime, and a tarball's commit-time mtimes could otherwise pass
+another tree's build off as current. `scripts/stage-server-binary.sh` uses it for
+the Linux dev server, so a stage starts from the release's compiled dependencies.
+
 **Memory.** The legs peak near 5.6 GB (Windows) and 4.2 GB (Linux). With Docker
 Desktop at 12 GB or more, `release-local.sh` builds them at once; below that it
 builds them one after the other and says so. It reads `MemTotal` from
