@@ -20,9 +20,9 @@ use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 const E2E_REPO: &str = "jtsiros/hyprlayer-e2e-fixture";
 
 /// `--ignored` alone is not enough to opt in. `scripts/release.sh` runs
-/// `cargo test -p hyprlayer-e2e -- --ignored` as its container-tier gate, and
-/// this scenario would then open a pull request on every release and demand
-/// network plus GitHub auth on the release builder.
+/// `cargo nextest run --run-ignored all` as its gate, and this scenario would
+/// then open a pull request on every release and demand network plus GitHub
+/// auth on the release builder.
 const OPT_IN: &str = "HYPRLAYER_E2E_GITHUB";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

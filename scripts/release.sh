@@ -15,24 +15,67 @@ if [[ "$BRANCH" != "main" ]]; then
 fi
 
 if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
-  echo "→ Verification gate (cargo test with local E2E, container E2E, library targets, typecheck, lint, vitest)…"
+  echo "→ Verification gate (one cargo nextest run with local and container E2E, library targets, typecheck, lint, vitest)…"
   # The container E2E tier reaches a Linux host over real SSH, the path remote
   # users take; check for Docker before the long steps rather than after.
   if ! docker info >/dev/null 2>&1; then
     echo "✗ Docker is not running — the E2E container tier needs it. Start Docker Desktop and re-run."
     exit 1
   fi
+  # Checked here because nextest's own floor (.config/nextest.toml) only bites after the sidecar build.
+  NEXTEST_MIN="$(sed -n 's/^nextest-version = { required = "\(.*\)" }$/\1/p' .config/nextest.toml)"
+  [[ -n "$NEXTEST_MIN" ]] || { echo "✗ .config/nextest.toml has no nextest-version"; exit 1; }
+  NEXTEST_HAVE="$(cargo nextest --version 2>/dev/null | sed -n '1s/^cargo-nextest \([0-9.]*\).*/\1/p' || true)"
+  if [[ -z "$NEXTEST_HAVE" ]] || ! printf '%s\n%s\n' "$NEXTEST_MIN" "$NEXTEST_HAVE" | sort -V -C; then
+    echo "✗ the gate runs tests with cargo-nextest ${NEXTEST_MIN}+ (found: ${NEXTEST_HAVE:-none})."
+    echo "  brew install cargo-nextest   (or: cargo install --locked cargo-nextest)"
+    exit 1
+  fi
+  # The test build rewrites target/debug/Hyprlayer with the prod identifier and ends a live `tauri dev` here.
+  for pid in $(pgrep -f 'tauri(\.js)? dev' || true); do
+    if [[ "$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')" == "$(pwd -P)" ]]; then
+      echo "✗ tauri dev from this checkout is running (pid $pid) — quit it and re-run."
+      exit 1
+    fi
+  done
+  step() { local start=$SECONDS; "$@"; echo "  ⏱ $*: $((SECONDS - start))s"; }
   # tauri-build refuses to compile the app without the externalBin sidecar, and
   # src-tauri/binaries/ is gitignored, so a clean checkout has none.
-  node scripts/build-server-sidecar.mjs --debug
-  cargo test --workspace --quiet
-  cargo test --package hyprlayer-e2e --quiet -- --ignored
-  # The desktop's own ssh sign-in path: it needs the app binary as its askpass helper.
-  cargo test --package hyprlayer-app --test ssh_sign_in --quiet -- --ignored
-  cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
-  pnpm typecheck && pnpm lint && pnpm test
+  step node scripts/build-server-sidecar.mjs --debug
+  # The staged copy: the test build replaces target/debug/hyprlayer-server with its own build of it.
+  export HYPRLAYER_E2E_SERVER_BIN="$PWD/src-tauri/binaries/hyprlayer-server-$(rustc -vV | sed -n 's/^host: //p')"
+  # Core's ignored smoke, migration and watcher tests stay out; nextest can't filter on #[ignore].
+  GATE_FILTER='not (binary_id(hyprlayer-core::claude_driver_smoke) | binary_id(hyprlayer-core::codex_driver_smoke) | binary_id(hyprlayer-core::orphan_reap_real_server) | binary_id(hyprlayer-core::real_machine_smoke) | (binary_id(hyprlayer-core) & test(/(backfills_a_copied_profile|reaches_latest_on_a_copied_profile|watches_external_git_dir_and_fires_on_index_write|reading_the_git_index_does_not_fire|reading_a_watched_file_does_not_fire_the_callback|an_append_under_a_new_run_directory_fires_the_callback)$/)))'
+  step cargo nextest run --workspace --profile gate --run-ignored all -E "$GATE_FILTER" --no-run   # build, timed on its own
+  # `<binary-id> <test>` for each test a `cargo nextest list -T json` run matched.
+  matching() {
+    node -e '
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      for (const [id, s] of Object.entries(j["rust-suites"]))
+        for (const [n, t] of Object.entries(s.testcases))
+          if (t["filter-match"].status === "matches") console.log(id + " " + n);' | LC_ALL=C sort
+  }
+  IGNORED="$(cargo nextest list --workspace --run-ignored only -E "$GATE_FILTER" -T json | matching)"
+  EXPECTED=$'hyprlayer-app::ssh_sign_in ssh_sign_in\nhyprlayer-e2e::pr_lifecycle pr_lifecycle\nhyprlayer-e2e::remote_host remote_host\nhyprlayer-e2e::remote_provider_auth remote_provider_auth\nhyprlayer-e2e::remote_slow_start remote_slow_start'
+  if [[ "$IGNORED" != "$EXPECTED" ]]; then
+    echo "✗ the gate filter admits a different set of ignored tests:"; echo "$IGNORED"
+    echo "  update GATE_FILTER or EXPECTED in scripts/release.sh"
+    exit 1
+  fi
+  # It excludes whole binaries, so a test added to one without #[ignore] would silently skip the gate.
+  DROPPED="$(cargo nextest list --workspace -E "not ($GATE_FILTER)" -T json | matching)"
+  if [[ -n "$DROPPED" ]]; then
+    echo "✗ the gate filter drops tests that aren't ignored:"; echo "$DROPPED"
+    echo "  narrow GATE_FILTER in scripts/release.sh"
+    exit 1
+  fi
+  step cargo nextest run --workspace --profile gate --run-ignored all -E "$GATE_FILTER"
+  step cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
+  step pnpm typecheck
+  step pnpm lint
+  step pnpm test
   if [[ -n "$(git status --porcelain -- src/lib/bindings.ts)" ]]; then
-    echo "✗ src/lib/bindings.ts drifted — cargo test regenerated it. Commit the diff first."
+    echo "✗ src/lib/bindings.ts drifted — the test run regenerated it. Commit the diff first."
     exit 1
   fi
 else

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use hyprlayer_core::models::RuntimeEvent;
@@ -17,6 +17,8 @@ use crate::sandbox::Sandbox;
 const IMAGE: &str = "hyprlayer-e2e/remote-host";
 /// Bookworm on both sides, so the binary it builds runs on the host's glibc.
 const BUILDER: &str = "rust:1-bookworm";
+/// The remote host's base; `containers/remote-host/Dockerfile` takes it as `BASE`.
+const HOST_BASE: &str = "debian:bookworm-slim";
 const ALIAS: &str = "e2e-host";
 const SSHD_READY: Duration = Duration::from_secs(30);
 
@@ -40,10 +42,26 @@ pub enum Platform {
 }
 
 impl Platform {
-    fn docker(self) -> Option<&'static str> {
+    fn docker(self) -> &'static str {
         match self {
-            Platform::Native => None,
-            Platform::Amd64 => Some("linux/amd64"),
+            Platform::Native => native_platform(),
+            Platform::Amd64 => "linux/amd64",
+        }
+    }
+
+    /// A private tag per platform: `docker run --platform` would re-point the shared base tag.
+    fn builder(self) -> &'static str {
+        match self {
+            Platform::Native => "hyprlayer-e2e/builder:native",
+            Platform::Amd64 => "hyprlayer-e2e/builder:amd64",
+        }
+    }
+
+    /// The remote host's base, privately tagged for the same reason.
+    fn host_base(self) -> &'static str {
+        match self {
+            Platform::Native => "hyprlayer-e2e/host-base:native",
+            Platform::Amd64 => "hyprlayer-e2e/host-base:amd64",
         }
     }
 
@@ -111,21 +129,38 @@ impl RemoteHost {
     }
 
     pub fn start_opts(sandbox: &Sandbox, options: HostOptions) -> Self {
+        // Under nextest, unbounded container tests exhaust the Docker VM.
+        if std::env::var_os("NEXTEST").is_some()
+            && std::env::var("NEXTEST_TEST_GROUP").as_deref() != Ok("docker")
+        {
+            panic!(
+                "container tests must be in nextest's `docker` test group; \
+                 add this binary to its filter in .config/nextest.toml"
+            );
+        }
+        let lock = build_lock();
+        let platform = options.platform.docker();
+        ensure_tag(BUILDER, options.platform.builder(), options.platform);
+        ensure_tag(HOST_BASE, options.platform.host_base(), options.platform);
         let binary = linux_server(options.build, options.platform);
-        let platform: Vec<&str> = options
-            .platform
-            .docker()
-            .map(|p| vec!["--platform", p])
-            .unwrap_or_default();
         let image = match options.platform {
             Platform::Native => IMAGE.to_string(),
             Platform::Amd64 => format!("{IMAGE}:amd64"),
         };
         let dockerfile = dockerfile_dir();
-        let mut build_args = vec!["build", "--quiet", "--tag", &image];
-        build_args.extend(&platform);
-        build_args.push(&dockerfile);
-        docker(&build_args);
+        let base = format!("BASE={}", options.platform.host_base());
+        docker(&[
+            "build",
+            "--quiet",
+            "--platform",
+            platform,
+            "--build-arg",
+            &base,
+            "--tag",
+            &image,
+            &dockerfile,
+        ]);
+        drop(lock);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.subsec_nanos())
@@ -141,9 +176,10 @@ impl RemoteHost {
             &name,
             "--publish",
             "127.0.0.1::22",
+            "--platform",
+            platform,
+            &image,
         ];
-        run_args.extend(&platform);
-        run_args.push(&image);
         // sshd's command line outranks the image's `PasswordAuthentication no`.
         let with_password = options.password.map(|password| {
             format!(
@@ -393,9 +429,9 @@ impl Relay {
     }
 }
 
-/// `hyprlayer-server` for the host's platform, built from this tree inside
-/// `BUILDER` with its target and registry cached in named volumes, one set
-/// per platform.
+/// `hyprlayer-server` for the host's platform, built from this tree in the
+/// platform's builder with its target and registry cached in named volumes,
+/// one set per platform. The caller holds `build_lock`.
 fn linux_server(build: Build, platform: Platform) -> PathBuf {
     static BUILT: Mutex<Vec<(Build, Platform, PathBuf)>> = Mutex::new(Vec::new());
     let mut built = BUILT.lock().unwrap_or_else(PoisonError::into_inner);
@@ -420,14 +456,13 @@ fn linux_server(build: Build, platform: Platform) -> PathBuf {
     let cargo = format!("hyprlayer-e2e-cargo{suffix}:/usr/local/cargo/registry");
     let target = format!("hyprlayer-e2e-target{suffix}:/target");
     let out_volume = format!("{}:/out", out.display());
+    // Copied then renamed, so a concurrent `docker cp` never reads half a binary.
     let script = format!(
         "cargo build {flag} --locked --quiet --package hyprlayer-server --bin hyprlayer-server \
-         && cp /target/{profile}/hyprlayer-server /out/"
+         && cp /target/{profile}/hyprlayer-server /out/.hyprlayer-server.tmp \
+         && mv -f /out/.hyprlayer-server.tmp /out/hyprlayer-server"
     );
-    let mut args = vec!["run", "--rm"];
-    if let Some(p) = platform.docker() {
-        args.extend(["--platform", p]);
-    }
+    let mut args = vec!["run", "--rm", "--platform", platform.docker()];
     args.extend([
         "--volume",
         &src,
@@ -445,7 +480,7 @@ fn linux_server(build: Build, platform: Platform) -> PathBuf {
         "CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16",
         "--workdir",
         "/src",
-        BUILDER,
+        platform.builder(),
         "sh",
         "-c",
         &script,
@@ -454,6 +489,49 @@ fn linux_server(build: Build, platform: Platform) -> PathBuf {
     let path = out.join("hyprlayer-server");
     built.push((build, platform, path.clone()));
     path
+}
+
+/// Builders share target volumes and the Docker VM's memory: one at a time.
+fn build_lock() -> std::fs::File {
+    let dir = crate::journey::target_dir().join("e2e");
+    std::fs::create_dir_all(&dir).expect("create the e2e output dir");
+    let file = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(".linux-build.lock"))
+        .expect("open the build lock");
+    file.lock().expect("lock the linux build");
+    file
+}
+
+/// Tags `base` privately as `tag` for the platform, once; later runs find it.
+fn ensure_tag(base: &str, tag: &str, platform: Platform) {
+    let present = Command::new("docker")
+        .args(["image", "inspect", tag])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
+    if !present {
+        run(Command::new("docker")
+            .args([
+                "build",
+                "--quiet",
+                "--platform",
+                platform.docker(),
+                "--tag",
+                tag,
+                "-",
+            ])
+            .stdin_bytes(format!("FROM {base}\n").as_bytes()));
+    }
+}
+
+/// Docker's own platform, passed explicitly so a native run can't resolve to another variant.
+fn native_platform() -> &'static str {
+    static NATIVE: OnceLock<String> = OnceLock::new();
+    NATIVE.get_or_init(|| docker(&["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"]))
 }
 
 fn dockerfile_dir() -> String {

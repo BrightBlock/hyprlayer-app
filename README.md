@@ -141,7 +141,7 @@ Prerequisites: Rust (stable), Node 22+, pnpm 11+, and the
 pnpm install
 pnpm tauri dev          # run the app (debug)
 
-cargo test --workspace  # rust tests (also regenerates src/lib/bindings.ts)
+cargo test --workspace  # rust tests (also regenerates src/lib/bindings.ts); the release gate runs them with cargo nextest
 pnpm typecheck && pnpm lint && pnpm test   # frontend checks
 pnpm tauri build        # production bundle
 ```

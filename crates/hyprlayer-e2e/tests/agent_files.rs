@@ -2,10 +2,10 @@
 //! what the app reads back out of them. `agent_bundle.rs` is pure and
 //! filesystem-only, so all of this runs inside the sandbox.
 //!
-//! The install/update/repair commands are deliberately absent. They fetch from
-//! GitHub and rewrite the bundle, which is the one thing the sandbox's pins
-//! exist to prevent; `agent_bundle_status` is included because on a 1.6.0+ CLI
-//! it is a local version comparison that fetches nothing (ADR-0002).
+//! The install/update/repair commands are deliberately absent: they fetch from
+//! GitHub and rewrite the bundle. The sandbox seeds that bundle, so nothing here
+//! reaches GitHub; `agent_bundle_status` stays because on a 1.6.0+ CLI it is a
+//! local version comparison (ADR-0002).
 #![cfg(unix)]
 
 use hyprlayer_core::agents::{AgentFile, AgentOverlay};
@@ -22,8 +22,8 @@ async fn agent_files() {
     let project = onboard_and_import(&mut j, &client, &sandbox, &repo).await;
 
     j.step("onboarding installs the CLI's agent bundle");
-    // `thoughts init` installs the CLI's own agents into the profile's home, so
-    // a freshly onboarded sandbox is not empty — that install is the property.
+    // The sandbox seeds the CLI's bundle and the CLI links it into the profile's
+    // home at startup, so the home is not empty; that bundle being readable is the property.
     let bundled = j
         .call(
             &client,

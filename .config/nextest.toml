@@ -1,0 +1,26 @@
+nextest-version = { required = "0.9.145" }
+
+[test-groups]
+# clamp(floor((0.75 × 15.59 GiB − 2818 MiB builder) / 769 MiB per host), 1, 4); the builder bound is the baseline's whole-VM peak.
+docker = { max-threads = 4 }
+# typescript_bindings_export rewrites bindings.ts in place; compat_contract reads it.
+bindings = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary_id(hyprlayer-e2e::remote_*) | binary_id(hyprlayer-app::ssh_sign_in)'
+test-group = 'docker'
+# A cold emulated amd64 build takes many minutes.
+slow-timeout = { period = "120s", terminate-after = 30 }
+
+[[profile.default.overrides]]
+filter = '(binary_id(hyprlayer-app) & test(=tests::typescript_bindings_export)) | (binary_id(hyprlayer-core::compat_contract) & test(=generated_bindings_match_the_pinned_v0_7_excerpts))'
+test-group = 'bindings'
+
+[profile.gate]
+fail-fast = false
+# Hang guard: 3× the slowest local E2E binary (account_sign_in, 25 s), at least 5 min.
+# A killed test skips Drop, so containers can be left behind (see docs/RELEASING.md).
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[profile.gate.junit]
+path = "junit.xml"

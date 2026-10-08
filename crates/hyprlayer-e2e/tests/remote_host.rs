@@ -17,7 +17,7 @@ const SERVE: &str = "hyprlayer-server serve";
 const RELAY: &str = "hyprlayer-server relay";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs Docker: cargo test -p hyprlayer-e2e -- --ignored"]
+#[ignore = "needs Docker: cargo test -p hyprlayer-e2e -- --ignored, or the release gate"]
 async fn remote_host() {
     let sandbox = Sandbox::new();
     let mut j = Journey::new("remote_host", &sandbox);

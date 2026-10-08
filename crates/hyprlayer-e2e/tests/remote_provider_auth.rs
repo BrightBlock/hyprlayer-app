@@ -19,7 +19,7 @@ const SERVE: &str = "hyprlayer-server serve";
 const AUTH: &str = "$HOME/.local/share/opencode/auth.json";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "needs Docker: cargo test -p hyprlayer-e2e -- --ignored"]
+#[ignore = "needs Docker: cargo test -p hyprlayer-e2e -- --ignored, or the release gate"]
 async fn remote_provider_auth() {
     let sandbox = Sandbox::new();
     let mut j = Journey::new("remote_provider_auth", &sandbox);

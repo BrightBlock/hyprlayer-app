@@ -36,7 +36,7 @@ enum Reply {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs Docker: cargo test -p hyprlayer-app --test ssh_sign_in -- --ignored"]
+#[ignore = "needs Docker: cargo test -p hyprlayer-app --test ssh_sign_in -- --ignored, or the release gate"]
 async fn ssh_sign_in() {
     let sandbox = Sandbox::new();
     capture_logs(&sandbox.logs.join("app.log"));

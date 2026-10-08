@@ -854,60 +854,6 @@ mod tests {
         open_runtime_with(root, environment(&root.join("home"))).await
     }
 
-    /// Builds and resolves the sibling `hyprlayer-server` binary from this
-    /// test binary's own path: `target/<profile>/deps/hyprlayer_server-<hash>`
-    /// for a lib unit test, two parents up to `target/<profile>/`.
-    /// `CARGO_BIN_EXE_...` is only set for integration tests and benchmarks,
-    /// and `cargo test` builds a package's binaries only for those, so the
-    /// binary is built here — cargo has released its build lock by the time
-    /// tests run, and an up-to-date build is a fingerprint check.
-    fn server_binary() -> PathBuf {
-        let exe = std::env::current_exe().expect("current test exe");
-        let profile_dir = exe
-            .parent()
-            .and_then(Path::parent)
-            .expect("target/<profile>/deps -> target/<profile>");
-        let mut build = std::process::Command::new(env!("CARGO"));
-        build.args(["build", "-q", "-p", "hyprlayer-server"]);
-        if profile_dir.file_name().and_then(|n| n.to_str()) == Some("release") {
-            build.arg("--release");
-        }
-        let status = build
-            .status()
-            .expect("run cargo build for the server binary");
-        assert!(status.success(), "cargo build -p hyprlayer-server failed");
-        profile_dir.join("hyprlayer-server")
-    }
-
-    #[tokio::test]
-    async fn a_second_server_process_on_the_same_profile_exits_with_runtime_in_use() {
-        let root = tempfile::tempdir().unwrap();
-        let home = root.path().join("home");
-        let runtime = open_runtime_with(root.path(), environment(&home)).await;
-
-        let bin = server_binary();
-        let output = tokio::process::Command::new(&bin)
-            .env("HOME", &home)
-            .env("HYPRLAYER_APP_CONFIG_DIR", root.path().join("app-config"))
-            .env("HYPRLAYER_APP_DATA_DIR", root.path().join("app-data"))
-            .kill_on_drop(true)
-            .output()
-            .await
-            .expect("spawn a second hyprlayer-server");
-
-        assert!(
-            !output.status.success(),
-            "a second server on the same profile must not start"
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("runtime_in_use"),
-            "expected runtime_in_use on stderr, got: {stderr}"
-        );
-
-        runtime.shutdown().await;
-    }
-
     #[tokio::test]
     async fn a_strictly_newer_client_can_still_shut_down_a_refusing_server() {
         let root = tempfile::tempdir().unwrap();

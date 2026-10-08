@@ -14,9 +14,9 @@ hyprlayer-server.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 base64 = "0.22"
+sha2 = "0.10"
 tempfile = "3"
 
 [dev-dependencies]
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false }
-sha2 = "0.10"

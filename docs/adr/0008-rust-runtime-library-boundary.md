@@ -15,7 +15,8 @@ thirds stand) · amended 2026-09-18 (the macOS Keychain carve-out and
 `commands/models.rs` are deleted; nothing in the workspace reads provider credentials) ·
 amended 2026-09-19 (the `commands/harnesses.rs` OpenCode config divergence is retired) ·
 amended 2026-10-06 (the Cloud sign-in loopback is a shell carve-out; `ProviderHttp`
-form-POSTs too)
+form-POSTs too) · amended 2026-10-07 (the release gate runs its Rust tests with
+`cargo nextest`; it still catches bindings drift)
 
 ## Decision
 
@@ -495,6 +496,8 @@ throughout.
   `src/lib/bindings.ts` through `cargo test` and fails on a dirty file; the
   standalone `scripts/check-bindings.sh` that did the same regenerate-and-compare
   was deleted as a second copy of that check wired into nothing.
+  *(Amended 2026-10-07 — the gate now regenerates it through its single
+  `cargo nextest run`; a plain `cargo test` still regenerates it too.)*
 - **Runtime migrations run once, and that is a deliberate narrowing.** The ledger at
   `<app_data_dir>/runtime-migrations.json` records each migration on completion and
   never reruns it. Some of what it replaced were *every-launch* guards — the OpenCode

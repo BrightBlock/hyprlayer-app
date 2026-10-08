@@ -108,30 +108,71 @@ impl Server {
     }
 }
 
-/// Built from the current tree once per test process: `tauri dev` never
-/// rebuilds the server, so a stale binary is the easy mistake.
+/// `HYPRLAYER_E2E_SERVER_BIN` when set (prebuilt, so parallel tests don't queue on
+/// cargo's lock); else built from the current tree, as `tauri dev` never rebuilds it.
 fn binary() -> &'static Path {
     static BINARY: OnceLock<PathBuf> = OnceLock::new();
     BINARY.get_or_init(|| {
-        let exe = std::env::current_exe().expect("locate the test executable");
-        let profile = exe
-            .parent()
-            .and_then(Path::parent)
-            .expect("target/<profile>/deps/<test>");
-        let mut cargo = std::process::Command::new(env!("CARGO"));
-        cargo.args([
-            "build",
-            "--quiet",
-            "--package",
-            "hyprlayer-server",
-            "--bin",
-            "hyprlayer-server",
-        ]);
-        if profile.file_name() == Some(OsStr::new("release")) {
-            cargo.arg("--release");
+        if let Some(path) = std::env::var_os("HYPRLAYER_E2E_SERVER_BIN").map(PathBuf::from) {
+            assert!(
+                path.is_file(),
+                "HYPRLAYER_E2E_SERVER_BIN={} is missing; run \
+                 `node scripts/build-server-sidecar.mjs --debug` or unset it",
+                path.display()
+            );
+            return path;
         }
-        let status = cargo.status().expect("run cargo build");
-        assert!(status.success(), "building hyprlayer-server failed");
-        profile.join(format!("hyprlayer-server{}", std::env::consts::EXE_SUFFIX))
+        match std::env::var("NEXTEST_RUN_ID") {
+            Ok(run) => run_copy(&run),
+            Err(_) => build(),
+        }
     })
+}
+
+/// `target/<profile>/hyprlayer-server`, built from the current tree.
+fn build() -> PathBuf {
+    let exe = std::env::current_exe().expect("locate the test executable");
+    let profile = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("target/<profile>/deps/<test>");
+    let mut cargo = std::process::Command::new(env!("CARGO"));
+    cargo.args([
+        "build",
+        "--quiet",
+        "--package",
+        "hyprlayer-server",
+        "--bin",
+        "hyprlayer-server",
+    ]);
+    if profile.file_name() == Some(OsStr::new("release")) {
+        cargo.arg("--release");
+    }
+    let status = cargo.status().expect("run cargo build");
+    assert!(status.success(), "building hyprlayer-server failed");
+    profile.join(format!("hyprlayer-server{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// One build per nextest run, copied to a path no build writes: every cargo build,
+/// even a no-op, re-links `target/<profile>/hyprlayer-server` while sibling tests spawn it.
+fn run_copy(run: &str) -> PathBuf {
+    let dir = crate::journey::target_dir().join("e2e").join("server");
+    std::fs::create_dir_all(&dir).expect("create the server copy dir");
+    let lock = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(".lock"))
+        .expect("open the server copy lock");
+    lock.lock().expect("lock the server copy");
+    let copy = dir.join(format!("hyprlayer-server{}", std::env::consts::EXE_SUFFIX));
+    let marker = dir.join("run");
+    if std::fs::read_to_string(&marker).ok().as_deref() != Some(run) {
+        let tmp = dir.join(".hyprlayer-server.tmp");
+        std::fs::copy(build(), &tmp).expect("copy the server");
+        // Renamed over, so a previous run's process still spawning it never finds it missing.
+        std::fs::rename(&tmp, &copy).expect("publish the server copy");
+        std::fs::write(&marker, run).expect("record the run");
+    }
+    copy
 }

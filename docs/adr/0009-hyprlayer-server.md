@@ -8,7 +8,9 @@ files; a spawned server's stderr goes to a file, not a pipe) · amended 2026-09-
 amended 2026-09-26 (the environment overlay merges per key and validates the agent
 socket) · amended 2026-09-30 (connections announce a display-only client identity;
 transcript-sync events are targeted) · amended 2026-10-06 (the Cloud account belongs to the
-server profile; `AccountChanged` is targeted by capability alone)
+server profile; `AccountChanged` is targeted by capability alone) · amended 2026-10-07
+(the cross-process lock test is an integration test, so it no longer builds the server
+binary mid-run; the release gate runs its tests under `cargo nextest`)
 
 ## Decision
 
@@ -523,6 +525,9 @@ would need all of the authentication machinery this decision declines to build.
     not doing" above. Nothing has shipped at any `PROTOCOL_VERSION`, so the
     constant is reset to 1 and stays there until the first release that ships
     `hyprlayer-server`.)*
+    *(Amended 2026-10-07 — the lock test no longer builds it: it is now
+    `tests/profile_lock.rs`, an integration test, so cargo builds the binary
+    first and passes it as `CARGO_BIN_EXE_hyprlayer-server`.)*
     **The handshake's version-mismatch arm now stays open for one more read.**
     `serve_connection` sends `Refused` and then, only if the peer's version is
     strictly greater than `PROTOCOL_VERSION`, reads one further control frame
@@ -685,6 +690,10 @@ would need all of the authentication machinery this decision declines to build.
     → `target/<profile>/`), exactly as this ADR's phase already anticipated;
     `cargo test` builds the `[[bin]]` target as a side effect of building the
     package under test, so the binary is there by the time the test runs it.
+    *(Amended 2026-10-07 — superseded: the test moved to `tests/profile_lock.rs`
+    and runs `CARGO_BIN_EXE_hyprlayer-server`. Its nested `cargo build` re-linked
+    `target/<profile>/hyprlayer-server` while tests running in parallel under
+    `cargo nextest` spawned it.)*
   - **Phase 5 (2026-09-08).** `crates/hyprlayer-server/src/relay.rs` is the
     server-side half: `relay::run` connects to the profile's local socket,
     spawning `hyprlayer-server serve` as the same kind of deliberate orphan

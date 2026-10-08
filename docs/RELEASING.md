@@ -81,16 +81,27 @@ it *is* the update signal (see "How Linux updates work").
 ./scripts/release.sh patch     # or minor / major / an explicit version
 ```
 
-The script first runs the verification gate — `cargo test`, which includes the
-local E2E scenarios in `crates/hyprlayer-e2e`, then that crate's container tier
-(`cargo test -p hyprlayer-e2e -- --ignored`: a Linux host in Docker reached over
-real SSH) and the desktop's ssh sign-in scenario (`cargo test -p hyprlayer-app
---test ssh_sign_in -- --ignored`), a standalone `cargo check` of the two library crates (see "Library
-target checks"), `pnpm typecheck && pnpm lint && pnpm test` — which
-`RELEASE_SKIP_CHECKS=1` skips. The gate needs Docker running, and `git` and the
-hyprlayer CLI installed; it stops at once if Docker is not up. A failing E2E
-scenario leaves its artifact in `target/e2e/<scenario>/`. It then gates on `changelog.json`: it scaffolds a stub entry for the new
-version if missing and refuses to proceed until you've written a `summary`
+The script first runs the verification gate, which `RELEASE_SKIP_CHECKS=1` skips.
+It needs Docker running, cargo-nextest 0.9.145+ (`brew install cargo-nextest`), and
+`git` and the hyprlayer CLI installed, and it stops at once if Docker or nextest is
+missing or a `tauri dev` from this checkout is running (the test build rewrites
+`target/debug/Hyprlayer` with the production identifier). It builds the server
+sidecar, points the E2E scenarios at it through `HYPRLAYER_E2E_SERVER_BIN`, and
+checks that its nextest filter admits exactly the five expected ignored tests (the
+container tier, the desktop's ssh sign-in and the opt-in `pr_lifecycle`). One
+`cargo nextest run --workspace --profile gate --run-ignored all` then runs every Rust
+test in its own process: the local E2E scenarios in `crates/hyprlayer-e2e`, that
+crate's container tier (a Linux host in Docker reached over real SSH, capped by the
+`docker` test group in `.config/nextest.toml`) and the desktop's ssh sign-in
+scenario. A standalone `cargo check` of the two library crates (see "Library target
+checks"), `pnpm typecheck`, `pnpm lint` and `pnpm test` follow, and each step prints
+its duration. A failing E2E scenario leaves its artifact in `target/e2e/<scenario>/`,
+and the run's JUnit report is `target/nextest/gate/junit.xml`. A test killed by the
+hang guard skips its cleanup: remove its containers with
+`docker rm -f $(docker ps -aq --filter label=hyprlayer-e2e=1)` and any stray server
+with `pkill -f "$(pwd -P)/src-tauri/binaries/hyprlayer-server-"` (the gate runs the
+staged sidecar copy, which neither the release app nor `tauri dev` starts). It then gates
+on `changelog.json`: it scaffolds a stub entry for the new version if missing and refuses to proceed until you've written a `summary`
 (≤15 words) and at least one `notes` bullet. It then bumps the version in
 `package.json`, `Cargo.toml` (`[workspace.package]`), and
 `src-tauri/tauri.conf.json` in lockstep, commits, and tags. Push to trigger CI:
@@ -323,9 +334,10 @@ cargo check -p hyprlayer-models -p hyprlayer-core --target x86_64-pc-windows-msv
 
 This is not redundant with the bundle build that follows it, though it looks it.
 `hyprlayer-app` depends on core with `features = ["specta"]`, and cargo unifies
-features across a workspace build — so `cargo test --workspace` and `tauri build`
-only ever compile core *with* specta. A headless embedder gets neither the app nor
-that feature, and this is the only check that compiles core the way they will.
+features across a workspace build — so `cargo test --workspace`, the gate's
+`cargo nextest run --workspace` and `tauri build` only ever compile core *with*
+specta. A headless embedder gets neither the app nor that feature, and this is the
+only check that compiles core the way they will.
 
 It runs in `release.sh`'s gate (the Mac) and at the start of both container legs:
 `scripts/builders/linux/build.sh`, and `scripts/builders/windows/build.sh`, where

@@ -5,8 +5,10 @@ use std::process::Command;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
-/// The resolver searches well-known install dirs whatever `PATH` says, so
-/// providers and `gh` are pinned to a missing file to keep the network out.
+use crate::cli_assets;
+
+/// The resolver searches well-known install dirs whatever `PATH` says, so these are pinned
+/// to a missing file to keep them off the network (`cli_assets` covers the CLI).
 const ABSENT: [&str; 5] = ["claude", "codex", "opencode", "gh", "ollama"];
 
 /// Fixed so fixture commits get the same SHA on every run.
@@ -17,7 +19,8 @@ const GITCONFIG: &str = "[user]\n\tname = Hyprlayer E2E\n\temail = e2e@hyprlayer
 
 /// A CLI that is already installed and opted out: without the full telemetry
 /// block the CLI re-enrolls a fresh install in anonymous telemetry, and without
-/// `disableUpdateCheck` it asks GitHub for a newer release.
+/// `disableUpdateCheck` it asks GitHub for a newer release. `Sandbox::new` adds
+/// `agentsInstalledVersion` and seeds `agents/<ver>`, or its first call fetches the bundle.
 const CLI_CONFIG: &str = r#"{
   "version": 4,
   "disableUpdateCheck": true,
@@ -100,9 +103,17 @@ impl Sandbox {
             std::os::unix::fs::symlink(tool, sandbox.bin.join(name)).expect("link a tool");
         }
         let cli_config = sandbox.cli_config();
-        std::fs::create_dir_all(cli_config.parent().expect("CLI config dir"))
-            .expect("create the CLI config dir");
-        std::fs::write(&cli_config, CLI_CONFIG).expect("seed the CLI config");
+        let cli_dir = cli_config.parent().expect("CLI config dir");
+        std::fs::create_dir_all(cli_dir).expect("create the CLI config dir");
+        let version = cli_assets::version(&sandbox.hyprlayer);
+        let mut config: Value = serde_json::from_str(CLI_CONFIG).expect("CLI_CONFIG is JSON");
+        config["agentsInstalledVersion"] = json!(version);
+        std::fs::write(
+            &cli_config,
+            serde_json::to_vec_pretty(&config).expect("encode the CLI config"),
+        )
+        .expect("seed the CLI config");
+        cli_assets::seed(version, &cli_dir.join("agents").join(version));
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

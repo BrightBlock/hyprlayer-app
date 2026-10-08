@@ -1,6 +1,8 @@
 # A remote host for the E2E container tier: sshd, git, and one key-only user.
 # The server binary and the authorized key are installed per run.
-FROM debian:bookworm-slim
+# The harness passes a private per-platform tag of this base, so --platform never re-points it.
+ARG BASE=debian:bookworm-slim
+FROM ${BASE}
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-server git procps ca-certificates \

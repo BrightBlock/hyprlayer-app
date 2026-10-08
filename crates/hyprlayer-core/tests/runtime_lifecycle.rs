@@ -411,8 +411,10 @@ async fn config_and_index_changes_are_mapped_to_runtime_events() {
         .expect("open");
     let mut events = runtime.subscribe();
     runtime.start().await.expect("start");
+    // 30 s, not 5: under the release gate's parallel load these events have arrived after 5 s.
+    let wait = Duration::from_secs(30);
 
-    let saw_index_update = tokio::time::timeout(Duration::from_secs(5), async {
+    let saw_index_update = tokio::time::timeout(wait, async {
         loop {
             match events.recv().await {
                 Ok(RuntimeEvent::ThoughtsIndexUpdated { .. }) => return true,
@@ -437,7 +439,7 @@ async fn config_and_index_changes_are_mapped_to_runtime_events() {
     )
     .unwrap();
 
-    let saw_config_change = tokio::time::timeout(Duration::from_secs(5), async {
+    let saw_config_change = tokio::time::timeout(wait, async {
         loop {
             match events.recv().await {
                 Ok(RuntimeEvent::ConfigChanged) => return true,

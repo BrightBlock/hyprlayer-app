@@ -6,10 +6,10 @@ facade ADR-0008 describes: `hyprlayer-models` (dependency-light contracts) →
 `hyprlayer-app` (Tauri transport and desktop carve-outs).
 
 `crates/hyprlayer-core/tests/headless_runtime.rs` is a complete embedder that
-runs on every `cargo test --workspace`: open, start, import, observe an event,
-shut down twice concurrently, and assert nothing was written outside the supplied
-paths. Read it alongside this document — it is the worked example, and unlike a
-prose snippet it cannot rot silently.
+runs on every `cargo test --workspace` and in the release gate's `cargo nextest run`:
+open, start, import, observe an event, shut down twice concurrently, and assert
+nothing was written outside the supplied paths. Read it alongside this document — it
+is the worked example, and unlike a prose snippet it cannot rot silently.
 
 This document describes the surface **as it exists**, which in several places is
 not the surface ADR-0008's outline table or the implementation plan sketched. The

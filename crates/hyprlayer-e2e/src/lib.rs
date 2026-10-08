@@ -1,6 +1,7 @@
 //! End-to-end harness: the real `hyprlayer-server` binary in a sandboxed
 //! profile, driven over its socket with the desktop's own `RpcClient`.
 
+mod cli_assets;
 pub mod containers;
 pub mod flows;
 mod journey;
