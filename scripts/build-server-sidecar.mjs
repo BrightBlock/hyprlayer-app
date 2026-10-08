@@ -31,8 +31,15 @@ const args = ["build", "-p", "hyprlayer-server"];
 if (!debug) args.push("--release");
 if (cross) args.push("--target", triple);
 
+// Static CRT, or the server needs the VC++ redistributable (tauri-build covers the app).
+// RUSTFLAGS, since `cargo xwin env` exports it empty and that masks .cargo/config rustflags.
+const env = { ...process.env };
+if (triple === "x86_64-pc-windows-msvc") {
+  env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -C target-feature=+crt-static`.trim();
+}
+
 console.log(`build-server-sidecar: cargo ${args.join(" ")}`);
-run("cargo", args, { stdio: "inherit" });
+run("cargo", args, { stdio: "inherit", env });
 
 const exe = triple.includes("windows") ? ".exe" : "";
 const targetDir = process.env.CARGO_TARGET_DIR || join(root, "target");
