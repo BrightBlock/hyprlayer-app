@@ -55,7 +55,31 @@ die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 warn() { printf '\033[1;33m! %s\033[0m\n' "$*" >&2; }
 
 TMPDIRS=()
+BUILDERS_PID=""
+BUILDER_RUN="release-$$"
+# Stops each process before listing its children, so none forks once it is seen;
+# the pending TERM lands on CONT. Async jobs ignore Ctrl-C's SIGINT, hence TERM.
+stop_builders() {
+  [[ -n "$BUILDERS_PID" ]] || return 0
+  say "Stopping the container builds…"
+  local pids=("$BUILDERS_PID") i=0 p
+  while (( i < ${#pids[@]} )); do
+    p="${pids[i++]}"
+    kill -STOP "$p" 2>/dev/null || continue
+    pids+=($(pgrep -P "$p" || true))
+  done
+  kill -TERM "${pids[@]}" 2>/dev/null || true
+  kill -CONT "${pids[@]}" 2>/dev/null || true
+  local left
+  for _ in {1..20}; do
+    left="$(docker ps -aq --filter "label=hyprlayer-builder.run=$BUILDER_RUN" 2>/dev/null || true)"
+    [[ -n "$left" ]] || return 0
+    sleep 0.5
+  done
+  docker rm -f $left >/dev/null 2>&1 || true
+}
 cleanup() {
+  stop_builders
   for d in "${TMPDIRS[@]:-}"; do [[ -n "${d:-}" ]] && rm -rf "$d"; done
 }
 trap cleanup EXIT
@@ -168,9 +192,8 @@ TMP="$(mktemp -d)"; TMPDIRS+=("$TMP")
 SRC_TGZ="$TMP/hyprlayer-src.tgz"
 WIN_LOG="$TMP/windows-build.log"
 LINUX_LOG="$TMP/linux-build.log"
-BUILDERS_PID=""
 build_leg() {  # build_leg <leg> <out-dir> <log>
-  if "$BUILDERS" "$1" "$SRC_TGZ" "$2" >"$3" 2>&1; then echo 0; else echo $?; fi >"$TMP/$1.rc"
+  if HYPRLAYER_BUILDER_RUN="$BUILDER_RUN" "$BUILDERS" "$1" "$SRC_TGZ" "$2" >"$3" 2>&1; then echo 0; else echo $?; fi >"$TMP/$1.rc"
 }
 if [[ "$BUILD_WINDOWS" == "1" || "$BUILD_LINUX" == "1" ]]; then
   git archive --format=tar.gz -o "$SRC_TGZ" "$TAG"

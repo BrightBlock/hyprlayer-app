@@ -22,6 +22,8 @@ docker info >/dev/null 2>&1 || { echo "Docker is not running" >&2; exit 1; }
 RUST_VERSION="$(rustc -V | awk '{print $2}')"
 PNPM_VERSION="$(node -p 'require("./package.json").packageManager.split("@")[1]')"
 IMAGE="hyprlayer-builder/$PLATFORM"
+# release-local.sh's cleanup removes containers by this label, so only its own.
+RUN_LABEL="hyprlayer-builder.run=${HYPRLAYER_BUILDER_RUN:-run-$$}"
 
 echo "==> Preparing $IMAGE (rust $RUST_VERSION, pnpm $PNPM_VERSION)"
 docker build --quiet --platform linux/arm64 \
@@ -37,13 +39,14 @@ OUT="$(cd "$OUT" && pwd)"
 # Both legs cross-compile on arm64, so neither needs Rosetta. Named volumes,
 # not bind mounts: a cargo target dir on a macOS file share is slow, and these
 # stay warm across releases. The cache volume keeps tauri-bundler from
-# re-downloading its NSIS plugin on every run.
+# re-downloading its NSIS plugin on every run. The entrypoint's bash ignores
+# signals as PID 1, so --init with TINI_KILL_PROCESS_GROUP signals its whole group.
 if [[ -n "$SERVER_ONLY" ]]; then
   RUN=(--entrypoint bash "$IMAGE" /usr/local/bin/hyprlayer-build-server)
 else
   RUN=("$IMAGE")
 fi
-docker run --rm --platform linux/arm64 \
+docker run --rm --init --env TINI_KILL_PROCESS_GROUP=1 --label "$RUN_LABEL" --platform linux/arm64 \
   --volume "$IN:/in:ro" \
   --volume "$OUT:/out" \
   --volume "hyprlayer-builder-$PLATFORM-target:/target" \
@@ -55,7 +58,7 @@ docker run --rm --platform linux/arm64 \
 if [[ "$PLATFORM" == "linux" && -z "$SERVER_ONLY" ]]; then
   echo "==> Rendering .SRCINFO with Arch's makepkg"
   docker build --quiet --platform linux/amd64 --tag hyprlayer-builder/aur scripts/builders/aur >/dev/null
-  docker run --rm --platform linux/amd64 --volume "$OUT:/out" hyprlayer-builder/aur
+  docker run --rm --init --label "$RUN_LABEL" --platform linux/amd64 --volume "$OUT:/out" hyprlayer-builder/aur
   for d in aur aur-server; do
     [[ -s "$OUT/$d/.SRCINFO" ]] || { echo "makepkg produced no $d/.SRCINFO" >&2; exit 1; }
   done
