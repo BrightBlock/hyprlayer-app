@@ -913,6 +913,9 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
   const ordinal = userTurnOrdinal(current.items, itemId);
   if (ordinal === 0) return;
 
+  // A live rewind keeps the old stream attached; its seq-less deltas would land twice.
+  const old = channels.get(sessionId);
+  if (old) retired.add(old);
   channels.delete(sessionId);
   setEntry(sessionId, { ...current, reloading: true, live: false, state: "starting" });
 

@@ -404,6 +404,14 @@ struct ActorState {
     attribution: Option<Arc<DocAttribution>>,
     /// Write tool id → its paths, until the result says whether it landed.
     pending_writes: HashMap<String, Vec<String>>,
+    /// The main-thread text block streamed so far and not yet stored.
+    in_flight: InFlightText,
+}
+
+#[derive(Default)]
+struct InFlightText {
+    text: String,
+    author: Option<ClientRef>,
 }
 
 impl ActorState {
@@ -451,6 +459,7 @@ impl ActorState {
             lapsed: VecDeque::new(),
             attribution,
             pending_writes: HashMap::new(),
+            in_flight: InFlightText::default(),
         }
     }
 
@@ -459,7 +468,8 @@ impl ActorState {
         let db = self.db.clone();
         let replay = blocking(move || db.session_log(&sid)).await?;
 
-        let (attachment, live) = LiveAttachment::new(echo_user_messages);
+        let (mut attachment, live) = LiveAttachment::new(echo_user_messages);
+        self.seed_in_flight(&mut attachment);
         let id = self.next_attach_id;
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
@@ -496,7 +506,8 @@ impl ActorState {
         echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let replay = self.log_after(caller_epoch, after_seq).await?;
-        Ok(self.register_after(replay, after_seq, echo_user_messages))
+        // The lagged reader still holds its open block; a seed would repeat it.
+        Ok(self.register_after(replay, after_seq, echo_user_messages, false))
     }
 
     /// A client's own cursor, not a caller epoch: the check is the row's
@@ -528,7 +539,7 @@ impl ActorState {
         let after_seq = self.verify_cursor(cursor).await?;
         let (sid, db) = (self.session_id.clone(), self.db.clone());
         let replay = blocking(move || db.session_log_after(&sid, after_seq)).await?;
-        Ok(self.register_after(replay, after_seq, echo_user_messages))
+        Ok(self.register_after(replay, after_seq, echo_user_messages, true))
     }
 
     /// The tail `attach_after` and `attach_from` share: register a new
@@ -538,9 +549,13 @@ impl ActorState {
         replay: Vec<SessionLogEntry>,
         after_seq: Option<i64>,
         echo_user_messages: bool,
+        seed: bool,
     ) -> SessionAttachment {
         let resume_seq = replay.last().map(|entry| entry.seq).or(after_seq);
-        let (attachment, live) = LiveAttachment::resuming_after(resume_seq, echo_user_messages);
+        let (mut attachment, live) = LiveAttachment::resuming_after(resume_seq, echo_user_messages);
+        if seed {
+            self.seed_in_flight(&mut attachment);
+        }
         let id = self.next_attach_id;
         self.next_attach_id += 1;
         self.attachments.insert(id, attachment);
@@ -852,6 +867,7 @@ impl ActorState {
             });
         }
 
+        self.track_in_flight(&event, &author);
         let delivery = SessionDelivery {
             epoch: self.epoch,
             delivery_ordinal: ordinal,
@@ -977,8 +993,45 @@ impl ActorState {
         });
     }
 
+    fn track_in_flight(&mut self, event: &SessionEvent, author: &Option<ClientRef>) {
+        match event {
+            SessionEvent::PartialText {
+                text,
+                parent_id: None,
+            } => {
+                self.in_flight.text.push_str(text);
+                self.in_flight.author = author.clone();
+            }
+            SessionEvent::AssistantText {
+                parent_id: None, ..
+            }
+            | SessionEvent::TurnDone { .. }
+            | SessionEvent::Exited { .. } => self.in_flight = InFlightText::default(),
+            _ => {}
+        }
+    }
+
+    /// Partial text is never stored, so a reader attaching mid-block would otherwise start mid-sentence.
+    fn seed_in_flight(&self, attachment: &mut LiveAttachment) {
+        if self.in_flight.text.is_empty() {
+            return;
+        }
+        attachment.deliver(SessionDelivery {
+            epoch: self.epoch,
+            delivery_ordinal: self.ordinal,
+            persisted_seq: None,
+            rev: self.rev,
+            author: self.in_flight.author.clone(),
+            event: SessionEvent::PartialText {
+                text: self.in_flight.text.clone(),
+                parent_id: None,
+            },
+        });
+    }
+
     /// A rewind or restore: every reader reloads, so no earlier commit is anyone's own.
     fn reset(&mut self, rev: u64) {
+        self.in_flight = InFlightText::default();
         self.rev = rev;
         self.reset_rev = rev;
         self.foreign_floor = rev;

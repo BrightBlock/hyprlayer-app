@@ -129,18 +129,26 @@ impl LiveAttachment {
             return;
         }
 
-        if let Some(pending) = self.pending_partial.take() {
-            if let Delivered::Ok = self.try_deliver(pending.item()) {
-                if let Some(seq) = pending.persisted_seq {
-                    self.last_persisted_seq = Some(seq);
+        if let Some(mut pending) = self.pending_partial.take() {
+            match self.try_deliver(pending.item()) {
+                Delivered::Ok => {}
+                Delivered::Closed => {
+                    self.detached = true;
+                    return;
+                }
+                // Partials are deltas: dropping one would cut words out of the block.
+                Delivered::Full if is_partial(&delivery) => {
+                    absorb(&mut pending, delivery);
+                    self.pending_partial = Some(pending);
+                    return;
+                }
+                Delivered::Full => {
+                    self.mark_lagged(delivery.epoch);
+                    return;
                 }
             }
-            // A pending partial that still can't be flushed is ephemeral and
-            // about to be superseded either way, so it is dropped rather than
-            // re-queued.
         }
 
-        let is_partial = matches!(delivery.event, SessionEvent::PartialText { .. });
         match self.try_deliver(delivery.item()) {
             Delivered::Ok => {
                 if let Some(seq) = delivery.persisted_seq {
@@ -148,14 +156,35 @@ impl LiveAttachment {
                 }
             }
             Delivered::Closed => self.detached = true,
-            Delivered::Full => {
-                if is_partial {
-                    self.pending_partial = Some(delivery);
-                } else {
-                    self.mark_lagged(delivery.epoch);
-                }
-            }
+            Delivered::Full if is_partial(&delivery) => self.pending_partial = Some(delivery),
+            Delivered::Full => self.mark_lagged(delivery.epoch),
         }
+    }
+}
+
+fn is_partial(delivery: &SessionDelivery) -> bool {
+    matches!(delivery.event, SessionEvent::PartialText { .. })
+}
+
+fn absorb(pending: &mut SessionDelivery, next: SessionDelivery) {
+    let SessionEvent::PartialText {
+        text: more,
+        parent_id: next_parent,
+    } = &next.event
+    else {
+        return;
+    };
+    match &mut pending.event {
+        SessionEvent::PartialText { text, parent_id } if parent_id == next_parent => {
+            text.push_str(more);
+            pending.rev = next.rev;
+            pending.author = next.author;
+        }
+        // Clients render only main-thread partials, so those win the single slot.
+        SessionEvent::PartialText {
+            parent_id: None, ..
+        } => {}
+        _ => *pending = next,
     }
 }
 

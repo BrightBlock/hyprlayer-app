@@ -1,0 +1,99 @@
+{
+  "scenario": "streaming_attach",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "partial": "Rivers carve their patience "
+          },
+          "guard": "the first client has the open block's prefix",
+          "ok": true
+        }
+      ],
+      "step": "a turn streams half a text block and holds it open"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "partial": "Rivers carve their patience "
+          },
+          "guard": "the streamed prefix arrives before any new delta",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "partialText:Rivers carve their patience "
+            ]
+          },
+          "guard": "the prefix follows the replayed history",
+          "ok": true
+        }
+      ],
+      "step": "a client resuming mid-block gets the prefix after the replay"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "partial": "Rivers carve their patience into stone."
+          },
+          "guard": "the late client's deltas add up to the saved text, nothing doubled",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "partial": "Rivers carve their patience into stone."
+          },
+          "guard": "the first client's deltas are untouched by the late attach",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "first": [
+              "userMessage",
+              "init",
+              "partialText:Rivers carve ",
+              "partialText:their patience ",
+              "partialText:into stone.",
+              "assistantText:Rivers carve their patience into stone.",
+              "turnDone"
+            ],
+            "late": [
+              "userMessage",
+              "init",
+              "partialText:Rivers carve their patience ",
+              "partialText:into stone.",
+              "assistantText:Rivers carve their patience into stone.",
+              "turnDone"
+            ]
+          },
+          "guard": "both clients receive the saved text",
+          "ok": true
+        }
+      ],
+      "step": "the block finishes on both streams"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "assistantText:Rivers carve their patience into stone.",
+              "turnDone"
+            ]
+          },
+          "guard": "a saved block is not sent again as partial text",
+          "ok": true
+        }
+      ],
+      "step": "a client attaching after the block was saved gets no partial text"
+    }
+  ]
+}
