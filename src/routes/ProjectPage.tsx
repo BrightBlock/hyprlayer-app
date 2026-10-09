@@ -71,6 +71,7 @@ import { openProjectSettings } from "@/features/projects/projectSettingsStore";
 import { useTabDrag, type TabDragHandlers } from "@/features/session/useTabDrag";
 import {
   agentStillWorking,
+  draftWithQueued,
   dropSession,
   endSession,
   killSession,
@@ -78,6 +79,7 @@ import {
   transcriptToText,
   useSession,
   useSessionStore,
+  type QueuedMessage,
 } from "@/features/session/sessionStore";
 import { isBusy } from "@/features/session/transcript";
 import { useCommand } from "@/lib/keybindings/registry";
@@ -272,6 +274,7 @@ function ProjectCommands(props: {
   onToggleRun: (() => void) | null;
   onCycleStage: (() => void) | null;
   onToggleReview: (() => void) | null;
+  onReturnQueued: (messages: QueuedMessage[]) => void;
 }) {
   const session = useSession(props.sessionId);
   const running = Boolean(props.sessionId && session && isBusy(session));
@@ -295,7 +298,7 @@ function ProjectCommands(props: {
   useCommand("scripts.run", props.onToggleRun);
   useCommand("ws.cycleStage", props.onCycleStage);
   useCommand("ws.review", props.onToggleReview);
-  useCommand("session.stop", running && sid ? () => void stopSession(sid) : null);
+  useCommand("session.stop", running && sid ? () => void stopSession(sid, props.onReturnQueued) : null);
   useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return (
     <>
@@ -874,6 +877,10 @@ export function ProjectPage() {
       return added.length ? { ...s, attachments: [...existing, ...added] } : s;
     });
   };
+  const returnQueuedToShell = (shellId: number, messages: QueuedMessage[]) => {
+    modifyShell(shellId, (s) => ({ ...s, draft: draftWithQueued(s.draft, messages) }));
+    addAttachmentsToShell(shellId, messages.flatMap((m) => m.attachments));
+  };
   const removeAttachmentFromShell = (shellId: number, path: string) =>
     modifyShell(shellId, (s) => ({
       ...s,
@@ -952,6 +959,7 @@ export function ProjectPage() {
     onAddAttachments: (atts: Attachment[]) => addAttachmentsToShell(shell.id, atts),
     onRemoveAttachment: (path: string) => removeAttachmentFromShell(shell.id, path),
     onClearAttachments: () => clearShellAttachments(shell.id),
+    onReturnQueued: (messages: QueuedMessage[]) => returnQueuedToShell(shell.id, messages),
   });
   const openRenameShell = (shell: ShellTab) => {
     setRenameShellId(shell.id);
@@ -1299,6 +1307,7 @@ export function ProjectPage() {
     <div ref={paneRef} className="relative flex h-full min-h-0 bg-surface">
       <ProjectCommands
         sessionId={focusedShell?.sessionId}
+        onReturnQueued={(messages) => focusedShell && returnQueuedToShell(focusedShell.id, messages)}
         onNewTab={onNewTabDefault}
         onArchiveTab={focusedShell ? () => archiveOrCloseShell(focusedShell.id) : null}
         onCloseTab={focusedShell ? () => closeShell(focusedShell.id) : null}

@@ -253,7 +253,7 @@ describe("stopSession (interrupt → kill escalation)", () => {
       const id = await startBusySession();
       emit(INIT);
 
-      const done = stopSession(id);
+      const done = stopSession(id, () => {});
       expect(h.interruptSession).toHaveBeenCalledWith(id);
       emit(TURN_DONE);
       await vi.runAllTimersAsync();
@@ -271,7 +271,7 @@ describe("stopSession (interrupt → kill escalation)", () => {
       const id = await startBusySession();
       emit(INIT);
 
-      const done = stopSession(id);
+      const done = stopSession(id, () => {});
       expect(h.interruptSession).toHaveBeenCalledWith(id);
       await vi.runAllTimersAsync();
       await done;
@@ -289,7 +289,7 @@ describe("stopSession (interrupt → kill escalation)", () => {
       const id = await startBusySession();
       emit(INIT);
 
-      const done = stopSession(id);
+      const done = stopSession(id, () => {});
       await vi.runAllTimersAsync();
       await done;
 
@@ -466,7 +466,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     emit(PERMISSION_ASK);
     expect(isBusy(entryOf(id))).toBe(true);
 
-    await stopSession(id);
+    await stopSession(id, () => {});
 
     expect(h.respondPermission).toHaveBeenCalledWith(id, "req-1", false, null);
     expect(h.interruptSession).toHaveBeenCalledWith(id);
@@ -484,7 +484,7 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     emit(QUESTION_ASK);
     expect(entryOf(id).pendingQuestion).not.toBeNull();
 
-    await stopSession(id);
+    await stopSession(id, () => {});
 
     expect(h.answerQuestion).toHaveBeenCalledWith(id, "q-1", {});
     expect(h.interruptSession).toHaveBeenCalledWith(id);
@@ -1527,7 +1527,7 @@ describe("transcript sync: queue and reload", () => {
     expect(entryOf(id).state).toBe("completed");
     expect(entryOf(id).live).toBe(false);
     // With no channel registered, stop has nothing to interrupt.
-    await stopSession(id);
+    await stopSession(id, () => {});
     expect(h.interruptSession).not.toHaveBeenCalled();
 
     const before = entryOf(id);

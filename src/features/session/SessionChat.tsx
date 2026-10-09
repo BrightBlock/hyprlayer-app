@@ -16,7 +16,7 @@ import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMe
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
 import { errorMessage, isStaleTranscript } from "@/lib/ipc";
-import { eventToChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
+import { eventToChord, formatChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
@@ -107,10 +107,12 @@ import {
   rewindToMessage,
   sendMessage,
   startSession,
+  steerQueued,
   stopSession,
   useSession,
   useMostRecentDoc,
   useSessionBackgroundTasks,
+  type QueuedMessage,
 } from "./sessionStore";
 import { dismissHeld, noteComposerInput, setDivider, syncOf, useTranscriptSync } from "./syncStore";
 import { canSend } from "./transcriptSync";
@@ -146,6 +148,7 @@ type Divider = { seq: number; device: string };
 
 // Dividers whose fade has played, kept outside the component so a remount doesn't replay it.
 const fadedDividers = new WeakSet<Divider>();
+const STEER_CHORD = formatChord("mod+enter", IS_MACOS);
 const FRESH_MS = 400;
 
 function useFreshFromSeq(divider: Divider | null): number | null {
@@ -556,6 +559,7 @@ type Props = {
   onAddAttachments: (attachments: Attachment[]) => void;
   onRemoveAttachment: (path: string) => void;
   onClearAttachments: () => void;
+  onReturnQueued: (messages: QueuedMessage[]) => void;
 };
 
 export function SessionChat({
@@ -584,6 +588,7 @@ export function SessionChat({
   onAddAttachments,
   onRemoveAttachment,
   onClearAttachments,
+  onReturnQueued,
 }: Props) {
   const session = useSession(shell.sessionId);
   const [starting, setStarting] = useState(false);
@@ -1232,8 +1237,12 @@ export function SessionChat({
     }
   };
 
-  const handleSend = async () => {
+  const handleSend = async (steer = false) => {
     const text = draft.trim();
+    if (steer && !text && attachments.length === 0 && sid) {
+      void steerQueued(sid);
+      return;
+    }
     if ((!text && attachments.length === 0) || pendingArg || !sid) return;
     // The store, not the render: a send right after a pull must see what the pull left.
     const current = syncOf(sid);
@@ -1251,7 +1260,7 @@ export function SessionChat({
       }
       const expanded = await expandDraft(text);
       if (!expanded) return;
-      await sendMessage(sid, expanded.text, attachments, expanded.title);
+      await sendMessage(sid, expanded.text, attachments, expanded.title, undefined, steer);
       setDivider(sid, null);
       transcriptRef.current?.scrollToBottom();
       onDraftChange("");
@@ -1330,11 +1339,11 @@ export function SessionChat({
       onModeChange(nextModeStage(mode));
       return;
     }
-    // Mid-turn, the agent reads it at its next step; nothing running is interrupted.
+    // Mid-turn, Enter waits for the turn's end; the primary modifier steers into its next step.
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!started) void handleStart();
-      else void handleSend();
+      else void handleSend(IS_MACOS ? e.metaKey : e.ctrlKey);
     }
   };
 
@@ -1641,7 +1650,7 @@ export function SessionChat({
                     {busy && started && (
                       <button
                         type="button"
-                        onClick={() => sid && void stopSession(sid)}
+                        onClick={() => sid && void stopSession(sid, onReturnQueued)}
                         title="Stop the current turn (interrupt, then force-stop if it doesn't respond)"
                         aria-label="Stop"
                         className="flex h-8 w-8 items-center justify-center rounded-md border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20"
@@ -1667,7 +1676,7 @@ export function SessionChat({
                             : busy
                               ? usingOpencode
                                 ? "Queue message, sent when the turn finishes"
-                                : "Queue message for the agent's next step"
+                                : `Queue message, sent when the turn finishes (${STEER_CHORD} sends it at the agent's next step)`
                               : "Send"
                       }
                       aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}

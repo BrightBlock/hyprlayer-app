@@ -1006,25 +1006,68 @@ export async function applyModel(
   await restartSession(sessionId, mode, modelFlag, effort);
 }
 
+/** Mid-turn, waits for the turn's end unless `steer` hands it to the harness's next step. */
 export async function sendMessage(
   sessionId: string,
   text: string,
   attachments: Attachment[] = [],
   promptName: string | null = null,
   onSent?: () => void,
+  steer = false,
 ): Promise<SendOutcome> {
   const current = entryOf(sessionId);
   if (!current) return "dropped";
   if (channels.has(sessionId) && isBusy(current)) {
     const message: QueuedMessage = { text, attachments, promptName, onSent };
-    if (steersInto(current)) return steerMessage(sessionId, message);
+    if (steer && steersInto(current)) return steerMessage(sessionId, message);
     setEntry(sessionId, { ...current, queued: [...current.queued, message] });
     return "queued";
   }
   const sync = syncOf(sessionId);
   // Senders that skip the composer's guard (the handoff banner) pull first.
   if (sync && !canSend(sync)) await pullNow(sessionId);
-  return deliverMessage(sessionId, text, attachments, promptName, "back", onSent);
+  return deliverMessage(sessionId, text, attachments, promptName, "back", onSent, steer);
+}
+
+/** Hands the messages waiting on the turn's end to the harness's next step instead. */
+export async function steerQueued(sessionId: string): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current || !current.queued.some((m) => !delivered(m))) return;
+  if (!isBusy(current)) {
+    flushQueuedMessage(sessionId);
+    return;
+  }
+  if (!steersInto(current)) return;
+  const waiting = current.queued.filter((m) => !delivered(m));
+  setEntry(sessionId, { ...current, queued: current.queued.filter(delivered) });
+  for (const message of waiting) await steerMessage(sessionId, message);
+}
+
+export function draftWithQueued(draft: string, messages: QueuedMessage[]): string {
+  return [...messages.map((m) => m.text), draft]
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Takes back every queued message the harness hasn't started; one it already took in stays. */
+export async function withdrawQueued(sessionId: string): Promise<QueuedMessage[]> {
+  const current = entryOf(sessionId);
+  if (!current || current.queued.length === 0) return [];
+  const chips = current.queued;
+  const withdrawn = await Promise.all(
+    chips.map(async (m) => {
+      if (!m.clientMessageId) return true;
+      return unwrap(commands.cancelQueuedMessage(sessionId, m.clientMessageId)).catch((e) => {
+        log.warn("session", `withdrawing a queued message from ${sessionId} failed`, e);
+        return false;
+      });
+    }),
+  );
+  const taken = chips.filter((_, i) => withdrawn[i]);
+  const latest = entryOf(sessionId);
+  if (latest) setEntry(sessionId, { ...latest, queued: latest.queued.filter((m) => !taken.includes(m)) });
+  return taken;
 }
 
 async function deliverMessage(
@@ -1034,6 +1077,7 @@ async function deliverMessage(
   promptName: string | null = null,
   requeue: "front" | "back" = "back",
   onSent?: () => void,
+  steer = false,
 ): Promise<SendOutcome> {
   if (!entryOf(sessionId)) return "dropped";
   // Resume before adding the optimistic item: a session another device drove
@@ -1047,7 +1091,7 @@ async function deliverMessage(
   // Working, not busy: a resumed log can re-show a dead process's ask, which must not block.
   if (channels.has(sessionId) && isWorking(current)) {
     const message: QueuedMessage = { text, attachments, promptName, onSent };
-    if (steersInto(current)) return steerMessage(sessionId, message, requeue);
+    if (steer && steersInto(current)) return steerMessage(sessionId, message, requeue);
     const queued = requeue === "front" ? [message, ...current.queued] : [...current.queued, message];
     setEntry(sessionId, { ...current, queued });
     return "queued";
@@ -1416,8 +1460,16 @@ export async function interruptSession(sessionId: string): Promise<void> {
 }
 
 const STOP_ESCALATION_MS = 3000;
-export async function stopSession(sessionId: string): Promise<void> {
+/** Queued messages go back to the composer: withdrawn first, or claude starts them as the interrupt lands. */
+export async function stopSession(
+  sessionId: string,
+  returnQueued: (messages: QueuedMessage[]) => void,
+): Promise<void> {
   if (!channels.has(sessionId)) return;
+  if (entryOf(sessionId)?.queued.length) {
+    const withdrawn = await withdrawQueued(sessionId);
+    if (withdrawn.length > 0) returnQueued(withdrawn);
+  }
 
   const parked = entryOf(sessionId);
   if (parked && isBusy(parked) && !isWorking(parked)) {
