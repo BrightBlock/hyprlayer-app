@@ -1,6 +1,19 @@
 {
   "versions": [
     {
+      "version": "0.8.11",
+      "summary": "Messages you send mid-turn queue instead of steering; review and validation get clearer panels.",
+      "notes": [
+        "Enter on a message sent mid-turn now queues it to run after the turn, instead of steering the agent. Use Cmd/Ctrl+Enter to steer. Stop pulls queued messages back into the composer.",
+        "Queued messages show inline at the end of the transcript instead of in a strip above the composer.",
+        "Fixed streamed text breaking mid-sentence for a reader that attached partway through a turn.",
+        "Validate and review now show as ordered steps in the plan sidebar and chat card. Validation findings split into gate, checks, issues, notes, and manual items, with a fix-or-skip choice.",
+        "Review notes drop the \"needs your call\" kind; the review panel counts unresolved notes instead.",
+        "Keyboard focus reads like hover instead of drawing a ring, and arrow keys navigate lists."
+      ],
+      "date": "2026-10-09"
+    },
+    {
       "version": "0.8.10",
       "date": "2026-10-07",
       "summary": "Sign in to ssh hosts that need a password, passphrase or new host key.",
