@@ -108,13 +108,7 @@ fn parse_line(worktree: &Path, line: &[u8]) -> Option<SidecarNote> {
     let Some(kind) = ReviewNoteKind::try_parse(&raw.kind) else {
         return skip("an unknown kind");
     };
-    let joined = format!(
-        "{}\0{}\0{}\0{}",
-        raw.path,
-        raw.line,
-        kind.as_str(),
-        raw.body
-    );
+    let joined = format!("{}\0{}\0{}\0{}", raw.path, raw.line, raw.kind, raw.body);
     let Ok(fingerprint) = git2::Oid::hash_object(git2::ObjectType::Blob, joined.as_bytes()) else {
         return skip("an unhashable line");
     };

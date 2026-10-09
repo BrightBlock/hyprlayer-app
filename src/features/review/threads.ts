@@ -4,7 +4,6 @@ export type Thread = { root: ReviewComment; replies: ReviewComment[] };
 
 export const NOTE_KIND_LABEL: Record<ReviewNoteKind, string> = {
   note: "Note",
-  needs_your_call: "Needs your call",
   outside_plan_scope: "Outside plan scope",
 };
 

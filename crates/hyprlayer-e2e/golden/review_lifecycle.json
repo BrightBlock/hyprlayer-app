@@ -579,7 +579,7 @@
               {
                 "body": "Why `b` is 20 is a guess; confirm the constant.",
                 "currentLine": 6,
-                "kind": "needs_your_call",
+                "kind": "note",
                 "line": 6,
                 "path": "src/edit.rs",
                 "resolved": false,
@@ -822,12 +822,12 @@
               "line": 6,
               "parentId": null,
               "path": "src/edit.rs",
-              "replyToNoteId": "$NEEDS_CALL_NOTE",
+              "replyToNoteId": "$ANSWERED_NOTE",
               "resolved": false,
               "side": "modified",
               "state": "pending"
             },
-            "replyToNoteId": "$NEEDS_CALL_NOTE"
+            "replyToNoteId": "$ANSWERED_NOTE"
           },
           "guard": "a note reply is a comment on the note's own line, whatever location the client sent",
           "ok": true
@@ -840,7 +840,7 @@
               {
                 "body": "Why `b` is 20 is a guess; confirm the constant.",
                 "currentLine": 7,
-                "kind": "needs_your_call",
+                "kind": "note",
                 "line": 6,
                 "path": "src/edit.rs",
                 "resolved": true,
@@ -910,7 +910,7 @@
       "guards": [
         {
           "evidence": {
-            "message": "Review · Changes requested · 2 / 7 viewed · 7 comments\n\nTighten the constants before this ships.\n\n- `src/edit.rs:4` Why 3, and not 30?\n- `src/edit.rs:4` It balances the sum.\n- `src/gone.rs:2 (removed line)` Why is this here?\n- `src/gone.rs:2` Why is this here?\n- `src/new_name.rs:4 (removed line)` Why is this here?\n- `src/edit.rs:7` Reply to note [needs_your_call]:\n  > Why `b` is 20 is a guess; confirm the constant.\n  \n  Keep 20; the spec fixes it.\n- `src/edit.rs:7` Name this constant.\n  \n  It also needs a doc comment.\n\nAddress each comment, then stop. Files you change go back to unviewed in the review."
+            "message": "Review · Changes requested · 2 / 7 viewed · 7 comments\n\nTighten the constants before this ships.\n\n- `src/edit.rs:4` Why 3, and not 30?\n- `src/edit.rs:4` It balances the sum.\n- `src/gone.rs:2 (removed line)` Why is this here?\n- `src/gone.rs:2` Why is this here?\n- `src/new_name.rs:4 (removed line)` Why is this here?\n- `src/edit.rs:7` Reply to note [note]:\n  > Why `b` is 20 is a guess; confirm the constant.\n  \n  Keep 20; the spec fixes it.\n- `src/edit.rs:7` Name this constant.\n  \n  It also needs a doc comment.\n\nAddress each comment, then stop. Files you change go back to unviewed in the review."
           },
           "guard": "the message follows the review grammar",
           "ok": true

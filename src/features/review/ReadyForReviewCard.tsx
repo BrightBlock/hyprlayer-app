@@ -35,7 +35,7 @@ function ReadyCardBody({ sessionId, view }: { sessionId: string; view: Workstrea
   const files = review?.files;
   if (!tracker || !tasksDone || git.implementWorking || !review || !files || files.files.length === 0) return null;
   if (review.status === "approved") return null;
-  const calls = review.notes.filter((n) => n.kind === "needs_your_call" && !n.resolved).length;
+  const openNotes = review.notes.filter((n) => !n.resolved).length;
 
   return (
     <div className="mt-4 max-w-[min(520px,100%)] space-y-2.5 rounded-card border border-edge bg-panel px-3 py-2.5">
@@ -62,7 +62,7 @@ function ReadyCardBody({ sessionId, view }: { sessionId: string; view: Workstrea
         <div className="flex items-baseline gap-1.5">
           <dt className="text-ink-dim">Notes</dt>
           <dd className="tabular-nums text-ink">
-            {review.notes.length} · {calls} {calls === 1 ? "needs" : "need"} your call
+            {review.notes.length} · {openNotes} unresolved
           </dd>
         </div>
       </dl>

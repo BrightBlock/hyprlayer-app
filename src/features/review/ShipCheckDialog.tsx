@@ -28,8 +28,8 @@ function readiness(review: ReviewView, target: ShipCheckTarget, agentLabel: stri
   const latest = review.rounds[review.rounds.length - 1];
   const awaitingFixes =
     review.status === "changes_requested" || (latest?.verdict === "request_changes" && !latest.delivered);
-  const calls = review.notes.filter((n) => n.kind === "needs_your_call" && !n.resolved);
-  const first = calls[0];
+  const open = review.notes.filter((n) => !n.resolved);
+  const first = open[0];
 
   return [
     {
@@ -65,8 +65,10 @@ function readiness(review: ReviewView, target: ShipCheckTarget, agentLabel: stri
       label: `${agentLabel}'s notes`,
       ok: !first,
       value: first
-        ? `${calls.length} ${calls.length === 1 ? "needs" : "need"} your call: ${first.body.split("\n")[0]} in ${basename(first.path)}`
-        : "None need your call",
+        ? `${open.length} unresolved: ${first.body.split("\n")[0]} in ${basename(first.path)}`
+        : review.notes.length > 0
+          ? "All resolved"
+          : "None",
       action: first ? { label: "Open", run: () => go(first.path, first.currentLine ?? undefined) } : undefined,
     },
   ];

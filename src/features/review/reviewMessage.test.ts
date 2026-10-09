@@ -105,7 +105,7 @@ describe("parseReviewMessage", () => {
       message(
         "Review · Changes requested · 0 / 1 viewed · 2 comments",
         "",
-        "- `a.rs:6` Reply to note [needs_your_call]:",
+        "- `a.rs:6` Reply to note [outside_plan_scope]:",
         "  > Is 20 right?",
         "  >",
         "  > Confirm the constant.",
@@ -123,7 +123,7 @@ describe("parseReviewMessage", () => {
         line: 6,
         removed: false,
         body: "> Yes, keep 20.\nAdd a doc comment.",
-        note: { kind: "needs_your_call", body: "Is 20 right?\n\nConfirm the constant." },
+        note: { kind: "outside_plan_scope", body: "Is 20 right?\n\nConfirm the constant." },
       },
       { path: "a.rs", line: 9, removed: false, body: "Plain." },
     ]);

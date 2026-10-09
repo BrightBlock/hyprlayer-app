@@ -185,13 +185,20 @@ pub fn review_notes_path(workstream_id: &str) -> String {
 pub fn review_notes_instruction(workstream_id: &str) -> String {
     let path = review_notes_path(workstream_id);
     format!(
-        "As you implement, leave review notes for the human reviewer: append one JSON object per \
-line to `{path}` (create the directory if needed) with keys `path` (repo-relative), `line` \
-(1-based, in the file as you leave it), `kind` (`note`, `needs_your_call`, or \
+        "As you implement, leave review notes for the human who will review this diff: append one \
+JSON object per line to `{path}` (create the directory if needed) with keys `path` \
+(repo-relative), `line` (1-based, in the file as you leave it), `kind` (`note` or \
 `outside_plan_scope`), `body` (one or two sentences, markdown), and `task` (the plan phase or \
-task you were on). Use `needs_your_call` for a decision the human should make and \
-`outside_plan_scope` for any change the plan did not ask for. Never stage or commit this file. \
-When you delegate work to a subagent, include this paragraph verbatim in its prompt."
+task you were on). The reviewer reads each note beside its line without the plan or this \
+conversation, so a note must stand on its own: name what it is about, and never lean on plan \
+shorthand, earlier messages, or other notes. Leave a note only where the diff hides something \
+the reviewer needs: why the code takes a non-obvious approach (a constraint, a gotcha, a \
+rejected alternative), or an effect that reaches beyond the lines shown. Do not restate what \
+the code does, narrate your steps, or leave a TODO. Use `outside_plan_scope` for any change the \
+plan did not ask for, and say why it was needed. A note is never a question: settle each \
+decision while you implement, and if one is genuinely the human's to make, stop and ask in the \
+conversation before you build it. Few notes is normal; none is fine. Never stage or commit this \
+file. When you delegate work to a subagent, include this paragraph verbatim in its prompt."
     )
 }
 

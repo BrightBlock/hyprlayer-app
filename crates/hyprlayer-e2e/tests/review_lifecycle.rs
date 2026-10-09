@@ -56,7 +56,8 @@ done
 const REVIEW_RULE: &str = "/.hyprlayer/review/";
 
 // Lines 1-3 of the sidecar are accepted; `NOTE_PARTIAL` arrives later, unterminated.
-const NOTE_NEEDS_CALL: &str = r#"{"path":"src/edit.rs","line":6,"kind":"needs_your_call","body":"Why `b` is 20 is a guess; confirm the constant.","task":"Phase 1: edit"}"#;
+// `NOTE_RETIRED_KIND` is from an agent still on the old instruction; it loads as a plain note.
+const NOTE_RETIRED_KIND: &str = r#"{"path":"src/edit.rs","line":6,"kind":"needs_your_call","body":"Why `b` is 20 is a guess; confirm the constant.","task":"Phase 1: edit"}"#;
 const NOTE_OUT_OF_SCOPE: &str = r#"{"path":"src/new.rs","line":2,"kind":"outside_plan_scope","body":"This constant was not in the plan.","task":"Phase 2: new"}"#;
 const NOTE_PLAIN: &str =
     r#"{"path":"src/edit.rs","line":7,"kind":"note","body":"Prints the sum."}"#;
@@ -110,7 +111,7 @@ const REVIEW_MESSAGE: &str = concat!(
     "- `src/gone.rs:2 (removed line)` Why is this here?\n",
     "- `src/gone.rs:2` Why is this here?\n",
     "- `src/new_name.rs:4 (removed line)` Why is this here?\n",
-    "- `src/edit.rs:7` Reply to note [needs_your_call]:\n",
+    "- `src/edit.rs:7` Reply to note [note]:\n",
     "  > Why `b` is 20 is a guess; confirm the constant.\n",
     "  \n",
     "  Keep 20; the spec fixes it.\n",
@@ -929,7 +930,7 @@ async fn review_lifecycle() {
     j.step("read the notes the agent left");
     let sidecar = worktree.join(&sidecar_path);
     let mut lines = vec![
-        NOTE_NEEDS_CALL,
+        NOTE_RETIRED_KIND,
         UNUSABLE_NOTES[0],
         NOTE_OUT_OF_SCOPE,
         UNUSABLE_NOTES[1],
@@ -941,7 +942,7 @@ async fn review_lifecycle() {
         UNUSABLE_NOTES[6],
         UNUSABLE_NOTES[7],
         UNUSABLE_NOTES[8],
-        NOTE_NEEDS_CALL,
+        NOTE_RETIRED_KIND,
     ]
     .join("\n");
     lines.push('\n');
@@ -949,7 +950,7 @@ async fn review_lifecycle() {
     write(&worktree, &sidecar_path, &lines);
     let first = review(&mut j, &client, &id).await;
     let expected = vec![
-        json!({ "path": "src/edit.rs", "line": 6, "currentLine": 6, "kind": "needs_your_call",
+        json!({ "path": "src/edit.rs", "line": 6, "currentLine": 6, "kind": "note",
             "body": "Why `b` is 20 is a guess; confirm the constant.", "task": "Phase 1: edit", "resolved": false }),
         json!({ "path": "src/new.rs", "line": 2, "currentLine": 2, "kind": "outside_plan_scope",
             "body": "This constant was not in the plan.", "task": "Phase 2: new", "resolved": false }),
@@ -1083,9 +1084,9 @@ async fn review_lifecycle() {
     );
 
     j.step("answer the agent's note");
-    let call_note = note_of_kind(&after_comment, "needs_your_call");
+    let call_note = note_on_line(&after_comment, "src/edit.rs", 6);
     let call_note_id = text(&call_note, "/id");
-    j.alias(&call_note_id, "$NEEDS_CALL_NOTE");
+    j.alias(&call_note_id, "$ANSWERED_NOTE");
     let unanswered = review(&mut j, &client, &id).await;
     let reply = add_comment(
         &mut j,
@@ -1103,7 +1104,7 @@ async fn review_lifecycle() {
     j.alias(&reply_id, "$NOTE_REPLY");
     let answered = review(&mut j, &client, &id).await;
     let stored = comment_in(&answered, &reply_id);
-    let note_after = note_of_kind(&answered, "needs_your_call");
+    let note_after = note_on_line(&answered, "src/edit.rs", 6);
     j.guard(
         "a note reply is a comment on the note's own line, whatever location the client sent",
         reply["replyToNoteId"] == json!(call_note_id)
@@ -1756,10 +1757,13 @@ fn note_summary(note: &Value) -> Value {
     })
 }
 
-fn note_of_kind(review: &Value, kind: &str) -> Value {
+fn note_on_line(review: &Value, path: &str, line: u32) -> Value {
     review["notes"]
         .as_array()
-        .and_then(|all| all.iter().find(|n| n["kind"] == json!(kind)))
+        .and_then(|all| {
+            all.iter()
+                .find(|n| n["path"] == json!(path) && n["line"] == json!(line))
+        })
         .cloned()
         .unwrap_or(Value::Null)
 }

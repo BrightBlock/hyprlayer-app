@@ -146,15 +146,14 @@ impl ReviewCommentState {
 #[serde(rename_all = "snake_case")]
 pub enum ReviewNoteKind {
     Note,
-    NeedsYourCall,
     OutsidePlanScope,
 }
 
 impl ReviewNoteKind {
     pub fn try_parse(s: &str) -> Option<ReviewNoteKind> {
         match s {
-            "note" => Some(ReviewNoteKind::Note),
-            "needs_your_call" => Some(ReviewNoteKind::NeedsYourCall),
+            // Retired kind: decisions are asked during implementation, not left for review.
+            "note" | "needs_your_call" => Some(ReviewNoteKind::Note),
             "outside_plan_scope" => Some(ReviewNoteKind::OutsidePlanScope),
             _ => None,
         }
@@ -167,7 +166,6 @@ impl ReviewNoteKind {
     pub fn as_str(self) -> &'static str {
         match self {
             ReviewNoteKind::Note => "note",
-            ReviewNoteKind::NeedsYourCall => "needs_your_call",
             ReviewNoteKind::OutsidePlanScope => "outside_plan_scope",
         }
     }

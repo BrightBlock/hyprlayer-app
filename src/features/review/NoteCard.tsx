@@ -11,7 +11,6 @@ import { NOTE_KIND_LABEL } from "./threads";
 
 const KIND_TAG: Record<ReviewNote["kind"], string> = {
   note: "border-edge text-ink-2",
-  needs_your_call: "border-warn/40 bg-warn/10 text-warn-ink",
   outside_plan_scope: "border-info/40 bg-info/10 text-info",
 };
 

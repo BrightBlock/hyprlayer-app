@@ -1468,7 +1468,7 @@ export type ReviewNote = {
 	createdAt: number | null,
 };
 
-export type ReviewNoteKind = "note" | "needs_your_call" | "outside_plan_scope";
+export type ReviewNoteKind = "note" | "outside_plan_scope";
 
 export type ReviewRound = {
 	number: number,

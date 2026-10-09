@@ -38,7 +38,7 @@ function summarize(review: ReviewView) {
     sent: sent.length,
     addressed: sent.filter((c) => c.addressed).length,
     notes: review.notes.length,
-    calls: review.notes.filter((n) => n.kind === "needs_your_call" && !n.resolved).length,
+    openNotes: review.notes.filter((n) => !n.resolved).length,
   };
 }
 
@@ -109,7 +109,7 @@ export function ReviewChecklist({ view, fallback }: ReviewChecklistProps) {
         )}
         {s.notes > 0 && (
           <p className="text-ui text-ink-2">
-            {plural(s.notes, "note")} from {agentLabel} · {s.calls} {s.calls === 1 ? "needs" : "need"} your call
+            {plural(s.notes, "note")} from {agentLabel} · {s.openNotes} unresolved
           </p>
         )}
         {s.round !== null && s.changed.length > 0 && (

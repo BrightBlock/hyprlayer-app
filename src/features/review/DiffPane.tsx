@@ -117,7 +117,6 @@ export function DiffPane({
   const glyph = CHANGE_GLYPH[file.change];
   const dir = dirname(file.path);
   const openNotes = notes.filter((n) => !n.resolved);
-  const needsCall = openNotes.some((n) => n.kind === "needs_your_call");
   const outOfScope = openNotes.some((n) => n.kind === "outside_plan_scope");
 
   // Unified view has no Original editor, so threads anchored there list above the diff.
@@ -268,7 +267,6 @@ export function DiffPane({
             {plural(openNotes.length, "note")}
           </span>
         )}
-        {needsCall && <KindTag kind="needs_your_call" />}
         {outOfScope && <KindTag kind="outside_plan_scope" />}
         <span className="shrink-0 text-meta tabular-nums text-ink-4">
           {index + 1} of {total}
