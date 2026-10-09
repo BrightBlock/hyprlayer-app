@@ -46,7 +46,7 @@ use hyprlayer_core::runtime::prompts::{
     PromptExportRequest, PromptExportResult, PromptImportDecision, PromptImportPreview,
     PromptImportRequest, PromptImportResult,
 };
-use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
+use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus, ValidationSummary};
 use hyprlayer_core::runtime::reviews::{
     AddReviewCommentRequest, ReviewComment, ReviewView, SetReviewFileViewedRequest,
     SubmitReviewRequest, SubmitReviewResult,
@@ -1121,6 +1121,17 @@ impl Dispatch for Server {
 
     async fn get_review(&self, workstream_id: String) -> Result<ReviewView, WireError> {
         self.runtime.reviews().get(&workstream_id).await.wire()
+    }
+
+    async fn summarize_validation_report(
+        &self,
+        report: String,
+    ) -> Result<Option<ValidationSummary>, WireError> {
+        self.runtime
+            .providers()
+            .summarize_validation(&report)
+            .await
+            .wire()
     }
 
     async fn set_review_file_viewed(

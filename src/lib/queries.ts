@@ -1090,6 +1090,18 @@ export function useReview(id: string, enabled = true) {
   });
 }
 
+// One `claude -p` call per report: a report never changes once written, so its summary never goes stale.
+export function useValidationSummary(reportId: string | null, text: string | null) {
+  return useQuery({
+    queryKey: ["validation-summary", reportId],
+    queryFn: () => unwrap(commands.summarizeValidationReport(text!)),
+    enabled: reportId !== null && text !== null,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
+}
+
 // The workstream id travels in the variables, never a hook argument, so a settled
 // mutation invalidates the review it changed.
 export function useSetReviewFileViewed() {

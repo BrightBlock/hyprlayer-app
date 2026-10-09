@@ -62,7 +62,7 @@ import {
   bindSessionToShell,
   focusedPaneId,
   openCommitTab,
-  openImplementTab,
+  openPlanStageTab,
   openPromptTab,
   openSessionTab,
   openShipTab,
@@ -1678,7 +1678,49 @@ export async function approvePlanAndBuild(
     attachments: [{ path: planPath, name: docTitle(planPath), kind: "file" }],
     ...newChatLaunchArgs(settings, from, claudeCatalogSnapshot()),
   });
-  openImplementTab(workstreamId, session.id, planPath, from);
+  openPlanStageTab(workstreamId, session.id, "implement", planPath, from);
+}
+
+// Carries the implement tab's harness and model, but not its permission mode: validate's policy owns that.
+export async function validatePlanInNewSession(
+  workstreamId: string,
+  planPath: string,
+  implementSessionId: string,
+): Promise<Session> {
+  const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
+  const shell = useWorkstreamTabsStore
+    .getState()
+    .byWs[workstreamId]?.shells.find((s) => s.sessionId === implementSessionId);
+  const from = shell && { ...shell, permissionMode: undefined };
+  const session = await startSession({
+    workstreamId,
+    stage: "validate",
+    input: "",
+    attachments: [{ path: planPath, name: docTitle(planPath), kind: "file" }],
+    ...newChatLaunchArgs(settings, from, claudeCatalogSnapshot()),
+    permissionMode: null,
+  });
+  openPlanStageTab(workstreamId, session.id, "validate", planPath, from);
+  return session;
+}
+
+export const VALIDATE_PROMPT = "Validate plan";
+export const FIX_VALIDATION_PROMPT = "Fix validation issues";
+
+// Resumes a finished implement session so the message keeps its context.
+export async function sendToImplementSession(
+  workstreamId: string,
+  implement: Session,
+  text: string,
+  promptName: string,
+): Promise<SendOutcome> {
+  if (!(await attachForReview(workstreamId, implement))) return "dropped";
+  return sendMessage(implement.id, text, [], promptName);
+}
+
+// The validate_plan skill hands the audit to its inspector subagent and reports back in this chat.
+export function validatePlanInSession(workstreamId: string, implement: Session, planPath: string): Promise<SendOutcome> {
+  return sendToImplementSession(workstreamId, implement, `/validate_plan ${planPath}`, VALIDATE_PROMPT);
 }
 
 export async function shipWorkstream(workstreamId: string): Promise<void> {

@@ -788,7 +788,11 @@ function renderSingle(
         />
       );
     case "assistant":
-      return <AssistantMessage text={item.text} streaming={item.streaming} />;
+      return (
+        <div data-item-id={item.id}>
+          <AssistantMessage text={item.text} streaming={item.streaming} />
+        </div>
+      );
     case "thinking":
       return <ThinkingBlock text={item.text} />;
     case "skill":
@@ -1188,7 +1192,9 @@ export const TranscriptView = memo(
         setAtBottom(false);
         jumping.current = true;
         settleJump();
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Centering a target taller than the pane would land mid-message.
+        const tall = el.getBoundingClientRect().height > (scrollRef.current?.clientHeight ?? 0);
+        el.scrollIntoView({ behavior: "smooth", block: tall ? "start" : "center" });
       };
       attempt();
       return () => {

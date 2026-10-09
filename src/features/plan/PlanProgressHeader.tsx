@@ -1,6 +1,7 @@
 import { cx } from "@/components/ui";
 import type { RunningSubagent } from "@/features/session/subagent";
 
+import type { StageBadge } from "./lifecycleSlot";
 import type { CurrentItem, PlanTracker } from "./planTracker";
 
 function subagentLine(s: RunningSubagent): string {
@@ -56,11 +57,20 @@ export function CurrentTaskCard({
 export function PlanProgressHeader({
   tracker,
   reduceMotion,
+  badge,
 }: {
   tracker: PlanTracker;
   reduceMotion: boolean;
+  badge?: StageBadge;
 }) {
   const pct = Math.round(tracker.progress * 100);
+  const phaseLine =
+    tracker.currentPhase !== null ? `Phase ${tracker.currentPhase} of ${tracker.phases.length}` : null;
+  const shown = badge ?? {
+    label: tracker.allDone ? "Done" : "Build",
+    className: tracker.allDone ? "bg-ok" : "bg-info",
+    detail: phaseLine,
+  };
   return (
     <div className="px-[18px] pt-4">
       <h2 className="text-h3 text-ink">{tracker.title}</h2>
@@ -68,16 +78,12 @@ export function PlanProgressHeader({
         <span
           className={cx(
             "rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none text-accent-ink",
-            tracker.allDone ? "bg-ok" : "bg-info",
+            shown.className,
           )}
         >
-          {tracker.allDone ? "Done" : "Build"}
+          {shown.label}
         </span>
-        {tracker.currentPhase !== null && (
-          <span className="text-meta tabular-nums text-ink-4">
-            Phase {tracker.currentPhase} of {tracker.phases.length}
-          </span>
-        )}
+        {shown.detail && <span className="text-meta tabular-nums text-ink-4">{shown.detail}</span>}
       </div>
       <div
         role="progressbar"

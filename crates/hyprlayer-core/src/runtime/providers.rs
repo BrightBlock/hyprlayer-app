@@ -21,6 +21,55 @@ use super::HyprlayerRuntime;
 
 // Background work, and a Haiku round trip alone swings from 4s to over 12s.
 const TITLE_TIMEOUT: Duration = Duration::from_secs(45);
+
+const VALIDATION_SUMMARY_PROMPT: &str = "Summarize the plan-validation report below as one JSON object, \
+with no prose and no code fence. Keys: \"gate\" (the report's gate or verdict line, or null); \
+\"checks\" (each automated check that was run or skipped: {\"text\": a short plain-text line, \
+\"outcome\": \"pass\", \"fail\" or null for skipped}); \"issues\" (only defects that need a code \
+change before the work is done: a deviation from the plan that is a regression, a bug, a failing \
+criterion caused by this change); \"notes\" (everything else worth knowing: skipped checks, process \
+remarks, cleanup advice, pre-existing failures unrelated to the change); \"manual\" (manual checks \
+still to do). When in doubt, it is a note, not an issue. Keep each line under 120 characters and drop markdown.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "lowercase")]
+pub enum CheckOutcome {
+    Pass,
+    Fail,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationCheck {
+    pub text: String,
+    #[serde(default)]
+    pub outcome: Option<CheckOutcome>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationSummary {
+    #[serde(default)]
+    pub gate: Option<String>,
+    #[serde(default)]
+    pub checks: Vec<ValidationCheck>,
+    #[serde(default)]
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub manual: Vec<String>,
+}
+
+// Small models still wrap JSON in a fence or a sentence now and then.
+fn parse_validation_summary(raw: &str) -> Option<ValidationSummary> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    serde_json::from_str(raw.get(start..=end)?).ok()
+}
 const OLLAMA_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
@@ -489,13 +538,44 @@ impl ProviderService<'_> {
     }
 
     pub async fn generate_title_claude(&self, flag: &str, prompt: &str) -> Result<String> {
+        self.claude_print(
+            flag,
+            "You name coding requests with short titles.",
+            prompt,
+            TITLE_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `None` when the model's reply isn't the JSON asked for.
+    pub async fn summarize_validation(&self, report: &str) -> Result<Option<ValidationSummary>> {
+        let prompt = format!("{VALIDATION_SUMMARY_PROMPT}\n\n<report>\n{report}\n</report>");
+        let raw = self
+            .claude_print(
+                "haiku",
+                "You condense plan-validation reports into JSON.",
+                &prompt,
+                TITLE_TIMEOUT,
+            )
+            .await?;
+        Ok(parse_validation_summary(&raw))
+    }
+
+    // One `claude -p` turn's text. Outside any repo, so the project's context
+    // can't leak in. No tools, MCP servers or default system prompt: they cost
+    // ~7x the tokens.
+    async fn claude_print(
+        &self,
+        flag: &str,
+        system: &str,
+        prompt: &str,
+        timeout: Duration,
+    ) -> Result<String> {
         ensure_running(self.runtime)?;
         let bin = self.runtime.binaries.require(BinaryKind::Claude).await?;
         let path = self.runtime.binaries.augmented_path().await;
         let claude_cfg = self.runtime.settings.get().await.providers.claude;
 
-        // Outside any repo, so the project's context can't become the title. No
-        // tools, MCP servers or default system prompt: they cost ~7x the tokens.
         let mut exec = Exec::new(&bin)
             .arg("-p")
             .args([
@@ -504,10 +584,7 @@ impl ProviderService<'_> {
                 "--strict-mcp-config",
                 "--no-session-persistence",
             ])
-            .args([
-                "--system-prompt",
-                "You name coding requests with short titles.",
-            ])
+            .args(["--system-prompt", system])
             .cwd(std::env::temp_dir())
             .stdin(prompt.as_bytes().to_vec());
         if !flag.is_empty() {
@@ -517,7 +594,7 @@ impl ProviderService<'_> {
             .arg("--output-format")
             .arg("json")
             .env("PATH", path)
-            .timeout(TITLE_TIMEOUT);
+            .timeout(timeout);
         for (k, v) in claude_auth_env(&claude_cfg) {
             exec = exec.env(k, v);
         }
@@ -530,7 +607,7 @@ impl ProviderService<'_> {
                 .and_then(|r| r.as_str())
                 .unwrap_or_default()
                 .to_string()),
-            // JSON that isn't one object is a stream or an error, never a title.
+            // JSON that isn't one object is a stream or an error, never a reply.
             Err(_) if stdout.starts_with('{') => Ok(String::new()),
             Err(_) => Ok(out.stdout),
         }

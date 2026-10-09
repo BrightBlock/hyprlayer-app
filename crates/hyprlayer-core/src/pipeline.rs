@@ -39,6 +39,23 @@ fn deny(specs: &[&str]) -> Vec<String> {
     specs.iter().map(|s| s.to_string()).collect()
 }
 
+/// Validate may edit thoughts docs (its plan's `status`), never the worktree.
+pub fn thoughts_edit_rules(stage: Stage, thoughts_roots: &[std::path::PathBuf]) -> Vec<String> {
+    if stage != Stage::Validate {
+        return Vec::new();
+    }
+    // Claude's permission rules mark an absolute path with a leading `//`.
+    thoughts_roots
+        .iter()
+        .map(|root| {
+            format!(
+                "Edit(//{}/**)",
+                root.display().to_string().trim_start_matches('/')
+            )
+        })
+        .collect()
+}
+
 pub fn policy_for(stage: Stage) -> StagePolicy {
     match stage {
         Stage::General => StagePolicy {
@@ -62,10 +79,11 @@ pub fn policy_for(stage: Stage) -> StagePolicy {
             allowed_tools: allow(&["Write", "Edit", "Bash(git add:*)", "Bash(git commit:*)"]),
             disallowed_tools: deny(&["Bash(git push:*)"]),
         },
+        // Edit stays off the deny list so `thoughts_edit_rules` can grant the plan's status promotion.
         Stage::Validate => StagePolicy {
             permission_mode: PermissionMode::Default,
             allowed_tools: allow(&[]),
-            disallowed_tools: deny(&["Write", "Edit", "Bash(git commit:*)"]),
+            disallowed_tools: deny(&["Write", "Bash(git commit:*)"]),
         },
         Stage::Commit => StagePolicy {
             permission_mode: PermissionMode::Default,

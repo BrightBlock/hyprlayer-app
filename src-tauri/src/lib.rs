@@ -116,6 +116,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::detach_workstream_pr,
             commands::workstreams::merge_workstream_pr,
             commands::reviews::get_review,
+            commands::reviews::summarize_validation_report,
             commands::reviews::set_review_file_viewed,
             commands::reviews::add_review_comment,
             commands::reviews::edit_review_comment,

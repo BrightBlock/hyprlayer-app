@@ -1104,7 +1104,8 @@ export function SessionChat({
     [sid, workstreamId, sessionItems, sessionStage, writtenDocs],
   );
   const readyCard = useMemo(
-    () => (sid && sessionStage === "implement" ? { sessionId: sid, workstreamId } : null),
+    () =>
+      sid && (sessionStage === "implement" || sessionStage === "validate") ? { sessionId: sid, workstreamId } : null,
     [sid, sessionStage, workstreamId],
   );
   const detectedHandoffPath = useMemo(

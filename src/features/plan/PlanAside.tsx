@@ -12,7 +12,7 @@ import { PlanPanel } from "./PlanPanel";
 import { approvalFor, runApproval } from "./planApproval";
 import { checkOffTasks } from "./planDocActions";
 import { closePlanPreview } from "./planPreviewStore";
-import { reviewChecklistComponent } from "./reviewChecklistSlot";
+import { lifecycleStepsComponent } from "./lifecycleSlot";
 import { usePlanTracker } from "./usePlanTracker";
 
 export function PlanAside({
@@ -63,9 +63,10 @@ export function PlanAside({
     : indexed
       ? { label: "Open in Library", icon: "external" as const, onClick: () => onOpenDoc(key) }
       : { label: "Open file", icon: "external" as const, onClick: () => onOpenFile(key) };
-  const Checklist = tracker.tasksDone ? reviewChecklistComponent() : null;
+  const Steps = entry?.stage === "implement" || entry?.stage === "validate" ? lifecycleStepsComponent() : null;
   const panel = (
     <PlanPanel
+      lifecycle={Steps && sessionId ? (parts) => <Steps view={view} sessionId={sessionId} {...parts} /> : undefined}
       tracker={tracker}
       diff={repoSummary(view)}
       approving={approving}
@@ -99,7 +100,7 @@ export function PlanAside({
           <ErrorNote error={approveError} onDismiss={() => setApproveError(null)} />
         </div>
       )}
-      <div className="min-h-0 flex-1">{Checklist ? <Checklist view={view} fallback={panel} /> : panel}</div>
+      <div className="min-h-0 flex-1">{panel}</div>
     </div>
   );
 }

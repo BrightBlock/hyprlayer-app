@@ -45,7 +45,7 @@ use hyprlayer_core::runtime::prompts::{
     PromptExportRequest, PromptExportResult, PromptImportDecision, PromptImportPreview,
     PromptImportResult,
 };
-use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus};
+use hyprlayer_core::runtime::providers::{ClaudeAuthStatus, OllamaStatus, ValidationSummary};
 use hyprlayer_core::runtime::reviews::{
     AddReviewCommentRequest, ReviewComment, ReviewView, SetReviewFileViewedRequest,
     SubmitReviewRequest, SubmitReviewResult,
@@ -212,6 +212,7 @@ hyprlayer_proto::commands! {
     ReviewChangedFiles: review_changed_files(workstream_id: String) -> ReviewFileList;
     ReviewFileSides: review_file_sides(workstream_id: String, path: String) -> ReviewFileSides;
     GetReview: get_review(workstream_id: String) -> ReviewView;
+    SummarizeValidationReport: summarize_validation_report(report: String) -> Option<ValidationSummary>;
     SetReviewFileViewed: set_review_file_viewed(req: SetReviewFileViewedRequest) -> ();
     AddReviewComment: add_review_comment(req: AddReviewCommentRequest) -> ReviewComment;
     EditReviewComment: edit_review_comment(workstream_id: String, comment_id: String, body: String) -> ();

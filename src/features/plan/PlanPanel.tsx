@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
 import { Button, cx } from "@/components/ui";
@@ -6,6 +6,7 @@ import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { plural } from "@/lib/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
+import type { StageBadge } from "./lifecycleSlot";
 import { PhaseSection } from "./PhaseSection";
 import { PlanPreviewDraft } from "./PlanPreviewDraft";
 import { PlanProgressHeader } from "./PlanProgressHeader";
@@ -27,6 +28,8 @@ type Props = {
   onClose?: () => void;
   onReviewChanges: () => void;
   onJump: (target: JumpTarget) => void;
+  // Owns the badge and what sits above the phases once a plan moves past implementing.
+  lifecycle?: (parts: { header: (badge: StageBadge) => ReactNode; phases: ReactNode }) => ReactNode;
 };
 
 const NO_CHANGES: ReadonlySet<string> = new Set();
@@ -136,6 +139,7 @@ export function PlanPanel({
   onClose,
   onReviewChanges,
   onJump,
+  lifecycle,
 }: Props) {
   const reduceMotion = useReducedMotion();
   const tracking = tracker.mode === "tracking";
@@ -154,6 +158,17 @@ export function PlanPanel({
   const markManualScroll = () => {
     lastManualScroll.current = Date.now();
   };
+
+  const phases = (
+    <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
+      <TrackedPhases tracker={tracker} changed={changed} reduceMotion={reduceMotion} onJump={onJump} />
+      {tracker.phases.length === 0 && (
+        <div className="text-body leading-prose text-ink-2">
+          <MarkdownPreview body={tracker.body} />
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -189,17 +204,17 @@ export function PlanPanel({
         onKeyDown={markManualScroll}
       >
         {tracking ? (
-          <>
-            <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
-            <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
-              <TrackedPhases tracker={tracker} changed={changed} reduceMotion={reduceMotion} onJump={onJump} />
-              {tracker.phases.length === 0 && (
-                <div className="text-body leading-prose text-ink-2">
-                  <MarkdownPreview body={tracker.body} />
-                </div>
-              )}
-            </div>
-          </>
+          lifecycle ? (
+            lifecycle({
+              header: (badge) => <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} badge={badge} />,
+              phases,
+            })
+          ) : (
+            <>
+              <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
+              {phases}
+            </>
+          )
         ) : (
           <PlanPreviewDraft tracker={tracker} changed={changed} reduceMotion={reduceMotion} />
         )}
@@ -215,7 +230,7 @@ export function PlanPanel({
               <span className="text-meta tabular-nums text-ink-4">{progressLabel(tracker)}</span>
             )}
             <span className="flex-1" />
-            {tracker.allDone ? (
+            {lifecycle ? null : tracker.allDone ? (
               <Button variant="primary" size="sm" onClick={onReviewChanges}>
                 Review changes
               </Button>

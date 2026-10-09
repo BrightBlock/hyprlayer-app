@@ -1039,7 +1039,7 @@ impl SessionService<'_> {
                 let add_dirs = self.thoughts_add_dirs(project_path).await?;
                 let LaunchPolicy::Claude {
                     permission_mode,
-                    allowed_tools,
+                    mut allowed_tools,
                     mut disallowed_tools,
                     agent,
                     review_notes,
@@ -1064,6 +1064,7 @@ impl SessionService<'_> {
                 .map(|a| a.name)
                 .collect();
                 disallowed_tools.extend(agents::agent_deny_rules(&drafts));
+                allowed_tools.extend(pipeline::thoughts_edit_rules(session.stage, &add_dirs));
 
                 let path = self.runtime.binaries.augmented_path().await;
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];

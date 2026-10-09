@@ -120,6 +120,13 @@ export const commands = {
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
 	getReview: (workstreamId: string) => typedError<ReviewView, AppError>(__TAURI_INVOKE("get_review", { workstreamId })),
+	summarizeValidationReport: (report: string) => typedError<{
+	gate?: string | null,
+	checks?: ValidationCheck[],
+	issues?: string[],
+	notes?: string[],
+	manual?: string[],
+} | null, AppError>(__TAURI_INVOKE("summarize_validation_report", { report })),
 	setReviewFileViewed: (req: SetReviewFileViewedRequest) => typedError<null, AppError>(__TAURI_INVOKE("set_review_file_viewed", { req })),
 	addReviewComment: (req: AddReviewCommentRequest) => typedError<ReviewComment, AppError>(__TAURI_INVOKE("add_review_comment", { req })),
 	editReviewComment: (workstreamId: string, commentId: string, body: string) => typedError<null, AppError>(__TAURI_INVOKE("edit_review_comment", { workstreamId, commentId, body })),
@@ -613,6 +620,8 @@ export type CatalogProvider = {
 	models: CatalogModel[],
 	available?: boolean | null,
 };
+
+export type CheckOutcome = "pass" | "fail";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -2012,6 +2021,19 @@ export type TurnKind = "user" | "assistant" | "tool";
 export type TypeCount = {
 	docType: DocType,
 	count: number,
+};
+
+export type ValidationCheck = {
+	text: string,
+	outcome?: CheckOutcome | null,
+};
+
+export type ValidationSummary = {
+	gate?: string | null,
+	checks?: ValidationCheck[],
+	issues?: string[],
+	notes?: string[],
+	manual?: string[],
 };
 
 export type WatchedSessionDto = {

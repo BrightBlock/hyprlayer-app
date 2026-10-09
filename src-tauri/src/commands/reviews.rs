@@ -1,3 +1,4 @@
+use hyprlayer_core::runtime::providers::ValidationSummary;
 use hyprlayer_core::runtime::reviews::{
     AddReviewCommentRequest, ReviewComment, ReviewView, SetReviewFileViewedRequest,
     SubmitReviewRequest, SubmitReviewResult,
@@ -128,6 +129,19 @@ pub async fn mark_review_round_delivered(
     state
         .client()?
         .mark_review_round_delivered(workstream_id, round)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn summarize_validation_report(
+    state: State<'_, AppState>,
+    report: String,
+) -> CmdResult<Option<ValidationSummary>> {
+    state
+        .client()?
+        .summarize_validation_report(report)
         .await
         .map_err(AppError::from)
 }
