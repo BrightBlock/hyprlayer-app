@@ -155,11 +155,11 @@ export function DiscoverDialog({ open, onClose, onPick }: Props) {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2 border-b border-edge px-5 py-4">
-            <div className="relative flex-1">
+            <div className="group/search relative flex-1">
               <Icon
                 name="search"
                 size="sm"
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim group-focus-within/search:text-ink"
               />
               <TextInput
                 value={filter}

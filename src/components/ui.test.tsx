@@ -306,26 +306,26 @@ describe("rowClass", () => {
   });
 });
 
-describe("focus-visible rings", () => {
-  it("Button carries the shared focus ring", () => {
+describe("focus-visible fills", () => {
+  it("Button fills like its hover instead of ringing", () => {
     render(<Button>Click me</Button>);
-    expect(screen.getByRole("button", { name: "Click me" }).className).toContain(
-      "focus-visible:ring-2",
-    );
+    const cls = screen.getByRole("button", { name: "Click me" }).className;
+    expect(cls).toContain("focus-visible:bg-edge/60");
+    expect(cls).not.toContain("focus-visible:ring");
   });
 
-  it("IconButton carries the shared focus ring", () => {
+  it("IconButton fills like its hover instead of ringing", () => {
     render(<IconButton aria-label="Icon action" />);
-    expect(screen.getByRole("button", { name: "Icon action" }).className).toContain(
-      "focus-visible:ring-2",
-    );
+    const cls = screen.getByRole("button", { name: "Icon action" }).className;
+    expect(cls).toContain("focus-visible:bg-panel-2");
+    expect(cls).not.toContain("focus-visible:ring");
   });
 
-  it("ContextMenuItem carries the shared focus ring", () => {
+  it("ContextMenuItem fills like its hover instead of ringing", () => {
     render(<ContextMenuItem>Item</ContextMenuItem>);
-    expect(screen.getByRole("menuitem", { name: "Item" }).className).toContain(
-      "focus-visible:ring-2",
-    );
+    const cls = screen.getByRole("menuitem", { name: "Item" }).className;
+    expect(cls).toContain("focus-visible:bg-panel-2");
+    expect(cls).not.toContain("focus-visible:ring");
   });
 });
 

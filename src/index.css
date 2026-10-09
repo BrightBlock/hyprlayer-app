@@ -405,6 +405,13 @@ html.solarized {
   select {
     font-family: inherit;
   }
+  /* Keyboard focus is a soft fill, never a ring (ADR-0006); a control's own bg-* overrides this one. */
+  :focus-visible {
+    outline: none;
+  }
+  :is(button, a[href], [role="button"], [role="menuitem"], [role="option"], [role="tab"]):focus-visible {
+    background-color: color-mix(in oklab, var(--color-edge) 50%, transparent);
+  }
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {

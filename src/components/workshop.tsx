@@ -38,7 +38,7 @@ export type WorkshopChrome = {
 
 const BORDERED_ROW = "flex w-full items-center gap-2 rounded-md border text-left transition-colors";
 const ROW_SELECTED = "border-accent/30 bg-accent/10 text-ink";
-const ROW_IDLE = "border-transparent text-ink hover:bg-edge/40";
+const ROW_IDLE = "border-transparent text-ink hover:bg-edge/40 focus-visible:bg-edge/40";
 
 export function WorkshopFrame({
   nav,

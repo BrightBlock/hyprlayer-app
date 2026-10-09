@@ -161,9 +161,9 @@ function SubmitForm({
               {...itemProps(i)}
               className={cx(
                 "flex w-full items-start gap-2.5 rounded-control border px-2.5 py-2 text-left",
-                "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+                "focus:outline-none",
                 "disabled:cursor-not-allowed disabled:opacity-50",
-                selected ? "border-ink-dim/70 bg-panel-2" : "border-transparent enabled:hover:bg-edge/50",
+                selected ? "border-ink-dim/70 bg-panel-2" : "border-transparent enabled:hover:bg-edge/50 enabled:focus-visible:bg-edge/50",
               )}
             >
               <span

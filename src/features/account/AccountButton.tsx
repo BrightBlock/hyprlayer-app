@@ -49,7 +49,7 @@ export function AccountButton() {
         aria-expanded={shown}
         className={cx(
           "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-control",
-          "hover:bg-edge/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+          "hover:bg-edge/60 focus:outline-none focus-visible:bg-edge/60",
           shown && "bg-accent-soft hover:bg-accent-soft",
         )}
       >

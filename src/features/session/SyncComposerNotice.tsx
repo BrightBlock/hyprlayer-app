@@ -59,7 +59,7 @@ const turns = (n: number) => `${n} ${n === 1 ? "turn" : "turns"}`;
 const pullLabel = (n: number) => (n > 0 ? `Pull ${turns(n)}` : "Pull");
 
 const CLOSE =
-  "flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+  "flex h-5 w-5 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink";
 
 function Age({ at }: { at: number }) {
   const [, tick] = useState(0);
@@ -73,7 +73,7 @@ function Age({ at }: { at: number }) {
 const DOT = "h-1.5 w-1.5 shrink-0 rounded-full";
 const LINE = "mb-2 flex items-center gap-1.5 px-1 text-meta text-ink-dim";
 const LINK =
-  "rounded-control px-1 font-mono text-meta text-info hover:bg-info/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+  "rounded-control px-1 font-mono text-meta text-info hover:bg-info/10 focus:outline-none focus-visible:bg-info/10";
 
 export function SyncComposerNotice({
   notice,
@@ -205,7 +205,7 @@ function NoticeBody({
               <button
                 type="button"
                 onClick={onLoad}
-                className="rounded-control px-1.5 py-0.5 font-medium text-info hover:bg-info/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="rounded-control px-1.5 py-0.5 font-medium text-info hover:bg-info/10 focus:outline-none focus-visible:bg-info/10"
               >
                 Load
               </button>

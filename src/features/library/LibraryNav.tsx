@@ -85,7 +85,7 @@ export function LibraryNav({
         aria-haspopup="dialog"
         aria-expanded={pickerAnchor === scopeRef}
         aria-label="Project scope"
-        className="mb-2 flex h-8 w-full shrink-0 items-center gap-2 rounded-control border border-edge bg-panel px-2.5 shadow-sm hover:bg-edge/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="mb-2 flex h-8 w-full shrink-0 items-center gap-2 rounded-control border border-edge bg-panel px-2.5 shadow-sm hover:bg-edge/50 focus:outline-none focus-visible:bg-edge/50"
       >
         <Icon name="folder" size="sm" className="text-ink-dim" />
         <span className="min-w-0 flex-1 truncate text-left text-ui font-semibold text-ink">

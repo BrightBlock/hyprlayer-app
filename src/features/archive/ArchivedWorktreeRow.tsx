@@ -61,7 +61,6 @@ export function ArchivedWorktreeRow({
       className={cx(
         "group flex items-center gap-[11px] border-t border-edge-2 px-3.5 py-2.5",
         "hover:bg-panel-2 focus-within:bg-panel-2 focus:outline-none",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
         status.purgePending && "opacity-75",
       )}
     >

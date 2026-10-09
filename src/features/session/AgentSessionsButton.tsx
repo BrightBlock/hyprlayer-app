@@ -42,7 +42,7 @@ export function AgentSessionsButton({ workstreamId }: { workstreamId: string }) 
         aria-expanded={shown}
         className={cx(
           "flex h-6 min-w-[26px] shrink-0 items-center justify-center gap-1 rounded-control px-1 text-ink-dim",
-          "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+          "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink",
           shown && "bg-edge/60 text-ink",
         )}
       >

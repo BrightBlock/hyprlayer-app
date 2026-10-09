@@ -62,9 +62,9 @@ export const MailRow = memo(function MailRow({
       }}
       aria-current={selected ? "true" : undefined}
       className={cx(
-        "relative flex w-full gap-2.5 px-3.5 py-2.5 text-left",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
-        selected ? "bg-accent-soft" : "hover:bg-edge/50",
+        "relative flex w-full gap-2.5 px-3.5 py-2.5 text-left focus:outline-none",
+        // A focus fill would outrank the selection tint, and the arrow keys keep focus on the selected row.
+        selected ? "bg-accent-soft" : "hover:bg-edge/50 focus-visible:bg-edge/50",
       )}
     >
       {selected && <RowSpine />}

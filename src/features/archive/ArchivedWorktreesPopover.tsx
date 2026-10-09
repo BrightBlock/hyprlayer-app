@@ -198,14 +198,14 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         </div>
 
         <div className="flex items-center gap-2 px-3 pb-2.5">
-          <div className="relative min-w-0 flex-1">
+          <div className="group/search relative min-w-0 flex-1">
             <label htmlFor={searchId} className="sr-only">
               Filter archived worktrees
             </label>
             <Icon
               name="search"
               size="sm"
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim"
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim group-focus-within/search:text-ink"
             />
             <input
               id={searchId}
@@ -218,7 +218,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
               autoComplete="off"
               className={cx(
                 "h-7 w-full rounded-control border border-edge bg-surface pl-7 pr-2 text-ui text-ink",
-                "placeholder:text-ink-dim focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+                "placeholder:text-ink-dim focus:border-ink-dim/70 focus:outline-none",
               )}
             />
           </div>

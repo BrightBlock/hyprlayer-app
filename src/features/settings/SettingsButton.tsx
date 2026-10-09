@@ -44,7 +44,7 @@ export function SettingsButton() {
         aria-expanded={shown || archivedShown}
         className={cx(
           "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-control text-ink-dim",
-          "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+          "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink",
           (shown || archivedShown) && "bg-accent-soft text-ink hover:bg-accent-soft",
         )}
       >

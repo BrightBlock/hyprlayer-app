@@ -1,12 +1,25 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 
 export const LIST_ROW = { "data-list-row": "" } as const;
 
 const isCurrent = (row: HTMLElement) => row.getAttribute("aria-current") === "true";
 
 function activate(row: HTMLElement) {
-  if (!isCurrent(row)) row.click();
+  // Before the click, whose onListNavClick focus would skip the scroll.
   row.focus();
+  if (!isCurrent(row)) row.click();
+}
+
+// Puts the arrow keys on a list: its current row, else its first, marked like keyboard focus.
+export function focusList(root: HTMLElement) {
+  const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-list-row]"));
+  (rows.find(isCurrent) ?? rows[0])?.focus({ focusVisible: true });
+}
+
+// WKWebView never focuses a clicked button, and the keys below need the row focused.
+// Not on mousedown: WebKit clears focus after it.
+export function onListNavClick(e: MouseEvent<HTMLElement>) {
+  (e.target as Element).closest<HTMLElement>("[data-list-row]")?.focus({ preventScroll: true });
 }
 
 // Mail-style list keys: the arrows move the selection, the detail pane follows it.
@@ -41,5 +54,8 @@ export function onListNavKeyDown(e: KeyboardEvent<HTMLElement>) {
   };
   if (!(e.key in next)) return;
   e.preventDefault();
-  activate(rows[Math.max(0, Math.min(next[e.key], rows.length - 1))]);
+  // With nothing open yet, the first arrow opens the focused row instead of passing it.
+  const step = e.key === "ArrowDown" || e.key === "ArrowUp";
+  const to = step && !rows.some(isCurrent) ? i : next[e.key];
+  activate(rows[Math.max(0, Math.min(to, rows.length - 1))]);
 }

@@ -30,11 +30,11 @@ function HarnessRadio({ value, onChange, disabled }: Omit<HarnessPickerProps, "v
             {...itemProps(i)}
             className={cx(
               "flex h-[38px] min-w-0 items-center justify-center gap-2 rounded-control border bg-panel px-2 text-body transition-colors",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+              "focus:outline-none",
               "disabled:cursor-not-allowed disabled:opacity-50",
               selected
                 ? "border-ink font-bold text-ink ring-1 ring-inset ring-ink"
-                : "border-edge text-ink-2 enabled:hover:bg-panel-2 enabled:hover:text-ink",
+                : "border-edge text-ink-2 enabled:hover:bg-panel-2 enabled:hover:text-ink enabled:focus-visible:bg-panel-2 enabled:focus-visible:text-ink",
             )}
           >
             <BrandMark brand={harnessBrand(h.key)} />

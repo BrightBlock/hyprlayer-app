@@ -130,14 +130,14 @@ export function ArchivedSessionsList({
         <div className="px-3 pb-2.5 pt-3">{switcher}</div>
 
         <div className="flex items-center gap-2 px-3 pb-2.5">
-          <div className="relative min-w-0 flex-1">
+          <div className="group/search relative min-w-0 flex-1">
             <label htmlFor={searchId} className="sr-only">
               Filter archived sessions
             </label>
             <Icon
               name="search"
               size="sm"
-              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim"
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-dim group-focus-within/search:text-ink"
             />
             <input
               id={searchId}
@@ -150,7 +150,7 @@ export function ArchivedSessionsList({
               autoComplete="off"
               className={cx(
                 "h-7 w-full rounded-control border border-edge bg-surface pl-7 pr-2 text-ui text-ink",
-                "placeholder:text-ink-dim focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+                "placeholder:text-ink-dim focus:border-ink-dim/70 focus:outline-none",
               )}
             />
           </div>
@@ -247,7 +247,6 @@ function ArchivedAgentRow({
       className={cx(
         "group flex items-center gap-[11px] border-t border-edge-2 px-3.5 py-2.5",
         "hover:bg-panel-2 focus-within:bg-panel-2 focus:outline-none",
-        "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
       )}
     >
       <span aria-hidden="true" className={cx("h-[7px] w-[7px] shrink-0 rounded-full", status.dot)} />

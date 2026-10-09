@@ -5,6 +5,7 @@ import { MenuPanel, OptionMenuList } from "@/components/OptionMenuList";
 import { EmptyState, ErrorNote, IconButton, Popover, Spinner, TextInput } from "@/components/ui";
 import type { DocMeta, Project } from "@/lib/bindings";
 import { plural } from "@/lib/format";
+import { focusList } from "@/lib/listNav";
 import { useDocCounts, useDocPages } from "@/lib/queries";
 import { countFiltersFromSearch, docQueryFromSearch } from "./DocFilters";
 import { asLibraryBox, LIBRARY_BOXES } from "./libraryBoxes";
@@ -81,6 +82,17 @@ export function MessageList({
     return (pages ?? []).flatMap((p) => p.items).filter((d) => !seen.has(d.id) && seen.add(d.id));
   }, [pages]);
 
+  // Arriving puts the arrow keys on the list, unless a field already has focus.
+  const arrived = useRef(false);
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (arrived.current || items.length === 0 || !scroller) return;
+    arrived.current = true;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && (active.isContentEditable || active.matches("input, textarea, select"))) return;
+    focusList(scroller);
+  }, [items.length]);
+
   const sort = search.sort ?? "mtime";
   const grouped = query.sort === "mtime" || query.sort === "date";
   const projectLabel = useMemo(() => new Map(projects.map((p) => [p.thoughtsProject, p.mappedName])), [projects]);
@@ -132,8 +144,8 @@ export function MessageList({
       </div>
 
       <div className="shrink-0 border-b border-edge-2 px-3.5 py-2">
-        <div className="relative">
-          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4">
+        <div className="group/search relative">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-4 group-focus-within/search:text-ink">
             <Icon name="search" size="xs" />
           </span>
           <TextInput

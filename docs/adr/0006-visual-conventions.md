@@ -11,7 +11,8 @@ amended 2026-10-01 (remote-sync surfaces: skeleton tail, sync divider, remote ch
 line and draft guard, presence badge; see "Remote sync surfaces") ·
 amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell") ·
 amended 2026-10 (the Library's mail shell; see "Library: mail shell") ·
-amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom; `Popover` hover cards)
+amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom; `Popover` hover cards) ·
+amended 2026-10-08 (keyboard focus is a soft fill, never a ring; see "Focus")
 
 ## Decision
 
@@ -649,7 +650,7 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   (`animate-fade-in`) and rises its panel (`animate-dialog-in`, 8px from .98, `gentle`).
   They have no exit animation yet: they unmount on close.
 - **Press, hover, focus.** `Button` and `IconButton` press to scale .97 and change hover
-  colour in `instant`, then settle back in `quick`; the focus ring grows with them. They
+  colour in `instant`, then settle back in `quick`; a keyboard-focus fill moves with them. They
   never transition opacity and snap when disabled: WebKit leaves stale paint when an
   animating button shifts layout (a busy spinner widening it).
 - **Reduced motion.** The entrance classes become a 100ms fade; press scale is `motion-safe`.
@@ -704,3 +705,20 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   move to the toolbar, so there is one set of save controls.
 - **Blank.** `LibraryBlank` replaces the whole frame only when thoughts is unconfigured or the
   unscoped count is 0. An empty scoped project keeps the frame and says so in the list.
+
+### Focus (2026-10-08)
+
+- **Keyboard focus is the element's hover fill, never a ring.** A control that hovers to `bg-X`
+  takes `focus-visible:bg-X` (and the hover's text colour); nothing draws a `focus-visible:ring-*`
+  or a focus outline. Text inputs, `Textarea` and `DropdownSelect`'s trigger mark focus with their
+  border (`focus:border-ink-dim/70`). A search field's leading icon brightens instead of the field
+  ringing: the wrapper is `group/search`, the icon `group-focus-within/search:text-ink`.
+- **Selected rows take no focus fill.** A `focus-visible:bg-*` variant outranks the selection tint,
+  and WebKit marks the focused element `:focus-visible` on every unmodified keypress, so arrow-key
+  lists, which keep focus on the selected row, let the tint show it. `rowClass` adds its fill only
+  when `selected` is `"none"`.
+- **The base layer catches the rest.** `src/index.css` zeroes the UA focus outline and fills an
+  unstyled `button`, link or `button`/`menuitem`/`option`/`tab` role with `edge/50`; any `bg-*`
+  utility overrides it.
+- **`Toggle` is the exception.** Its track's colour is its state, so it keeps
+  `peer-focus-visible:ring-2`.

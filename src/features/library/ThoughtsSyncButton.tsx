@@ -171,7 +171,7 @@ export function ThoughtsSyncStatus({ sync, compact }: { sync: ThoughtsSyncState;
         type="button"
         onClick={sync.syncNow}
         disabled={sync.syncing || noRemote}
-        className={`flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 ${tone} enabled:hover:bg-panel-2 enabled:hover:text-ink disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60`}
+        className={`flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 ${tone} enabled:hover:bg-panel-2 enabled:hover:text-ink disabled:pointer-events-none focus:outline-none focus-visible:bg-panel-2 focus-visible:text-ink`}
         aria-label={`Sync thoughts: ${title}`}
       >
         <span className="relative flex">

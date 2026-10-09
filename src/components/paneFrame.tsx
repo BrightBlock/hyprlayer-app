@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 
-import { onListNavKeyDown } from "@/lib/listNav";
+import { onListNavClick, onListNavKeyDown } from "@/lib/listNav";
 import { cx, PaneSeparator } from "./ui";
 
 // Nav, resizable list, detail. Reads no stores: each feature passes its own layout state.
@@ -48,6 +48,7 @@ export function PaneFrame({
       <div
         className="flex min-h-0 shrink-0 flex-col border-r border-edge"
         style={{ width }}
+        onClick={onListNavClick}
         onKeyDown={onListNavKeyDown}
       >
         {list}

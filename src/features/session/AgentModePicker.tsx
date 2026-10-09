@@ -50,7 +50,7 @@ export function AgentModePicker({
         aria-expanded={open}
         aria-label={name}
         title={name}
-        className={`${TILE} ${tone} transition-opacity hover:opacity-80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60`}
+        className={`${TILE} ${tone} transition-opacity hover:opacity-80 focus:outline-none focus-visible:opacity-80`}
       >
         <Icon name={stageIconName(mode)} />
       </button>

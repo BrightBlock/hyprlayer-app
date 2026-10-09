@@ -97,8 +97,8 @@ export function ProjectPicker({
       className="flex max-h-80 w-[300px] flex-col overflow-y-auto p-0"
     >
       <div className="shrink-0 border-b border-edge-2 p-2.5">
-        <label className="flex h-7 items-center gap-1.5 rounded-control border border-edge px-2 focus-within:border-info focus-within:ring-2 focus-within:ring-info/15">
-          <Icon name="search" size="xs" className="text-ink-4" />
+        <label className="group/search flex h-7 items-center gap-1.5 rounded-control border border-edge px-2 focus-within:border-info">
+          <Icon name="search" size="xs" className="text-ink-4 group-focus-within/search:text-ink" />
           <input
             ref={inputRef}
             value={query}

@@ -220,7 +220,7 @@ function AttachMenu({
         onClick={() => setOpen((v) => !v)}
         title="Attach context"
         aria-label="Attach context"
-        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink"
       >
         <Icon name="add" />
       </button>
@@ -1504,7 +1504,7 @@ export function SessionChat({
                   transcriptRef.current?.scrollToBottom();
                   setAway(null);
                 }}
-                className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-info/40 bg-panel px-3 py-1 text-meta text-info shadow-pop hover:bg-panel-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-info/40 bg-panel px-3 py-1 text-meta text-info shadow-pop hover:bg-panel-2 focus:outline-none focus-visible:bg-panel-2"
               >
                 <Icon name="arrowDown" size="xs" />
                 {newTurns} new {newTurns === 1 ? "turn" : "turns"}

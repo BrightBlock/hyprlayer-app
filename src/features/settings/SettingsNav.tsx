@@ -24,8 +24,8 @@ const NAV: NavEntry[] = [
 
 const ROW =
   "relative flex h-[34px] w-full items-center gap-2.5 overflow-hidden rounded-control px-3 text-left text-body transition-colors " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
-const IDLE = "text-ink-2 hover:bg-edge/50 hover:text-ink";
+  "focus:outline-none";
+const IDLE = "text-ink-2 hover:bg-edge/50 hover:text-ink focus-visible:bg-edge/50 focus-visible:text-ink";
 
 export function SettingsNav({
   section,

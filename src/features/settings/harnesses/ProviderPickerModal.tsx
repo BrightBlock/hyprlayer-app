@@ -50,8 +50,8 @@ export function ProviderPickerModal({
         <KeyEntry provider={picked} onBack={() => setPicked(null)} onDone={close} />
       ) : (
         <>
-          <div className="relative mb-3">
-            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim">
+          <div className="group/search relative mb-3">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim group-focus-within/search:text-ink">
               <Icon name="search" size="sm" />
             </span>
             <TextInput

@@ -20,7 +20,7 @@ export function ScriptsDockButton({
       title={running ? "Scripts · a Run is active" : "Terminal & scripts dock"}
       className={cx(
         "relative flex h-6 w-[26px] shrink-0 items-center justify-center rounded-control text-ink-dim",
-        "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+        "hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink",
         open && "bg-edge/60 text-ink",
       )}
     >

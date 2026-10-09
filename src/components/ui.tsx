@@ -37,8 +37,6 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
   return twMerge(parts.filter(Boolean).join(" "));
 }
 
-const FOCUS_RING = "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
-
 // No opacity, snap on disable: WebKit leaves stale paint when an animating button shifts layout.
 const PRESS =
   "transition-[color,background-color,border-color,box-shadow,scale] hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97 disabled:transition-none";
@@ -100,11 +98,11 @@ export function Button({
         "inline-flex items-center gap-2 rounded-control px-3 py-1.5 text-body font-medium",
         PRESS,
         size === "sm" && "h-6 gap-1.5 px-2 py-0 text-ui",
-        FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "border border-accent bg-accent text-accent-ink hover:bg-accent-hover",
-        variant === "ghost" && "border border-edge bg-panel-2 hover:bg-edge/60",
-        variant === "danger" && "border border-bad/25 text-bad-ink hover:bg-bad/10",
+        variant === "primary" &&
+          "border border-accent bg-accent text-accent-ink hover:bg-accent-hover focus-visible:bg-accent-hover",
+        variant === "ghost" && "border border-edge bg-panel-2 hover:bg-edge/60 focus-visible:bg-edge/60",
+        variant === "danger" && "border border-bad/25 text-bad-ink hover:bg-bad/10 focus-visible:bg-bad/10",
         className,
       )}
       disabled={disabled || busy}
@@ -170,7 +168,6 @@ export function TextInput({ className, ...rest }: InputHTMLAttributes<HTMLInputE
       className={cx(
         "selectable w-full rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-body text-ink",
         "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
-        FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
@@ -221,7 +218,6 @@ export function TextArea({
       className={cx(
         "selectable block w-full resize-none rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-body text-ink",
         "placeholder:text-ink-dim/70 focus:border-ink-dim/70",
-        FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
@@ -361,7 +357,6 @@ export function DropdownSelect({
         className={cx(
           "flex w-full items-center justify-between gap-2 rounded-control border border-edge bg-panel-2 px-2.5 py-1.5 text-left text-body text-ink",
           "focus:border-ink-dim/70",
-          FOCUS_RING,
           "disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
@@ -586,7 +581,6 @@ export function SegmentedControl<T extends string>({
           className={cx(
             "rounded-[2px] text-ui transition-colors",
             bordered ? "flex h-5 items-center px-2" : "px-2.5 py-0.5",
-            FOCUS_RING,
             "disabled:cursor-not-allowed disabled:opacity-50",
             o.value === value
               ? bordered
@@ -687,7 +681,7 @@ export function Dialog({
                 aria-label="Close dialog"
                 className={cx(
                   "-mr-1 -mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-dim hover:bg-edge/60 hover:text-ink",
-                  FOCUS_RING,
+                  "focus-visible:bg-edge/60 focus-visible:text-ink",
                 )}
               >
                 <Icon name="close" size="sm" />
@@ -789,7 +783,7 @@ export function ErrorNote({
           aria-label="Dismiss error"
           className={cx(
             "absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-control text-bad/70 hover:bg-bad/15 hover:text-bad",
-            FOCUS_RING,
+            "focus-visible:bg-bad/15 focus-visible:text-bad",
           )}
         >
           <Icon name="close" size="xs" />
@@ -878,9 +872,10 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
       className={cx(
         "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control",
         PRESS,
-        FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
-        active ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2 hover:text-ink",
+        active
+          ? "bg-panel-2 text-ink"
+          : "text-ink-dim hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink",
         className,
       )}
       {...rest}
@@ -924,9 +919,8 @@ export function RefreshButton({
       disabled={busy}
       className={cx(
         "flex shrink-0 items-center gap-1.5 rounded-control text-ink-dim",
-        FOCUS_RING,
-        "enabled:hover:text-ink disabled:cursor-default",
-        children ? "px-1.5 py-1" : "h-6 w-6 justify-center enabled:hover:bg-edge/60",
+        "enabled:hover:text-ink enabled:focus-visible:text-ink disabled:cursor-default",
+        children ? "px-1.5 py-1" : "h-6 w-6 justify-center enabled:hover:bg-edge/60 enabled:focus-visible:bg-edge/60",
         className,
       )}
       title={title ?? label}
@@ -998,9 +992,8 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       role="menuitem"
       className={cx(
         "block w-full rounded-control px-2.5 py-1.5 text-left text-body",
-        FOCUS_RING,
         "disabled:cursor-not-allowed disabled:opacity-50",
-        danger ? "text-bad hover:bg-bad/10" : "text-ink hover:bg-panel-2",
+        danger ? "text-bad hover:bg-bad/10 focus-visible:bg-bad/10" : "text-ink hover:bg-panel-2 focus-visible:bg-panel-2",
         className,
       )}
       {...rest}
@@ -1155,15 +1148,18 @@ export const MenuItem = ContextMenuItem;
 export const BAR_POPOVER = "w-[306px] p-1.5 shadow-pop";
 export const BAR_POPOVER_ROW =
   "flex items-center gap-2.5 rounded-control px-3 py-2 text-ui text-ink-2 hover:bg-edge/50 " +
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60";
+  "focus:outline-none focus-visible:bg-edge/50";
 
 /** Archive popovers' row buttons (Restore, Delete, Keep). */
 export const ROW_ACTION = cx(
   "inline-flex h-6 shrink-0 items-center rounded-control border border-edge bg-panel px-2",
   "text-ui-sm font-semibold text-ink-2 hover:bg-edge/50 disabled:opacity-50 disabled:hover:bg-panel",
-  "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
+  "focus:outline-none focus-visible:bg-edge/50",
 );
-export const ROW_ACTION_DANGER = cx(ROW_ACTION, "border-destructive-border text-bad-ink hover:bg-bad/10");
+export const ROW_ACTION_DANGER = cx(
+  ROW_ACTION,
+  "border-destructive-border text-bad-ink hover:bg-bad/10 focus-visible:bg-bad/10",
+);
 
 export function MenuSeparator() {
   return <div className="my-1 h-px bg-edge" />;
@@ -1196,7 +1192,8 @@ export function rowClass({
     ROW_TIER[tier],
     interactive && ROW_HOVER,
     selected !== "none" && "bg-accent-soft",
-    FOCUS_RING,
+    // A focus fill would outrank the selection tint.
+    interactive && selected === "none" && "focus-visible:bg-edge/50",
     className,
   );
 }

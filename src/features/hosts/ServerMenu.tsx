@@ -121,8 +121,8 @@ function ServerRows({
               onClick={() => onSwitch({ ...file, active: row.host?.destination ?? null, localProfile: null })}
               className={cx(
                 "flex w-full items-center gap-3 rounded-control px-3 py-2 text-left",
-                "focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60",
-                "enabled:hover:bg-edge/50 disabled:cursor-default",
+                "focus:outline-none enabled:hover:bg-edge/50 enabled:focus-visible:bg-edge/50",
+                "disabled:cursor-default",
               )}
             >
               <ServerSummary
