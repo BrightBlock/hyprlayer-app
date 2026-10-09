@@ -49,9 +49,26 @@ pub(crate) fn rewind_unsupported() -> CoreError {
     }
 }
 
+/// Hands a message the harness never took in back to its sender, who resends it after the turn.
+pub(crate) fn declined_message(echo: &SessionEvent) -> Option<SessionEvent> {
+    let SessionEvent::UserMessage {
+        client_message_id: Some(id),
+        ..
+    } = echo
+    else {
+        return None;
+    };
+    Some(SessionEvent::CommandLifecycle {
+        command_uuid: id.clone(),
+        state: "cancelled".into(),
+    })
+}
+
 pub trait AgentDriver: Send + Sync {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
+    /// Sent mid-turn, the harness takes it in at its next step and the echo
+    /// lands then; one it cannot take comes back as a `cancelled` lifecycle.
     fn send_user_turn(
         &self,
         text: &str,
@@ -59,6 +76,14 @@ pub trait AgentDriver: Send + Sync {
         prompt_name: Option<&str>,
         client_message_id: Option<&str>,
     ) -> Result<()>;
+
+    /// Withdraws a message waiting for the harness's next step; false once it was taken in.
+    fn cancel_queued_message<'a>(
+        &'a self,
+        _client_message_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
+        Box::pin(async { Ok(false) })
+    }
 
     fn set_model(&self, _model: Option<String>) {}
 
@@ -116,6 +141,12 @@ impl AgentDriver for ClaudeDriver {
         client_message_id: Option<&str>,
     ) -> Result<()> {
         self.send_user_turn(text, stage, prompt_name, client_message_id)
+    }
+    fn cancel_queued_message<'a>(
+        &'a self,
+        client_message_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
+        Box::pin(self.cancel_queued_message(client_message_id))
     }
     fn respond_permission(
         &self,

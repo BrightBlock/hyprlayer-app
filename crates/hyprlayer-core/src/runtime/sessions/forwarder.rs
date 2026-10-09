@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -399,6 +399,8 @@ struct ActorState {
     /// Rows visible since the last announced revision; flushed onto it.
     riders: Vec<RevisedTurn>,
     reservations: HashMap<String, Reservation>,
+    /// Authors of reservations that lapsed unechoed: a steer can wait behind a long tool.
+    lapsed: VecDeque<(String, Option<ClientRef>)>,
     attribution: Option<Arc<DocAttribution>>,
     /// Write tool id → its paths, until the result says whether it landed.
     pending_writes: HashMap<String, Vec<String>>,
@@ -446,6 +448,7 @@ impl ActorState {
             next_turn: None,
             riders: Vec::new(),
             reservations: HashMap::new(),
+            lapsed: VecDeque::new(),
             attribution,
             pending_writes: HashMap::new(),
         }
@@ -890,8 +893,11 @@ impl ActorState {
         // Follow-ups are reserved like sends; an unmatched message is author-less, nonce or not.
         let author = client_message_id
             .as_ref()
-            .and_then(|id| self.reservations.remove(id))
-            .and_then(|reserved| reserved.author);
+            .and_then(|id| {
+                let reserved = self.reservations.remove(id).map(|r| r.author);
+                reserved.or_else(|| self.take_lapsed(id))
+            })
+            .flatten();
         if self.in_turn {
             // The running turn keeps its author; the harness may answer this after it or with it.
             self.next_turn = Some(author.clone());
@@ -944,6 +950,7 @@ impl ActorState {
         if exited {
             self.next_turn = None;
             self.reservations.clear();
+            self.lapsed.clear();
         }
     }
 
@@ -996,6 +1003,7 @@ struct Reservation {
 
 // A UserMessage the relay dropped on lag never releases its slot.
 const RESERVATION_TTL: Duration = Duration::from_secs(30);
+const LAPSED_KEPT: usize = 32;
 
 const TURNS_PAGE_MAX: u32 = 2000;
 
@@ -1058,12 +1066,29 @@ impl ActorState {
 
     fn expire_reservations(&mut self) {
         let before = self.reservations.len();
-        self.reservations
-            .retain(|_, r| r.at.elapsed() < RESERVATION_TTL);
+        let expired: Vec<String> = self
+            .reservations
+            .iter()
+            .filter(|(_, r)| r.at.elapsed() >= RESERVATION_TTL)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in expired {
+            if let Some(reserved) = self.reservations.remove(&id) {
+                self.lapsed.push_back((id, reserved.author));
+            }
+        }
+        while self.lapsed.len() > LAPSED_KEPT {
+            self.lapsed.pop_front();
+        }
         if self.reservations.len() < before {
             // Same rev, no turns: readers drop the in-flight count it carried.
             self.announce_revision(self.current_author());
         }
+    }
+
+    fn take_lapsed(&mut self, id: &str) -> Option<Option<ClientRef>> {
+        let at = self.lapsed.iter().position(|(lapsed, _)| lapsed == id)?;
+        self.lapsed.remove(at).map(|(_, author)| author)
     }
 
     /// The `ReleaseUserTurn` arm: releasing an unknown nonce is a silent no-op.

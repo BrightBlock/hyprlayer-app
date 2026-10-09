@@ -118,6 +118,8 @@ import {
 export type SessionEntry = SessionView & {
   workstreamId: string;
   stage: string;
+  /** Known once a stream attaches; it decides how a message sent mid-turn travels. */
+  harness?: Harness;
   autoAllow: string[];
   live: boolean;
   permissionMode: PermissionMode | null;
@@ -141,7 +143,9 @@ export type QueuedMessage = {
   text: string;
   attachments: Attachment[];
   promptName: string | null;
-  /** Runs once the queued text actually reaches the harness. */
+  /** Set while the harness holds it for its next step; its echo carries this id. */
+  clientMessageId?: string;
+  /** Runs once the queued text actually reaches the transcript. */
   onSent?: () => void;
 };
 
@@ -380,7 +384,7 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
     channels.delete(sessionId);
     const cleared = cancelPendingPrompts(current);
     setEntry(sessionId, {
-      ...current,
+      ...undeliver(current, () => true),
       ...cleared,
       items: closeOpenAssistant(cleared.items),
       streaming: false,
@@ -395,12 +399,19 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   }
 
   const wasNeedsYou = classifyEntry(current) === "needs-you";
-  const nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event, seq), ...modeFields(event) };
+  let nextEntry: SessionEntry = { ...current, ...reduceEvent(current, event, seq), ...modeFields(event) };
+  let settled: QueuedMessage | null = null;
+  if (event.kind === "userMessage" && event.clientMessageId) {
+    ({ entry: nextEntry, chip: settled } = settleDelivered(nextEntry, event.clientMessageId));
+  }
+  const handedBack = handedBackBy(event);
+  if (handedBack) nextEntry = undeliver(nextEntry, handedBack);
   if (synced) {
     if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) nextEntry.appliedSeq = seq;
     nextEntry.turnAuthor = turnAuthorAfter(current.turnAuthor ?? null, synced, selfClientId(), current.streaming);
   }
   setEntry(sessionId, nextEntry);
+  settled?.onSent?.();
   if (event.kind === "permissionModeChanged") {
     setSessionPermissionMode(current.workstreamId, sessionId, event.mode);
   }
@@ -421,7 +432,82 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
     invalidateWorkstreamPr(current.workstreamId);
     flushQueuedMessage(sessionId);
   }
+  // A decline can land after the turn it missed has ended.
+  if (event.kind === "commandLifecycle" && handedBack) flushQueuedMessage(sessionId);
   if (event.kind === "exited") endStream(sessionId, current.workstreamId);
+}
+
+// The harness holds these for its next step; their echo carries the id.
+const delivered = (m: QueuedMessage) => m.clientMessageId !== undefined;
+
+// Messages the harness will never take in: it declined one, or its process ended holding them.
+function handedBackBy(event: SessionEvent): ((m: QueuedMessage) => boolean) | null {
+  switch (event.kind) {
+    case "commandLifecycle":
+      return event.state === "cancelled" ? (m) => m.clientMessageId === event.commandUuid : null;
+    case "exited":
+    case "relaunched":
+      return () => true;
+    default:
+      return null;
+  }
+}
+
+/** Back to the local queue, which sends them once the session is idle. */
+function undeliver(entry: SessionEntry, which: (m: QueuedMessage) => boolean): SessionEntry {
+  if (!entry.queued.some((m) => delivered(m) && which(m))) return entry;
+  const queued = entry.queued.map((m) => (delivered(m) && which(m) ? { ...m, clientMessageId: undefined } : m));
+  return { ...entry, queued };
+}
+
+// The log stores no attachments, and a live echo has no createdAt: the chip supplies both.
+function settleDelivered(
+  entry: SessionEntry,
+  clientMessageId: string,
+): { entry: SessionEntry; chip: QueuedMessage | null } {
+  const chip = entry.queued.find((m) => m.clientMessageId === clientMessageId);
+  if (!chip) return { entry, chip: null };
+  const queued = entry.queued.filter((m) => m !== chip);
+  for (let i = entry.items.length - 1; i >= 0; i -= 1) {
+    const item = entry.items[i];
+    if (item.kind !== "user" || item.clientMessageId !== clientMessageId) continue;
+    const items = entry.items.slice();
+    items[i] = {
+      ...item,
+      attachments: item.attachments.length > 0 ? item.attachments : chip.attachments,
+      createdAt: item.createdAt ?? Date.now(),
+    };
+    return { entry: { ...entry, items, queued }, chip };
+  }
+  return { entry: { ...entry, queued }, chip };
+}
+
+// A fold or pull can bring a delivered message's echo in without its live event.
+function settleFolded(sessionId: string): void {
+  const entry = entryOf(sessionId);
+  if (!entry || !entry.queued.some(delivered)) return;
+  const echoed = new Set<string>();
+  for (const item of entry.items) {
+    if (item.kind === "user" && item.clientMessageId) echoed.add(item.clientMessageId);
+  }
+  let next = entry;
+  const sent: QueuedMessage[] = [];
+  for (const chip of entry.queued) {
+    if (!chip.clientMessageId || !echoed.has(chip.clientMessageId)) continue;
+    const settled = settleDelivered(next, chip.clientMessageId);
+    next = settled.entry;
+    if (settled.chip) sent.push(settled.chip);
+  }
+  if (next === entry) return;
+  setEntry(sessionId, next);
+  for (const chip of sent) chip.onSent?.();
+}
+
+// Claude and codex take a message in at their next step, as their own CLIs do. Another
+// device's turn would refuse it as stale, and a starting session may have no harness yet.
+function steersInto(entry: SessionEntry): boolean {
+  if (entry.harness !== "claude" && entry.harness !== "codex") return false;
+  return entry.state !== "starting" && entry.turnAuthor !== "other";
 }
 
 // The session exited: its stream is dead, whether the exit came on it or in a pulled page.
@@ -529,6 +615,7 @@ export async function startSession(args: {
     ...view,
     workstreamId: args.workstreamId,
     stage: args.stage,
+    harness: session.harness,
     autoAllow: [],
     live: true,
     permissionMode: args.permissionMode ?? null,
@@ -705,6 +792,7 @@ async function resumeOnce(
   }
 
   let permissionMode: PermissionMode | null = null;
+  let harness: Harness | undefined;
   for (let attempt = 1; ; attempt += 1) {
     const entry = entryOf(sessionId);
     if (!entry) return;
@@ -716,6 +804,7 @@ async function resumeOnce(
         commands.resumeSession(sessionId, null, null, entry.permissionMode, cursor, channel),
       );
       permissionMode = result.permissionMode;
+      harness = result.session.harness;
       activate(sessionId);
       break;
     } catch (e) {
@@ -739,7 +828,10 @@ async function resumeOnce(
 
   adoptRunningMode(sessionId, permissionMode);
   const resumed = entryOf(sessionId);
-  if (resumed?.drifted) setEntry(sessionId, { ...resumed, drifted: false });
+  if (resumed && (resumed.drifted || resumed.harness !== harness)) {
+    setEntry(sessionId, { ...resumed, drifted: false, harness });
+  }
+  settleFolded(sessionId);
 
   // A quiet Claude resume emits no init event.
   const after = entryOf(sessionId);
@@ -921,10 +1013,9 @@ export async function sendMessage(
   const current = entryOf(sessionId);
   if (!current) return "dropped";
   if (channels.has(sessionId) && isBusy(current)) {
-    setEntry(sessionId, {
-      ...current,
-      queued: [...current.queued, { text, attachments, promptName, onSent }],
-    });
+    const message: QueuedMessage = { text, attachments, promptName, onSent };
+    if (steersInto(current)) return steerMessage(sessionId, message);
+    setEntry(sessionId, { ...current, queued: [...current.queued, message] });
     return "queued";
   }
   const sync = syncOf(sessionId);
@@ -953,6 +1044,7 @@ async function deliverMessage(
   // Working, not busy: a resumed log can re-show a dead process's ask, which must not block.
   if (channels.has(sessionId) && isWorking(current)) {
     const message: QueuedMessage = { text, attachments, promptName, onSent };
+    if (steersInto(current)) return steerMessage(sessionId, message, requeue);
     const queued = requeue === "front" ? [message, ...current.queued] : [...current.queued, message];
     setEntry(sessionId, { ...current, queued });
     return "queued";
@@ -994,6 +1086,52 @@ async function deliverMessage(
   return "sent";
 }
 
+// Sent now; the harness takes it in at its next step, and its echo replaces the chip.
+async function steerMessage(
+  sessionId: string,
+  message: QueuedMessage,
+  at: "front" | "back" = "back",
+): Promise<SendOutcome> {
+  const sync = syncOf(sessionId);
+  if (sync && !canSend(sync)) await pullNow(sessionId);
+  const current = entryOf(sessionId);
+  if (!current) return "dropped";
+  const clientMessageId = crypto.randomUUID();
+  const chip: QueuedMessage = { ...message, clientMessageId };
+  const queued = at === "front" ? [chip, ...current.queued] : [...current.queued, chip];
+  setEntry(sessionId, { ...current, queued });
+  try {
+    await unwrap(
+      commands.sendUserMessage(
+        sessionId,
+        message.text,
+        message.attachments.map((a) => a.path),
+        message.promptName,
+        clientMessageId,
+        syncOf(sessionId)?.localRev ?? null,
+      ),
+    );
+  } catch (e) {
+    const latest = entryOf(sessionId);
+    // Kept for the turn's end: its flush pulls first, and resumes a harness not yet live.
+    const keep = isStaleTranscript(e) || (isAppError(e) && e.code === "session_not_found");
+    if (keep && latest) setEntry(sessionId, undeliver(latest, (m) => m.clientMessageId === clientMessageId));
+    if (isStaleTranscript(e)) {
+      syncInput(sessionId, {
+        kind: "stale",
+        rev: rev(e.staleTranscript.rev),
+        committedRev: rev(e.staleTranscript.committedRev),
+      });
+    }
+    if (keep) return "queued";
+    if (latest) {
+      setEntry(sessionId, { ...latest, queued: latest.queued.filter((m) => m.clientMessageId !== clientMessageId) });
+    }
+    throw e;
+  }
+  return "queued";
+}
+
 // A refused send never reached the harness, so the turn it opened locally never ran. But a
 // log item applied meanwhile (the winner's message) opened a real one, which keeps running.
 function unsentTurn(
@@ -1020,9 +1158,11 @@ const flushing = new Set<string>();
 function flushQueuedMessage(sessionId: string): void {
   const entry = entryOf(sessionId);
   // One flush per session: a pull's own trailing flush must not overtake the one waiting on it.
-  if (!entry || entry.queued.length === 0 || isBusy(entry) || flushing.has(sessionId)) return;
-  const [next, ...rest] = entry.queued;
-  setEntry(sessionId, { ...entry, queued: rest });
+  if (!entry || isBusy(entry) || flushing.has(sessionId)) return;
+  const at = entry.queued.findIndex((m) => !delivered(m));
+  if (at === -1) return;
+  const next = entry.queued[at];
+  setEntry(sessionId, { ...entry, queued: entry.queued.filter((_, i) => i !== at) });
   flushing.add(sessionId);
   void deliverQueued(sessionId, next).then((requeued) => {
     flushing.delete(sessionId);
@@ -1150,6 +1290,7 @@ async function pullOnce(sessionId: string): Promise<void> {
         }
       }
     }
+    settleFolded(sessionId);
 
     const latest = syncOf(sessionId);
     syncInput(sessionId, {
@@ -1198,10 +1339,25 @@ async function reloadOnce(sessionId: string): Promise<void> {
   if (!folded && entryOf(sessionId)) syncInput(sessionId, { kind: "fetchFailed" });
 }
 
-export function cancelQueuedMessage(sessionId: string, index: number): void {
+export async function cancelQueuedMessage(sessionId: string, index: number): Promise<void> {
+  const chip = entryOf(sessionId)?.queued[index];
+  if (!chip) return;
+  if (chip.clientMessageId) {
+    const id = chip.clientMessageId;
+    // Taken in already, or a server that predates withdrawing: its echo clears the chip.
+    const withdrawn = await unwrap(commands.cancelQueuedMessage(sessionId, id)).catch((e) => {
+      log.warn("session", `withdrawing a queued message from ${sessionId} failed`, e);
+      return false;
+    });
+    const latest = entryOf(sessionId);
+    if (withdrawn && latest) {
+      setEntry(sessionId, { ...latest, queued: latest.queued.filter((m) => m.clientMessageId !== id) });
+    }
+    return;
+  }
   const current = entryOf(sessionId);
   if (!current) return;
-  setEntry(sessionId, { ...current, queued: current.queued.filter((_, i) => i !== index) });
+  setEntry(sessionId, { ...current, queued: current.queued.filter((m) => m !== chip) });
 }
 
 export async function respondPermission(
@@ -1648,6 +1804,7 @@ async function resync(sessionId: string, live: boolean): Promise<void> {
   const { view, ...position } = foldLog(read, current.items);
   setEntry(sessionId, { ...current, ...restoredView(view, false), ...position, live: false, drifted: false });
   foldLoaded(sessionId, read);
+  settleFolded(sessionId);
 }
 
 /** Hides the no-sync "new turns" notice until the next lifecycle event marks the view again. */

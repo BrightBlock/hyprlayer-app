@@ -1422,6 +1422,18 @@ impl Dispatch for Server {
         self.runtime.sessions().interrupt(&session_id).await.wire()
     }
 
+    async fn cancel_queued_message(
+        &self,
+        session_id: String,
+        client_message_id: String,
+    ) -> Result<bool, WireError> {
+        self.runtime
+            .sessions()
+            .cancel_queued_message(&session_id, &client_message_id)
+            .await
+            .wire()
+    }
+
     async fn kill_session(&self, session_id: String) -> Result<(), WireError> {
         self.runtime.sessions().kill(&session_id).await.wire()
     }

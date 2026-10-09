@@ -843,3 +843,225 @@ async fn extra_skill_roots_reach_codex() {
         "fixture skill leaked into a session that never declared its root"
     );
 }
+
+#[derive(Debug, PartialEq)]
+enum Seen {
+    User(Option<String>),
+    ToolResult,
+    Text(String),
+    TurnDone,
+    Lifecycle(String, String),
+}
+
+/// Sends `first`; at its first tool call runs `mid`. Collects through `turns` turn ends, then
+/// keeps listening for `settle` so a stray extra turn shows up.
+async fn collect_turns(
+    driver: &CodexDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    first: &str,
+    turns: usize,
+    settle: Duration,
+    mut mid: impl FnMut(&CodexDriver),
+) -> Vec<Seen> {
+    driver
+        .send_user_turn(first, None, None, Some("first"))
+        .expect("send first");
+    let mut seen = Vec::new();
+    let mut fired = false;
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(180);
+    let mut done = 0;
+    loop {
+        let event = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(event)) => event,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) => panic!("event channel closed"),
+            Err(_) if done >= turns => return seen,
+            Err(_) => panic!("only {done} of {turns} turns ended within 180s: {seen:?}"),
+        };
+        match event {
+            SessionEvent::ToolUse { .. } if !fired => {
+                fired = true;
+                mid(driver);
+            }
+            SessionEvent::UserMessage {
+                client_message_id, ..
+            } => seen.push(Seen::User(client_message_id)),
+            SessionEvent::ToolResult { .. } => seen.push(Seen::ToolResult),
+            SessionEvent::AssistantText { text, .. } => seen.push(Seen::Text(text)),
+            SessionEvent::CommandLifecycle {
+                command_uuid,
+                state,
+            } => seen.push(Seen::Lifecycle(command_uuid, state)),
+            SessionEvent::TurnDone { .. } => {
+                seen.push(Seen::TurnDone);
+                done += 1;
+                if done == turns {
+                    deadline = tokio::time::Instant::now() + settle;
+                }
+            }
+            SessionEvent::Exited { outcome, .. } => panic!("session exited: {outcome:?}"),
+            _ => {}
+        }
+    }
+}
+
+fn position(seen: &[Seen], want: &Seen) -> usize {
+    seen.iter()
+        .position(|s| s == want)
+        .unwrap_or_else(|| panic!("{want:?} never arrived: {seen:?}"))
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn a_message_sent_mid_turn_steers_the_running_turn() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) =
+        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions))
+            .await
+            .expect("spawn codex app-server");
+    let driver = std::sync::Arc::new(driver);
+    let typist = driver.clone();
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Use the shell to run exactly `sleep 8 && echo first`. When it finishes, run `echo second`. Then reply with the single word DONE.",
+        1,
+        Duration::from_secs(8),
+        move |_| {
+            // Typed while the command runs; sent at its very start, codex commits a steer
+            // when the model's response stream ends instead.
+            let typist = typist.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                typist
+                    .send_user_turn(
+                        "Also: include the word PINEAPPLE in your final reply.",
+                        None,
+                        None,
+                        Some("steer"),
+                    )
+                    .expect("send mid-turn");
+            });
+        },
+    )
+    .await;
+    println!("seen: {seen:?}");
+    let steer = position(&seen, &Seen::User(Some("steer".into())));
+    let first_result = position(&seen, &Seen::ToolResult);
+    assert!(
+        first_result < steer,
+        "the echo waits for codex to commit the steer at its next step: {seen:?}"
+    );
+    assert_eq!(
+        seen.iter().filter(|s| **s == Seen::TurnDone).count(),
+        1,
+        "the steer joins the running turn: {seen:?}"
+    );
+    let reply = seen
+        .iter()
+        .rev()
+        .find_map(|s| match s {
+            Seen::Text(t) => Some(t.to_uppercase()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    assert!(reply.contains("PINEAPPLE"), "{seen:?}");
+    driver.kill();
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn an_interrupted_turn_hands_back_its_uncommitted_steer() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) =
+        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions))
+            .await
+            .expect("spawn codex app-server");
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Use the shell to run exactly `sleep 20 && echo first`. Then reply with the single word DONE.",
+        1,
+        Duration::from_secs(5),
+        |d| {
+            d.send_user_turn(
+                "Reply with only the word PINEAPPLE.",
+                None,
+                None,
+                Some("dropped"),
+            )
+            .expect("send mid-turn");
+            d.interrupt().expect("interrupt");
+        },
+    )
+    .await;
+    println!("seen: {seen:?}");
+    let handed_back = position(
+        &seen,
+        &Seen::Lifecycle("dropped".into(), "cancelled".into()),
+    );
+    assert!(
+        handed_back < position(&seen, &Seen::TurnDone),
+        "the sender learns of the drop before the turn ends, so its turn-end flush resends it: {seen:?}"
+    );
+    assert!(
+        !seen.contains(&Seen::User(Some("dropped".into()))),
+        "codex never committed it: {seen:?}"
+    );
+    driver.kill();
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn rewind_maps_ordinals_past_a_steered_message() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex, PermissionMode::BypassPermissions))
+            .await
+            .expect("spawn codex app-server");
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Remember the word ALPHA. Use the shell to run exactly `sleep 6`, then reply: ok.",
+        1,
+        Duration::from_secs(3),
+        |d| {
+            d.send_user_turn("Also remember the word BRAVO.", None, None, Some("bravo"))
+                .expect("send mid-turn");
+        },
+    )
+    .await;
+    assert!(seen.contains(&Seen::User(Some("bravo".into()))), "{seen:?}");
+    run_turn(
+        &driver,
+        &mut events,
+        "Remember the word CHARLIE. Reply: ok.",
+    )
+    .await;
+
+    assert!(
+        driver.rewind_to_ordinal(2).await.is_err(),
+        "a steered message has no turn of its own to revert to"
+    );
+    driver
+        .rewind_to_ordinal(3)
+        .await
+        .expect("the message after a steer still maps to its own turn");
+    let recalled = run_turn(
+        &driver,
+        &mut events,
+        "Which of ALPHA, BRAVO, CHARLIE did I ask you to remember? List only those you were told.",
+    )
+    .await
+    .to_uppercase();
+    println!("recalled: {recalled}");
+    driver.kill();
+    assert!(
+        recalled.contains("ALPHA") && recalled.contains("BRAVO"),
+        "the steered turn survives: {recalled:?}"
+    );
+    assert!(
+        !recalled.contains("CHARLIE"),
+        "the reverted turn is forgotten: {recalled:?}"
+    );
+}

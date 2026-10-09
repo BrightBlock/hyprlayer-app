@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
+use std::sync::{Mutex as StdMutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -11,7 +12,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
-use crate::agent::KillFlag;
+use crate::agent::{declined_message, KillFlag};
 use crate::error::{CoreError, Result};
 use crate::store::session_event_codec::questions_from_value;
 use hyprlayer_models::session::QuestionAnswers;
@@ -49,10 +50,72 @@ pub struct SpawnConfig {
 
 const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
+const REWIND_TIMEOUT: Duration = Duration::from_secs(20);
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RewindOutcome {
     rewound: bool,
     error: Option<String>,
+}
+
+/// A message written mid-turn waits in claude's queue until its next step, so
+/// its echo waits for the `command_lifecycle` frame that says claude took it in.
+#[derive(Default)]
+struct Inbox {
+    busy: bool,
+    /// Claude has sent a lifecycle frame for one of our messages.
+    lifecycle: bool,
+    /// Wire uuid and held echo, oldest first.
+    waiting: Vec<(String, SessionEvent)>,
+    /// Our messages claude has yet to settle; their frames are ours to swallow.
+    own: HashSet<String>,
+    /// Being withdrawn: claude's `cancelled` for these is the user's, not a drop.
+    cancelling: HashSet<String>,
+}
+
+impl Inbox {
+    /// Nothing waiting either: claude starts a waiting message right after a `result`.
+    fn idle(&self) -> bool {
+        !self.busy && self.waiting.is_empty()
+    }
+
+    fn take(&mut self, wire: &str) -> Option<SessionEvent> {
+        let at = self.waiting.iter().position(|(w, _)| w == wire)?;
+        Some(self.waiting.remove(at).1)
+    }
+
+    fn wire_for(&self, client_message_id: &str) -> Option<String> {
+        self.waiting.iter().find_map(|(wire, echo)| {
+            matches!(echo, SessionEvent::UserMessage { client_message_id: Some(id), .. } if id == client_message_id)
+                .then(|| wire.clone())
+        })
+    }
+
+    /// `None` for another command's frame; otherwise what our own frame emits.
+    fn frame(&mut self, wire: &str, state: &str) -> Option<Option<SessionEvent>> {
+        if !self.own.contains(wire) {
+            return None;
+        }
+        self.lifecycle = true;
+        Some(match state {
+            "queued" => None,
+            "started" => {
+                self.busy = true;
+                self.take(wire)
+            }
+            _ => {
+                self.own.remove(wire);
+                let withdrawn = self.cancelling.remove(wire);
+                self.take(wire)
+                    .filter(|_| !withdrawn)
+                    .and_then(|echo| declined_message(&echo))
+            }
+        })
+    }
+}
+
+fn lock(inbox: &StdMutex<Inbox>) -> MutexGuard<'_, Inbox> {
+    inbox.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 pub struct ClaudeDriver {
@@ -64,6 +127,7 @@ pub struct ClaudeDriver {
     kill_flag: Arc<KillFlag>,
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
+    inbox: Arc<StdMutex<Inbox>>,
     killer: Killer,
     claude_config_dir: Option<PathBuf>,
     cwd: PathBuf,
@@ -177,6 +241,7 @@ impl ClaudeDriver {
         let pending_controls = Arc::new(StdMutex::new(
             HashMap::<String, oneshot::Sender<Value>>::new(),
         ));
+        let inbox = Arc::new(StdMutex::new(Inbox::default()));
 
         tokio::spawn(write_loop(stdin, stdin_rx));
 
@@ -190,6 +255,7 @@ impl ClaudeDriver {
             kill_flag.clone(),
             pending_permissions.clone(),
             pending_controls.clone(),
+            inbox.clone(),
         ));
 
         Ok((
@@ -202,6 +268,7 @@ impl ClaudeDriver {
                 kill_flag,
                 pending_permissions,
                 pending_controls,
+                inbox,
                 killer: Killer { pid },
                 claude_config_dir: config.claude_config_dir,
                 cwd: config.cwd,
@@ -214,6 +281,8 @@ impl ClaudeDriver {
         self.events.subscribe()
     }
 
+    /// Mid-turn, claude takes the message in at its next step, as its own CLI
+    /// does; the echo is emitted then, so it lands where the model read it.
     pub fn send_user_turn(
         &self,
         text: &str,
@@ -221,14 +290,64 @@ impl ClaudeDriver {
         prompt_name: Option<&str>,
         client_message_id: Option<&str>,
     ) -> Result<()> {
-        let _ = self.events.send(SessionEvent::UserMessage {
+        let echo = SessionEvent::UserMessage {
             text: text.to_string(),
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
             client_message_id: client_message_id.map(str::to_string),
             author: None,
-        });
-        self.write_line(protocol::user_turn_json(&self.session_id, text))
+        };
+        // Minted here: a client's id need not be the uuid claude expects.
+        let wire = uuid::Uuid::new_v4().to_string();
+        let line = protocol::user_turn_json(&self.session_id, text, &wire);
+        let mut inbox = lock(&self.inbox);
+        inbox.own.insert(wire.clone());
+        // Without lifecycle frames nothing would say when claude took it in: it still
+        // waits in claude's queue, but echoes now.
+        if !inbox.idle() && inbox.lifecycle {
+            inbox.waiting.push((wire.clone(), echo));
+        } else {
+            inbox.busy = true;
+            let _ = self.events.send(echo);
+        }
+        let written = self.write_line(line);
+        if written.is_err() {
+            inbox.own.remove(&wire);
+            inbox.take(&wire);
+        }
+        written
+    }
+
+    /// Withdraws a message still waiting for claude's next step; false once claude took it in.
+    pub async fn cancel_queued_message(&self, client_message_id: &str) -> Result<bool> {
+        let wire = {
+            let mut inbox = lock(&self.inbox);
+            let Some(wire) = inbox.wire_for(client_message_id) else {
+                return Ok(false);
+            };
+            inbox.cancelling.insert(wire.clone());
+            wire
+        };
+        let reply = self
+            .control(
+                "cancel_async_message",
+                json!({ "message_uuid": wire }),
+                CANCEL_TIMEOUT,
+            )
+            .await;
+        let cancelled = reply
+            .as_ref()
+            .ok()
+            .and_then(|payload| payload.get("cancelled"))
+            .and_then(Value::as_bool)
+            == Some(true);
+        let mut inbox = lock(&self.inbox);
+        if cancelled {
+            inbox.take(&wire);
+        } else {
+            inbox.cancelling.remove(&wire);
+        }
+        reply.map(|_| cancelled)
     }
 
     pub fn respond_permission(
@@ -323,37 +442,17 @@ impl ClaudeDriver {
         target_uuid: &str,
         interrupt_if_running: bool,
     ) -> Result<RewindOutcome> {
-        let id = self.next_control_id();
-        let (tx, rx) = oneshot::channel::<Value>();
-        if let Ok(mut map) = self.pending_controls.lock() {
-            map.insert(id.clone(), tx);
-        }
-        if let Err(e) = self.write_line(protocol::control_request_json(
-            &id,
-            "rewind_conversation",
-            json!({
-                "target_message_uuid": target_uuid,
-                "interrupt_if_running": interrupt_if_running,
-                "dry_run": false,
-            }),
-        )) {
-            if let Ok(mut map) = self.pending_controls.lock() {
-                map.remove(&id);
-            }
-            return Err(e);
-        }
-        let payload = match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
-            Ok(Ok(v)) => v,
-            _ => {
-                if let Ok(mut map) = self.pending_controls.lock() {
-                    map.remove(&id);
-                }
-                return Err(CoreError::OutputParse {
-                    program: "claude".into(),
-                    detail: "rewind_conversation got no reply".into(),
-                });
-            }
-        };
+        let payload = self
+            .control(
+                "rewind_conversation",
+                json!({
+                    "target_message_uuid": target_uuid,
+                    "interrupt_if_running": interrupt_if_running,
+                    "dry_run": false,
+                }),
+                REWIND_TIMEOUT,
+            )
+            .await?;
         Ok(RewindOutcome {
             rewound: payload
                 .get("rewound")
@@ -385,6 +484,34 @@ impl ClaudeDriver {
             .lock()
             .map(|r| r.join("\n"))
             .unwrap_or_default()
+    }
+
+    /// A control request whose reply carries a payload.
+    async fn control(&self, subtype: &str, extra: Value, timeout: Duration) -> Result<Value> {
+        let id = self.next_control_id();
+        let (tx, rx) = oneshot::channel::<Value>();
+        if let Ok(mut map) = self.pending_controls.lock() {
+            map.insert(id.clone(), tx);
+        }
+        let forget = || {
+            if let Ok(mut map) = self.pending_controls.lock() {
+                map.remove(&id);
+            }
+        };
+        if let Err(e) = self.write_line(protocol::control_request_json(&id, subtype, extra)) {
+            forget();
+            return Err(e);
+        }
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(payload)) => Ok(payload),
+            _ => {
+                forget();
+                Err(CoreError::OutputParse {
+                    program: "claude".into(),
+                    detail: format!("{subtype} got no reply"),
+                })
+            }
+        }
     }
 
     fn write_line(&self, mut line: String) -> Result<()> {
@@ -438,6 +565,7 @@ async fn read_and_wait(
     kill_flag: Arc<KillFlag>,
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
+    inbox: Arc<StdMutex<Inbox>>,
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
@@ -450,12 +578,29 @@ async fn read_and_wait(
             Ok(Some(line)) => {
                 let parsed = protocol::parse_line(&line);
                 match &parsed {
-                    ParsedLine::Init { model: m, .. } => model = m.clone(),
+                    ParsedLine::Init { model: m, .. } => {
+                        model = m.clone();
+                        // Every turn opens with one, including those claude starts itself.
+                        lock(&inbox).busy = true;
+                    }
+                    ParsedLine::CommandLifecycle {
+                        command_uuid,
+                        state,
+                    } => {
+                        let ours = lock(&inbox).frame(command_uuid, state);
+                        if let Some(emit) = ours {
+                            if let Some(event) = emit {
+                                let _ = events.send(event);
+                            }
+                            continue;
+                        }
+                    }
                     ParsedLine::Result {
                         is_error,
                         context_windows,
                         ..
                     } => {
+                        lock(&inbox).busy = false;
                         saw_result = true;
                         saw_error_result |= *is_error;
                         if let Some(tokens) = context_windows
@@ -727,14 +872,12 @@ pub fn relocate_transcript(
     Ok(true)
 }
 
+/// The uuids of the app's user turns, in order: what a rewind ordinal indexes.
 fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
     jsonl
         .lines()
         .filter_map(|line| {
             let v: Value = serde_json::from_str(line.trim()).ok()?;
-            if v.get("type").and_then(Value::as_str) != Some("user") {
-                return None;
-            }
             let flag = |k| v.get(k).and_then(Value::as_bool).unwrap_or(false);
             if flag("isMeta")
                 || flag("isCompactSummary")
@@ -743,29 +886,43 @@ fn parse_transcript_user_uuids(jsonl: &str) -> Vec<String> {
             {
                 return None;
             }
-            let content = v.get("message").and_then(|m| m.get("content"));
-            let is_tool_result = content
-                .and_then(Value::as_array)
-                .and_then(|a| a.first())
-                .and_then(|b| b.get("type"))
-                .and_then(Value::as_str)
-                == Some("tool_result");
-            if is_tool_result {
-                return None;
-            }
-            if let Some(kind) = v
-                .get("origin")
-                .and_then(|o| o.get("kind"))
-                .and_then(Value::as_str)
-            {
-                if kind != "human" {
-                    return None;
+            let human = |origin: Option<&Value>| {
+                origin
+                    .and_then(|o| o.get("kind"))
+                    .and_then(Value::as_str)
+                    .is_none_or(|kind| kind == "human")
+            };
+            match v.get("type").and_then(Value::as_str)? {
+                "user" => {
+                    let content = v.get("message").and_then(|m| m.get("content"));
+                    let first = content.and_then(Value::as_array).and_then(|a| a.first());
+                    let block = |key| first.and_then(|b| b.get(key)).and_then(Value::as_str);
+                    let text = content.and_then(Value::as_str).or_else(|| block("text"));
+                    // The interrupt marker reaches the app as assistant text, not a user turn.
+                    let marker = text.is_some_and(|t| t.starts_with(INTERRUPT_MARKER));
+                    if block("type") == Some("tool_result") || marker || !human(v.get("origin")) {
+                        return None;
+                    }
                 }
+                // A message sent mid-turn joins the turn as an attachment, not a user line.
+                "attachment" => {
+                    let queued = v.get("attachment")?;
+                    let field = |key| queued.get(key).and_then(Value::as_str);
+                    if field("type") != Some("queued_command")
+                        || field("commandMode") != Some("prompt")
+                        || !human(queued.get("origin"))
+                    {
+                        return None;
+                    }
+                }
+                _ => return None,
             }
             v.get("uuid").and_then(Value::as_str).map(str::to_string)
         })
         .collect()
 }
+
+const INTERRUPT_MARKER: &str = "[Request interrupted by user";
 
 struct Killer {
     pid: Option<u32>,

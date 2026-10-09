@@ -1,0 +1,190 @@
+{
+  "scenario": "mid_turn_messages",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage:-",
+              "init",
+              "assistantText:E2E_REPLY",
+              "turnDone"
+            ]
+          },
+          "guard": "the first message echoes and its turn completes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "userMessage:-",
+              "init",
+              "assistantText:E2E_REPLY",
+              "turnDone"
+            ]
+          },
+          "guard": "the harness's lifecycle frames for the app's own messages never reach the client",
+          "ok": true
+        }
+      ],
+      "step": "an idle send opens its turn at once"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage:steer-turn",
+              "init",
+              "toolUse"
+            ]
+          },
+          "guard": "the turn's tool is running when the next message is sent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "its echo waits for the running tool's result, where the harness took it in",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "the reply that follows heard it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after": [],
+            "turn": [
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "it joins the running turn instead of opening its own",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "the running tool was not interrupted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harness_saw": true
+          },
+          "guard": "the harness received it while the tool ran",
+          "ok": true
+        }
+      ],
+      "step": "a message sent mid-turn joins the running turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "order": [
+              "userMessage:-",
+              "init",
+              "assistantText:E2E_REPLY",
+              "turnDone",
+              "userMessage:steer-turn",
+              "init",
+              "toolUse",
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "tool result, then the mid-turn message, then the reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "order": [
+              "userMessage:-",
+              "init",
+              "assistantText:E2E_REPLY",
+              "turnDone",
+              "userMessage:steer-turn",
+              "init",
+              "toolUse",
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone"
+            ]
+          },
+          "guard": "no queued-command seam was stored for the app's own messages",
+          "ok": true
+        }
+      ],
+      "step": "the stored transcript keeps the harness's order"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "withdrawn": true
+          },
+          "guard": "the harness confirms it was withdrawn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "toolResult",
+              "assistantText:E2E_HEARD_NOTHING",
+              "turnDone"
+            ]
+          },
+          "guard": "a withdrawn message never reaches the transcript",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "toolResult",
+              "assistantText:E2E_HEARD_NOTHING",
+              "turnDone"
+            ]
+          },
+          "guard": "a withdrawal the user asked for is not handed back to resend",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "withdrawn": false
+          },
+          "guard": "a message already taken in cannot be withdrawn",
+          "ok": true
+        }
+      ],
+      "step": "a waiting message can be withdrawn"
+    }
+  ]
+}

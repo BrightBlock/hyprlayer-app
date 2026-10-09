@@ -182,11 +182,12 @@ fn outbound_shapes_are_well_formed() {
     use serde_json::Value;
 
     let turn: Value =
-        serde_json::from_str(&user_turn_json("sid", "/research_codebase hi")).unwrap();
+        serde_json::from_str(&user_turn_json("sid", "/research_codebase hi", "u1")).unwrap();
     assert_eq!(turn["type"], "user");
     assert_eq!(turn["message"]["role"], "user");
     assert_eq!(turn["message"]["content"], "/research_codebase hi");
     assert_eq!(turn["session_id"], "sid");
+    assert_eq!(turn["uuid"], "u1");
 
     let deny: Value =
         serde_json::from_str(&permission_response_json("r1", false, None, Some("nope"))).unwrap();

@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::protocol::{
     approval_reply, decode_line, question_reply, CodexPosture, CollabMode, Incoming, Translator,
 };
-use crate::agent::{rewind_unsupported, KillFlag};
+use crate::agent::{declined_message, rewind_unsupported, KillFlag};
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
 use hyprlayer_models::session::QuestionAnswers;
@@ -297,6 +297,8 @@ impl CodexDriver {
         self.events.subscribe()
     }
 
+    /// Mid-turn, the message steers the running turn, as codex's own Enter
+    /// does; its echo waits for codex to commit it at the next step.
     pub fn send_user_turn(
         &self,
         text: &str,
@@ -304,13 +306,22 @@ impl CodexDriver {
         prompt_name: Option<&str>,
         client_message_id: Option<&str>,
     ) -> Result<()> {
-        let _ = self.events.send(SessionEvent::UserMessage {
+        let echo = SessionEvent::UserMessage {
             text: text.to_string(),
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
             client_message_id: client_message_id.map(str::to_string),
             author: None,
-        });
+        };
+        let running = self
+            .state
+            .lock()
+            .ok()
+            .and_then(|s| s.active_turn.clone().or_else(|| s.requested_turn.clone()));
+        if let (Some(turn), Some(client)) = (running, client_message_id) {
+            return self.steer(&turn, client, text, echo);
+        }
+        let _ = self.events.send(echo);
 
         let model = self.model.lock().ok().and_then(|m| m.clone());
         let effort = self.effort.lock().ok().and_then(|e| e.clone());
@@ -353,6 +364,41 @@ impl CodexDriver {
                     }
                 }
                 Err(_) => {}
+            }
+        });
+        Ok(())
+    }
+
+    fn steer(&self, turn: &str, client: &str, text: &str, echo: SessionEvent) -> Result<()> {
+        if let Ok(mut s) = self.state.lock() {
+            s.steer_sent(client.to_string(), echo);
+        }
+        let params = json!({
+            "threadId": self.thread_id,
+            "expectedTurnId": turn,
+            "clientUserMessageId": client,
+            "input": text_input(text),
+        });
+        let rx = match self.request_channel("turn/steer", params) {
+            Ok(rx) => rx,
+            Err(e) => {
+                if let Ok(mut s) = self.state.lock() {
+                    s.take_steer(client);
+                }
+                return Err(e);
+            }
+        };
+        let events = self.events.clone();
+        let state = self.state.clone();
+        let client = client.to_string();
+        tokio::spawn(async move {
+            // The turn ended first, isn't steerable, or this codex predates steering.
+            if let Ok(Err(e)) = rx.await {
+                tracing::debug!("codex refused a steer: {e}");
+                let echo = state.lock().ok().and_then(|mut s| s.take_steer(&client));
+                if let Some(declined) = echo.as_ref().and_then(declined_message) {
+                    let _ = events.send(declined);
+                }
             }
         });
         Ok(())
@@ -621,7 +667,7 @@ fn turn_params(
 ) -> Value {
     let mut params = json!({
         "threadId": thread_id,
-        "input": [{ "type": "text", "text": text, "text_elements": [] }],
+        "input": text_input(text),
     });
     if let Some(model) = model {
         params["model"] = json!(model);
@@ -636,6 +682,10 @@ fn turn_params(
         });
     }
     params
+}
+
+fn text_input(text: &str) -> Value {
+    json!([{ "type": "text", "text": text, "text_elements": [] }])
 }
 
 // A schema default: a thread without the field is legacy.
@@ -664,8 +714,14 @@ fn rewind_request(
     ordinal: usize,
     state: &Translator,
 ) -> Result<(&'static str, Value)> {
+    let turn = state
+        .turn_of(ordinal)
+        .ok_or_else(|| CoreError::OutputParse {
+            program: "codex".into(),
+            detail: "that message joined a running turn, and codex reverts whole turns".into(),
+        })?;
     if !paginated {
-        let num_turns = rollback_count(ordinal, state.user_turns)?;
+        let num_turns = rollback_count(turn, state.turns())?;
         return Ok((
             "thread/rollback",
             json!({ "threadId": thread_id, "numTurns": num_turns }),
@@ -678,7 +734,7 @@ fn rewind_request(
             program: "codex".into(),
             detail: "this thread's turns do not match the session's user turns".into(),
         })?;
-    let before = &ids[turn_index(ordinal, ids.len())?];
+    let before = &ids[turn_index(turn, ids.len())?];
     Ok((
         "thread/revert",
         json!({ "threadId": thread_id, "beforeTurnId": before }),

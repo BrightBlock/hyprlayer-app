@@ -308,7 +308,10 @@ attach.
 Sending a message, answering a question, and resolving a permission go through
 `send`, `respond_permission` and `answer` on the service. Only `send` takes the
 session's `op_lock`; it also checks `SendContext.base_rev` against other
-authors' turns and refuses a stale one with `stale_transcript`.
+authors' turns and refuses a stale one with `stale_transcript`. Sent mid-turn,
+the message reaches the harness at once and the driver echoes its `UserMessage`
+when the harness takes it in at its next step; `cancel_queued_message` withdraws
+one still waiting.
 
 ### `ProjectService`
 

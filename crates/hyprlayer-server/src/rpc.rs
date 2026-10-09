@@ -240,6 +240,7 @@ hyprlayer_proto::commands! {
     RespondPermission: respond_permission(session_id: String, request_id: String, allow: bool, message: Option<String>) -> ();
     AnswerQuestion: answer_question(session_id: String, request_id: String, answers: QuestionAnswers) -> ();
     InterruptSession: interrupt_session(session_id: String) -> ();
+    CancelQueuedMessage: cancel_queued_message(session_id: String, client_message_id: String) -> bool;
     KillSession: kill_session(session_id: String) -> ();
     SetSessionModel: set_session_model(session_id: String, model: Option<String>) -> ();
     SetSessionEffort: set_session_effort(session_id: String, effort: Option<String>) -> ();

@@ -132,6 +132,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::respond_permission,
             commands::sessions::answer_question,
             commands::sessions::interrupt_session,
+            commands::sessions::cancel_queued_message,
             commands::sessions::kill_session,
             commands::sessions::set_session_model,
             commands::sessions::set_session_effort,

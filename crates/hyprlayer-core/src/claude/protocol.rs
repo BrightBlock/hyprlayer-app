@@ -375,12 +375,14 @@ fn string_list(v: Option<&Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub fn user_turn_json(session_id: &str, text: &str) -> String {
+/// `uuid` makes claude report the message's fate in `command_lifecycle` frames.
+pub fn user_turn_json(session_id: &str, text: &str, uuid: &str) -> String {
     json!({
         "type": "user",
         "message": { "role": "user", "content": text },
         "parent_tool_use_id": null,
         "session_id": session_id,
+        "uuid": uuid,
     })
     .to_string()
 }

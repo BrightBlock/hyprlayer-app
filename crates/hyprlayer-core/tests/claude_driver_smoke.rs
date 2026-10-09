@@ -294,3 +294,216 @@ async fn rewind_across_resume_truncates_pre_resume_turns() {
 
     driver.kill();
 }
+
+#[derive(Debug, PartialEq)]
+enum Seen {
+    User(Option<String>),
+    ToolResult,
+    Text(String),
+    TurnDone,
+    Lifecycle(String, String),
+}
+
+/// Sends `first`; at its first tool call runs `mid`. Collects through `turns` turn ends, then
+/// keeps listening for `settle` so a stray extra turn shows up.
+async fn collect_turns(
+    driver: &ClaudeDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    first: &str,
+    turns: usize,
+    settle: Duration,
+    mut mid: impl FnMut(&ClaudeDriver),
+) -> Vec<Seen> {
+    driver
+        .send_user_turn(first, None, None, Some("first"))
+        .expect("send first");
+    let mut seen = Vec::new();
+    let mut fired = false;
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let mut done = 0;
+    loop {
+        let event = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(event)) => event,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) => panic!("event channel closed"),
+            Err(_) if done >= turns => return seen,
+            Err(_) => panic!("only {done} of {turns} turns ended within 120s: {seen:?}"),
+        };
+        match event {
+            SessionEvent::ToolUse { .. } if !fired => {
+                fired = true;
+                mid(driver);
+            }
+            SessionEvent::UserMessage {
+                client_message_id, ..
+            } => seen.push(Seen::User(client_message_id)),
+            SessionEvent::ToolResult { .. } => seen.push(Seen::ToolResult),
+            SessionEvent::AssistantText { text, .. } => seen.push(Seen::Text(text)),
+            SessionEvent::CommandLifecycle {
+                command_uuid,
+                state,
+            } => seen.push(Seen::Lifecycle(command_uuid, state)),
+            SessionEvent::TurnDone { .. } => {
+                seen.push(Seen::TurnDone);
+                done += 1;
+                if done == turns {
+                    deadline = tokio::time::Instant::now() + settle;
+                }
+            }
+            SessionEvent::Exited { outcome, .. } => panic!("session exited: {outcome:?}"),
+            _ => {}
+        }
+    }
+}
+
+fn position(seen: &[Seen], want: &Seen) -> usize {
+    seen.iter()
+        .position(|s| s == want)
+        .unwrap_or_else(|| panic!("{want:?} never arrived: {seen:?}"))
+}
+
+fn final_text(seen: &[Seen]) -> String {
+    seen.iter()
+        .rev()
+        .find_map(|s| match s {
+            Seen::Text(t) => Some(t.to_uppercase()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn a_message_sent_mid_turn_joins_the_running_turn() {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let (driver, mut events) = spawn_haiku(&std::env::temp_dir(), &session_id, false);
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Use the Bash tool to run exactly `sleep 8 && echo first`. When it finishes, use Bash to run `echo second`. Then reply with the single word DONE.",
+        1,
+        Duration::from_secs(8),
+        |d| {
+            d.send_user_turn(
+                "Also: include the word PINEAPPLE in your final reply.",
+                None,
+                None,
+                Some("steer"),
+            )
+            .expect("send mid-turn");
+        },
+    )
+    .await;
+    println!("seen: {seen:?}");
+
+    let steer = position(&seen, &Seen::User(Some("steer".into())));
+    let first_result = position(&seen, &Seen::ToolResult);
+    assert!(
+        first_result < steer,
+        "the echo waits for claude's next step, after the running tool: {seen:?}"
+    );
+    assert_eq!(
+        seen.iter().filter(|s| **s == Seen::TurnDone).count(),
+        1,
+        "the message joins the running turn instead of opening its own: {seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|s| matches!(s, Seen::Lifecycle(..))),
+        "our own lifecycle frames never reach the transcript: {seen:?}"
+    );
+    assert!(final_text(&seen).contains("PINEAPPLE"), "{seen:?}");
+
+    // The steered message is a user turn claude can rewind to, so later ordinals stay aligned.
+    driver
+        .rewind_to_ordinal(2)
+        .await
+        .expect("claude rewinds to a message that joined a running turn");
+    let recalled = run_turn(
+        &driver,
+        &mut events,
+        "Did I ask you to include any special word in a reply? Answer with that word, or NONE.",
+    )
+    .await;
+    println!("post-rewind: {recalled:?}");
+    assert!(
+        !recalled.to_uppercase().contains("PINEAPPLE"),
+        "the rewound steer is forgotten: {recalled:?}"
+    );
+    driver.kill();
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn a_waiting_message_can_be_withdrawn() {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let (driver, mut events) = spawn_haiku(&std::env::temp_dir(), &session_id, false);
+    let driver = std::sync::Arc::new(driver);
+    let canceller = driver.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut tx = Some(tx);
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Use the Bash tool to run exactly `sleep 15 && echo first`. Then reply with the single word DONE.",
+        1,
+        Duration::from_secs(5),
+        move |d| {
+            d.send_user_turn(
+                "Also: include the word PINEAPPLE in your reply.",
+                None,
+                None,
+                Some("withdrawn"),
+            )
+            .expect("send mid-turn");
+            if let Some(tx) = tx.take() {
+                let canceller = canceller.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(canceller.cancel_queued_message("withdrawn").await);
+                });
+            }
+        },
+    )
+    .await;
+    println!("seen: {seen:?}");
+    let cancelled = rx.await.expect("cancel ran").expect("cancel replied");
+    assert!(cancelled, "withdrawn before claude's next step");
+    assert!(
+        !seen.contains(&Seen::User(Some("withdrawn".into()))),
+        "a withdrawn message never echoes: {seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|s| matches!(s, Seen::Lifecycle(..))),
+        "a withdrawal the user asked for is not handed back: {seen:?}"
+    );
+    assert!(!final_text(&seen).contains("PINEAPPLE"), "{seen:?}");
+    driver.kill();
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn an_interrupt_runs_the_waiting_message_next() {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let (driver, mut events) = spawn_haiku(&std::env::temp_dir(), &session_id, false);
+    let seen = collect_turns(
+        &driver,
+        &mut events,
+        "Use the Bash tool to run exactly `sleep 20 && echo first`. Then reply with the single word DONE.",
+        2,
+        Duration::from_secs(5),
+        |d| {
+            d.send_user_turn("Reply with only the word PINEAPPLE.", None, None, Some("next"))
+                .expect("send mid-turn");
+            d.interrupt().expect("interrupt");
+        },
+    )
+    .await;
+    println!("seen: {seen:?}");
+    let interrupted = position(&seen, &Seen::TurnDone);
+    let next = position(&seen, &Seen::User(Some("next".into())));
+    assert!(
+        interrupted < next,
+        "the waiting message opens the turn after the interrupted one: {seen:?}"
+    );
+    assert!(final_text(&seen).contains("PINEAPPLE"), "{seen:?}");
+    driver.kill();
+}

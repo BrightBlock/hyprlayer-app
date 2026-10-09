@@ -216,6 +216,16 @@ impl SessionService<'_> {
         self.require_live(session_id).await?.interrupt()
     }
 
+    /// False once the harness took the message in, or when it cannot withdraw one.
+    pub async fn cancel_queued_message(
+        &self,
+        session_id: &str,
+        client_message_id: &str,
+    ) -> Result<bool> {
+        let driver = self.require_live(session_id).await?;
+        driver.cancel_queued_message(client_message_id).await
+    }
+
     pub async fn kill(&self, session_id: &str) -> Result<()> {
         tracing::info!("session {session_id}: kill requested");
         self.require_live(session_id).await?.kill();

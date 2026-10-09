@@ -446,6 +446,20 @@ pub async fn interrupt_session(state: State<'_, AppState>, session_id: String) -
 
 #[tauri::command]
 #[specta::specta]
+pub async fn cancel_queued_message(
+    state: State<'_, AppState>,
+    session_id: String,
+    client_message_id: String,
+) -> CmdResult<bool> {
+    state
+        .client()?
+        .cancel_queued_message(session_id, client_message_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn kill_session(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
     state
         .client()?

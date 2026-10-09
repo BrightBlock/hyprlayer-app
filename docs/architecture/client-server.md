@@ -414,6 +414,16 @@ A send also carries `base_rev`. The actor reserves it against other authors'
 committed and in-flight turns and refuses a stale one with `stale_transcript`
 (`{rev, committed_rev, missing_turns}`), before the driver ever sees it.
 
+A send during a turn reaches the harness at once, and the harness takes it in at
+its next step, as its own CLI does: claude queues the stdin line, whose `uuid`
+brings `command_lifecycle` frames (`started` is the take-in); codex gets
+`turn/steer`, and the `userMessage` item carrying its `clientId` is the take-in.
+The driver emits the `UserMessage` echo only then, so it lands where the model
+read it. A message the harness never takes in (codex drops the steers an
+interrupted turn hadn't committed) comes back as a `cancelled`
+`CommandLifecycle` carrying the client's id. `cancel_queued_message` withdraws
+one still waiting; only claude can.
+
 ## Part 5b — Transcript sync
 
 Several desktops can view one session. The client side lives in
@@ -436,9 +446,12 @@ watch set).
   echoed `UserMessage`, by `Exited`, or after 30s.
 - **Client.** Another device's items, prompts included, are held until the user
   pulls, then applied in order; partial text is dropped, and a prompt in another
-  device's turn never notifies. A queued message pulls before it is sent, and
-  when another device's turn it waits on ends; one refused as stale returns to the
-  head of the queue and is sent after that pull. A `rewound` item, or a higher
+  device's turn never notifies. On claude and codex a message sent during this
+  device's turn goes to the harness at once and shows as a queued chip until its
+  echo lands; one handed back joins the local queue. That queue (OpenCode,
+  another device's turn, a session still starting) pulls before it sends, and
+  sends when the turn it waits on ends; one refused as stale returns to the head
+  of the queue and is sent after that pull. A `rewound` item, or a higher
   `reset_rev` anywhere, reloads the view and keeps the draft.
 
 ## Part 6 — Runtime events

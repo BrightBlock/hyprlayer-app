@@ -136,6 +136,7 @@ export const commands = {
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	answerQuestion: (sessionId: string, requestId: string, answers: QuestionAnswers) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
 	interruptSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("interrupt_session", { sessionId })),
+	cancelQueuedMessage: (sessionId: string, clientMessageId: string) => typedError<boolean, AppError>(__TAURI_INVOKE("cancel_queued_message", { sessionId, clientMessageId })),
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),

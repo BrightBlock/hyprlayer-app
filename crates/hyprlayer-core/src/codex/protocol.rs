@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Map, Value};
 
+use crate::agent::declined_message;
 use crate::claude::driver::PermissionMode;
 use crate::claude::events::SessionEvent;
 use crate::store::session_event_codec::questions_from_value;
@@ -138,9 +139,14 @@ pub struct Translator {
     pub pending_questions: HashMap<String, PendingQuestion>,
     pub user_turns: usize,
     // Root turn ids, oldest first, for a paginated thread's `thread/revert`.
-    // `None` unless they line up with `user_turns`.
+    // `None` unless they line up with the turn-starting user messages.
     pub turn_ids: Option<Vec<String>>,
     pub collab_mode: Option<String>,
+    /// Ordinals of user messages that joined a running turn; codex reverts whole turns.
+    pub steered: Vec<usize>,
+    last_user_turn: Option<String>,
+    /// Steers codex has yet to commit, by client id, with the echo to emit when it does.
+    steering: Vec<(String, SessionEvent)>,
 }
 
 impl Translator {
@@ -158,9 +164,40 @@ impl Translator {
     pub fn rewound_to(&mut self, ordinal: usize) {
         let kept = ordinal.saturating_sub(1);
         self.user_turns = kept;
+        self.steered.retain(|&s| s <= kept);
+        self.last_user_turn = None;
         if let Some(ids) = &mut self.turn_ids {
-            ids.truncate(kept);
+            ids.truncate(kept.saturating_sub(self.steered.len()));
         }
+    }
+
+    /// The 1-based turn a user message opened, or `None` when it joined one already running.
+    pub fn turn_of(&self, ordinal: usize) -> Option<usize> {
+        if self.steered.contains(&ordinal) {
+            return None;
+        }
+        Some(ordinal - self.steered.iter().filter(|&&s| s < ordinal).count())
+    }
+
+    pub fn turns(&self) -> usize {
+        self.user_turns.saturating_sub(self.steered.len())
+    }
+
+    pub fn steer_sent(&mut self, client_id: String, echo: SessionEvent) {
+        self.steering.push((client_id, echo));
+    }
+
+    pub fn take_steer(&mut self, client_id: &str) -> Option<SessionEvent> {
+        let at = self.steering.iter().position(|(id, _)| id == client_id)?;
+        Some(self.steering.remove(at).1)
+    }
+
+    /// A turn that ends drops the steers it never committed; their senders resend them.
+    fn decline_steers(&mut self) -> Vec<SessionEvent> {
+        self.steering
+            .drain(..)
+            .filter_map(|(_, echo)| declined_message(&echo))
+            .collect()
     }
 
     // codex replays thread history right behind a resume response, so the read
@@ -296,7 +333,7 @@ impl Translator {
                     .and_then(|t| t.get("status"))
                     .and_then(Value::as_str);
                 let status = raw_status.unwrap_or("completed");
-                let mut out = Vec::new();
+                let mut out = self.decline_steers();
                 if status == "failed" {
                     if let Some(msg) = p
                         .get("turn")
@@ -335,23 +372,28 @@ impl Translator {
             // Codex marks plan deltas experimental and may not match the completed item.
             "item/plan/delta" => Vec::new(),
             "item/started" => self.item_started(p.get("item").unwrap_or(&Value::Null)),
-            "item/completed" => self.item_completed(p.get("item").unwrap_or(&Value::Null)),
+            "item/completed" => self.item_completed(
+                p.get("item").unwrap_or(&Value::Null),
+                p.get("turnId").and_then(Value::as_str),
+            ),
             "turn/plan/updated" => plan_events(p),
             "thread/tokenUsage/updated" => self.token_usage(p),
             "error" => match error_text(p) {
-                Some(msg) => vec![
-                    SessionEvent::AssistantText {
+                Some(msg) => {
+                    let mut out = self.decline_steers();
+                    out.push(SessionEvent::AssistantText {
                         text: format!("⚠ Codex error: {msg}"),
                         parent_id: None,
                         injected: false,
-                    },
-                    SessionEvent::TurnDone {
+                    });
+                    out.push(SessionEvent::TurnDone {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
                         turn_status: Some("failed".into()),
-                    },
-                ],
+                    });
+                    out
+                }
                 None => Vec::new(),
             },
             "thread/settings/updated" => {
@@ -561,7 +603,7 @@ impl Translator {
         }]
     }
 
-    fn item_completed(&mut self, item: &Value) -> Vec<SessionEvent> {
+    fn item_completed(&mut self, item: &Value, turn_id: Option<&str>) -> Vec<SessionEvent> {
         let kind = item.get("type").and_then(Value::as_str).unwrap_or_default();
         let id = item
             .get("id")
@@ -572,7 +614,17 @@ impl Translator {
         match kind {
             "userMessage" => {
                 self.user_turns += 1;
-                Vec::new()
+                let turn = turn_id.map(str::to_string);
+                if turn.is_some() && turn == self.last_user_turn {
+                    self.steered.push(self.user_turns);
+                }
+                self.last_user_turn = turn;
+                // A steer's echo waits for this commit, so it lands where codex read it.
+                item.get("clientId")
+                    .and_then(Value::as_str)
+                    .and_then(|client| self.take_steer(client))
+                    .into_iter()
+                    .collect()
             }
             "agentMessage" => vec![SessionEvent::AssistantText {
                 text: item

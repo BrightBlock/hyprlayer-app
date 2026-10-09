@@ -11,7 +11,7 @@ import {
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Button, ErrorNote, Kbd, MenuItem, Popover, Spinner } from "@/components/ui";
+import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
@@ -314,9 +314,12 @@ function HandoffBanner({
 
 function QueuedMessages({
   messages,
+  canWithdraw,
   onCancel,
 }: {
   messages: QueuedMessage[];
+  /** Whether the harness can give back a message it already holds (codex cannot). */
+  canWithdraw: boolean;
   onCancel: (index: number) => void;
 }) {
   return (
@@ -325,7 +328,7 @@ function QueuedMessages({
         const n = msg.attachments.length;
         return (
         <div
-          key={i}
+          key={msg.clientMessageId ?? i}
           className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
         >
           <span className="flex shrink-0 items-center gap-1 text-label text-ink-dim/70">
@@ -341,15 +344,17 @@ function QueuedMessages({
               {n}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => onCancel(i)}
-            title="Cancel queued message"
-            aria-label="Cancel queued message"
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-          >
-            <Icon name="close" size="xs" />
-          </button>
+          {(canWithdraw || !msg.clientMessageId) && (
+            <button
+              type="button"
+              onClick={() => onCancel(i)}
+              title="Cancel queued message"
+              aria-label="Cancel queued message"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+            >
+              <Icon name="close" size="xs" />
+            </button>
+          )}
         </div>
         );
       })}
@@ -1369,11 +1374,10 @@ export function SessionChat({
       onModeChange(nextModeStage(mode));
       return;
     }
+    // Mid-turn, the agent reads it at its next step; nothing running is interrupted.
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!started) void handleStart();
-      else if (busy && sid && eventToChord(e.nativeEvent, IS_MACOS) === "mod+enter")
-        void stopSession(sid).then(handleSend);
       else void handleSend();
     }
   };
@@ -1587,8 +1591,9 @@ export function SessionChat({
                 {session && session.queued.length > 0 && (
                   <QueuedMessages
                     messages={session.queued}
+                    canWithdraw={!usingCodex}
                     onCancel={(i) => {
-                      if (sid) cancelQueuedMessage(sid, i);
+                      if (sid) void cancelQueuedMessage(sid, i);
                     }}
                   />
                 )}
@@ -1683,11 +1688,6 @@ export function SessionChat({
                       onFiles={onAddFiles}
                       onScreenshots={onAddScreenshots}
                     />
-                    {busy && started && canSubmit && sendable && (
-                      <span className="flex shrink-0 items-center gap-1 text-ui-sm text-ink-dim">
-                        <Kbd chord="mod+enter" /> send now
-                      </span>
-                    )}
                     {busy && started && (
                       <button
                         type="button"
@@ -1715,7 +1715,9 @@ export function SessionChat({
                           : !started
                             ? "Start session"
                             : busy
-                              ? "Queue message, sent when the turn finishes"
+                              ? usingOpencode
+                                ? "Queue message, sent when the turn finishes"
+                                : "Queue message for the agent's next step"
                               : "Send"
                       }
                       aria-label={!started ? "Start" : busy ? "Queue message" : "Send"}

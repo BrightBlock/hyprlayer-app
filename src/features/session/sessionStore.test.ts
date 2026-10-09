@@ -21,7 +21,9 @@ const h = vi.hoisted(() => {
     };
   });
   const sendUserMessage = vi.fn(async () => ({ status: "ok", data: null }));
-  const resumeSession = vi.fn(async () => ({ status: "ok", data: {} }));
+  // A ResumedSession whose harness is unknown, so a busy send queues for the turn's end.
+  const RESUMED = { session: {}, permissionMode: null };
+  const resumeSession = vi.fn(async () => ({ status: "ok", data: RESUMED }));
   const interruptSession = vi.fn(async () => ({ status: "ok", data: null }));
   const killSession = vi.fn(async () => ({ status: "ok", data: null }));
   const respondPermission = vi.fn(async () => ({ status: "ok", data: null }));
@@ -53,6 +55,7 @@ const h = vi.hoisted(() => {
     state,
     startStageSession,
     sendUserMessage,
+    RESUMED,
     resumeSession,
     interruptSession,
     killSession,
@@ -544,7 +547,7 @@ describe("resuming a silent process settles out of `starting`", () => {
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
       for (const event of burst) ch.onmessage?.(item(event));
-      return { status: "ok", data: {} };
+      return { status: "ok", data: h.RESUMED };
     });
 
   it("a resume whose only sign of life is a bare `init` settles instead of pulsing", async () => {
@@ -582,7 +585,7 @@ describe("resuming a silent process settles out of `starting`", () => {
     h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
       ch.onmessage?.(item({ kind: "partialText", text: "thinking" } as SessionEvent));
-      return { status: "ok", data: {} };
+      return { status: "ok", data: h.RESUMED };
     });
 
     await resumeSession(id);
@@ -1345,7 +1348,7 @@ describe("transcript sync: queue and reload", () => {
       const ch = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
       // A replayed row: author-less, so it applies at once.
       ch.onmessage?.({ seq: 3, rev: 1, author: null, event: { ...THEIRS, author: null } });
-      return { status: "ok", data: {} };
+      return { status: "ok", data: h.RESUMED };
     });
 
     await sendMessage(id, "mine");
@@ -1538,7 +1541,7 @@ describe("transcript sync: queue and reload", () => {
     const channels: InstanceType<typeof h.FakeChannel>[] = [];
     h.resumeSession.mockImplementation(async (...args: unknown[]) => {
       channels.push(args[args.length - 1] as InstanceType<typeof h.FakeChannel>);
-      return { status: "ok", data: {} };
+      return { status: "ok", data: h.RESUMED };
     });
     const one: SessionEvent = { kind: "userMessage", text: "one", stage: null };
     const two: SessionEvent = { kind: "userMessage", text: "two", stage: null };
@@ -1563,6 +1566,6 @@ describe("transcript sync: queue and reload", () => {
     expect(texts).toContain("after the rewind");
     expect(texts).not.toContain("b");
     h.resumeSession.mockReset();
-    h.resumeSession.mockImplementation(async () => ({ status: "ok", data: {} }));
+    h.resumeSession.mockImplementation(async () => ({ status: "ok", data: h.RESUMED }));
   });
 });
