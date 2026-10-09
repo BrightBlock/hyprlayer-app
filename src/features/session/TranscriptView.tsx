@@ -30,6 +30,7 @@ import { FileCard } from "./FileCard";
 import { PromptCard } from "./PromptCard";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
+import type { QueuedMessage } from "./sessionStore";
 import { formatElapsed, formatRelativeTime, formatTokens } from "@/lib/format";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { PlanCardsContext, planCardComponent } from "./planCardSlot";
@@ -166,6 +167,39 @@ const UserMessage = memo(function UserMessage({
     </div>
   );
 });
+
+// Greyed until the harness takes it in; its echo then lands as a regular message.
+function QueuedUserMessage({ message, onCancel }: { message: QueuedMessage; onCancel: (() => void) | null }) {
+  const { text, attachments, promptName } = message;
+  return (
+    <div className="flex flex-col items-end">
+      <div className="max-w-[85%] rounded-lg border border-dashed border-edge bg-panel-2/60 px-3.5 py-2.5 opacity-60">
+        {text &&
+          (promptName ? (
+            <PromptCard name={promptName} body={text} />
+          ) : (
+            <p className="selectable whitespace-pre-wrap break-words text-body text-ink-dim">{text}</p>
+          ))}
+        <AttachmentCards attachments={attachments} className={text ? "mt-2" : ""} />
+      </div>
+      <div className="mt-1 flex items-center justify-end gap-1 text-ui-sm text-ink-dim">
+        <Icon name="queued" size="xs" />
+        Queued
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            title="Cancel queued message"
+            aria-label="Cancel queued message"
+            className="ml-0.5 flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
+          >
+            <Icon name="close" size="xs" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function useSmoothText(text: string, streaming: boolean): string {
   const [revealed, setRevealed] = useState(() => (streaming ? 0 : text.length));
@@ -1089,6 +1123,10 @@ type Props = {
   sync?: TranscriptSync;
   // Set for an implement session; the review feature decides whether the card shows.
   ready?: ReadyCardProps | null;
+  queued?: QueuedMessage[];
+  /** Whether the harness can give back a message it already holds (codex cannot). */
+  canWithdrawQueued?: boolean;
+  onCancelQueued?: (index: number) => void;
   onBottomChange?: (atBottom: boolean) => void;
   onDividerPassed?: () => void;
 };
@@ -1098,6 +1136,8 @@ export type TranscriptHandle = {
   scrollToItem: (itemId: string) => void;
   scrollToBottom: () => void;
 };
+
+const NO_QUEUED: QueuedMessage[] = [];
 
 const RESTICK_PX = 24;
 
@@ -1142,6 +1182,9 @@ export const TranscriptView = memo(
       prompt,
       sync = NO_SYNC,
       ready = null,
+      queued = NO_QUEUED,
+      canWithdrawQueued = true,
+      onCancelQueued,
       onBottomChange,
       onDividerPassed,
     },
@@ -1374,6 +1417,18 @@ export const TranscriptView = memo(
           ) : (
             workingSince !== null && <ElapsedCounter since={workingSince} />
           )}
+          {queued.map((message, i) => (
+            <div key={message.clientMessageId ?? `local:${i}`} className={items.length > 0 || i > 0 ? "mt-5" : ""}>
+              <QueuedUserMessage
+                message={message}
+                onCancel={
+                  onCancelQueued && (canWithdrawQueued || !message.clientMessageId)
+                    ? () => onCancelQueued(i)
+                    : null
+                }
+              />
+            </div>
+          ))}
         </div>
       </div>
     );

@@ -111,7 +111,6 @@ import {
   useSession,
   useMostRecentDoc,
   useSessionBackgroundTasks,
-  type QueuedMessage,
 } from "./sessionStore";
 import { dismissHeld, noteComposerInput, setDivider, syncOf, useTranscriptSync } from "./syncStore";
 import { canSend } from "./transcriptSync";
@@ -308,56 +307,6 @@ function HandoffBanner({
       >
         <Icon name="close" size="xs" />
       </button>
-    </div>
-  );
-}
-
-function QueuedMessages({
-  messages,
-  canWithdraw,
-  onCancel,
-}: {
-  messages: QueuedMessage[];
-  /** Whether the harness can give back a message it already holds (codex cannot). */
-  canWithdraw: boolean;
-  onCancel: (index: number) => void;
-}) {
-  return (
-    <div className="mb-2 space-y-1">
-      {messages.map((msg, i) => {
-        const n = msg.attachments.length;
-        return (
-        <div
-          key={msg.clientMessageId ?? i}
-          className="flex items-center gap-2 rounded-md border border-edge bg-panel-2 px-2.5 py-1.5"
-        >
-          <span className="flex shrink-0 items-center gap-1 text-label text-ink-dim/70">
-            <Icon name="queued" size="xs" />
-            Queued
-          </span>
-          <span className="flex-1 truncate text-ui text-ink">
-            {msg.text || (n > 0 ? `${n} attachment(s)` : "")}
-          </span>
-          {n > 0 && msg.text && (
-            <span className="flex shrink-0 items-center gap-0.5 text-ui-sm text-ink-dim">
-              <Icon name="attachment" size="xs" />
-              {n}
-            </span>
-          )}
-          {(canWithdraw || !msg.clientMessageId) && (
-            <button
-              type="button"
-              onClick={() => onCancel(i)}
-              title="Cancel queued message"
-              aria-label="Cancel queued message"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
-            >
-              <Icon name="close" size="xs" />
-            </button>
-          )}
-        </div>
-        );
-      })}
     </div>
   );
 }
@@ -1069,6 +1018,12 @@ export function SessionChat({
   const onDividerPassed = useCallback(() => {
     if (sid) setDivider(sid, null);
   }, [sid]);
+  const onCancelQueued = useCallback(
+    (index: number) => {
+      if (sid) void cancelQueuedMessage(sid, index);
+    },
+    [sid],
+  );
   const jumpRequest = useTranscriptJumpStore((s) =>
     s.pending && s.pending.sessionId === sid ? s.pending : null,
   );
@@ -1495,6 +1450,9 @@ export function SessionChat({
               prompt={prompt}
               sync={transcriptSync}
               ready={readyCard}
+              queued={session?.queued}
+              canWithdrawQueued={!usingCodex}
+              onCancelQueued={onCancelQueued}
               onBottomChange={onBottomChange}
               onDividerPassed={onDividerPassed}
             />
@@ -1587,15 +1545,6 @@ export function SessionChat({
                     onSubmit={(answers) =>
                       sid && void answerQuestion(sid, pendingQuestion.requestId, answers)
                     }
-                  />
-                )}
-                {session && session.queued.length > 0 && (
-                  <QueuedMessages
-                    messages={session.queued}
-                    canWithdraw={!usingCodex}
-                    onCancel={(i) => {
-                      if (sid) void cancelQueuedMessage(sid, i);
-                    }}
                   />
                 )}
               </div>
