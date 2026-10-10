@@ -54,6 +54,10 @@ impl Git<'_> {
             .args(["--literal-pathspecs", "-c"])
             .arg(hooks)
             .args([
+                // Git for Windows' default fscache hides the pack a partial clone's lazy
+                // fetch just wrote, so checkout reports the blob as unreadable.
+                "-c",
+                "core.fscache=false",
                 "-c",
                 "credential.interactive=never",
                 "-c",
