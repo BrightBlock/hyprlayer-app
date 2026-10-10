@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.8.12",
+      "date": "",
+      "summary": "Fixes git and gh not being detected on Windows.",
+      "notes": [
+        "Fixed git and gh showing as missing on Windows when installed only on the system PATH (for example C:Program FilesGitcmd)."
+      ]
+    },
+    {
       "version": "0.8.11",
       "summary": "Messages you send mid-turn queue instead of steering; review and validation get clearer panels.",
       "notes": [

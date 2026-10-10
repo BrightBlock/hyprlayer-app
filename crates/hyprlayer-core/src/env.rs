@@ -54,10 +54,20 @@ impl RuntimeEnvironment {
             .collect()
     }
 
+    /// Windows variable names are case-insensitive (`PATH` is stored as `Path`),
+    /// so an exact miss falls back to a case-insensitive match there.
     pub fn var(&self, key: &str) -> Option<&OsStr> {
-        self.process_env
-            .get(OsStr::new(key))
-            .map(OsString::as_os_str)
+        if let Some(value) = self.process_env.get(OsStr::new(key)) {
+            return Some(value.as_os_str());
+        }
+        if cfg!(windows) {
+            return self
+                .process_env
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(key))
+                .map(|(_, v)| v.as_os_str());
+        }
+        None
     }
 }
 
@@ -192,6 +202,14 @@ mod tests {
                 .collect(),
             env_overlay: Arc::default(),
         }
+    }
+
+    #[test]
+    fn var_matches_windows_mixed_case_names() {
+        let git = OsStr::new(r"C:\Program Files\Git\cmd");
+        let env = environment("/tmp/hl-home", &[("Path", r"C:\Program Files\Git\cmd")]);
+        assert_eq!(env.var("Path"), Some(git));
+        assert_eq!(env.var("PATH"), cfg!(windows).then_some(git));
     }
 
     // The oracle is the desktop's 0.7.5 `resolve_paths`, field by field.
