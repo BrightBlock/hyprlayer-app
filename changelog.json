@@ -2,10 +2,10 @@
   "versions": [
     {
       "version": "0.8.12",
-      "date": "",
+      "date": "2026-10-10",
       "summary": "Fixes git detection and skills.sh skill previews on Windows.",
       "notes": [
-        "Fixed git and gh showing as missing on Windows when installed only on the system PATH (for example C:Program FilesGitcmd).",
+        "Fixed git and gh showing as missing on Windows when installed only on the system PATH (for example C:\\Program Files\\Git\\cmd).",
         "Fixed skills.sh skill details failing with \"Couldn't reach the skill source\" on Windows."
       ]
     },
