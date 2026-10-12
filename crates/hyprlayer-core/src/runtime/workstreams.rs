@@ -25,6 +25,7 @@ use crate::worktree::seed::SeedReport;
 use crate::worktree::thoughts_links::{self, LinkStatus};
 use crate::worktree::{self, archive_dir_for, BranchCleanup, CreateMode, CreateSpec, RemovePolicy};
 
+use super::doc_status;
 use super::HyprlayerRuntime;
 
 pub type WorkstreamGitStatus = worktree::WorktreeStatus;
@@ -352,13 +353,25 @@ impl WorkstreamService<'_> {
             lookups.spawn(async move {
                 let _permit = permits.acquire_owned().await;
                 let found = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref(), &overlay).await;
-                (item.id, record, found)
+                (item, record, found)
             });
         }
         while let Some(joined) = lookups.join_next().await {
-            let Ok((id, record, found)) = joined else {
+            let Ok((item, record, found)) = joined else {
                 continue;
             };
+            let id = item.id;
+            if let Ok(Some(status)) = &found {
+                doc_status::settle_workstream(
+                    self.runtime.db.clone(),
+                    &self.runtime.config,
+                    &id,
+                    &item.project_path,
+                    status.number,
+                    status.state,
+                )
+                .await;
+            }
             let cached = match found {
                 Ok(Some(status)) => Some((Some(status.number), pr_state_name(&status.state))),
                 Ok(None) => Some((None, "none")),
@@ -1264,6 +1277,20 @@ impl WorkstreamService<'_> {
         self.runtime.terminals.remove_for_workstream(&id).await;
         self.runtime.scripts.clear_workstream(&id).await;
 
+        // After the kills: no agent of this workstream can write a doc past this point.
+        let pr = self.archive_pr_status(&item).await;
+        if let Some(status) = &pr {
+            doc_status::settle_workstream(
+                self.runtime.db.clone(),
+                &self.runtime.config,
+                &id,
+                &item.project_path,
+                status.number,
+                status.state,
+            )
+            .await;
+        }
+
         if !item.app_owns_worktree() {
             let db = self.runtime.db.clone();
             let aid = id.clone();
@@ -1291,32 +1318,20 @@ impl WorkstreamService<'_> {
             .git
             .delete_branch_on_archive
             && item.app_owns_branch()
+            && pr.is_some_and(|s| s.state == pr::PrState::Merged)
         {
-            if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
-                if let Ok(Some(status)) = pr::pr_status(
-                    &gh,
-                    pr_dir(&item),
-                    &item.pr_ref(),
-                    &self.runtime.environment.overlay_env(),
-                )
-                .await
-                {
-                    if status.state == pr::PrState::Merged {
-                        if let Err(e) = worktree::delete_remote_branch(
-                            &git,
-                            project_path,
-                            &item.branch,
-                            &self.runtime.environment.overlay_env(),
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                "delete remote branch {} on archive failed: {e}",
-                                item.branch
-                            );
-                        }
-                    }
-                }
+            if let Err(e) = worktree::delete_remote_branch(
+                &git,
+                project_path,
+                &item.branch,
+                &self.runtime.environment.overlay_env(),
+            )
+            .await
+            {
+                tracing::warn!(
+                    "delete remote branch {} on archive failed: {e}",
+                    item.branch
+                );
             }
         }
 
@@ -1393,6 +1408,24 @@ impl WorkstreamService<'_> {
         })
         .await?;
         self.find(&id).await
+    }
+
+    async fn archive_pr_status(&self, item: &Workstream) -> Option<pr::PrStatus> {
+        if !has_own_pr(item) {
+            return None;
+        }
+        let gh = self.runtime.binaries.require(BinaryKind::Gh).await.ok()?;
+        pr::pr_status(
+            &gh,
+            pr_dir(item),
+            &item.pr_ref(),
+            &self.runtime.environment.overlay_env(),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::debug!("archive of {}: PR lookup failed: {e}", item.id);
+            None
+        })
     }
 
     pub async fn restore(&self, req: RestoreWorkstreamRequest) -> Result<RestoreWorkstreamResult> {
@@ -1828,11 +1861,20 @@ fn archived_view(
     }
 }
 
+fn own_branch(item: &Workstream) -> bool {
+    !item.branch.is_empty()
+        && item.branch != item.base_branch
+        && item.base_branch.strip_prefix("origin/") != Some(item.branch.as_str())
+}
+
+/// Whether a PR `pr_ref` finds is this workstream's own, not one whose head is its base branch.
+pub(crate) fn has_own_pr(item: &Workstream) -> bool {
+    !item.is_folder() && (item.pr_number.is_some() || own_branch(item))
+}
+
 /// Unknown or open, and not asked recently: a lookup could still change it.
 fn pr_lookup_due(item: &Workstream, record: &ArchiveRecord, now: f64) -> bool {
-    let own_branch = !item.branch.is_empty()
-        && item.branch != item.base_branch
-        && item.base_branch.strip_prefix("origin/") != Some(item.branch.as_str());
+    let own_branch = own_branch(item);
     let settled = matches!(
         record.pr_state.as_deref(),
         Some("none" | "merged" | "closed")

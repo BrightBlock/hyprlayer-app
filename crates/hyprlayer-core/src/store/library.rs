@@ -215,6 +215,22 @@ impl Db {
         })
     }
 
+    /// Every doc whose newest write came from a session in `workstream_id`.
+    pub fn docs_last_written_by(&self, workstream_id: &str) -> Result<Vec<String>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT a.doc_id FROM doc_agents a
+                  WHERE a.workstream_id = ?1
+                  GROUP BY a.doc_id
+                 HAVING MAX(a.last_at) >= (SELECT MAX(b.last_at) FROM doc_agents b
+                                            WHERE b.doc_id = a.doc_id)
+                  ORDER BY a.doc_id",
+            )?;
+            let rows = stmt.query_map(params![workstream_id], |row| row.get(0))?;
+            rows.collect()
+        })
+    }
+
     /// One backfill window, `(after_rowid, upto_rowid]`. Never selects a tool's
     /// raw input: a `Write` carries the whole file.
     pub fn write_tool_uses_between(

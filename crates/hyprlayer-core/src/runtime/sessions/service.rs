@@ -19,6 +19,7 @@ use crate::opencode::support::opencode_model_is_supported;
 use crate::pipeline::{self, Stage};
 use crate::process::binaries::BinaryKind;
 use crate::review::sidecar;
+use crate::runtime::doc_status;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
@@ -722,6 +723,16 @@ impl SessionService<'_> {
                     workstream.id
                 );
             }
+        }
+        // Any route into building a plan activates it, not only the Approve & build button.
+        if matches!(stage, Stage::Implement | Stage::Validate) {
+            doc_status::activate_plans(
+                &self.runtime.config,
+                &workstream.worktree_path,
+                &attached_docs,
+                &input,
+            )
+            .await;
         }
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
 

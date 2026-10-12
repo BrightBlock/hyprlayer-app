@@ -126,3 +126,4 @@ automatically: **read the relevant ADR before changing its area.**
 | 0009 | `hyprlayer-server`, RPC, remote hosts, server versioning | The runtime runs in the server; the desktop is always a client |
 | 0010 | skill installs, skill stores, skills.lock | Installed skills live in app-owned stores reached by per-skill links; the CLI must not claim them |
 | 0011 | Cloud sign-in, `account.json`, the Cognito pools | The server holds the session and the PKCE verifier; the desktop only runs the loopback and the browser; the pool follows the build profile |
+| 0012 | hand-run tests that open, merge or close real PRs | Run them in the private `jtsiros/hyprlayer-live-tests` via the dev instance, never against a real project |

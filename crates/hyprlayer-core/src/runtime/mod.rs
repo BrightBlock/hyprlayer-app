@@ -3,6 +3,7 @@ pub mod agents;
 pub mod attachments;
 mod attribution;
 pub mod builder;
+mod doc_status;
 pub mod library;
 pub mod migrations;
 mod operation_locks;

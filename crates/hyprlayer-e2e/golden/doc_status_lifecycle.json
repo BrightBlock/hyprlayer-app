@@ -1,0 +1,147 @@
+{
+  "scenario": "doc_status_lifecycle",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "shared": "$SHARED"
+          },
+          "guard": "the seed note lands under <shared>/notes",
+          "ok": true
+        }
+      ],
+      "step": "find the project's shared thoughts"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "widget": "active"
+          },
+          "guard": "the attached draft plan is active before the agent's first turn, without the Approve button",
+          "ok": true
+        }
+      ],
+      "step": "an implement session activates the plan it starts from"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "newestWriterIsSecond": true
+          },
+          "guard": "the second workstream is the plan's newest writer, and every box is now ticked",
+          "ok": true
+        }
+      ],
+      "step": "another workstream builds the rest of a plan"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bare": "active",
+            "handedOn": "active",
+            "handoff": "archived",
+            "note": "draft",
+            "partial": "active",
+            "pr41": null,
+            "pr7": "active",
+            "replaced": "superseded",
+            "research": "implemented",
+            "widget": "implemented"
+          },
+          "guard": "built plan → implemented, research → implemented, handoff → archived; an unfinished or checkbox-less plan, a superseded plan, a note, another PR's record, and a plan the next workstream has since built stay; no record yet",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "unchanged": true
+          },
+          "guard": "only the status line changed: manual boxes and the fenced box stay as written",
+          "ok": true
+        }
+      ],
+      "step": "a merge settles what the workstream wrote"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bodyIntact": true,
+            "pr41": "implemented"
+          },
+          "guard": "describe_pr's late `active` record becomes implemented, body untouched",
+          "ok": true
+        }
+      ],
+      "step": "a record written after the merge was seen still settles"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "abandoned": "active",
+            "handedOn": "active",
+            "pr42": "archived"
+          },
+          "guard": "the record is archived; the workstream's built plans are not promoted",
+          "ok": true
+        }
+      ],
+      "step": "a PR closed unmerged archives its record and nothing else"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "late": "implemented",
+            "pr43": "implemented"
+          },
+          "guard": "with the app in the background, archive alone settles the research and the record",
+          "ok": true
+        }
+      ],
+      "step": "archiving settles a merge the watcher never saw"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the first server stops cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pr44": "implemented",
+            "pr45": "implemented",
+            "pr46": "active",
+            "pr47": "draft",
+            "pr48": "archived",
+            "pr7": "active"
+          },
+          "guard": "merged → implemented (incl. the skill's `merged`), closed → archived (incl. `closed`); an open PR, a number with no PR, and #7 stay",
+          "ok": true
+        }
+      ],
+      "step": "a restart sweeps records no workstream tracks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

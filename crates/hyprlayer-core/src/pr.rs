@@ -294,6 +294,45 @@ pub async fn pr_status(
     })
 }
 
+/// Just the PR's state, for sweeps that need nothing else; `None` when the number resolves to no PR.
+pub async fn pr_state(
+    gh: &Path,
+    dir: &Path,
+    pr_ref: &str,
+    overlay: &[(String, String)],
+) -> Result<Option<PrState>> {
+    #[derive(Deserialize)]
+    struct RawState {
+        state: String,
+    }
+    let out = Exec::new(gh)
+        .cwd(dir)
+        .args(["pr", "view", pr_ref, "--json", "state"])
+        .envs(overlay.iter().cloned())
+        .timeout(Duration::from_secs(30))
+        .run_unchecked()
+        .await?;
+    if out.exit_code == Some(0) {
+        let raw: RawState =
+            serde_json::from_str(&out.stdout).map_err(|e| CoreError::OutputParse {
+                program: "gh pr view".into(),
+                detail: e.to_string(),
+            })?;
+        return Ok(Some(parse_state(&raw.state)));
+    }
+    let stderr = out.stderr.to_lowercase();
+    if stderr.contains("no pull requests found")
+        || stderr.contains("could not resolve to a pullrequest")
+    {
+        return Ok(None);
+    }
+    Err(CoreError::Exec {
+        program: "gh".into(),
+        exit: out.exit_code,
+        stderr_tail: out.stderr.trim().to_string(),
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawPrSummary {

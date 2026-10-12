@@ -1,35 +1,32 @@
 use std::path::{Path, PathBuf};
 
-use crate::docs::frontmatter::{self, FmPatch, FmValue};
+use crate::docs::lifecycle::{self, Milestone};
+use crate::docs::vocab::DocType;
 use crate::error::Result;
 
-pub const MERGED_STATUS: &str = "implemented";
-
-const PROMOTABLE: [&str; 3] = ["draft", "active", "merged"];
-
-pub fn record_path(root: &Path, repos_dir: &str, mapped_name: &str, number: u32) -> PathBuf {
+pub fn records_dir(root: &Path, repos_dir: &str, mapped_name: &str) -> PathBuf {
     root.join(repos_dir)
         .join(mapped_name)
         .join("shared")
         .join("prs")
-        .join(format!("{number}_description.md"))
+}
+
+pub fn file_name(number: u32) -> String {
+    format!("{number}_description.md")
+}
+
+pub fn record_path(root: &Path, repos_dir: &str, mapped_name: &str, number: u32) -> PathBuf {
+    records_dir(root, repos_dir, mapped_name).join(file_name(number))
+}
+
+/// The PR a `<number>_description.md` record describes.
+pub fn record_number(path: &Path) -> Option<u32> {
+    let stem = path.file_stem()?.to_str()?;
+    stem.strip_suffix("_description")?.parse().ok()
 }
 
 pub fn promote_merged(content: &str) -> Result<Option<String>> {
-    let Some(current) = frontmatter::parse(content).fm.status else {
-        return Ok(None);
-    };
-    if !PROMOTABLE.contains(&current.trim()) {
-        return Ok(None);
-    }
-    let patch = FmPatch {
-        set: vec![(
-            "status".to_string(),
-            FmValue::Str(MERGED_STATUS.to_string()),
-        )],
-        remove: Vec::new(),
-    };
-    Ok(Some(frontmatter::patch_frontmatter(content, &patch)?))
+    lifecycle::settle_as(content, DocType::Pr, Milestone::Merged)
 }
 
 pub fn promote_merged_record(path: &Path) -> Result<bool> {

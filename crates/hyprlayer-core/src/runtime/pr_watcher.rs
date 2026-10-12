@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::{Duration, Instant};
@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
 
 use crate::config::ConfigService;
-use crate::docs::pr_record;
 use crate::error::Result;
 use crate::index::watcher::WatchHandle;
 use crate::pr::{self, ChecksState, PrState, PrStatus};
@@ -15,7 +14,9 @@ use crate::process::binaries::{BinaryKind, BinaryResolver};
 use crate::store::{Db, Workstream};
 use hyprlayer_models::RuntimeEvent;
 
+use super::doc_status;
 use super::shutdown::TrackedTask;
+use super::workstreams::has_own_pr;
 
 const FAST: Duration = Duration::from_secs(8);
 const MEDIUM: Duration = Duration::from_secs(20);
@@ -29,6 +30,9 @@ const RATE_LIMITED: Duration = Duration::from_secs(15 * 60);
 const MIN_TICK: Duration = Duration::from_secs(4);
 
 const MAX_CONCURRENT: usize = 6;
+
+const RECORD_SWEEP: Duration = BG_IDLE;
+const RECORDS_PER_SWEEP: usize = 12;
 
 // Reported on the change, not every tick.
 static GH_MISSING_REPORTED: AtomicBool = AtomicBool::new(false);
@@ -57,6 +61,9 @@ struct WatchState {
     tracked: HashMap<String, Tracked>,
     active: Option<String>,
     backoff_until: Option<Instant>,
+    swept_at: Option<Instant>,
+    /// Records whose number names no PR in their project's repository.
+    unresolved: HashSet<PathBuf>,
 }
 
 pub fn spawn(ctx: PrWatcherContext) -> TrackedTask {
@@ -136,6 +143,28 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         st.active.clone_from(&active);
     }
 
+    let projects: HashMap<String, String> = items
+        .iter()
+        .filter(|item| has_own_pr(item))
+        .map(|item| (item.id.clone(), item.project_path.clone()))
+        .collect();
+
+    // A merged PR is never polled again, but its record can land after the merge.
+    let resettle: Vec<(String, u32)> = st
+        .tracked
+        .iter()
+        .filter_map(|(id, t)| match &t.status {
+            Some(s) if s.state == PrState::Merged => Some((id.clone(), s.number)),
+            _ => None,
+        })
+        .collect();
+    for (id, number) in resettle {
+        if let Some(project) = projects.get(&id) {
+            doc_status::settle_merged_record(ctx.db.clone(), &ctx.config, &id, project, number)
+                .await;
+        }
+    }
+
     let to_poll: Vec<Workstream> = items
         .into_iter()
         .filter(|item| !item.is_folder())
@@ -143,14 +172,6 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
             Some(t) => !matches!(&t.status, Some(s) if s.state == PrState::Merged) && t.due <= now,
             None => true,
         })
-        .collect();
-    if to_poll.is_empty() {
-        return next_tick(&st.tracked, now, st.backoff_until);
-    }
-
-    let projects: HashMap<String, String> = to_poll
-        .iter()
-        .map(|item| (item.id.clone(), item.project_path.clone()))
         .collect();
 
     let overlay: Vec<(String, String)> = ctx
@@ -160,7 +181,11 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let results = poll_all(&gh, to_poll, &overlay).await;
+    let results = if to_poll.is_empty() {
+        Vec::new()
+    } else {
+        poll_all(&gh, to_poll, &overlay).await
+    };
     let polled_at = Instant::now();
     let mut rate_limited = false;
 
@@ -194,11 +219,17 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
             }
         };
         let changed = st.tracked.get(&id).map(|t| &t.status) != Some(&status);
-        if changed {
-            if let Some(s) = status.as_ref().filter(|s| s.state == PrState::Merged) {
-                if let Some(project) = projects.get(&id) {
-                    promote_record(ctx, project, s.number).await;
-                }
+        if let Some(s) = status.as_ref().filter(|s| s.state != PrState::Open) {
+            if let Some(project) = projects.get(&id) {
+                doc_status::settle_workstream(
+                    ctx.db.clone(),
+                    &ctx.config,
+                    &id,
+                    project,
+                    s.number,
+                    s.state,
+                )
+                .await;
             }
         }
         let due = polled_at + cadence(&status, active.as_deref() == Some(id.as_str()));
@@ -208,6 +239,19 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
                 .events
                 .send(RuntimeEvent::PrStatusChanged { workstream_id: id });
         }
+    }
+
+    let sweep_due = st
+        .swept_at
+        .is_none_or(|at| polled_at.saturating_duration_since(at) >= RECORD_SWEEP);
+    if !rate_limited && sweep_due {
+        st.swept_at = Some(polled_at);
+        let tracked: HashSet<(String, u32)> = st
+            .tracked
+            .iter()
+            .filter_map(|(id, t)| Some((projects.get(id)?.clone(), t.status.as_ref()?.number)))
+            .collect();
+        rate_limited = sweep_records(ctx, &gh, &overlay, &tracked, &mut st.unresolved).await;
     }
 
     st.backoff_until = rate_limited.then(|| {
@@ -223,30 +267,43 @@ fn is_rate_limited(stderr: &str) -> bool {
     s.contains("rate limit") || s.contains("secondary rate limit")
 }
 
-async fn promote_record(ctx: &PrWatcherContext, project_path: &str, number: u32) {
-    let Ok(loaded) = ctx.config.load().await else {
-        return;
-    };
-    let Some(thoughts) = loaded.config.thoughts.as_ref() else {
-        return;
-    };
-
-    let effective = thoughts.effective_config_for(project_path);
-    let (Some(root), Some((repos_dir, _)), Some(mapped)) = (
-        effective.backend.thoughts_root(),
-        effective.backend.tree_dirs(),
-        effective.mapped_name.as_deref(),
-    ) else {
-        return;
-    };
-    let path = pr_record::record_path(&root, repos_dir, mapped, number);
-
-    match tokio::task::spawn_blocking(move || pr_record::promote_merged_record(&path)).await {
-        Ok(Ok(true)) => tracing::info!("pr watch: PR #{number} merged, record promoted"),
-        Ok(Ok(false)) => {}
-        Ok(Err(e)) => tracing::debug!("pr watch: promoting PR #{number} record failed: {e}"),
-        Err(e) => tracing::debug!("pr watch: promote task join error: {e}"),
+/// Settles PR records no live workstream tracks (opened elsewhere, or archived before the merge
+/// was seen). Returns whether GitHub's quota ran out.
+async fn sweep_records(
+    ctx: &PrWatcherContext,
+    gh: &Path,
+    overlay: &[(String, String)],
+    tracked: &HashSet<(String, u32)>,
+    unresolved: &mut HashSet<PathBuf>,
+) -> bool {
+    let mut records = doc_status::unsettled_records(ctx.db.clone(), &ctx.config).await;
+    records.retain(|r| {
+        !unresolved.contains(&r.path) && !tracked.contains(&(r.project_path.clone(), r.number))
+    });
+    records.sort_by_key(|r| std::cmp::Reverse(r.number));
+    for record in records.into_iter().take(RECORDS_PER_SWEEP) {
+        let number = record.number;
+        match pr::pr_state(
+            gh,
+            Path::new(&record.project_path),
+            &number.to_string(),
+            overlay,
+        )
+        .await
+        {
+            Ok(Some(state)) => {
+                doc_status::settle_record(record.path, number, state).await;
+            }
+            Ok(None) => {
+                unresolved.insert(record.path);
+            }
+            Err(e) if is_rate_limited(&e.to_string()) => return true,
+            Err(e) => {
+                tracing::debug!("pr watch: looking up PR #{number} for its record failed: {e}")
+            }
+        }
     }
+    false
 }
 
 async fn poll_all(
