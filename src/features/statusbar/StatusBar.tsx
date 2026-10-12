@@ -3,12 +3,10 @@ import type { ReactNode, RefObject } from "react";
 import type { WorkstreamView } from "@/lib/bindings";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
 import { useViewport } from "@/lib/useViewport";
-import { RepoStatus } from "./parts";
+import { BAR_PAD_X, RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
-
-const BAR_PAD_X = 12;
 
 /**
  * Sits under the agent view: the open workstream's repo state and the focused session's

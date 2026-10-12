@@ -10,12 +10,12 @@ import { NO_SERVER, runProvision } from "./serverInstall";
 
 // `code` is kept because a missing server is a failure a row can act on, not only report.
 export type HostCheck =
-  | { ok: true; at: number }
+  | { ok: true; release?: string | null; at: number }
   | { ok: false; code?: string; short: string; detail?: string; remedy?: string | null; at: number };
 
 function fromProbe(probe: HostProbeResult): HostCheck {
   return probe.ok
-    ? { ok: true, at: probe.at }
+    ? { ok: true, release: probe.release, at: probe.at }
     : { ok: false, code: probe.code, short: shortFailure(probe.code), at: probe.at };
 }
 
@@ -53,7 +53,7 @@ export function useHostChecks(active: string | null, shared?: Record<string, Hos
     try {
       const probe = await test.mutateAsync(host);
       if (probe.ok) {
-        record(host.destination, { ok: true, at: Date.now() });
+        record(host.destination, { ok: true, release: probe.serverRelease, at: Date.now() });
         // The connection surface above is still reporting the failure this host
         // just disproved. Reconnecting is what makes the two agree — and it is
         // the same work a relaunch would do, without the relaunch.

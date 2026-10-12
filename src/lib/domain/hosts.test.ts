@@ -215,6 +215,23 @@ describe("serverRows", () => {
     expect(rows[1].failureCode).toBeUndefined();
   });
 
+  it("carries the version a row's live connection or last probe reported", () => {
+    const rows = serverRows(
+      file([NEXUS, LAPTOP], "nexus"),
+      { ...status("connected", NEXUS), serverRelease: "0.8.11+dev.2e671fb" },
+      { "jt@laptop.local": { ok: true, release: "0.8.10", at: 1 } },
+    );
+    expect(rows.map((r) => r.release)).toEqual([null, "0.8.11+dev.2e671fb", "0.8.10"]);
+  });
+
+  it("carries no version for a host it cannot reach, whatever an older probe said", () => {
+    const rows = serverRows(file([NEXUS, LAPTOP], "nexus"), status("lost", NEXUS, "server_disconnected"), {
+      nexus: { ok: true, release: "0.8.11", at: 1 },
+      "jt@laptop.local": { ok: false, code: "remote_auth_failed", at: 2 },
+    });
+    expect(rows.map((r) => r.release)).toEqual([null, null, null]);
+  });
+
   it("marks no row connected before the first connection status resolves", () => {
     const rows = serverRows(file([NEXUS], "nexus"), undefined, { nexus: { ok: true, at: 1 } });
     expect(rows.some((r) => r.isConnected)).toBe(false);

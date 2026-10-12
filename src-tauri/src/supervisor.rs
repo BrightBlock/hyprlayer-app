@@ -755,6 +755,8 @@ pub(crate) fn triple_for_uname(host: &Host, uname: &str) -> Result<&'static str,
 pub struct HostProbe {
     pub ok: bool,
     pub server_version: Option<u32>,
+    /// The server's release version; `None` from a server up to 0.8.2.
+    pub server_release: Option<String>,
     pub error: Option<AppError>,
 }
 
@@ -769,17 +771,20 @@ pub async fn probe_remote(host: &Host, app_data_dir: &Path, ssh: &Ssh) -> HostPr
     match ssh_relay_connect(host, app_data_dir, false, ssh).await {
         Ok((client, mut relay, _)) => {
             let server_version = client.server_version();
+            let server_release = client.server_semver().map(str::to_string);
             drop(client);
             let _ = relay.child.kill().await;
             HostProbe {
                 ok: true,
                 server_version: Some(server_version),
+                server_release,
                 error: None,
             }
         }
         Err(error) => HostProbe {
             ok: false,
             server_version: None,
+            server_release: None,
             error: Some(error),
         },
     }

@@ -90,7 +90,12 @@ function worktree(mode: WorkstreamView["item"]["worktreeMode"]): WorkstreamView 
 
 beforeEach(() => {
   saveAsync.mockResolvedValue(null);
-  testAsync.mockResolvedValue({ ok: true, serverVersion: 1, error: null } satisfies HostProbe);
+  testAsync.mockResolvedValue({
+    ok: true,
+    serverVersion: 1,
+    serverRelease: "0.8.11",
+    error: null,
+  } satisfies HostProbe);
   q.useSaveHosts.mockReturnValue({
     mutate: vi.fn(),
     mutateAsync: saveAsync,
@@ -309,7 +314,7 @@ describe("ServersSettings", () => {
       connection: status("lost", NEXUS, {
         error: { code: "server_disconnected", message: "The server connection ended.", remedy: null },
       }),
-      probes: { nexus: { ok: true, at: 1 } },
+      probes: { nexus: { ok: true, release: "0.8.11", at: 1 } },
     });
 
     expect(row("Nexus").className).toContain("bg-warn/5");
@@ -372,6 +377,15 @@ describe("ServersSettings", () => {
     expect(within(row("This machine")).queryByText(/worktree/)).toBeNull();
   });
 
+  it("names the connected server's version beside its worktrees", () => {
+    setup({
+      connection: status("connected", NEXUS, { serverRelease: "0.8.11" }),
+      workstreams: [worktree("isolated")],
+    });
+
+    expect(within(row("Nexus")).getByText("nexus · v0.8.11 · 1 worktree")).toBeTruthy();
+  });
+
   it("tests every remote server in turn, one at a time", async () => {
     const pending: Array<(probe: HostProbe) => void> = [];
     testAsync.mockImplementation(() => new Promise<HostProbe>((resolve) => pending.push(resolve)));
@@ -381,10 +395,12 @@ describe("ServersSettings", () => {
 
     await waitFor(() => expect(testAsync).toHaveBeenCalledTimes(1));
     expect(testAsync).toHaveBeenLastCalledWith(NEXUS);
-    await act(async () => pending[0]({ ok: true, serverVersion: 1, error: null }));
+    await act(async () => pending[0]({ ok: true, serverVersion: 1, serverRelease: "0.8.11", error: null }));
     await waitFor(() => expect(testAsync).toHaveBeenCalledTimes(2));
     expect(testAsync).toHaveBeenLastCalledWith(LAPTOP);
-    await act(async () => pending[1]({ ok: true, serverVersion: 1, error: null }));
+    await act(async () => pending[1]({ ok: true, serverVersion: 1, serverRelease: "0.8.10", error: null }));
+    expect(within(row("Nexus")).getByText("nexus · v0.8.11")).toBeTruthy();
+    expect(within(row("Laptop")).getByText("jt@laptop.local · v0.8.10")).toBeTruthy();
   });
 
   it("locks the default server's destination while editing it", () => {

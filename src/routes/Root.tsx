@@ -105,6 +105,7 @@ import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNo
 import { HostsDialog } from "@/features/hosts/HostsDialog";
 import { SshPromptDialog } from "@/features/hosts/SshPromptDialog";
 import { ServerMenu } from "@/features/hosts/ServerMenu";
+import { ServerUpdateConfirm } from "@/features/hosts/ServerUpdateConfirm";
 import { SettingsButton } from "@/features/settings/SettingsButton";
 import { SettingsCrumb, SettingsHeaderMeta } from "@/features/settings/SettingsHeader";
 import { parseSettingsSection } from "@/features/settings/sections";
@@ -1708,6 +1709,7 @@ export function Root() {
       <FullDiskAccessNotice />
       <ServerDisconnectedNotice />
       <HostsDialog />
+      <ServerUpdateConfirm />
       {/* Above HostsDialog: signing in is how its blocking state gets resolved. */}
       <SshPromptDialog />
       <ConfirmQuitDialog />

@@ -232,10 +232,12 @@ export function HostsDialog() {
   // There is no initialData, so `data` is undefined on the first render of every
   // launch; gating on `isSuccess` is what keeps a reasonless "Not connected"
   // modal from flashing before the first connection_status resolves.
-  const blocking = status.isSuccess && status.data.state !== "connected";
+  const disconnected = status.isSuccess && status.data.state !== "connected";
+  // A dropped connection is left to the toast and the status bar, which opens this.
+  const blocking = disconnected && status.data.state === "failed";
   const localServers = useLocalServers(blocking || uiOpen).data ?? [];
-  // Deliberate mode (opened from the status bar while connected) is
-  // dismissible; blocking mode never is, regardless of how it got opened.
+  // Deliberate mode (opened from the status bar) is dismissible; blocking
+  // mode never is, regardless of how it got opened.
   if (!blocking && !uiOpen) return null;
 
   const connection = status.data ?? null;
@@ -290,7 +292,7 @@ export function HostsDialog() {
               Use this machine
             </Button>
             {/* Connected, the reconnect loop already covers any later drop. */}
-            {blocking && (
+            {disconnected && (
               <Button variant="primary" onClick={relaunchNow}>
                 Relaunch
               </Button>

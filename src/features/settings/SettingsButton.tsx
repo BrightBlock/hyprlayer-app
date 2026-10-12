@@ -21,7 +21,7 @@ export function SettingsButton() {
   const anchorRef = useRef<HTMLButtonElement>(null);
   const open = useSettingsPopover((s) => s.open);
   const archivedOpen = useArchivedWorktrees((s) => s.open);
-  // While disconnected the blocking HostsDialog owns the screen; nothing may stack over it.
+  // Closed while disconnected: it needs the server, and a failed launch sits under HostsDialog.
   const connected = useConnectionStatus().data?.state === "connected";
   const shown = open && connected;
   const archivedShown = archivedOpen && connected;

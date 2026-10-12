@@ -6,6 +6,8 @@ import type { ConnectionStatus, Host, WorkstreamView } from "@/lib/bindings";
 import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import { useHostsUiStore } from "@/features/hosts/hostsUi";
 import { useReconnectStore } from "@/features/hosts/reconnectState";
+import { useServerAutoUpdate } from "@/features/hosts/serverAutoUpdate";
+import { ServerUpdateConfirm } from "@/features/hosts/ServerUpdateConfirm";
 import {
   controlsKey,
   useSessionControlsStore,
@@ -15,10 +17,14 @@ import {
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
 import { StatusBar } from "./StatusBar";
 
-const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn() }));
+const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), restartServer: vi.fn() }));
 vi.mock("@/lib/queries", () => ({
   useConnectionStatus: b.useConnectionStatus,
 }));
+vi.mock("@/lib/bindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/bindings")>();
+  return { ...actual, commands: { ...actual.commands, restartServer: b.restartServer } };
+});
 
 const NOW = Date.UTC(2026, 8, 24, 12, 0, 0);
 const NEXUS: Host = { destination: "nexus", label: "Nexus" };
@@ -152,8 +158,9 @@ const dot = (el: HTMLElement) => el.querySelector("span[aria-hidden]");
 
 beforeEach(() => {
   mockStatus(CONNECTED);
-  useHostsUiStore.setState({ open: false, menu: false });
+  useHostsUiStore.setState({ open: false, menu: false, update: false });
   useReconnectStore.setState({ lostAt: null, attempting: false, halted: null });
+  useServerAutoUpdate.setState({ updating: false });
   useSessionControlsStore.setState({ byShell: {} });
   useWorkstreamTabsStore.setState({ byWs: {} });
 });
@@ -172,6 +179,13 @@ describe("StatusBar sync status", () => {
     expect(useHostsUiStore.getState()).toMatchObject({ menu: true, open: false });
   });
 
+  it("opens the server dialog, not the menu, while the connection is down", () => {
+    mockStatus(LOST);
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: "Connection to Nexus lost" }));
+    expect(useHostsUiStore.getState()).toMatchObject({ open: true, menu: false });
+  });
+
   it("reads 'connected' with a green dot when local and connected", () => {
     renderBar();
     const button = screen.getByRole("button", { name: "Server: this machine" });
@@ -188,11 +202,59 @@ describe("StatusBar sync status", () => {
     expect(dot(button)?.className).toContain("bg-ok");
   });
 
-  it("warns when the server is outdated", () => {
-    mockStatus({ ...CONNECTED, host: NEXUS, serverOutdated: true });
+  it("warns when the server is outdated, and offers its update", () => {
+    mockStatus({ ...CONNECTED, host: NEXUS, serverRelease: "0.8.10", serverOutdated: true });
     renderBar();
     const button = screen.getByRole("button", { name: "Server update available on Nexus" });
     expect(dot(button)?.className).toContain("bg-warn");
+    expect(screen.getByRole("button", { name: "Update server" }).title).toBe(
+      "Update the server on Nexus",
+    );
+  });
+
+  it("offers no update to a current server", () => {
+    renderBar();
+    expect(screen.queryByRole("button", { name: /^Update/ })).toBeNull();
+  });
+
+  it("asks before updating, naming what the update stops", async () => {
+    mockStatus({ ...CONNECTED, serverRelease: "0.8.10", serverOutdated: true });
+    b.restartServer.mockResolvedValue({ status: "ok", data: null });
+    render(
+      <>
+        <StatusBar workstreamId="w1" workstream={makeView()} />
+        <ServerUpdateConfirm />
+      </>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update server" }));
+    expect(b.restartServer).not.toHaveBeenCalled();
+    const confirm = screen.getByRole("dialog", { name: "Update the server?" });
+    expect(confirm.textContent).toContain("Every agent and terminal running on this machine will stop.");
+
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole("button", { name: "Update server" }));
+    });
+    expect(b.restartServer).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Update the server?" })).toBeNull();
+    expect(useServerAutoUpdate.getState().updating).toBe(true);
+  });
+
+  it("reads 'updating' through the planned drop, with no counter, retry or update offer", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    useServerAutoUpdate.setState({ updating: true });
+    mockStatus({ ...CONNECTED, serverRelease: "0.8.10", serverOutdated: true });
+    const { rerender } = renderBar();
+    const button = screen.getByRole("button", { name: "Updating the server on this machine" });
+    expect(button.textContent).toBe("updating");
+    expect(dot(button)?.className).toContain("bg-warn");
+    expect(screen.queryByRole("button", { name: /^Update/ })).toBeNull();
+
+    mockStatus({ ...LOST, host: null });
+    useReconnectStore.setState({ lostAt: NOW - 9_000, attempting: true });
+    rerender(<StatusBar workstreamId="w1" workstream={makeView()} />);
+    expect(button.textContent).toBe("updating");
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("names the host and shows a bad dot when never connected", () => {

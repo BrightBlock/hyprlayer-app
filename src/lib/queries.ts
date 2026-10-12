@@ -85,7 +85,12 @@ export function useTestHostConnection() {
     onSuccess: (probe, host) => {
       queryClient.setQueryData<Record<string, HostProbeResult>>(["host-probes"], (prev) => ({
         ...prev,
-        [host.destination]: { ok: probe.ok, code: probe.error?.code, at: Date.now() },
+        [host.destination]: {
+          ok: probe.ok,
+          code: probe.error?.code,
+          release: probe.serverRelease,
+          at: Date.now(),
+        },
       }));
     },
   });

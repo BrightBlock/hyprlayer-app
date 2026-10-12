@@ -1040,6 +1040,8 @@ export type HostActivity = {
 export type HostProbe = {
 	ok: boolean,
 	serverVersion: number | null,
+	/**  The server's release version; `None` from a server up to 0.8.2. */
+	serverRelease: string | null,
 	error: AppError | null,
 };
 

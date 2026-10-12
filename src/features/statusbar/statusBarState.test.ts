@@ -127,6 +127,10 @@ describe("syncLabel", () => {
     expect(syncLabel(status({ host }), IDLE, NOW)?.title).toBe("Server: jt@nexus.local");
   });
 
+  it("keeps reading 'connected' whatever version the server reports", () => {
+    expect(syncLabel(status({ serverRelease: "0.8.11+dev.2e671fb" }), IDLE, NOW)?.text).toBe("connected");
+  });
+
   it("warns about an outdated server while still connected", () => {
     expect(syncLabel(status({ host: NEXUS, serverOutdated: true }), IDLE, NOW)).toMatchObject({
       text: "connected · Nexus",
@@ -136,6 +140,18 @@ describe("syncLabel", () => {
     expect(syncLabel(status({ serverOutdated: true }), IDLE, NOW)?.title).toBe(
       "Server update available on this machine",
     );
+  });
+
+  it("reads 'updating' through an update's planned drop, never 'offline' or 'retrying'", () => {
+    const updating = {
+      text: "updating",
+      title: "Updating the server on Nexus",
+      tone: "warn",
+      ticking: false,
+    };
+    expect(syncLabel(status({ host: NEXUS, serverOutdated: true }), IDLE, NOW, true)).toEqual(updating);
+    expect(syncLabel(lost(), droppedAgo(9_000), NOW, true)).toEqual(updating);
+    expect(syncLabel(lost(), { ...droppedAgo(9_000), attempting: true }, NOW, true)).toEqual(updating);
   });
 
   it("counts up from the drop while lost", () => {

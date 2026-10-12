@@ -12,7 +12,8 @@ import {
 } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
 import { BAR_POPOVER, BAR_POPOVER_ROW, cx, ErrorNote, Popover } from "@/components/ui";
-import { closeServerMenu, openHostsUi, openServerMenu, useHostsUiStore } from "./hostsUi";
+import { closeServerMenu, openServerMenu, openServerUpdate, useHostsUiStore } from "./hostsUi";
+import { useServerAutoUpdate } from "./serverAutoUpdate";
 import { ServerSummary, worktreeCount } from "./ServerSummary";
 import { SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
 import { useHostChecks } from "./useHostChecks";
@@ -28,7 +29,7 @@ export function ServerMenu({ anchorRef }: { anchorRef: RefObject<HTMLElement | n
   const serverSwitch = useServerSwitch({
     mutateAsync: (file) => save.mutateAsync(file, { onError: openServerMenu }),
   });
-  // While disconnected the blocking HostsDialog owns the screen; nothing may stack over it.
+  // Closed while disconnected, when the status bar opens HostsDialog instead.
   const connected = connection?.state === "connected";
   const shown = open && connected;
   const headingId = useId();
@@ -103,7 +104,8 @@ function ServerRows({
   const checks = useHostChecks(file.active ?? null, useHostProbes()).checks;
   const worktrees = worktreeCount(useAllWorkstreams().data);
   const rows = serverRows(file, connection, checks);
-  const outdated = connection?.state === "connected" && connection.serverOutdated;
+  const updating = useServerAutoUpdate((s) => s.updating);
+  const outdated = connection?.state === "connected" && connection.serverOutdated && !updating;
 
   // As the Servers page's "Set default": switching is what makes a server the default.
   const canSwitch = (row: ServerRow) => row.state !== "unreachable" && !row.isDefault;
@@ -136,7 +138,7 @@ function ServerRows({
         ))}
       </ul>
       {outdated && (
-        <button type="button" onClick={openHostsUi} className={cx(BAR_POPOVER_ROW, "w-full")}>
+        <button type="button" onClick={openServerUpdate} className={cx(BAR_POPOVER_ROW, "w-full")}>
           <span className="flex-1 text-left text-warn-ink">Server update available</span>
           <Icon name="chevronRight" size="sm" className="text-ink-dim" />
         </button>

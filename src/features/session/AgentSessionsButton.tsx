@@ -19,7 +19,7 @@ export function AgentSessionsButton({ workstreamId }: { workstreamId: string }) 
   const open = useAgentSessions((s) => s.open);
   const current = (useWorkstreamSessions(workstreamId).data ?? []).filter((s) => s.archivedAt == null).length;
   const status = useConnectionStatus().data;
-  // While disconnected the blocking HostsDialog owns the screen; nothing may stack over it.
+  // Closed while disconnected: it needs the server, and a failed launch sits under HostsDialog.
   const disconnected = status !== undefined && status.state !== "connected";
   const shown = open && !disconnected;
 

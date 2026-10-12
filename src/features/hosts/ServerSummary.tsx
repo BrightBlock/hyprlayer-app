@@ -44,12 +44,16 @@ export function ServerSummary({
   // A check's own words beat its code: an "Install failed" is still `remote_cli_missing`.
   const failure = !row.isConnected && check && !check.ok ? check : null;
   const reason = failure?.short ?? (row.failureCode ? shortFailure(row.failureCode) : "unreachable");
-  // TODO(servers): latency, last seen, other servers' worktrees — HostProbe is only {ok, serverVersion, error}, nothing persisted.
+  // TODO(servers): latency, last seen, other servers' worktrees — HostProbe is only {ok, serverVersion, serverRelease, error}, nothing persisted.
   const detail = unreachable
     ? `${where} · ${reason}`
-    : row.state === "ok" && worktrees !== null
-      ? `${where} · ${plural(worktrees, "worktree")}`
-      : where;
+    : [
+        where,
+        row.release && `v${row.release}`,
+        row.state === "ok" && worktrees !== null && plural(worktrees, "worktree"),
+      ]
+        .filter(Boolean)
+        .join(" · ");
   const tooltip = row.isConnected ? connection?.error?.message : failure?.detail;
 
   return (

@@ -6,6 +6,7 @@ import type { AppError, ConnectionStatus, Host, HostProvisioning, HostsFile } fr
 import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import { HostsDialog } from "./HostsDialog";
 import { useHostsUiStore } from "./hostsUi";
+import { useServerAutoUpdate } from "./serverAutoUpdate";
 
 const b = vi.hoisted(() => ({
   useConnectionStatus: vi.fn(),
@@ -116,6 +117,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   useHostsUiStore.setState({ open: false });
+  useServerAutoUpdate.setState({ updating: false });
 });
 
 describe("HostsDialog", () => {
@@ -159,7 +161,7 @@ describe("HostsDialog", () => {
     );
   });
 
-  it("distinguishes a connection that was lost from one never made", () => {
+  it("distinguishes a connection that was lost from one never made, once opened", () => {
     mockStatus({
       state: "lost",
       host: NEXUS,
@@ -168,9 +170,12 @@ describe("HostsDialog", () => {
       error: { code: "server_disconnected", message: "The server connection ended.", remedy: null },
     });
     mockHosts({ hosts: [NEXUS], active: "nexus" });
+    useHostsUiStore.setState({ open: true });
     render(<HostsDialog />);
 
     expect(screen.getByText("Connection lost")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Relaunch" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close dialog" })).toBeTruthy();
   });
 
   it("does not close on Escape in blocking mode, and still consumes the key", () => {
@@ -413,5 +418,40 @@ describe("HostsDialog", () => {
     expect(h.updateHostServer).toHaveBeenCalledTimes(1);
     // The dropped connection's own reconnect loop takes it from here.
     expect(reconnect.retryConnection).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])("never opens on its own for a dropped connection (updating: %s)", (updating) => {
+    useServerAutoUpdate.setState({ updating });
+    mockStatus({
+      state: "lost",
+      host: null,
+      serverVersion: null,
+      serverRelease: null,
+      serverOutdated: false,
+      transcriptSync: false,
+      error: { code: "server_disconnected", message: "The server connection ended.", remedy: null },
+    });
+    const { container } = render(<HostsDialog />);
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("keeps a refused host's dialog up while it updates", () => {
+    useServerAutoUpdate.setState({ updating: true });
+    mockStatus({
+      state: "failed",
+      host: NEXUS,
+      serverVersion: null,
+      serverRelease: null,
+      serverOutdated: false,
+      transcriptSync: false,
+      error: {
+        code: "remote_server_outdated",
+        message: "Nexus is running Hyprlayer server 0.8.10; this app needs 0.8.11 or newer.",
+        remedy: null,
+      },
+    });
+    render(<HostsDialog />);
+    expect(screen.getByText("Not connected")).toBeTruthy();
+    expect(screen.getByText("Updating…")).toBeTruthy();
   });
 });

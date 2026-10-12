@@ -63,7 +63,7 @@ export function connectionName(connection: ConnectionStatus | null | undefined):
 }
 
 /** One test of a host this session, keyed by destination. */
-export type HostProbeResult = { ok: boolean; code?: string; at: number };
+export type HostProbeResult = { ok: boolean; code?: string; release?: string | null; at: number };
 
 export type ServerState = "ok" | "unreachable" | "unknown";
 
@@ -76,6 +76,8 @@ export type ServerRow = {
   isDefault: boolean;
   isConnected: boolean;
   state: ServerState;
+  /** The server's release version, as its live connection or last probe reported it. */
+  release: string | null;
   failureCode?: string;
 };
 
@@ -101,14 +103,14 @@ export function serverRows(
     // The live connection outranks any probe of the host it is connected to.
     if (base.isConnected && connection) {
       return connection.state === "connected"
-        ? { ...base, state: "ok" }
-        : { ...base, state: "unreachable", failureCode: connection.error?.code };
+        ? { ...base, state: "ok", release: connection.serverRelease }
+        : { ...base, state: "unreachable", release: null, failureCode: connection.error?.code };
     }
     const probe = host ? probes[host.destination] : undefined;
-    if (!probe) return { ...base, state: "unknown" };
+    if (!probe) return { ...base, state: "unknown", release: null };
     return probe.ok
-      ? { ...base, state: "ok" }
-      : { ...base, state: "unreachable", failureCode: probe.code };
+      ? { ...base, state: "ok", release: probe.release ?? null }
+      : { ...base, state: "unreachable", release: null, failureCode: probe.code };
   };
 
   return [row(null), ...hosts.map((host) => row(host))];

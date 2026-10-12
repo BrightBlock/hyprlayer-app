@@ -21,7 +21,7 @@ export function AccountButton() {
   const signIn = useAccountSignIn();
   const cancel = useAccountCancelSignIn();
   const signOut = useAccountSignOut();
-  // While disconnected the blocking HostsDialog owns the screen; nothing may stack over it.
+  // Closed while disconnected: it needs the server, and a failed launch sits under HostsDialog.
   const connected = useConnectionStatus().data?.state === "connected";
   const shown = open && connected;
 

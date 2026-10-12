@@ -68,10 +68,12 @@ none: a desktop older than 0.8.6 tears its connection down on an unknown kind, a
 0.8.7 desktops announce only the three session kinds, so no released desktop receives it.
 
 **`MIN_SERVER_VERSION` is 0.8.9.** *(Amended 2026-10-07 — it was left at 0.8.8 so an
-optional feature would not replace a running server.)* A server older than 0.8.9 would keep a
-deleted or revoked user signed in with no periodic check, so the desktop requires the server
-that runs it. The cost is paid once: updating to this desktop replaces a local server older than
-0.8.9, ending its live sessions and terminals.
+optional feature would not replace a running server.)* *(Amended 2026-10-12 — since raised to
+0.8.11 for the queued-message and validation-summary commands; 0.8.9 stays this section's
+floor.)* A server older than 0.8.9 would keep a deleted or revoked user signed in with no
+periodic check, so the desktop requires the server that runs it. The cost is paid once:
+updating to this desktop replaces a local server older than 0.8.9, ending its live sessions and
+terminals.
 
 ## Session lifecycle
 

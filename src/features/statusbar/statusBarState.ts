@@ -66,12 +66,18 @@ export function syncLabel(
   status: ConnectionStatus | null,
   r: ReconnectSnapshot,
   now: number,
+  updating = false,
 ): SyncLabel | null {
   if (!status) return null;
   const named = status.host
     ? status.host.label || status.host.destination
     : (status.localServerName ?? null);
   const label = named ?? "this machine";
+
+  // The drop an update causes is planned, not an outage.
+  if (updating) {
+    return { text: "updating", title: `Updating the server on ${label}`, tone: "warn", ticking: false };
+  }
 
   if (status.state === "connected") {
     if (status.serverOutdated) return connected(named, `Server update available on ${label}`, "warn");
