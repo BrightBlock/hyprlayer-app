@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.13",
+      "date": "2026-10-12",
+      "summary": "Update an outdated server from the status bar; plan and PR record statuses stay current.",
+      "notes": [
+        "This version needs hyprlayer-server 0.8.11. A host running an older server is updated once it has been idle for two minutes; turn off \"Update server when idle\" in Settings to update it yourself.",
+        "The status bar shows an Update server button when the connected server is outdated, and runs the update in place with a progress label instead of the disconnected dialog.",
+        "The local server now also updates shortly after launch when nothing has been touched yet. Remote hosts still wait for the idle window.",
+        "Plan and PR record statuses now follow the workstream, session, and PR state, so they no longer go stale."
+      ]
+    },
+    {
       "version": "0.8.12",
       "date": "2026-10-10",
       "summary": "Fixes git detection and skills.sh skill previews on Windows.",
