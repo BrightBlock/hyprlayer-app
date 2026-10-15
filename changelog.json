@@ -1,6 +1,15 @@
 {
   "versions": [
     {
+      "version": "0.8.14",
+      "date": "2026-10-15",
+      "summary": "Fixes the plan view tracking the wrong phase.",
+      "notes": [
+        "Fixed the plan view tracking the wrong phase when an earlier phase had a deferred check. The current phase is now the first unfinished one after the last phase with progress, and sub-phases like 7B resolve to their parent.",
+        "The plan phase line shows the plan's own label when it differs from the position (Phase 5b · 6 of 9), and the current phase leads the remaining list."
+      ]
+    },
+    {
       "version": "0.8.13",
       "date": "2026-10-12",
       "summary": "Update an outdated server from the status bar; plan and PR record statuses stay current.",
