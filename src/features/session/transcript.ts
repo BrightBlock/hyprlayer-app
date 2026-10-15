@@ -84,10 +84,12 @@ export function skillBodyName(text: string): string | null {
   return name || "skill";
 }
 
-const COMPACT_SUMMARY_PREFIX = "This session is being continued from a previous conversation";
+// Line-anchored: claude can lead with notice lines, e.g. <artifact-content-authored-by-others/>.
+const COMPACT_SUMMARY_START = /^This session is being continued from a previous conversation/m;
 
-export function isCompactSummary(text: string): boolean {
-  return text.startsWith(COMPACT_SUMMARY_PREFIX);
+export function compactSummaryBody(text: string): string | null {
+  const at = text.search(COMPACT_SUMMARY_START);
+  return at === -1 ? null : text.slice(at);
 }
 
 const THINK_TAG = /<\/?think(?:ing)?>/gi;
@@ -483,6 +485,19 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
 
     case "assistantText": {
       if (INTERRUPT_NOTICE.test(event.text)) return view;
+      // Ahead of the skill fold: the summary arrives injected too.
+      const summary = event.parentId ? null : compactSummaryBody(event.text);
+      if (summary !== null) {
+        const open = openAssistantIndex(view.items);
+        const base = open === -1 ? view.items : view.items.filter((_, i) => i !== open);
+        const compactIdx = firstCompactAwaitingSummary(base);
+        if (compactIdx !== -1) {
+          const compact = base[compactIdx] as Extract<TranscriptItem, { kind: "compact" }>;
+          const items = base.slice();
+          items[compactIdx] = { ...compact, summary };
+          return { ...view, items, streaming: true };
+        }
+      }
       const skill = skillBodyName(event.text);
       if (skill || event.injected) {
         const toolIdx = firstSkillToolAwaitingBody(view.items, event.parentId ?? null);
@@ -514,17 +529,6 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
           ...appended(view, makeSkill, !event.parentId, seq),
           streaming: true,
         };
-      }
-      if (!event.parentId && isCompactSummary(event.text)) {
-        const open = openAssistantIndex(view.items);
-        const base = open === -1 ? view.items : view.items.filter((_, i) => i !== open);
-        const compactIdx = firstCompactAwaitingSummary(base);
-        if (compactIdx !== -1) {
-          const compact = base[compactIdx] as Extract<TranscriptItem, { kind: "compact" }>;
-          const items = base.slice();
-          items[compactIdx] = { ...compact, summary: event.text };
-          return { ...view, items, streaming: true };
-        }
       }
       if (event.parentId) {
         if (!event.text.length) return view;
