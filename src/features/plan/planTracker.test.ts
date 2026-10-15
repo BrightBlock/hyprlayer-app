@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineTask } from "@/features/session/planTasks";
 
 import { parsePlanDoc } from "./planDoc";
-import { matchTodoToPlan, trackPlan, type SessionSignal } from "./planTracker";
+import { matchTodoToPlan, trackPlan, type PlanTracker, type SessionSignal } from "./planTracker";
 
 const PATH = "/t/plans/p.md";
 
@@ -194,9 +194,9 @@ describe("session status overlay", () => {
     const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [x] fmt\n\n## Phase 2: B\n### Success Criteria:\n- [ ] clippy\n", PATH);
     const subagent = { toolUseId: "f2", agent: "foreman", background: false, tools: 0, lastTool: null, steps: null, phase: "2" };
     const t = trackPlan(doc, [], { ...building, subagent });
-    expect(t.phases[1].tasks[1]).toMatchObject({ title: "Implementation", state: "in_progress", jump: { toolUseId: "f2" } });
+    expect(t.phases[1].tasks).toEqual([expect.objectContaining({ title: "clippy", state: "pending", jump: { toolUseId: "f2" } })]);
     expect(t.phases[1].state).toBe("in_progress");
-    expect(t.current).toMatchObject({ phaseLevel: true, taskKey: "impl:2", subagent });
+    expect(t.current).toMatchObject({ title: "Phase 2: B", taskKey: null, subagent });
     expect([t.currentPhase, t.pulsing]).toEqual([2, true]);
   });
 
@@ -204,7 +204,8 @@ describe("session status overlay", () => {
     const doc = parsePlanDoc("## Phase 1: A\n### Success Criteria:\n- [ ] fmt\n", PATH);
     const subagent = { toolUseId: "f1", agent: "foreman", background: false, tools: 0, lastTool: null, steps: null, phase: "1" };
     const t = trackPlan(doc, [todo("Phase 1: A", "completed", "tu-1")], { ...building, subagent });
-    expect(t.phases[0].tasks[1]).toMatchObject({ state: "done", jump: { toolUseId: "tu-1" } });
+    expect(t.phases[0].tasks).toEqual([expect.objectContaining({ title: "fmt", jump: { toolUseId: "tu-1" } })]);
+    expect([t.current, t.tasksDone]).toEqual([null, true]);
   });
 
   it("leaves in-progress static once the session stops working", () => {
@@ -232,6 +233,48 @@ describe("phases", () => {
   it("points at the first unfinished phase, or the last when all are done", () => {
     expect(trackPlan(plan([true, true, false, false]), [], building).currentPhase).toBe(2);
     expect(trackPlan(plan([true, true, true, true]), [], building).currentPhase).toBe(2);
+  });
+});
+
+describe("current phase", () => {
+  // Phase 0's spike check is deferred while 1, 2 and 2b are done.
+  const spike = (later = " ") =>
+    parsePlanDoc(
+      `## Phase 0: Spike\n### Success Criteria:\n- [x] lint\n- [ ] spike up\n\n## Phase 1: Config\n- [x] a\n\n## Phase 2: Views\n- [x] b\n\n## Phase 2b: Build stats\n- [x] c\n\n## Phase 3: SPA\n### Success Criteria:\n- [${later}] typecheck\n- [${later}] dev loop\n\n## Phase 4: Parity\n- [${later}] d\n`,
+      PATH,
+    );
+  const added = (t: PlanTracker, i: number) => t.phases[i].tasks.filter((x) => x.added).map((x) => x.title);
+  const foreman = (phase: string) => ({ toolUseId: "f1", agent: "foreman", background: true, tools: 0, lastTool: null, steps: null, phase });
+
+  it("moves past an earlier phase left open to the one after the last with progress", () => {
+    const t = trackPlan(spike(), [todo("Gather prior notes", "completed"), todo("Wire the dev loop", "in_progress")], building);
+    expect(t.currentPhase).toBe(5);
+    expect(added(t, 4)).toEqual(["Gather prior notes", "Wire the dev loop"]);
+    expect(added(t, 0)).toEqual([]);
+  });
+
+  it("stays there while nothing is in progress", () => {
+    const t = trackPlan(spike(), [todo("Phase 3A: scaffold", "completed")], { ...building, activity: "idle" });
+    expect([t.current, t.currentPhase]).toEqual([null, 5]);
+  });
+
+  it("reads a sub-phase todo the doc lacks as its parent phase", () => {
+    const t = trackPlan(spike(), [todo("Phase 4A: parity routes", "in_progress")], building);
+    expect(t.currentPhase).toBe(6);
+    expect(added(t, 5)).toEqual(["Phase 4A: parity routes"]);
+  });
+
+  it("builds the parent phase of a foreman spawned for a sub-phase", () => {
+    const t = trackPlan(spike(), [], { ...building, subagent: foreman("3B") });
+    expect([t.phases[4].state, t.current?.title, t.currentPhase]).toEqual(["in_progress", "Phase 3: SPA", 5]);
+  });
+
+  it("keeps a lettered phase the doc has", () => {
+    expect(trackPlan(spike(), [todo("Phase 2B: stats", "in_progress")], building).currentPhase).toBe(4);
+  });
+
+  it("falls back to the earlier open phase once it is all that remains", () => {
+    expect(trackPlan(spike("x"), [], building).currentPhase).toBe(1);
   });
 });
 

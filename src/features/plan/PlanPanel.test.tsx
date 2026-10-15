@@ -112,6 +112,29 @@ describe("PlanPanel phase collapse", () => {
   });
 });
 
+describe("PlanPanel current phase", () => {
+  // Phase 0's spike is deferred while Phase 1 is done.
+  const SPIKE = parsePlanDoc(
+    "---\nstatus: active\n---\n# Spike\n\n## Phase 0: Spike\n- [x] lint\n- [ ] spike up\n\n## Phase 1: Config\n- [x] a\n\n## Phase 2: SPA\n- [ ] typecheck\n",
+    "/t/plans/spike.md",
+  );
+
+  it("leads with the current phase, named by its label, over an earlier one left open", () => {
+    renderPanel(trackPlan(SPIKE, [todo("Phase 2B: dev loop", "in_progress")], working));
+    expect(screen.getByText("Phase 2 · 3 of 3")).toBeTruthy();
+    const spa = screen.getByText("Phase 2 — SPA").closest("button")!;
+    const spike = screen.getByText("Phase 0 — Spike").closest("button")!;
+    expect(spa.compareDocumentPosition(spike) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([spa.getAttribute("aria-expanded"), spike.getAttribute("aria-expanded")]).toEqual(["true", "false"]);
+    expect(screen.getByRole("button", { name: "Phase 2B: dev loop, in progress, added by the agent" })).toBeTruthy();
+  });
+
+  it("keeps the phase header when the current todo is the phase itself", () => {
+    renderPanel(trackPlan(DOC("active", "xx  "), [todo("Phase 2: Build", "in_progress")], working));
+    expect(screen.getByText("Phase 2 — Build").closest("button")!.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
 describe("PlanPanel checks", () => {
   const CHECKS = (status: string, tasks: string) =>
     parsePlanDoc(
@@ -129,10 +152,10 @@ describe("PlanPanel checks", () => {
     expect(follows(manual, screen.getByText("Looks right"))).toBe(true);
   });
 
-  it("counts a criteria-only phase's implementation row as its task", () => {
+  it("counts a criteria-only phase by its checks alone", () => {
     renderPanel(trackPlan(CHECKS("active", ""), [], working));
-    expect(screen.getByText("Implementation")).toBeTruthy();
-    expect(screen.getByText("0 of 1 task · 1 of 3 checks")).toBeTruthy();
+    expect(screen.queryByText("Implementation")).toBeNull();
+    expect(screen.getByText("1 of 3 checks passed")).toBeTruthy();
   });
 
   it("counts tasks and checks apart when a plan has both", () => {

@@ -2,7 +2,7 @@ import { cx } from "@/components/ui";
 import type { RunningSubagent } from "@/features/session/subagent";
 
 import type { StageBadge } from "./lifecycleSlot";
-import type { CurrentItem, PlanTracker } from "./planTracker";
+import { phaseLine, type CurrentItem, type PlanTracker } from "./planTracker";
 
 function subagentLine(s: RunningSubagent): string {
   const parts = [s.agent];
@@ -64,12 +64,10 @@ export function PlanProgressHeader({
   badge?: StageBadge;
 }) {
   const pct = Math.round(tracker.progress * 100);
-  const phaseLine =
-    tracker.currentPhase !== null ? `Phase ${tracker.currentPhase} of ${tracker.phases.length}` : null;
   const shown = badge ?? {
     label: tracker.allDone ? "Done" : "Build",
     className: tracker.allDone ? "bg-ok" : "bg-info",
-    detail: phaseLine,
+    detail: phaseLine(tracker),
   };
   return (
     <div className="px-[18px] pt-4">

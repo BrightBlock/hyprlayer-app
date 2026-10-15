@@ -6,6 +6,7 @@ import { Button, IconButton } from "@/components/ui";
 import { plural } from "@/lib/format";
 import { useReview, useWorkstreamPr } from "@/lib/queries";
 import type { LifecycleStepsProps } from "@/features/plan/lifecycleSlot";
+import { phaseLine } from "@/features/plan/planTracker";
 import { usePlanTracker } from "@/features/plan/usePlanTracker";
 import { useSession } from "@/features/session/sessionStore";
 import { requestTranscriptJump } from "@/features/session/transcriptJump";
@@ -266,10 +267,8 @@ function Stages({
             : "review";
 
   const tracker = plan.tracker;
-  const phaseLine =
-    tracker && tracker.currentPhase !== null ? `Phase ${tracker.currentPhase} of ${tracker.phases.length}` : null;
   const badge = {
-    implement: { ...IMPLEMENT_BADGE, detail: phaseLine },
+    implement: { ...IMPLEMENT_BADGE, detail: tracker ? phaseLine(tracker) : null },
     validate: { label: "Validate", className: "bg-validate", detail: validateDetail(flow) },
     review: { label: "Review", className: "bg-accent", detail: review && s ? reviewStatusLabel(review, s) : null },
     ship: { label: "Ship", className: "bg-commit", detail: livePr ? `PR #${livePr.number} open` : null },

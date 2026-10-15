@@ -149,7 +149,6 @@ export function PhaseSection({
   phase,
   collapseKey,
   defaultCollapsed = false,
-  headless = false,
   showState,
   pulse,
   flash = false,
@@ -158,44 +157,40 @@ export function PhaseSection({
   phase: TrackedPhase;
   collapseKey: string;
   defaultCollapsed?: boolean;
-  // Rows only, always open: the current task card above already names the phase.
-  headless?: boolean;
   showState: boolean;
   pulse: boolean;
   flash?: boolean;
   onJump: (target: JumpTarget) => void;
 }) {
-  const collapsed = usePhaseCollapsed(collapseKey, defaultCollapsed) && !headless;
+  const collapsed = usePhaseCollapsed(collapseKey, defaultCollapsed);
   const suffix = showState ? PHASE_SUFFIX[phase.state] : null;
   const title = phase.label ? `Phase ${phase.label} — ${phase.name}` : phase.name;
   return (
     <section className={cx("-mx-2 rounded-control px-2", flash && "animate-plan-flash")}>
-      {!headless && (
-        <button
-          type="button"
-          data-phase-label
-          aria-expanded={!collapsed}
-          onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
-          className={cx(
-            "flex w-full items-start gap-1.5 text-left text-body font-semibold",
-            !collapsed && "mb-2",
-            !showState ? "text-ink-2" : PHASE_TEXT[phase.state],
-          )}
-        >
-          <Icon
-            name="chevronDown"
-            size="xs"
-            className={cx("mt-[3px] shrink-0 transition-transform", collapsed && "-rotate-90")}
-          />
-          <span className="min-w-0">
-            <span>{title}</span>
-            {suffix && <span className="text-meta font-normal text-ink-4"> {suffix}</span>}
-          </span>
-        </button>
-      )}
-      {/* pl-[18px] lines rows up with the header text (chevron 12px + gap 6px); headless px-2 keeps the active row's tint inside the section. */}
+      <button
+        type="button"
+        data-phase-label
+        aria-expanded={!collapsed}
+        onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
+        className={cx(
+          "flex w-full items-start gap-1.5 text-left text-body font-semibold",
+          !collapsed && "mb-2",
+          !showState ? "text-ink-2" : PHASE_TEXT[phase.state],
+        )}
+      >
+        <Icon
+          name="chevronDown"
+          size="xs"
+          className={cx("mt-[3px] shrink-0 transition-transform", collapsed && "-rotate-90")}
+        />
+        <span className="min-w-0">
+          <span>{title}</span>
+          {suffix && <span className="text-meta font-normal text-ink-4"> {suffix}</span>}
+        </span>
+      </button>
+      {/* pl-[18px] lines rows up with the header text (chevron 12px + gap 6px). */}
       {!collapsed && (
-        <div className={cx("space-y-3", headless ? "px-2" : "pl-[18px]")}>
+        <div className="space-y-3 pl-[18px]">
           {rowGroups(phase.tasks).map((group, i) => (
             <div key={i}>
               {group.label && <div className="mb-1.5 text-meta text-ink-4">{group.label}</div>}

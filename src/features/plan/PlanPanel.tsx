@@ -81,7 +81,6 @@ function TrackedPhaseSection({
       // Keyed by the current phase, so finishing one drops earlier choices: it collapses and the next opens.
       collapseKey={`${tracker.title}\0${tracker.currentPhase}\0${phase.label}:${phase.name}`}
       defaultCollapsed={tracker.allDone || index + 1 !== tracker.currentPhase}
-      headless={tracker.current?.phaseLevel === true && index + 1 === tracker.currentPhase}
       showState
       pulse={tracker.pulsing && !reduceMotion}
       flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
@@ -91,9 +90,12 @@ function TrackedPhaseSection({
 }
 
 // Finished phases sink below the remaining ones; open by default only once nothing remains.
+// The current phase leads, so an earlier phase left open trails the ones still ahead.
 function TrackedPhases(props: PhaseProps) {
   const indexed = props.tracker.phases.map((phase, index) => ({ phase, index }));
-  const remaining = indexed.filter((p) => p.phase.state !== "done");
+  const current = (props.tracker.currentPhase ?? 1) - 1;
+  const open = indexed.filter((p) => p.phase.state !== "done");
+  const remaining = [...open.filter((p) => p.index >= current), ...open.filter((p) => p.index < current)];
   const completed = indexed.filter((p) => p.phase.state === "done");
   const collapseKey = `${props.tracker.title}\0completed\0${remaining.length === 0}`;
   const collapsed = usePhaseCollapsed(collapseKey, remaining.length > 0);
