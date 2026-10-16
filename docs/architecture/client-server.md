@@ -138,10 +138,9 @@ anywhere.
 
 The window opens anyway, into a recovery state — VS Code Remote-SSH's rule.
 `AppState::failed` stores the named reason, every command answers with it rather
-than a generic one, and `connectionStatus` reports it. The single exception is
-`runtime_in_use`: another Hyprlayer already holds this profile's lock, which is
-`tauri-plugin-single-instance`'s job rather than a connection to recover from,
-and that arm still shows a dialog and exits.
+than a generic one, and `connectionStatus` reports it. That includes
+`runtime_in_use`: something holds this profile's lock without serving the
+socket, and once it quits, Relaunch recovers.
 
 One more downgrade happens after a successful handshake: if the very first
 request (`WorktreeRoot`) comes back `server_disconnected`, the server is a build

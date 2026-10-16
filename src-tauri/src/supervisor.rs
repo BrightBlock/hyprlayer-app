@@ -84,9 +84,8 @@ pub enum Outcome {
         client: Arc<RpcClient>,
         outdated: bool,
     },
-    /// Nothing left to retry. `setup()` opens the window anyway on every arm
-    /// except `ALREADY_RUNNING` (plan Phase 1 §5) — `error` is what
-    /// `AppState::failed` stores and `connection_status` reports.
+    /// Nothing left to retry. `setup()` opens the window anyway (plan Phase 1
+    /// §5): `error` is what `AppState::failed` stores and `connection_status` reports.
     Blocked { title: String, error: AppError },
 }
 
@@ -108,9 +107,9 @@ impl Outcome {
     }
 
     /// The one `Blocked` arm that is not a connect failure: another
-    /// Hyprlayer already holds this profile's lock. `setup()` matches on
-    /// `error.code == "runtime_in_use"` to keep this one exit (plan Phase 1
-    /// §5) — building it any other way makes that match silently not fire.
+    /// Hyprlayer already holds this profile's lock. Built from
+    /// `CoreError::RuntimeInUse`, not `server_unavailable`, so the recovery
+    /// screen gets its code and remedy.
     fn already_running(app_data_dir: &Path) -> Self {
         Self::Blocked {
             title: ALREADY_RUNNING.to_string(),
@@ -853,8 +852,8 @@ fn reports_working(semver: Option<&str>) -> bool {
         .is_some_and(|v| v >= semver::Version::new(0, 8, 5))
 }
 
-/// The one dialog that still shows the full message-plus-remedy text as one
-/// string — the `runtime_in_use` exit (plan Phase 1 §5).
+/// Message and remedy as one string, for a `server_unavailable` detail (which
+/// carries no remedy of its own) and the launch log.
 pub(crate) fn detail_for(err: &AppError) -> String {
     match &err.remedy {
         Some(remedy) => format!("{}\n\n{remedy}", err.message),

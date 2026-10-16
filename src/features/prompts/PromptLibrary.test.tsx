@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useState } from "react";
@@ -31,7 +31,6 @@ function Harness({ settings }: { settings: AppSettings }) {
 }
 
 const mutate = vi.fn();
-const confirmMock = vi.fn(async (..._args: unknown[]) => true);
 
 vi.mock("@/lib/useViewport", () => ({
   useViewport: () => ({ width: 1280, narrow: false, compact: false }),
@@ -61,7 +60,6 @@ const saveDialog = vi.fn(async () => "/Users/jt/Desktop/share" as string | null)
 const openDialog = vi.fn(async () => "/Users/jt/Desktop/share.hlprompts" as string | null);
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
-  confirm: (...args: unknown[]) => confirmMock(...args),
   save: (...args: unknown[]) => saveDialog(...(args as [])),
   open: (...args: unknown[]) => openDialog(...(args as [])),
 }));
@@ -88,7 +86,6 @@ const PROMPTS_JSON = JSON.stringify({
 afterEach(() => {
   cleanup();
   mutate.mockReset();
-  confirmMock.mockClear();
   saveDialog.mockClear();
   openDialog.mockClear();
   for (const fn of Object.values(ipc)) fn.mockReset();
@@ -238,6 +235,9 @@ describe("PromptLibrary", () => {
     render(<Harness settings={settings} />);
     fireEvent.click(screen.getByText("Tests"));
     fireEvent.click(screen.getByText("Delete"));
+    const dialog = await screen.findByRole("dialog", { name: "Delete “Tests”?" });
+    expect(mutate).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await vi.waitFor(() => expect(mutate).toHaveBeenCalled());
     const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
     expect(saved.prompts?.custom).toHaveLength(0);

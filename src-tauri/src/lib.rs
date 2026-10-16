@@ -24,7 +24,6 @@ use hyprlayer_server::events::{TARGETED_EVENTS, TRANSCRIPT_SYNC};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
-use tauri_plugin_dialog::DialogExt;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
 
 use crate::client_identity::ClientIdentity;
@@ -490,10 +489,8 @@ pub fn run() {
                 &ssh.batch(),
             ));
             // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
-            // regardless of whether the connection succeeded. The one
-            // exception is `runtime_in_use` — another Hyprlayer already holds
-            // this profile's lock, which is `tauri-plugin-single-instance`'s
-            // job, not a recoverable connection state.
+            // regardless of whether the connection succeeded, `runtime_in_use`
+            // included.
             // `app.manage(AppState::new(..))` moves above `runtime_events::spawn`
             // (plan Phase 1 §5): the spawned task now needs `handle.state::<AppState>()`.
             let mut client = match outcome {
@@ -502,18 +499,8 @@ pub fn run() {
                     Some(client)
                 }
                 supervisor::Outcome::Blocked { title, error } => {
-                    let detail = supervisor::detail_for(&error);
-                    // Logged as well as shown: the dialog renders nothing from a
-                    // terminal launch, and the log is what a bug report carries.
-                    log::error!("{title}: {detail}");
-                    if error.code == "runtime_in_use" {
-                        app.dialog()
-                            .message(detail)
-                            .title(title)
-                            .kind(tauri_plugin_dialog::MessageDialogKind::Error)
-                            .blocking_show();
-                        std::process::exit(1);
-                    }
+                    // Logged as well as shown: the log is what a bug report carries.
+                    log::error!("{title}: {}", supervisor::detail_for(&error));
                     app.manage(AppState::failed(target.clone(), error));
                     None
                 }

@@ -765,6 +765,72 @@ export function ConfirmDialog({
   );
 }
 
+type ConfirmRequest = {
+  title: string;
+  message?: string;
+  confirmLabel: string;
+  confirmVariant?: "primary" | "danger";
+};
+
+/** `confirm()` in-app: render `dialog`, await `confirm`. Only the confirm button answers true. */
+export function useConfirm(): [dialog: ReactNode, confirm: (request: ConfirmRequest) => Promise<boolean>] {
+  const [request, setRequest] = useState<ConfirmRequest | null>(null);
+  const settle = useRef<((ok: boolean) => void) | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+
+  const confirm = useCallback((next: ConfirmRequest) => {
+    if (settle.current) settle.current(false);
+    else opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setRequest(next);
+    return new Promise<boolean>((resolve) => {
+      settle.current = resolve;
+    });
+  }, []);
+
+  const answer = (ok: boolean) => {
+    settle.current?.(ok);
+    settle.current = null;
+    setRequest(null);
+  };
+
+  useEffect(() => () => settle.current?.(false), []);
+
+  // As `useFocusTrap`: focus goes back to a keyboard user only.
+  const open = request !== null;
+  useEffect(() => {
+    if (!open) return;
+    let byPointer = false;
+    const onPointer = () => {
+      byPointer = true;
+    };
+    const onKey = () => {
+      byPointer = false;
+    };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey, true);
+      if (!byPointer && opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+    };
+  }, [open]);
+
+  const dialog = (
+    <ConfirmDialog
+      open={open}
+      onClose={() => answer(false)}
+      title={request?.title ?? ""}
+      confirmLabel={request?.confirmLabel ?? ""}
+      confirmVariant={request?.confirmVariant}
+      autoFocus="confirm"
+      onConfirm={() => answer(true)}
+    >
+      {request?.message && <p className="text-body leading-prose text-ink-dim">{request.message}</p>}
+    </ConfirmDialog>
+  );
+  return [dialog, confirm];
+}
+
 export function ErrorNote({
   error,
   onDismiss,

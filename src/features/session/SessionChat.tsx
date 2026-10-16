@@ -9,9 +9,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { confirm } from "@tauri-apps/plugin-dialog";
 
-import { Button, ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
+import { Button, ErrorNote, MenuItem, Popover, Spinner, useConfirm } from "@/components/ui";
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
@@ -536,6 +535,7 @@ function QuestionPrompt({
 type Props = {
   view: WorkstreamView;
   shell: ShellTab;
+  focused: boolean;
   onDraftChange: (value: string) => void;
   onModeChange: (mode: StageKey) => void;
   onModelChange: (key: string) => void;
@@ -565,6 +565,7 @@ type Props = {
 export function SessionChat({
   view,
   shell,
+  focused,
   onDraftChange,
   onModeChange,
   onModelChange,
@@ -596,6 +597,7 @@ export function SessionChat({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [confirmDialog, confirm] = useConfirm();
   const dropRef = useRef<HTMLDivElement>(null);
   const addAttachmentsRef = useRef(onAddAttachments);
   addAttachmentsRef.current = onAddAttachments;
@@ -789,10 +791,11 @@ export function SessionChat({
     if (next.disabled) return;
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
     if (live && session && isBusy(session)) {
-      const ok = await confirm(
-        `Restart this session to switch to ${next.label}? The active turn will be interrupted.`,
-        { title: "Switch model?", kind: "warning" },
-      );
+      const ok = await confirm({
+        title: "Switch model?",
+        message: `Restart this session to switch to ${next.label}? The active turn will be interrupted.`,
+        confirmLabel: "Switch model",
+      });
       if (!ok) return;
     }
     onModelChange(key);
@@ -1287,12 +1290,18 @@ export function SessionChat({
       const message = handoffDoc
         ? "Clear this conversation and start fresh? The captured handoff doc will attach to the next session in this tab."
         : "Clear this conversation and start fresh? The current session ends and its context is discarded.";
-      const ok = await confirm(message, { title: "Clear context?", kind: "warning" });
+      const ok = await confirm({
+        title: "Clear context?",
+        message,
+        confirmLabel: "Clear",
+        confirmVariant: "danger",
+      });
       if (!ok) return;
     }
     if (live && sid) await killSession(sid).catch(() => {});
     onResetSession();
   };
+  useCommand("session.clear", focused && started ? () => void handleClear() : null);
 
   const handleRefresh = async () => {
     if (!sid) return;
@@ -1317,10 +1326,11 @@ export function SessionChat({
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
     const inPlace = harness.key === "claude";
     if (live && session && !inPlace && opt.flag !== session.permissionMode && isBusy(session)) {
-      const ok = await confirm(
-        `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
-        { title: "Restart session?", kind: "warning" },
-      );
+      const ok = await confirm({
+        title: "Restart session?",
+        message: `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
+        confirmLabel: "Restart",
+      });
       if (!ok) return;
     }
     onPermissionModeChange(key);
@@ -1691,6 +1701,7 @@ export function SessionChat({
           )}
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }

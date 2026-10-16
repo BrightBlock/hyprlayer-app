@@ -74,7 +74,6 @@ import {
   draftWithQueued,
   dropSession,
   endSession,
-  killSession,
   stopSession,
   transcriptToText,
   useSession,
@@ -299,7 +298,6 @@ function ProjectCommands(props: {
   useCommand("ws.cycleStage", props.onCycleStage);
   useCommand("ws.review", props.onToggleReview);
   useCommand("session.stop", running && sid ? () => void stopSession(sid, props.onReturnQueued) : null);
-  useCommand("session.clear", sid ? () => void killSession(sid) : null);
   return (
     <>
       {Array.from({ length: TAB_SELECT_COUNT }, (_, i) => (
@@ -916,6 +914,7 @@ export function ProjectPage() {
   const shellChatProps = (shell: ShellTab) => ({
     view: activeView!,
     shell,
+    focused: shell.id === focusedShell?.id,
     onDraftChange: (value: string) => patchShell(shell.id, { draft: value }),
     onModeChange: (key: StageKey) => changeShellMode(shell, key),
     onModelChange: (key: string) => patchShell(shell.id, { model: key }),

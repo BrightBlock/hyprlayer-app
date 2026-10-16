@@ -12,7 +12,8 @@ line and draft guard, presence badge; see "Remote sync surfaces") ·
 amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane shell") ·
 amended 2026-10 (the Library's mail shell; see "Library: mail shell") ·
 amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom; `Popover` hover cards) ·
-amended 2026-10-08 (keyboard focus is a soft fill, never a ring; see "Focus")
+amended 2026-10-08 (keyboard focus is a soft fill, never a ring; see "Focus") ·
+amended 2026-10-16 (no native alerts, and `useConfirm`; see "Native alerts")
 
 ## Decision
 
@@ -722,3 +723,18 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   utility overrides it.
 - **`Toggle` is the exception.** Its track's colour is its state, so it keeps
   `peer-focus-visible:ring-2`.
+
+### Native alerts (2026-10-16)
+
+- **None.** Confirms, warnings and messages are `ConfirmDialog` or `Dialog`: never
+  `@tauri-apps/plugin-dialog`'s `confirm`, `ask` or `message`, and never `app.dialog()` in Rust.
+  The file and folder pickers (`open`, `save`) are not alerts.
+- **Enforced twice.** ESLint's `no-restricted-imports` bans those three imports, and the main
+  window's capability grants only `dialog:allow-open` and `dialog:allow-save`, so the webview cannot
+  raise a message box past the lint either. A launch that cannot connect opens into `HostsDialog`'s
+  recovery screen, `runtime_in_use` included (ADR-0009).
+- **`useConfirm`** (`ui.tsx`) replaces an awaited `confirm()`: render the `dialog` it returns, then
+  `await confirm({ title, message, confirmLabel, confirmVariant })`. Only the confirm button answers
+  `true`; Cancel, Escape, the backdrop, a newer request and unmounting answer `false`. The confirm
+  button takes focus, as the native default button did, and focus returns to a keyboard user on
+  close. Destructive confirms take `danger`.

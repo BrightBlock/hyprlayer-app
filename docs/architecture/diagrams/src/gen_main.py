@@ -199,7 +199,7 @@ for name, sub in res:
 NY = BY + 188 + 26
 facts = [("The environment overlay", "A daemonised server has no SSH_AUTH_SOCK, so every attach sends one and the server merges it at each child spawn. Last attach wins — except opencode serve, which bakes it in and keeps the first.", ACCENT),
          ("Version skew is eviction, not negotiation", "A newer client asks an older server to shut down, waits for the profile lock, and spawns its own — which ends every live session on that profile.", ACCENT),
-         ("A failed connect still opens the window", "Into a recovery state that retries. The one exception is runtime_in_use: another Hyprlayer holds the lock, which is single-instance's job, and that arm still exits.", ACCENT)]
+         ("A failed connect still opens the window", "Into a recovery state that retries, runtime_in_use included: it shows the error and its remedy.", ACCENT)]
 fw = (W - 80 - 2 * 20) / 3
 fx = 40
 for title, body, colour in facts:

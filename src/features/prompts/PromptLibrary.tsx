@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { confirm, open, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
+import { open, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 
 import { commands } from "@/lib/bindings";
 import type { AppSettings, CustomPrompt, PromptSettings } from "@/lib/bindings";
@@ -19,6 +19,7 @@ import {
   Popover,
   TextInput,
   Toggle,
+  useConfirm,
 } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import {
@@ -207,6 +208,7 @@ export function PromptLibrary({
   const projPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
+  const [confirmDialog, confirm] = useConfirm();
   const [importFile, setImportFile] = useState<{
     fileName: string;
     /** The file's own contents, carried back to `applyPromptImport`. */
@@ -315,9 +317,10 @@ export function PromptLibrary({
 
   const deleteSelected = async () => {
     if (!selPrompt) return;
-    const ok = await confirm(`Delete “${selPrompt.name ?? "this prompt"}”?`, {
-      title: "Delete prompt?",
-      kind: "warning",
+    const ok = await confirm({
+      title: `Delete “${selPrompt.name ?? "this prompt"}”?`,
+      confirmLabel: "Delete",
+      confirmVariant: "danger",
     });
     if (!ok) return;
     update(
@@ -1063,6 +1066,7 @@ export function PromptLibrary({
           onClose={() => setImportFile(null)}
         />
       )}
+      {confirmDialog}
     </>
   );
 }

@@ -10,7 +10,8 @@ socket) · amended 2026-09-30 (connections announce a display-only client identi
 transcript-sync events are targeted) · amended 2026-10-06 (the Cloud account belongs to the
 server profile; `AccountChanged` is targeted by capability alone) · amended 2026-10-07
 (the cross-process lock test is an integration test, so it no longer builds the server
-binary mid-run; the release gate runs its tests under `cargo nextest`)
+binary mid-run; the release gate runs its tests under `cargo nextest`) · amended 2026-10-16
+(`runtime_in_use` opens the recovery screen instead of a native dialog and exit)
 
 ## Decision
 
@@ -353,6 +354,14 @@ frontend leak figure and is not comparable.
   block is `runtime_in_use`: a second Hyprlayer holding this profile's lock is
   `tauri-plugin-single-instance`'s job, not a connection to recover from, and is
   the one arm that still shows the blocking dialog and exits.)*
+  *(Amended 2026-10-16 — that exception is gone. Only the server takes the profile
+  lock, and a second copy of the app is stopped by single-instance or simply connects
+  to the running server, so `runtime_in_use` now means the lock is held by something
+  not serving the socket: a server still starting after the five spawn retries, a
+  wedged one, or a headless process. Once it quits, Relaunch recovers. So `setup()`
+  treats it like every other `Outcome::Blocked`: `AppState::failed`, and the recovery
+  screen shows its message and remedy. No native dialog, no `process::exit`; see
+  ADR-0006's "Native alerts".)*
   *(Amended 2026-09-16 — reversed. This bullet's "bumps `PROTOCOL_VERSION` 2 → 3"
   and the Phase 2 changelog entry's "`PROTOCOL_VERSION` is 2 from this phase"
   (below) both describe a compatibility surface that never shipped: at `v0.7.5`,

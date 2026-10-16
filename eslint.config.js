@@ -7,6 +7,13 @@ const LUCIDE_ONLY_IN_ICON = {
   name: "lucide-react",
   message: "Use <Icon name=…> from @/components/Icon; it is the only lucide-react importer.",
 };
+// Every block that sets no-restricted-imports replaces the rule's options, so each lists this.
+const NO_NATIVE_ALERTS = {
+  name: "@tauri-apps/plugin-dialog",
+  importNames: ["confirm", "ask", "message"],
+  message:
+    "No native alerts: use ConfirmDialog, Dialog or useConfirm from @/components/ui (ADR-0006). open and save are fine.",
+};
 const NO_ROUTE_IMPORTS = {
   group: ["@/routes/*", "**/routes/**", "@/router", "../router", "../../router"],
   message:
@@ -30,7 +37,7 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
       "no-empty": ["error", { allowEmptyCatch: true }],
-      "no-restricted-imports": ["error", { paths: [LUCIDE_ONLY_IN_ICON] }],
+      "no-restricted-imports": ["error", { paths: [LUCIDE_ONLY_IN_ICON, NO_NATIVE_ALERTS] }],
       "no-restricted-syntax": ["error", NO_INLINE_SVG],
     },
     languageOptions: {
@@ -51,7 +58,7 @@ export default tseslint.config(
             },
             NO_ROUTE_IMPORTS,
           ],
-          paths: [LUCIDE_ONLY_IN_ICON],
+          paths: [LUCIDE_ONLY_IN_ICON, NO_NATIVE_ALERTS],
         },
       ],
     },
@@ -69,7 +76,7 @@ export default tseslint.config(
                 "Features must not import routes or the router singleton — routes are wiring above features. Move the shared type into the feature, or use lib/appNav.",
             },
           ],
-          paths: [LUCIDE_ONLY_IN_ICON],
+          paths: [LUCIDE_ONLY_IN_ICON, NO_NATIVE_ALERTS],
         },
       ],
     },
@@ -87,6 +94,7 @@ export default tseslint.config(
             },
             NO_ROUTE_IMPORTS,
           ],
+          paths: [NO_NATIVE_ALERTS],
         },
       ],
     },
