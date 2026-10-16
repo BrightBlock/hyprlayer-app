@@ -181,6 +181,7 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    let overlay = ctx.binaries.child_env(overlay).await;
     let results = if to_poll.is_empty() {
         Vec::new()
     } else {

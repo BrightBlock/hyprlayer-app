@@ -601,7 +601,7 @@ impl ProjectService<'_> {
             });
         }
 
-        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
+        let origin = repos::origin_url(git, repo, &self.runtime.child_env().await).await;
         let path = repo.display().to_string();
         let row = NewProject {
             path: path.clone(),
@@ -699,17 +699,11 @@ impl ProjectService<'_> {
                     .map(str::trim)
                     .filter(|b| !b.is_empty())
                     .unwrap_or("main");
-                repos::init_repo_with_commit(
-                    &git,
-                    repo,
-                    branch,
-                    &self.runtime.environment.overlay_env(),
-                )
-                .await
+                repos::init_repo_with_commit(&git, repo, branch, &self.runtime.child_env().await)
+                    .await
             }
             repos::RepoPathStatus::Unborn => {
-                repos::commit_empty_initial(&git, repo, &self.runtime.environment.overlay_env())
-                    .await
+                repos::commit_empty_initial(&git, repo, &self.runtime.child_env().await).await
             }
             _ => Ok(()),
         };
@@ -800,7 +794,7 @@ impl ProjectService<'_> {
             });
         }
 
-        repos::clone_repo(&git, source, &dest, &self.runtime.environment.overlay_env()).await?;
+        repos::clone_repo(&git, source, &dest, &self.runtime.child_env().await).await?;
 
         self.register_repo(&git, &dest, name, thoughts, kind, true)
             .await
@@ -853,7 +847,7 @@ impl ProjectService<'_> {
         let Some(record) = record else {
             return Ok(None);
         };
-        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
+        let origin = repos::origin_url(git, repo, &self.runtime.child_env().await).await;
         if origin == record.origin_url {
             return Ok(None);
         }
@@ -896,7 +890,7 @@ impl ProjectService<'_> {
 
         progress.emit(CreateStep::GithubRepo, StepStatus::Running, None);
 
-        let origin = repos::origin_url(git, repo, &self.runtime.environment.overlay_env()).await;
+        let origin = repos::origin_url(git, repo, &self.runtime.child_env().await).await;
         let url =
             match repos::plan_publish(origin.as_deref(), &owner, &name) {
                 repos::PublishPlan::PushOnly { url } => url,
@@ -918,7 +912,7 @@ impl ProjectService<'_> {
                         &owner,
                         &name,
                         target.private,
-                        &self.runtime.environment.overlay_env(),
+                        &self.runtime.child_env().await,
                     )
                     .await
                     {
@@ -936,7 +930,7 @@ impl ProjectService<'_> {
 
         progress.emit(CreateStep::Push, StepStatus::Running, None);
         if let Err(e) =
-            repos::push_upstream(git, repo, branch, &self.runtime.environment.overlay_env()).await
+            repos::push_upstream(git, repo, branch, &self.runtime.child_env().await).await
         {
             fail(CreateStep::Push);
             return Err(CoreError::GithubOperation(repos::classify_push_failure(
@@ -1024,13 +1018,8 @@ impl ProjectService<'_> {
         );
 
         progress.emit(CreateStep::Repository, StepStatus::Running, None);
-        if let Err(e) = repos::init_repo(
-            &git,
-            &dest,
-            &branch,
-            &self.runtime.environment.overlay_env(),
-        )
-        .await
+        if let Err(e) =
+            repos::init_repo(&git, &dest, &branch, &self.runtime.child_env().await).await
         {
             progress.emit(CreateStep::Repository, StepStatus::Failed, None);
             return Err(rollback_dir(&dest, e).await);
@@ -1045,9 +1034,8 @@ impl ProjectService<'_> {
                 move || repos::write_scaffold(&dest, &name, &scaffold)
             })
             .await?;
-            repos::stage_all(&git, &dest, &self.runtime.environment.overlay_env()).await?;
-            repos::commit_empty_initial(&git, &dest, &self.runtime.environment.overlay_env())
-                .await?;
+            repos::stage_all(&git, &dest, &self.runtime.child_env().await).await?;
+            repos::commit_empty_initial(&git, &dest, &self.runtime.child_env().await).await?;
             Ok(written)
         }
         .await;
@@ -1125,7 +1113,7 @@ impl ProjectService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return Ok(GithubOwnersOutcome::SignedOut);
         };
-        match repos::github_owners(&gh, &self.runtime.environment.overlay_env()).await {
+        match repos::github_owners(&gh, &self.runtime.child_env().await).await {
             Ok(owners) => Ok(GithubOwnersOutcome::Ready { owners }),
             Err(e) => {
                 let detail = exec_stderr(&e);
@@ -1188,7 +1176,7 @@ impl ProjectService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return Ok(Vec::new());
         };
-        match repos::github_repos(&gh, 100, &self.runtime.environment.overlay_env()).await {
+        match repos::github_repos(&gh, 100, &self.runtime.child_env().await).await {
             Ok(list) => Ok(list),
             Err(e) => {
                 tracing::debug!("gh repo list unavailable: {e}");
@@ -1298,8 +1286,15 @@ impl ProjectService<'_> {
                 .as_ref()
                 .map(|t| t.user.as_str())
                 .unwrap_or_default();
-            thoughts_repo::scaffold(&git, &root, user, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
-                .await?;
+            thoughts_repo::scaffold(
+                &git,
+                &root,
+                user,
+                DEFAULT_REPOS_DIR,
+                DEFAULT_GLOBAL_DIR,
+                &self.runtime.child_env().await,
+            )
+            .await?;
         }
 
         let cwd = self
@@ -1512,8 +1507,7 @@ impl ProjectService<'_> {
                     None => self.runtime.environment.home_dir.join("thoughts"),
                 };
                 let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-                repos::clone_repo(&git, url, &dest, &self.runtime.environment.overlay_env())
-                    .await?;
+                repos::clone_repo(&git, url, &dest, &self.runtime.child_env().await).await?;
                 dest
             }
             ThoughtsSource::Disk { path } => {
@@ -1528,8 +1522,15 @@ impl ProjectService<'_> {
             ThoughtsSource::Create { path } => {
                 let p = thoughts_location(path)?;
                 let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-                thoughts_repo::scaffold(&git, &p, user, DEFAULT_REPOS_DIR, DEFAULT_GLOBAL_DIR)
-                    .await?;
+                thoughts_repo::scaffold(
+                    &git,
+                    &p,
+                    user,
+                    DEFAULT_REPOS_DIR,
+                    DEFAULT_GLOBAL_DIR,
+                    &self.runtime.child_env().await,
+                )
+                .await?;
                 p
             }
         };

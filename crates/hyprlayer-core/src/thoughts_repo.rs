@@ -84,6 +84,7 @@ pub async fn scaffold(
     user: &str,
     repos_dir: &str,
     global_dir: &str,
+    overlay: &[(String, String)],
 ) -> Result<()> {
     std::fs::create_dir_all(root)?;
 
@@ -104,6 +105,7 @@ pub async fn scaffold(
         })?;
         Exec::new(git)
             .args(["init", "-b", "main", root_str])
+            .envs(overlay.iter().cloned())
             .timeout(Duration::from_secs(30))
             .run()
             .await?;
@@ -136,11 +138,12 @@ pub async fn scaffold(
         })?;
         Exec::new(git)
             .args(["-C", root_str, "add", "-A"])
+            .envs(overlay.iter().cloned())
             .timeout(Duration::from_secs(30))
             .run()
             .await?;
-        // Local commit only, no remote touched — nothing in the overlay applies.
-        commit_empty_initial(git, root, &[]).await?;
+        // Local, but the user's hooks and filters still resolve on `PATH`.
+        commit_empty_initial(git, root, overlay).await?;
     }
 
     Ok(())
@@ -160,7 +163,7 @@ mod tests {
         let root = tmp.path().join("thoughts");
         let git = git_bin();
 
-        scaffold(&git, &root, "jt", "repos", "global")
+        scaffold(&git, &root, "jt", "repos", "global", &[])
             .await
             .unwrap();
 
@@ -184,7 +187,7 @@ mod tests {
             .await
             .unwrap();
 
-        scaffold(&git, &root, "jt", "repos", "global")
+        scaffold(&git, &root, "jt", "repos", "global", &[])
             .await
             .unwrap();
 
@@ -198,12 +201,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
         let git = git_bin();
-        scaffold(&git, &root, "jt", "repos", "global")
+        scaffold(&git, &root, "jt", "repos", "global", &[])
             .await
             .unwrap();
         std::fs::write(root.join(".gitignore"), "custom\n").unwrap();
 
-        scaffold(&git, &root, "jt", "repos", "global")
+        scaffold(&git, &root, "jt", "repos", "global", &[])
             .await
             .unwrap();
 
@@ -220,7 +223,7 @@ mod tests {
         let root = tmp.path().join("t");
         let git = git_bin();
 
-        scaffold(&git, &root, "  ", "projects", "shared-notes")
+        scaffold(&git, &root, "  ", "projects", "shared-notes", &[])
             .await
             .unwrap();
 
@@ -298,7 +301,7 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(root.join("repos")).unwrap();
 
-        scaffold(&git, &root, "jt", "repos", "global")
+        scaffold(&git, &root, "jt", "repos", "global", &[])
             .await
             .unwrap();
 
@@ -311,7 +314,7 @@ mod tests {
         let root = tmp.path().join("t");
         let git = git_bin();
 
-        scaffold(&git, &root, "jt", "", "").await.unwrap();
+        scaffold(&git, &root, "jt", "", "", &[]).await.unwrap();
 
         assert!(root.join("repos").is_dir());
         assert!(root.join("global").is_dir());

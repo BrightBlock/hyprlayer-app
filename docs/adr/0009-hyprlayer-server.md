@@ -138,6 +138,12 @@ overlay. Nothing else in core reads the overlay; the exception is deliberate and
 singular. Remotely, the value the client sends is a path on the *client*, so a remote
 server needs its own agent access (`ssh -A`, or a key on the server).
 
+*(Amended 2026-10-16: the overlay rides behind the resolver's augmented `PATH`, which
+`child_env` (`BinaryResolver`, `HyprlayerRuntime`) puts first on every spawn. The
+`git`/`gh` shell-outs had taken only the overlay, so a server holding launchd's `PATH`
+ran git without Homebrew's dirs and a git-lfs checkout failed. Guarded by the
+`git_child_path` E2E scenario.)*
+
 #### opencode takes the overlay of whoever started it
 
 Every other spawn reads the overlay at spawn time, so each key takes its newest valid

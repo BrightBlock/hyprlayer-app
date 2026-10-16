@@ -217,7 +217,7 @@ async fn scaffolded_root_is_accepted_by_the_real_cli() {
     let tmp = tempfile::tempdir().unwrap();
 
     let root = tmp.path().join("thoughts");
-    hyprlayer_core::thoughts_repo::scaffold(&git, &root, "tester", "repos", "global")
+    hyprlayer_core::thoughts_repo::scaffold(&git, &root, "tester", "repos", "global", &[])
         .await
         .expect("scaffold should succeed");
 

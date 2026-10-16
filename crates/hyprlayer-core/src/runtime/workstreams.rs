@@ -345,7 +345,7 @@ impl WorkstreamService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return Ok(changed);
         };
-        let overlay = self.runtime.environment.overlay_env();
+        let overlay = self.runtime.child_env().await;
         let permits = Arc::new(tokio::sync::Semaphore::new(PR_LOOKUPS_AT_ONCE));
         let mut lookups = tokio::task::JoinSet::new();
         for (item, record) in due {
@@ -457,13 +457,8 @@ impl WorkstreamService<'_> {
         }
         if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
             let dir = pr_dir(&item);
-            if let Ok(Some(status)) = pr::pr_status(
-                &gh,
-                dir,
-                &item.pr_ref(),
-                &self.runtime.environment.overlay_env(),
-            )
-            .await
+            if let Ok(Some(status)) =
+                pr::pr_status(&gh, dir, &item.pr_ref(), &self.runtime.child_env().await).await
             {
                 if status.state == pr::PrState::Open {
                     pr::edit_pr_base(
@@ -471,7 +466,7 @@ impl WorkstreamService<'_> {
                         dir,
                         &item.pr_ref(),
                         &base,
-                        &self.runtime.environment.overlay_env(),
+                        &self.runtime.child_env().await,
                     )
                     .await?;
                 }
@@ -704,14 +699,7 @@ impl WorkstreamService<'_> {
             return Ok(None);
         };
         let dir = pr_dir(&item);
-        match pr::pr_status(
-            &gh,
-            dir,
-            &item.pr_ref(),
-            &self.runtime.environment.overlay_env(),
-        )
-        .await
-        {
+        match pr::pr_status(&gh, dir, &item.pr_ref(), &self.runtime.child_env().await).await {
             Ok(status) => Ok(status),
             // An error, not "no PR": the client keeps the last known PR and
             // backs off, where `None` made a spent GraphQL quota erase it.
@@ -734,7 +722,7 @@ impl WorkstreamService<'_> {
         ensure_running(self.runtime)?;
         let git = self.runtime.binaries.require(BinaryKind::Git).await?;
         let repo = PathBuf::from(project_path);
-        let overlay = self.runtime.environment.overlay_env();
+        let overlay = self.runtime.child_env().await;
         let default_base = worktree::detect_base_branch(&git, &repo, &overlay)
             .await
             .unwrap_or_default();
@@ -782,7 +770,7 @@ impl WorkstreamService<'_> {
         worktree::fetch_remote(
             &git,
             Path::new(project_path),
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
     }
@@ -795,7 +783,7 @@ impl WorkstreamService<'_> {
             &git,
             Path::new(&item.worktree_path),
             &item.base_branch,
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
     }
@@ -807,7 +795,7 @@ impl WorkstreamService<'_> {
         worktree::fetch_remote(
             &git,
             Path::new(&item.worktree_path),
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
     }
@@ -823,7 +811,7 @@ impl WorkstreamService<'_> {
             pr_dir(&item),
             query,
             50,
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
         {
@@ -845,7 +833,7 @@ impl WorkstreamService<'_> {
             &gh,
             pr_dir(&item),
             &pr_number.to_string(),
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
         {
@@ -868,7 +856,7 @@ impl WorkstreamService<'_> {
             &gh,
             pr_dir(&item),
             &pr_number.to_string(),
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
         {
@@ -891,7 +879,7 @@ impl WorkstreamService<'_> {
             &item.pr_ref(),
             method,
             auto,
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
     }
@@ -966,7 +954,7 @@ impl WorkstreamService<'_> {
                 return Ok((local, false));
             }
             let git = self.runtime.binaries.require(BinaryKind::Git).await?;
-            let overlay = self.runtime.environment.overlay_env();
+            let overlay = self.runtime.child_env().await;
             if let Err(e) = worktree::fetch_remote(&git, &repo, &overlay).await {
                 tracing::warn!("fetch before tracking {branch} failed; using the local ref: {e}");
             }
@@ -1324,7 +1312,7 @@ impl WorkstreamService<'_> {
                 &git,
                 project_path,
                 &item.branch,
-                &self.runtime.environment.overlay_env(),
+                &self.runtime.child_env().await,
             )
             .await
             {
@@ -1419,7 +1407,7 @@ impl WorkstreamService<'_> {
             &gh,
             pr_dir(item),
             &item.pr_ref(),
-            &self.runtime.environment.overlay_env(),
+            &self.runtime.child_env().await,
         )
         .await
         .unwrap_or_else(|e| {

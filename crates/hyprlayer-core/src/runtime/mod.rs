@@ -214,6 +214,11 @@ impl HyprlayerRuntime {
             cloud.pool.as_str(),
             cloud.login_url
         );
+        let worktrees = Arc::new(
+            WorktreeManager::new(worktree_root)
+                .with_env_overlay(environment.env_overlay.clone())
+                .with_binaries(binaries.clone()),
+        );
 
         Ok(Arc::new(Self {
             config_cli,
@@ -226,10 +231,7 @@ impl HyprlayerRuntime {
             binaries,
             settings,
             db,
-            worktrees: Arc::new(
-                WorktreeManager::new(worktree_root)
-                    .with_env_overlay(environment.env_overlay.clone()),
-            ),
+            worktrees,
             index: Arc::new(ThoughtsIndex::new()),
             session_registry: Arc::new(SessionRegistry::new()),
             session_actors,
@@ -413,6 +415,12 @@ impl HyprlayerRuntime {
             }
         );
         self.environment.merge_env_overlay(overlay);
+    }
+
+    pub(crate) async fn child_env(&self) -> Vec<(String, String)> {
+        self.binaries
+            .child_env(self.environment.overlay_env())
+            .await
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RuntimeEvent> {

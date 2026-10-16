@@ -17,6 +17,9 @@ Git access splits on whether an operation touches a remote.
 - The binary is resolved through the augmented-PATH resolver in
   `crates/hyprlayer-core/src/process/binaries.rs`, never assumed to be on `PATH`
   (a macOS GUI app inherits launchd's minimal one).
+- It also runs with that augmented `PATH` (`BinaryResolver::child_env`): git
+  resolves its filters (git-lfs), hooks and credential helpers on it. *(Added
+  2026-10-16, after a Dock-launched app failed every git-lfs checkout.)*
 
 The split is about the *network*, not about the word "remote": reading
 remote-tracking refs (`git2::BranchType::Remote` in `gitops.rs:109`) touches only

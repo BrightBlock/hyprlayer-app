@@ -1,0 +1,36 @@
+{
+  "scenario": "git_child_path",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "error": null
+          },
+          "guard": "creating the workstream finds the filter git runs",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asset.dat": "smudged\n"
+          },
+          "guard": "the worktree holds the filter's output, not the stored blob",
+          "ok": true
+        }
+      ],
+      "step": "a worktree checkout runs the filter"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

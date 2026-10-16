@@ -154,6 +154,15 @@ impl BinaryResolver {
         self.augmented_path.read().await.clone()
     }
 
+    /// What a child merges over the inherited env: the augmented `PATH`, then
+    /// `overlay`. git needs it too: its filters, hooks and helpers resolve on it.
+    pub async fn child_env(&self, overlay: Vec<(String, String)>) -> Vec<(String, String)> {
+        let path = self.augmented_path().await.to_string_lossy().into_owned();
+        std::iter::once(("PATH".to_string(), path))
+            .chain(overlay)
+            .collect()
+    }
+
     pub async fn resolve(&self, kind: BinaryKind) -> Option<PathBuf> {
         if let Some(p) = self.overrides.read().await.get(&kind) {
             return Some(p.clone());

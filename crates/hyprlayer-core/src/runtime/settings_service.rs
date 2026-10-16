@@ -164,7 +164,7 @@ impl SettingsService<'_> {
         let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
             return None;
         };
-        pr::github_login(&gh, &self.runtime.environment.overlay_env()).await
+        pr::github_login(&gh, &self.runtime.child_env().await).await
     }
 
     /// The username a branch created here is attributed to: this machine's

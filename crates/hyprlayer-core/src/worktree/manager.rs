@@ -7,6 +7,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
+use crate::process::binaries::BinaryResolver;
 use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
@@ -133,6 +134,7 @@ pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
 pub struct WorktreeManager {
     root: PathBuf,
     env_overlay: Arc<RwLock<BTreeMap<String, String>>>,
+    binaries: Option<Arc<BinaryResolver>>,
 }
 
 impl WorktreeManager {
@@ -140,6 +142,7 @@ impl WorktreeManager {
         Self {
             root,
             env_overlay: Arc::default(),
+            binaries: None,
         }
     }
 
@@ -151,13 +154,25 @@ impl WorktreeManager {
         self
     }
 
-    fn overlay_pairs(&self) -> Vec<(String, String)> {
-        self.env_overlay
+    /// The resolver's `PATH` for every git this manager spawns; without it git
+    /// inherits the process's own, which launchd keeps minimal.
+    pub fn with_binaries(mut self, binaries: Arc<BinaryResolver>) -> Self {
+        self.binaries = Some(binaries);
+        self
+    }
+
+    async fn child_env(&self) -> Vec<(String, String)> {
+        let overlay: Vec<(String, String)> = self
+            .env_overlay
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+            .collect();
+        match &self.binaries {
+            Some(binaries) => binaries.child_env(overlay).await,
+            None => overlay,
+        }
     }
 
     pub fn root(&self) -> &Path {
@@ -170,7 +185,7 @@ impl WorktreeManager {
 
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
         let slug = unique_slug(&spec.title);
-        let overlay = self.overlay_pairs();
+        let overlay = self.child_env().await;
 
         // Best effort: offline still creates, from whatever refs are local.
         if !matches!(spec.mode, CreateMode::Attached { .. }) {
@@ -289,7 +304,7 @@ impl WorktreeManager {
         args.extend_from_slice(extra);
         args.push(path_str);
         args.push(committish);
-        git_in(git, project_repo, &args, &self.overlay_pairs())
+        git_in(git, project_repo, &args, &self.child_env().await)
             .timeout(Duration::from_secs(120))
             .run()
             .await?;
@@ -303,7 +318,7 @@ impl WorktreeManager {
                 _git,
                 _worktree,
                 &["config", "core.longpaths", "true"],
-                &self.overlay_pairs(),
+                &self.child_env().await,
             )
             .run()
             .await;
@@ -321,7 +336,7 @@ impl WorktreeManager {
         policy: RemovePolicy,
         delete_branch: bool,
     ) -> Result<()> {
-        let overlay = self.overlay_pairs();
+        let overlay = self.child_env().await;
         if is_live_worktree(worktree) {
             if policy == RemovePolicy::Safe {
                 ensure_removable(worktree, base_branch, branch)?;
@@ -378,7 +393,7 @@ impl WorktreeManager {
             git,
             project_repo,
             &["worktree", "prune"],
-            &self.overlay_pairs(),
+            &self.child_env().await,
         )
         .run()
         .await?;
@@ -392,7 +407,7 @@ impl WorktreeManager {
         worktree: &Path,
         dest: &Path,
     ) -> Result<bool> {
-        let overlay = self.overlay_pairs();
+        let overlay = self.child_env().await;
         if !is_live_worktree(worktree) {
             let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
                 .run()
@@ -456,7 +471,7 @@ impl WorktreeManager {
             git,
             project_repo,
             &["worktree", "move", &from, &to],
-            &self.overlay_pairs(),
+            &self.child_env().await,
         )
         .timeout(Duration::from_secs(120))
         .run()
@@ -471,7 +486,7 @@ impl WorktreeManager {
             args.push(format!("!{pat}"));
         }
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        git_in(git, worktree, &arg_refs, &self.overlay_pairs())
+        git_in(git, worktree, &arg_refs, &self.child_env().await)
             .timeout(Duration::from_secs(120))
             .run()
             .await?;
@@ -486,7 +501,7 @@ impl WorktreeManager {
         branch: &str,
         cleanup: BranchCleanup,
     ) -> Result<()> {
-        let overlay = self.overlay_pairs();
+        let overlay = self.child_env().await;
         // Each step is best effort; the log is the only record of what was left.
         if archive.exists() {
             if let Err(e) = std::fs::remove_dir_all(archive) {

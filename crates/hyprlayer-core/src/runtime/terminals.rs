@@ -156,9 +156,7 @@ impl TerminalService<'_> {
     pub async fn open(&self, req: OpenTerminalRequest) -> Result<TerminalAttachment> {
         ensure_running(self.runtime)?;
         let ws = self.find_workstream(&req.workstream_id).await?;
-        let path = self.runtime.binaries.augmented_path().await;
-        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-        env.extend(self.runtime.environment.overlay_env());
+        let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args: vec!["-l".to_string()],
@@ -218,9 +216,7 @@ impl TerminalService<'_> {
     pub async fn open_cli(&self, req: OpenCliTerminalRequest) -> Result<TerminalAttachment> {
         ensure_running(self.runtime)?;
         let bin = self.runtime.binaries.require(BinaryKind::Hyprlayer).await?;
-        let path = self.runtime.binaries.augmented_path().await;
-        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-        env.extend(self.runtime.environment.overlay_env());
+        let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: bin,
             args: req.args,
@@ -236,10 +232,8 @@ impl TerminalService<'_> {
 
     pub async fn open_shell(&self, req: OpenShellTerminalRequest) -> Result<TerminalAttachment> {
         ensure_running(self.runtime)?;
-        let path = self.runtime.binaries.augmented_path().await;
         let args = login_shell_args(&req.command);
-        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-        env.extend(self.runtime.environment.overlay_env());
+        let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args,
@@ -259,9 +253,7 @@ impl TerminalService<'_> {
             return Err(CoreError::TerminalCommandEmpty);
         }
         let ws = self.find_workstream(&req.workstream_id).await?;
-        let path = self.runtime.binaries.augmented_path().await;
-        let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-        env.extend(self.runtime.environment.overlay_env());
+        let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
             args: login_shell_args(&agent_command_line(&req.command, &req.args)),

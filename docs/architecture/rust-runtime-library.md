@@ -123,8 +123,9 @@ not call `std::env::current_dir`.
 
 **It does not promise anything about child processes.** Hermeticity constrains
 core's *own* reads, never what a child inherits. PTY terminals, provider CLIs,
-and `git` receive the desktop environment verbatim on purpose, so a user's
-shell keeps `SSH_AUTH_SOCK`, locale, and custom variables. Two specific
+and `git` receive the desktop environment on purpose, with only `PATH` swapped
+for the augmented one, so a user's shell keeps `SSH_AUTH_SOCK`, locale, and
+custom variables. Two specific
 consequences worth knowing before you write a test that asserts against ambient
 state:
 

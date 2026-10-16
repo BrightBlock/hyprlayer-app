@@ -264,7 +264,7 @@ impl SkillService<'_> {
             .as_deref()
             .and_then(parse_semver)
             .is_some_and(|v| v >= [2, 25, 0]);
-        let overlay = self.runtime.environment.overlay_env();
+        let overlay = self.runtime.child_env().await;
         let (clone_url, fetched_from) = github::git_url(&self.runtime.environment, repo);
         let git = Git {
             bin: &git_bin,
@@ -321,7 +321,7 @@ impl SkillService<'_> {
         let staging_root = self.staging_root();
         std::fs::create_dir_all(&staging_root)?;
         let git_bin = self.runtime.binaries.require(BinaryKind::Git).await?;
-        let overlay = self.runtime.environment.overlay_env();
+        let overlay = self.runtime.child_env().await;
         let (clone_url, _) = github::git_url(&self.runtime.environment, repo);
         let git = Git {
             bin: &git_bin,

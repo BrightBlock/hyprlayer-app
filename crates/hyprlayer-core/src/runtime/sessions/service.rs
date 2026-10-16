@@ -994,9 +994,7 @@ impl SessionService<'_> {
                     unreachable!("codex harness yields a codex launch policy")
                 };
 
-                let path = self.runtime.binaries.augmented_path().await;
-                let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
-                env.extend(self.runtime.environment.overlay_env());
+                let env = self.runtime.child_env().await;
 
                 let developer_instructions = self.codex_developer_instructions(session).await;
 
