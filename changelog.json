@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.16",
+      "date": "",
+      "summary": "Fixes the context meter after /compact and /clear, the missing compact summary, and notes meant for Claude showing as its replies.",
+      "notes": [
+        "Fixed the context meter still showing the pre-compaction fill after running /compact. It now drops to the size Claude reports for the compacted conversation, which leaves out the system prompt and tools, so the next turn reports a higher figure. Sessions compacted before this fix hide the meter until their next turn.",
+        "Fixed the summary from a manual /compact never reaching the compact divider. The divider now expands to show it, as it does after an auto-compact.",
+        "Fixed /clear leaving the old fill on the context meter and adding an \"unrecognized stream-json line\" error to the transcript. The meter now stays hidden until Claude reports the new conversation's size.",
+        "Fixed notes Claude adds for itself, such as image size hints, resume nudges after a cut-off reply and hook feedback, showing up in the transcript as its replies."
+      ]
+    },
+    {
       "version": "0.8.15",
       "date": "2026-10-16",
       "summary": "Fixes Git LFS checkouts from the Dock and compact summaries leaking into the transcript.",

@@ -44,6 +44,7 @@ pub enum ParsedLine {
     CompactBoundary {
         trigger: String,
         pre_tokens: Option<u32>,
+        post_tokens: Option<u32>,
     },
     TaskNotification {
         task_id: String,
@@ -112,13 +113,15 @@ pub fn parse_line(line: &str) -> ParsedLine {
                         .and_then(Value::as_str)
                         .unwrap_or("auto")
                         .to_string();
-                    let pre_tokens = meta
-                        .and_then(|m| m.get("pre_tokens"))
-                        .and_then(Value::as_u64)
-                        .map(|n| n.min(u32::MAX as u64) as u32);
+                    let tokens = |key: &str| {
+                        meta.and_then(|m| m.get(key))
+                            .and_then(Value::as_u64)
+                            .map(|n| n.min(u32::MAX as u64) as u32)
+                    };
                     ParsedLine::CompactBoundary {
                         trigger,
-                        pre_tokens,
+                        pre_tokens: tokens("pre_tokens"),
+                        post_tokens: tokens("post_tokens"),
                     }
                 }
                 "task_notification" => match str_field(&v, "task_id") {
@@ -152,16 +155,26 @@ pub fn parse_line(line: &str) -> ParsedLine {
             context_tokens: context_tokens(v.get("message").and_then(|m| m.get("usage"))),
             parent_id: str_field(&v, "parent_tool_use_id"),
         },
-        Some("user") => ParsedLine::User {
-            blocks: parse_blocks(v.get("message")),
-            parent_id: str_field(&v, "parent_tool_use_id"),
-            uuid: str_field(&v, "uuid"),
-            is_replay: v.get("isReplay").and_then(Value::as_bool).unwrap_or(false),
-            is_synthetic: v
+        Some("user") => {
+            let is_synthetic = v
                 .get("isSynthetic")
                 .and_then(Value::as_bool)
-                .unwrap_or(false),
-        },
+                .unwrap_or(false);
+            // claude sends a manual /compact's summary as plain string content.
+            let blocks = match v.pointer("/message/content").and_then(Value::as_str) {
+                Some(text) if is_synthetic => vec![Block::Text {
+                    text: text.to_string(),
+                }],
+                _ => parse_blocks(v.get("message")),
+            };
+            ParsedLine::User {
+                blocks,
+                parent_id: str_field(&v, "parent_tool_use_id"),
+                uuid: str_field(&v, "uuid"),
+                is_replay: v.get("isReplay").and_then(Value::as_bool).unwrap_or(false),
+                is_synthetic,
+            }
+        }
         Some("stream_event") => parse_stream_event(&v),
         Some("result") => ParsedLine::Result {
             is_error: v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
@@ -181,6 +194,10 @@ pub fn parse_line(line: &str) -> ParsedLine {
         },
         Some("tool_progress") => ParsedLine::System {
             subtype: "tool_progress".into(),
+        },
+        // `/clear`; the init that follows carries the new conversation's id.
+        Some("conversation_reset") => ParsedLine::System {
+            subtype: "conversation_reset".into(),
         },
         Some("command_lifecycle") => match str_field(&v, "command_uuid") {
             Some(command_uuid) => ParsedLine::CommandLifecycle {

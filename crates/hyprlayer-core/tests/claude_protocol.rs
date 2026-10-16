@@ -141,6 +141,7 @@ fn parses_compact_boundary_with_metadata() {
         ParsedLine::CompactBoundary {
             trigger,
             pre_tokens,
+            ..
         } => {
             assert_eq!(trigger, "auto");
             assert_eq!(pre_tokens, Some(182_431));
@@ -154,6 +155,7 @@ fn parses_compact_boundary_with_metadata() {
         ParsedLine::CompactBoundary {
             trigger,
             pre_tokens,
+            ..
         } => {
             assert_eq!(trigger, "manual");
             assert_eq!(pre_tokens, None);
@@ -166,6 +168,7 @@ fn parses_compact_boundary_with_metadata() {
         ParsedLine::CompactBoundary {
             trigger,
             pre_tokens,
+            ..
         } => {
             assert_eq!(trigger, "auto");
             assert_eq!(pre_tokens, None);

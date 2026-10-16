@@ -362,10 +362,11 @@ function firstSkillToolAwaitingBody(items: TranscriptItem[], parentId: string | 
   return -1;
 }
 
-function firstCompactAwaitingSummary(items: TranscriptItem[]): number {
-  for (let i = 0; i < items.length; i += 1) {
+// Only the latest divider: an older one that never got its summary must not take this one.
+function latestCompactAwaitingSummary(items: TranscriptItem[]): number {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
-    if (it.kind === "compact" && it.summary === undefined) return i;
+    if (it.kind === "compact") return it.summary === undefined ? i : -1;
   }
   return -1;
 }
@@ -432,14 +433,18 @@ export function reduceEvent(view: SessionView, event: SessionEvent, seq: number 
 
 function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | null): SessionView {
   switch (event.kind) {
-    case "init":
+    case "init": {
+      // A new id is a new conversation (e.g. /clear): its fill is unknown until reported.
+      const fresh = !!view.claudeSessionId && !!event.claudeSessionId && event.claudeSessionId !== view.claudeSessionId;
       return {
         ...view,
         state: "running",
         claudeSessionId: event.claudeSessionId || view.claudeSessionId,
         model: event.model ?? view.model,
         contextWindow: event.model && event.model !== view.model ? null : view.contextWindow,
+        contextTokens: fresh ? null : view.contextTokens,
       };
+    }
 
     case "userMessage": {
       // The sender already shows this turn optimistically; only its own echo is dropped.
@@ -490,7 +495,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
       if (summary !== null) {
         const open = openAssistantIndex(view.items);
         const base = open === -1 ? view.items : view.items.filter((_, i) => i !== open);
-        const compactIdx = firstCompactAwaitingSummary(base);
+        const compactIdx = latestCompactAwaitingSummary(base);
         if (compactIdx !== -1) {
           const compact = base[compactIdx] as Extract<TranscriptItem, { kind: "compact" }>;
           const items = base.slice();
@@ -530,6 +535,8 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
           streaming: true,
         };
       }
+      // Any other injected note (image sizes, resume nudges, hook feedback) is for the model.
+      if (event.injected) return view;
       if (event.parentId) {
         if (!event.text.length) return view;
         return {
@@ -754,8 +761,10 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
       };
 
     case "compactBoundary":
+      // The pre-compaction fill is stale; a usage after the boundary restores it.
       return {
         ...view,
+        contextTokens: null,
         ...appended(
           view,
           (id) => ({

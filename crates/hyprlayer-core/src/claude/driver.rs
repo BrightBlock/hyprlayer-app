@@ -743,15 +743,18 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             context_tokens,
             turn_status: None,
         }],
+        // A manual /compact's result carries no usage, so the boundary is the
+        // only report of the compacted context.
         ParsedLine::CompactBoundary {
             trigger,
             pre_tokens,
-        } => {
-            vec![SessionEvent::CompactBoundary {
-                trigger,
-                pre_tokens,
-            }]
-        }
+            post_tokens,
+        } => std::iter::once(SessionEvent::CompactBoundary {
+            trigger,
+            pre_tokens,
+        })
+        .chain(post_tokens.map(|t| SessionEvent::Usage { context_tokens: t }))
+        .collect(),
         ParsedLine::TaskNotification {
             task_id,
             tool_use_id,

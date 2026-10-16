@@ -1,0 +1,146 @@
+{
+  "scenario": "context_resets",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "usage:30096",
+              "assistantText",
+              "turnDone:30096"
+            ]
+          },
+          "guard": "the turn reports its fill",
+          "ok": true
+        }
+      ],
+      "step": "a turn fills the context"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "compactBoundary",
+              "usage:1374",
+              "assistantText:injected",
+              "turnDone:-"
+            ]
+          },
+          "guard": "the boundary records the size it compacted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "compactBoundary",
+              "usage:1374",
+              "assistantText:injected",
+              "turnDone:-"
+            ]
+          },
+          "guard": "the fill after the boundary is claude's post-compaction size",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init",
+              "compactBoundary",
+              "usage:1374",
+              "assistantText:injected",
+              "turnDone:-"
+            ]
+          },
+          "guard": "the summary reaches the client as injected text, and nothing else does",
+          "ok": true
+        }
+      ],
+      "step": "a manual /compact"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init:cleared",
+              "turnDone:-"
+            ]
+          },
+          "guard": "the client hears the new conversation's id, and no fill",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "events": [
+              "userMessage",
+              "init:cleared",
+              "turnDone:-"
+            ]
+          },
+          "guard": "claude's conversation_reset line raises no protocol error",
+          "ok": true
+        }
+      ],
+      "step": "a /clear"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "order": [
+              "userMessage",
+              "init",
+              "usage:30096",
+              "assistantText",
+              "turnDone",
+              "userMessage",
+              "init",
+              "compactBoundary",
+              "usage:1374",
+              "assistantText:injected",
+              "turnDone",
+              "userMessage",
+              "init:cleared",
+              "turnDone"
+            ]
+          },
+          "guard": "the post-compaction fill and the summary follow the boundary",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "order": [
+              "userMessage",
+              "init",
+              "usage:30096",
+              "assistantText",
+              "turnDone",
+              "userMessage",
+              "init",
+              "compactBoundary",
+              "usage:1374",
+              "assistantText:injected",
+              "turnDone",
+              "userMessage",
+              "init:cleared",
+              "turnDone"
+            ]
+          },
+          "guard": "nothing stored is a protocol error",
+          "ok": true
+        }
+      ],
+      "step": "the stored log replays both"
+    }
+  ]
+}
