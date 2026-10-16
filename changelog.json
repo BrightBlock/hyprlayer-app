@@ -2,10 +2,11 @@
   "versions": [
     {
       "version": "0.8.15",
-      "date": "",
-      "summary": "Fixes Git LFS repositories failing to check out when Hyprlayer is opened from the Dock or Finder.",
+      "date": "2026-10-16",
+      "summary": "Fixes Git LFS checkouts from the Dock and compact summaries leaking into the transcript.",
       "notes": [
-        "Fixed creating a workstream in a Git LFS repository failing with \"git-lfs: command not found\" when Hyprlayer was opened from the Dock or Finder. git now gets the same PATH as agents and terminals, so filters, hooks and credential helpers installed with Homebrew are found."
+        "Fixed creating a workstream in a Git LFS repository failing with \"git-lfs: command not found\" when Hyprlayer was opened from the Dock or Finder. git now gets the same PATH as agents and terminals, so filters, hooks and credential helpers installed with Homebrew are found.",
+        "Fixed the summary after a compact showing up as assistant text when Claude put a notice line ahead of it. It now folds into the compact divider."
       ]
     },
     {
