@@ -207,8 +207,11 @@ pub fn sanitize_title(raw: &str) -> String {
     }
 }
 
-pub async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<String> {
-    let deadline = tokio::time::sleep(TITLE_TIMEOUT);
+pub async fn drain_title(
+    rx: &mut broadcast::Receiver<SessionEvent>,
+    timeout: Duration,
+) -> Option<String> {
+    let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
     let mut streamed = String::new();
     let mut finalized = String::new();
@@ -242,6 +245,22 @@ pub async fn drain_title(rx: &mut broadcast::Receiver<SessionEvent>) -> Option<S
     };
     let title = raw.trim().to_string();
     (!title.is_empty()).then_some(title)
+}
+
+/// One model reply; `cost_usd` only where the harness reports it.
+#[derive(Debug, Clone, Default)]
+pub struct OneShot {
+    pub text: String,
+    pub cost_usd: Option<f64>,
+}
+
+fn non_empty_title(reply: OneShot, provider: &str) -> Result<String> {
+    if reply.text.is_empty() {
+        return Err(CoreError::TitleGenerationEmpty {
+            provider: provider.into(),
+        });
+    }
+    Ok(reply.text)
 }
 
 pub struct ProviderService<'a> {
@@ -537,6 +556,23 @@ impl ProviderService<'_> {
         Ok((!title.is_empty()).then_some(title))
     }
 
+    /// One turn on the model `model_tag` names, with no tools and no session left behind.
+    pub async fn one_shot(
+        &self,
+        model_tag: &str,
+        system: &str,
+        prompt: &str,
+        timeout: Duration,
+    ) -> Result<OneShot> {
+        match parse_model_tag(model_tag) {
+            TitleModel::Claude(flag) => self.claude_print(flag, system, prompt, timeout).await,
+            TitleModel::Codex(model) => self.codex_one_shot(model, system, prompt, timeout).await,
+            TitleModel::OpenCode(model) => {
+                self.opencode_one_shot(model, system, prompt, timeout).await
+            }
+        }
+    }
+
     pub async fn generate_title_claude(&self, flag: &str, prompt: &str) -> Result<String> {
         self.claude_print(
             flag,
@@ -545,20 +581,33 @@ impl ProviderService<'_> {
             TITLE_TIMEOUT,
         )
         .await
+        .map(|reply| reply.text)
     }
 
     /// `None` when the model's reply isn't the JSON asked for.
     pub async fn summarize_validation(&self, report: &str) -> Result<Option<ValidationSummary>> {
+        self.summarize_validation_on("claude:haiku", report, TITLE_TIMEOUT)
+            .await
+            .map(|(summary, _)| summary)
+    }
+
+    /// The summary on `model_tag`, with what the call cost where the harness reports it.
+    pub(crate) async fn summarize_validation_on(
+        &self,
+        model_tag: &str,
+        report: &str,
+        timeout: Duration,
+    ) -> Result<(Option<ValidationSummary>, Option<f64>)> {
         let prompt = format!("{VALIDATION_SUMMARY_PROMPT}\n\n<report>\n{report}\n</report>");
-        let raw = self
-            .claude_print(
-                "haiku",
+        let reply = self
+            .one_shot(
+                model_tag,
                 "You condense plan-validation reports into JSON.",
                 &prompt,
-                TITLE_TIMEOUT,
+                timeout,
             )
             .await?;
-        Ok(parse_validation_summary(&raw))
+        Ok((parse_validation_summary(&reply.text), reply.cost_usd))
     }
 
     // One `claude -p` turn's text. Outside any repo, so the project's context
@@ -570,7 +619,7 @@ impl ProviderService<'_> {
         system: &str,
         prompt: &str,
         timeout: Duration,
-    ) -> Result<String> {
+    ) -> Result<OneShot> {
         ensure_running(self.runtime)?;
         let bin = self.runtime.binaries.require(BinaryKind::Claude).await?;
         let path = self.runtime.binaries.augmented_path().await;
@@ -602,18 +651,37 @@ impl ProviderService<'_> {
         let out = exec.run().await?;
         let stdout = out.stdout.trim();
         match serde_json::from_str::<serde_json::Value>(stdout) {
-            Ok(v) => Ok(v
-                .get("result")
-                .and_then(|r| r.as_str())
-                .unwrap_or_default()
-                .to_string()),
+            Ok(v) => Ok(OneShot {
+                text: v
+                    .get("result")
+                    .and_then(|r| r.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                cost_usd: v.get("total_cost_usd").and_then(|c| c.as_f64()),
+            }),
             // JSON that isn't one object is a stream or an error, never a reply.
-            Err(_) if stdout.starts_with('{') => Ok(String::new()),
-            Err(_) => Ok(out.stdout),
+            Err(_) if stdout.starts_with('{') => Ok(OneShot::default()),
+            Err(_) => Ok(OneShot {
+                text: out.stdout,
+                cost_usd: None,
+            }),
         }
     }
 
     pub async fn generate_title_codex(&self, model: &str, prompt: &str) -> Result<String> {
+        let reply = self
+            .codex_one_shot(model, "", prompt, TITLE_TIMEOUT)
+            .await?;
+        non_empty_title(reply, "Codex")
+    }
+
+    async fn codex_one_shot(
+        &self,
+        model: &str,
+        system: &str,
+        prompt: &str,
+        timeout: Duration,
+    ) -> Result<OneShot> {
         ensure_running(self.runtime)?;
         let bin = self.runtime.binaries.require(BinaryKind::Codex).await?;
         let path = self.runtime.binaries.augmented_path().await;
@@ -630,20 +698,34 @@ impl ProviderService<'_> {
             effort: None,
             ephemeral: true,
             env: vec![("PATH".to_string(), path.to_string_lossy().into_owned())],
-            developer_instructions: None,
+            developer_instructions: (!system.is_empty()).then(|| system.to_string()),
         })
         .await?;
 
         driver.send_user_turn(prompt, None, None, None)?;
-        let collected = drain_title(&mut rx).await;
+        let collected = drain_title(&mut rx, timeout).await;
         driver.kill();
-
-        collected.ok_or_else(|| CoreError::TitleGenerationEmpty {
-            provider: "Codex".into(),
+        Ok(OneShot {
+            text: collected.unwrap_or_default(),
+            cost_usd: None,
         })
     }
 
     pub async fn generate_title_opencode(&self, model: &str, prompt: &str) -> Result<String> {
+        let reply = self
+            .opencode_one_shot(model, "", prompt, TITLE_TIMEOUT)
+            .await?;
+        non_empty_title(reply, "OpenCode")
+    }
+
+    // OpenCode sessions take no system prompt of their own, so it leads the turn.
+    async fn opencode_one_shot(
+        &self,
+        model: &str,
+        system: &str,
+        prompt: &str,
+        timeout: Duration,
+    ) -> Result<OneShot> {
         ensure_running(self.runtime)?;
         let server = self.opencode_server().await?;
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
@@ -651,13 +733,18 @@ impl ProviderService<'_> {
             .await
             .map_err(|detail| CoreError::Opencode { detail })?;
 
-        driver.send_user_turn(prompt, None, None, None)?;
-        let collected = drain_title(&mut rx).await;
+        let turn = if system.is_empty() {
+            prompt.to_string()
+        } else {
+            format!("{system}\n\n{prompt}")
+        };
+        driver.send_user_turn(&turn, None, None, None)?;
+        let collected = drain_title(&mut rx, timeout).await;
         driver.kill();
         driver.delete_session().await;
-
-        collected.ok_or_else(|| CoreError::TitleGenerationEmpty {
-            provider: "OpenCode".into(),
+        Ok(OneShot {
+            text: collected.unwrap_or_default(),
+            cost_usd: None,
         })
     }
 
@@ -865,6 +952,7 @@ mod tests {
             num_turns: None,
             context_tokens: None,
             turn_status: None,
+            thread_tokens: None,
         }
     }
 
@@ -875,7 +963,7 @@ mod tests {
         tx.send(partial("Token Refresh")).unwrap();
         tx.send(turn_done()).unwrap();
         assert_eq!(
-            drain_title(&mut rx).await.as_deref(),
+            drain_title(&mut rx, TITLE_TIMEOUT).await.as_deref(),
             Some("OAuth Token Refresh"),
         );
     }
@@ -887,7 +975,7 @@ mod tests {
         tx.send(assistant("Refresh Token Flow")).unwrap();
         tx.send(turn_done()).unwrap();
         assert_eq!(
-            drain_title(&mut rx).await.as_deref(),
+            drain_title(&mut rx, TITLE_TIMEOUT).await.as_deref(),
             Some("Refresh Token Flow"),
         );
     }
@@ -902,7 +990,7 @@ mod tests {
             let (tx, mut rx) = broadcast::channel(8);
             tx.send(assistant(sentinel)).unwrap();
             assert_eq!(
-                drain_title(&mut rx).await,
+                drain_title(&mut rx, TITLE_TIMEOUT).await,
                 None,
                 "sentinel must not become a title: {sentinel:?}",
             );

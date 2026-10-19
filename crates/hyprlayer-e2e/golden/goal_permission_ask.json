@@ -1,0 +1,106 @@
+{
+  "scenario": "goal_permission_ask",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "reason": "Bash"
+          },
+          "guard": "B hears the goal wait on the Bash permission",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "activeMsEqual": true,
+            "step": "waiting"
+          },
+          "guard": "the step is waiting and active time stands still across 3 s",
+          "ok": true
+        }
+      ],
+      "step": "an ask moves the goal to waiting"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answered": true,
+            "changes": [
+              "running/working/0",
+              "running/working/1",
+              "running/waiting/1",
+              "running/working/1",
+              "running/checking/1"
+            ]
+          },
+          "guard": "B's answer moves the goal back to working, then the iteration ends and checks run",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "clockStoppedWhileWaiting": true
+          },
+          "guard": "the time spent waiting is not counted as active time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcome1": "fail"
+          },
+          "guard": "iteration 1's checks ran after the answer",
+          "ok": true
+        }
+      ],
+      "step": "another device answers"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "iteration": 2,
+            "reason": "Ship it?",
+            "step": "waiting"
+          },
+          "guard": "iteration 2 waits on the question, and B hears its text",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "answered": true,
+            "changes": [
+              "running/working/2",
+              "running/checking/2",
+              "met/-/2"
+            ]
+          },
+          "guard": "A's answer moves the goal back to working",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endReason": "checks_passed",
+            "iteration": 2,
+            "status": "met"
+          },
+          "guard": "the goal meets at iteration 2",
+          "ok": true
+        }
+      ],
+      "step": "a question waits too"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

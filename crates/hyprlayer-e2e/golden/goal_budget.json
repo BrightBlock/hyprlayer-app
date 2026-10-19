@@ -1,0 +1,250 @@
+{
+  "scenario": "goal_budget",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cap": null,
+            "deniesProposeGoal": true,
+            "launches": 1
+          },
+          "guard": "its one launch denies ProposeGoal and carries no budget cap",
+          "ok": true
+        }
+      ],
+      "step": "a session the goal did not spawn has no cap"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "budget_limit",
+            "iteration": 3,
+            "status": "exhausted"
+          },
+          "guard": "it ends exhausted on the budget at iteration 3",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spentCents": 120
+          },
+          "guard": "it spent $1.20 on its three 40-cent iterations; the session's earlier turn is not counted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "capped": 0,
+            "launches": 1
+          },
+          "guard": "no launch carried a budget cap",
+          "ok": true
+        }
+      ],
+      "step": "the boundary budget ends the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "iteration": 1,
+            "pauseReason": "user",
+            "spentCents": 40,
+            "status": "paused"
+          },
+          "guard": "the goal pauses after iteration 1 with $0.40 spent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iteration": 2,
+            "spentCents": 80,
+            "status": "exhausted",
+            "userTurnEnded": true
+          },
+          "guard": "the user's 40-cent turn is not counted: iteration 2 brings the spend to $0.80",
+          "ok": true
+        }
+      ],
+      "step": "turns during a pause do not count"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cap": "1"
+          },
+          "guard": "its launch carries the goal's one-dollar cap",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "earlierTurnsCompleted": true,
+            "tripIteration": 2
+          },
+          "guard": "iteration 2's turn trips the backstop",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endReason": "budget_limit",
+            "iteration": 2,
+            "spentCents": 140,
+            "status": "exhausted"
+          },
+          "guard": "the goal ends exhausted on the budget at iteration 2",
+          "ok": true
+        }
+      ],
+      "step": "the backstop trips mid-turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cap": null,
+            "relaunched": true,
+            "resumes": true
+          },
+          "guard": "after the goal ends, its session is relaunched with --resume and without the cap",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "normalReply": true
+          },
+          "guard": "a message after the end gets a normal reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cap": null,
+            "firstCap": "10",
+            "relaunched": true,
+            "resumes": true,
+            "status": "paused"
+          },
+          "guard": "after a pause, the capped launch is replaced by a --resume without the cap",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "normalReply": true
+          },
+          "guard": "a message during the pause gets a normal reply",
+          "ok": true
+        }
+      ],
+      "step": "the cap is lifted when the runner exits"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "iteration": 2,
+            "launchesAtResume": 1,
+            "raised": 3,
+            "resumed": "running",
+            "status": "exhausted"
+          },
+          "guard": "the goal ends at its cap of 2, and a raise and a resume land while the lift waits on the exit",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cap": null,
+            "goalMessages": 3,
+            "iteration3CostCents": 40,
+            "launches": 2,
+            "receivedByTheHarness": 3,
+            "resumes": true
+          },
+          "guard": "iteration 3 is sent once, to the relaunched harness",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exited": false,
+            "goalTurnsAfterAttach": 2,
+            "lastTurnDone": true,
+            "relaunched": true
+          },
+          "guard": "a client attached before the lift keeps its stream: it sees the relaunch and iteration 3's turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "iteration": 3,
+            "status": "exhausted"
+          },
+          "guard": "the goal ends exhausted at its new cap of 3",
+          "ok": true
+        }
+      ],
+      "step": "extend while the cap is lifted"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "session_ended",
+            "iterationWasRunning": true,
+            "status": "stopped"
+          },
+          "guard": "the kill ends the goal with its session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cap": "10",
+            "launches": 1
+          },
+          "guard": "its launch carried the cap, and nothing relaunched it after the kill",
+          "ok": true
+        }
+      ],
+      "step": "a killed session is not relaunched to lift the cap"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "budget_limit",
+            "iteration": 2,
+            "spentCents": 80,
+            "status": "exhausted"
+          },
+          "guard": "the crashed iteration's spend reaches the cap, so the goal ends at iteration 2",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "caps": [
+              null
+            ],
+            "launches": 1
+          },
+          "guard": "nothing relaunched the crashed session with a spent budget",
+          "ok": true
+        }
+      ],
+      "step": "a crash past the budget ends the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

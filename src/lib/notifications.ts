@@ -85,7 +85,11 @@ export function setupNotificationActions(): void {
   });
 }
 
-export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
+async function dispatch(
+  target: { workstreamId: string; projectPath: string },
+  title: string,
+  body: string,
+): Promise<void> {
   try {
     const settings = await getSettings();
     const cfg = settings.notifications ?? DEFAULT_CONFIG;
@@ -93,20 +97,38 @@ export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
     if (!(await ensurePermission())) return;
 
     lastIntent = {
-      projectPath: args.projectPath,
-      workstreamId: args.workstreamId,
+      projectPath: target.projectPath,
+      workstreamId: target.workstreamId,
       firedAt: Date.now(),
     };
 
     sendNotification({
-      title: `${args.workstreamTitle} needs you`,
-      body: `Agent paused in ${args.stage} . Waiting for your input.`,
+      title,
+      body,
       sound: !IS_MACOS && (cfg.sound ?? DEFAULT_CONFIG.sound) ? "default" : undefined,
     });
     if (cfg.sound ?? DEFAULT_CONFIG.sound) void playSound();
   } catch (e) {
     log.warn("notifications", "dispatch failed", e);
   }
+}
+
+export async function notifyNeedsAttention(args: NotifyArgs): Promise<void> {
+  await dispatch(
+    args,
+    `${args.workstreamTitle} needs you`,
+    `Agent paused in ${args.stage} . Waiting for your input.`,
+  );
+}
+
+export async function notifyGoal(args: {
+  workstreamId: string;
+  projectPath: string;
+  workstreamTitle: string;
+  title: string;
+  body: string;
+}): Promise<void> {
+  await dispatch(args, `${args.workstreamTitle}: ${args.title}`, args.body);
 }
 
 export async function sendTestNotification(): Promise<{

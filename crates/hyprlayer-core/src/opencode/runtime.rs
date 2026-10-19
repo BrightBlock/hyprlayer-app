@@ -11,7 +11,7 @@ use tokio::process::Command;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, Mutex};
 
-use crate::agent::{AgentDriver, KillFlag};
+use crate::agent::{AgentDriver, KillFlag, UsageSoFar};
 use crate::claude::{ExitOutcome, SessionEvent};
 use crate::error::Result as CoreResult;
 use crate::models::session::QuestionAnswers;
@@ -580,6 +580,8 @@ pub struct OpenCodeDriver {
     kill_flag: Arc<KillFlag>,
     filter_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>>,
+    /// The translator's running `cost_total`, published after every event it handles.
+    cost_so_far: Arc<std::sync::Mutex<Option<f64>>>,
 }
 
 impl OpenCodeDriver {
@@ -663,6 +665,8 @@ impl OpenCodeDriver {
         let pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>> =
             Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
         let pq = pending_questions.clone();
+        let cost_so_far = Arc::new(std::sync::Mutex::new(None));
+        let published_cost = cost_so_far.clone();
         let task = server.tasks.spawn(async move {
             let mut xlate = Translator::default();
             loop {
@@ -684,7 +688,11 @@ impl OpenCodeDriver {
                                 }
                             }
                         }
-                        for se in xlate.handle(&ev) {
+                        let translated = xlate.handle(&ev);
+                        if let Ok(mut so_far) = published_cost.lock() {
+                            *so_far = Some(xlate.cost_total);
+                        }
+                        for se in translated {
                             let _ = tx.send(se);
                         }
                     }
@@ -705,6 +713,7 @@ impl OpenCodeDriver {
             kill_flag: Arc::new(KillFlag::default()),
             filter_task: Mutex::new(Some(task)),
             pending_questions,
+            cost_so_far,
         });
         Ok((driver, primary_rx))
     }
@@ -802,7 +811,8 @@ impl OpenCodeDriver {
                     cost_usd: None,
                     num_turns: None,
                     context_tokens: None,
-                    turn_status: None,
+                    turn_status: Some("failed".into()),
+                    thread_tokens: None,
                 });
             }
         });
@@ -831,7 +841,8 @@ impl OpenCodeDriver {
                     cost_usd: None,
                     num_turns: None,
                     context_tokens: None,
-                    turn_status: None,
+                    turn_status: Some("failed".into()),
+                    thread_tokens: None,
                 });
             }
         });
@@ -942,6 +953,13 @@ impl AgentDriver for OpenCodeDriver {
     fn interrupt(&self) -> CoreResult<()> {
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         Ok(())
+    }
+
+    fn usage_so_far(&self) -> UsageSoFar {
+        UsageSoFar {
+            cost_usd: self.cost_so_far.lock().ok().and_then(|cost| *cost),
+            thread_tokens: None,
+        }
     }
 
     fn kill(&self) {
@@ -1055,6 +1073,8 @@ struct Translator {
     cost_total: f64,
     context_tokens: Option<u32>,
     planning: bool,
+    /// An error or abort already ended the turn; the `session.idle` that follows is the same turn.
+    turn_ended: bool,
 }
 
 impl Translator {
@@ -1069,6 +1089,9 @@ impl Translator {
                     info.get("id").and_then(Value::as_str),
                     info.get("role").and_then(Value::as_str),
                 ) {
+                    if role == "user" && !self.roles.contains_key(id) {
+                        self.turn_ended = false;
+                    }
                     self.roles.insert(id.to_string(), role.to_string());
                 }
                 // Every message names the agent answering it; `plan` is OpenCode's plan mode.
@@ -1129,11 +1152,13 @@ impl Translator {
                 request_id: str_field(p, "id"),
                 questions: questions_from_value(p.get("questions")),
             }],
+            "session.idle" if self.turn_ended => Vec::new(),
             "session.idle" => vec![SessionEvent::TurnDone {
                 cost_usd: Some(self.cost_total),
                 num_turns: None,
                 context_tokens: self.context_tokens,
-                turn_status: None,
+                turn_status: Some("completed".into()),
+                thread_tokens: None,
             }],
             "session.error" => {
                 let err = p.get("error");
@@ -1147,12 +1172,14 @@ impl Translator {
                     .and_then(Value::as_str)
                     .unwrap_or("OpenCode reported an error")
                     .to_string();
+                self.turn_ended = true;
                 if name == "MessageAbortedError" || msg == "Aborted" {
                     return vec![SessionEvent::TurnDone {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
-                        turn_status: None,
+                        turn_status: Some("interrupted".into()),
+                        thread_tokens: None,
                     }];
                 }
                 vec![
@@ -1165,7 +1192,8 @@ impl Translator {
                         cost_usd: None,
                         num_turns: None,
                         context_tokens: None,
-                        turn_status: None,
+                        turn_status: Some("failed".into()),
+                        thread_tokens: None,
                     },
                 ]
             }
@@ -1290,6 +1318,7 @@ impl Translator {
                     self.context_tokens = Some(ctx);
                     out.push(SessionEvent::Usage {
                         context_tokens: ctx,
+                        thread_tokens: None,
                     });
                 }
             }
@@ -1535,6 +1564,46 @@ mod tests {
         OcEvent {
             kind: kind.to_string(),
             properties,
+        }
+    }
+
+    #[test]
+    fn an_ended_turn_ignores_the_idle_events_that_trail_it() {
+        let statuses = |events: Vec<SessionEvent>| -> Vec<Option<String>> {
+            events
+                .into_iter()
+                .filter_map(|e| match e {
+                    SessionEvent::TurnDone { turn_status, .. } => Some(turn_status),
+                    _ => None,
+                })
+                .collect()
+        };
+        let user = |id: &str| {
+            oc(
+                "message.updated",
+                json!({ "info": { "id": id, "role": "user" } }),
+            )
+        };
+        for (error, status) in [
+            (json!({ "name": "MessageAbortedError" }), "interrupted"),
+            (
+                json!({ "name": "ProviderError", "data": { "message": "boom" } }),
+                "failed",
+            ),
+        ] {
+            let mut x = Translator::default();
+            let mut events = x.handle(&user("u1"));
+            events.extend(x.handle(&oc("session.error", json!({ "error": error }))));
+            events.extend(x.handle(&oc("session.idle", json!({}))));
+            events.extend(x.handle(&oc("session.idle", json!({}))));
+            // Seen again, the same user message starts nothing.
+            events.extend(x.handle(&user("u1")));
+            events.extend(x.handle(&oc("session.idle", json!({}))));
+            assert_eq!(statuses(events), [Some(status.to_string())]);
+
+            let mut next = x.handle(&user("u2"));
+            next.extend(x.handle(&oc("session.idle", json!({}))));
+            assert_eq!(statuses(next), [Some("completed".to_string())]);
         }
     }
 

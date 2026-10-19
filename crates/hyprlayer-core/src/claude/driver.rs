@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use super::events::{ExitOutcome, SessionEvent};
 use super::protocol::{self, Block, ParsedLine};
-use crate::agent::{declined_message, KillFlag};
+use crate::agent::{declined_message, KillFlag, UsageSoFar};
 use crate::error::{CoreError, Result};
 use crate::store::session_event_codec::questions_from_value;
 use hyprlayer_models::session::QuestionAnswers;
@@ -128,6 +128,9 @@ pub struct ClaudeDriver {
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     inbox: Arc<StdMutex<Inbox>>,
+    /// The process's cumulative `total_cost_usd` as of its last `result`.
+    cost_so_far: Arc<StdMutex<Option<f64>>>,
+    budget_cap: Option<f64>,
     killer: Killer,
     claude_config_dir: Option<PathBuf>,
     cwd: PathBuf,
@@ -242,6 +245,7 @@ impl ClaudeDriver {
             HashMap::<String, oneshot::Sender<Value>>::new(),
         ));
         let inbox = Arc::new(StdMutex::new(Inbox::default()));
+        let cost_so_far = Arc::new(StdMutex::new(None));
 
         tokio::spawn(write_loop(stdin, stdin_rx));
 
@@ -256,6 +260,7 @@ impl ClaudeDriver {
             pending_permissions.clone(),
             pending_controls.clone(),
             inbox.clone(),
+            cost_so_far.clone(),
         ));
 
         Ok((
@@ -269,6 +274,8 @@ impl ClaudeDriver {
                 pending_permissions,
                 pending_controls,
                 inbox,
+                cost_so_far,
+                budget_cap: config.max_budget_usd,
                 killer: Killer { pid },
                 claude_config_dir: config.claude_config_dir,
                 cwd: config.cwd,
@@ -479,6 +486,17 @@ impl ClaudeDriver {
         self.killer.pid
     }
 
+    pub fn usage_so_far(&self) -> UsageSoFar {
+        UsageSoFar {
+            cost_usd: self.cost_so_far.lock().ok().and_then(|cost| *cost),
+            thread_tokens: None,
+        }
+    }
+
+    pub fn budget_cap(&self) -> Option<f64> {
+        self.budget_cap
+    }
+
     pub fn stderr_tail(&self) -> String {
         self.stderr_ring
             .lock()
@@ -566,6 +584,7 @@ async fn read_and_wait(
     pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     inbox: Arc<StdMutex<Inbox>>,
+    cost_so_far: Arc<StdMutex<Option<f64>>>,
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
@@ -598,11 +617,15 @@ async fn read_and_wait(
                     ParsedLine::Result {
                         is_error,
                         context_windows,
+                        total_cost_usd,
                         ..
                     } => {
                         lock(&inbox).busy = false;
                         saw_result = true;
                         saw_error_result |= *is_error;
+                        if let (Some(cost), Ok(mut so_far)) = (total_cost_usd, cost_so_far.lock()) {
+                            *so_far = Some(*cost);
+                        }
                         if let Some(tokens) = context_windows
                             .iter()
                             .find(|(m, _)| Some(m) == model.as_ref())
@@ -684,7 +707,10 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             parent_id,
         } => context_tokens
             .filter(|_| parent_id.is_none())
-            .map(|t| SessionEvent::Usage { context_tokens: t })
+            .map(|t| SessionEvent::Usage {
+                context_tokens: t,
+                thread_tokens: None,
+            })
             .into_iter()
             .chain(
                 blocks
@@ -733,6 +759,9 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             }
         }
         ParsedLine::Result {
+            is_error,
+            subtype,
+            terminal_reason,
             total_cost_usd,
             num_turns,
             context_tokens,
@@ -741,7 +770,10 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             cost_usd: total_cost_usd,
             num_turns,
             context_tokens,
-            turn_status: None,
+            turn_status: Some(
+                claude_turn_status(is_error, subtype.as_deref(), terminal_reason.as_deref()).into(),
+            ),
+            thread_tokens: None,
         }],
         // A manual /compact's result carries no usage, so the boundary is the
         // only report of the compacted context.
@@ -753,7 +785,10 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             trigger,
             pre_tokens,
         })
-        .chain(post_tokens.map(|t| SessionEvent::Usage { context_tokens: t }))
+        .chain(post_tokens.map(|t| SessionEvent::Usage {
+            context_tokens: t,
+            thread_tokens: None,
+        }))
         .collect(),
         ParsedLine::TaskNotification {
             task_id,
@@ -778,6 +813,19 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
         ParsedLine::PermissionMode { mode } => vec![SessionEvent::PermissionModeChanged { mode }],
         ParsedLine::ControlResponse { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
+    }
+}
+
+fn claude_turn_status(
+    is_error: bool,
+    subtype: Option<&str>,
+    terminal: Option<&str>,
+) -> &'static str {
+    match (subtype, terminal) {
+        (_, Some("aborted_streaming")) => "interrupted",
+        (Some("error_max_budget_usd"), _) => "budget_exhausted",
+        _ if is_error => "failed",
+        _ => "completed",
     }
 }
 

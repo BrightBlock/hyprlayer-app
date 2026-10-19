@@ -145,7 +145,7 @@ async fn context_resets() {
         .iter()
         .skip_while(|e| !matches!(e, SessionEvent::CompactBoundary { .. }))
         .find_map(|e| match e {
-            SessionEvent::Usage { context_tokens } => Some(*context_tokens),
+            SessionEvent::Usage { context_tokens, .. } => Some(*context_tokens),
             _ => None,
         });
     j.guard(
@@ -256,7 +256,7 @@ fn shape(events: &[SessionEvent]) -> Vec<String> {
                 ..
             } if provider_session_id == CLEARED_SESSION => "init:cleared".into(),
             SessionEvent::AssistantText { injected: true, .. } => "assistantText:injected".into(),
-            SessionEvent::Usage { context_tokens } => format!("usage:{context_tokens}"),
+            SessionEvent::Usage { context_tokens, .. } => format!("usage:{context_tokens}"),
             SessionEvent::TurnDone { context_tokens, .. } => match context_tokens {
                 Some(t) => format!("turnDone:{t}"),
                 None => "turnDone:-".into(),

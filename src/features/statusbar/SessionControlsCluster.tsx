@@ -2,9 +2,21 @@ import { useRef, useState } from "react";
 
 import { Icon } from "@/components/Icon";
 import { MenuPanel, OptionMenuList } from "@/components/OptionMenuList";
-import { MenuItem, MenuSeparator, Popover, cx } from "@/components/ui";
+import { Button, MenuItem, MenuSeparator, Popover, Spinner, cx } from "@/components/ui";
+import {
+  GOAL_CONTROL_LABEL,
+  GOAL_STATUS_LABEL,
+  GOAL_STEP_LABEL,
+  formatActiveTime,
+  goalBudgetUnit,
+  goalControls,
+  goalMeters,
+} from "@/lib/domain/goals";
 import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
 import { formatTokens } from "@/lib/format";
+import { useGoals } from "@/lib/queries";
+import { useTickingNow } from "@/lib/useTickingNow";
+import { goalActiveSince, goalMeterValues, useGoalControl } from "@/features/session/sessionGoal";
 import { useFocusedSessionControls, type SessionControls } from "@/features/session/sessionControls";
 import { BAR_BUTTON, Divider, Dot, useMenuOpen } from "./parts";
 import { meterClasses, meterPercent, meterState } from "./statusBarState";
@@ -60,6 +72,126 @@ export function SessionControlsCluster({
           />
         )}
       </div>
+      {controls.goal && workstreamId && (
+        <>
+          <Divider />
+          <GoalChip goal={controls.goal} workstreamId={workstreamId} />
+        </>
+      )}
+    </div>
+  );
+}
+
+type GoalSnapshot = NonNullable<SessionControls["goal"]>;
+
+// `goalChip`'s text from the published snapshot, so a closed chip reads no goal query.
+function chipText(goal: GoalSnapshot, now: number): string {
+  const phase = goal.step ? GOAL_STEP_LABEL[goal.step] : GOAL_STATUS_LABEL[goal.status].toLowerCase();
+  const ticking = goal.activeSince === null ? 0 : Math.max(0, now - goal.activeSince);
+  return [`${goal.iteration}/${goal.maxIterations}`, phase, goal.spent, formatActiveTime(goal.activeMs + ticking)].join(
+    " · ",
+  );
+}
+
+function GoalChip({ goal, workstreamId }: { goal: GoalSnapshot; workstreamId: string }) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const now = useTickingNow(goal.activeSince);
+  const text = chipText(goal, now);
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={`Goal: ${text}`}
+        data-testid="goal-chip"
+        className={cx(BAR_BUTTON, "min-w-0 shrink font-medium text-ink")}
+      >
+        <Icon name="goal" size="xs" className="text-ink-dim" />
+        <span className="truncate tabular-nums">{text}</span>
+      </button>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        side="top"
+        align="end"
+        aria-label="Goal"
+        className="w-72 p-3"
+      >
+        <GoalPopoverBody goalId={goal.id} workstreamId={workstreamId} onSheet={() => setOpen(false)} />
+      </Popover>
+    </>
+  );
+}
+
+function GoalMeterRow({ label, fraction, value }: { label: string; fraction: number; value: string }) {
+  const percent = Math.round(fraction * 100);
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <UsageMeter label={label} percent={percent} title={`${label} ${value}`} />
+      <span className="text-meta text-ink-dim">{value}</span>
+    </div>
+  );
+}
+
+function GoalPopoverBody({
+  goalId,
+  workstreamId,
+  onSheet,
+}: {
+  goalId: string;
+  workstreamId: string;
+  onSheet: () => void;
+}) {
+  const goal = useGoals(workstreamId).data?.find((g) => g.id === goalId);
+  const now = useTickingNow(goal ? goalActiveSince(goal) : null);
+  const control = useGoalControl();
+  if (!goal) return <Spinner size="sm" />;
+  const meters = goalMeters(goal, now);
+  const values = goalMeterValues(goal, now);
+  return (
+    <div className="space-y-2.5">
+      <div className="text-body font-medium text-ink">Goal · {GOAL_STATUS_LABEL[goal.status].toLowerCase()}</div>
+      <p className="text-ui text-ink-2">{goal.condition}</p>
+      <dl className="space-y-1 text-ui">
+        <div className="flex gap-3">
+          <dt className="w-10 shrink-0 text-ink-dim">Step</dt>
+          <dd className="min-w-0 text-ink">{goal.step ? GOAL_STEP_LABEL[goal.step] : "—"}</dd>
+        </div>
+        <div className="flex gap-3">
+          <dt className="w-10 shrink-0 text-ink-dim">Last</dt>
+          <dd className="min-w-0 break-words text-ink">{goal.lastReason ?? goal.lastOutcome ?? "—"}</dd>
+        </div>
+      </dl>
+      <div className="space-y-1.5">
+        <GoalMeterRow
+          label="iter"
+          fraction={meters.iterations}
+          value={`${goal.iteration} / ${goal.limits.maxIterations}`}
+        />
+        <GoalMeterRow label={goalBudgetUnit(goal) === "usd" ? "$" : "tok"} fraction={meters.spend} value={values.spend} />
+        <GoalMeterRow label="time" fraction={meters.time} value={values.time} />
+      </div>
+      {goalControls(goal).length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {goalControls(goal).map((c) => (
+            <Button
+              key={c}
+              size="sm"
+              disabled={control.pending && (c === "pause" || c === "resume" || c === "stop")}
+              onClick={() => {
+                control.run(c, goal);
+                if (c === "edit" || c === "extend" || c === "startAgain") onSheet();
+              }}
+            >
+              {GOAL_CONTROL_LABEL[c]}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

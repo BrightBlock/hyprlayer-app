@@ -2,7 +2,7 @@
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionEvent } from "@/lib/bindings";
+import type { GoalBrief, SessionEvent } from "@/lib/bindings";
 
 const h = vi.hoisted(() => {
   class FakeChannel {
@@ -115,6 +115,10 @@ const {
   useSessionStore,
   useWorkstreamArtifacts,
   useMostRecentDoc,
+  setSessionGoal,
+  armResumeAfterSend,
+  takeArmedResume,
+  reattachRunningGoal,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
 const { pullNow } = await import("./sessionStore");
@@ -1567,5 +1571,101 @@ describe("transcript sync: queue and reload", () => {
     expect(texts).not.toContain("b");
     h.resumeSession.mockReset();
     h.resumeSession.mockImplementation(async () => ({ status: "ok", data: h.RESUMED }));
+  });
+});
+
+describe("goals in the session store", () => {
+  const brief = (over: Partial<GoalBrief> = {}): GoalBrief => ({
+    id: "g1",
+    status: "running",
+    step: "working",
+    pauseReason: null,
+    iteration: 1,
+    maxIterations: 10,
+    ...over,
+  });
+
+  async function restingSession(): Promise<string> {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(TURN_DONE);
+    return id;
+  }
+
+  it("activity with goal briefs", async () => {
+    const id = await restingSession();
+    expect(classifyEntry(entryOf(id))).toBe("review");
+
+    setSessionGoal(id, brief({ step: "checking" }));
+    expect(classifyEntry(entryOf(id))).toBe("working");
+    setSessionGoal(id, brief({ step: "waiting" }));
+    expect(classifyEntry(entryOf(id))).toBe("needs-you");
+    setSessionGoal(id, brief({ status: "paused", step: null, pauseReason: "needs_human" }));
+    expect(classifyEntry(entryOf(id))).toBe("needs-you");
+    setSessionGoal(id, brief({ status: "paused", step: null, pauseReason: "user" }));
+    expect(classifyEntry(entryOf(id))).toBe("review");
+
+    emit({ kind: "userMessage", text: "go on", stage: null });
+    expect(classifyEntry(entryOf(id))).toBe("working");
+    setSessionGoal(id, brief({ status: "met", step: null }));
+    expect(classifyEntry(entryOf(id))).toBe("review");
+  });
+
+  it("a running goal's ask notifies once", async () => {
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+    h.notifyNeedsAttention.mockClear();
+    const id = await startBusySession();
+    emit(INIT);
+    setSessionGoal(id, brief());
+    emit({ kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}" });
+    setSessionGoal(id, brief({ step: "waiting" }));
+    emit({ kind: "questionAsk", requestId: "q1", questions: [] });
+    await settle();
+
+    expect(h.notifyNeedsAttention).not.toHaveBeenCalled();
+  });
+
+  async function crashedGoalSession(): Promise<string> {
+    const id = await restingSession();
+    setSessionGoal(id, brief());
+    emit({ kind: "exited", outcome: "crashed", code: 1, stderrTail: "" });
+    h.resumeSession.mockClear();
+    return id;
+  }
+
+  const reportLive = (id: string) =>
+    h.listActiveSessions.mockResolvedValue({ status: "ok", data: [{ session: { id } }] });
+
+  it("a goal running on a relaunched harness reattaches its ended stream once", async () => {
+    const id = await crashedGoalSession();
+    reportLive(id);
+
+    await Promise.all([
+      reattachRunningGoal(id, brief({ iteration: 2 })),
+      reattachRunningGoal(id, brief({ iteration: 2, step: "checking" })),
+    ]);
+    expect(h.resumeSession).toHaveBeenCalledTimes(1);
+    h.listActiveSessions.mockReset();
+    h.listActiveSessions.mockResolvedValue({ status: "ok", data: [] });
+  });
+
+  it("a paused, ended or unchanged goal, or a dead harness, reattaches nothing", async () => {
+    const id = await crashedGoalSession();
+    reportLive(id);
+    await reattachRunningGoal(id, brief({ status: "paused", step: null, pauseReason: "user" }));
+    await reattachRunningGoal(id, brief({ status: "met", step: null }));
+    await reattachRunningGoal(id, brief({ step: "resuming" }));
+    await reattachRunningGoal(id, brief());
+    h.listActiveSessions.mockResolvedValue({ status: "ok", data: [] });
+    await reattachRunningGoal(id, brief({ iteration: 2 }));
+
+    expect(h.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it("an armed resume fires once", () => {
+    expect(takeArmedResume("s-armed")).toBeNull();
+    armResumeAfterSend("s-armed", "g1");
+    expect(takeArmedResume("s-armed")).toBe("g1");
+    expect(takeArmedResume("s-armed")).toBeNull();
   });
 });

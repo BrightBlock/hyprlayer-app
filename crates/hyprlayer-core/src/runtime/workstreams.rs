@@ -1256,6 +1256,7 @@ impl WorkstreamService<'_> {
                     Vec::new()
                 })
         };
+        self.runtime.goals().stop_for_workstream(&id).await;
         for session in &sessions {
             self.runtime
                 .sessions()

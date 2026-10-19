@@ -9,7 +9,7 @@ import { useUiStore, type UiStore } from "@/lib/uiStore";
 // `key` is a plan doc path or the inline key; `followLatest` keeps the newest revision's card active.
 export type PlanSelection = { key: string; cardId: string | null; followLatest: boolean };
 
-type AsideSnapshot = { view: "changes" | "plan"; hidden: boolean; drawer: UiStore["narrowDrawer"] };
+type AsideSnapshot = { view: UiStore["asideView"]; hidden: boolean; drawer: UiStore["narrowDrawer"] };
 
 type PlanPreviewState = {
   bySession: Record<string, PlanSelection>;
@@ -39,7 +39,7 @@ export function setPlanPreviewNarrow(narrow: boolean): void {
 }
 
 type UiSlice = {
-  asideView: "changes" | "plan";
+  asideView: UiStore["asideView"];
   diffHidden: boolean;
   narrowDrawer: UiStore["narrowDrawer"];
 };

@@ -35,6 +35,8 @@ pub enum ParsedLine {
     },
     Result {
         is_error: bool,
+        subtype: Option<String>,
+        terminal_reason: Option<String>,
         total_cost_usd: Option<f64>,
         num_turns: Option<u32>,
         stop_reason: Option<String>,
@@ -178,6 +180,8 @@ pub fn parse_line(line: &str) -> ParsedLine {
         Some("stream_event") => parse_stream_event(&v),
         Some("result") => ParsedLine::Result {
             is_error: v.get("is_error").and_then(Value::as_bool).unwrap_or(false),
+            subtype: str_field(&v, "subtype"),
+            terminal_reason: str_field(&v, "terminal_reason"),
             total_cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
             num_turns: v.get("num_turns").and_then(Value::as_u64).map(|n| n as u32),
             stop_reason: str_field(&v, "stop_reason"),

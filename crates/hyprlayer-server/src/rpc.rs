@@ -23,6 +23,7 @@ use hyprlayer_core::gitops::{
 };
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
+use hyprlayer_core::models::goal::{Goal, GoalDetail, GoalSpec};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
@@ -34,6 +35,7 @@ use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::account::{AccountStatus, SignInStart};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
+use hyprlayer_core::runtime::goals::{DeriveGoalRequest, GoalPatch, StartGoalRequest};
 use hyprlayer_core::runtime::library::{
     CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
 };
@@ -221,6 +223,14 @@ hyprlayer_proto::commands! {
     ResolveReviewNote: resolve_review_note(workstream_id: String, note_id: String, resolved: bool) -> ();
     SubmitReview: submit_review(req: SubmitReviewRequest) -> SubmitReviewResult;
     MarkReviewRoundDelivered: mark_review_round_delivered(workstream_id: String, round: u32) -> ();
+    StartGoal: start_goal(request: StartGoalRequest) -> Goal;
+    PauseGoal: pause_goal(goal_id: String) -> Goal;
+    ResumeGoal: resume_goal(goal_id: String) -> Goal;
+    StopGoal: stop_goal(goal_id: String) -> Goal;
+    UpdateGoal: update_goal(goal_id: String, patch: GoalPatch) -> Goal;
+    GetGoal: get_goal(goal_id: String) -> GoalDetail;
+    ListGoals: list_goals(workstream_id: Option<String>, active_only: bool) -> Vec<Goal>;
+    DeriveGoal: derive_goal(request: DeriveGoalRequest) -> GoalSpec;
     WorktreeListDir: worktree_list_dir(id: String, path: String) -> Vec<DirEntry>;
     WorktreeReadFile: worktree_read_file(id: String, path: String) -> WorktreeFile;
     WorktreeWriteFile: worktree_write_file(id: String, path: String, content: String, base_mtime_ms: f64) -> f64;

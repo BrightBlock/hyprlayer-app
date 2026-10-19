@@ -11,6 +11,9 @@ import {
   type Bootstrap,
   type ClientRef,
   type ClaudeProbe,
+  type Goal,
+  type GoalBrief,
+  type GoalStep,
   type Harness,
   type LogCursorDto,
   type PermissionMode,
@@ -25,11 +28,13 @@ import {
   type SessionTurnsDto,
 } from "@/lib/bindings";
 import type { WorkstreamActivity } from "@/lib/domain/activity";
+import { goalActivity, isLiveGoal } from "@/lib/domain/goals";
+import type { GoalSheetRequest } from "@/lib/goalSheet";
 import type { EventBridge } from "@/lib/events";
 import { isAppError, isStaleTranscript, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
-import { invalidateWorkstreamPr, invalidateWorktreeGit } from "@/lib/queries";
+import { invalidateWorkstreamPr, invalidateWorktreeGit, useActiveSessions } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
@@ -137,6 +142,8 @@ export type SessionEntry = SessionView & {
   /** Where a catch-up read resumes: the last fold's or page's final raw row. */
   cursor?: LogCursorDto | null;
   turnAuthor?: TurnAuthor;
+  /** A running or paused goal, from the session row and then each `GoalChanged`. */
+  goal?: GoalBrief | null;
 };
 
 export type QueuedMessage = {
@@ -185,6 +192,7 @@ function setEntry(sessionId: string, next: SessionEntry): void {
 function forgetSession(sessionId: string): void {
   channels.delete(sessionId);
   held.delete(sessionId);
+  armedResumes.delete(sessionId);
   forgetSync(sessionId);
 }
 
@@ -419,8 +427,10 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
   const autoApproved =
     event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName);
-  // Another device is driving this turn; its user answers the prompt there.
-  if (!wasNeedsYou && isNeedsYou && !autoApproved && nextEntry.turnAuthor !== "other") {
+  // Another device is driving this turn; its user answers the prompt there. A running goal's
+  // asks are announced by the goal bridge, on every device.
+  const goalOwnsNotices = nextEntry.goal?.status === "running";
+  if (!wasNeedsYou && isNeedsYou && !autoApproved && nextEntry.turnAuthor !== "other" && !goalOwnsNotices) {
     void maybeNotifyTransition(sessionId, current.workstreamId, current.stage);
   }
 
@@ -554,7 +564,12 @@ async function maybeNotifyTransition(
   }
 }
 
-async function isSessionVisible(sessionId: string, workstreamId: string): Promise<boolean> {
+/** This device answers the tool's asks itself ("Allow for this agent"). */
+export function isAutoAllowed(sessionId: string, toolName: string): boolean {
+  return entryOf(sessionId)?.autoAllow.includes(toolName) ?? false;
+}
+
+export async function isSessionVisible(sessionId: string, workstreamId: string): Promise<boolean> {
   if (!(await getCurrentWindow().isFocused())) return false;
   const loc = currentAppLocation();
   if (!loc || !loc.pathname.startsWith("/projects/")) return false;
@@ -623,6 +638,7 @@ export async function startSession(args: {
     taskStartedAt: {},
     queued: [],
     turnAuthor: "self",
+    goal: session.goal ?? null,
   });
 
   activate(session.id);
@@ -793,6 +809,7 @@ async function resumeOnce(
 
   let permissionMode: PermissionMode | null = null;
   let harness: Harness | undefined;
+  let goal: GoalBrief | null | undefined;
   for (let attempt = 1; ; attempt += 1) {
     const entry = entryOf(sessionId);
     if (!entry) return;
@@ -805,6 +822,7 @@ async function resumeOnce(
       );
       permissionMode = result.permissionMode;
       harness = result.session.harness;
+      goal = result.session.goal;
       activate(sessionId);
       break;
     } catch (e) {
@@ -831,6 +849,7 @@ async function resumeOnce(
   if (resumed && (resumed.drifted || resumed.harness !== harness)) {
     setEntry(sessionId, { ...resumed, drifted: false, harness });
   }
+  if (goal !== undefined) setSessionGoal(sessionId, goal);
   settleFolded(sessionId);
 
   // A quiet Claude resume emits no init event.
@@ -1853,7 +1872,8 @@ export async function restoreSessionIfNeeded(
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
     const { view: folded, ...position } = foldLog(read);
-    const live = active.some((a) => a.session.id === sessionId);
+    const row = active.find((a) => a.session.id === sessionId);
+    const live = row !== undefined;
     const view = restoredView(folded, live);
     setEntry(sessionId, {
       ...view,
@@ -1866,6 +1886,7 @@ export async function restoreSessionIfNeeded(
       workingSince: null,
       taskStartedAt: {},
       queued: [],
+      goal: row?.session.goal ?? null,
     });
     foldLoaded(sessionId, read);
     if (live) await resumeSession(sessionId, { cursor: position.cursor });
@@ -1917,7 +1938,10 @@ export async function refreshSession(sessionId: string): Promise<void> {
 // A dropped connection ends every stream without an `Exited`, so the channels
 // still registered here are dead and would block any resume.
 export async function reattachSessions(): Promise<void> {
-  const live = await liveSessionIds();
+  const active = await unwrap(commands.listActiveSessions());
+  const live = new Set(active.map((a) => a.session.id));
+  // A goal event missed while disconnected would leave the brief stale.
+  for (const a of active) setSessionGoal(a.session.id, a.session.goal ?? null);
   await Promise.all(
     Object.keys(useSessionStore.getState().sessions).map((id) =>
       resync(id, live.has(id)).catch((e) =>
@@ -1982,6 +2006,85 @@ setSyncHandlers({
   revised: onRevised,
   reset: onReset,
 });
+
+const sameBrief = (a: GoalBrief | null | undefined, b: GoalBrief | null) =>
+  (a ?? null) === b ||
+  (!!a &&
+    !!b &&
+    a.id === b.id &&
+    a.status === b.status &&
+    a.step === b.step &&
+    a.pauseReason === b.pauseReason &&
+    a.iteration === b.iteration &&
+    a.maxIterations === b.maxIterations);
+
+export function setSessionGoal(sessionId: string, goal: GoalBrief | null): void {
+  const entry = entryOf(sessionId);
+  if (!entry || sameBrief(entry.goal, goal)) return;
+  setEntry(sessionId, { ...entry, goal });
+}
+
+const ACTIVE_GOAL_STEPS: ReadonlySet<GoalStep> = new Set(["working", "checking", "waiting"]);
+const probingGoalHarness = new Set<string>();
+
+/**
+ * Reattaches a tab whose stream a server-side relaunch ended; call before `setSessionGoal`.
+ * A running step doesn't prove a live harness (a crash is counted before the relaunch), and resuming a dead one would launch it uncapped.
+ */
+export async function reattachRunningGoal(sessionId: string, goal: GoalBrief | null): Promise<void> {
+  if (goal?.status !== "running" || !goal.step || !ACTIVE_GOAL_STEPS.has(goal.step)) return;
+  const entry = entryOf(sessionId);
+  if (!entry || entry.reloading || sameBrief(entry.goal, goal)) return;
+  if (channels.has(sessionId) || resuming.has(sessionId) || probingGoalHarness.has(sessionId)) return;
+  probingGoalHarness.add(sessionId);
+  try {
+    if (!(await liveSessionIds()).has(sessionId)) return;
+    await resync(sessionId, true);
+  } catch (e) {
+    log.warn("session", `reattaching ${sessionId} to its running goal failed`, e);
+  } finally {
+    probingGoalHarness.delete(sessionId);
+  }
+}
+
+export function goalBrief(goal: Goal): GoalBrief {
+  const { id, status, step, pauseReason, iteration } = goal;
+  return { id, status, step, pauseReason, iteration, maxIterations: goal.limits.maxIterations };
+}
+
+/** Shows the session a goal started in: its composer tab, or a new tab for a new session. */
+export async function openGoalSession(goal: Goal, request: GoalSheetRequest): Promise<void> {
+  const { sessionId, workstreamId } = goal;
+  const launch = "newSession" in request.target ? request.target.newSession : null;
+  if (launch?.shellId !== undefined) {
+    bindSessionToShell(workstreamId, launch.shellId, sessionId);
+  } else if (launch) {
+    const planPath = request.planPath ?? launch.attachedDocs?.[0];
+    const stage = launch.stage;
+    if (planPath && (stage === "implement" || stage === "validate")) {
+      openPlanStageTab(workstreamId, sessionId, stage, planPath, undefined);
+    } else {
+      openPromptTab(workstreamId, sessionId, "Goal");
+    }
+    // The tab relaunches its session in this mode, so it must match what the goal launched with.
+    if (launch.permissionMode) setSessionPermissionMode(workstreamId, sessionId, launch.permissionMode);
+  }
+  await restoreSessionIfNeeded(sessionId, workstreamId, launch?.stage ?? entryOf(sessionId)?.stage ?? "general");
+  setSessionGoal(sessionId, goalBrief(goal));
+}
+
+// One-shot per session: the paused-needs-you card's Reply and resume, taken after the reply is sent.
+const armedResumes = new Map<string, string>();
+
+export function armResumeAfterSend(sessionId: string, goalId: string): void {
+  armedResumes.set(sessionId, goalId);
+}
+
+export function takeArmedResume(sessionId: string): string | null {
+  const goalId = armedResumes.get(sessionId) ?? null;
+  armedResumes.delete(sessionId);
+  return goalId;
+}
 
 export function transcriptToText(sessionId: string): string {
   const entry = useSessionStore.getState().sessions[sessionId];
@@ -2137,6 +2240,23 @@ export function useWorkstreamBuildPhase(workstreamId: string): string | null {
   });
 }
 
+// A live goal brief from any of the workstream's sessions: an open entry first, else the active-session rows.
+export function useWorkstreamGoal(workstreamId: string | null): GoalBrief | null {
+  const local = useSessionStore((s) => {
+    if (!workstreamId) return null;
+    for (const entry of Object.values(s.sessions)) {
+      if (entry.workstreamId === workstreamId && entry.goal && isLiveGoal(entry.goal)) return entry.goal;
+    }
+    return null;
+  });
+  const active = useActiveSessions(workstreamId !== null && local === null).data;
+  if (local || !workstreamId) return local;
+  const row = active?.find(
+    (a) => a.session.workstreamId === workstreamId && a.session.goal && isLiveGoal(a.session.goal),
+  );
+  return row?.session.goal ?? null;
+}
+
 export type { WorkstreamActivity } from "@/lib/domain/activity";
 
 const ACTIVITY_RANK: Record<WorkstreamActivity, number> = {
@@ -2158,6 +2278,9 @@ export function isAwaiting(entry: SessionEntry): boolean {
 }
 
 export function classifyEntry(entry: SessionEntry): WorkstreamActivity {
+  // Between iterations the session rests, which alone would read "ready for review".
+  const goal = goalActivity(entry.goal);
+  if (goal) return goal;
   if (isAwaiting(entry)) return "needs-you";
   if (isWorking(entry)) return "working";
   if (entry.state === "crashed" || entry.state === "spawn_failed") return "error";

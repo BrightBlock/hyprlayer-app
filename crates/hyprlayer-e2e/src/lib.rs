@@ -4,6 +4,7 @@
 mod cli_assets;
 pub mod containers;
 pub mod flows;
+pub mod goal_stub;
 mod journey;
 mod sandbox;
 mod server;

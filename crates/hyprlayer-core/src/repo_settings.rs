@@ -15,6 +15,7 @@ pub struct RepoSettings {
     pub worktree: WorktreeSettings,
     pub scripts: ScriptSettings,
     pub branches: BranchSettings,
+    pub goals: GoalRepoSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -38,6 +39,14 @@ pub struct ScriptSettings {
 #[serde(rename_all = "kebab-case", default)]
 pub struct BranchSettings {
     pub prefixes: Vec<BranchPrefix>,
+}
+
+/// Commands a goal sheet proposes for this repo; nothing in the app writes them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "kebab-case", default)]
+pub struct GoalRepoSettings {
+    pub checks: Vec<String>,
 }
 
 pub fn settings_path(repo: &Path) -> PathBuf {
@@ -257,6 +266,20 @@ mod tests {
         .unwrap();
         let settings = read(repo.path()).unwrap();
         assert!(settings.branches.prefixes.is_empty());
+    }
+
+    #[test]
+    fn absent_goals_section_defaults_empty() {
+        let repo = make_repo();
+        let dir = repo.path().join(".hyprlayer");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.toml"),
+            b"[worktree]\ncopy = [\".env\"]\n",
+        )
+        .unwrap();
+        let settings = read(repo.path()).unwrap();
+        assert!(settings.goals.checks.is_empty());
     }
 
     #[test]

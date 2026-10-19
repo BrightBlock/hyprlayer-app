@@ -168,7 +168,7 @@ async fn tool_calls_and_usage_reach_the_transcript() {
                 assert!(tokens > 0);
                 saw_window = true;
             }
-            Ok(Ok(SessionEvent::Usage { context_tokens })) => {
+            Ok(Ok(SessionEvent::Usage { context_tokens, .. })) => {
                 saw_usage = true;
                 assert!(
                     !saw_window || context_tokens > 0,
@@ -1063,5 +1063,130 @@ async fn rewind_maps_ordinals_past_a_steered_message() {
     assert!(
         !recalled.contains("CHARLIE"),
         "the reverted turn is forgotten: {recalled:?}"
+    );
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
+#[ignore = "requires a logged-in codex; starts a thread but makes no model call"]
+async fn native_goals_are_disabled_in_app_sessions() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) = CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan))
+        .await
+        .expect("spawn codex app-server");
+    let refused = driver
+        .request_for_test(
+            "thread/goal/set",
+            serde_json::json!({
+                "threadId": driver.thread_id(),
+                "objective": "Count to three, one number per turn.",
+                "status": "active",
+            }),
+        )
+        .await;
+    let detail = match refused {
+        Ok(reply) => panic!("thread/goal/set was accepted: {reply}"),
+        Err(e) => e.to_string(),
+    };
+    // `turn/started` maps to no event, so a native continuation shows as the turn it runs.
+    let turn = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await {
+                Ok(
+                    event @ (SessionEvent::PartialText { .. }
+                    | SessionEvent::AssistantText { .. }
+                    | SessionEvent::Thinking { .. }
+                    | SessionEvent::ToolUse { .. }
+                    | SessionEvent::TurnDone { .. }),
+                ) => return Some(event),
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    driver.kill();
+    assert!(detail.contains("goals feature is disabled"), "{detail}");
+    assert!(
+        !matches!(turn, Ok(Some(_))),
+        "a refused goal still started a turn: {turn:?}"
+    );
+}
+
+#[cfg(feature = "test-support")]
+async fn thread_tokens_of_turn(
+    driver: &CodexDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    text: &str,
+) -> Option<u32> {
+    driver
+        .send_user_turn(text, None, None, None)
+        .expect("send turn");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(SessionEvent::TurnDone { thread_tokens, .. })) => return thread_tokens,
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("turn did not finish within 120s: {text:?}"),
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test]
+#[ignore = "requires a logged-in codex; makes real API calls"]
+async fn goal_turns_report_thread_token_totals() {
+    let codex = which::which("codex").expect("codex on PATH");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan))
+            .await
+            .expect("spawn codex app-server");
+    let first =
+        thread_tokens_of_turn(&driver, &mut events, "Reply with exactly the word: one.").await;
+    let second =
+        thread_tokens_of_turn(&driver, &mut events, "Reply with exactly the word: two.").await;
+    println!("thread tokens: {first:?}, then {second:?}");
+    assert!(
+        first.is_some() && second > first,
+        "the thread's total grows with each turn: {first:?}, then {second:?}"
+    );
+    let thread = driver.thread_id().to_string();
+    // `kill` signals the whole group: a native app-server outliving its wrapper keeps the thread.
+    driver.kill();
+    while !matches!(
+        events.recv().await,
+        Ok(SessionEvent::Exited { .. }) | Err(_)
+    ) {}
+
+    let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
+        resume: Some(thread),
+        prior_user_turns: 2,
+        ..persisted_config(codex, PermissionMode::Plan)
+    })
+    .await
+    .expect("resume the thread");
+    let restored = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match events.recv().await {
+                Ok(SessionEvent::Usage { thread_tokens, .. }) => return thread_tokens,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the resume reports the thread's usage");
+    let third =
+        thread_tokens_of_turn(&driver, &mut events, "Reply with exactly the word: three.").await;
+    println!("after the resume: {restored:?}, then {third:?}");
+    driver.kill();
+    assert_eq!(restored, second, "the resume restores the thread's total");
+    assert!(
+        third > restored,
+        "the next turn adds to the restored total: {restored:?}, then {third:?}"
     );
 }

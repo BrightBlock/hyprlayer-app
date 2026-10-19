@@ -375,3 +375,33 @@ describe("PlanPanel for plans without phases", () => {
     expect(screen.getByRole("button", { name: "Write the parser, in progress, added by the agent" })).toBeTruthy();
   });
 });
+
+describe("PlanPanel goals", () => {
+  const draft = () => trackPlan(DOC("draft", "    "), [], { ...working, stage: "plan" });
+
+  it("no build-until-met without a plan file", () => {
+    renderPanel(draft());
+    expect(screen.queryByRole("radiogroup", { name: "Build mode" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Build until met" })).toBeNull();
+    cleanup();
+
+    renderPanel(draft(), { buildGoal: { render: () => <div>until-met panel</div> } });
+    expect(screen.getByRole("button", { name: "Approve & build" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Build until met" }));
+    expect(screen.getByText("until-met panel")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve & build" })).toBeNull();
+  });
+
+  it("the phase action is a sibling", () => {
+    const phaseAction = (phase: { label: string }) => <button type="button">Run phase {phase.label}</button>;
+    renderPanel(trackPlan(DOC("active", "xx  "), [], working), { phaseAction });
+    fireEvent.click(screen.getByRole("button", { name: /^Completed/ }));
+    expect(screen.getByText("Phase 1 — Scaffold")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Run phase 1" })).toBeNull();
+    const action = screen.getByRole("button", { name: "Run phase 2" });
+    expect(action.parentElement!.closest("button")).toBeNull();
+    const header = screen.getByText("Phase 2 — Build").closest("button")!;
+    expect(header.contains(action)).toBe(false);
+    expect(header.parentElement!.contains(action)).toBe(true);
+  });
+});

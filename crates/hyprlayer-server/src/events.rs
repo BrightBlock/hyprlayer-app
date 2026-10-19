@@ -13,11 +13,12 @@ use tokio::task::JoinHandle;
 use crate::transport::{encode_control, Control};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
-pub const TARGETED_EVENTS: [&str; 4] = [
+pub const TARGETED_EVENTS: [&str; 5] = [
     "SessionRevised",
     "SessionReset",
     "SessionViewers",
     "AccountChanged",
+    "GoalChanged",
 ];
 /// Reported by `announce_client` when this server targets them.
 pub const TRANSCRIPT_SYNC: &str = "transcript_sync";
@@ -213,6 +214,7 @@ fn audience(event: &RuntimeEvent) -> Audience {
             Audience::Watchers("SessionViewers", session_id.clone())
         }
         RuntimeEvent::AccountChanged => Audience::Announced("AccountChanged"),
+        RuntimeEvent::GoalChanged { .. } => Audience::Announced("GoalChanged"),
         _ => Audience::Everyone,
     }
 }
@@ -255,5 +257,6 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::ScriptRunChanged { .. } => "ScriptRunChanged",
         E::ProjectCreateProgress { .. } => "ProjectCreateProgress",
         E::AccountChanged => "AccountChanged",
+        E::GoalChanged { .. } => "GoalChanged",
     }
 }

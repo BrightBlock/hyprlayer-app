@@ -26,6 +26,7 @@ import { Icon } from "@/components/Icon";
 import { ScrollableTabStrip } from "@/components/ScrollableTabs";
 import { commands, type WorkstreamView } from "@/lib/bindings";
 import { GLASS_BAND } from "@/lib/glass";
+import { openGoalSheet } from "@/lib/goalSheet";
 import { CreateWorkstreamDialog } from "@/features/workstreams/CreateWorkstreamDialog";
 import { ChangesPanel } from "@/features/workstreams/ChangesPanel";
 import { GitPanel } from "@/features/workstreams/GitPanel";
@@ -44,6 +45,8 @@ import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
 import { PlanAside, PlanDocSync } from "@/features/plan/PlanAside";
 import { ReviewWorkspace } from "@/features/review/ReviewWorkspace";
 import { usePlanAside } from "@/features/plan/usePlanAside";
+import { GoalAside } from "@/features/session/GoalAside";
+import { useGoalAside } from "@/features/session/goalAsideState";
 import { AgentPtyTab } from "@/features/multiplexer/AgentPtyTab";
 import { EngineGlyph } from "@/components/EngineGlyph";
 import { PtyTabDot } from "@/features/multiplexer/agentStateUi";
@@ -138,6 +141,7 @@ import {
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectPipeline } from "@/features/board/ProjectPipeline";
+import { planGoalTarget, usePlanPath } from "@/features/board/pipelineData";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import {
   setNewWorkstreamStage,
@@ -339,6 +343,7 @@ export function ProjectPage() {
   const [cardMenu, setCardMenu] = useState<{ x: number; y: number; view: WorkstreamView } | null>(
     null,
   );
+  const cardPlanPath = usePlanPath(cardMenu?.view.item.id ?? null);
   const [attachPrTarget, setAttachPrTarget] = useState<WorkstreamView | null>(null);
   const detachPr = useDetachPr();
   const [renameShellId, setRenameShellId] = useState<number | null>(null);
@@ -512,10 +517,9 @@ export function ProjectPage() {
   );
 
   const planTabs = wsId ? tabsByWs[wsId] : undefined;
-  const planAside = usePlanAside(
-    planTabs ? activeShellIn(planTabs, focusedPaneId(planTabs))?.sessionId : undefined,
-    narrow,
-  );
+  const asideSessionId = planTabs ? activeShellIn(planTabs, focusedPaneId(planTabs))?.sessionId : undefined;
+  const planAside = usePlanAside(asideSessionId, narrow);
+  const goalAside = useGoalAside(asideSessionId, wsId, planAside.available, narrow);
 
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
@@ -1286,6 +1290,23 @@ export function ProjectPage() {
                 Detach PR #{cardMenu.view.item.prNumber}
               </ContextMenuItem>
             )}
+            {cardPlanPath && (
+              <ContextMenuItem
+                onClick={() => {
+                  const workstreamId = cardMenu.view.item.id;
+                  openGoalSheet({
+                    mode: "start",
+                    workstreamId,
+                    source: "plan",
+                    planPath: cardPlanPath,
+                    target: planGoalTarget(workstreamId, cardPlanPath),
+                  });
+                  setCardMenu(null);
+                }}
+              >
+                Run until met…
+              </ContextMenuItem>
+            )}
           </ContextMenu>
         )}
         <AttachPrDialog target={attachPrTarget} onClose={() => setAttachPrTarget(null)} />
@@ -1707,20 +1728,25 @@ export function ProjectPage() {
               className="absolute inset-y-0 right-0 flex flex-col"
               style={{ width: asideWidth }}
             >
-              {planAside.available && (
+              {(planAside.available || goalAside.available) && (
                 <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
                   <SegmentedControl
                     aria-label="Right panel"
-                    value={planAside.view}
+                    value={goalAside.view}
                     options={[
-                      { value: "plan", label: "Plan" },
-                      { value: "changes", label: "Changes" },
+                      ...(planAside.available ? [{ value: "plan" as const, label: "Plan" }] : []),
+                      ...(goalAside.available ? [{ value: "goal" as const, label: "Goal" }] : []),
+                      { value: "changes" as const, label: "Changes" },
                     ]}
-                    onChange={planAside.setView}
+                    onChange={goalAside.setView}
                   />
                 </div>
               )}
-              {planAside.view === "plan" && activeView && focusedShell ? (
+              {goalAside.view === "goal" && activeView ? (
+                <div className="min-h-0 flex-1">
+                  <GoalAside sessionId={focusedShell?.sessionId} workstreamId={activeView.item.id} />
+                </div>
+              ) : goalAside.view === "plan" && activeView && focusedShell ? (
                 <div className="min-h-0 flex-1">
                   <PlanAside
                     view={activeView}

@@ -51,6 +51,8 @@ export type ShellTab = {
   codexModel?: string;
   codexEffort?: string;
   sessionId?: string;
+  /** Opened to read a session a goal check ended; viewing it never relaunches it. */
+  frozen?: boolean;
   docPreviewPath?: string;
   diffView?: { path: string; staged: boolean; sha?: string };
   filePath?: string;
@@ -430,7 +432,7 @@ export function sessionPermissionMode(workstreamId: string, sessionId: string): 
 const tabMode = (stage: StageKey): StageKey =>
   MODE_STAGES.some((s) => s.key === stage) ? stage : "general";
 
-export function openSessionTab(workstreamId: string, session: Session): void {
+export function openSessionTab(workstreamId: string, session: Session, opts?: { frozen?: boolean }): void {
   if (session.title != null) markTitleSeen(session.id, session.title);
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();
@@ -456,6 +458,7 @@ export function openSessionTab(workstreamId: string, session: Session): void {
         mode: tabMode(session.stage),
         // The entry's stage must stay the server's, or a picked ship session is invisible to workstreamShipBusy.
         sessionStage: session.stage,
+        ...(opts?.frozen ? { frozen: true } : {}),
         harness: session.harness,
         draft: "",
         docs: [],

@@ -12,8 +12,10 @@ import {
   type CliInstallMethodId,
   type CreateDocInput,
   type CreateProjectRequest,
+  type DeriveGoalRequest,
   type DocContent,
   type FrontmatterEditDto,
+  type GoalPatch,
   type Host,
   type HostsFile,
   type MergeMethod,
@@ -25,6 +27,7 @@ import {
   type SkillsShView,
   type SkillSourceInput,
   type SkillTarget,
+  type StartGoalRequest,
   type SubmitReviewRequest,
   type Stage,
   type WorktreeMode,
@@ -1186,6 +1189,85 @@ export function useMarkReviewRoundDelivered() {
     mutationFn: (v: { workstreamId: string; round: number }) =>
       unwrap(commands.markReviewRoundDelivered(v.workstreamId, v.round)),
     onSettled: (_data, _error, v) => invalidateReview(v.workstreamId),
+  });
+}
+
+
+export function invalidateGoals(goalId?: string) {
+  void queryClient.invalidateQueries({ queryKey: ["goals"] });
+  void queryClient.invalidateQueries({ queryKey: goalId ? ["goal", goalId] : ["goal"] });
+}
+
+function settleGoal(goalId: string | undefined) {
+  invalidateGoals(goalId);
+  void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });
+  void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
+}
+
+// Newest first, as `list_goals` returns them; null lists every workstream's.
+export function useGoals(workstreamId: string | null, activeOnly = false, enabled = true) {
+  return useQuery({
+    queryKey: ["goals", workstreamId, activeOnly],
+    queryFn: () => unwrap(commands.listGoals(workstreamId, activeOnly)),
+    enabled,
+  });
+}
+
+export function useGoal(goalId: string | null) {
+  return useQuery({
+    queryKey: ["goal", goalId],
+    queryFn: () => unwrap(commands.getGoal(goalId!)),
+    enabled: goalId !== null,
+  });
+}
+
+// The goal id travels in the variables, never a hook argument, so a settled
+// mutation invalidates the goal it changed.
+export function useStartGoal() {
+  return useMutation({
+    mutationFn: (request: StartGoalRequest) => unwrap(commands.startGoal(request)),
+    onSettled: (goal) => settleGoal(goal?.id),
+  });
+}
+
+export function usePauseGoal() {
+  return useMutation({
+    mutationFn: (goalId: string) => unwrap(commands.pauseGoal(goalId)),
+    onSettled: (_data, _error, goalId) => settleGoal(goalId),
+  });
+}
+
+export function useResumeGoal() {
+  return useMutation({
+    mutationFn: (goalId: string) => unwrap(commands.resumeGoal(goalId)),
+    onSettled: (_data, _error, goalId) => settleGoal(goalId),
+  });
+}
+
+export function useStopGoal() {
+  return useMutation({
+    mutationFn: (goalId: string) => unwrap(commands.stopGoal(goalId)),
+    onSettled: (_data, _error, goalId) => settleGoal(goalId),
+  });
+}
+
+export function useUpdateGoal() {
+  return useMutation({
+    mutationFn: (v: { goalId: string; patch: GoalPatch }) =>
+      unwrap(commands.updateGoal(v.goalId, v.patch)),
+    onSettled: (_data, _error, v) => settleGoal(v.goalId),
+  });
+}
+
+// A query, not a mutation: StrictMode's remount detaches a mutation fired from a mount effect.
+export function useDeriveGoal(request: DeriveGoalRequest | null) {
+  return useQuery({
+    queryKey: ["goal-derive", request],
+    queryFn: () => unwrap(commands.deriveGoal(request as DeriveGoalRequest)),
+    enabled: request !== null,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
   });
 }
 

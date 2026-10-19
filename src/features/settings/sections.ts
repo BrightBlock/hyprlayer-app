@@ -3,6 +3,7 @@ export const SETTINGS_SECTIONS = [
   "harnesses",
   "git",
   "notifications",
+  "goals",
   "keyboard",
   "appearance",
   "servers",

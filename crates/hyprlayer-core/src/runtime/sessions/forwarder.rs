@@ -62,6 +62,12 @@ pub(crate) enum Control {
         workflow: WorkflowChannel,
         reply: oneshot::Sender<()>,
     },
+    KeepStreamsAcrossExit {
+        reply: oneshot::Sender<()>,
+    },
+    EndKeptStreams {
+        reply: oneshot::Sender<()>,
+    },
     ReserveUserTurn {
         client_message_id: String,
         base_rev: Option<u64>,
@@ -205,6 +211,22 @@ impl ActorHandle {
         reply_rx.await.map_err(|_| actor_gone())
     }
 
+    pub(crate) async fn keep_streams_across_exit(&self) -> Result<()> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::KeepStreamsAcrossExit { reply })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())
+    }
+
+    pub(crate) async fn end_kept_streams(&self) -> Result<()> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::EndKeptStreams { reply })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())
+    }
+
     pub(crate) async fn reserve_user_turn(
         &self,
         client_message_id: String,
@@ -343,6 +365,14 @@ async fn run(
                         state.set_workflow(workflow);
                         let _ = reply.send(());
                     }
+                    Some(Control::KeepStreamsAcrossExit { reply }) => {
+                        state.keep_streams = true;
+                        let _ = reply.send(());
+                    }
+                    Some(Control::EndKeptStreams { reply }) => {
+                        state.end_kept_streams().await;
+                        let _ = reply.send(());
+                    }
                     Some(Control::ReserveUserTurn { client_message_id, base_rev, author, reply }) => {
                         let _ = reply.send(state.reserve(client_message_id, base_rev, author));
                     }
@@ -406,6 +436,10 @@ struct ActorState {
     pending_writes: HashMap<String, Vec<String>>,
     /// The main-thread text block streamed so far and not yet stored.
     in_flight: InFlightText,
+    /// The next detach is a server relaunch: its exit would end every client's stream.
+    keep_streams: bool,
+    /// A detach was kept from the streams, which now wait on the relaunch.
+    streams_kept: bool,
 }
 
 #[derive(Default)]
@@ -460,6 +494,8 @@ impl ActorState {
             attribution,
             pending_writes: HashMap::new(),
             in_flight: InFlightText::default(),
+            keep_streams: false,
+            streams_kept: false,
         }
     }
 
@@ -732,6 +768,19 @@ impl ActorState {
         }
     }
 
+    /// The relaunch failed: a kept exit is delivered after all, or a pending one is not kept.
+    async fn end_kept_streams(&mut self) {
+        if std::mem::take(&mut self.keep_streams) || !std::mem::take(&mut self.streams_kept) {
+            return;
+        }
+        self.handle_event(SessionEvent::Exited {
+            outcome: ExitOutcome::Detached,
+            code: None,
+            stderr_tail: String::new(),
+        })
+        .await;
+    }
+
     async fn handle_event(&mut self, mut event: SessionEvent) {
         self.ordinal += 1;
         let ordinal = self.ordinal;
@@ -769,6 +818,9 @@ impl ActorState {
                 | SessionEvent::PlanModeChanged { .. }
         ) || unreportable_exit;
         let suppress_live = matches!(event, SessionEvent::UserMessage { .. });
+        let exited = matches!(event, SessionEvent::Exited { .. });
+        let kept_streams = exited && std::mem::take(&mut self.keep_streams) && unreportable_exit;
+        self.streams_kept = kept_streams;
         log_lifecycle(&self.session_id, &event);
 
         // Nothing is persisted for a detach, so the row mutation that clears
@@ -792,7 +844,6 @@ impl ActorState {
             *stamped = author.clone();
         }
         let turn_kind = event.turn_kind();
-        let exited = matches!(event, SessionEvent::Exited { .. });
         let closes_turn = exited || matches!(event, SessionEvent::TurnDone { .. });
         let announce_close =
             closes_turn && (self.in_turn || exited && !self.reservations.is_empty());
@@ -884,7 +935,7 @@ impl ActorState {
         );
         self.attachments.retain(|_, attachment| {
             // Released clients render their own prompt optimistically and never dedupe an echo.
-            if !suppress_live || attachment.echo_user_messages {
+            if (!suppress_live || attachment.echo_user_messages) && !kept_streams {
                 attachment.deliver(delivery.clone());
             }
             !attachment.detached()

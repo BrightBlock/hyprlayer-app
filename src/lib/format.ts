@@ -86,6 +86,12 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+const USD = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+
+export function formatUsd(n: number): string {
+  return USD.format(Number.isFinite(n) ? n : 0);
+}
+
 const BYTE_UNITS = [
   { size: 1e12, suffix: "TB", digits: 1 },
   { size: 1e9, suffix: "GB", digits: 1 },

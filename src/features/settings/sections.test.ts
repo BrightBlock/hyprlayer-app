@@ -14,6 +14,11 @@ describe("parseSettingsSection", () => {
     expect(parseSettingsSection(3)).toBe("general");
   });
 
+  it("has a goals section after notifications", () => {
+    expect(parseSettingsSection("goals")).toBe("goals");
+    expect(SETTINGS_SECTIONS.indexOf("goals")).toBe(SETTINGS_SECTIONS.indexOf("notifications") + 1);
+  });
+
   it("treats workshop as a link out, not a section", () => {
     expect(parseSettingsSection("workshop")).toBe("general");
   });

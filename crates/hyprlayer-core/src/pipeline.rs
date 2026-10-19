@@ -1,3 +1,7 @@
+use hyprlayer_models::goal::{
+    GoalCheck, GoalCheckKind, GoalCheckOutcome, GoalCheckResult, GoalSource, GoalSpec,
+};
+
 use crate::agent::Harness;
 use crate::claude::PermissionMode;
 
@@ -55,6 +59,14 @@ pub fn thoughts_edit_rules(stage: Stage, thoughts_roots: &[std::path::PathBuf]) 
         })
         .collect()
 }
+
+/// A goal's validate run only reports; promoting the plan stays with the person.
+pub const REPORT_ONLY_DENY: [&str; 4] = [
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Bash(hyprlayer thoughts sync:*)",
+];
 
 pub fn policy_for(stage: Stage) -> StagePolicy {
     match stage {
@@ -403,12 +415,357 @@ pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
     prompt
 }
 
+/// The `prompt_name` every iteration turn is sent under, so a client can tell it from a typed message.
+pub const GOAL_PROMPT_NAME: &str = "hyprlayer:goal";
+
+pub const GOAL_PREAMBLE: &str = "Goal (checked after each turn): {condition}\nChecks: {checks}\n\
+Work toward it and end your turn when you have made real progress. If you cannot continue \
+without a decision from the user, write a line starting with NEEDS-HUMAN: and stop.";
+
+pub const GOAL_CONTINUE: &str = "Continue toward the goal: {condition}\n\n\
+The check after your last turn did not pass:\n{feedback}";
+
+pub const GOAL_CUT_OFF: &str = "Your previous turn was cut off by a server restart.";
+
+/// The Evaluator check's one-shot system prompt; the E2E claude stub routes on its first words.
+pub const EVALUATOR_SYSTEM: &str = "You judge whether a coding goal is met, from the evidence given and nothing else. \
+Reply with one JSON object and no other text: {\"met\": true or false, \"reason\": \"one sentence\"}.";
+
+/// Mirrors `fixPrompt` in `src/features/review/validateFlow.ts`; the two must match.
+pub fn fix_findings_prompt(findings: &[String]) -> String {
+    let mut prompt = "Resolve these findings from the plan validation. Fix the real ones, and say which you left alone and why.\n".to_string();
+    for finding in findings {
+        prompt.push_str("\n- ");
+        prompt.push_str(finding);
+    }
+    prompt
+}
+
+/// What a goal's validate session is told about the Command checks that already passed.
+pub const VALIDATION_GOAL_NOTE: &str =
+    "The app already ran these approved commands at {head} and each exited 0:\n\
+{commands}\nTreat them as run; do not run them again.\n\
+This run is report-only: do not edit the plan or any other file, change the plan's status, \
+run `hyprlayer thoughts sync`, or ask about manual items, which stay with the person.\n\
+Put your report under a `## Validation Report` heading.";
+
+pub fn validation_goal_note(head: &str, commands: &[String]) -> String {
+    fill(
+        VALIDATION_GOAL_NOTE,
+        &[("{head}", head), ("{commands}", &commands.join("\n"))],
+    )
+}
+
+const PLAIN_PART: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 _./=:@+%-";
+
+/// Claude allow rules for the approved commands a validate session may re-run. `--allowedTools`
+/// is one space-joined argument, so only plain-word parts become rules; any other command still asks.
+pub fn validate_allow_rules(commands: &[String]) -> Vec<String> {
+    let mut rules: Vec<String> = Vec::new();
+    for command in commands {
+        let parts: Vec<&str> = command
+            .split("&&")
+            .flat_map(|part| part.split("||"))
+            .flat_map(|part| part.split([';', '|']))
+            .map(str::trim)
+            .collect();
+        let plain = parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|c| PLAIN_PART.contains(c)));
+        if !plain {
+            continue;
+        }
+        for part in parts {
+            let rule = format!("Bash({part})");
+            if !rules.contains(&rule) {
+                rules.push(rule);
+            }
+        }
+    }
+    rules
+}
+
+const GOAL_FEEDBACK_LINES: usize = 40;
+const GOAL_LABEL_CHARS: usize = 80;
+
+/// Iteration 1 states the goal; later ones carry the failed checks. `notes_suffix` rides on iteration 1 only.
+pub fn goal_iteration_prompt(
+    spec: &GoalSpec,
+    n: u32,
+    feedback: &[GoalCheckResult],
+    cut_off: bool,
+    notes_suffix: Option<&str>,
+) -> String {
+    if n <= 1 {
+        let checks = spec
+            .checks
+            .iter()
+            .map(|check| {
+                format!(
+                    "{} ({})",
+                    goal_check_label(check),
+                    goal_check_kind(check).as_str()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let preamble = fill(
+            GOAL_PREAMBLE,
+            &[("{condition}", &spec.condition), ("{checks}", &checks)],
+        );
+        let mut prompt = format!("{}\n\n{preamble}", spec.work_prompt);
+        prompt.push_str(notes_suffix.unwrap_or_default());
+        return prompt;
+    }
+    let mut sections = Vec::new();
+    // A skill only expands when the message opens with its slash command.
+    if let Some(command) = skill_command_line(spec) {
+        sections.push(command.to_string());
+    }
+    if cut_off {
+        sections.push(GOAL_CUT_OFF.to_string());
+    }
+    let continued = fill(
+        GOAL_CONTINUE,
+        &[
+            ("{condition}", &spec.condition),
+            ("{feedback}", &goal_feedback(feedback)),
+        ],
+    );
+    // A cut-off turn ran no checks, so there is no failure to report.
+    if feedback.is_empty() {
+        sections.push(
+            continued
+                .split("\n\n")
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+        );
+    } else {
+        sections.push(continued);
+    }
+    sections.join("\n\n")
+}
+
+/// How a check is named to the agent and in its result.
+pub fn goal_check_label(check: &GoalCheck) -> String {
+    match check {
+        GoalCheck::Command { command, label, .. } => label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map_or_else(|| command_summary(command), str::to_string),
+        GoalCheck::PlanBoxes { phase: None, .. } => "plan boxes".to_string(),
+        GoalCheck::PlanBoxes {
+            phase: Some(phase), ..
+        } => format!("plan boxes (phase {phase})"),
+        GoalCheck::Evaluator { .. } => "evaluator".to_string(),
+        GoalCheck::Validation { .. } => "validation".to_string(),
+    }
+}
+
+pub fn goal_check_kind(check: &GoalCheck) -> GoalCheckKind {
+    match check {
+        GoalCheck::Command { .. } => GoalCheckKind::Command,
+        GoalCheck::PlanBoxes { .. } => GoalCheckKind::PlanBoxes,
+        GoalCheck::Evaluator { .. } => GoalCheckKind::Evaluator,
+        GoalCheck::Validation { .. } => GoalCheckKind::Validation,
+    }
+}
+
+fn command_summary(command: &str) -> String {
+    let line = command
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    if line.chars().count() <= GOAL_LABEL_CHARS {
+        return line.to_string();
+    }
+    let cut: String = line.chars().take(GOAL_LABEL_CHARS).collect();
+    format!("{cut}…")
+}
+
+/// The slash command a skill-sourced goal opens with; other sources carry none.
+fn skill_command_line(spec: &GoalSpec) -> Option<&str> {
+    matches!(
+        spec.source,
+        GoalSource::Plan | GoalSource::PlanPhase | GoalSource::Research
+    )
+    .then(|| spec.work_prompt.lines().next())
+    .flatten()
+    .map(str::trim)
+    .filter(|line| line.starts_with('/'))
+}
+
+fn goal_feedback(results: &[GoalCheckResult]) -> String {
+    results
+        .iter()
+        .filter(|result| result.outcome != GoalCheckOutcome::Pass)
+        .take(GOAL_FEEDBACK_LINES)
+        .map(|result| {
+            // A validation's findings are its output tail, one per line, in today's Fix-all wording.
+            if result.kind == GoalCheckKind::Validation
+                && result.outcome == GoalCheckOutcome::Fail
+                && !result.output_tail.trim().is_empty()
+            {
+                let findings: Vec<String> = result
+                    .output_tail
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                return fix_findings_prompt(&findings);
+            }
+            format!(
+                "{} — {} — {}",
+                result.label,
+                result.outcome.as_str(),
+                feedback_detail(result)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The reason, then the output tail, flattened so each check stays on one line.
+fn feedback_detail(result: &GoalCheckResult) -> String {
+    let lines: Vec<&str> = result
+        .reason
+        .as_deref()
+        .into_iter()
+        .flat_map(str::lines)
+        .chain(result.output_tail.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return result.exit_code.map_or_else(
+            || "no output".to_string(),
+            |code| format!("exit code {code}"),
+        );
+    }
+    lines.join(" ⏎ ")
+}
+
+/// One left-to-right pass, so a placeholder typed into a user's text is never expanded.
+fn fill(template: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some((at, token, value)) = vars
+        .iter()
+        .filter_map(|&(token, value)| rest.find(token).map(|at| (at, token, value)))
+        .min_by_key(|&(at, ..)| at)
+    {
+        out.push_str(&rest[..at]);
+        out.push_str(value);
+        rest = &rest[at + token.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyprlayer_models::goal::GoalLimits;
 
     fn compose(stage: Stage, input: &str, base: &str, bodies: &ActionPromptBodies) -> String {
         compose_prompt(stage, input, base, bodies, Harness::Claude)
+    }
+
+    fn goal_spec() -> GoalSpec {
+        GoalSpec {
+            condition: "the counter reaches 3".into(),
+            work_prompt: "Bump the counter".into(),
+            source: GoalSource::Composer,
+            source_ref: None,
+            source_phase: None,
+            checks: vec![GoalCheck::Command {
+                command: "test -f done".into(),
+                timeout_secs: 60,
+                label: None,
+            }],
+            limits: GoalLimits {
+                max_iterations: 5,
+                max_cost_usd: Some(5.0),
+                max_tokens: None,
+                max_active_secs: 600,
+            },
+        }
+    }
+
+    fn failed_check() -> GoalCheckResult {
+        GoalCheckResult {
+            kind: GoalCheckKind::Command,
+            label: "test -f done".into(),
+            outcome: GoalCheckOutcome::Fail,
+            exit_code: Some(1),
+            duration_ms: 5,
+            output_tail: "no such file".into(),
+            reason: None,
+            session_id: None,
+        }
+    }
+
+    #[test]
+    fn an_opencode_implement_goal_keeps_the_review_notes_instruction() {
+        let spec = goal_spec();
+        let opencode = implement_notes_suffix(Harness::Opencode, Stage::Implement, "ws-1");
+        let notes = opencode
+            .as_deref()
+            .expect("opencode carries it in the first prompt only");
+
+        let first = goal_iteration_prompt(&spec, 1, &[], false, opencode.as_deref());
+        assert!(first.ends_with(notes), "{first}");
+        assert!(first.contains(&review_notes_path("ws-1")));
+
+        for harness in [Harness::Claude, Harness::Codex] {
+            assert_eq!(
+                implement_notes_suffix(harness, Stage::Implement, "ws-1"),
+                None,
+                "{harness:?} carries it at spawn"
+            );
+        }
+        let bare = goal_iteration_prompt(&spec, 1, &[], false, None);
+        assert!(!bare.contains(notes.trim()));
+
+        let later = goal_iteration_prompt(&spec, 2, &[failed_check()], false, opencode.as_deref());
+        assert!(!later.contains(notes.trim()), "{later}");
+    }
+
+    #[test]
+    fn a_cut_off_iteration_with_no_checks_claims_no_failure() {
+        let spec = goal_spec();
+        let resumed = goal_iteration_prompt(&spec, 2, &[], true, None);
+        assert!(resumed.starts_with(GOAL_CUT_OFF), "{resumed}");
+        assert!(!resumed.contains("did not pass"), "{resumed}");
+        let failed = goal_iteration_prompt(&spec, 2, &[failed_check()], true, None);
+        assert!(
+            failed.contains("did not pass") && failed.contains("no such file"),
+            "{failed}"
+        );
+    }
+
+    #[test]
+    fn validate_allow_rules_only_hold_plain_commands() {
+        let rules = |command: &str| validate_allow_rules(&[command.to_string()]);
+        assert_eq!(
+            rules("cargo test -p widget"),
+            ["Bash(cargo test -p widget)"]
+        );
+        assert_eq!(rules("a && b | c"), ["Bash(a)", "Bash(b)", "Bash(c)"]);
+        for refused in [
+            r#"test "$(cat x)" -ge 3"#,
+            "echo $(date) Edit x",
+            "rm -rf *",
+            "a, b",
+            "cmd > out",
+            "make && echo `date`",
+        ] {
+            assert_eq!(rules(refused), Vec::<String>::new(), "{refused}");
+        }
     }
 
     #[test]

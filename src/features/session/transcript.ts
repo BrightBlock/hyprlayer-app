@@ -8,6 +8,7 @@ import type {
   SessionState,
 } from "@/lib/bindings";
 import type { Attachment } from "./attachments";
+import { GOAL_PROMPT } from "./goalPrompt";
 import { parseToolInput } from "./toolDisplay";
 
 export type { Question, QuestionOption, SessionState };
@@ -95,6 +96,19 @@ export function compactSummaryBody(text: string): string | null {
 const THINK_TAG = /<\/?think(?:ing)?>/gi;
 // Claude Code sends this as a plain user message after every interrupt.
 const INTERRUPT_NOTICE = /^\[Request interrupted by user( for tool use)?\]$/;
+
+const STOP_HOOK_FEEDBACK = "Stop hook feedback:\n";
+// Claude's native /goal names its condition in brackets.
+const NATIVE_GOAL_FEEDBACK = /^\[[^\]\n]*\]:\s*/;
+
+export type NativeContinuation = { reason: string; native: "hook" | "goal" };
+
+function nativeContinuation(text: string): NativeContinuation | null {
+  if (!text.startsWith(STOP_HOOK_FEEDBACK)) return null;
+  const body = text.slice(STOP_HOOK_FEEDBACK.length).trim();
+  const goal = NATIVE_GOAL_FEEDBACK.exec(body);
+  return goal ? { reason: body.slice(goal[0].length).trim(), native: "goal" } : { reason: body, native: "hook" };
+}
 
 export function splitInlineThinking(text: string): { reasoning: string | null; answer: string } {
   THINK_TAG.lastIndex = 0;
@@ -184,6 +198,7 @@ export type TranscriptItem =
       toolUseId: string | null;
       status: string;
     } & Sequenced)
+  | ({ kind: "nativeContinuation"; id: string } & NativeContinuation & Sequenced)
   | ({
       kind: "relaunched";
       id: string;
@@ -490,6 +505,11 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
 
     case "assistantText": {
       if (INTERRUPT_NOTICE.test(event.text)) return view;
+      // Ahead of the skill fold, which would take a hook line as a prefix-less skill body.
+      const continuation = event.injected ? nativeContinuation(event.text) : null;
+      if (continuation) {
+        return { ...view, ...appended(view, (id) => ({ kind: "nativeContinuation", id, ...continuation }), true, seq) };
+      }
       // Ahead of the skill fold: the summary arrives injected too.
       const summary = event.parentId ? null : compactSummaryBody(event.text);
       if (summary !== null) {
@@ -930,6 +950,10 @@ export function viewToText(view: SessionView): string {
   for (const item of view.items) {
     switch (item.kind) {
       case "user": {
+        if (item.promptName === GOAL_PROMPT) {
+          lines.push("--- Goal iteration ---", "");
+          break;
+        }
         const heading = `## You${item.stage && item.stage !== "general" ? ` (${item.stage})` : ""}`;
         lines.push(heading);
         if (item.promptName) lines.push(`*Prompt: ${item.promptName}*`);
@@ -967,6 +991,9 @@ export function viewToText(view: SessionView): string {
         break;
       case "compact":
         lines.push("--- Conversation compacted ---", "");
+        break;
+      case "nativeContinuation":
+        lines.push(`- stop hook: ${item.reason}`, "");
         break;
       case "queuedCommand":
         lines.push(`--- ${item.label} ---`, "");

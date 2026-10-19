@@ -8,6 +8,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { BinariesSettings } from "./BinariesSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { GitSettings } from "./GitSettings";
+import { GoalsSettings } from "./GoalsSettings";
 import { HarnessesSection } from "./harnesses/HarnessesSection";
 import { KeyboardSettings } from "./KeyboardSettings";
 import { NotificationsSettings } from "./NotificationsSettings";
@@ -64,6 +65,8 @@ function SectionBody({
       return <GitSettings settings={data.settings} />;
     case "notifications":
       return <NotificationsSettings settings={data.settings} />;
+    case "goals":
+      return <GoalsSettings settings={data.settings} />;
     case "keyboard":
       return <KeyboardSettings settings={data.settings} />;
     case "advanced":

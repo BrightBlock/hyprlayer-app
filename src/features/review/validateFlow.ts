@@ -199,6 +199,7 @@ export function useValidateFlow(
     report,
     reportSessionId,
     findings,
+    planPath,
     run,
     fix,
     accept: () => {

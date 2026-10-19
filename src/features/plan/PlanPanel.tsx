@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
-import { Button, cx } from "@/components/ui";
+import { Button, cx, SegmentedControl } from "@/components/ui";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { plural } from "@/lib/format";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
 import type { StageBadge } from "./lifecycleSlot";
-import { PhaseSection } from "./PhaseSection";
+import { PhaseSection, type CheckStatus } from "./PhaseSection";
 import { PlanPreviewDraft } from "./PlanPreviewDraft";
 import { PlanProgressHeader } from "./PlanProgressHeader";
 import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
@@ -30,9 +30,17 @@ type Props = {
   onJump: (target: JumpTarget) => void;
   // Owns the badge and what sits above the phases once a plan moves past implementing.
   lifecycle?: (parts: { header: (badge: StageBadge) => ReactNode; phases: ReactNode }) => ReactNode;
+  // Only a plan file can be built under a goal: `/implement_plan` and its checks need the path.
+  buildGoal?: { render: () => ReactNode } | null;
+  goalAction?: { label: string; onClick: () => void } | null;
+  phaseAction?: (phase: TrackedPhase) => ReactNode;
+  checkStatus?: CheckStatus;
 };
 
 const NO_CHANGES: ReadonlySet<string> = new Set();
+
+export const HEADER_BUTTON =
+  "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-control border border-edge px-2 text-ui-sm font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink";
 
 function progressLabel(tracker: PlanTracker): string {
   const checks = tracker.checks;
@@ -65,6 +73,8 @@ type PhaseProps = {
   changed: ReadonlySet<string>;
   reduceMotion: boolean;
   onJump: (target: JumpTarget) => void;
+  phaseAction?: (phase: TrackedPhase) => ReactNode;
+  checkStatus?: CheckStatus;
 };
 
 function TrackedPhaseSection({
@@ -74,6 +84,8 @@ function TrackedPhaseSection({
   changed,
   reduceMotion,
   onJump,
+  phaseAction,
+  checkStatus,
 }: PhaseProps & { phase: TrackedPhase; index: number }) {
   return (
     <PhaseSection
@@ -85,6 +97,8 @@ function TrackedPhaseSection({
       pulse={tracker.pulsing && !reduceMotion}
       flash={!reduceMotion && changed.has(`phase:${phase.label}`)}
       onJump={onJump}
+      action={phase.state === "done" ? undefined : phaseAction?.(phase)}
+      checkStatus={checkStatus}
     />
   );
 }
@@ -142,8 +156,13 @@ export function PlanPanel({
   onReviewChanges,
   onJump,
   lifecycle,
+  buildGoal,
+  goalAction,
+  phaseAction,
+  checkStatus,
 }: Props) {
   const reduceMotion = useReducedMotion();
+  const [buildMode, setBuildMode] = useState<"once" | "until">("once");
   const tracking = tracker.mode === "tracking";
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastManualScroll = useRef(0);
@@ -161,9 +180,41 @@ export function PlanPanel({
     lastManualScroll.current = Date.now();
   };
 
+  const draftRow = (
+    <>
+      {tracker.phases.length > 0 && (
+        <span className="text-meta tabular-nums text-ink-4">
+          {plural(tracker.phases.length, "phase")} · {progressLabel(tracker)}
+        </span>
+      )}
+      <span className="flex-1" />
+      {approve && (
+        <span title={approve.blocked ?? undefined}>
+          <Button
+            variant="primary"
+            size="sm"
+            className="h-[26px] text-ui-sm font-semibold"
+            busy={approving}
+            disabled={approve.blocked !== null}
+            onClick={onApprove}
+          >
+            Approve &amp; build
+          </Button>
+        </span>
+      )}
+    </>
+  );
+
   const phases = (
     <div className="space-y-[18px] px-[18px] pb-[18px] pt-5">
-      <TrackedPhases tracker={tracker} changed={changed} reduceMotion={reduceMotion} onJump={onJump} />
+      <TrackedPhases
+        tracker={tracker}
+        changed={changed}
+        reduceMotion={reduceMotion}
+        onJump={onJump}
+        phaseAction={phaseAction}
+        checkStatus={checkStatus}
+      />
       {tracker.phases.length === 0 && (
         <div className="text-body leading-prose text-ink-2">
           <MarkdownPreview body={tracker.body} />
@@ -185,11 +236,22 @@ export function PlanPanel({
         <Icon name="docText" size="sm" className="text-ink-4" />
         <span className="text-ui font-semibold text-ink">Plan preview</span>
         <span className="flex-1" />
+        {goalAction && (
+          <button
+            type="button"
+            data-testid="plan-goal-action"
+            onClick={goalAction.onClick}
+            className={HEADER_BUTTON}
+          >
+            <Icon name="goal" size="xs" />
+            {goalAction.label}
+          </button>
+        )}
         {headerAction && (
           <button
             type="button"
             onClick={headerAction.onClick}
-            className="inline-flex h-[26px] items-center gap-1.5 rounded-control border border-edge px-2 text-ui-sm font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink"
+            className={HEADER_BUTTON}
           >
             {headerAction.label}
             <Icon name={headerAction.icon} size="xs" />
@@ -245,29 +307,26 @@ export function PlanPanel({
               )
             )}
           </>
+        ) : buildGoal ? (
+          <div className="flex w-full flex-col gap-2.5">
+            <SegmentedControl
+              aria-label="Build mode"
+              value={buildMode}
+              options={[
+                { value: "once", label: "Build once" },
+                { value: "until", label: "Build until met" },
+              ]}
+              onChange={setBuildMode}
+              className="self-start"
+            />
+            {buildMode === "until" ? (
+              buildGoal.render()
+            ) : (
+              <div className="flex items-center gap-2">{draftRow}</div>
+            )}
+          </div>
         ) : (
-          <>
-            {tracker.phases.length > 0 && (
-              <span className="text-meta tabular-nums text-ink-4">
-                {plural(tracker.phases.length, "phase")} · {progressLabel(tracker)}
-              </span>
-            )}
-            <span className="flex-1" />
-            {approve && (
-              <span title={approve.blocked ?? undefined}>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="h-[26px] text-ui-sm font-semibold"
-                  busy={approving}
-                  disabled={approve.blocked !== null}
-                  onClick={onApprove}
-                >
-                  Approve &amp; build
-                </Button>
-              </span>
-            )}
-          </>
+          draftRow
         )}
       </div>
     </div>

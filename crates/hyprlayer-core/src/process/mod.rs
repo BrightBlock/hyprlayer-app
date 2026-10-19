@@ -5,16 +5,21 @@ pub mod exit;
 mod job;
 pub mod orphan;
 
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Notify;
 
 use crate::error::{CoreError, Result};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+const BOUNDED_READ_CHUNK: usize = 8 * 1024;
+const BOUNDED_DRAIN: Duration = Duration::from_millis(500);
+const BOUNDED_REAP: Duration = Duration::from_secs(2);
 const STDERR_TAIL_CHARS: usize = 2000;
 /// Longer arguments are prompts or file bodies; the log gets their length.
 const LOGGED_ARG_CHARS: usize = 200;
@@ -143,6 +148,68 @@ impl Exec {
         ran
     }
 
+    /// stdout and stderr share one ring of `ring_bytes`; a timeout or cancel keeps what was read.
+    /// The child leads its own process group, which dies with the run if its future is dropped.
+    pub async fn run_bounded(&self, ring_bytes: usize, cancel: &Notify) -> Result<BoundedOutput> {
+        // Enabled before the spawn, so a cancel signalled earlier starts nothing and a later one is never missed.
+        let cancelled = cancel.notified();
+        tokio::pin!(cancelled);
+        if cancelled.as_mut().enable() {
+            return Ok(BoundedOutput {
+                tail: String::new(),
+                exit_code: None,
+                timed_out: false,
+                cancelled: true,
+            });
+        }
+
+        let mut child = self.spawn_child(true)?;
+        let mut group = GroupGuard::new(child.id());
+        let mut pipes = Pipes::new(&mut child, ring_bytes);
+        let deadline = tokio::time::sleep(self.timeout);
+        tokio::pin!(deadline);
+
+        let ended = loop {
+            tokio::select! {
+                _ = pipes.pump(), if pipes.open() => {}
+                status = child.wait() => break Ended::Exited(status),
+                _ = &mut deadline => break Ended::TimedOut,
+                _ = &mut cancelled => break Ended::Cancelled,
+            }
+        };
+        let timed_out = matches!(ended, Ended::TimedOut);
+        let was_cancelled = matches!(ended, Ended::Cancelled);
+        let status = match ended {
+            Ended::Exited(status) => Some(status.map_err(CoreError::Io)?),
+            Ended::TimedOut | Ended::Cancelled => {
+                group.kill();
+                let _ = child.start_kill();
+                tokio::time::timeout(BOUNDED_REAP, child.wait())
+                    .await
+                    .ok()
+                    .and_then(|reaped| reaped.ok())
+            }
+        };
+        // Reaped: the pid may be reused from here, so the guard must not fire on it.
+        group.disarm();
+        // A process that outlived the child can hold the pipes open, so the drain is bounded.
+        let _ = tokio::time::timeout(BOUNDED_DRAIN, async { while pipes.pump().await {} }).await;
+
+        if timed_out {
+            tracing::warn!(
+                "`{}` timed out after {}s and was killed",
+                self.describe(),
+                self.timeout.as_secs()
+            );
+        }
+        Ok(BoundedOutput {
+            tail: pipes.ring.into_tail(),
+            exit_code: status.and_then(|status| status.code()),
+            timed_out,
+            cancelled: was_cancelled,
+        })
+    }
+
     /// Program, cwd and arguments for a log line, with credentials in URLs,
     /// values after key- or token-like flags, and long arguments masked.
     fn describe(&self) -> String {
@@ -175,10 +242,11 @@ impl Exec {
         out
     }
 
-    async fn spawn_and_wait(&self) -> Result<ExecOutput> {
+    /// A bounded run takes no stdin and always leads its own process group, which is what it kills.
+    fn spawn_child(&self, bounded: bool) -> Result<tokio::process::Child> {
         let mut cmd = tokio::process::Command::new(&self.program);
         cmd.args(&self.args)
-            .stdin(if self.stdin.is_some() {
+            .stdin(if self.stdin.is_some() && !bounded {
                 Stdio::piped()
             } else {
                 Stdio::null()
@@ -202,11 +270,11 @@ impl Exec {
         }
 
         #[cfg(unix)]
-        if self.own_process_group {
+        if self.own_process_group || bounded {
             cmd.process_group(0);
         }
 
-        let mut child = cmd.spawn().map_err(|e| {
+        cmd.spawn().map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 CoreError::BinaryMissing {
                     name: program_name(&self.program_display()),
@@ -214,7 +282,11 @@ impl Exec {
             } else {
                 CoreError::Io(e)
             }
-        })?;
+        })
+    }
+
+    async fn spawn_and_wait(&self) -> Result<ExecOutput> {
+        let mut child = self.spawn_child(false)?;
 
         let mut stdout_pipe = child.stdout.take().expect("stdout piped");
         let mut stderr_pipe = child.stderr.take().expect("stderr piped");
@@ -270,6 +342,147 @@ impl Exec {
 
     fn program_display(&self) -> String {
         self.program.display().to_string()
+    }
+}
+
+#[derive(Debug)]
+pub struct BoundedOutput {
+    pub tail: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub cancelled: bool,
+}
+
+enum Ended {
+    Exited(std::io::Result<std::process::ExitStatus>),
+    TimedOut,
+    Cancelled,
+}
+
+/// Kills the child's whole process group when dropped while armed: `kill_on_drop` reaches only the child.
+/// Elsewhere than unix there is no group, and only the child is killed.
+struct GroupGuard {
+    #[cfg(unix)]
+    pgid: Option<u32>,
+}
+
+impl GroupGuard {
+    fn new(pid: Option<u32>) -> Self {
+        #[cfg(unix)]
+        {
+            Self { pgid: pid }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = pid;
+            Self {}
+        }
+    }
+
+    fn kill(&self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid {
+            unsafe { libc::killpg(pgid as libc::pid_t, libc::SIGKILL) };
+        }
+    }
+
+    fn disarm(&mut self) {
+        #[cfg(unix)]
+        {
+            self.pgid = None;
+        }
+    }
+}
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// The last `cap` bytes written, whichever pipe they came from.
+struct Ring {
+    bytes: VecDeque<u8>,
+    cap: usize,
+    wrapped: bool,
+}
+
+impl Ring {
+    fn push(&mut self, chunk: &[u8]) {
+        self.bytes.extend(chunk);
+        if self.bytes.len() > self.cap {
+            self.bytes.drain(..self.bytes.len() - self.cap);
+            self.wrapped = true;
+        }
+    }
+
+    fn into_tail(mut self) -> String {
+        let bytes = self.bytes.make_contiguous();
+        // The cut may land inside a character; start at the next whole one.
+        let skip = if self.wrapped {
+            bytes.iter().take_while(|b| **b & 0xC0 == 0x80).count()
+        } else {
+            0
+        };
+        String::from_utf8_lossy(&bytes[skip..]).into_owned()
+    }
+}
+
+/// A child's stdout and stderr, read into one ring until each closes.
+struct Pipes {
+    stdout: Option<tokio::process::ChildStdout>,
+    stderr: Option<tokio::process::ChildStderr>,
+    out_chunk: Vec<u8>,
+    err_chunk: Vec<u8>,
+    ring: Ring,
+}
+
+impl Pipes {
+    fn new(child: &mut tokio::process::Child, ring_bytes: usize) -> Self {
+        Self {
+            stdout: Some(child.stdout.take().expect("stdout piped")),
+            stderr: Some(child.stderr.take().expect("stderr piped")),
+            out_chunk: vec![0; BOUNDED_READ_CHUNK],
+            err_chunk: vec![0; BOUNDED_READ_CHUNK],
+            ring: Ring {
+                bytes: VecDeque::new(),
+                cap: ring_bytes,
+                wrapped: false,
+            },
+        }
+    }
+
+    fn open(&self) -> bool {
+        self.stdout.is_some() || self.stderr.is_some()
+    }
+
+    /// Takes the next chunk from whichever pipe has one; false once both are closed.
+    async fn pump(&mut self) -> bool {
+        if !self.open() {
+            return false;
+        }
+        tokio::select! {
+            read = read_chunk(&mut self.stdout, &mut self.out_chunk) => match read {
+                Ok(n) if n > 0 => self.ring.push(&self.out_chunk[..n]),
+                _ => self.stdout = None,
+            },
+            read = read_chunk(&mut self.stderr, &mut self.err_chunk) => match read {
+                Ok(n) if n > 0 => self.ring.push(&self.err_chunk[..n]),
+                _ => self.stderr = None,
+            },
+        }
+        true
+    }
+}
+
+/// Waits forever on a closed pipe, so `select!` only ever hears from the open ones.
+async fn read_chunk<R: AsyncRead + Unpin>(
+    pipe: &mut Option<R>,
+    chunk: &mut [u8],
+) -> std::io::Result<usize> {
+    match pipe {
+        Some(pipe) => pipe.read(chunk).await,
+        None => std::future::pending().await,
     }
 }
 

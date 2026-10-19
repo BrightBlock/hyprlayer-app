@@ -124,6 +124,14 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::reviews::resolve_review_note,
             commands::reviews::submit_review,
             commands::reviews::mark_review_round_delivered,
+            commands::goals::start_goal,
+            commands::goals::pause_goal,
+            commands::goals::resume_goal,
+            commands::goals::stop_goal,
+            commands::goals::update_goal,
+            commands::goals::get_goal,
+            commands::goals::list_goals,
+            commands::goals::derive_goal,
             commands::sessions::start_stage_session,
             commands::sessions::resume_session,
             commands::sessions::restart_session,
@@ -278,7 +286,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::QuitRequested,
             events::ServerDisconnected,
             events::AccountChanged,
-            events::SshPromptsChanged
+            events::SshPromptsChanged,
+            events::GoalChanged
         ])
         // Vocabulary no command signature carries yet.
         .typ::<DocType>()
@@ -803,6 +812,8 @@ mod tests {
             "answerQuestion:",
             "setBinaryOverride:",
             "getAppSettings:",
+            "startGoal:",
+            "listGoals:",
         ] {
             assert!(
                 bindings.contains(command),

@@ -13,15 +13,18 @@ import { startServerAutoUpdate } from "./features/hosts/serverAutoUpdate";
 import { registerActiveWorkstreams, writtenDocsBridge } from "./features/session/writtenDocs";
 import {
   activeWorkstreamIds,
+  openGoalSession,
   reattachSessions,
   removeSessionsForWorkstream,
   sessionBridge,
 } from "./features/session/sessionStore";
+import { goalBridge } from "./features/session/goalBridge";
 import {
   setupTranscriptSync,
   transcriptSyncBridge,
   transcriptSyncReconnected,
 } from "./features/session/syncStore";
+import { registerGoalHandoff } from "./features/session/goalHandoffSlot";
 import { registerPlanCard } from "./features/session/planCardSlot";
 import { registerReadyCard } from "./features/session/readyCardSlot";
 import { registerReviewCard } from "./features/session/reviewCardSlot";
@@ -30,12 +33,14 @@ import { startSessionTitleSync } from "./features/session/sessionTitleSync";
 import { PlanCard } from "./features/plan/PlanCard";
 import { ReviewCard } from "./features/review/ReviewCard";
 import { ReadyForReviewCard } from "./features/review/ReadyForReviewCard";
+import { GoalHandoff } from "./features/review/GoalHandoff";
 import { LifecycleSteps } from "./features/review/LifecycleSteps";
 import { registerLifecycleSteps } from "./features/plan/lifecycleSlot";
 import { approveFromChat } from "./features/plan/planApproval";
 import { unwrap } from "./lib/ipc";
 import { installGlobalHandlers, log } from "./lib/log";
-import { onWorkstreamArchived } from "./lib/queries";
+import { invalidateGoals, onWorkstreamArchived } from "./lib/queries";
+import { onGoalStarted } from "./lib/goalSheet";
 import { queryClient } from "./lib/queryClient";
 import { setupDragRegion } from "./lib/dragRegion";
 import { setupMotionGate } from "./lib/motion";
@@ -66,17 +71,24 @@ registerEventBridge(reconnectBridge);
 registerEventBridge(sshPromptBridge);
 registerEventBridge(sessionBridge);
 registerEventBridge(transcriptSyncBridge);
+registerEventBridge(goalBridge);
 // Ahead of the reattach, whose folds ask whether the new connection syncs.
 onServerReconnected(transcriptSyncReconnected);
 onServerReconnected(() => {
   reattachSessions().catch((e) => log.warn("reconnect", "reattaching sessions failed", e));
 });
+// No goal event replays across a reconnect.
+onServerReconnected(() => invalidateGoals());
 registerActiveWorkstreams(activeWorkstreamIds);
 registerPlanCard(PlanCard);
 registerReviewCard(ReviewCard);
 registerReadyCard(ReadyForReviewCard);
+registerGoalHandoff(GoalHandoff);
 registerLifecycleSteps(LifecycleSteps);
 registerSendInterceptor(approveFromChat);
+onGoalStarted((goal, request) => {
+  openGoalSession(goal, request).catch((e) => log.warn("goal", "opening the goal's session failed", e));
+});
 onWorkstreamArchived(removeSessionsForWorkstream);
 attachEventListeners();
 void unwrap(commands.listRunningScripts())

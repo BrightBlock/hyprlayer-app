@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 
-import type { ActiveSessionView, WorkstreamView } from "@/lib/bindings";
+import type { ActiveSessionView, Session, WorkstreamView } from "@/lib/bindings";
+import { goalActivity } from "@/lib/domain/goals";
 import { useActiveSessions } from "@/lib/queries";
 import type { AgentState } from "@/features/multiplexer/engineState";
 import { rollupForWorkstream, useMultiplexerStore } from "@/features/multiplexer/multiplexerStore";
@@ -167,9 +168,12 @@ function parsePicked(keys: string[]): Map<string, Picked> {
   return out;
 }
 
-function registryActivity(state: string): FleetActivity | null {
-  if (state === "awaiting_permission" || state === "awaiting_question") return "needs-you";
-  if (state === "starting") return "working";
+// The goal's brief first, as `classifyEntry` reads it for sessions in the store.
+function registryActivity(session: Session): FleetActivity | null {
+  const goal = goalActivity(session.goal);
+  if (goal && goal !== "idle") return goal;
+  if (session.state === "awaiting_permission" || session.state === "awaiting_question") return "needs-you";
+  if (session.state === "starting") return "working";
   return null;
 }
 
@@ -178,7 +182,7 @@ function registryFold(
 ): Map<string, { activity: FleetActivity; sessionId: string; since: number | null }> {
   const out = new Map<string, { activity: FleetActivity; sessionId: string; since: number | null }>();
   for (const av of views) {
-    const activity = registryActivity(av.session.state);
+    const activity = registryActivity(av.session);
     if (!activity) continue;
     const wsId = av.session.workstreamId;
     const cur = out.get(wsId);

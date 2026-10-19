@@ -961,6 +961,55 @@ describe("post-compact summary", () => {
   });
 });
 
+describe("native continuation rows", () => {
+  const HOOK = "Stop hook feedback:\ntests still failing in widget::render";
+
+  it("an injected hook line is a continuation row, not a bubble, even with a Skill awaiting its body", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Skill", input: '{"skill":"a"}', parentId: null });
+    view = reduceEvent(view, {
+      kind: "toolResult",
+      toolUseId: "s1",
+      content: "Launching skill: a",
+      isError: false,
+      parentId: null,
+    });
+    view = reduceEvent(view, { kind: "assistantText", text: HOOK, parentId: null, injected: true });
+    expect(kinds(view)).toEqual(["tool", "nativeContinuation"]);
+    expect(view.items[0]).not.toHaveProperty("skillBody");
+    expect(view.items[1]).toMatchObject({ reason: "tests still failing in widget::render", native: "hook" });
+  });
+
+  it("the [condition]: reason form is a native goal", () => {
+    const view = reduceEvent(initialSessionView("running"), {
+      kind: "assistantText",
+      text: "Stop hook feedback:\n[all tests pass]: widget::render still fails",
+      parentId: null,
+      injected: true,
+    });
+    expect(view.items[0]).toMatchObject({
+      kind: "nativeContinuation",
+      reason: "widget::render still fails",
+      native: "goal",
+    });
+  });
+
+  it("the model's own text with the same words stays an assistant bubble", () => {
+    const view = reduceEvent(initialSessionView("running"), { kind: "assistantText", text: HOOK, parentId: null });
+    expect(kinds(view)).toEqual(["assistant"]);
+  });
+
+  it("viewToText keeps the row as a stop hook line", () => {
+    const view = reduceEvent(initialSessionView("running"), {
+      kind: "assistantText",
+      text: HOOK,
+      parentId: null,
+      injected: true,
+    });
+    expect(viewToText(view)).toContain("- stop hook: tests still failing in widget::render");
+  });
+});
+
 describe("connecting state (leaves 'starting' on first sign of life)", () => {
   it("init clears 'starting'", () => {
     const view = reduceEvent(initialSessionView("starting"), {

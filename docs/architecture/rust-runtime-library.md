@@ -221,20 +221,20 @@ lags and receives `RecvError::Lagged`.
 
 ## Services
 
-Fourteen handles, each borrowed from the runtime for the duration of one call:
+Fifteen handles, each borrowed from the runtime for the duration of one call:
 
 ```rust
 runtime.settings()   runtime.providers()  runtime.sessions()   runtime.projects()
 runtime.library()    runtime.agents()     runtime.prompts()    runtime.workstreams()
 runtime.attachments() runtime.terminals() runtime.scripts()    runtime.reviews()
-runtime.skills()     runtime.account()
+runtime.skills()     runtime.account()    runtime.goals()
 ```
 
 Each handle's operational request/result types live in that service's module and
 are supported alongside it: `hyprlayer_core::runtime::{settings_service,
 providers, sessions, projects, library, agents, prompts, workstreams,
-attachments, terminals, scripts, reviews, skills, account}`. The handles themselves
-are also re-exported at the crate root.
+attachments, terminals, scripts, reviews, skills, account, goals}`. The handles
+themselves are also re-exported at the crate root.
 
 Every method takes `&self` and returns `Result<T>` unless shown otherwise.
 
@@ -503,6 +503,62 @@ After a delivered round, `changed_since_round` lists the files whose content
 differs from the round's snapshot, and a sent comment in one of them is
 `addressed` once its line or the lines around it changed. The `review_lifecycle`
 E2E scenario is their headless test.
+
+### `GoalService`
+
+`start(StartGoalRequest, Option<ClientRef>)`, `pause(&str)`, `resume(&str)`,
+`stop(&str)`, `update(&str, GoalPatch)`, `get(&str)` and
+`list(Option<&str>, active_only: bool)`. The `&str` is a goal id; `list` filters by an
+optional workstream id. The first five return the `Goal`, `get` a `GoalDetail` (the
+goal and its iterations, oldest first), and `list` the goals newest first.
+
+A goal is a condition, a work prompt, checks and limits attached to one session. The
+server sends an iteration into that session, runs the checks, and either sends the next
+iteration with the failed checks as feedback or ends the goal. `start` takes a
+`GoalTarget`: an existing `Session`, or a `NewSession`, which first launches a General,
+Research or Implement session. A session has one running or paused goal at most
+(`goal_active`); a partial unique index decides a race between two starts. The caller's
+`ClientRef` signs every iteration's message and stays on it after that client leaves.
+
+A spec the server cannot run is refused as `goal_invalid` before anything is written:
+it needs a Command check (the other kinds are refused), a command and a timeout of a
+second or more, 1 to 200 iterations, 60 seconds to 48 hours of active time, and a spend
+limit (dollars on Claude and OpenCode, tokens on Codex). Spend is recorded on the goal
+but not yet enforced.
+
+Each running goal has one driver task (`runtime/sessions/goal_loop.rs`), spawned by
+`start` and `resume`; `shutdown` stops it before it kills any harness. An iteration is
+one turn, sent through `SessionService::send_app_turn` under the prompt name
+`hyprlayer:goal`. It ends at the turn's own echoed message, a `TurnDone` and two quiet
+seconds, so a Stop-hook loop inside the turn is still one iteration. The runner then
+runs the Command checks in the workstream's worktree, each in its own process group
+with bounded output, and decides. The goal is `met` when every check passes. It is
+exhausted at the iteration or active-time limit, and failed as `stalled` after three
+iterations in a row that leave the same diff, HEAD and failure. It pauses when a line of
+the agent's last text starts `NEEDS-HUMAN:`, after two failed turns, when the harness
+exits unexpectedly, or when asked. The goal is stored in `goals`, each iteration with
+its check results in `goal_iterations`.
+
+`pause` waits for the iteration and its checks (step `pausing`). `stop` interrupts the
+turn (step `stopping`) and kills the harness if it ignores the interrupt for ten
+seconds. `resume` runs a paused goal again, and an exhausted one whose limit `update`
+has raised. `update` changes the condition, work prompt, checks or limits at the
+runner's next boundary and leaves the running iteration alone. Interrupting the session
+pauses its running goal, killing the session ends the goal as `session_ended`, and
+archiving the workstream ends it as `workstream_archived`. Archiving or deleting a
+session with a live goal is refused as `goal_active`. Opening the runtime reaps the
+harness a previous run left behind for a running or paused goal, then resumes the running
+ones once the first client's environment overlay arrives (at most 30 s): the cut-off
+iteration closes as `cut_off`, or the checks re-run if the goal went down checking. More
+than three restarts without a finished iteration pause the goal as `restart_loop`. The
+other codes are `goal_not_found`, `goal_invalid` and `goal_finished`.
+
+Every status, step or iteration change sends `RuntimeEvent::GoalChanged`. The server
+forwards it only to connections that announced `GoalChanged`, watching the session or
+not; a `subscribe()` receiver hears every one. While a goal is running or paused its
+session carries a `GoalBrief` in `Session.goal`; an ended goal is read with `get`. The
+`goal_met`, `goal_iteration_limit` and `goal_user_stop` E2E scenarios and the
+`goal_runtime` suite are its headless tests.
 
 ### `AttachmentService`
 

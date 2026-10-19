@@ -19,8 +19,17 @@ import { useCopyFeedback } from "@/lib/clipboard";
 import { HyprlayerMark } from "@/components/Logo";
 import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
+import { selectAgentTab } from "@/features/search/selectAgentTab";
 import { stageLabel } from "@/lib/domain/stages";
-import type { ClientRef } from "@/lib/bindings";
+import type { ClientRef, Goal, GoalCheckResult, GoalIteration } from "@/lib/bindings";
+import {
+  GOAL_CONTROL_LABEL,
+  GOAL_END_REASON_LABEL,
+  GOAL_PAUSE_REASON_LABEL,
+  goalBudgetUnit,
+  goalControls,
+  goalSpent,
+} from "@/lib/domain/goals";
 import type { SyncPhase } from "@/lib/domain/sync";
 import { exitLabel, type TranscriptItem } from "./transcript";
 import type { PendingTurn } from "./transcriptSync";
@@ -31,11 +40,16 @@ import { PromptCard } from "./PromptCard";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import type { QueuedMessage } from "./sessionStore";
-import { formatElapsed, formatRelativeTime, formatTokens } from "@/lib/format";
+import { formatElapsed, formatRelativeTime, formatTokens, formatUsd, plural } from "@/lib/format";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { PlanCardsContext, planCardComponent } from "./planCardSlot";
 import { readyCardComponent, type ReadyCardProps } from "./readyCardSlot";
+import { goalHandoffComponent } from "./goalHandoffSlot";
 import { REVIEW_PROMPT, reviewCardComponent } from "./reviewCardSlot";
+import { GOAL_PROMPT } from "./goalPrompt";
+import { useGoalControl } from "./sessionGoal";
+import { armResumeAfterSend } from "./sessionStore";
+import { requestComposerFocus, useWorkstreamTabsStore } from "./workstreamTabs";
 import { SkillChip } from "./SkillChip";
 import {
   baseName,
@@ -642,6 +656,374 @@ const BoundaryDivider = memo(function BoundaryDivider({
   );
 });
 
+/** The session's newest goal and its iterations, for the dividers, check cards and finished card. */
+export type TranscriptGoal = {
+  sessionId: string;
+  workstreamId: string;
+  goal: Goal;
+  iterations: GoalIteration[] | null;
+};
+
+const GoalTranscript = createContext<TranscriptGoal | null>(null);
+
+function useIteration(clientMessageId: string | null | undefined): GoalIteration | null {
+  const ctx = useContext(GoalTranscript);
+  if (!clientMessageId) return null;
+  return ctx?.iterations?.find((it) => it.clientMessageId === clientMessageId) ?? null;
+}
+
+export function iterationSpend(goal: Goal, iteration: GoalIteration): string | null {
+  if (goalBudgetUnit(goal) === "usd") return iteration.costUsd == null ? null : formatUsd(iteration.costUsd);
+  return iteration.tokens == null ? null : `${formatTokens(iteration.tokens)} tokens`;
+}
+
+// Replaces the iteration's prompt bubble; an earlier goal's iteration isn't in the detail.
+const GoalIterationDivider = memo(function GoalIterationDivider({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: "user" }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const goal = useContext(GoalTranscript)?.goal ?? null;
+  const iteration = useIteration(item.clientMessageId);
+  const parts =
+    goal && iteration ? [`Iteration ${iteration.n} of ${goal.limits.maxIterations}`] : ["Goal iteration"];
+  if (goal && iteration?.startedAt != null && iteration.endedAt != null) {
+    parts.push(formatElapsed(iteration.endedAt - iteration.startedAt));
+    const spend = iterationSpend(goal, iteration);
+    if (spend) parts.push(spend);
+  }
+  return (
+    <div data-item-id={item.id} data-testid="goal-iteration-divider" className="text-label text-ink-dim/70">
+      <div className="flex items-center gap-2">
+        <span className="h-px flex-1 bg-edge" aria-hidden />
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Icon name="goal" size="xs" />
+          {parts.join(" · ")}
+        </span>
+        <span className="h-px flex-1 bg-edge" aria-hidden />
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="shrink-0 rounded px-1 py-0.5 transition hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink"
+        >
+          {open ? "Hide prompt" : "Show prompt"}
+        </button>
+      </div>
+      {open && (
+        <p className="selectable mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-edge bg-panel-2 p-3 font-sans text-body normal-case tracking-normal text-ink-dim">
+          {item.text}
+        </p>
+      )}
+    </div>
+  );
+});
+
+const NativeContinuationRow = memo(function NativeContinuationRow({
+  item,
+}: {
+  item: Extract<TranscriptItem, { kind: "nativeContinuation" }>;
+}) {
+  return (
+    <div className="text-ui" data-item-id={item.id} data-testid="native-continuation">
+      <div className={STEP_ROW_STATIC}>
+        <Icon name="iteration" size="xs" className="text-ink-dim" />
+        <span className="shrink-0 font-medium text-ink">
+          {item.native === "goal" ? "Native /goal not met:" : "Stop hook continued the turn:"}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-ink-dim" title={item.reason}>
+          {item.reason}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+const TAIL_LINES = 6;
+
+function CheckTail({ tail }: { tail: string }) {
+  const [all, setAll] = useState(false);
+  const lines = tail.trimEnd().split("\n");
+  const clipped = lines.length > TAIL_LINES;
+  return (
+    <div className="mt-1 pl-5">
+      <pre className="selectable max-h-96 overflow-auto rounded bg-surface/60 p-2 text-meta text-ink-dim">
+        {all || !clipped ? tail.trimEnd() : lines.slice(-TAIL_LINES).join("\n")}
+      </pre>
+      {clipped && (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          className="mt-1 rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
+        >
+          {all ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const CHECK_KIND_LABEL = { plan_boxes: "Plan boxes", evaluator: "Evaluator", validation: "Validation" } as const;
+
+// The result carries no counts: the server writes one finding per tail line, failing checks prefixed.
+function validationCounts(tail: string): string | null {
+  const findings = tail.split("\n").filter((line) => line.trim());
+  const failing = findings.filter((line) => line.startsWith("Failed check: ")).length;
+  const issues = findings.length - failing;
+  const parts = [issues > 0 && plural(issues, "issue"), failing > 0 && plural(failing, "failing check")];
+  return parts.filter(Boolean).join(" · ") || null;
+}
+
+function CheckResultRow({ result, workstreamId }: { result: GoalCheckResult; workstreamId: string }) {
+  const [open, setOpen] = useState(false);
+  const pass = result.outcome === "pass";
+  const validation = result.kind === "validation";
+  const counts = validation ? validationCounts(result.outputTail) : null;
+  const detail =
+    result.exitCode !== null ? `exit ${result.exitCode}` : result.outcome === "error" ? "error" : counts;
+  const tail = !pass && result.outputTail ? result.outputTail : null;
+  const validateSessionId = validation ? (result.sessionId ?? null) : null;
+  return (
+    <div data-testid={validation ? "goal-check-validation" : undefined}>
+      <div className="flex min-w-0 items-center gap-2">
+        <Icon
+          name={pass ? "check" : "failed"}
+          size="xs"
+          className={pass ? "shrink-0 text-ok" : "shrink-0 text-bad-ink"}
+        />
+        <span className="min-w-0 truncate font-mono text-ink" title={result.label}>
+          {result.label}
+        </span>
+        {detail && <span className="shrink-0 font-mono text-ink-dim">{detail}</span>}
+        {(validateSessionId || tail) && (
+          <span className="ml-auto flex shrink-0 items-center gap-1">
+            {validateSessionId && (
+              <button
+                type="button"
+                data-testid="goal-check-open-validate"
+                onClick={() => void selectAgentTab(workstreamId, validateSessionId, { frozen: true })}
+                className="rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
+              >
+                Open
+              </button>
+            )}
+            {tail && (
+              <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
+              >
+                {open ? "Hide output" : "Output"}
+              </button>
+            )}
+          </span>
+        )}
+      </div>
+      {result.reason && (
+        <p className="selectable mt-0.5 pl-5 text-ink-dim">
+          {result.kind === "evaluator" ? `“${result.reason}”` : result.reason}
+        </p>
+      )}
+      {open && tail && <CheckTail tail={tail} />}
+    </div>
+  );
+}
+
+function checkLabel(check: Goal["checks"][number]): string {
+  return check.kind === "command" ? (check.label ?? check.command) : CHECK_KIND_LABEL[check.kind];
+}
+
+/** One line per result, then the layers an earlier failure kept from running. */
+export function GoalCheckList({ goal, iteration }: { goal: Goal; iteration: GoalIteration }) {
+  // Layers run in order and stop at the first failure, so the unrun ones are the tail.
+  const ranKinds = new Set(iteration.results.map((r) => r.kind));
+  const commandsRun = iteration.results.filter((r) => r.kind === "command").length;
+  const skipped = [
+    ...goal.checks.filter((c) => c.kind === "command").slice(commandsRun),
+    ...goal.checks.filter((c) => c.kind !== "command" && !ranKinds.has(c.kind)),
+  ].map(checkLabel);
+  return (
+    <div className="space-y-1.5 text-ui">
+      {iteration.results.map((result, i) => (
+        <CheckResultRow key={`${result.label}:${i}`} result={result} workstreamId={goal.workstreamId} />
+      ))}
+      {skipped.length > 0 && (
+        <div className="flex min-w-0 items-center gap-2 text-ink-dim">
+          <span className="w-3 shrink-0 text-center" aria-hidden>
+            –
+          </span>
+          <span className="min-w-0 truncate">{skipped.join(", ")}</span>
+          <span className="shrink-0">not run</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Under each finished iteration; output tails mount only when expanded.
+function GoalCheckCard({ clientMessageId }: { clientMessageId: string }) {
+  const goal = useContext(GoalTranscript)?.goal ?? null;
+  const iteration = useIteration(clientMessageId);
+  if (!goal || !iteration || iteration.results.length === 0) return null;
+  const pass = iteration.outcome === "pass";
+  const spend = iterationSpend(goal, iteration);
+  return (
+    <div
+      data-testid="goal-check-card"
+      className={cx(
+        "mt-3 rounded-card border px-3 py-2.5 text-ui shadow-card",
+        pass ? "border-line-strong bg-panel" : "border-fail-card-border bg-fail-card-bg",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <Icon name={pass ? "check" : "failed"} size="xs" className={pass ? "text-ok" : "text-bad-ink"} />
+        <span className="font-medium text-ink">
+          Checks · iteration {iteration.n} · {iteration.outcome ?? "pending"}
+        </span>
+        {spend && <span className="ml-auto text-meta text-ink-dim">{spend}</span>}
+      </div>
+      <div className="mt-2">
+        <GoalCheckList goal={goal} iteration={iteration} />
+      </div>
+    </div>
+  );
+}
+
+function lastCheckLine(iterations: GoalIteration[] | null): string | null {
+  const last = [...(iterations ?? [])].reverse().find((it) => it.results.length > 0);
+  if (!last) return null;
+  const failed = last.results.find((r) => r.outcome !== "pass");
+  if (!failed) return `last check: ${last.results.length} of ${last.results.length} passed`;
+  if (failed.exitCode !== null) return `last: ${failed.label} exited ${failed.exitCode}`;
+  return `last: ${failed.label}${failed.reason ? `: ${failed.reason}` : ""}`;
+}
+
+function goalComposerShell(workstreamId: string, sessionId: string): number | null {
+  const shells = useWorkstreamTabsStore.getState().byWs[workstreamId]?.shells ?? [];
+  return shells.find((s) => s.sessionId === sessionId)?.id ?? null;
+}
+
+const FINISHED_TONE = {
+  neutral: "border-line-strong bg-panel",
+  failed: "border-fail-card-border bg-fail-card-bg",
+  ask: "border-q-card-border bg-q-card-bg",
+} as const;
+
+/** Once the session's newest goal has ended, or paused for anything but the user. */
+function GoalFinishedCard({ data }: { data: TranscriptGoal }) {
+  const { goal, iterations, sessionId, workstreamId } = data;
+  const [collapsedFor, setCollapsedFor] = useState<string | null>(null);
+  const control = useGoalControl();
+  const needsYou = goal.status === "paused" && goal.pauseReason !== null && goal.pauseReason !== "user";
+  const ended = goal.status !== "running" && goal.status !== "paused";
+  const key = `${goal.id}:${goal.status}:${goal.pauseReason ?? ""}`;
+  if ((!ended && !needsYou) || collapsedFor === key) return null;
+
+  const focusComposer = () => {
+    const shellId = goalComposerShell(workstreamId, sessionId);
+    if (shellId !== null) requestComposerFocus(shellId);
+  };
+  const takeOver = () => {
+    focusComposer();
+    setCollapsedFor(key);
+  };
+  const controls = goalControls(goal).map((c) => (
+    <Button key={c} size="sm" onClick={() => control.run(c, goal)}>
+      {GOAL_CONTROL_LABEL[c]}
+    </Button>
+  ));
+
+  if (goal.status === "stopped") {
+    return (
+      <div data-testid="goal-finished-card" className="mt-3 flex items-center gap-2 text-ui text-ink-dim">
+        <Icon name="goal" size="xs" />
+        <span>Goal stopped</span>
+        {controls}
+      </div>
+    );
+  }
+
+  const last = lastCheckLine(iterations);
+  const Handoff = goal.status === "met" ? goalHandoffComponent() : null;
+  let title: string;
+  let tone: keyof typeof FINISHED_TONE = "neutral";
+  let body: ReactNode;
+  let actions: ReactNode;
+  if (goal.status === "met") {
+    title = "Goal met";
+    body = [
+      `${goal.iteration} ${goal.iteration === 1 ? "iteration" : "iterations"}`,
+      goalSpent(goal),
+      `${formatElapsed(goal.activeMs)} active`,
+      last,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  } else if (needsYou) {
+    title = "Goal paused, needs you";
+    tone = "ask";
+    body = goal.lastReason ?? GOAL_PAUSE_REASON_LABEL[goal.pauseReason!];
+    actions = (
+      <>
+        <Button
+          size="sm"
+          onClick={() => {
+            armResumeAfterSend(sessionId, goal.id);
+            focusComposer();
+          }}
+        >
+          Reply and resume
+        </Button>
+        <Button size="sm" disabled={control.pending} onClick={() => control.run("resume", goal)}>
+          {GOAL_CONTROL_LABEL.resume}
+        </Button>
+        <Button size="sm" disabled={control.pending} onClick={() => control.run("stop", goal)}>
+          {GOAL_CONTROL_LABEL.stop}
+        </Button>
+      </>
+    );
+  } else {
+    const failed = goal.status === "failed";
+    title = failed
+      ? `Goal failed: ${goal.endReason ? GOAL_END_REASON_LABEL[goal.endReason] : "unknown"}`
+      : "Goal stopped at its limit";
+    tone = failed ? "failed" : "neutral";
+    body = [`${goal.iteration} of ${goal.limits.maxIterations} iterations`, goalSpent(goal), last]
+      .filter(Boolean)
+      .join(" · ");
+    actions = (
+      <>
+        {controls}
+        <Button size="sm" onClick={takeOver}>
+          Take over
+        </Button>
+      </>
+    );
+  }
+
+  return (
+    <div
+      data-testid="goal-finished-card"
+      className={cx("mt-5 rounded-card border p-3.5 shadow-card", FINISHED_TONE[tone])}
+    >
+      <div className="flex items-center gap-2">
+        <Icon
+          name={tone === "ask" ? "warning" : goal.status === "met" ? "goal" : tone === "failed" ? "failed" : "paused"}
+          size="sm"
+          className={tone === "ask" ? "text-q-label" : tone === "failed" ? "text-bad-ink" : "text-ink-2"}
+        />
+        <span className="text-body font-medium text-ink">{title}</span>
+      </div>
+      {goal.status === "met" && <p className="mt-1.5 text-body text-ink">{goal.condition}</p>}
+      <p className="selectable mt-1 text-ui text-ink-dim">{body}</p>
+      {actions && <div className="mt-2.5 flex flex-wrap gap-2">{actions}</div>}
+      {Handoff && <Handoff sessionId={sessionId} workstreamId={workstreamId} goal={goal} />}
+    </div>
+  );
+}
+
 const QueuedCommandRow = memo(function QueuedCommandRow({
   item,
 }: {
@@ -808,6 +1190,7 @@ function renderSingle(
 ) {
   switch (item.kind) {
     case "user":
+      if (item.promptName === GOAL_PROMPT) return <GoalIterationDivider item={item} />;
       return (
         <UserMessage
           id={item.id}
@@ -859,6 +1242,8 @@ function renderSingle(
       );
     case "queuedCommand":
       return <QueuedCommandRow item={item} />;
+    case "nativeContinuation":
+      return <NativeContinuationRow item={item} />;
     case "exit":
       return (
         <div data-item-id={item.id}>
@@ -940,6 +1325,11 @@ const unitItems = (u: Unit): TranscriptItem[] => (u.type === "group" ? u.items :
 
 const seqAtLeast = (item: TranscriptItem, seq: number) => item.seq != null && item.seq >= seq;
 
+const goalIterationOf = (u: Unit): string | null =>
+  u.type === "single" && u.item.kind === "user" && u.item.promptName === GOAL_PROMPT
+    ? (u.item.clientMessageId ?? null)
+    : null;
+
 function ItemList({
   items,
   childrenByParent,
@@ -948,6 +1338,7 @@ function ItemList({
   prompt,
   freshFromSeq = null,
   divider = null,
+  goalChecks = false,
 }: {
   items: TranscriptItem[];
   childrenByParent: ChildMap;
@@ -956,6 +1347,8 @@ function ItemList({
   prompt: PromptHandlers;
   freshFromSeq?: number | null;
   divider?: { seq: number; node: ReactNode } | null;
+  /** Top level only: a check card closes each goal iteration. */
+  goalChecks?: boolean;
 }) {
   const planCards = useContext(PlanCardsContext);
   const selfClientId = useContext(SelfClientId);
@@ -1002,7 +1395,16 @@ function ItemList({
   const dividerAt = divider ? units.findIndex((u) => unitItems(u).some((it) => seqAtLeast(it, divider.seq))) : -1;
   // One flat keyed list, so the divider coming and going never remounts the unit beside it.
   const nodes: ReactNode[] = [];
+  let openIteration: string | null = null;
+  const closeIteration = () => {
+    if (openIteration) nodes.push(<GoalCheckCard key={`goal-check:${openIteration}`} clientMessageId={openIteration} />);
+  };
   units.forEach((unit, i) => {
+    const iteration = goalChecks ? goalIterationOf(unit) : null;
+    if (iteration) {
+      closeIteration();
+      openIteration = iteration;
+    }
     if (divider && i === dividerAt) {
       nodes.push(
         <div key={`divider:${divider.seq}`} className={i > 0 ? "mt-5" : ""}>
@@ -1012,6 +1414,7 @@ function ItemList({
     }
     nodes.push(renderUnit(unit, i));
   });
+  closeIteration();
   return <>{nodes}</>;
 }
 
@@ -1123,6 +1526,7 @@ type Props = {
   sync?: TranscriptSync;
   // Set for an implement session; the review feature decides whether the card shows.
   ready?: ReadyCardProps | null;
+  goal?: TranscriptGoal | null;
   queued?: QueuedMessage[];
   /** Whether the harness can give back a message it already holds (codex cannot). */
   canWithdrawQueued?: boolean;
@@ -1182,6 +1586,7 @@ export const TranscriptView = memo(
       prompt,
       sync = NO_SYNC,
       ready = null,
+      goal = null,
       queued = NO_QUEUED,
       canWithdrawQueued = true,
       onCancelQueued,
@@ -1387,24 +1792,28 @@ export const TranscriptView = memo(
           <OpenBackgroundIds.Provider value={openBackgroundIds}>
             <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
               <SelfClientId.Provider value={sync.selfClientId}>
-                <ItemList
-                  items={topLevel}
-                  childrenByParent={childrenByParent}
-                  busy={busy}
-                  permission={permission}
-                  prompt={prompt}
-                  freshFromSeq={sync.freshFromSeq}
-                  divider={
-                    divider && {
-                      seq: divider.seq,
-                      node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
+                <GoalTranscript.Provider value={goal}>
+                  <ItemList
+                    items={topLevel}
+                    goalChecks
+                    childrenByParent={childrenByParent}
+                    busy={busy}
+                    permission={permission}
+                    prompt={prompt}
+                    freshFromSeq={sync.freshFromSeq}
+                    divider={
+                      divider && {
+                        seq: divider.seq,
+                        node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
+                      }
                     }
-                  }
-                />
+                  />
+                </GoalTranscript.Provider>
               </SelfClientId.Provider>
             </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
           {ReadyCard && ready && <ReadyCard sessionId={ready.sessionId} workstreamId={ready.workstreamId} />}
+          {goal && <GoalFinishedCard data={goal} />}
           {tail && <SyncSkeletonTail tail={tail} />}
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">

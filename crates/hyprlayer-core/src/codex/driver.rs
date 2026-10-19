@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use super::protocol::{
     approval_reply, decode_line, question_reply, CodexPosture, CollabMode, Incoming, Translator,
 };
-use crate::agent::{declined_message, rewind_unsupported, KillFlag};
+use crate::agent::{declined_message, rewind_unsupported, KillFlag, UsageSoFar};
 use crate::claude::events::{ExitOutcome, SessionEvent};
 use crate::error::{CoreError, Result};
 use hyprlayer_models::session::QuestionAnswers;
@@ -29,7 +29,9 @@ const UPDATE_PLAN_CONFIG: &str = "tools.update_plan.enabled=true";
 // multi-agent runtime in Codex 0.149.x. Set the documented agent registry gate
 // so installed persona TOMLs are available in every Hyprlayer Codex session.
 const AGENTS_ENABLED_CONFIG: &str = "agents.enabled=true";
-const APP_SERVER_ARGS: [&str; 8] = [
+// The app owns goals; a native one would continue turns we never sent.
+pub(crate) const GOALS_DISABLED_CONFIG: &str = "features.goals=false";
+const APP_SERVER_ARGS: [&str; 10] = [
     "app-server",
     "--stdio",
     "-c",
@@ -38,6 +40,8 @@ const APP_SERVER_ARGS: [&str; 8] = [
     REQUEST_USER_INPUT_CONFIG,
     "-c",
     UPDATE_PLAN_CONFIG,
+    "-c",
+    GOALS_DISABLED_CONFIG,
 ];
 
 fn initialize_params() -> Value {
@@ -352,6 +356,7 @@ impl CodexDriver {
                         num_turns: None,
                         context_tokens: None,
                         turn_status: Some("failed".into()),
+                        thread_tokens: None,
                     });
                 }
                 Ok(Ok(result)) => {
@@ -525,6 +530,14 @@ impl CodexDriver {
         &self.thread_id
     }
 
+    /// The thread's total, which a resumed driver already knows before its first turn.
+    pub fn usage_so_far(&self) -> UsageSoFar {
+        UsageSoFar {
+            cost_usd: None,
+            thread_tokens: self.state.lock().ok().and_then(|s| s.thread_tokens),
+        }
+    }
+
     pub fn stderr_tail(&self) -> String {
         self.stderr_ring
             .lock()
@@ -535,6 +548,11 @@ impl CodexDriver {
     async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_rpc_id();
         self.request_with_id(id, method, params).await
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn request_for_test(&self, method: &str, params: Value) -> Result<Value> {
+        self.request(method, params).await
     }
 
     async fn request_with_id(&self, id: u64, method: &str, params: Value) -> Result<Value> {
@@ -1188,7 +1206,9 @@ mod tests {
                 "-c",
                 "tools.experimental_request_user_input.enabled=true",
                 "-c",
-                "tools.update_plan.enabled=true"
+                "tools.update_plan.enabled=true",
+                "-c",
+                "features.goals=false"
             ]
         );
     }

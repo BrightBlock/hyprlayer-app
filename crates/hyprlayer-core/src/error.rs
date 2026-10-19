@@ -76,6 +76,18 @@ pub enum CoreError {
     #[error("session {session_id} must be archived before it is deleted")]
     SessionNotArchived { session_id: String },
 
+    #[error("No goal with id {goal_id}")]
+    GoalNotFound { goal_id: String },
+
+    #[error("session {session_id} already has a goal running or paused")]
+    GoalActive { session_id: String },
+
+    #[error("{detail}")]
+    GoalInvalid { detail: String },
+
+    #[error("goal {goal_id} has already ended")]
+    GoalFinished { goal_id: String },
+
     #[error("this session moved on: {missing_turns} newer turn(s) from another client")]
     StaleTranscript {
         session_id: String,
@@ -543,6 +555,13 @@ impl CoreError {
                 Some("Wait for the agent to finish its turn, or stop it.".into())
             }
             CoreError::SessionNotArchived { .. } => Some("Archive the session first.".into()),
+            CoreError::GoalNotFound { .. } => {
+                Some("The goal ended with its session; start a new one.".into())
+            }
+            CoreError::GoalActive { .. } => Some("Stop or finish the session's goal first.".into()),
+            CoreError::GoalFinished { .. } => Some(
+                "Start a new goal, or raise the limit that was hit and resume.".into(),
+            ),
             CoreError::StaleTranscript { .. } => {
                 Some("Pull the new turns, then send again.".into())
             }
@@ -755,6 +774,10 @@ impl CoreError {
             CoreError::SessionNotFound { .. } => "session_not_found",
             CoreError::SessionBusy { .. } => "session_busy",
             CoreError::SessionNotArchived { .. } => "session_not_archived",
+            CoreError::GoalNotFound { .. } => "goal_not_found",
+            CoreError::GoalActive { .. } => "goal_active",
+            CoreError::GoalInvalid { .. } => "goal_invalid",
+            CoreError::GoalFinished { .. } => "goal_finished",
             CoreError::StaleTranscript { .. } => "stale_transcript",
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",

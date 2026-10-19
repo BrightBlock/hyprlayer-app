@@ -47,7 +47,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 [dev-dependencies]
 tempfile = "3"
 log = { version = "0.4", features = ["std"] }
-# Adds tokio::time::pause/advance for the reservation-TTL test only.
+# Adds tokio::time::pause/advance for the reservation-TTL and goal timer tests only.
 tokio = { workspace = true, features = ["test-util"] }
 
 [target."cfg(windows)".dependencies]

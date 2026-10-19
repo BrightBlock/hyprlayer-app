@@ -1,0 +1,78 @@
+{
+  "scenario": "goal_check_broken",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "error",
+            "reason": "timed out after 2 s",
+            "tailHasPartialOutput": true
+          },
+          "guard": "the check errors as timed out, and its tail holds what it printed before the kill",
+          "ok": true
+        }
+      ],
+      "step": "a timed-out check keeps its partial output"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcomes": [
+              "error",
+              "error",
+              "error"
+            ]
+          },
+          "guard": "three iterations in a row error",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endReason": "checks_broken",
+            "iteration": 3,
+            "status": "failed"
+          },
+          "guard": "the goal fails as checks broken at iteration 3",
+          "ok": true
+        }
+      ],
+      "step": "three errors fail the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "fail",
+            "tailCapped": true
+          },
+          "guard": "the check fails with at most 8 KiB of its output kept",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "status": "exhausted"
+          },
+          "guard": "the one-iteration goal then stops at its limit",
+          "ok": true
+        }
+      ],
+      "step": "a flooding check is capped"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

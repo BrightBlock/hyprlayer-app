@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Harness, PermissionMode, Stage};
+use crate::goal::GoalBrief;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -92,6 +93,7 @@ pub enum TurnStatus {
     Completed,
     Failed,
     Interrupted,
+    BudgetExhausted,
     Unknown,
 }
 
@@ -101,6 +103,7 @@ impl TurnStatus {
             "completed" => TurnStatus::Completed,
             "failed" => TurnStatus::Failed,
             "interrupted" | "aborted" | "cancelled" => TurnStatus::Interrupted,
+            "budget_exhausted" => TurnStatus::BudgetExhausted,
             _ => TurnStatus::Unknown,
         }
     }
@@ -205,6 +208,9 @@ pub enum SessionEvent {
     },
     Usage {
         context_tokens: u32,
+        // The thread's cumulative uncached input plus output tokens.
+        #[serde(default)]
+        thread_tokens: Option<u32>,
     },
     ContextWindow {
         tokens: u32,
@@ -215,6 +221,9 @@ pub enum SessionEvent {
         context_tokens: Option<u32>,
         #[serde(default)]
         turn_status: Option<String>,
+        // The thread's cumulative uncached input plus output tokens.
+        #[serde(default)]
+        thread_tokens: Option<u32>,
     },
     CompactBoundary {
         trigger: String,
@@ -320,6 +329,9 @@ pub struct Session {
     /// When the session's newest log event landed; `None` before its first.
     #[serde(default)]
     pub last_active_at: Option<f64>,
+    /// Only a running or paused goal; an ended one is read through `get_goal`.
+    #[serde(default)]
+    pub goal: Option<GoalBrief>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -465,6 +477,7 @@ mod tests {
             archived_at: None,
             working: false,
             last_active_at: None,
+            goal: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

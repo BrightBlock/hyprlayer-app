@@ -204,6 +204,7 @@ mod tests {
                 num_turns: None,
                 context_tokens: None,
                 turn_status: None,
+                thread_tokens: None,
             },
         }
     }

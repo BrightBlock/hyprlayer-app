@@ -1,0 +1,323 @@
+{
+  "scenario": "goal_from_plan",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "workPrompt": "/implement_plan $SHARED/plans/counter.md all remaining phases consecutively"
+          },
+          "guard": "the work prompt implements every remaining phase",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "source": "plan",
+            "sourcePhase": null
+          },
+          "guard": "the source is the whole plan",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "command": "test \"$(cat counter.txt)\" -ge 3",
+                "kind": "command",
+                "label": "Counter reaches 3",
+                "timeoutSecs": 600
+              },
+              {
+                "kind": "plan_boxes",
+                "phase": null,
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "one command from the criterion's last span, then the plan's boxes, then the evaluator",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "condition": "Every phase of Counter plan is implemented and its automated criteria pass. Prose criteria: Counter file exists"
+          },
+          "guard": "the condition names the plan and carries the prose criterion",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "fenced": false,
+            "manual": false,
+            "repoDefault": false
+          },
+          "guard": "manual criteria, the fenced box and the repo default stay out of a plan goal",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limits": {
+              "maxActiveSecs": 3600,
+              "maxCostUsd": 10.0,
+              "maxIterations": 10,
+              "maxTokens": null
+            }
+          },
+          "guard": "the limits are Settings' defaults for Claude",
+          "ok": true
+        }
+      ],
+      "step": "derive a goal from the whole plan"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "source": "plan_phase",
+            "sourcePhase": "2",
+            "workPrompt": "/implement_plan $SHARED/plans/counter.md phase 2"
+          },
+          "guard": "the work prompt names the phase",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "kind": "plan_boxes",
+                "phase": "2",
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "only phase 2's criteria: its boxes and the evaluator, no phase 1 command",
+          "ok": true
+        }
+      ],
+      "step": "derive from one phase"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checks": [
+              {
+                "command": "test \"$(cat counter.txt)\" -ge 3",
+                "kind": "command",
+                "label": "Counter reaches 3",
+                "timeoutSecs": 600
+              },
+              {
+                "kind": "plan_boxes",
+                "phase": "1",
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "plan_boxes",
+                "phase": "2",
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ],
+            "sourcePhase": "1-2",
+            "workPrompt": "/implement_plan $SHARED/plans/counter.md phases 1-2 consecutively"
+          },
+          "guard": "the work prompt spans the range, with one boxes check per phase",
+          "ok": true
+        }
+      ],
+      "step": "derive a phase range"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "condition": "Make the counter file.",
+            "workPrompt": "Make the counter file."
+          },
+          "guard": "the composer text is both condition and work prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "command": "test -f counter.txt",
+                "kind": "command",
+                "label": null,
+                "timeoutSecs": 600
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "the repo's [goals] command is proposed, plus the evaluator",
+          "ok": true
+        }
+      ],
+      "step": "repo default checks prefill"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "condition": "A research document answers: Where does the counter live?",
+            "workPrompt": "/research_codebase Where does the counter live?"
+          },
+          "guard": "the question comes from its Research Question section",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "the evaluator is its only check",
+          "ok": true
+        }
+      ],
+      "step": "research question source"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcomes": [
+              "fail",
+              "fail",
+              "fail",
+              "pass"
+            ],
+            "status": "met"
+          },
+          "guard": "the counter fails twice, the open boxes once, then everything passes and the goal is met",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "boxes": [
+              "fail",
+              "2 of 2 automated boxes open"
+            ],
+            "command": "pass"
+          },
+          "guard": "the third iteration's command passes and its boxes are still open",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "command": "test \"$(cat counter.txt)\" -ge 3",
+                "kind": "command",
+                "label": "Counter reaches 3",
+                "timeoutSecs": 600
+              },
+              {
+                "kind": "plan_boxes",
+                "phase": null,
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "the goal ran its snapshot, not the plan's rewritten `false`",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "evaluator": "pass",
+            "prompts": 1,
+            "seesCondition": true
+          },
+          "guard": "the evaluator runs once, after the boxes pass, and sees the condition",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spentCents": 161
+          },
+          "guard": "spend counts four turns and the evaluator's cent",
+          "ok": true
+        }
+      ],
+      "step": "boxes and the evaluator gate met"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "evaluator": [
+              "error",
+              "the evaluator's reply is not {met, reason}: not json"
+            ]
+          },
+          "guard": "the evaluator's result is an error naming the reply",
+          "ok": true
+        }
+      ],
+      "step": "an unparseable evaluator reply is an error"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "summary": {
+              "checks": [
+                {
+                  "outcome": "pass",
+                  "text": "cargo test"
+                }
+              ],
+              "gate": "PASS",
+              "issues": [
+                "Fix the counter"
+              ],
+              "manual": [
+                "Look at it"
+              ],
+              "notes": [
+                "Pre-existing lint"
+              ]
+            }
+          },
+          "guard": "the summary is the stub's JSON, parsed",
+          "ok": true
+        }
+      ],
+      "step": "the validation summary rides the one-shot"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

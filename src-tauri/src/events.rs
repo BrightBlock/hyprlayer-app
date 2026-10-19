@@ -1,4 +1,5 @@
 use hyprlayer_core::claude::SessionState;
+use hyprlayer_core::models::goal::{GoalEndReason, GoalPauseReason, GoalStatus, GoalStep};
 use hyprlayer_core::models::{ClientRef, DocStateChange, TurnKind};
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +52,21 @@ pub struct WorktreeChanged {
 #[serde(rename_all = "camelCase")]
 pub struct ReviewChanged {
     pub workstream_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalChanged {
+    pub goal_id: String,
+    pub session_id: String,
+    pub workstream_id: String,
+    pub status: GoalStatus,
+    pub step: Option<GoalStep>,
+    pub pause_reason: Option<GoalPauseReason>,
+    pub end_reason: Option<GoalEndReason>,
+    pub reason: Option<String>,
+    pub iteration: u32,
+    pub max_iterations: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

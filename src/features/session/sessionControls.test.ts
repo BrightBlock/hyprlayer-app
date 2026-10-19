@@ -46,6 +46,7 @@ function snapshot(patch: Partial<SessionControlsSnapshot> = {}): SessionControls
     permissionKey: "default",
     planning: false,
     context: { tokens: 24_000, window: 200_000, title: "Context 24k / 200k" },
+    goal: null,
     ...patch,
   };
 }

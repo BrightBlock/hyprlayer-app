@@ -45,7 +45,7 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   # The staged copy: the test build replaces target/debug/hyprlayer-server with its own build of it.
   export HYPRLAYER_E2E_SERVER_BIN="$PWD/src-tauri/binaries/hyprlayer-server-$(rustc -vV | sed -n 's/^host: //p')"
   # Core's ignored smoke, migration and watcher tests stay out; nextest can't filter on #[ignore].
-  GATE_FILTER='not (binary_id(hyprlayer-core::claude_driver_smoke) | binary_id(hyprlayer-core::codex_driver_smoke) | binary_id(hyprlayer-core::orphan_reap_real_server) | binary_id(hyprlayer-core::real_machine_smoke) | (binary_id(hyprlayer-core) & test(/(backfills_a_copied_profile|reaches_latest_on_a_copied_profile|watches_external_git_dir_and_fires_on_index_write|reading_the_git_index_does_not_fire|reading_a_watched_file_does_not_fire_the_callback|an_append_under_a_new_run_directory_fires_the_callback)$/)))'
+  GATE_FILTER='not (binary_id(hyprlayer-core::claude_driver_smoke) | binary_id(hyprlayer-core::codex_driver_smoke) | binary_id(hyprlayer-core::opencode_driver_smoke) | binary_id(hyprlayer-core::orphan_reap_real_server) | binary_id(hyprlayer-core::real_machine_smoke) | (binary_id(hyprlayer-core) & test(/(backfills_a_copied_profile|reaches_latest_on_a_copied_profile|watches_external_git_dir_and_fires_on_index_write|reading_the_git_index_does_not_fire|reading_a_watched_file_does_not_fire_the_callback|an_append_under_a_new_run_directory_fires_the_callback)$/)))'
   step cargo nextest run --workspace --profile gate --run-ignored all -E "$GATE_FILTER" --no-run   # build, timed on its own
   # `<binary-id> <test>` for each test a `cargo nextest list -T json` run matched.
   matching() {

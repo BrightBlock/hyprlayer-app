@@ -211,7 +211,13 @@ const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, s
                       WHERE e.session_id = sessions.id AND e.kind IN ('userMessage', 'turnDone')
                       ORDER BY e.seq DESC LIMIT 1) AS last_turn_kind, \
                     (SELECT e.created_at FROM session_events e WHERE e.session_id = sessions.id
-                      ORDER BY e.seq DESC LIMIT 1) AS last_active_at";
+                      ORDER BY e.seq DESC LIMIT 1) AS last_active_at, \
+                    (SELECT json_object('id', g.id, 'status', g.status, 'step', g.step,
+                                        'pauseReason', g.pause_reason, 'iteration', g.iteration,
+                                        'maxIterations', g.max_iterations)
+                       FROM goals g
+                      WHERE g.session_id = sessions.id AND g.status IN ('running', 'paused')
+                      ORDER BY g.started_at DESC LIMIT 1) AS goal_brief";
 
 /// `TurnDone` persists `Running`, so a live idle harness is told apart by its log.
 fn is_working(state: SessionState, last_turn_kind: Option<&str>) -> bool {
@@ -227,6 +233,7 @@ fn is_working(state: SessionState, last_turn_kind: Option<&str>) -> bool {
 fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
     let state = SessionState::parse(&row.get::<_, String>("state")?);
     let last_turn_kind: Option<String> = row.get("last_turn_kind")?;
+    let goal_brief: Option<String> = row.get("goal_brief")?;
     Ok(Session {
         id: row.get("id")?,
         workstream_id: row.get("workstream_id")?,
@@ -245,6 +252,9 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         archived_at: row.get("archived_at")?,
         working: is_working(state, last_turn_kind.as_deref()),
         last_active_at: row.get("last_active_at")?,
+        goal: goal_brief
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok()),
     })
 }
 
@@ -304,6 +314,7 @@ impl Db {
             archived_at: None,
             working: true,
             last_active_at: None,
+            goal: None,
         };
         self.with(|conn| {
             conn.execute(
@@ -746,10 +757,11 @@ impl Db {
         })
     }
 
-    pub fn list_orphans(&self) -> Result<Vec<(i64, String)>> {
+    /// Pid, session id and when the pid was recorded, in ms.
+    pub fn list_orphans(&self) -> Result<Vec<(i64, String, f64)>> {
         self.with(|conn| {
-            let mut stmt = conn.prepare("SELECT pid, session_id FROM orphan_pids")?;
-            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            let mut stmt = conn.prepare("SELECT pid, session_id, spawned_at FROM orphan_pids")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
             rows.collect()
         })
     }
@@ -1027,7 +1039,10 @@ mod tests {
         db.record_orphan(5678, "s2").unwrap();
         assert_eq!(db.list_orphans().unwrap().len(), 2);
         db.clear_orphans_for("s1").unwrap();
-        assert_eq!(db.list_orphans().unwrap(), vec![(5678, "s2".to_string())]);
+        let left = db.list_orphans().unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!((left[0].0, left[0].1.as_str()), (5678, "s2"));
+        assert!(left[0].2 > 0.0);
         db.clear_all_orphans().unwrap();
         assert!(db.list_orphans().unwrap().is_empty());
     }

@@ -2,6 +2,7 @@ pub mod account;
 pub mod agents;
 pub mod attachments;
 pub mod diagnostics;
+pub mod goals;
 pub mod harnesses;
 pub mod hosts;
 pub mod library;

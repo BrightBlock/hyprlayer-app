@@ -5,6 +5,8 @@ tool is enabled and reachable; Commit, Plan, and Research run two-phase on codex
 and Research gains a posture of its own) · amended 2026-09-19 (codex floor raised to
 0.155.1: paginated threads rewind with `thread/revert`, the planning tool is switched
 on, and a skipped phase two leaves plan mode; Claude's Commit never denied `git push`)
+· amended 2026-10-16 (goals: the follow-up send path gains a second, persisted arm; codex
+native goals off)
 
 ## Decision
 
@@ -73,8 +75,8 @@ Two related, harness-aware seams sit alongside it:
 
 - **Two-phase stages on codex.** `pipeline::codex_phase_two(harness, stage, bodies)`
   is the single predicate deciding whether a stage runs as collaborate-then-execute,
-  and `run_followup` (`crates/hyprlayer-core/src/runtime/sessions/followup.rs`) is
-  the single orchestrator, shared with Ship. Three stages qualify: **Commit**
+  and `followup::await_followup` (`runtime/sessions/followup.rs`) is the single waiter,
+  shared with Ship; `send_app_turn` sends its turn. Three stages qualify: **Commit**
   (review and ask, then commit and maybe push), **Plan**, and **Research**
   (collaborate and ask, then write the document). Commit two-phases only when its
   built-in body is in play — a user's custom body owns its turn — while Plan and
@@ -96,10 +98,34 @@ Two related, harness-aware seams sit alongside it:
   re-arms a follow-up, so a resume that reports `collaborationMode: plan` arms the
   same; only 0.156+ restores and reports the saved mode.
 
-  Inherited from the Ship precedent, and unchanged: no timeout, no re-arming after
-  a kill or `resume_session`, the phase-two user message is persisted but not pushed
-  to the live channel (it appears on reload), and a user interjecting while the first
-  turn is in flight can make the waiter fire on the wrong `TurnDone`.
+- **Two arms, one send path.** App-originated turns go through one call,
+  `SessionService::send_app_turn`
+  (`crates/hyprlayer-core/src/runtime/sessions/service.rs`): the session op lock, a
+  live check, a reservation under the triggering client's author with a server-minted
+  nonce, un-archive, send. Two orchestrators use it.
+  - **One-shot stage follow-ups** (`followup.rs`: Ship's `/describe_pr`, codex phase
+    two) are unchanged. Only `launch_and_converse` arms them; the first `TurnDone`
+    fires them; there is no timeout; and nothing re-arms them after a kill, a
+    `resume_session` or a server restart. A user interjecting while the first turn is
+    in flight can still make the waiter fire on the wrong `TurnDone`. Their user
+    message is persisted, and delivered live to attachments that asked for echoes.
+  - **Goal loops** (`runtime/sessions/goal_loop.rs`, driven by `GoalService`) are
+    persisted in `goals` and `goal_iterations` and capped by iterations and active
+    time. A goal's driver task is spawned and registered, never awaited inside
+    `launch_and_converse`, and stops before the runtime detaches its harnesses at
+    shutdown. It launches harnesses only through `launch_if_exited_held`, under the
+    session op lock. An iteration ends on its own echoed message, a `TurnDone`, and
+    two quiet seconds, so a native Stop-hook or `/goal` loop inside it (one
+    `TurnDone`) is one iteration. Goals are re-armed when the server opens. The
+    goal's orphaned harness is reaped first, and more than three resumes without a
+    finished iteration pause the goal. Spend is capped too: dollars on Claude and
+    OpenCode, uncached input plus output tokens on Codex, with `--max-budget-usd` as
+    a backstop on Claude processes the goal spawns.
+    Only the app drives a goal: Codex runs with `-c features.goals=false` in
+    `APP_SERVER_ARGS`, and every Claude session is spawned with `ProposeGoal` denied.
+    A goal's Validation check opens a fresh Validate session. On Claude, that session
+    may run exactly the goal's approved commands without asking; it is report-only
+    (no file edits, no thoughts sync), and its posture is otherwise Validate's.
 
 - **Version floor: codex-cli 0.155.1.** Codex has created threads with
   `historyMode: "paginated"` since 0.151, and 0.155.1 rejects `thread/rollback` on

@@ -135,6 +135,8 @@ pub struct Translator {
     // proposed patch and need the preceding item/started payload for context.
     child_file_change_inputs: HashMap<(String, String), Map<String, Value>>,
     context_window_sent: bool,
+    /// The thread's last reported total; `thread/resume` reports it again.
+    pub thread_tokens: Option<u32>,
     pub pending_approvals: HashMap<String, (Value, ApprovalKind)>,
     pub pending_questions: HashMap<String, PendingQuestion>,
     pub user_turns: usize,
@@ -353,6 +355,7 @@ impl Translator {
                     num_turns: None,
                     context_tokens: None,
                     turn_status: raw_status.map(str::to_string),
+                    thread_tokens: self.thread_tokens,
                 });
                 out
             }
@@ -391,6 +394,7 @@ impl Translator {
                         num_turns: None,
                         context_tokens: None,
                         turn_status: Some("failed".into()),
+                        thread_tokens: self.thread_tokens,
                     });
                     out
                 }
@@ -576,6 +580,9 @@ impl Translator {
                 });
             }
         }
+        if let Some(total) = usage.and_then(|u| u.get("total")).and_then(thread_total) {
+            self.thread_tokens = Some(total);
+        }
         if let Some(ctx) = usage
             .and_then(|u| u.get("last"))
             .and_then(|l| l.get("inputTokens"))
@@ -583,6 +590,7 @@ impl Translator {
         {
             out.push(SessionEvent::Usage {
                 context_tokens: ctx.min(u32::MAX as u64) as u32,
+                thread_tokens: self.thread_tokens,
             });
         }
         out
@@ -678,6 +686,15 @@ impl Translator {
             }
         }
     }
+}
+
+/// Uncached input plus output: `inputTokens` also counts the cached context re-read each call.
+fn thread_total(total: &Value) -> Option<u32> {
+    let field = |key: &str| total.get(key).and_then(Value::as_u64);
+    let tokens = field("inputTokens")?
+        .saturating_sub(field("cachedInputTokens").unwrap_or(0))
+        .saturating_add(field("outputTokens").unwrap_or(0));
+    Some(tokens.min(u32::MAX as u64) as u32)
 }
 
 fn approval_request_id(p: &Value, rpc_id: &Value) -> String {
@@ -1630,16 +1647,23 @@ mod tests {
     fn token_usage_sends_the_window_once_and_tracks_the_turn() {
         let mut t = Translator::default();
         let p = json!({ "tokenUsage": {
-            "total": { "inputTokens": 900, "totalTokens": 1000 },
+            "total": { "inputTokens": 900, "cachedInputTokens": 600, "outputTokens": 100, "totalTokens": 1000 },
             "last": { "inputTokens": 120, "totalTokens": 150 },
             "modelContextWindow": 272000
         } });
         let out = t.notification("thread/tokenUsage/updated", &p);
         assert_eq!(ev_names(&out), ["contextWindow", "usage"]);
         match (&out[0], &out[1]) {
-            (SessionEvent::ContextWindow { tokens }, SessionEvent::Usage { context_tokens }) => {
+            (
+                SessionEvent::ContextWindow { tokens },
+                SessionEvent::Usage {
+                    context_tokens,
+                    thread_tokens,
+                },
+            ) => {
                 assert_eq!(*tokens, 272_000);
                 assert_eq!(*context_tokens, 120);
+                assert_eq!(*thread_tokens, Some(400));
             }
             other => panic!("unexpected events {other:?}"),
         }

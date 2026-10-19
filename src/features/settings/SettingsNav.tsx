@@ -15,6 +15,7 @@ const NAV: NavEntry[] = [
   { href: "/workshop", label: "Workshop", icon: "workshop" },
   { id: "git", label: "Git", icon: "branch" },
   { id: "notifications", label: "Notifications", icon: "notifications" },
+  { id: "goals", label: "Goals", icon: "goal" },
   { id: "keyboard", label: "Keyboard", icon: "keyboard" },
   { id: "appearance", label: "Appearance", icon: "appearance" },
   { id: "servers", label: "Servers", icon: "server" },

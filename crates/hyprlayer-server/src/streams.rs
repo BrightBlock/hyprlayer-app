@@ -624,6 +624,10 @@ pub(crate) async fn prepare_stream(
                     permission_mode,
                     resume: true,
                     boundary_on_relaunch: true,
+                    max_budget_usd: None,
+                    extra_allowed_tools: Vec::new(),
+                    extra_disallowed_tools: Vec::new(),
+                    report_only: false,
                 })
                 .await
                 .wire()?;
@@ -677,6 +681,10 @@ pub(crate) async fn prepare_stream(
                     permission_mode,
                     resume: true,
                     boundary_on_relaunch: true,
+                    max_budget_usd: None,
+                    extra_allowed_tools: Vec::new(),
+                    extra_disallowed_tools: Vec::new(),
+                    report_only: false,
                 })
                 .await
                 .wire()?;

@@ -20,6 +20,7 @@ use hyprlayer_core::gitops::{
 };
 use hyprlayer_core::hyprcli::{AiStatus, AiVersions, CliUpdateCheck};
 use hyprlayer_core::index::{DocCounts, DocMeta, QueryResult, ThoughtQuery};
+use hyprlayer_core::models::goal::{Goal, GoalDetail, GoalSpec};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
@@ -33,6 +34,7 @@ use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::account::{AccountStatus, SignInStart};
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::attachments::{ImportAttachmentRequest, SaveAttachmentRequest};
+use hyprlayer_core::runtime::goals::{DeriveGoalRequest, GoalPatch, StartGoalRequest};
 use hyprlayer_core::runtime::library::{
     CreateDocumentRequest, Document, FrontmatterEdit, RelatedLink,
 };
@@ -1216,6 +1218,50 @@ impl Dispatch for Server {
             .mark_delivered(&workstream_id, round)
             .await
             .wire()
+    }
+
+    async fn start_goal(&self, request: StartGoalRequest) -> Result<Goal, WireError> {
+        self.runtime
+            .goals()
+            .start(request, self.caller())
+            .await
+            .wire()
+    }
+
+    async fn pause_goal(&self, goal_id: String) -> Result<Goal, WireError> {
+        self.runtime.goals().pause(&goal_id).await.wire()
+    }
+
+    async fn resume_goal(&self, goal_id: String) -> Result<Goal, WireError> {
+        self.runtime.goals().resume(&goal_id).await.wire()
+    }
+
+    async fn stop_goal(&self, goal_id: String) -> Result<Goal, WireError> {
+        self.runtime.goals().stop(&goal_id).await.wire()
+    }
+
+    async fn update_goal(&self, goal_id: String, patch: GoalPatch) -> Result<Goal, WireError> {
+        self.runtime.goals().update(&goal_id, patch).await.wire()
+    }
+
+    async fn get_goal(&self, goal_id: String) -> Result<GoalDetail, WireError> {
+        self.runtime.goals().get(&goal_id).await.wire()
+    }
+
+    async fn list_goals(
+        &self,
+        workstream_id: Option<String>,
+        active_only: bool,
+    ) -> Result<Vec<Goal>, WireError> {
+        self.runtime
+            .goals()
+            .list(workstream_id.as_deref(), active_only)
+            .await
+            .wire()
+    }
+
+    async fn derive_goal(&self, request: DeriveGoalRequest) -> Result<GoalSpec, WireError> {
+        self.runtime.goals().derive(request).await.wire()
     }
 
     async fn worktree_list_dir(
@@ -2607,6 +2653,7 @@ mod tests {
             num_turns: None,
             context_tokens: None,
             turn_status: None,
+            thread_tokens: None,
         }
     }
 

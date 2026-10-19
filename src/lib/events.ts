@@ -1,4 +1,13 @@
-import { events } from "./bindings";
+import {
+  events,
+  type ActiveSessionView,
+  type Goal,
+  type GoalBrief,
+  type GoalChanged,
+  type GoalDetail,
+  type Session,
+} from "./bindings";
+import { isLiveGoal } from "./domain/goals";
 import { queryClient } from "./queryClient";
 import { refreshOmarchyTheme } from "./theme";
 import {
@@ -27,6 +36,51 @@ export function onServerReconnected(handler: () => void): void {
 
 export function notifyServerReconnected(): void {
   for (const handler of reconnectHandlers) handler();
+}
+
+// The payload carries no `activeMs`/`updatedAt`, so a flip into or out of `waiting` re-reads the clock.
+function goalMoved(goal: Goal, p: GoalChanged): boolean {
+  return (
+    goal.status !== p.status ||
+    goal.iteration !== p.iteration ||
+    goal.limits.maxIterations !== p.maxIterations ||
+    (goal.step === "waiting") !== (p.step === "waiting")
+  );
+}
+
+// A step-only change patches the cached goal; the rest re-read only this workstream's lists, so the
+// several writes per iteration don't refetch every list.
+function applyGoalChanged(p: GoalChanged): void {
+  const patch = (g: Goal): Goal => (g.id === p.goalId ? { ...g, step: p.step, pauseReason: p.pauseReason } : g);
+  for (const [key, list] of queryClient.getQueriesData<Goal[]>({ queryKey: ["goals", p.workstreamId] })) {
+    if (!list) continue;
+    const row = list.find((g) => g.id === p.goalId);
+    if (row && !goalMoved(row, p)) queryClient.setQueryData<Goal[]>(key, list.map(patch));
+    else void queryClient.invalidateQueries({ queryKey: key, exact: true });
+  }
+  const detailKey = ["goal", p.goalId];
+  const detail = queryClient.getQueryData<GoalDetail>(detailKey);
+  if (detail && !goalMoved(detail.goal, p)) {
+    queryClient.setQueryData<GoalDetail>(detailKey, { ...detail, goal: patch(detail.goal) });
+  } else if (detail) {
+    void queryClient.invalidateQueries({ queryKey: detailKey, exact: true });
+  }
+  patchSessionBriefs(p);
+}
+
+// `Session.goal` is exactly the payload's fields, so the session lists are patched, never re-read.
+function patchSessionBriefs(p: GoalChanged): void {
+  const { goalId: id, status, step, pauseReason, iteration, maxIterations } = p;
+  const brief: GoalBrief | null = isLiveGoal(p) ? { id, status, step, pauseReason, iteration, maxIterations } : null;
+  const withBrief = (s: Session): Session => (s.id === p.sessionId ? { ...s, goal: brief } : s);
+  queryClient.setQueryData<Session[]>(["workstream-sessions", p.workstreamId], (rows) =>
+    rows?.some((s) => s.id === p.sessionId) ? rows.map(withBrief) : rows,
+  );
+  queryClient.setQueryData<ActiveSessionView[]>(["active-sessions"], (rows) =>
+    rows?.some((r) => r.session.id === p.sessionId)
+      ? rows.map((r) => (r.session.id === p.sessionId ? { ...r, session: withBrief(r.session) } : r))
+      : rows,
+  );
 }
 
 export function attachEventListeners(): () => void {
@@ -68,6 +122,7 @@ export function attachEventListeners(): () => void {
       invalidateWorkstreamLists();
       invalidateWorkstreamPr(event.payload.workstreamId);
     }),
+    events.goalChanged.listen((event) => applyGoalChanged(event.payload)),
     events.sessionLifecycle.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });

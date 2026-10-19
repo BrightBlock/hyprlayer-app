@@ -1,4 +1,4 @@
-import type { AppSettings } from "@/lib/bindings";
+import type { AppSettings, GoalSettings } from "@/lib/bindings";
 
 // The server's own defaults (crates/hyprlayer-core/src/settings.rs) for slices a fresh profile omits.
 export function quickSettings(s: AppSettings) {
@@ -19,4 +19,19 @@ export function withNotify(s: AppSettings, enabled: boolean): AppSettings {
 
 export function withConfirmQuit(s: AppSettings, confirm: boolean): AppSettings {
   return { ...s, quit: { ...(s.quit ?? {}), confirm } };
+}
+
+export function goalSettings(s: AppSettings): Required<GoalSettings> {
+  const g = s.goals ?? {};
+  return {
+    maxIterations: g.maxIterations ?? 10,
+    maxCostUsd: g.maxCostUsd ?? 10,
+    maxTokens: g.maxTokens ?? 2_000_000,
+    maxActiveSecs: g.maxActiveSecs ?? 3600,
+    evaluatorModel: g.evaluatorModel ?? null,
+  };
+}
+
+export function withGoals(s: AppSettings, next: Partial<GoalSettings>): AppSettings {
+  return { ...s, goals: { ...goalSettings(s), ...next } };
 }

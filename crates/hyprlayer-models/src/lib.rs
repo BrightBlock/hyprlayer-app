@@ -7,6 +7,7 @@
 //! desktop shell generates.
 
 pub mod agent;
+pub mod goal;
 pub mod project;
 pub mod review;
 pub mod runtime;
@@ -17,6 +18,11 @@ pub mod terminal;
 pub mod workstream;
 
 pub use agent::{Harness, PermissionMode, Stage};
+pub use goal::{
+    Goal, GoalBrief, GoalCheck, GoalCheckKind, GoalCheckOutcome, GoalCheckResult, GoalDetail,
+    GoalEndReason, GoalIteration, GoalIterationNote, GoalLimits, GoalPauseReason, GoalSource,
+    GoalSpec, GoalStatus, GoalStep,
+};
 pub use project::{CreateStep, ProjectRecord, ProjectSource, StepStatus};
 pub use review::{
     FileChangeKind, ReviewCommentState, ReviewNoteKind, ReviewSide, ReviewStatus, ReviewVerdict,

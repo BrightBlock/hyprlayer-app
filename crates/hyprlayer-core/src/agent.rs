@@ -64,6 +64,13 @@ pub(crate) fn declined_message(echo: &SessionEvent) -> Option<SessionEvent> {
     })
 }
 
+/// The cumulative usage a driver has parsed so far: its process's, or Codex's thread's.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageSoFar {
+    pub cost_usd: Option<f64>,
+    pub thread_tokens: Option<u32>,
+}
+
 pub trait AgentDriver: Send + Sync {
     fn subscribe(&self) -> broadcast::Receiver<SessionEvent>;
 
@@ -101,6 +108,16 @@ pub trait AgentDriver: Send + Sync {
     /// The collaboration mode the harness last confirmed (codex only): the
     /// ADR-0007 tripwire for a plan mode it silently ignored.
     fn observed_collab_mode(&self) -> Option<String> {
+        None
+    }
+
+    /// A goal seeds its spend baseline from this at each send.
+    fn usage_so_far(&self) -> UsageSoFar {
+        UsageSoFar::default()
+    }
+
+    /// The `--max-budget-usd` the process was launched with (claude only).
+    fn budget_cap(&self) -> Option<f64> {
         None
     }
 
@@ -162,6 +179,12 @@ impl AgentDriver for ClaudeDriver {
     fn interrupt(&self) -> Result<()> {
         self.interrupt()
     }
+    fn usage_so_far(&self) -> UsageSoFar {
+        self.usage_so_far()
+    }
+    fn budget_cap(&self) -> Option<f64> {
+        self.budget_cap()
+    }
     fn set_permission_mode(&self, mode: PermissionMode) -> Result<()> {
         self.set_permission_mode(mode)
     }
@@ -220,6 +243,9 @@ impl AgentDriver for CodexDriver {
     }
     fn interrupt(&self) -> Result<()> {
         self.interrupt()
+    }
+    fn usage_so_far(&self) -> UsageSoFar {
+        self.usage_so_far()
     }
     fn rewind_to_ordinal<'a>(
         &'a self,

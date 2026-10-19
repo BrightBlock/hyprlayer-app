@@ -25,6 +25,8 @@ export const LIBRARY_LIST_WIDTH = 344;
 export const LIBRARY_LIST_MIN = 280;
 export const LIBRARY_LIST_MAX = 480;
 
+export type AsideView = "changes" | "plan" | "goal";
+
 export type UiStore = {
   diffHidden: boolean;
   toggleDiff: () => void;
@@ -32,10 +34,11 @@ export type UiStore = {
   setDiffWidth: (width: number) => void;
   tasksCollapsed: boolean;
   toggleTasks: () => void;
-  asideView: "changes" | "plan";
+  // Persisted raw; readers resolve it against what the focused session offers.
+  asideView: AsideView;
   // True once the person picks an aside view this run; auto-open never overrides that choice.
   asideViewChosen: boolean;
-  setAsideView: (view: "changes" | "plan") => void;
+  setAsideView: (view: AsideView) => void;
   docsCollapsed: boolean;
   toggleDocs: () => void;
   libraryListWidth: number;

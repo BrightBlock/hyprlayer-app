@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::goal::{GoalEndReason, GoalPauseReason, GoalStatus, GoalStep};
 use crate::project::{CreateStep, StepStatus};
 use crate::script::{RunPhase, ScriptKind};
 use crate::session::{ClientRef, RevisedTurn, SessionState};
@@ -87,6 +88,19 @@ pub enum RuntimeEvent {
         step: CreateStep,
         status: StepStatus,
         detail: Option<String>,
+    },
+    /// `reason` is the goal's last reason, or the tool or question of the ask while it waits.
+    GoalChanged {
+        goal_id: String,
+        session_id: String,
+        workstream_id: String,
+        status: GoalStatus,
+        step: Option<GoalStep>,
+        pause_reason: Option<GoalPauseReason>,
+        end_reason: Option<GoalEndReason>,
+        reason: Option<String>,
+        iteration: u32,
+        max_iterations: u32,
     },
     /// Re-read `account_status`; carries no identity or token.
     AccountChanged,

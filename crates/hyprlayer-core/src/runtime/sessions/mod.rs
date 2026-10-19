@@ -1,6 +1,7 @@
 pub mod delivery;
 mod followup;
 mod forwarder;
+pub(crate) mod goal_loop;
 pub mod registry;
 mod service;
 pub(crate) mod titles;
@@ -29,6 +30,8 @@ pub use service::{
 
 #[cfg(any(test, feature = "test-support"))]
 pub use followup::run_codex_followup_for_test;
+#[cfg(any(test, feature = "test-support"))]
+pub use goal_loop::{interrupt_then_kill, watch_iteration, Escalation, IterationEnd, Watch};
 
 pub(crate) struct SessionActors {
     db: Arc<Db>,
@@ -152,6 +155,20 @@ impl SessionActors {
         let handles = self.handles.lock().await;
         match handles.get(session_id) {
             Some(handle) => handle.restore_after_failed_relaunch(cutoff, removed).await,
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) async fn keep_streams_across_exit(&self, session_id: &str) -> Result<()> {
+        match self.handles.lock().await.get(session_id) {
+            Some(handle) => handle.keep_streams_across_exit().await,
+            None => Ok(()),
+        }
+    }
+
+    pub(crate) async fn end_kept_streams(&self, session_id: &str) -> Result<()> {
+        match self.handles.lock().await.get(session_id) {
+            Some(handle) => handle.end_kept_streams().await,
             None => Ok(()),
         }
     }
@@ -305,6 +322,12 @@ impl SessionRuntimeHandle {
         echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         self.actors.attach(session_id, echo_user_messages).await
+    }
+
+    pub async fn watch(&self, session_id: &str) -> goal_loop::Watch {
+        goal_loop::Watch::attach(self.actors.clone(), session_id)
+            .await
+            .expect("the session's actor is running")
     }
 
     pub async fn attachment_count(&self, session_id: &str) -> usize {

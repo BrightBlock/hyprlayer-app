@@ -1,6 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
+use hyprlayer_models::goal::GoalEndReason;
 use hyprlayer_models::session::QuestionAnswers;
 use tokio::sync::{broadcast, mpsc};
 
@@ -27,8 +29,12 @@ use hyprlayer_models::{ClientRef, RuntimeEvent, SessionRev, SessionTurns};
 use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
+use super::goal_loop::is_idle;
 use super::workflow_bridge::{self, WorkflowChannel};
 use super::SessionAttachment;
+
+/// How often a cap lift looks again at a session that was mid-turn.
+const LIFT_RETRY: Duration = Duration::from_millis(500);
 
 pub struct SessionService<'a> {
     runtime: &'a HyprlayerRuntime,
@@ -77,6 +83,26 @@ pub struct LaunchAndConverseParams {
     effort: Option<String>,
     permission_mode: Option<PermissionMode>,
     bodies: pipeline::ActionPromptBodies,
+    extra_allowed_tools: Vec<String>,
+    extra_disallowed_tools: Vec<String>,
+    report_only: bool,
+}
+
+impl LaunchAndConverseParams {
+    /// Claude allow rules on top of the stage's; other harnesses ignore them.
+    pub(crate) fn allow_also(&mut self, rules: Vec<String>) {
+        self.extra_allowed_tools.extend(rules);
+    }
+
+    /// Claude may not edit files or sync thoughts; other harnesses ignore it.
+    pub(crate) fn report_only(&mut self) {
+        self.extra_disallowed_tools.extend(
+            pipeline::REPORT_ONLY_DENY
+                .iter()
+                .map(|rule| rule.to_string()),
+        );
+        self.report_only = true;
+    }
 }
 
 pub struct LaunchSessionParams {
@@ -87,6 +113,14 @@ pub struct LaunchSessionParams {
     pub permission_mode: Option<PermissionMode>,
     pub resume: bool,
     pub boundary_on_relaunch: bool,
+    /// Claude's `--max-budget-usd`; other harnesses ignore it.
+    pub max_budget_usd: Option<f64>,
+    /// Claude allow rules on top of the stage's; other harnesses ignore them.
+    pub extra_allowed_tools: Vec<String>,
+    /// Claude deny rules on top of the stage's; other harnesses ignore them.
+    pub extra_disallowed_tools: Vec<String>,
+    /// Withholds Validate's thoughts edit rules from Claude.
+    pub report_only: bool,
 }
 
 pub struct RewindSessionRequest {
@@ -113,6 +147,20 @@ pub struct SendContext {
     pub base_rev: Option<u64>,
     pub author: Option<ClientRef>,
 }
+
+/// A turn the app sends on its own: a stage follow-up or a goal iteration.
+pub(crate) struct AppTurn<'a> {
+    pub text: &'a str,
+    pub prompt_name: Option<&'a str>,
+    pub author: Option<ClientRef>,
+    /// Minted by the caller, so a goal's iteration row can exist before the message echoes.
+    pub nonce: String,
+    /// Applied under the same op lock, just before the send.
+    pub collab_mode: Option<CollabMode>,
+}
+
+/// Proof that the session's op lock is held.
+pub(crate) type OpGuard<'a> = tokio::sync::MutexGuard<'a, ()>;
 
 impl SessionService<'_> {
     pub(crate) async fn live_driver(&self, session_id: &str) -> Option<Arc<dyn AgentDriver>> {
@@ -170,6 +218,40 @@ impl SessionService<'_> {
         )
     }
 
+    /// The one send path for app-originated turns.
+    pub(crate) async fn send_app_turn(&self, session_id: &str, turn: AppTurn<'_>) -> Result<()> {
+        let op = self.op_lock(session_id).await;
+        let guard = op.lock().await;
+        self.send_app_turn_held(session_id, turn, &guard).await
+    }
+
+    /// For a caller holding the op lock. Always reserved, author or not, so another client's send waits until this one lands.
+    pub(crate) async fn send_app_turn_held(
+        &self,
+        session_id: &str,
+        turn: AppTurn<'_>,
+        _held: &OpGuard<'_>,
+    ) -> Result<()> {
+        let driver = self.require_live(session_id).await?;
+        self.runtime
+            .session_actors
+            .reserve_user_turn(session_id, turn.nonce.clone(), None, turn.author)
+            .await?;
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        if let Err(e) = blocking(move || db.set_session_archived(&id, false)).await {
+            // The driver never ran, so no UserMessage will release it.
+            self.runtime
+                .session_actors
+                .release_user_turn(session_id, turn.nonce)
+                .await;
+            return Err(e);
+        }
+        if let Some(mode) = turn.collab_mode {
+            driver.set_collab_mode(Some(mode));
+        }
+        driver.send_user_turn(turn.text, None, turn.prompt_name, Some(&turn.nonce))
+    }
+
     /// Reserves a checked or attributed send under a nonce the actor can match.
     async fn reserve_turn(
         &self,
@@ -214,7 +296,9 @@ impl SessionService<'_> {
 
     pub async fn interrupt(&self, session_id: &str) -> Result<()> {
         tracing::info!("session {session_id}: interrupt requested");
-        self.require_live(session_id).await?.interrupt()
+        let driver = self.require_live(session_id).await?;
+        self.runtime.goals().note_user_interrupt(session_id).await;
+        driver.interrupt()
     }
 
     /// False once the harness took the message in, or when it cannot withdraw one.
@@ -229,7 +313,9 @@ impl SessionService<'_> {
 
     pub async fn kill(&self, session_id: &str) -> Result<()> {
         tracing::info!("session {session_id}: kill requested");
-        self.require_live(session_id).await?.kill();
+        let driver = self.require_live(session_id).await?;
+        self.runtime.goals().note_session_killed(session_id).await;
+        driver.kill();
         Ok(())
     }
 
@@ -329,6 +415,9 @@ impl SessionService<'_> {
         let op = self.op_lock(session_id).await;
         let _op_guard = op.lock().await;
         let session = self.require_row(session_id).await?;
+        if archived {
+            self.refuse_live_goal(session_id).await?;
+        }
         if archived && session.working {
             return Err(CoreError::SessionBusy {
                 session_id: session_id.to_string(),
@@ -345,6 +434,7 @@ impl SessionService<'_> {
         let op = self.op_lock(session_id).await;
         let _op_guard = op.lock().await;
         let session = self.require_row(session_id).await?;
+        self.refuse_live_goal(session_id).await?;
         if session.archived_at.is_none() {
             return Err(CoreError::SessionNotArchived {
                 session_id: session_id.to_string(),
@@ -360,6 +450,28 @@ impl SessionService<'_> {
         self.runtime.session_actors.remove(session_id).await;
         self.announce(session);
         Ok(())
+    }
+
+    /// Removes a session whose harness never started and that no client was handed.
+    pub(crate) async fn discard_unlaunched(&self, session: &Session) {
+        let (db, id) = (self.runtime.db.clone(), session.id.clone());
+        if let Err(e) = blocking(move || db.delete_session(&id)).await {
+            tracing::warn!("session {}: its unlaunched row stays: {e}", session.id);
+            return;
+        }
+        self.runtime.session_actors.remove(&session.id).await;
+        self.announce(session.clone());
+    }
+
+    /// Archiving or deleting a session would strand its goal's runner.
+    async fn refuse_live_goal(&self, session_id: &str) -> Result<()> {
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        match blocking(move || db.live_goal_for_session(&id)).await? {
+            Some(_) => Err(CoreError::GoalActive {
+                session_id: session_id.to_string(),
+            }),
+            None => Ok(()),
+        }
     }
 
     async fn require_row(&self, session_id: &str) -> Result<Session> {
@@ -554,6 +666,146 @@ impl SessionService<'_> {
                     "session {session_id}: the harness had not exited after 10s; relaunching anyway"
                 );
             }
+        }
+    }
+
+    /// For a relaunch no client asked for: open streams carry on to its `Relaunched` instead of ending on the exit.
+    pub(crate) async fn kill_for_relaunch(&self, session_id: &str) {
+        if self
+            .runtime
+            .session_registry
+            .get(session_id)
+            .await
+            .is_some()
+        {
+            if let Err(e) = self
+                .runtime
+                .session_actors
+                .keep_streams_across_exit(session_id)
+                .await
+            {
+                tracing::warn!("session {session_id}: its streams end with the relaunch: {e}");
+            }
+        }
+        self.kill_and_await_exit(session_id).await;
+        // A harness still running relaunches nothing, so its exit must end the streams.
+        if self.is_live(session_id).await {
+            self.end_kept_streams(session_id).await;
+        }
+    }
+
+    /// Ends the streams `kill_for_relaunch` kept open when no relaunch followed.
+    pub(crate) async fn end_kept_streams(&self, session_id: &str) {
+        if let Err(e) = self
+            .runtime
+            .session_actors
+            .end_kept_streams(session_id)
+            .await
+        {
+            tracing::warn!("session {session_id}: could not end its kept streams: {e}");
+        }
+    }
+
+    /// Relaunches the harness a goal capped, without the cap, once no turn runs: the cap is sticky and would refuse the user's next message.
+    pub(crate) async fn lift_budget_cap(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        owned: &Weak<dyn AgentDriver>,
+    ) {
+        loop {
+            let op = self.op_lock(session_id).await;
+            let guard = op.lock().await;
+            if !self.cap_still_owned(session_id, goal_id, owned).await {
+                return;
+            }
+            if is_idle(&self.runtime.session_actors, session_id).await {
+                self.relaunch_uncapped(session_id, &guard).await;
+                return;
+            }
+            drop(guard);
+            tokio::time::sleep(LIFT_RETRY).await;
+        }
+    }
+
+    /// False once another goal runs the session (its runner handles the cap), this one ended with the session or its workstream, or the capped harness is gone.
+    async fn cap_still_owned(
+        &self,
+        session_id: &str,
+        goal_id: &str,
+        owned: &Weak<dyn AgentDriver>,
+    ) -> bool {
+        let (db, sid, gid) = (
+            self.runtime.db.clone(),
+            session_id.to_string(),
+            goal_id.to_string(),
+        );
+        let read = blocking(move || Ok((db.live_goal_for_session(&sid)?, db.goal(&gid)?))).await;
+        let (live, own) = match read {
+            Ok(goals) => goals,
+            Err(e) => {
+                tracing::warn!("session {session_id}: its budget cap stays: {e}");
+                return false;
+            }
+        };
+        if live.is_some_and(|row| row.goal.id != goal_id) {
+            return false;
+        }
+        let kept_down = own.is_some_and(|row| {
+            matches!(
+                row.goal.end_reason,
+                Some(GoalEndReason::SessionEnded | GoalEndReason::WorkstreamArchived)
+            )
+        });
+        if kept_down {
+            return false;
+        }
+        match (owned.upgrade(), self.live_driver(session_id).await) {
+            (Some(owned), Some(live)) => Arc::ptr_eq(&owned, &live),
+            _ => false,
+        }
+    }
+
+    async fn relaunch_uncapped(&self, session_id: &str, held: &OpGuard<'_>) {
+        let session = match self.require_row(session_id).await {
+            Ok(session) => session,
+            Err(e) => {
+                tracing::warn!("session {session_id}: its budget cap stays: {e}");
+                return;
+            }
+        };
+        let project_path = match self
+            .runtime
+            .workstreams()
+            .find(&session.workstream_id)
+            .await
+        {
+            Ok(workstream) => workstream.project_path,
+            Err(e) => {
+                tracing::warn!("session {session_id}: its budget cap stays: {e}");
+                return;
+            }
+        };
+        // The started model and a mode the user switched to live both survive the relaunch.
+        let permission_mode = self.permission_mode(session_id).await;
+        self.kill_for_relaunch(session_id).await;
+        let model = session.model.clone();
+        let params = LaunchSessionParams {
+            session,
+            project_path,
+            model,
+            effort: None,
+            permission_mode,
+            resume: true,
+            boundary_on_relaunch: true,
+            max_budget_usd: None,
+            extra_allowed_tools: Vec::new(),
+            extra_disallowed_tools: Vec::new(),
+            report_only: false,
+        };
+        if let Err(e) = self.launch_if_exited_held(params, held).await {
+            self.end_kept_streams(session_id).await;
+            tracing::warn!("session {session_id}: the relaunch without its budget cap failed: {e}");
         }
     }
 
@@ -764,6 +1016,9 @@ impl SessionService<'_> {
                 effort,
                 permission_mode,
                 bodies,
+                extra_allowed_tools: Vec::new(),
+                extra_disallowed_tools: Vec::new(),
+                report_only: false,
             },
         })
     }
@@ -784,6 +1039,9 @@ impl SessionService<'_> {
             effort,
             permission_mode,
             bodies,
+            extra_allowed_tools,
+            extra_disallowed_tools,
+            report_only,
         } = params;
 
         let followup = followup::followup_for(session.harness, stage, &bodies);
@@ -798,6 +1056,10 @@ impl SessionService<'_> {
                 permission_mode,
                 resume: false,
                 boundary_on_relaunch: false,
+                max_budget_usd: None,
+                extra_allowed_tools,
+                extra_disallowed_tools,
+                report_only,
             })
             .await?;
 
@@ -824,16 +1086,25 @@ impl SessionService<'_> {
         };
         first_send?;
         if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {
-            followup::run_followup(
-                &session_id,
-                driver.as_ref(),
-                rx,
-                followup,
-                op_lock,
-                &self.runtime.session_actors,
-                author,
-            )
-            .await;
+            if let Some(turn) =
+                followup::await_followup(&session_id, driver.as_ref(), rx, followup).await
+            {
+                let sent = self
+                    .send_app_turn(
+                        &session_id,
+                        AppTurn {
+                            text: turn.prompt,
+                            prompt_name: None,
+                            author,
+                            nonce: uuid::Uuid::new_v4().to_string(),
+                            collab_mode: turn.collab_mode,
+                        },
+                    )
+                    .await;
+                if let Err(e) = sent {
+                    tracing::warn!("session {session_id}: the follow-up was not sent: {e}");
+                }
+            }
         }
         Ok(())
     }
@@ -842,17 +1113,25 @@ impl SessionService<'_> {
         self.launch_driver(params).await.map(|_| ())
     }
 
-    async fn launch_driver(&self, params: LaunchSessionParams) -> Result<Arc<dyn AgentDriver>> {
-        let LaunchSessionParams {
-            session,
-            project_path,
-            model,
-            effort,
-            permission_mode,
-            resume,
-            boundary_on_relaunch,
-        } = params;
+    /// For a caller holding the op lock: launches only when no harness is live, as `ResumeSession` does; `None` means one was.
+    pub(crate) async fn launch_if_exited_held(
+        &self,
+        params: LaunchSessionParams,
+        _held: &OpGuard<'_>,
+    ) -> Result<Option<Arc<dyn AgentDriver>>> {
+        if self.is_live(&params.session.id).await {
+            return Ok(None);
+        }
+        self.launch_driver(params).await.map(Some)
+    }
+
+    pub(crate) async fn launch_driver(
+        &self,
+        params: LaunchSessionParams,
+    ) -> Result<Arc<dyn AgentDriver>> {
+        let session = &params.session;
         let session_id = session.id.clone();
+        let resume = params.resume;
 
         if resume {
             let db = self.runtime.db.clone();
@@ -864,19 +1143,10 @@ impl SessionService<'_> {
             "{:?} {:?} (model {}, effort {}, resume {resume})",
             session.harness,
             session.stage,
-            model.as_deref().unwrap_or("default"),
-            effort.as_deref().unwrap_or("default"),
+            params.model.as_deref().unwrap_or("default"),
+            params.effort.as_deref().unwrap_or("default"),
         );
-        let spawned = self
-            .spawn_driver(
-                &session,
-                &project_path,
-                model,
-                effort,
-                permission_mode,
-                resume,
-            )
-            .await;
+        let spawned = self.spawn_driver(&params).await;
         let (driver, rx, launched_mode) = match spawned {
             Ok(spawned) => spawned,
             Err(e) => {
@@ -931,7 +1201,7 @@ impl SessionService<'_> {
             .await?;
 
         if has_history {
-            if boundary_on_relaunch {
+            if params.boundary_on_relaunch {
                 let _ = ingress.send(SessionEvent::Relaunched {}).await;
             }
             workflow_bridge::recover_workflow_runs(&self.runtime.db, &session_id, &workflow).await;
@@ -949,18 +1219,25 @@ impl SessionService<'_> {
 
     async fn spawn_driver(
         &self,
-        session: &Session,
-        project_path: &str,
-        model: Option<String>,
-        effort: Option<String>,
-        permission_mode: Option<PermissionMode>,
-        resume: bool,
+        params: &LaunchSessionParams,
     ) -> Result<(
         Arc<dyn AgentDriver>,
         broadcast::Receiver<SessionEvent>,
         Option<PermissionMode>,
     )> {
-        let policy = launch_policy(session.harness, session.stage, permission_mode);
+        let LaunchSessionParams {
+            session,
+            project_path,
+            permission_mode,
+            resume,
+            max_budget_usd,
+            extra_allowed_tools,
+            extra_disallowed_tools,
+            report_only,
+            ..
+        } = params;
+        let (model, effort, resume) = (params.model.clone(), params.effort.clone(), *resume);
+        let policy = launch_policy(session.harness, session.stage, *permission_mode);
         match session.harness {
             Harness::Opencode => {
                 if model
@@ -1073,7 +1350,13 @@ impl SessionService<'_> {
                 .map(|a| a.name)
                 .collect();
                 disallowed_tools.extend(agents::agent_deny_rules(&drafts));
-                allowed_tools.extend(pipeline::thoughts_edit_rules(session.stage, &add_dirs));
+                // The app owns goals: no native goal can be proposed in its sessions.
+                disallowed_tools.push("ProposeGoal".into());
+                if !*report_only {
+                    allowed_tools.extend(pipeline::thoughts_edit_rules(session.stage, &add_dirs));
+                }
+                allowed_tools.extend(extra_allowed_tools.iter().cloned());
+                disallowed_tools.extend(extra_disallowed_tools.iter().cloned());
 
                 let path = self.runtime.binaries.augmented_path().await;
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
@@ -1093,7 +1376,7 @@ impl SessionService<'_> {
                     add_dirs,
                     resume: resume.then(|| session.id.clone()),
                     fork: false,
-                    max_budget_usd: None,
+                    max_budget_usd: *max_budget_usd,
                     model,
                     effort,
                     chrome: claude_cfg.chrome_enabled,
@@ -1170,6 +1453,10 @@ impl SessionService<'_> {
                 permission_mode,
                 resume: true,
                 boundary_on_relaunch: false,
+                max_budget_usd: None,
+                extra_allowed_tools: Vec::new(),
+                extra_disallowed_tools: Vec::new(),
+                report_only: false,
             })
             .await;
 

@@ -135,6 +135,14 @@ export const commands = {
 	resolveReviewNote: (workstreamId: string, noteId: string, resolved: boolean) => typedError<null, AppError>(__TAURI_INVOKE("resolve_review_note", { workstreamId, noteId, resolved })),
 	submitReview: (req: SubmitReviewRequest) => typedError<SubmitReviewResult, AppError>(__TAURI_INVOKE("submit_review", { req })),
 	markReviewRoundDelivered: (workstreamId: string, round: number) => typedError<null, AppError>(__TAURI_INVOKE("mark_review_round_delivered", { workstreamId, round })),
+	startGoal: (request: StartGoalRequest) => typedError<Goal, AppError>(__TAURI_INVOKE("start_goal", { request })),
+	pauseGoal: (goalId: string) => typedError<Goal, AppError>(__TAURI_INVOKE("pause_goal", { goalId })),
+	resumeGoal: (goalId: string) => typedError<Goal, AppError>(__TAURI_INVOKE("resume_goal", { goalId })),
+	stopGoal: (goalId: string) => typedError<Goal, AppError>(__TAURI_INVOKE("stop_goal", { goalId })),
+	updateGoal: (goalId: string, patch: GoalPatch) => typedError<Goal, AppError>(__TAURI_INVOKE("update_goal", { goalId, patch })),
+	getGoal: (goalId: string) => typedError<GoalDetail, AppError>(__TAURI_INVOKE("get_goal", { goalId })),
+	listGoals: (workstreamId: string | null, activeOnly: boolean) => typedError<Goal[], AppError>(__TAURI_INVOKE("list_goals", { workstreamId, activeOnly })),
+	deriveGoal: (request: DeriveGoalRequest) => typedError<GoalSpec, AppError>(__TAURI_INVOKE("derive_goal", { request })),
 	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionStreamItemDto>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
 	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
 	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
@@ -339,6 +347,7 @@ export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	docStateChanged: makeEvent<DocStateChanged>("doc-state-changed"),
+	goalChanged: makeEvent<GoalChanged>("goal-changed"),
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
@@ -531,6 +540,7 @@ export type AppSettings = {
 	quit?: QuitSettings,
 	tabTitles?: TabTitleSettings,
 	multiplexer?: MultiplexerSettings,
+	goals?: GoalSettings,
 	devTools?: boolean,
 	fullDiskAccessNoticeDismissed?: boolean,
 };
@@ -816,6 +826,21 @@ export type CustomPrompt = {
 	pinned?: boolean,
 };
 
+/**
+ *  A source to propose a goal from. `phases` is the plan's scope: empty for the whole plan,
+ *  one id for a phase, several for a range.
+ */
+export type DeriveGoalRequest = {
+	workstreamId: string,
+	source: GoalSource,
+	harness?: Harness | null,
+	text?: string | null,
+	planPath?: string | null,
+	phases?: string[],
+	researchPath?: string | null,
+	findings?: string[],
+};
+
 export type DirBrowseEntry = {
 	name: string,
 	isDir: boolean,
@@ -1004,6 +1029,145 @@ export type GithubTarget = {
 };
 
 export type GitignoreTemplate = "node" | "rust" | "python" | "go";
+
+export type Goal = {
+	id: string,
+	sessionId: string,
+	workstreamId: string,
+	condition: string,
+	workPrompt: string,
+	source: GoalSource,
+	sourceRef: string | null,
+	sourcePhase: string | null,
+	checks: GoalCheck[],
+	limits: GoalLimits,
+	status: GoalStatus,
+	step: GoalStep | null,
+	pauseReason: GoalPauseReason | null,
+	endReason: GoalEndReason | null,
+	iteration: number,
+	spentCostUsd: number | null,
+	spentTokens: number,
+	activeMs: number,
+	lastOutcome: GoalCheckOutcome | null,
+	lastReason: string | null,
+	author: ClientRef | null,
+	startedAt: number | null,
+	updatedAt: number | null,
+	endedAt: number | null,
+};
+
+/**  `pause_reason` is here so a board can tell a user pause from a goal that needs you. */
+export type GoalBrief = {
+	id: string,
+	status: GoalStatus,
+	step: GoalStep | null,
+	pauseReason: GoalPauseReason | null,
+	iteration: number,
+	maxIterations: number,
+};
+
+export type GoalChanged = {
+	goalId: string,
+	sessionId: string,
+	workstreamId: string,
+	status: GoalStatus,
+	step: GoalStep | null,
+	pauseReason: GoalPauseReason | null,
+	endReason: GoalEndReason | null,
+	reason: string | null,
+	iteration: number,
+	maxIterations: number,
+};
+
+export type GoalCheck = { kind: "command"; command: string; timeoutSecs: number; label?: string | null } | { kind: "plan_boxes"; planPath: string; phase?: string | null } | { kind: "evaluator"; model?: string | null } | { kind: "validation"; planPath: string };
+
+export type GoalCheckKind = "command" | "plan_boxes" | "evaluator" | "validation";
+
+export type GoalCheckOutcome = "pass" | "fail" | "error";
+
+export type GoalCheckResult = {
+	kind: GoalCheckKind,
+	label: string,
+	outcome: GoalCheckOutcome,
+	exitCode: number | null,
+	durationMs: number,
+	/**  Kept for fail and error only, at most 8 KiB. */
+	outputTail: string,
+	reason: string | null,
+	/**  The Validation check's validate session. */
+	sessionId?: string | null,
+};
+
+export type GoalDetail = {
+	goal: Goal,
+	iterations: GoalIteration[],
+};
+
+export type GoalEndReason = "checks_passed" | "iteration_limit" | "budget_limit" | "token_limit" | "time_limit" | "stalled" | "checks_broken" | "stopped_by_user" | "session_ended" | "workstream_archived";
+
+export type GoalIteration = {
+	goalId: string,
+	n: number,
+	clientMessageId: string,
+	startedAt: number | null,
+	endedAt: number | null,
+	turnStatus: string | null,
+	costUsd: number | null,
+	tokens: number | null,
+	outcome: GoalCheckOutcome | null,
+	reason: string | null,
+	results: GoalCheckResult[],
+	/**  Hex of a 64-bit hash of HEAD's oid and the worktree diff; a u64 cannot cross specta. */
+	progressHash: string | null,
+	note: GoalIterationNote | null,
+};
+
+/**  The column is nullable, so there is no `parse` fallback. */
+export type GoalIterationNote = "cut_off" | "steered" | "interrupted";
+
+export type GoalLimits = {
+	maxIterations: number,
+	maxCostUsd: number | null,
+	maxTokens: number | null,
+	maxActiveSecs: number,
+};
+
+export type GoalPatch = {
+	condition?: string | null,
+	workPrompt?: string | null,
+	checks?: GoalCheck[] | null,
+	limits?: GoalLimits | null,
+};
+
+export type GoalPauseReason = "user" | "needs_human" | "turn_failures" | "harness_crashes" | "restart_loop" | "relaunch_failed";
+
+/**  A new goal's limits, named as `GoalLimits` names them; plain numbers, since a goal is never unlimited. */
+export type GoalSettings = {
+	maxIterations?: number,
+	maxCostUsd?: number | null,
+	maxTokens?: number,
+	maxActiveSecs?: number,
+	evaluatorModel?: string | null,
+};
+
+export type GoalSource = "composer" | "plan" | "plan_phase" | "research" | "validation";
+
+export type GoalSpec = {
+	condition: string,
+	workPrompt: string,
+	source: GoalSource,
+	sourceRef: string | null,
+	sourcePhase: string | null,
+	checks: GoalCheck[],
+	limits: GoalLimits,
+};
+
+export type GoalStatus = "running" | "paused" | "met" | "exhausted" | "failed" | "stopped";
+
+export type GoalStep = "working" | "checking" | "waiting" | "resuming" | "pausing" | "stopping";
+
+export type GoalTarget = { kind: "session"; sessionId: string } | { kind: "new_session"; workstreamId: string; stage: Stage; harness?: Harness | null; model?: string | null; effort?: string | null; permissionMode?: PermissionMode | null; attachedDocs?: string[] };
 
 export type Harness = "claude" | "opencode" | "codex";
 
@@ -1602,9 +1766,11 @@ export type Session = {
 	working?: boolean,
 	/**  When the session's newest log event landed; `None` before its first. */
 	lastActiveAt?: number | null,
+	/**  Only a running or paused goal; an ended one is read through `get_goal`. */
+	goal?: GoalBrief | null,
 };
 
-export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
+export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched" } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
 
 export type SessionLifecycle = {
 	sessionId: string,
@@ -1898,6 +2064,11 @@ export type StaleTranscriptDto = {
 	rev: number | null,
 	committedRev: number | null,
 	missingTurns: number | null,
+};
+
+export type StartGoalRequest = {
+	target: GoalTarget,
+	spec: GoalSpec,
 };
 
 export type StartOpts = {

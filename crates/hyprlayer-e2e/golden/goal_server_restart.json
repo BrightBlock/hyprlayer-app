@@ -1,0 +1,231 @@
+{
+  "scenario": "goal_server_restart",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "held": true
+          },
+          "guard": "the server stops cleanly while iteration 1 is held",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "note1": "cut_off"
+          },
+          "guard": "iteration 1 is closed as cut off",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "goalMessages": 2,
+            "opensWithCutOff": true
+          },
+          "guard": "iteration 2's prompt opens by saying the last turn was cut off",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "resumed": true
+          },
+          "guard": "the session is relaunched with --resume",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "counter": "2",
+            "iteration": 2,
+            "status": "met"
+          },
+          "guard": "the goal is met at iteration 2",
+          "ok": true
+        }
+      ],
+      "step": "a clean restart resumes the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gone": true,
+            "midTurn": true
+          },
+          "guard": "the crashed server stops listening while the stub is mid-turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "reaped": true
+          },
+          "guard": "the lingering stub is gone within 5 s of the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "logNamesTheReap": true
+          },
+          "guard": "the server log names the reap of that pid",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iterations": 2,
+            "note1": "cut_off",
+            "status": "met"
+          },
+          "guard": "the cut-off iteration is closed and a new one is sent",
+          "ok": true
+        }
+      ],
+      "step": "a crash mid-iteration reaps the orphan and resumes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checking": true,
+            "gone": true
+          },
+          "guard": "the server dies while the check runs",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checkRuns": 2,
+            "iteration": 1,
+            "iterations": 1,
+            "status": "met"
+          },
+          "guard": "the check runs again and the iteration is not re-sent",
+          "ok": true
+        }
+      ],
+      "step": "a crash mid-check re-runs the checks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checking": true,
+            "exit": 0,
+            "killed": true
+          },
+          "guard": "the check's shell is gone within 2 s of the shutdown",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checkRuns": 2,
+            "status": "met"
+          },
+          "guard": "after the restart the check runs again",
+          "ok": true
+        }
+      ],
+      "step": "a clean stop kills the check in flight"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "goalLaunches": 1,
+            "held": true,
+            "relaunchHasTheOverlay": true
+          },
+          "guard": "the relaunched stub sees the overlay that arrived 2 s after the restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": "met"
+          },
+          "guard": "the goal then meets",
+          "ok": true
+        }
+      ],
+      "step": "the resume waits for the overlay"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cycles": [
+              {
+                "gone": true,
+                "midTurn": true,
+                "reaped": true
+              },
+              {
+                "gone": true,
+                "midTurn": true,
+                "reaped": true
+              },
+              {
+                "gone": true,
+                "midTurn": true,
+                "reaped": true
+              },
+              {
+                "gone": true,
+                "midTurn": true,
+                "reaped": true
+              }
+            ]
+          },
+          "guard": "four crashes, each mid-iteration, each orphan reaped",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cutOff": 3,
+            "iterations": 4
+          },
+          "guard": "three resumes each cut off an iteration and sent the next",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "pauseReason": "restart_loop",
+            "reason": "The server restarted 4 times before an iteration finished",
+            "status": "paused"
+          },
+          "guard": "the fourth restart pauses the goal as a restart loop",
+          "ok": true
+        }
+      ],
+      "step": "a restart loop pauses"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gone": true,
+            "midTurn": true,
+            "nextSent": true,
+            "pauseReason": null,
+            "reaped": true,
+            "status": "running"
+          },
+          "guard": "one restart after the user's resume resumes the goal instead of pausing it",
+          "ok": true
+        }
+      ],
+      "step": "a resume after a restart loop gets a fresh allowance"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

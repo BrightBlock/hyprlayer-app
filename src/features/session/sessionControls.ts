@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 
 import type { OptionMenuGroup, OptionMenuItem } from "@/components/OptionMenuList";
-import type { Harness } from "@/lib/bindings";
+import type { GoalStatus, GoalStep, Harness } from "@/lib/bindings";
 import { activeShellIn, defaultTabState, focusedPaneId, useWorkstreamTabsStore } from "./workstreamTabs";
 
 export type SessionControlsSnapshot = {
@@ -17,6 +17,17 @@ export type SessionControlsSnapshot = {
   /** The harness put itself in plan mode; it leaves on its own. */
   planning: boolean;
   context: { tokens: number; window: number; title: string } | null;
+  /** Fixed values; the chip ticks its clock from `activeSince`, so nothing republishes per second. */
+  goal: {
+    id: string;
+    status: GoalStatus;
+    step: GoalStep | null;
+    iteration: number;
+    maxIterations: number;
+    spent: string;
+    activeMs: number;
+    activeSince: number | null;
+  } | null;
 };
 
 export type SessionControlActions = {

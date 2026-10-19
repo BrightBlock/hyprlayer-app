@@ -1,9 +1,10 @@
 import { ActivityDot } from "@/components/ActivityDot";
 import type { WorkstreamActivity } from "@/lib/domain/activity";
+import { workstreamGoalLabel } from "@/lib/domain/goals";
 import type { AgentState } from "@/features/multiplexer/engineState";
 import { useWorkstreamAgentRollup } from "@/features/multiplexer/multiplexerStore";
 import type { ReactNode } from "react";
-import { useWorkstreamActivity, useWorkstreamBuildPhase } from "./sessionStore";
+import { useWorkstreamActivity, useWorkstreamBuildPhase, useWorkstreamGoal } from "./sessionStore";
 
 const ACTIVITY_PRIORITY: Record<WorkstreamActivity, number> = {
   error: 5,
@@ -46,7 +47,19 @@ export function WorkstreamBuildPhase({
   workstreamId: string;
   fallback: ReactNode;
 }) {
+  const goal = useWorkstreamGoal(workstreamId);
   const phase = useWorkstreamBuildPhase(workstreamId);
+  if (goal) {
+    return (
+      <span
+        data-testid="sidebar-goal"
+        className="shrink-0 text-meta tabular-nums text-ink-4"
+        title={`goal · iteration ${goal.iteration} of ${goal.maxIterations}`}
+      >
+        {workstreamGoalLabel(goal)}
+      </span>
+    );
+  }
   if (!phase) return fallback;
   return (
     <span className="shrink-0 text-meta tabular-nums text-ink-4" title={`building · phase ${phase}`}>

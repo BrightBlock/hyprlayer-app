@@ -1,0 +1,162 @@
+{
+  "scenario": "goal_harness_crash",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "iteration": 2,
+            "pauseReason": "turn_failures",
+            "status": "paused"
+          },
+          "guard": "the goal pauses as turn failures after its second iteration",
+          "ok": true
+        }
+      ],
+      "step": "two failed turns pause the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "changes": [
+              "running/working/0",
+              "running/working/1",
+              "running/resuming/1",
+              "running/working/2",
+              "running/checking/2"
+            ]
+          },
+          "guard": "the crash moves the goal to resuming, and iteration 2 is sent and checked",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "relaunchedWithResume": true
+          },
+          "guard": "the session is relaunched once, with --resume",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "modes": [
+              "acceptEdits",
+              "acceptEdits"
+            ]
+          },
+          "guard": "the relaunch keeps the session's permission mode",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checked1": false,
+            "note1": "cut_off",
+            "outcome2": "fail"
+          },
+          "guard": "the crashed iteration closes cut off with no checks, and the next one finishes its checks",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "namesARestart": false,
+            "sent2": true
+          },
+          "guard": "iteration 2's prompt does not claim a server restart",
+          "ok": true
+        }
+      ],
+      "step": "a crash relaunches and continues"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "held": true,
+            "notes": [
+              "cut_off",
+              null,
+              "cut_off",
+              "cut_off"
+            ]
+          },
+          "guard": "iterations 3 and 4 both crash",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iteration": 4,
+            "pauseReason": "harness_crashes",
+            "status": "paused"
+          },
+          "guard": "the second crash in a row pauses the goal at iteration 4",
+          "ok": true
+        }
+      ],
+      "step": "a second crash pauses"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hasReason": true,
+            "iteration": 4,
+            "pauseReason": "relaunch_failed",
+            "status": "paused"
+          },
+          "guard": "the resume cannot relaunch the session and pauses with the error",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "restored": true
+          },
+          "guard": "the staged harness is back in place",
+          "ok": true
+        }
+      ],
+      "step": "a failed relaunch pauses"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "goalMessages": 6,
+            "iteration": 6,
+            "namesARestart": false
+          },
+          "guard": "the iteration a user's resume sends carries no cut-off sentence",
+          "ok": true
+        }
+      ],
+      "step": "a resume after crashes does not claim a server restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "goalMessagesDelivered": 1,
+            "iteration": 1,
+            "status": "exhausted"
+          },
+          "guard": "the goal stops at its iteration limit and the stub got one goal message",
+          "ok": true
+        }
+      ],
+      "step": "a crash on the last iteration does not exceed the cap"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

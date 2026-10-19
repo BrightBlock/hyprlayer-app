@@ -14,6 +14,8 @@ import { Button, ErrorNote, MenuItem, Popover, Spinner, useConfirm } from "@/com
 import { type OptionMenuGroup, type OptionMenuItem } from "@/components/OptionMenuList";
 import { BrandMark } from "@/components/BrandMark";
 import { Icon, stageIconName } from "@/components/Icon";
+import { goalDraft, goalSpent } from "@/lib/domain/goals";
+import { openGoalSheet } from "@/lib/goalSheet";
 import { errorMessage, isStaleTranscript } from "@/lib/ipc";
 import { eventToChord, formatChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
@@ -24,6 +26,7 @@ import {
   useClaudeProbe,
   useCodexProbe,
   useOpencodeCatalog,
+  useResumeGoal,
   useSyncClaudeModels,
   useWorkstreamSessions,
 } from "@/lib/queries";
@@ -80,11 +83,13 @@ import { useWrittenDocs } from "./writtenDocs";
 import { planRevisions } from "./planRevisions";
 import { PlanCardsContext } from "./planCardSlot";
 import { interceptSend } from "./sendInterceptor";
+import { goalActiveSince, useSessionGoal } from "./sessionGoal";
 import {
   TranscriptView,
   type PermissionHandlers,
   type PromptHandlers,
   type SkeletonTail,
+  type TranscriptGoal,
   type TranscriptHandle,
   type TranscriptSync,
 } from "./TranscriptView";
@@ -108,6 +113,7 @@ import {
   startSession,
   steerQueued,
   stopSession,
+  takeArmedResume,
   useSession,
   useMostRecentDoc,
   useSessionBackgroundTasks,
@@ -850,13 +856,13 @@ export function SessionChat({
     // open was stopped on purpose (here or on another device), and every open
     // window relaunching it would race to spawn duplicate harnesses.
     autoResumeDecidedRef.current = shell.sessionId;
-    if (!isTerminal(session.state)) return;
+    if (!isTerminal(session.state) || shell.frozen) return;
     setError(null);
     setResuming(true);
     void resumeSession(shell.sessionId)
       .catch((e) => setError(errorMessage(e)))
       .finally(() => setResuming(false));
-  }, [shell.sessionId, session]);
+  }, [shell.sessionId, shell.frozen, session]);
 
   const suggestKind = suggestedDocKind(mode);
   const recent = useMostRecentDoc(workstreamId, suggestKind);
@@ -1066,6 +1072,13 @@ export function SessionChat({
         : null,
     [sid, workstreamId, sessionItems, sessionStage, writtenDocs],
   );
+  const { goal: sessionGoal, detail: goalDetail } = useSessionGoal(sid, workstreamId);
+  const goalIterations = goalDetail?.iterations ?? null;
+  const transcriptGoal = useMemo<TranscriptGoal | null>(
+    () => (sid && sessionGoal ? { sessionId: sid, workstreamId, goal: sessionGoal, iterations: goalIterations } : null),
+    [sid, workstreamId, sessionGoal, goalIterations],
+  );
+  const resumeGoal = useResumeGoal();
   const readyCard = useMemo(
     () =>
       sid && (sessionStage === "implement" || sessionStage === "validate") ? { sessionId: sid, workstreamId } : null,
@@ -1201,7 +1214,29 @@ export function SessionChat({
     });
   };
 
+  const openGoalFromDraft = (text: string) => {
+    openGoalSheet({
+      mode: "start",
+      workstreamId,
+      source: "composer",
+      text,
+      target: sid ? { sessionId: sid } : { newSession: { stage: mode, shellId: shell.id } },
+    });
+    onDraftChange("");
+    setHistoryNav(IDLE_NAV);
+    recalledValueRef.current = null;
+  };
+
+  // A `/goal` draft reaching the harness would start its own native goal.
+  const interceptGoalDraft = (): boolean => {
+    const text = goalDraft(draft);
+    if (text === null) return false;
+    openGoalFromDraft(text);
+    return true;
+  };
+
   const handleStart = async () => {
+    if (interceptGoalDraft()) return;
     const input = draft.trim();
     if (!canSubmit || pendingArg || starting) return;
     if (!usingOpencode && !usingCodex && model.disabled) {
@@ -1241,6 +1276,7 @@ export function SessionChat({
   };
 
   const handleSend = async (steer = false) => {
+    if (interceptGoalDraft()) return;
     const text = draft.trim();
     if (steer && !text && attachments.length === 0 && sid) {
       void steerQueued(sid);
@@ -1263,7 +1299,10 @@ export function SessionChat({
       }
       const expanded = await expandDraft(text);
       if (!expanded) return;
-      await sendMessage(sid, expanded.text, attachments, expanded.title, undefined, steer);
+      const outcome = await sendMessage(sid, expanded.text, attachments, expanded.title, undefined, steer);
+      // Reply and resume: the server's boundary waits for this reply's turn before it re-checks.
+      const armed = outcome === "dropped" ? null : takeArmedResume(sid);
+      if (armed) resumeGoal.mutate(armed, { onError: (e) => setError(errorMessage(e)) });
       setDivider(sid, null);
       transcriptRef.current?.scrollToBottom();
       onDraftChange("");
@@ -1411,6 +1450,16 @@ export function SessionChat({
               title: `Context ${formatTokens(session.contextTokens)} / ${formatTokens(contextWindow)}`,
             }
           : null,
+      goal: sessionGoal && {
+        id: sessionGoal.id,
+        status: sessionGoal.status,
+        step: sessionGoal.step,
+        iteration: sessionGoal.iteration,
+        maxIterations: sessionGoal.limits.maxIterations,
+        spent: goalSpent(sessionGoal),
+        activeMs: sessionGoal.activeMs,
+        activeSince: goalActiveSince(sessionGoal),
+      },
     },
     {
       pickModel: onPickModel,
@@ -1469,6 +1518,7 @@ export function SessionChat({
               prompt={prompt}
               sync={transcriptSync}
               ready={readyCard}
+              goal={transcriptGoal}
               queued={session?.queued}
               canWithdrawQueued={!usingCodex}
               onCancelQueued={onCancelQueued}
@@ -1633,6 +1683,15 @@ export function SessionChat({
                       tasks={backgroundTasks}
                       onJumpTo={(toolUseId) => transcriptRef.current?.scrollToTool(toolUseId)}
                     />
+                    <button
+                      type="button"
+                      onClick={() => openGoalFromDraft(goalDraft(draft) ?? draft.trim())}
+                      title="Run until a goal is met"
+                      aria-label="Start a goal"
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-ink-dim hover:bg-edge/60 hover:text-ink focus:outline-none focus-visible:bg-edge/60 focus-visible:text-ink"
+                    >
+                      <Icon name="goal" />
+                    </button>
                     {started && (
                       <button
                         type="button"

@@ -2,8 +2,10 @@ import { useMemo } from "react";
 
 import type { ActiveSessionView, WorkstreamView } from "@/lib/bindings";
 import { modelDisplayName } from "@/lib/domain/models";
+import type { GoalSheetTarget } from "@/lib/goalSheet";
 import { useDoc, useWorkstreamPr } from "@/lib/queries";
 import { parsePlanDoc, phaseRows } from "@/features/plan/planDoc";
+import { useSessionStore } from "@/features/session/sessionStore";
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
 import type { PipelineSession } from "./pipeline";
 
@@ -22,8 +24,9 @@ export function sessionsByWorkstream(active: ActiveSessionView[]): Map<string, P
   );
 }
 
-function planPathOf(wsId: string): (s: ReturnType<typeof useWorkstreamTabsStore.getState>) => string | null {
+function planPathOf(wsId: string | null): (s: ReturnType<typeof useWorkstreamTabsStore.getState>) => string | null {
   return (s) => {
+    if (!wsId) return null;
     for (const shell of s.byWs[wsId]?.shells ?? []) {
       const doc = shell.docs.find((d) => d.role === "plan" && !d.suggested);
       if (doc) return doc.path;
@@ -32,8 +35,23 @@ function planPathOf(wsId: string): (s: ReturnType<typeof useWorkstreamTabsStore.
   };
 }
 
+export function usePlanPath(wsId: string | null): string | null {
+  return useWorkstreamTabsStore(planPathOf(wsId));
+}
+
+// A live implement session already carrying the plan, else a new one with the plan attached.
+export function planGoalTarget(wsId: string, planPath: string): GoalSheetTarget {
+  const sessions = useSessionStore.getState().sessions;
+  for (const shell of useWorkstreamTabsStore.getState().byWs[wsId]?.shells ?? []) {
+    const entry = shell.sessionId ? sessions[shell.sessionId] : undefined;
+    const carries = shell.docs.some((d) => d.role === "plan" && !d.suggested && d.path === planPath);
+    if (carries && entry?.stage === "implement" && entry.live && shell.sessionId) return { sessionId: shell.sessionId };
+  }
+  return { newSession: { stage: "implement", attachedDocs: [planPath] } };
+}
+
 export function usePlanProgress(wsId: string, enabled: boolean): { done: number; total: number } | null {
-  const path = useWorkstreamTabsStore(planPathOf(wsId));
+  const path = usePlanPath(wsId);
   const doc = useDoc(enabled && path ? path : "");
   const content = doc.data?.content;
   return useMemo(() => {

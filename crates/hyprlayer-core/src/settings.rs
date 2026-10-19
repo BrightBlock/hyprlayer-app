@@ -76,6 +76,7 @@ pub struct AppSettings {
     pub quit: QuitSettings,
     pub tab_titles: TabTitleSettings,
     pub multiplexer: MultiplexerSettings,
+    pub goals: GoalSettings,
     pub dev_tools: bool,
     pub full_disk_access_notice_dismissed: bool,
 }
@@ -99,14 +100,16 @@ impl AppSettings {
             }
         }
 
-        if self.tab_titles.model.as_deref().is_some_and(|model| {
-            model
-                .get(.."opencode:".len())
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("opencode:"))
-                && !opencode_model_is_supported(model)
-        }) {
-            self.tab_titles.model = None;
-            changed = true;
+        for model in [&mut self.tab_titles.model, &mut self.goals.evaluator_model] {
+            if model.as_deref().is_some_and(|model| {
+                model
+                    .get(.."opencode:".len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("opencode:"))
+                    && !opencode_model_is_supported(model)
+            }) {
+                *model = None;
+                changed = true;
+            }
         }
 
         changed
@@ -161,6 +164,39 @@ impl TabTitleSettings {
             return explicit;
         }
         Self::default_model_for(providers.default_harness.as_deref())
+    }
+}
+
+/// A new goal's limits, named as `GoalLimits` names them; plain numbers, since a goal is never unlimited.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct GoalSettings {
+    pub max_iterations: u32,
+    pub max_cost_usd: f64,
+    pub max_tokens: u32,
+    pub max_active_secs: u32,
+    pub evaluator_model: Option<String>,
+}
+
+impl Default for GoalSettings {
+    fn default() -> Self {
+        Self {
+            max_iterations: 10,
+            max_cost_usd: 10.0,
+            max_tokens: 2_000_000,
+            max_active_secs: 3_600,
+            evaluator_model: None,
+        }
+    }
+}
+
+impl GoalSettings {
+    pub fn effective_evaluator_model<'a>(&'a self, providers: &ProviderSettings) -> &'a str {
+        if let Some(explicit) = self.evaluator_model.as_deref().filter(|m| !m.is_empty()) {
+            return explicit;
+        }
+        TabTitleSettings::default_model_for(providers.default_harness.as_deref())
     }
 }
 

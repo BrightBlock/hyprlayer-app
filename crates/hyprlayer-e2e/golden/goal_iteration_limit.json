@@ -1,0 +1,172 @@
+{
+  "scenario": "goal_iteration_limit",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refused": [
+              {
+                "case": "no checks",
+                "code": "goal_invalid"
+              },
+              {
+                "case": "no iterations",
+                "code": "goal_invalid"
+              },
+              {
+                "case": "under a minute of active time",
+                "code": "goal_invalid"
+              },
+              {
+                "case": "Claude without a spend cap",
+                "code": "goal_invalid"
+              },
+              {
+                "case": "a new Plan session",
+                "code": "goal_invalid"
+              }
+            ]
+          },
+          "guard": "every one is goal_invalid",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "goals": 0
+          },
+          "guard": "none of them left a goal behind",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refused": true,
+            "sessionsAdded": 0
+          },
+          "guard": "a new session that cannot launch is refused and leaves no session behind",
+          "ok": true
+        }
+      ],
+      "step": "invalid specs are refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "iteration": 3,
+            "iterations": 3,
+            "status": "exhausted"
+          },
+          "guard": "it ends exhausted on the iteration limit after three iterations",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcomes": [
+              "fail",
+              "fail",
+              "fail"
+            ]
+          },
+          "guard": "its checks failed every time",
+          "ok": true
+        }
+      ],
+      "step": "the iteration cap ends the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "maxIterations": 4,
+            "status": "exhausted"
+          },
+          "guard": "raising the limit changes the cap and resumes nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iteration": 4,
+            "iterations": 4,
+            "resumedStatus": "running",
+            "status": "exhausted"
+          },
+          "guard": "resuming runs one more iteration and stops at the new cap",
+          "ok": true
+        }
+      ],
+      "step": "extend and resume"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "goal_active",
+            "firstGoal": "exhausted",
+            "liveGoal": "paused"
+          },
+          "guard": "the first goal cannot resume past the live one",
+          "ok": true
+        }
+      ],
+      "step": "extend refuses while another goal is live"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "stalled",
+            "iteration": 3,
+            "status": "failed"
+          },
+          "guard": "three iterations that change nothing end failed as stalled",
+          "ok": true
+        }
+      ],
+      "step": "a stalled goal fails"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "iteration": 4,
+            "status": "exhausted"
+          },
+          "guard": "it runs to the iteration limit and is never failed as stalled",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "commitsAdded": 4
+          },
+          "guard": "HEAD advanced on every iteration",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "diffUnchanged": true,
+            "distinctProgressHashes": 4
+          },
+          "guard": "the diff never changes, yet the progress hash moves on every iteration",
+          "ok": true
+        }
+      ],
+      "step": "a committing agent is not stalled"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

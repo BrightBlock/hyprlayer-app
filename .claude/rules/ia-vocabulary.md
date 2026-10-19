@@ -24,6 +24,7 @@ enums or raw `string` types** — use the generated binding.
 | `Harness` | `crates/hyprlayer-core/src/agent.rs` | `lib/domain/harnessing.ts` |
 | `PermissionMode` | `crates/hyprlayer-core/src/claude/driver.rs` | `lib/domain/permissions.ts` |
 | `DocType` / `DocStatus` / `DocScope` | `crates/hyprlayer-core/src/docs/vocab.rs` | `lib/domain/docs.ts` |
+| `GoalStatus` / `GoalStep` / `GoalPauseReason` / `GoalEndReason` / `GoalSource` | `crates/hyprlayer-models/src/goal.rs` | `lib/domain/goals.ts` |
 
 SQLite columns stay TEXT. Core `parse()` functions do tolerant parsing so legacy
 rows keep loading.

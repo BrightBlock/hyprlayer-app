@@ -1,0 +1,240 @@
+{
+  "scenario": "goal_until_validated",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "carriesIssue": true,
+            "outcome1": "fail",
+            "validation": [
+              "fail",
+              "validation found 1 issue"
+            ]
+          },
+          "guard": "iteration 1's validation fails on the summarized issue",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "fixAll": true,
+            "issue": true
+          },
+          "guard": "iteration 2's prompt carries the Fix-all text and the issue",
+          "ok": true
+        }
+      ],
+      "step": "validation findings feed the next iteration"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "checks_passed",
+            "iteration": 2,
+            "status": "met"
+          },
+          "guard": "the goal is met at iteration 2",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "namedOnResults": true,
+            "sessions": 2,
+            "states": [
+              "killed",
+              "killed"
+            ]
+          },
+          "guard": "two validate sessions, each killed after its report and named on its result",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "describePr": false,
+            "statusActive": true
+          },
+          "guard": "no /describe_pr was sent and the plan's status is unchanged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spentCents": 162
+          },
+          "guard": "spend counts both turns, both validate sessions and both summaries",
+          "ok": true
+        }
+      ],
+      "step": "met after a clean validation"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "sessions": [
+              {
+                "doNotRerun": true,
+                "notesPlain": true,
+                "notesShell": true,
+                "opensWithSkill": true,
+                "plainRule": true,
+                "shellRule": false
+              },
+              {
+                "doNotRerun": true,
+                "notesPlain": true,
+                "notesShell": true,
+                "opensWithSkill": true,
+                "plainRule": true,
+                "shellRule": false
+              }
+            ]
+          },
+          "guard": "each validate session allows the plain command only, and its prompt names both",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "sessions": [
+              {
+                "allowsThoughtsEdit": false,
+                "deniesEdit": true,
+                "deniesSync": true,
+                "toldReportOnly": true
+              },
+              {
+                "allowsThoughtsEdit": false,
+                "deniesEdit": true,
+                "deniesSync": true,
+                "toldReportOnly": true
+              }
+            ]
+          },
+          "guard": "each validate session is report-only: no edits, no thoughts sync, and told so",
+          "ok": true
+        }
+      ],
+      "step": "approved commands are allowed in the validate session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true,
+            "iteration": 1,
+            "step": "waiting",
+            "validateSessions": 1
+          },
+          "guard": "the validate session's ask moves the goal to waiting during its checks",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": "met"
+          },
+          "guard": "answering it lets the validation finish and the goal meet",
+          "ok": true
+        }
+      ],
+      "step": "a validate ask waits"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "killed": true
+          },
+          "guard": "the user's message kills the held validate session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "judgedByNewSession": true,
+            "status": "met",
+            "validateSessions": 2
+          },
+          "guard": "the re-run opens a new validate session, whose report meets the goal",
+          "ok": true
+        }
+      ],
+      "step": "a cancelled validation kills its session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "iteration_limit",
+            "validation": [
+              "fail",
+              "validation found 1 failing check"
+            ]
+          },
+          "guard": "the bare parse's failing check fails the validation",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "failedCheck": true
+          },
+          "guard": "the next prompt carries the failed check",
+          "ok": true
+        }
+      ],
+      "step": "a failed summary falls back to the bare parse"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": "met"
+          },
+          "guard": "the summarized failure filed under notes leaves the goal met",
+          "ok": true
+        }
+      ],
+      "step": "a pre-existing failure in notes does not block met"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "validation": [
+              "error",
+              "the validation ended without a report"
+            ]
+          },
+          "guard": "the validation is an error saying it ended without a report",
+          "ok": true
+        }
+      ],
+      "step": "a missing report is an error"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "spentCents": 121,
+            "status": "met",
+            "summaryHeld": true
+          },
+          "guard": "spend counts the turn, both validate sessions and the one finished summary",
+          "ok": true
+        }
+      ],
+      "step": "a validation cancelled during its summary still counts its session's spend"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

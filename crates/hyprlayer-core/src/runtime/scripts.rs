@@ -369,7 +369,7 @@ impl ScriptService<'_> {
     }
 }
 
-fn script_env(
+pub(crate) fn script_env(
     item: &Workstream,
     port: u16,
     augmented: &OsStr,

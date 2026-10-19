@@ -1,8 +1,18 @@
+use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::time::Duration;
 
 use hyprlayer_core::claude::{
     ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SpawnConfig,
 };
+use hyprlayer_core::models::goal::{
+    GoalCheck, GoalCheckOutcome, GoalCheckResult, GoalLimits, GoalSource, GoalSpec,
+};
+use hyprlayer_core::pipeline::{
+    goal_check_kind, goal_check_label, goal_iteration_prompt, EVALUATOR_SYSTEM,
+};
+use hyprlayer_core::process::Exec;
+use hyprlayer_core::{HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths};
 
 #[tokio::test]
 #[ignore = "requires a logged-in claude; makes a real API call"]
@@ -506,4 +516,324 @@ async fn an_interrupt_runs_the_waiting_message_next() {
     );
     assert!(final_text(&seen).contains("PINEAPPLE"), "{seen:?}");
     driver.kill();
+}
+
+/// Haiku with the deny every app session carries, so no native goal can start.
+fn spawn_goal_haiku(
+    cwd: &std::path::Path,
+    max_budget_usd: f64,
+) -> (ClaudeDriver, tokio::sync::broadcast::Receiver<SessionEvent>) {
+    let claude = which::which("claude").expect("claude on PATH");
+    ClaudeDriver::spawn(SpawnConfig {
+        claude_bin: claude,
+        cwd: cwd.to_path_buf(),
+        session_id: uuid::Uuid::new_v4().to_string(),
+        permission_mode: PermissionMode::BypassPermissions,
+        allowed_tools: vec![],
+        disallowed_tools: vec!["ProposeGoal".into()],
+        add_dirs: vec![],
+        resume: None,
+        fork: false,
+        max_budget_usd: Some(max_budget_usd),
+        model: Some("haiku".into()),
+        effort: None,
+        chrome: false,
+        agent: None,
+        append_system_prompt: None,
+        env: std::env::vars().collect(),
+        claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
+    })
+    .expect("spawn claude")
+}
+
+/// Sends `text` and returns the status its turn ended with.
+async fn turn_status(
+    driver: &ClaudeDriver,
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    text: &str,
+) -> Option<String> {
+    driver
+        .send_user_turn(text, None, None, None)
+        .expect("send turn");
+    next_turn_status(events).await
+}
+
+async fn next_turn_status(
+    events: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(SessionEvent::TurnDone { turn_status, .. })) => return turn_status,
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("the turn did not end within 120s"),
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes a real API call"]
+async fn a_completed_turn_reports_completed() {
+    let (driver, mut events) = spawn_goal_haiku(&std::env::temp_dir(), 1.0);
+    let status = turn_status(
+        &driver,
+        &mut events,
+        "Reply with exactly the word: pong. Nothing else.",
+    )
+    .await;
+    driver.kill();
+    assert_eq!(status.as_deref(), Some("completed"));
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes a real API call"]
+async fn an_interrupted_turn_reports_interrupted() {
+    let (driver, mut events) = spawn_goal_haiku(&std::env::temp_dir(), 1.0);
+    driver
+        .send_user_turn(
+            "Without using any tool, count from 1 to 500, one number per line.",
+            None,
+            None,
+            None,
+        )
+        .expect("send turn");
+    // Interrupted while it streams: claude reports that as `aborted_streaming`.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(SessionEvent::PartialText { .. })) => break,
+            Ok(Ok(SessionEvent::TurnDone { .. })) => panic!("the turn ended before it streamed"),
+            Ok(Ok(SessionEvent::Exited { outcome, .. })) => {
+                panic!("session exited mid-turn: {outcome:?}")
+            }
+            Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("nothing streamed within 60s"),
+        }
+    }
+    driver.interrupt().expect("interrupt");
+    let status = next_turn_status(&mut events).await;
+    driver.kill();
+    assert_eq!(status.as_deref(), Some("interrupted"));
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes a real API call"]
+async fn a_budget_trip_reports_budget_exhausted() {
+    let (driver, mut events) = spawn_goal_haiku(&std::env::temp_dir(), 0.0001);
+    let first = turn_status(
+        &driver,
+        &mut events,
+        "Use the Bash tool to run `echo budget`, then reply with the single word DONE.",
+    )
+    .await;
+    println!("first turn: {first:?}");
+    let status = if first.as_deref() == Some("budget_exhausted") {
+        first
+    } else {
+        // The cap trips between model calls, so a one-call turn can finish; the next one cannot.
+        turn_status(&driver, &mut events, "Reply with the single word AGAIN.").await
+    };
+    driver.kill();
+    assert_eq!(status.as_deref(), Some("budget_exhausted"));
+}
+
+/// Runs a Command check as the goal runner does: bounded output, its own process group.
+async fn run_check(check: &GoalCheck, cwd: &std::path::Path) -> GoalCheckResult {
+    let GoalCheck::Command {
+        command,
+        timeout_secs,
+        ..
+    } = check
+    else {
+        panic!("the counter goal has only a command check");
+    };
+    let started = std::time::Instant::now();
+    let output = Exec::new("sh")
+        .args(["-c", command.as_str()])
+        .cwd(cwd)
+        .timeout(Duration::from_secs(u64::from(*timeout_secs)))
+        .run_bounded(64 * 1024, &tokio::sync::Notify::new())
+        .await
+        .expect("run the check");
+    GoalCheckResult {
+        kind: goal_check_kind(check),
+        label: goal_check_label(check),
+        outcome: if output.exit_code == Some(0) {
+            GoalCheckOutcome::Pass
+        } else {
+            GoalCheckOutcome::Fail
+        },
+        exit_code: output.exit_code,
+        duration_ms: u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX),
+        output_tail: output.tail,
+        reason: None,
+        session_id: None,
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn a_counter_goal_meets_its_command_check() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let initialized = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run git init");
+    assert!(initialized.success(), "git init failed");
+    let check = GoalCheck::Command {
+        command: r#"test "$(cat counter.txt)" = 3"#.into(),
+        timeout_secs: 60,
+        label: None,
+    };
+    let spec = GoalSpec {
+        condition: "counter.txt holds the number 3".into(),
+        work_prompt: "Add one to the number in counter.txt, creating it holding 1 if it is \
+                      missing. Make exactly one increment, change nothing else, then stop."
+            .into(),
+        source: GoalSource::Composer,
+        source_ref: None,
+        source_phase: None,
+        checks: vec![check.clone()],
+        limits: GoalLimits {
+            max_iterations: 5,
+            max_cost_usd: Some(1.0),
+            max_tokens: None,
+            max_active_secs: 600,
+        },
+    };
+    let (driver, mut events) = spawn_goal_haiku(dir.path(), 1.0);
+    let mut feedback = Vec::new();
+    let mut met_at = None;
+    for n in 1..=5 {
+        let prompt = goal_iteration_prompt(&spec, n, &feedback, false, None);
+        let status = turn_status(&driver, &mut events, &prompt).await;
+        let result = run_check(&check, dir.path()).await;
+        println!("iteration {n}: turn {status:?}, check {:?}", result.outcome);
+        if result.outcome == GoalCheckOutcome::Pass {
+            met_at = Some(n);
+            break;
+        }
+        feedback = vec![result];
+    }
+    driver.kill();
+    assert!(
+        met_at.is_some(),
+        "the counter goal did not meet within 5 iterations"
+    );
+}
+
+/// A runtime on a temp profile whose `PATH` is the real one, so `claude` resolves.
+async fn evaluator_runtime(root: &std::path::Path) -> std::sync::Arc<HyprlayerRuntime> {
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut process_env = BTreeMap::new();
+    process_env.insert(OsString::from("SHELL"), home.join("no-such-shell").into());
+    if let Some(path) = std::env::var_os("PATH") {
+        process_env.insert(OsString::from("PATH"), path);
+    }
+    let environment = RuntimeEnvironment {
+        home_dir: home.clone(),
+        process_cwd: home,
+        process_env,
+        env_overlay: Default::default(),
+    };
+    let paths = RuntimePaths {
+        hyprlayer_config_file: root.join("config/hyprlayer.json"),
+        app_config_dir: root.join("app-config"),
+        app_data_dir: root.join("app-data"),
+        default_worktree_root: root.join("worktrees"),
+        default_repos_root: root.join("repos"),
+        opencode_config_file: root.join("opencode/opencode.json"),
+        opencode_auth_file: root.join("opencode/auth.json"),
+        opencode_data_dir: root.join("opencode/data"),
+        claude_config_dir: root.join("claude"),
+        claude_managed_settings_files: Vec::new(),
+        codex_home: root.join("codex"),
+        agent_roots: Vec::new(),
+        download_dir: root.join("downloads"),
+    };
+    for dir in [
+        paths.hyprlayer_config_file.parent().unwrap(),
+        &paths.app_config_dir,
+        &paths.app_data_dir,
+        paths.opencode_config_file.parent().unwrap(),
+    ] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
+    std::fs::write(&paths.hyprlayer_config_file, r#"{"version": 4}"#).unwrap();
+    std::fs::write(paths.app_config_dir.join("settings.json"), "{}").unwrap();
+    std::fs::write(&paths.opencode_config_file, "{}").unwrap();
+    std::fs::write(&paths.opencode_auth_file, "{}").unwrap();
+    let runtime = HyprlayerRuntime::open(RuntimeOptions::new(environment, paths))
+        .await
+        .expect("open the runtime");
+    runtime.start().await.expect("start the runtime");
+    runtime
+}
+
+#[derive(serde::Deserialize)]
+struct Verdict {
+    met: bool,
+    reason: String,
+}
+
+async fn judge(runtime: &HyprlayerRuntime, evidence: &str) -> Verdict {
+    let prompt = format!(
+        "Condition: counter.txt holds the number 3.\n\nEvidence:\n{evidence}\n\nChecks:\n\
+         Counter reaches 3 — pass"
+    );
+    let reply = runtime
+        .providers()
+        .one_shot(
+            "claude:haiku",
+            EVALUATOR_SYSTEM,
+            &prompt,
+            Duration::from_secs(90),
+        )
+        .await
+        .expect("the evaluator one-shot");
+    println!("reply: {:?}, cost {:?}", reply.text, reply.cost_usd);
+    let text = reply.text.as_str();
+    let json = text
+        .find('{')
+        .zip(text.rfind('}'))
+        .and_then(|(start, end)| text.get(start..=end))
+        .expect("a JSON object in the reply");
+    serde_json::from_str(json).expect("a {met, reason} verdict")
+}
+
+#[tokio::test]
+#[ignore = "requires a logged-in claude; makes real API calls"]
+async fn the_evaluator_judges_a_met_condition() {
+    let root = tempfile::tempdir().expect("temp dir");
+    let runtime = evaluator_runtime(root.path()).await;
+    let met = judge(
+        &runtime,
+        "The agent said: \"counter.txt now holds 3.\"\n`cat counter.txt` printed: 3",
+    )
+    .await;
+    println!("met: {} — {}", met.met, met.reason);
+    let unmet = judge(
+        &runtime,
+        "The agent said: \"I raised the counter to 2.\"\n`cat counter.txt` printed: 2",
+    )
+    .await;
+    println!("unmet: {} — {}", unmet.met, unmet.reason);
+    runtime.shutdown().await;
+    assert!(
+        met.met,
+        "a satisfied condition reads as met: {}",
+        met.reason
+    );
+    assert!(
+        !unmet.met,
+        "an unsatisfied condition reads as unmet: {}",
+        unmet.reason
+    );
 }

@@ -51,6 +51,7 @@ fn turn_done(cost: f64) -> SessionEvent {
         num_turns: None,
         context_tokens: None,
         turn_status: None,
+        thread_tokens: None,
     }
 }
 
@@ -781,6 +782,7 @@ async fn a_skipped_codex_phase_two_leaves_plan_mode_on_the_next_turn() {
             num_turns: None,
             context_tokens: None,
             turn_status: status.map(str::to_string),
+            thread_tokens: None,
         })
         .unwrap();
 
@@ -1061,7 +1063,10 @@ async fn bookkeeping_kinds_do_not_bump_rev() {
         .unwrap();
     ingress.send(turn_done(1.0)).await.unwrap();
     ingress
-        .send(SessionEvent::Usage { context_tokens: 10 })
+        .send(SessionEvent::Usage {
+            context_tokens: 10,
+            thread_tokens: None,
+        })
         .await
         .unwrap();
     ingress

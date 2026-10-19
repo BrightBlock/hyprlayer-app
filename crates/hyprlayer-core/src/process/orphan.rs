@@ -8,6 +8,8 @@
 
 use std::path::Path;
 
+use crate::agent::Harness;
+
 struct Record {
     pid: u32,
     program: String,
@@ -33,7 +35,7 @@ pub fn clear(pid_file: &Path) {
 /// Kill a child recorded by a previous run, if it is still the process we
 /// recorded. Returns the pid that was signalled.
 pub fn reap(pid_file: &Path) -> Option<u32> {
-    reap_with(pid_file, process_cmdline, kill_group)
+    reap_with(pid_file, cmdline, kill_group)
 }
 
 fn reap_with(
@@ -82,8 +84,8 @@ fn read_record(pid_file: &Path) -> Option<Record> {
 
 /// The executable a live pid is running, or `None` once it has exited.
 pub fn running_program(pid: u32) -> Option<String> {
-    let cmdline = process_cmdline(pid)?;
-    let program = cmdline.split_whitespace().next()?;
+    let line = cmdline(pid)?;
+    let program = line.split_whitespace().next()?;
     Some(
         std::path::Path::new(program)
             .file_name()
@@ -94,7 +96,7 @@ pub fn running_program(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn process_cmdline(pid: u32) -> Option<String> {
+pub fn cmdline(pid: u32) -> Option<String> {
     let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
     Some(
         raw.split(|b| *b == 0)
@@ -105,7 +107,7 @@ fn process_cmdline(pid: u32) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn process_cmdline(pid: u32) -> Option<String> {
+pub fn cmdline(pid: u32) -> Option<String> {
     // `-ww` is belt and braces, not a fix: BSD ps can wrap to the width of an
     // attached terminal, and the recorded string ends in `--port <n>`, so a
     // truncated line would fail the match. Measured on macOS 26.6.2 it makes no
@@ -123,12 +125,76 @@ fn process_cmdline(pid: u32) -> Option<String> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn process_cmdline(_pid: u32) -> Option<String> {
+pub fn cmdline(_pid: u32) -> Option<String> {
     None
 }
 
+/// `ps` reports whole seconds, so a start read back can trail its record by about one.
+const START_SLACK_MS: f64 = 2_000.0;
+
+/// Whether a process that started at `started_ms` can be the one recorded at `recorded_ms`:
+/// a reused pid started after the recorded process was gone.
+pub fn started_by(started_ms: Option<f64>, recorded_ms: f64) -> bool {
+    started_ms.is_some_and(|started| started <= recorded_ms + START_SLACK_MS)
+}
+
+/// When a live pid started, in milliseconds since the epoch.
+#[cfg(target_os = "linux")]
+pub fn started_at_ms(pid: u32) -> Option<f64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name may hold spaces and parens; field 22, `starttime`, is the 20th after it.
+    let ticks: f64 = stat
+        .rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(19)?
+        .parse()
+        .ok()?;
+    let boot: f64 = std::fs::read_to_string("/proc/stat")
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .trim()
+        .parse()
+        .ok()?;
+    let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    (hz > 0).then(|| (boot + ticks / hz as f64) * 1000.0)
+}
+
+#[cfg(target_os = "macos")]
+pub fn started_at_ms(pid: u32) -> Option<f64> {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let elapsed = parse_etime(String::from_utf8_lossy(&out.stdout).trim())?;
+    Some(crate::store::now_ms() - elapsed as f64 * 1000.0)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn started_at_ms(_pid: u32) -> Option<f64> {
+    None
+}
+
+/// Seconds from `ps`'s `[[dd-]hh:]mm:ss`.
+#[cfg(any(test, target_os = "macos"))]
+fn parse_etime(etime: &str) -> Option<u64> {
+    let (days, clock) = match etime.split_once('-') {
+        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
+        None => (0, etime),
+    };
+    let mut secs = 0u64;
+    for part in clock.split(':') {
+        secs = secs * 60 + part.parse::<u64>().ok()?;
+    }
+    Some(days * 86_400 + secs)
+}
+
 #[cfg(unix)]
-fn kill_group(pid: u32) {
+pub fn kill_group(pid: u32) {
     // Matches `SupervisedChild::kill_blocking`: the server is spawned into its own
     // process group, so signalling the group takes its children with it.
     unsafe {
@@ -137,7 +203,27 @@ fn kill_group(pid: u32) {
 }
 
 #[cfg(not(unix))]
-fn kill_group(_pid: u32) {}
+pub fn kill_group(_pid: u32) {}
+
+/// Whether a live command line is a harness the session left behind.
+pub fn harness_orphan_matches(cmdline: &str, harness: Harness, session_id: &str) -> bool {
+    let mut tokens = cmdline.split_whitespace();
+    match harness {
+        // `--session-id` or `--resume` put it in argv; the program may be a `sh` stub.
+        Harness::Claude => tokens.any(|token| token == session_id),
+        // The native app-server outlives its wrapper and holds the thread. Its argv names no
+        // thread, so only our goals-off flag tells it from another client's app-server.
+        Harness::Codex => {
+            tokens.any(|token| token.ends_with("codex"))
+                && cmdline.contains("app-server")
+                && cmdline
+                    .split_whitespace()
+                    .any(|token| token == crate::codex::driver::GOALS_DISABLED_CONFIG)
+        }
+        // Its per-profile server is reaped through `OPENCODE_PID_FILE`.
+        Harness::Opencode => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -247,7 +333,7 @@ mod tests {
     }
 
     /// What `/proc/<pid>/cmdline` reports once the shim has exec'd, joined the
-    /// way `process_cmdline` joins it (trailing separator included).
+    /// way `cmdline` joins it (trailing separator included).
     fn live_cmdline(port: u16) -> String {
         format!("{RESOLVED_BIN} {} ", serve_args(port))
     }
@@ -359,6 +445,106 @@ mod tests {
         }
     }
 
+    const SESSION: &str = "4f3c2a10-8b7e-4d21-9a55-0c1e2f3a4b5c";
+
+    #[test]
+    fn matches_a_claude_orphan_by_its_session_id() {
+        let line = format!(
+            "/bin/sh /opt/bin/claude -p --output-format stream-json --verbose --resume {SESSION} --permission-mode default"
+        );
+        assert!(harness_orphan_matches(&line, Harness::Claude, SESSION));
+        let first = format!("/opt/bin/claude -p --session-id {SESSION}");
+        assert!(harness_orphan_matches(&first, Harness::Claude, SESSION));
+    }
+
+    #[test]
+    fn spares_a_reused_pid_without_the_session_id() {
+        assert!(!harness_orphan_matches(
+            "/usr/bin/postgres -D /var/lib/postgres",
+            Harness::Claude,
+            SESSION
+        ));
+        assert!(!harness_orphan_matches(
+            "/usr/bin/postgres -D /var/lib/postgres",
+            Harness::Codex,
+            SESSION
+        ));
+    }
+
+    #[test]
+    fn spares_a_claude_process_for_another_session() {
+        let other = "9d8e7f60-1a2b-4c3d-8e9f-a0b1c2d3e4f5";
+        let line = format!("/opt/bin/claude -p --resume {other}");
+        assert!(!harness_orphan_matches(&line, Harness::Claude, SESSION));
+        // A longer id that merely contains ours is someone else's.
+        let longer = format!("/opt/bin/claude -p --resume {SESSION}-fork");
+        assert!(!harness_orphan_matches(&longer, Harness::Claude, SESSION));
+    }
+
+    #[test]
+    fn matches_a_codex_app_server() {
+        assert!(harness_orphan_matches(
+            "node /opt/homebrew/bin/codex app-server -c features.goals=false",
+            Harness::Codex,
+            SESSION
+        ));
+        assert!(!harness_orphan_matches(
+            "node /opt/homebrew/bin/codex exec hello",
+            Harness::Codex,
+            SESSION
+        ));
+        assert!(!harness_orphan_matches(
+            "/opt/bin/opencode serve --port 4096",
+            Harness::Opencode,
+            SESSION
+        ));
+    }
+
+    #[test]
+    fn spares_a_codex_app_server_another_client_started() {
+        assert!(!harness_orphan_matches(
+            "/opt/homebrew/bin/codex app-server --stdio",
+            Harness::Codex,
+            SESSION
+        ));
+    }
+
+    const RECORDED_MS: f64 = 1_760_000_000_000.0;
+
+    #[test]
+    fn spares_a_pid_that_started_after_its_record() {
+        assert!(!started_by(Some(RECORDED_MS + 10_000.0), RECORDED_MS));
+    }
+
+    #[test]
+    fn spares_a_pid_whose_start_is_unknown() {
+        assert!(!started_by(None, RECORDED_MS));
+    }
+
+    #[test]
+    fn keeps_a_pid_that_started_by_its_record() {
+        assert!(started_by(Some(RECORDED_MS - 500.0), RECORDED_MS));
+        // `ps` reports whole seconds, so a start read back can trail the record slightly.
+        assert!(started_by(Some(RECORDED_MS + 1_500.0), RECORDED_MS));
+    }
+
+    #[test]
+    fn parses_ps_elapsed_time() {
+        assert_eq!(parse_etime("05:07"), Some(307));
+        assert_eq!(parse_etime("02:05:07"), Some(7507));
+        assert_eq!(parse_etime("3-02:05:07"), Some(3 * 86_400 + 7507));
+        assert_eq!(parse_etime(""), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn reads_this_process_start_time() {
+        let now = crate::store::now_ms();
+        let started = started_at_ms(std::process::id()).expect("a live pid has a start time");
+        assert!(started <= now + 1_000.0, "started {started}, now {now}");
+        assert!(started > now - 3_600_000.0, "started {started}, now {now}");
+    }
+
     #[test]
     fn clear_removes_the_record() {
         let dir = temp_dir("clear");
@@ -390,7 +576,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut identifiable = false;
             while Instant::now() < deadline {
-                if process_cmdline(child.id()).is_some_and(|c| c.contains("sleep 30")) {
+                if cmdline(child.id()).is_some_and(|c| c.contains("sleep 30")) {
                     identifiable = true;
                     break;
                 }

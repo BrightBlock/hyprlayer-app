@@ -11,7 +11,8 @@ transcript-sync events are targeted) · amended 2026-10-06 (the Cloud account be
 server profile; `AccountChanged` is targeted by capability alone) · amended 2026-10-07
 (the cross-process lock test is an integration test, so it no longer builds the server
 binary mid-run; the release gate runs its tests under `cargo nextest`) · amended 2026-10-16
-(`runtime_in_use` opens the recovery screen instead of a native dialog and exit)
+(`runtime_in_use` opens the recovery screen instead of a native dialog and exit) ·
+amended 2026-10-16 (`GoalChanged` is targeted by capability alone)
 
 ## Decision
 
@@ -123,6 +124,8 @@ Three consequences follow, accepted rather than designed around:
   released desktop tears its connection down on an event kind it cannot decode.
   *(Amended 2026-10-06 — `AccountChanged` is targeted by capability alone: it reaches
   every connection that announced it, watching a session or not.)*
+  *(Amended 2026-10-16 — `GoalChanged` is targeted the same way, so a goal's notices reach
+  every announced device and a released desktop never receives a kind it cannot decode.)*
 
 ### The environment overlay: the exception to freeze-at-construction
 

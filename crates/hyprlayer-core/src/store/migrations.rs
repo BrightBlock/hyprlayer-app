@@ -214,6 +214,63 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_doc_agents_doc ON doc_agents(doc_id, last_at);
     ",
+    "
+    CREATE TABLE goals (
+        id                TEXT PRIMARY KEY,
+        session_id        TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        workstream_id     TEXT NOT NULL REFERENCES workstreams(id) ON DELETE CASCADE,
+        source            TEXT NOT NULL DEFAULT 'composer',
+        source_ref        TEXT,
+        source_phase      TEXT,
+        condition         TEXT NOT NULL,
+        work_prompt       TEXT NOT NULL,
+        checks            TEXT NOT NULL DEFAULT '[]',
+        max_iterations    INTEGER NOT NULL,
+        max_cost_usd      REAL,
+        max_tokens        INTEGER,
+        max_active_secs   INTEGER NOT NULL,
+        status            TEXT NOT NULL DEFAULT 'running',
+        step              TEXT,
+        pause_reason      TEXT,
+        end_reason        TEXT,
+        iteration         INTEGER NOT NULL DEFAULT 0,
+        spent_cost_usd    REAL NOT NULL DEFAULT 0,
+        spent_tokens      INTEGER NOT NULL DEFAULT 0,
+        cost_baseline_usd REAL,
+        token_baseline    INTEGER,
+        active_ms         INTEGER NOT NULL DEFAULT 0,
+        stall_count       INTEGER NOT NULL DEFAULT 0,
+        check_errors      INTEGER NOT NULL DEFAULT 0,
+        turn_failures     INTEGER NOT NULL DEFAULT 0,
+        harness_crashes   INTEGER NOT NULL DEFAULT 0,
+        restart_resumes   INTEGER NOT NULL DEFAULT 0,
+        last_outcome      TEXT,
+        last_reason       TEXT,
+        author_client_id  TEXT,
+        author_device     TEXT,
+        started_at        REAL NOT NULL,
+        updated_at        REAL NOT NULL,
+        ended_at          REAL
+    );
+    CREATE INDEX idx_goals_session ON goals(session_id);
+    CREATE UNIQUE INDEX idx_goals_one_live ON goals(session_id) WHERE status IN ('running', 'paused');
+    CREATE TABLE goal_iterations (
+        goal_id           TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        n                 INTEGER NOT NULL,
+        client_message_id TEXT NOT NULL,
+        started_at        REAL NOT NULL,
+        ended_at          REAL,
+        turn_status       TEXT,
+        cost_usd          REAL,
+        tokens            INTEGER,
+        outcome           TEXT,
+        reason            TEXT,
+        results           TEXT NOT NULL DEFAULT '[]',
+        progress_hash     TEXT,
+        note              TEXT,
+        PRIMARY KEY (goal_id, n)
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

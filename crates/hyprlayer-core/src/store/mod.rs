@@ -1,3 +1,4 @@
+mod goals;
 mod library;
 mod migrations;
 mod projects;
@@ -6,6 +7,7 @@ pub mod session_event_codec;
 mod sessions;
 mod workstreams;
 
+pub use goals::*;
 pub use library::*;
 pub use projects::*;
 pub use reviews::*;

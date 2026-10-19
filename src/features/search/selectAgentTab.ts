@@ -7,7 +7,11 @@ import {
 import { workstreamSessionsQuery } from "@/lib/queries";
 import { queryClient } from "@/lib/queryClient";
 
-export async function selectAgentTab(workstreamId: string, sessionId: string): Promise<void> {
+export async function selectAgentTab(
+  workstreamId: string,
+  sessionId: string,
+  opts?: { frozen?: boolean },
+): Promise<void> {
   const local = useWorkstreamTabsStore
     .getState()
     .byWs[workstreamId]?.shells.find((s) => s.sessionId === sessionId);
@@ -21,5 +25,5 @@ export async function selectAgentTab(workstreamId: string, sessionId: string): P
 
   const sessions = await queryClient.fetchQuery(workstreamSessionsQuery(workstreamId)).catch(() => []);
   const session = sessions.find((s) => s.id === sessionId);
-  if (session) openSessionTab(workstreamId, session);
+  if (session) openSessionTab(workstreamId, session, opts);
 }

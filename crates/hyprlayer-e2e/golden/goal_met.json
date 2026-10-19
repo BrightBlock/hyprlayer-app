@@ -1,0 +1,157 @@
+{
+  "scenario": "goal_met",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "author": "client-a",
+            "status": "running"
+          },
+          "guard": "the goal starts running, attributed to client-a",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": "running"
+          },
+          "guard": "the session carries the goal's brief while it runs",
+          "ok": true
+        }
+      ],
+      "step": "start a goal on a live session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "goalMessages": 3
+          },
+          "guard": "each iteration is one message under the goal prompt name",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "injectedTexts": 1
+          },
+          "guard": "the native Stop-hook feedback is one injected text",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iterations": 3,
+            "turnDonesInIteration2": 2
+          },
+          "guard": "the extra empty result lands inside the second iteration",
+          "ok": true
+        }
+      ],
+      "step": "iterations end at the right boundary"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "checks_passed",
+            "iteration": 3,
+            "status": "met"
+          },
+          "guard": "it ends met on its checks at the third iteration",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcomes": [
+              "fail",
+              "fail",
+              "pass"
+            ]
+          },
+          "guard": "the checks fail twice, then pass",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "carriesOutput": true,
+            "saysDidNotPass": true
+          },
+          "guard": "the second iteration carries the first check's output",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spentCents": 120
+          },
+          "guard": "spend counts the goal's own turns, not the session's earlier one",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changes": [
+              "running/working/0",
+              "running/working/1",
+              "running/checking/1",
+              "running/working/2",
+              "running/checking/2",
+              "running/working/3",
+              "running/checking/3",
+              "met/-/3"
+            ]
+          },
+          "guard": "C hears the goal start, check every iteration and meet",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": null
+          },
+          "guard": "the brief is gone once the goal has ended",
+          "ok": true
+        }
+      ],
+      "step": "the goal meets its condition"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "goalEvents": 0,
+            "heardTheSession": true
+          },
+          "guard": "B, which never announced GoalChanged, still hears the session but no goal event",
+          "ok": true
+        }
+      ],
+      "step": "an unannounced client hears nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "authors": [
+              "client-a",
+              "client-a",
+              "client-a"
+            ]
+          },
+          "guard": "every goal message is client-a's, though client-a left",
+          "ok": true
+        }
+      ],
+      "step": "iterations stay attributed to the starter"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

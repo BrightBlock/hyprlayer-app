@@ -1,0 +1,323 @@
+{
+  "scenario": "goal_user_stop",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checksRun": 0,
+            "goalMessages": 0,
+            "iteration": 0
+          },
+          "guard": "the goal waits for the user's turn: no message sent, no check run",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "afterTheTurn": true,
+            "checksRun": 1,
+            "iteration": 1,
+            "status": "met"
+          },
+          "guard": "iteration 1 follows that turn's result, and the goal meets there, never at iteration 0",
+          "ok": true
+        }
+      ],
+      "step": "start on a busy session waits for its turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "interrupts": 0,
+            "step": "pausing"
+          },
+          "guard": "the goal reads pausing while the turn runs, and nothing interrupts it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checked": true,
+            "iteration": 1,
+            "iterationThreeSecondsLater": 1,
+            "pauseReason": "user",
+            "status": "paused"
+          },
+          "guard": "it pauses at iteration 1 once the checks have run, and starts no second iteration",
+          "ok": true
+        }
+      ],
+      "step": "pause waits for the iteration"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "reachedIteration2": true,
+            "resumedStatus": "running",
+            "status": "running"
+          },
+          "guard": "the next iteration follows",
+          "ok": true
+        }
+      ],
+      "step": "resume continues"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstAccepted": true,
+            "goalMessagesAdded": 1,
+            "secondAccepted": true
+          },
+          "guard": "both resumes are accepted and the harness gets exactly one more goal message",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "iterationsAfterPause": 1,
+            "status": "exhausted"
+          },
+          "guard": "that one iteration ends the goal at the cap",
+          "ok": true
+        }
+      ],
+      "step": "two resumes start one runner"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstRun": true,
+            "rerun": true,
+            "userTurnFinished": true
+          },
+          "guard": "the checks start again only after the user's turn has finished",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checksRun": 2,
+            "iteration": 1,
+            "iterations": 1
+          },
+          "guard": "the check ran twice and the message did not count as an iteration",
+          "ok": true
+        }
+      ],
+      "step": "a message during checks re-runs them"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "goal_active"
+          },
+          "guard": "a session with a live goal refuses another",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusedWith": [
+              "goal_active"
+            ],
+            "winners": 1
+          },
+          "guard": "two starts at once on another session: exactly one wins",
+          "ok": true
+        }
+      ],
+      "step": "a second goal is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "archive": "goal_active",
+            "delete": "goal_active"
+          },
+          "guard": "a session with a live goal can be neither archived nor deleted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archivedAfterStop": true,
+            "status": "stopped"
+          },
+          "guard": "stopping the paused goal frees the session",
+          "ok": true
+        }
+      ],
+      "step": "archive and delete are refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checksRun": 1,
+            "iteration": 1,
+            "pauseReason": "needs_human",
+            "reason": "which database?",
+            "status": "paused"
+          },
+          "guard": "the agent's question pauses the goal after the checks have run",
+          "ok": true
+        }
+      ],
+      "step": "NEEDS-HUMAN pauses the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checksRun": 1,
+            "goalMessages": 1,
+            "status": "running"
+          },
+          "guard": "while the reply's turn runs nothing is sent and no check runs",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checksRun": 3,
+            "goalMessages": 2,
+            "iteration": 2,
+            "status": "exhausted"
+          },
+          "guard": "the checks run again after the reply, then the next iteration follows",
+          "ok": true
+        }
+      ],
+      "step": "reply and resume waits for the reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "interrupts": 1,
+            "note": "interrupted",
+            "pauseReason": "user",
+            "status": "paused"
+          },
+          "guard": "the user's interrupt pauses the goal and marks the iteration interrupted",
+          "ok": true
+        }
+      ],
+      "step": "take over pauses the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "note": "interrupted",
+            "pauseReason": "user",
+            "status": "paused"
+          },
+          "guard": "restarting the session pauses the goal and marks the iteration interrupted",
+          "ok": true
+        }
+      ],
+      "step": "a client restart pauses the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answeredStep": "stopping",
+            "endReason": "stopped_by_user",
+            "status": "stopped"
+          },
+          "guard": "stopping answers stopping, then ends the goal as stopped by the user",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "alive": true,
+            "interrupts": 1
+          },
+          "guard": "the harness got one interrupt and is still running",
+          "ok": true
+        }
+      ],
+      "step": "stop interrupts"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "stopped_by_user",
+            "status": "stopped"
+          },
+          "guard": "the goal ends stopped by the user",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessGone": true,
+            "waitedForTheGrace": true
+          },
+          "guard": "the harness is killed only after the grace period",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "interruptWasLast": true,
+            "interrupts": 1
+          },
+          "guard": "it was asked once and never sent anything after",
+          "ok": true
+        }
+      ],
+      "step": "stop kills a harness that ignores the interrupt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "endReason": "session_ended",
+            "status": "stopped"
+          },
+          "guard": "killing the session ends the goal with the session",
+          "ok": true
+        }
+      ],
+      "step": "a user kill ends the goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "checkWasRunning": true,
+            "endReason": "workstream_archived",
+            "status": "stopped"
+          },
+          "guard": "the goal ends stopped with the workstream, never paused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checkKilled": true,
+            "checksRun": 1
+          },
+          "guard": "the check in flight was killed and not run again",
+          "ok": true
+        }
+      ],
+      "step": "archiving the workstream stops its goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

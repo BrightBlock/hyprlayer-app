@@ -17,6 +17,7 @@ import { restoreSessionIfNeeded, useSession } from "@/features/session/sessionSt
 import { openSessionTab, sessionPermissionMode } from "@/features/session/workstreamTabs";
 import type { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 
+import { FixUntilMetButton, ImplementUntilValidatedButton } from "./goalActions";
 import { useValidateFlow, type ValidateFlow } from "./validateFlow";
 import { useImplementSessionFor } from "./validateStep";
 
@@ -74,7 +75,7 @@ function AfterImplement({
           <span className="text-ui font-semibold text-ink">Validate the plan</span>
         </div>
         <div className="truncate text-body text-ink">{tracker.title}</div>
-        <ValidateActions flow={flow} />
+        <ValidateActions flow={flow} view={view} />
       </div>
     );
   }
@@ -107,6 +108,7 @@ function AfterImplement({
             <Icon name="agents" size="sm" />
             Fix all
           </Button>
+          <FixUntilMetButton flow={flow} view={view} />
           <Button size="sm" disabled={flow.busy !== null} onClick={flow.accept}>
             Accept
           </Button>
@@ -136,25 +138,28 @@ export function OpenValidateButton({ workstreamId, flow }: { workstreamId: strin
   ) : null;
 }
 
-export function ValidateActions({ flow }: { flow: ValidateFlow }) {
+export function ValidateActions({ flow, view }: { flow: ValidateFlow; view: WorkstreamView }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        size="sm"
-        variant="primary"
-        disabled={!flow.canStart}
-        busy={flow.busy === "agent"}
-        onClick={() => void flow.run("agent")}
-      >
-        Validate in new agent
-      </Button>
-      <Button size="sm" disabled={!flow.canStart} busy={flow.busy === "inline"} onClick={() => void flow.run("inline")}>
-        Validate as subagent
-      </Button>
-      <span className="flex-1" />
-      <Button size="sm" disabled={flow.busy !== null} onClick={flow.skip}>
-        Skip
-      </Button>
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!flow.canStart}
+          busy={flow.busy === "agent"}
+          onClick={() => void flow.run("agent")}
+        >
+          Validate in new agent
+        </Button>
+        <Button size="sm" disabled={!flow.canStart} busy={flow.busy === "inline"} onClick={() => void flow.run("inline")}>
+          Validate as subagent
+        </Button>
+        <span className="flex-1" />
+        <Button size="sm" disabled={flow.busy !== null} onClick={flow.skip}>
+          Skip
+        </Button>
+      </div>
+      <ImplementUntilValidatedButton flow={flow} view={view} />
     </div>
   );
 }

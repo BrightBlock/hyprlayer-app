@@ -1,5 +1,8 @@
+import type { ReactNode } from "react";
+
 import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
+import type { CommandOutcome } from "@/lib/domain/goals";
 
 import type { CheckGroup } from "./planDoc";
 import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
@@ -100,14 +103,32 @@ function DraftTaskRow({ task }: { task: TrackedTask }) {
   );
 }
 
+export type CheckStatus = (task: TrackedTask) => CommandOutcome | null;
+
+function OutcomeTag({ outcome }: { outcome: CommandOutcome }) {
+  const pass = outcome.outcome === "pass";
+  return (
+    <span
+      data-testid="criterion-outcome"
+      data-outcome={outcome.outcome}
+      className={cx("ml-2 inline-flex items-center gap-1 align-[1px] text-meta", pass ? "text-ok" : "text-bad-ink")}
+    >
+      <Icon name={pass ? "check" : "failed"} size="xs" />
+      {pass ? "passed" : outcome.exitCode != null ? `exit ${outcome.exitCode}` : outcome.outcome}
+    </span>
+  );
+}
+
 export function TaskRow({
   task,
   pulse,
   onJump,
+  outcome = null,
 }: {
   task: TrackedTask;
   pulse: boolean;
   onJump: (target: JumpTarget) => void;
+  outcome?: CommandOutcome | null;
 }) {
   const active = task.state === "in_progress";
   return (
@@ -130,6 +151,7 @@ export function TaskRow({
             added
           </span>
         )}
+        {outcome && <OutcomeTag outcome={outcome} />}
         {task.reason && (task.state === "waiting" || task.state === "failed") && (
           <span
             className={cx(
@@ -153,6 +175,8 @@ export function PhaseSection({
   pulse,
   flash = false,
   onJump,
+  action,
+  checkStatus,
 }: {
   phase: TrackedPhase;
   collapseKey: string;
@@ -161,33 +185,38 @@ export function PhaseSection({
   pulse: boolean;
   flash?: boolean;
   onJump: (target: JumpTarget) => void;
+  action?: ReactNode;
+  checkStatus?: CheckStatus;
 }) {
   const collapsed = usePhaseCollapsed(collapseKey, defaultCollapsed);
   const suffix = showState ? PHASE_SUFFIX[phase.state] : null;
   const title = phase.label ? `Phase ${phase.label} — ${phase.name}` : phase.name;
   return (
     <section className={cx("-mx-2 rounded-control px-2", flash && "animate-plan-flash")}>
-      <button
-        type="button"
-        data-phase-label
-        aria-expanded={!collapsed}
-        onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
-        className={cx(
-          "flex w-full items-start gap-1.5 text-left text-body font-semibold",
-          !collapsed && "mb-2",
-          !showState ? "text-ink-2" : PHASE_TEXT[phase.state],
-        )}
-      >
-        <Icon
-          name="chevronDown"
-          size="xs"
-          className={cx("mt-[3px] shrink-0 transition-transform", collapsed && "-rotate-90")}
-        />
-        <span className="min-w-0">
-          <span>{title}</span>
-          {suffix && <span className="text-meta font-normal text-ink-4"> {suffix}</span>}
-        </span>
-      </button>
+      {/* A button cannot nest a button, so the action sits beside the collapse toggle. */}
+      <div className={cx("flex items-start gap-2", !collapsed && "mb-2")}>
+        <button
+          type="button"
+          data-phase-label
+          aria-expanded={!collapsed}
+          onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
+          className={cx(
+            "flex min-w-0 flex-1 items-start gap-1.5 text-left text-body font-semibold",
+            !showState ? "text-ink-2" : PHASE_TEXT[phase.state],
+          )}
+        >
+          <Icon
+            name="chevronDown"
+            size="xs"
+            className={cx("mt-[3px] shrink-0 transition-transform", collapsed && "-rotate-90")}
+          />
+          <span className="min-w-0">
+            <span>{title}</span>
+            {suffix && <span className="text-meta font-normal text-ink-4"> {suffix}</span>}
+          </span>
+        </button>
+        {action}
+      </div>
       {/* pl-[18px] lines rows up with the header text (chevron 12px + gap 6px). */}
       {!collapsed && (
         <div className="space-y-3 pl-[18px]">
@@ -197,7 +226,16 @@ export function PhaseSection({
               <ul className="space-y-2">
                 {group.rows.map((task) => (
                   <li key={task.key}>
-                    {showState ? <TaskRow task={task} pulse={pulse} onJump={onJump} /> : <DraftTaskRow task={task} />}
+                    {showState ? (
+                      <TaskRow
+                        task={task}
+                        pulse={pulse}
+                        onJump={onJump}
+                        outcome={task.check ? (checkStatus?.(task) ?? null) : null}
+                      />
+                    ) : (
+                      <DraftTaskRow task={task} />
+                    )}
                   </li>
                 ))}
               </ul>

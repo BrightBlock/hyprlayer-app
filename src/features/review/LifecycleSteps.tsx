@@ -3,8 +3,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { Icon } from "@/components/Icon";
 import { Button, IconButton } from "@/components/ui";
+import { liveGoalForPlan, workstreamGoalLabel } from "@/lib/domain/goals";
 import { plural } from "@/lib/format";
-import { useReview, useWorkstreamPr } from "@/lib/queries";
+import { useGoals, useReview, useWorkstreamPr } from "@/lib/queries";
+import type { WorkstreamView } from "@/lib/bindings";
 import type { LifecycleStepsProps } from "@/features/plan/lifecycleSlot";
 import { phaseLine } from "@/features/plan/planTracker";
 import { usePlanTracker } from "@/features/plan/usePlanTracker";
@@ -12,6 +14,7 @@ import { useSession } from "@/features/session/sessionStore";
 import { requestTranscriptJump } from "@/features/session/transcriptJump";
 import { openSessionTab } from "@/features/session/workstreamTabs";
 
+import { FixUntilMetButton } from "./goalActions";
 import { OpenValidateButton, useRestoreImplement, ValidateActions } from "./ReadyForReviewCard";
 import { reviewStatusLabel, ReviewStepBody, summarize } from "./ReviewChecklist";
 import { useValidateFlow, type ValidateFlow } from "./validateFlow";
@@ -24,7 +27,8 @@ const OUTCOME_ICON = {
   fail: <Icon name="close" size="xs" className="text-bad-ink" />,
 } as const;
 
-function ValidationSummary({ workstreamId, flow }: { workstreamId: string; flow: ValidateFlow }) {
+function ValidationSummary({ view, flow }: { view: WorkstreamView; flow: ValidateFlow }) {
+  const workstreamId = view.item.id;
   const report = flow.report;
   const session = flow.validateSession ?? flow.implement;
   if (!report) {
@@ -110,6 +114,7 @@ function ValidationSummary({ workstreamId, flow }: { workstreamId: string; flow:
             <Button size="sm" disabled={flow.busy !== null} onClick={flow.accept}>
               Accept
             </Button>
+            <FixUntilMetButton flow={flow} view={view} />
             <Button
               size="sm"
               variant="primary"
@@ -251,6 +256,8 @@ function Stages({
   const flow = useValidateFlow(view, implementId, plan);
   const review = useReview(wsId, plan.tracker?.tasksDone ?? false).data;
   const pr = useWorkstreamPr(wsId).data;
+  const goals = useGoals(wsId).data;
+  const goal = plan.key ? liveGoalForPlan(goals, plan.key) : null;
 
   const s = review && review.files.files.length > 0 ? summarize(review) : null;
   const approved = review?.status === "approved";
@@ -274,17 +281,20 @@ function Stages({
     ship: { label: "Ship", className: "bg-commit", detail: livePr ? `PR #${livePr.number} open` : null },
     shipped: { label: "Shipped", className: "bg-ok", detail: livePr ? `PR #${livePr.number} merged` : null },
   }[stage];
+  const shown = goal
+    ? { ...badge, detail: workstreamGoalLabel({ iteration: goal.iteration, maxIterations: goal.limits.maxIterations }) }
+    : badge;
 
   const body =
     stage === "validate" ? (
       <>
-        {flow.phase === "choosing" && <ValidateActions flow={flow} />}
+        {flow.phase === "choosing" && <ValidateActions flow={flow} view={view} />}
         {flow.phase === "validating" && flow.step?.kind === "agent" && (
           <div className="flex justify-end">
             <OpenValidateButton workstreamId={wsId} flow={flow} />
           </div>
         )}
-        {flow.phase === "issues" && <ValidationSummary workstreamId={wsId} flow={flow} />}
+        {flow.phase === "issues" && <ValidationSummary view={view} flow={flow} />}
       </>
     ) : stage === "review" ? (
       <>
@@ -330,7 +340,7 @@ function Stages({
 
   return (
     <>
-      {header(badge)}
+      {header(shown)}
       {body && <div className="space-y-2.5 border-b border-edge px-[18px] py-4">{body}</div>}
       {phases}
     </>

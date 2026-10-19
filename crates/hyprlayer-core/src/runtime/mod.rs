@@ -4,6 +4,7 @@ pub mod attachments;
 mod attribution;
 pub mod builder;
 mod doc_status;
+pub mod goals;
 pub mod library;
 pub mod migrations;
 mod operation_locks;
@@ -24,12 +25,13 @@ pub mod terminal_registry;
 pub mod terminals;
 pub mod workstreams;
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
+use tokio::sync::{broadcast, watch, Mutex as AsyncMutex, Notify};
 
 use hyprlayer_models::runtime::ThoughtsIndexUpdateKind;
 use hyprlayer_models::RuntimeEvent;
@@ -62,6 +64,8 @@ const EVENT_CAP: usize = 256;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const ARCHIVE_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PROVIDER_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+const ORPHAN_EXIT_WAIT: Duration = Duration::from_secs(2);
+const ORPHAN_POLL: Duration = Duration::from_millis(50);
 
 pub struct RuntimeOptions {
     pub environment: RuntimeEnvironment,
@@ -90,6 +94,7 @@ pub struct HyprlayerRuntime {
     index: Arc<ThoughtsIndex>,
     session_registry: Arc<SessionRegistry>,
     session_actors: Arc<SessionActors>,
+    goal_runners: Arc<goals::GoalRunners>,
     attribution: Arc<DocAttribution>,
     session_titler: Arc<sessions::titles::SessionTitler>,
     terminals: Arc<TerminalRegistry>,
@@ -102,6 +107,8 @@ pub struct HyprlayerRuntime {
     indexed_docs: AtomicU32,
     focus_changed: Arc<Notify>,
     events: broadcast::Sender<RuntimeEvent>,
+    /// Set by the first client's environment overlay; the goal resumer waits on it.
+    overlay_arrived: watch::Sender<bool>,
     config_cli: Arc<dyn ConfigCli>,
     provider_http: Arc<dyn ProviderHttp + Send + Sync>,
     lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
@@ -150,10 +157,12 @@ impl HyprlayerRuntime {
 
         if let Ok(orphans) = db.list_orphans() {
             if !orphans.is_empty() {
+                let reaped = reap_goal_orphans(&db, &orphans).await;
                 // A pid may since belong to something else; the program says.
                 let described: Vec<String> = orphans
                     .iter()
-                    .map(|(pid, session)| {
+                    .filter(|(pid, ..)| !reaped.contains(pid))
+                    .map(|(pid, session, _)| {
                         match crate::process::orphan::running_program(*pid as u32) {
                             Some(program) => {
                                 format!("{pid} (session {session}) still runs {program}")
@@ -162,11 +171,13 @@ impl HyprlayerRuntime {
                         }
                     })
                     .collect();
-                tracing::warn!(
-                    "{} agent process(es) outlived a previous run: {}",
-                    orphans.len(),
-                    described.join("; ")
-                );
+                if !described.is_empty() {
+                    tracing::warn!(
+                        "{} agent process(es) outlived a previous run: {}",
+                        described.len(),
+                        described.join("; ")
+                    );
+                }
                 let _ = db.clear_all_orphans();
             }
         }
@@ -235,6 +246,7 @@ impl HyprlayerRuntime {
             index: Arc::new(ThoughtsIndex::new()),
             session_registry: Arc::new(SessionRegistry::new()),
             session_actors,
+            goal_runners: Arc::default(),
             attribution,
             session_titler: Arc::default(),
             terminals: Arc::new(TerminalRegistry::new()),
@@ -248,6 +260,7 @@ impl HyprlayerRuntime {
             indexed_docs: AtomicU32::new(u32::MAX),
             focus_changed: Arc::new(Notify::new()),
             events,
+            overlay_arrived: watch::Sender::new(false),
             environment,
             paths,
             coordinator: ShutdownCoordinator::new(),
@@ -258,6 +271,7 @@ impl HyprlayerRuntime {
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         self.coordinator.try_start()?;
+        self.goal_runners.bind(Arc::downgrade(self));
 
         // Tracked, and holding a `Weak` rather than an `Arc`, because the login-shell
         // probe below carries an eight-second timeout. An untracked task holding a
@@ -374,6 +388,8 @@ impl HyprlayerRuntime {
         let title_task =
             sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
 
+        let goal_task = goals::spawn_resumer(self.goal_runners.clone(), Arc::downgrade(self));
+
         self.tasks.lock().await.extend([
             startup_task,
             config_task,
@@ -381,6 +397,7 @@ impl HyprlayerRuntime {
             sweep_task,
             account_task,
             title_task,
+            goal_task,
         ]);
 
         Ok(())
@@ -415,6 +432,7 @@ impl HyprlayerRuntime {
             }
         );
         self.environment.merge_env_overlay(overlay);
+        self.overlay_arrived.send_replace(true);
     }
 
     pub(crate) async fn child_env(&self) -> Vec<(String, String)> {
@@ -437,6 +455,7 @@ impl HyprlayerRuntime {
                 let start = std::time::Instant::now();
                 let tasks = std::mem::take(&mut *self.tasks.lock().await);
                 let (forced_tasks, _) = shutdown::stop_tasks(tasks).await;
+                self.goal_runners.stop_all().await;
 
                 let terminals = self.terminals.kill_all_blocking();
                 let sessions = self.session_registry.kill_all_blocking();
@@ -580,6 +599,57 @@ impl HyprlayerRuntime {
             ids: Vec::new(),
         });
     }
+}
+
+/// Kills the harness a live goal's session left running, so its relaunch is the only one; returns the pids signalled.
+async fn reap_goal_orphans(db: &Db, orphans: &[(i64, String, f64)]) -> HashSet<i64> {
+    use crate::process::orphan;
+
+    let sessions = match db.live_goal_sessions() {
+        Ok(sessions) => sessions,
+        Err(e) => {
+            tracing::warn!("could not read the sessions of live goals: {e}");
+            return HashSet::new();
+        }
+    };
+    let mut reaped = HashSet::new();
+    for (pid, session, spawned_at) in orphans {
+        let Some((_, harness, harness_id)) = sessions.iter().find(|(id, ..)| id == session) else {
+            continue;
+        };
+        let Some(line) = u32::try_from(*pid)
+            .ok()
+            .filter(|p| *p > 1)
+            .and_then(orphan::cmdline)
+        else {
+            continue;
+        };
+        // A fork resumes under its own harness session id.
+        let ours = std::iter::once(session.as_str())
+            .chain(harness_id.as_deref())
+            .any(|id| orphan::harness_orphan_matches(&line, *harness, id));
+        // A codex argv names no thread, so a pid that started after its record was reused.
+        let reused = *harness == crate::agent::Harness::Codex
+            && !orphan::started_by(orphan::started_at_ms(*pid as u32), *spawned_at);
+        if !ours || reused {
+            continue;
+        }
+        tracing::warn!("reaping goal orphan pid {pid} (session {session})");
+        orphan::kill_group(*pid as u32);
+        reaped.insert(*pid);
+    }
+    let deadline = tokio::time::Instant::now() + ORPHAN_EXIT_WAIT;
+    while reaped
+        .iter()
+        .any(|pid| orphan::cmdline(*pid as u32).is_some())
+    {
+        if tokio::time::Instant::now() >= deadline {
+            tracing::warn!("a reaped goal orphan was still running after {ORPHAN_EXIT_WAIT:?}");
+            break;
+        }
+        tokio::time::sleep(ORPHAN_POLL).await;
+    }
+    reaped
 }
 
 #[cfg(unix)]

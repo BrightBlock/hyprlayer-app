@@ -3,11 +3,12 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { ActivityDot } from "@/components/ActivityDot";
 import { Badge } from "@/components/ui";
 import type { WorkstreamView } from "@/lib/bindings";
+import { workstreamGoalLabel } from "@/lib/domain/goals";
 import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
 import { isDetachedHead, isFolderWorkstream, isOffBase, shortBranch } from "@/lib/domain/projects";
 import { stageLabel } from "@/lib/domain/stages";
 import { formatCompactAge, formatCompactCount } from "@/lib/format";
-import { useSessionStore } from "@/features/session/sessionStore";
+import { useSessionStore, useWorkstreamGoal } from "@/features/session/sessionStore";
 import { columnDot, pipelineColumnOf, type PipelineLive, type PipelineSession } from "./pipeline";
 import { usePlanProgress, usePrSummary } from "./pipelineData";
 
@@ -74,6 +75,7 @@ export function PipelineCard({
   const offBase = inplace && !isDetachedHead(view) && isOffBase(view);
   const percent = progress ? Math.round((progress.done / progress.total) * 100) : null;
   const harness = harnessLabel(session);
+  const goal = useWorkstreamGoal(item.id);
 
   return (
     <div
@@ -93,6 +95,11 @@ export function PipelineCard({
           column !== "planning" && <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${columnDot(column)}`} />
         )}
         <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{item.title}</span>
+        {goal && (
+          <span data-testid="board-goal-badge" className="shrink-0">
+            <Badge tone="dim">{workstreamGoalLabel(goal)}</Badge>
+          </span>
+        )}
       </span>
       <span className="mt-1 flex min-w-0 items-center gap-1.5">
         <span className="min-w-0 truncate font-mono text-meta text-ink-4">
