@@ -18,7 +18,7 @@ import { CommentLayer, slotKey } from "./commentGutter";
 import { CommentThread } from "./CommentThread";
 import { KindTag, NoteConversation } from "./NoteCard";
 import { type Slot, ThreadPortals } from "./ThreadPortals";
-import { NOTE_KIND_LABEL, type Thread, threadSize } from "./threads";
+import { type Thread, threadSize } from "./threads";
 
 const MODE_OPTIONS = [
   { value: "unified", label: "Unified" },
@@ -39,6 +39,17 @@ function useDefaultEditor() {
 function scrollToLine(view: EditorView, line: number) {
   const at = view.state.doc.line(Math.min(line, view.state.doc.lines)).from;
   view.dispatch({ effects: EditorView.scrollIntoView(at, { y: "center" }) });
+}
+
+// CodeMirror breaks lines at \r\n, \r and \n.
+function lineCount(text: string): number {
+  let n = 1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 13 && text.charCodeAt(i + 1) === 10) i++;
+    if (c === 10 || c === 13) n++;
+  }
+  return n;
 }
 
 type Composer = { path: string; side: ReviewSide; line: number; anchorText: string; noteId?: string };
@@ -112,6 +123,10 @@ export function DiffPane({
   }, [layer, file.path]);
 
   const data = sides.data;
+  const docLines = useMemo(
+    () => data && { original: lineCount(data.original), modified: lineCount(data.modified) },
+    [data],
+  );
   const oneSided = !!data && (!data.originalExists || !data.modifiedExists);
   const effectiveMode: DiffMode = oneSided ? "unified" : mode;
   const glyph = CHANGE_GLYPH[file.change];
@@ -119,10 +134,14 @@ export function DiffPane({
   const openNotes = notes.filter((n) => !n.resolved);
   const outOfScope = openNotes.some((n) => n.kind === "outside_plan_scope");
 
-  // Unified view has no Original editor, so threads anchored there list above the diff.
-  const inline = (side: ReviewSide) => side === "modified" || effectiveMode === "split";
+  // Unified view has no Original editor, so threads anchored there list above the diff, as does
+  // everything on a file shown without one.
+  const noDiff = file.binary || !!data?.binary || !!data?.tooLarge;
+  const inline = (side: ReviewSide) => !noDiff && (side === "modified" || effectiveMode === "split");
+  // An outdated item sits where its line was, within what is left of the file.
+  const placeAt = (side: ReviewSide, current: number | null, line: number) =>
+    current ?? Math.max(1, Math.min(line, docLines?.[side] ?? line));
   const above: ReactNode[] = [];
-  const outdated: ReactNode[] = [];
   const bySlot = new Map<string, { side: ReviewSide; line: number; items: ReactNode[] }>();
   const at = (side: ReviewSide, n: number) => {
     const key = slotKey(side, n);
@@ -133,7 +152,7 @@ export function DiffPane({
     }
     return slot.items;
   };
-  // A note's replies render under its card, so the exchange reads as one conversation.
+  // A note's replies render inside its box, so the exchange reads as one conversation.
   const answers = new Map<string, Thread[]>();
   const noteIds = new Set(notes.map((n) => n.id));
   const loose: Thread[] = [];
@@ -145,39 +164,32 @@ export function DiffPane({
   for (const n of notes) {
     const replies = answers.get(n.id) ?? [];
     const replying = composer?.noteId === n.id;
-    const group = [
-      ...replies.map((t) => (
-        <CommentThread key={t.root.id} thread={t} workstreamId={wsId} agentLabel={agentLabel} />
-      )),
-    ];
-    if (replying) {
-      group.push(
-        <CommentComposer
-          key={`reply-${n.id}`}
-          request={{
-            workstreamId: wsId,
-            path: file.path,
-            side: "modified",
-            line: n.currentLine ?? n.line,
-            anchorText: "",
-            parentId: null,
-            replyToNoteId: n.id,
-          }}
-          agentLabel={agentLabel}
-          quote={`${NOTE_KIND_LABEL[n.kind]}: ${n.body}`}
-          onDone={() => setOpened(null)}
-        />,
-      );
-    }
     // An outdated note's reply stays anchored to the note's own line: the server re-anchors it
-    // like any comment, so it lists as outdated beside the note and follows it if the line returns.
+    // like any comment, so it goes outdated with the note and follows it if the line returns.
     const conversation = (
       <NoteConversation
         key={n.id}
         note={n}
         workstreamId={wsId}
         replyCount={replies.reduce((sum, t) => sum + threadSize(t), 0)}
-        replying={replying}
+        outdated={n.currentLine == null}
+        composer={
+          replying && (
+            <CommentComposer
+              request={{
+                workstreamId: wsId,
+                path: file.path,
+                side: "modified",
+                line: n.currentLine ?? n.line,
+                anchorText: "",
+                parentId: null,
+                replyToNoteId: n.id,
+              }}
+              agentLabel={agentLabel}
+              onDone={() => setOpened(null)}
+            />
+          )
+        }
         // The first reply opens the thread; later ones go through its own Reply.
         onReply={
           replies.length === 0 && !replying
@@ -185,14 +197,17 @@ export function DiffPane({
             : undefined
         }
       >
-        {group}
+        {replies.map((t) => (
+          <CommentThread key={t.root.id} thread={t} workstreamId={wsId} agentLabel={agentLabel} embedded />
+        ))}
       </NoteConversation>
     );
-    if (n.currentLine == null) outdated.push(conversation);
-    else at("modified", n.currentLine).push(conversation);
+    if (inline("modified")) at("modified", placeAt("modified", n.currentLine, n.line)).push(conversation);
+    else above.push(conversation);
   }
   for (const t of loose) {
     const { root } = t;
+    const outdated = root.currentLine == null;
     const context = <LineContext side={root.side} line={root.currentLine ?? root.line} text={root.anchorText} />;
     const render = (withContext: boolean) => (
       <CommentThread
@@ -201,11 +216,12 @@ export function DiffPane({
         workstreamId={wsId}
         agentLabel={agentLabel}
         context={withContext ? context : undefined}
+        outdated={outdated}
       />
     );
-    if (root.currentLine == null) outdated.push(render(true));
-    else if (!inline(root.side)) above.push(render(true));
-    else at(root.side, root.currentLine).push(render(false));
+    // Inline, an outdated thread's spot no longer shows the text it was left on.
+    if (inline(root.side)) at(root.side, placeAt(root.side, root.currentLine, root.line)).push(render(outdated));
+    else above.push(render(true));
   }
   const lineComposer = composer && !composer.noteId && inline(composer.side) ? composer : null;
   if (lineComposer) {
@@ -309,15 +325,9 @@ export function DiffPane({
         />
       </div>
 
-      {(above.length > 0 || outdated.length > 0) && (
+      {above.length > 0 && (
         <div className="max-h-[40%] shrink-0 space-y-2 overflow-y-auto border-b border-edge bg-panel-2/40 px-4 pb-3 pt-2.5 [&>*]:max-w-[min(520px,75%)]">
           {above}
-          {outdated.length > 0 && (
-            <>
-              <div className="text-label text-ink-dim">Outdated</div>
-              {outdated}
-            </>
-          )}
         </div>
       )}
 

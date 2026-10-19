@@ -203,6 +203,7 @@ const ICONS = {
   multiplexer: LayoutGrid,
   note: StickyNote,
   notifications: Bell,
+  outdated: History,
   panelBottom: PanelBottom,
   panelLeft: PanelLeft,
   permissions: Shield,

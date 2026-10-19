@@ -62,6 +62,10 @@ class Spacer extends GutterMarker {
   }
 }
 
+// Slots resize outside CodeMirror's updates, and it re-measures heights only when the content's
+// height changes, which the base theme's `min-height: 100%` holds still on a short file.
+const fitContent = EditorView.theme({ ".cm-content": { minHeight: "0" } });
+
 const hoverField = StateField.define<number | null>({
   create: () => null,
   update(value, tr) {
@@ -115,7 +119,7 @@ export class CommentLayer {
     let el = this.containers.get(key);
     if (!el) {
       el = document.createElement("div");
-      el.className = "cm-review-slot max-w-[min(520px,75%)] whitespace-normal pb-3 pl-2 pr-4 pt-2.5 font-sans";
+      el.className = "cm-review-slot max-w-[min(520px,75%)] whitespace-normal break-normal pb-3 pl-2 pr-4 pt-2.5 font-sans";
       this.containers.set(key, el);
     }
     return el;
@@ -259,6 +263,7 @@ export class CommentLayer {
     return [
       field,
       hoverField,
+      fitContent,
       hover,
       gutter({
         class: "cm-review-gutter",

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
-import { Badge, type BadgeTone, Button, ErrorNote, IconButton, TextArea } from "@/components/ui";
+import { Badge, type BadgeTone, Button, cx, ErrorNote, IconButton, TextArea } from "@/components/ui";
 import type { ReviewComment, ReviewCommentState } from "@/lib/bindings";
 import { formatRelativeTime, plural } from "@/lib/format";
 import { useDeleteReviewComment, useEditReviewComment, useResolveReviewComment } from "@/lib/queries";
@@ -110,45 +110,82 @@ function CommentBody({
   );
 }
 
-/** A resolved conversation folded to one row, as GitHub does. */
-export function ResolvedBar({ summary, onShow }: { summary: ReactNode; onShow: () => void }) {
+function foldLabel(resolved: boolean, outdated: boolean): string {
+  return [resolved && "Resolved", outdated && "Outdated"].filter(Boolean).join(" · ");
+}
+
+/** A resolved or outdated conversation folded to one row, as GitHub does. `flush` sits inside a box. */
+export function FoldedBar({
+  resolved,
+  outdated,
+  summary,
+  flush = false,
+  onShow,
+}: {
+  resolved: boolean;
+  outdated: boolean;
+  summary: ReactNode;
+  flush?: boolean;
+  onShow: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onShow}
-      className="flex w-full items-center gap-1.5 rounded-card border border-edge bg-panel px-3 py-1.5 text-left text-ui text-ink-dim hover:bg-edge/50"
+      className={cx(
+        "flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-ui text-ink-dim hover:bg-edge/50",
+        !flush && "rounded-card border border-edge bg-panel",
+      )}
     >
-      <Icon name="check" size="xs" />
-      Resolved · {summary} · <span className="text-ink-2 underline-offset-2 hover:underline">Show</span>
+      <Icon name={resolved ? "check" : "outdated"} size="xs" />
+      {foldLabel(resolved, outdated)} · {summary} · <span className="text-ink-2 underline-offset-2 hover:underline">Show</span>
     </button>
   );
 }
 
+/** `embedded` drops the card, for a thread answering a note inside the note's box. */
 export function CommentThread({
   thread,
   workstreamId,
   agentLabel,
   context,
+  outdated = false,
+  embedded = false,
 }: {
   thread: Thread;
   workstreamId: string;
   agentLabel: string;
   context?: ReactNode;
+  outdated?: boolean;
+  embedded?: boolean;
 }) {
   const [shown, setShown] = useState(false);
   const [replying, setReplying] = useState(false);
   const resolve = useResolveReviewComment();
   const { root } = thread;
   const count = plural(threadSize(thread), "comment");
+  const folds = root.resolved || outdated;
 
-  if (root.resolved && !shown) return <ResolvedBar summary={count} onShow={() => setShown(true)} />;
+  if (folds && !shown) {
+    return (
+      <FoldedBar
+        resolved={root.resolved}
+        outdated={outdated}
+        summary={count}
+        flush={embedded}
+        onShow={() => setShown(true)}
+      />
+    );
+  }
 
   return (
-    <div className="space-y-2 rounded-card border border-edge bg-panel px-3 py-2.5">
-      {root.resolved && (
+    <div className={cx("space-y-2 px-3 py-2.5", !embedded && "rounded-card border border-edge bg-panel")}>
+      {folds && (
         <div className="flex items-center gap-1.5 text-ui text-ink-dim">
-          <Icon name="check" size="xs" />
-          <span className="flex-1">Resolved · {count}</span>
+          <Icon name={root.resolved ? "check" : "outdated"} size="xs" />
+          <span className="flex-1">
+            {foldLabel(root.resolved, outdated)} · {count}
+          </span>
           <IconButton className="h-6 w-6 hover:bg-edge/60" aria-label="Collapse thread" onClick={() => setShown(false)}>
             <Icon name="chevronDown" size="xs" />
           </IconButton>
@@ -183,12 +220,13 @@ export function CommentThread({
             size="sm"
             aria-pressed={root.resolved}
             busy={resolve.isPending}
-            onClick={() =>
+            onClick={() => {
+              const resolved = !root.resolved;
               resolve.mutate(
-                { workstreamId, commentId: root.id, resolved: !root.resolved },
-                { onSuccess: () => setShown(false) },
-              )
-            }
+                { workstreamId, commentId: root.id, resolved },
+                { onSuccess: () => resolved && setShown(false) },
+              );
+            }}
           >
             <Icon name="check" size="xs" />
             {root.resolved ? "Resolved" : "Resolve"}
