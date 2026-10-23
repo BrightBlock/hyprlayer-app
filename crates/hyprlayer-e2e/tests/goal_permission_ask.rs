@@ -238,6 +238,8 @@ fn spec() -> GoalSpec {
             command: r#"test "$(cat counter.txt)" -ge 3"#.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: GoalLimits {
             max_iterations: 5,

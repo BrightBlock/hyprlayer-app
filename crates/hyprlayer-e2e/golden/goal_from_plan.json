@@ -23,8 +23,53 @@
             "checks": [
               {
                 "command": "test \"$(cat counter.txt)\" -ge 3",
+                "cwd": null,
                 "kind": "command",
                 "label": "Counter reaches 3",
+                "phases": [
+                  "1"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": null,
+                "kind": "command",
+                "label": "The root is a directory",
+                "phases": [
+                  "2"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "Marker is in the app dir",
+                "phases": [
+                  "3",
+                  "4"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app is a directory",
+                "phases": [
+                  "3"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f ../README.md &&\n  test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app sits in the repo (gh alone would pass)",
+                "phases": [
+                  "3"
+                ],
                 "timeoutSecs": 600
               },
               {
@@ -38,14 +83,126 @@
               }
             ]
           },
-          "guard": "one command from the criterion's last span, then the plan's boxes, then the evaluator",
+          "guard": "the commands from each criterion's last span or its fence, then the plan's boxes, then the evaluator",
           "ok": true
         },
         {
           "evidence": {
-            "condition": "Every phase of Counter plan is implemented and its automated criteria pass. Prose criteria: Counter file exists"
+            "commands": [
+              [
+                "test \"$(cat counter.txt)\" -ge 3",
+                null,
+                [
+                  "1"
+                ]
+              ],
+              [
+                "test -d .",
+                null,
+                [
+                  "2"
+                ]
+              ],
+              [
+                "test -f marker.txt",
+                "app",
+                [
+                  "3",
+                  "4"
+                ]
+              ],
+              [
+                "test -d .",
+                "app",
+                [
+                  "3"
+                ]
+              ],
+              [
+                "test -f ../README.md &&\n  test -f marker.txt",
+                "app",
+                [
+                  "3"
+                ]
+              ]
+            ]
           },
-          "guard": "the condition names the plan and carries the prose criterion",
+          "guard": "each command runs where its heading or Run-from line says, once per directory, listing every phase that names it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checks": [
+              {
+                "command": "test \"$(cat counter.txt)\" -ge 3",
+                "cwd": null,
+                "kind": "command",
+                "label": "Counter reaches 3",
+                "phases": [
+                  "1"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": null,
+                "kind": "command",
+                "label": "The root is a directory",
+                "phases": [
+                  "2"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "Marker is in the app dir",
+                "phases": [
+                  "3",
+                  "4"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app is a directory",
+                "phases": [
+                  "3"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f ../README.md &&\n  test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app sits in the repo (gh alone would pass)",
+                "phases": [
+                  "3"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "kind": "plan_boxes",
+                "phase": null,
+                "planPath": "$SHARED/plans/counter.md"
+              },
+              {
+                "kind": "evaluator",
+                "model": null
+              }
+            ]
+          },
+          "guard": "the fenced command's label is its sentence, without backticks or the colon",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "condition": "Every phase of Counter plan is implemented and its automated criteria pass. Prose criteria: Counter file exists; A sample payload:"
+          },
+          "guard": "the condition names the plan and carries the prose criteria, the json sample among them",
           "ok": true
         },
         {
@@ -87,6 +244,16 @@
           "evidence": {
             "checks": [
               {
+                "command": "test -d .",
+                "cwd": null,
+                "kind": "command",
+                "label": "The root is a directory",
+                "phases": [
+                  "2"
+                ],
+                "timeoutSecs": 600
+              },
+              {
                 "kind": "plan_boxes",
                 "phase": "2",
                 "planPath": "$SHARED/plans/counter.md"
@@ -97,7 +264,7 @@
               }
             ]
           },
-          "guard": "only phase 2's criteria: its boxes and the evaluator, no phase 1 command",
+          "guard": "only phase 2's criteria: its command, its boxes and the evaluator, no phase 1 command",
           "ok": true
         }
       ],
@@ -110,8 +277,22 @@
             "checks": [
               {
                 "command": "test \"$(cat counter.txt)\" -ge 3",
+                "cwd": null,
                 "kind": "command",
                 "label": "Counter reaches 3",
+                "phases": [
+                  "1"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": null,
+                "kind": "command",
+                "label": "The root is a directory",
+                "phases": [
+                  "2"
+                ],
                 "timeoutSecs": 600
               },
               {
@@ -153,8 +334,10 @@
             "checks": [
               {
                 "command": "test -f counter.txt",
+                "cwd": null,
                 "kind": "command",
                 "label": null,
+                "phases": [],
                 "timeoutSecs": 600
               },
               {
@@ -213,7 +396,7 @@
           "evidence": {
             "boxes": [
               "fail",
-              "2 of 2 automated boxes open"
+              "8 of 8 automated boxes open"
             ],
             "command": "pass"
           },
@@ -222,11 +405,97 @@
         },
         {
           "evidence": {
+            "first": [
+              [
+                "Counter reaches 3",
+                "fail",
+                "1"
+              ],
+              [
+                "The root is a directory",
+                "pass",
+                "2"
+              ],
+              [
+                "Marker is in the app dir",
+                "pass",
+                "3"
+              ],
+              [
+                "The app is a directory",
+                "pass",
+                "3"
+              ],
+              [
+                "The app sits in the repo (gh alone would pass)",
+                "pass",
+                "3"
+              ]
+            ]
+          },
+          "guard": "the app's checks pass from the first iteration, run in app/, and each result names its first phase",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "namesApp": true,
+            "rootPlain": true
+          },
+          "guard": "the first prompt says where each check runs",
+          "ok": true
+        },
+        {
+          "evidence": {
             "checks": [
               {
                 "command": "test \"$(cat counter.txt)\" -ge 3",
+                "cwd": null,
                 "kind": "command",
                 "label": "Counter reaches 3",
+                "phases": [
+                  "1"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": null,
+                "kind": "command",
+                "label": "The root is a directory",
+                "phases": [
+                  "2"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "Marker is in the app dir",
+                "phases": [
+                  "3",
+                  "4"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -d .",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app is a directory",
+                "phases": [
+                  "3"
+                ],
+                "timeoutSecs": 600
+              },
+              {
+                "command": "test -f ../README.md &&\n  test -f marker.txt",
+                "cwd": "app",
+                "kind": "command",
+                "label": "The app sits in the repo (gh alone would pass)",
+                "phases": [
+                  "3"
+                ],
                 "timeoutSecs": 600
               },
               {
@@ -276,6 +545,21 @@
         }
       ],
       "step": "an unparseable evaluator reply is an error"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "result": [
+              "fail",
+              "the directory not-yet does not exist"
+            ]
+          },
+          "guard": "the check fails rather than errors, so the goal is not broken, and its reason names the directory",
+          "ok": true
+        }
+      ],
+      "step": "a check whose directory is missing fails by its name"
     },
     {
       "guards": [

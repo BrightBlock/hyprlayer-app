@@ -23,6 +23,14 @@
                 "code": "goal_invalid"
               },
               {
+                "case": "a check directory above the worktree",
+                "code": "goal_invalid"
+              },
+              {
+                "case": "an absolute check directory",
+                "code": "goal_invalid"
+              },
+              {
                 "case": "a new Plan session",
                 "code": "goal_invalid"
               }

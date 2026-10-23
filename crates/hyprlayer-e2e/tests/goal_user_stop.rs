@@ -815,6 +815,8 @@ fn spec(condition: &str, command: &str, max_iterations: u32) -> GoalSpec {
             command: command.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: limits(max_iterations),
     }

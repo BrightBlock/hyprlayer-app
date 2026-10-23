@@ -1081,7 +1081,11 @@ export type GoalChanged = {
 	maxIterations: number,
 };
 
-export type GoalCheck = { kind: "command"; command: string; timeoutSecs: number; label?: string | null } | { kind: "plan_boxes"; planPath: string; phase?: string | null } | { kind: "evaluator"; model?: string | null } | { kind: "validation"; planPath: string };
+export type GoalCheck = { kind: "command"; command: string; timeoutSecs: number; label?: string | null; 
+/**  Relative to the worktree; none runs at its root. */
+cwd?: string | null; 
+/**  The plan phases that list this command, in plan order. */
+phases?: string[] } | { kind: "plan_boxes"; planPath: string; phase?: string | null } | { kind: "evaluator"; model?: string | null } | { kind: "validation"; planPath: string };
 
 export type GoalCheckKind = "command" | "plan_boxes" | "evaluator" | "validation";
 
@@ -1098,6 +1102,8 @@ export type GoalCheckResult = {
 	reason: string | null,
 	/**  The Validation check's validate session. */
 	sessionId?: string | null,
+	/**  The check's first plan phase, so results group the way the goal's checks do. */
+	phase?: string | null,
 };
 
 export type GoalDetail = {

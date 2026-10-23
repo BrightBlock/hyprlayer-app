@@ -214,6 +214,7 @@ fn validate_spec(spec: &GoalSpec, harness: Harness) -> Result<()> {
             GoalCheck::Command {
                 command,
                 timeout_secs,
+                cwd,
                 ..
             } => {
                 if command.trim().is_empty() {
@@ -222,6 +223,11 @@ fn validate_spec(spec: &GoalSpec, harness: Harness) -> Result<()> {
                 if *timeout_secs == 0 {
                     return Err(invalid(
                         "A command check needs a timeout of a second or more.",
+                    ));
+                }
+                if checks::run_dir(cwd.as_deref()).is_some_and(|dir| !checks::stays_inside(dir)) {
+                    return Err(invalid(
+                        "A command check's directory must be a relative path inside the worktree.",
                     ));
                 }
             }
@@ -846,7 +852,7 @@ impl GoalService<'_> {
                         Vec::new()
                     }
                 };
-                let mut checks = command_checks(repo_checks.into_iter().map(|c| (c, None)));
+                let mut checks = command_checks(repo_checks.into_iter().map(ProposedCommand::bare));
                 checks.push(evaluator);
                 Ok(GoalSpec {
                     condition: text.clone(),
@@ -1126,18 +1132,57 @@ fn derived_limits(goals: &GoalSettings, harness: Harness) -> GoalLimits {
     }
 }
 
-/// One Command check per distinct command, in the order given.
-fn command_checks(commands: impl IntoIterator<Item = (String, Option<String>)>) -> Vec<GoalCheck> {
-    let mut seen = std::collections::HashSet::new();
-    commands
-        .into_iter()
-        .filter(|(command, _)| !command.trim().is_empty() && seen.insert(command.clone()))
-        .map(|(command, label)| GoalCheck::Command {
+/// A plan or repo command before it becomes a check.
+struct ProposedCommand {
+    command: String,
+    label: Option<String>,
+    cwd: Option<String>,
+    phase: Option<String>,
+}
+
+impl ProposedCommand {
+    fn bare(command: String) -> Self {
+        Self {
             command,
-            timeout_secs: DERIVED_TIMEOUT_SECS,
-            label,
-        })
-        .collect()
+            label: None,
+            cwd: None,
+            phase: None,
+        }
+    }
+}
+
+/// One Command check per distinct directory and command, in the order given; a repeat adds its phase.
+fn command_checks(proposed: impl IntoIterator<Item = ProposedCommand>) -> Vec<GoalCheck> {
+    let mut checks: Vec<GoalCheck> = Vec::new();
+    for next in proposed {
+        if next.command.trim().is_empty() {
+            continue;
+        }
+        let seen = checks.iter_mut().find_map(|check| match check {
+            GoalCheck::Command {
+                command,
+                cwd,
+                phases,
+                ..
+            } if *command == next.command && *cwd == next.cwd => Some(phases),
+            _ => None,
+        });
+        match seen {
+            Some(phases) => {
+                if let Some(phase) = next.phase.filter(|phase| !phases.contains(phase)) {
+                    phases.push(phase);
+                }
+            }
+            None => checks.push(GoalCheck::Command {
+                command: next.command,
+                timeout_secs: DERIVED_TIMEOUT_SECS,
+                label: next.label,
+                cwd: next.cwd,
+                phases: next.phase.into_iter().collect(),
+            }),
+        }
+    }
+    checks
 }
 
 async fn read_outline(worktree: &Path, plan_path: &str) -> Result<PlanOutline> {
@@ -1233,9 +1278,10 @@ impl<'a> PlanScope<'a> {
     }
 }
 
-/// A scope's automated criteria: the ones ending in a backtick span are commands, the rest prose.
+/// A scope's automated criteria: the ones with a fence or ending in a backtick span are commands,
+/// the rest prose.
 struct Criteria {
-    commands: Vec<(String, Option<String>)>,
+    commands: Vec<ProposedCommand>,
     prose: Vec<String>,
 }
 
@@ -1245,26 +1291,38 @@ impl Criteria {
             commands: Vec::new(),
             prose: Vec::new(),
         };
-        let automated = phases
-            .iter()
-            .flat_map(|phase| &phase.boxes)
-            .filter(|b| b.section == BoxSection::Automated);
-        for criterion in automated {
-            match criterion.command() {
-                Some(command) => {
-                    let span = criterion.text.rfind(&format!("`{command}`"));
-                    let label = span
-                        .map(|at| {
-                            let close = at + command.len() + 2;
-                            format!("{}{}", &criterion.text[..at], &criterion.text[close..])
-                        })
-                        .unwrap_or_default();
-                    let label = label.trim().trim_end_matches(':').trim().to_string();
-                    let label = (!label.is_empty()).then_some(label);
-                    criteria.commands.push((command.to_string(), label));
-                }
-                None => criteria.prose.push(criterion.text.clone()),
-            }
+        let automated = phases.iter().flat_map(|phase| {
+            phase
+                .boxes
+                .iter()
+                .filter(|b| b.section == BoxSection::Automated)
+                .map(|b| (&phase.id, b))
+        });
+        for (phase, criterion) in automated {
+            let Some(command) = criterion.command() else {
+                criteria.prose.push(criterion.text.clone());
+                continue;
+            };
+            // A fence leaves the sentence whole; a span is cut out of it.
+            let label = match &criterion.block {
+                Some(_) => criterion.text.clone(),
+                None => criterion
+                    .text
+                    .rfind(&format!("`{command}`"))
+                    .map(|at| {
+                        let close = at + command.len() + 2;
+                        format!("{}{}", &criterion.text[..at], &criterion.text[close..])
+                    })
+                    .unwrap_or_default(),
+            };
+            let label = label.replace('`', "");
+            let label = label.trim().trim_end_matches(':').trim();
+            criteria.commands.push(ProposedCommand {
+                command: command.to_string(),
+                label: (!label.is_empty()).then(|| label.to_string()),
+                cwd: criterion.dir.clone(),
+                phase: Some(phase.clone()),
+            });
         }
         criteria
     }

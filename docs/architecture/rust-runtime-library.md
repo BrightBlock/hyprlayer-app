@@ -522,7 +522,7 @@ Research or Implement session. A session has one running or paused goal at most
 
 A spec the server cannot run is refused as `goal_invalid` before anything is written:
 it needs a Command check (the other kinds are refused), a command and a timeout of a
-second or more, 1 to 200 iterations, 60 seconds to 48 hours of active time, and a spend
+second or more, a directory (if any) inside the worktree, 1 to 200 iterations, 60 seconds to 48 hours of active time, and a spend
 limit (dollars on Claude and OpenCode, tokens on Codex). Spend is recorded on the goal
 but not yet enforced.
 
@@ -531,8 +531,9 @@ Each running goal has one driver task (`runtime/sessions/goal_loop.rs`), spawned
 one turn, sent through `SessionService::send_app_turn` under the prompt name
 `hyprlayer:goal`. It ends at the turn's own echoed message, a `TurnDone` and two quiet
 seconds, so a Stop-hook loop inside the turn is still one iteration. The runner then
-runs the Command checks in the workstream's worktree, each in its own process group
-with bounded output, and decides. The goal is `met` when every check passes. It is
+runs the Command checks in the workstream's worktree, or the directory under it a check
+names (a missing one fails the check by name), each in its own process group with
+bounded output, and decides. The goal is `met` when every check passes. It is
 exhausted at the iteration or active-time limit, and failed as `stalled` after three
 iterations in a row that leave the same diff, HEAD and failure. It pauses when a line of
 the agent's last text starts `NEEDS-HUMAN:`, after two failed turns, when the harness

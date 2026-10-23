@@ -57,6 +57,14 @@ async fn goal_iteration_limit() {
             edit(&invalid, |s| s.limits.max_cost_usd = None),
         ),
         (
+            "a check directory above the worktree",
+            edit(&invalid, |s| run_in(s, "app/../../outside")),
+        ),
+        (
+            "an absolute check directory",
+            edit(&invalid, |s| run_in(s, "/tmp")),
+        ),
+        (
             "a new Plan session",
             StartGoalRequest {
                 target: GoalTarget::NewSession {
@@ -379,6 +387,8 @@ fn spec(condition: &str, command: &str, max_iterations: u32) -> GoalSpec {
             command: command.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: limits(max_iterations),
     }
@@ -393,6 +403,12 @@ fn edit(session_id: &str, change: impl FnOnce(&mut GoalSpec)) -> StartGoalReques
             session_id: session_id.into(),
         },
         spec,
+    }
+}
+
+fn run_in(spec: &mut GoalSpec, dir: &str) {
+    if let Some(GoalCheck::Command { cwd, .. }) = spec.checks.first_mut() {
+        *cwd = Some(dir.into());
     }
 }
 

@@ -14,14 +14,13 @@ import {
   type WheelEvent,
 } from "react";
 
-import { Button, Skeleton, Spinner, cx } from "@/components/ui";
+import { Button, ROW_ACTION, Skeleton, Spinner, cx } from "@/components/ui";
 import { useCopyFeedback } from "@/lib/clipboard";
 import { HyprlayerMark } from "@/components/Logo";
 import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
-import { selectAgentTab } from "@/features/search/selectAgentTab";
 import { stageLabel } from "@/lib/domain/stages";
-import type { ClientRef, Goal, GoalCheckResult, GoalIteration } from "@/lib/bindings";
+import type { ClientRef, Goal, GoalIteration } from "@/lib/bindings";
 import {
   GOAL_CONTROL_LABEL,
   GOAL_END_REASON_LABEL,
@@ -40,13 +39,16 @@ import { PromptCard } from "./PromptCard";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import type { QueuedMessage } from "./sessionStore";
-import { formatElapsed, formatRelativeTime, formatTokens, formatUsd, plural } from "@/lib/format";
+import { formatElapsed, formatRelativeTime, formatTokens, formatUsd } from "@/lib/format";
 import { useTickingNow } from "@/lib/useTickingNow";
 import { PlanCardsContext, planCardComponent } from "./planCardSlot";
 import { readyCardComponent, type ReadyCardProps } from "./readyCardSlot";
+import { reviewAnchor } from "./reviewAnchor";
 import { goalHandoffComponent } from "./goalHandoffSlot";
 import { REVIEW_PROMPT, reviewCardComponent } from "./reviewCardSlot";
 import { GOAL_PROMPT } from "./goalPrompt";
+import { showGoalChecks } from "./goalAsideState";
+import { CheckTicks } from "./GoalCheckResults";
 import { useGoalControl } from "./sessionGoal";
 import { armResumeAfterSend } from "./sessionStore";
 import { requestComposerFocus, useWorkstreamTabsStore } from "./workstreamTabs";
@@ -743,153 +745,33 @@ const NativeContinuationRow = memo(function NativeContinuationRow({
   );
 });
 
-const TAIL_LINES = 6;
-
-function CheckTail({ tail }: { tail: string }) {
-  const [all, setAll] = useState(false);
-  const lines = tail.trimEnd().split("\n");
-  const clipped = lines.length > TAIL_LINES;
-  return (
-    <div className="mt-1 pl-5">
-      <pre className="selectable max-h-96 overflow-auto rounded bg-surface/60 p-2 text-meta text-ink-dim">
-        {all || !clipped ? tail.trimEnd() : lines.slice(-TAIL_LINES).join("\n")}
-      </pre>
-      {clipped && (
-        <button
-          type="button"
-          onClick={() => setAll((v) => !v)}
-          className="mt-1 rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
-        >
-          {all ? "Show less" : "Show all"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-const CHECK_KIND_LABEL = { plan_boxes: "Plan boxes", evaluator: "Evaluator", validation: "Validation" } as const;
-
-// The result carries no counts: the server writes one finding per tail line, failing checks prefixed.
-function validationCounts(tail: string): string | null {
-  const findings = tail.split("\n").filter((line) => line.trim());
-  const failing = findings.filter((line) => line.startsWith("Failed check: ")).length;
-  const issues = findings.length - failing;
-  const parts = [issues > 0 && plural(issues, "issue"), failing > 0 && plural(failing, "failing check")];
-  return parts.filter(Boolean).join(" · ") || null;
-}
-
-function CheckResultRow({ result, workstreamId }: { result: GoalCheckResult; workstreamId: string }) {
-  const [open, setOpen] = useState(false);
-  const pass = result.outcome === "pass";
-  const validation = result.kind === "validation";
-  const counts = validation ? validationCounts(result.outputTail) : null;
-  const detail =
-    result.exitCode !== null ? `exit ${result.exitCode}` : result.outcome === "error" ? "error" : counts;
-  const tail = !pass && result.outputTail ? result.outputTail : null;
-  const validateSessionId = validation ? (result.sessionId ?? null) : null;
-  return (
-    <div data-testid={validation ? "goal-check-validation" : undefined}>
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon
-          name={pass ? "check" : "failed"}
-          size="xs"
-          className={pass ? "shrink-0 text-ok" : "shrink-0 text-bad-ink"}
-        />
-        <span className="min-w-0 truncate font-mono text-ink" title={result.label}>
-          {result.label}
-        </span>
-        {detail && <span className="shrink-0 font-mono text-ink-dim">{detail}</span>}
-        {(validateSessionId || tail) && (
-          <span className="ml-auto flex shrink-0 items-center gap-1">
-            {validateSessionId && (
-              <button
-                type="button"
-                data-testid="goal-check-open-validate"
-                onClick={() => void selectAgentTab(workstreamId, validateSessionId, { frozen: true })}
-                className="rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
-              >
-                Open
-              </button>
-            )}
-            {tail && (
-              <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                aria-expanded={open}
-                className="rounded px-1 py-0.5 text-ui-sm text-ink-dim hover:bg-edge/60 hover:text-ink focus-visible:bg-edge/60 focus-visible:text-ink"
-              >
-                {open ? "Hide output" : "Output"}
-              </button>
-            )}
-          </span>
-        )}
-      </div>
-      {result.reason && (
-        <p className="selectable mt-0.5 pl-5 text-ink-dim">
-          {result.kind === "evaluator" ? `“${result.reason}”` : result.reason}
-        </p>
-      )}
-      {open && tail && <CheckTail tail={tail} />}
-    </div>
-  );
-}
-
-function checkLabel(check: Goal["checks"][number]): string {
-  return check.kind === "command" ? (check.label ?? check.command) : CHECK_KIND_LABEL[check.kind];
-}
-
-/** One line per result, then the layers an earlier failure kept from running. */
-export function GoalCheckList({ goal, iteration }: { goal: Goal; iteration: GoalIteration }) {
-  // Layers run in order and stop at the first failure, so the unrun ones are the tail.
-  const ranKinds = new Set(iteration.results.map((r) => r.kind));
-  const commandsRun = iteration.results.filter((r) => r.kind === "command").length;
-  const skipped = [
-    ...goal.checks.filter((c) => c.kind === "command").slice(commandsRun),
-    ...goal.checks.filter((c) => c.kind !== "command" && !ranKinds.has(c.kind)),
-  ].map(checkLabel);
-  return (
-    <div className="space-y-1.5 text-ui">
-      {iteration.results.map((result, i) => (
-        <CheckResultRow key={`${result.label}:${i}`} result={result} workstreamId={goal.workstreamId} />
-      ))}
-      {skipped.length > 0 && (
-        <div className="flex min-w-0 items-center gap-2 text-ink-dim">
-          <span className="w-3 shrink-0 text-center" aria-hidden>
-            –
-          </span>
-          <span className="min-w-0 truncate">{skipped.join(", ")}</span>
-          <span className="shrink-0">not run</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Under each finished iteration; output tails mount only when expanded.
-function GoalCheckCard({ clientMessageId }: { clientMessageId: string }) {
+// Closes each finished iteration in one line; the Goal view lists its checks.
+function GoalCheckStrip({ clientMessageId }: { clientMessageId: string }) {
   const goal = useContext(GoalTranscript)?.goal ?? null;
   const iteration = useIteration(clientMessageId);
   if (!goal || !iteration || iteration.results.length === 0) return null;
-  const pass = iteration.outcome === "pass";
-  const spend = iterationSpend(goal, iteration);
+  const failed = iteration.results.filter((r) => r.outcome !== "pass").length;
+  const ms = iteration.results.reduce((sum, r) => sum + r.durationMs, 0);
   return (
     <div
-      data-testid="goal-check-card"
-      className={cx(
-        "mt-3 rounded-card border px-3 py-2.5 text-ui shadow-card",
-        pass ? "border-line-strong bg-panel" : "border-fail-card-border bg-fail-card-bg",
-      )}
+      data-testid="goal-check-strip"
+      className="-ml-1.5 mt-3 flex w-[calc(100%+0.375rem)] min-w-0 items-center gap-2.5 rounded px-1.5 py-1 text-ui"
     >
-      <div className="flex items-center gap-2">
-        <Icon name={pass ? "check" : "failed"} size="xs" className={pass ? "text-ok" : "text-bad-ink"} />
-        <span className="font-medium text-ink">
-          Checks · iteration {iteration.n} · {iteration.outcome ?? "pending"}
-        </span>
-        {spend && <span className="ml-auto text-meta text-ink-dim">{spend}</span>}
-      </div>
-      <div className="mt-2">
-        <GoalCheckList goal={goal} iteration={iteration} />
-      </div>
+      <Icon name={failed ? "failed" : "check"} size="xs" className={cx("shrink-0", failed ? "text-bad-ink" : "text-ok")} />
+      <span className="shrink-0 font-medium text-ink">Checks · iteration {iteration.n}</span>
+      <CheckTicks results={iteration.results} />
+      <span className={cx("shrink-0", failed ? "text-bad-ink" : "text-ok")}>
+        {failed ? `${failed} failed` : `All ${iteration.results.length} passed`}
+      </span>
+      {ms >= 1000 && <span className="shrink-0 font-mono text-meta text-ink-dim">{formatElapsed(ms)}</span>}
+      <button
+        type="button"
+        onClick={() => showGoalChecks(goal.id, iteration.n)}
+        className={cx(ROW_ACTION, "ml-auto gap-1")}
+      >
+        Details
+        <Icon name="chevronRight" size="xs" />
+      </button>
     </div>
   );
 }
@@ -1329,10 +1211,30 @@ const unitItems = (u: Unit): TranscriptItem[] => (u.type === "group" ? u.items :
 
 const seqAtLeast = (item: TranscriptItem, seq: number) => item.seq != null && item.seq >= seq;
 
+type Anchor = { key: string; beforeItemId: string; node: ReactNode };
+
+const NO_ANCHORS: Anchor[] = [];
+
+// An ended goal's card stays where the goal ended, above whatever was sent after it.
+function goalEndAnchor(goal: Goal, topLevel: TranscriptItem[]): string | null {
+  const endedAt = goal.endedAt;
+  if (endedAt == null) return null;
+  const sent = topLevel.find((it) => it.kind === "user" && it.createdAt !== null && it.createdAt >= endedAt);
+  return sent?.id ?? null;
+}
+
 const goalIterationOf = (u: Unit): string | null =>
   u.type === "single" && u.item.kind === "user" && u.item.promptName === GOAL_PROMPT
     ? (u.item.clientMessageId ?? null)
     : null;
+
+// A message sent mid-iteration steers it; one sent after its checks ran starts the person's own exchange.
+const sentAfter = (u: Unit, endedAt: number | null | undefined): boolean =>
+  endedAt != null &&
+  u.type === "single" &&
+  u.item.kind === "user" &&
+  u.item.createdAt !== null &&
+  u.item.createdAt >= endedAt;
 
 function ItemList({
   items,
@@ -1342,6 +1244,7 @@ function ItemList({
   prompt,
   freshFromSeq = null,
   divider = null,
+  anchors = NO_ANCHORS,
   goalChecks = false,
 }: {
   items: TranscriptItem[];
@@ -1351,11 +1254,14 @@ function ItemList({
   prompt: PromptHandlers;
   freshFromSeq?: number | null;
   divider?: { seq: number; node: ReactNode } | null;
+  /** Each rendered just before the item it names, after any check strip that closes there. */
+  anchors?: Anchor[];
   /** Top level only: a check card closes each goal iteration. */
   goalChecks?: boolean;
 }) {
   const planCards = useContext(PlanCardsContext);
   const selfClientId = useContext(SelfClientId);
+  const goalIterations = useContext(GoalTranscript)?.iterations;
   // Subagents and plan cards (a Bash-written plan, a presented one) never fold into a tool group.
   const keepOut = (it: TranscriptItem) =>
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
@@ -1401,13 +1307,23 @@ function ItemList({
   const nodes: ReactNode[] = [];
   let openIteration: string | null = null;
   const closeIteration = () => {
-    if (openIteration) nodes.push(<GoalCheckCard key={`goal-check:${openIteration}`} clientMessageId={openIteration} />);
+    if (openIteration) nodes.push(<GoalCheckStrip key={`goal-check:${openIteration}`} clientMessageId={openIteration} />);
   };
+  const endedAt = (clientMessageId: string) =>
+    goalIterations?.find((it) => it.clientMessageId === clientMessageId)?.endedAt;
   units.forEach((unit, i) => {
     const iteration = goalChecks ? goalIterationOf(unit) : null;
     if (iteration) {
       closeIteration();
       openIteration = iteration;
+    } else if (openIteration && sentAfter(unit, endedAt(openIteration))) {
+      closeIteration();
+      openIteration = null;
+    }
+    if (unit.type === "single") {
+      for (const anchor of anchors) {
+        if (anchor.beforeItemId === unit.item.id) nodes.push(<div key={anchor.key}>{anchor.node}</div>);
+      }
     }
     if (divider && i === dividerAt) {
       nodes.push(
@@ -1529,7 +1445,9 @@ type Props = {
   prompt: PromptHandlers;
   sync?: TranscriptSync;
   // Set for an implement session; the review feature decides whether the card shows.
-  ready?: ReadyCardProps | null;
+  ready?: (ReadyCardProps & { worktreePath: string }) | null;
+  /** A turn is running or held on a prompt, so it has not finished editing. */
+  turnOpen?: boolean;
   goal?: TranscriptGoal | null;
   queued?: QueuedMessage[];
   /** Whether the harness can give back a message it already holds (codex cannot). */
@@ -1590,6 +1508,7 @@ export const TranscriptView = memo(
       prompt,
       sync = NO_SYNC,
       ready = null,
+      turnOpen = false,
       goal = null,
       queued = NO_QUEUED,
       canWithdrawQueued = true,
@@ -1771,6 +1690,10 @@ export const TranscriptView = memo(
       () => new Set(backgroundTasksFromItems(items).map((t) => t.toolUseId)),
       [items],
     );
+    const readyAnchor = useMemo(
+      () => (ready ? reviewAnchor(items, turnOpen, ready.worktreePath) : null),
+      [items, turnOpen, ready],
+    );
 
     const childrenByParent: ChildMap = new Map();
     for (const item of items) {
@@ -1784,6 +1707,12 @@ export const TranscriptView = memo(
     const topLevel = items.filter((item) => parentIdOf(item) === null);
     const { tail, divider } = sync;
     const ReadyCard = ready ? readyCardComponent() : null;
+    const readyCard = ReadyCard && ready && <ReadyCard sessionId={ready.sessionId} workstreamId={ready.workstreamId} />;
+    const goalCard = goal && <GoalFinishedCard data={goal} />;
+    const goalAnchor = goal ? goalEndAnchor(goal.goal, topLevel) : null;
+    const anchors: Anchor[] = [];
+    if (goalAnchor && goalCard) anchors.push({ key: "anchor:goal", beforeItemId: goalAnchor, node: goalCard });
+    if (readyAnchor && readyCard) anchors.push({ key: "anchor:ready", beforeItemId: readyAnchor, node: readyCard });
 
     return (
       <div
@@ -1811,13 +1740,14 @@ export const TranscriptView = memo(
                         node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
                       }
                     }
+                    anchors={anchors}
                   />
                 </GoalTranscript.Provider>
               </SelfClientId.Provider>
             </JumpTargetId.Provider>
           </OpenBackgroundIds.Provider>
-          {ReadyCard && ready && <ReadyCard sessionId={ready.sessionId} workstreamId={ready.workstreamId} />}
-          {goal && <GoalFinishedCard data={goal} />}
+          {!goalAnchor && goalCard}
+          {!readyAnchor && readyCard}
           {tail && <SyncSkeletonTail tail={tail} />}
           {connecting && (
             <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">

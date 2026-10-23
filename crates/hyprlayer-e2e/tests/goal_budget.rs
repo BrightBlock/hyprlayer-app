@@ -530,6 +530,8 @@ fn spec(condition: &str, command: &str, max_iterations: u32, max_cost_usd: f64) 
             command: command.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: limits(max_iterations, max_cost_usd),
     }

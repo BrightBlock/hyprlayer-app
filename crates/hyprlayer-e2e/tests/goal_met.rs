@@ -320,6 +320,8 @@ fn spec() -> GoalSpec {
             command: r#"c=$(cat counter.txt); echo "counter is $c"; test "$c" = 3"#.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: GoalLimits {
             max_iterations: 6,

@@ -410,6 +410,8 @@ fn spec(condition: &str, command: &str) -> GoalSpec {
             command: command.into(),
             timeout_secs: 60,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: GoalLimits {
             max_iterations: 10,

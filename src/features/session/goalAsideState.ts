@@ -1,8 +1,22 @@
 import { useEffect } from "react";
+import { create } from "zustand";
 
+import { isNarrow } from "@/lib/layout";
 import { useUiStore, type AsideView } from "@/lib/uiStore";
 import type { GoalStatus } from "@/lib/domain/goals";
 import { useSessionGoalRow } from "./sessionGoal";
+
+/** The iteration whose checks the Goal view lists; unset, or another goal's, means the newest. */
+export const useGoalAsideIteration = create<{ goalId: string | null; n: number | null }>(() => ({
+  goalId: null,
+  n: null,
+}));
+
+export function showGoalChecks(goalId: string, n: number): void {
+  useGoalAsideIteration.setState({ goalId, n });
+  const goal = { asideView: "goal" as const, asideViewChosen: true };
+  useUiStore.setState(isNarrow(window.innerWidth) ? { ...goal, narrowDrawer: "diff" } : { ...goal, diffHidden: false });
+}
 
 /** The chosen view when it is available, else Plan, else Goal, else Changes. */
 export function resolveAsideView(chosen: AsideView, available: { plan: boolean; goal: boolean }): AsideView {

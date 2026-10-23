@@ -12,11 +12,19 @@ import type { GoalHandoffProps } from "@/features/session/goalHandoffSlot";
 import { validatePlanInNewSession } from "@/features/session/sessionStore";
 import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 
-import { useValidateStepStore } from "./validateStep";
+import { useValidateStep, useValidateStepStore, type ValidateStep } from "./validateStep";
+
+/** A met goal that implemented or validated the plan offers the next step itself, until one is taken. */
+export function goalOwnsNextStep(goal: Goal | null, step: ValidateStep | null): boolean {
+  if (!goal || goal.status !== "met" || step) return false;
+  return goal.source === "plan" || goal.source === "plan_phase" || goal.checks.some((c) => c.kind === "validation");
+}
 
 export function GoalHandoff({ sessionId, workstreamId, goal }: GoalHandoffProps) {
   const projectPath = findWorkstreamForNotify(workstreamId)?.projectPath;
-  return projectPath ? (
+  // Once a validate step exists, the validate card carries the rest of the flow.
+  const step = useValidateStep(sessionId);
+  return projectPath && !step ? (
     <Handoff sessionId={sessionId} workstreamId={workstreamId} goal={goal} projectPath={projectPath} />
   ) : null;
 }

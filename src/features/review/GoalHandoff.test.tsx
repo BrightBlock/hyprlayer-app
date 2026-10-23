@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Goal, GoalSource } from "@/lib/bindings";
 
-import { GoalHandoff } from "./GoalHandoff";
+import { GoalHandoff, goalOwnsNextStep } from "./GoalHandoff";
 import { useValidateStepStore } from "./validateStep";
 
 const m = vi.hoisted(() => ({
@@ -85,6 +85,31 @@ describe("GoalHandoff", () => {
     await waitFor(() =>
       expect(useValidateStepStore.getState().byImplement.impl1).toEqual({ kind: "agent", sessionId: "val1" }),
     );
+  });
+
+  it("a plan goal that ran a validation offers Review and Ship, not Validate", () => {
+    renderHandoff({ ...goal("plan", PLAN), checks: [{ kind: "validation", planPath: PLAN }] });
+    expect(screen.queryByRole("button", { name: "Validate plan" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Review changes" })).toBeTruthy();
+  });
+
+  it("hands the next step to the validate card once validation starts", () => {
+    useValidateStepStore.getState().setStep("impl1", { kind: "agent", sessionId: "val1" });
+    renderHandoff(goal("plan", PLAN));
+    expect(screen.queryByRole("button", { name: "Validate plan" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review changes" })).toBeNull();
+  });
+
+  it("a met plan goal owns the next step until a validate step exists", () => {
+    const planGoal = goal("plan", PLAN);
+    expect(goalOwnsNextStep(planGoal, null)).toBe(true);
+    expect(goalOwnsNextStep({ ...goal("composer", null), checks: [{ kind: "validation", planPath: PLAN }] }, null)).toBe(
+      true,
+    );
+    expect(goalOwnsNextStep(goal("composer", null), null)).toBe(false);
+    expect(goalOwnsNextStep({ ...planGoal, status: "exhausted" }, null)).toBe(false);
+    expect(goalOwnsNextStep(planGoal, { kind: "skipped" })).toBe(false);
+    expect(goalOwnsNextStep(null, null)).toBe(false);
   });
 
   it("disables Ship when the workstream cannot ship", () => {

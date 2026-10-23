@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -86,20 +86,19 @@ pub(crate) async fn run_checks(
         let GoalCheck::Command {
             command,
             timeout_secs,
+            cwd,
+            phases,
             ..
         } = check
         else {
             continue;
         };
-        let (result, cancelled) = run_command(
-            &env,
-            &workstream.worktree_path,
-            goal_check_label(check),
-            command,
-            *timeout_secs,
-            cancel,
-        )
-        .await;
+        let label = goal_check_label(check);
+        let (mut result, cancelled) = match command_dir(&workstream.worktree_path, cwd.as_deref()) {
+            Ok(dir) => run_command(&env, &dir, label, command, *timeout_secs, cancel).await,
+            Err((outcome, reason)) => (unrun_command(label, outcome, reason), false),
+        };
+        result.phase = phases.first().cloned();
         results.push(result);
         if cancelled {
             return summarize(results, 0.0);
@@ -191,6 +190,7 @@ async fn plan_boxes(check: &GoalCheck, plan: &Path, phase: Option<&str>) -> Goal
         output_tail: String::new(),
         reason: (outcome != GoalCheckOutcome::Pass).then_some(reason),
         session_id: None,
+        phase: phase.map(str::to_string),
     }
 }
 
@@ -212,6 +212,7 @@ async fn evaluate(
         output_tail: crate::redact::tail(tail, KEPT_TAIL_BYTES).to_string(),
         reason: Some(reason),
         session_id: None,
+        phase: None,
     };
     if run.spend_reached {
         let skipped = result(
@@ -306,6 +307,7 @@ async fn validate(
             output_tail: crate::redact::tail(tail, KEPT_TAIL_BYTES).to_string(),
             reason,
             session_id: session_id.map(str::to_string),
+            phase: None,
         };
     let error = |reason: String, session_id: Option<&str>| {
         result(GoalCheckOutcome::Error, Some(reason), "", session_id)
@@ -324,7 +326,10 @@ async fn validate(
         .checks
         .iter()
         .filter_map(|check| match check {
-            GoalCheck::Command { command, .. } => Some(command.clone()),
+            GoalCheck::Command { command, cwd, .. } => Some(match run_dir(cwd.as_deref()) {
+                Some(dir) => format!("cd {} && {command}", shell_word(dir)),
+                None => command.clone(),
+            }),
             _ => None,
         })
         .collect();
@@ -609,9 +614,68 @@ fn elapsed_ms(started: Instant) -> u32 {
     u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX)
 }
 
+/// A check's directory, none for the worktree root.
+pub(crate) fn run_dir(cwd: Option<&str>) -> Option<&str> {
+    cwd.map(str::trim).filter(|dir| !dir.is_empty())
+}
+
+/// Relative and free of `..`, so a check never runs outside its worktree.
+pub(crate) fn stays_inside(dir: &str) -> bool {
+    Path::new(dir)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
+/// A directory a later phase creates fails rather than errors, so it never reads as broken checks.
+fn command_dir(worktree: &str, cwd: Option<&str>) -> Result<PathBuf, (GoalCheckOutcome, String)> {
+    let Some(dir) = run_dir(cwd) else {
+        return Ok(PathBuf::from(worktree));
+    };
+    if !stays_inside(dir) {
+        return Err((
+            GoalCheckOutcome::Error,
+            format!("the directory {dir} is not inside the worktree"),
+        ));
+    }
+    let path = Path::new(worktree).join(dir);
+    if !path.is_dir() {
+        return Err((
+            GoalCheckOutcome::Fail,
+            format!("the directory {dir} does not exist"),
+        ));
+    }
+    Ok(path)
+}
+
+fn unrun_command(label: String, outcome: GoalCheckOutcome, reason: String) -> GoalCheckResult {
+    GoalCheckResult {
+        kind: GoalCheckKind::Command,
+        label,
+        outcome,
+        exit_code: None,
+        duration_ms: 0,
+        output_tail: String::new(),
+        reason: Some(reason),
+        session_id: None,
+        phase: None,
+    }
+}
+
+/// Quoted only when it has to be, so the plain `cd dir` part can become an allow rule.
+fn shell_word(word: &str) -> String {
+    if word
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "_./-".contains(c))
+    {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
+    }
+}
+
 async fn run_command(
     env: &[(String, String)],
-    cwd: &str,
+    cwd: &Path,
     label: String,
     command: &str,
     timeout_secs: u32,
@@ -670,6 +734,7 @@ async fn run_command(
         output_tail: crate::redact::tail(&tail, KEPT_TAIL_BYTES).to_string(),
         reason,
         session_id: None,
+        phase: None,
     };
     (result, cancelled)
 }

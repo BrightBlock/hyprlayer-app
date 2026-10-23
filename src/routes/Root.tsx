@@ -153,7 +153,7 @@ import {
 import { useUpdate, showUpdateToast } from "@/lib/updater";
 import { useToast } from "@/lib/toast";
 import { Toast } from "@/components/Toast";
-import { GoalSheetHost } from "@/components/GoalSheet";
+import { GoalSheetHost } from "@/features/goals/GoalSheet";
 import type { Project, WorkstreamView } from "@/lib/bindings";
 import { useLastRoute } from "@/lib/lastRoute";
 

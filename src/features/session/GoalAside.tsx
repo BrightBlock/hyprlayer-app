@@ -7,7 +7,9 @@ import { useTickingNow } from "@/lib/useTickingNow";
 import { docTitle } from "./toolDisplay";
 import { goalActiveSince, goalMeterValues, useGoalControl, useSessionGoal } from "./sessionGoal";
 import { useSessionStore } from "./sessionStore";
-import { GoalCheckList, iterationSpend } from "./TranscriptView";
+import { useGoalAsideIteration } from "./goalAsideState";
+import { GoalCheckResults } from "./GoalCheckResults";
+import { iterationSpend } from "./TranscriptView";
 import { requestTranscriptJump } from "./transcriptJump";
 
 function sourceLine(goal: Goal): string {
@@ -55,15 +57,33 @@ function jumpToIteration(sessionId: string, iteration: GoalIteration): void {
   if (item) requestTranscriptJump(sessionId, { itemId: item.id });
 }
 
-function IterationRow({ goal, iteration, sessionId }: { goal: Goal; iteration: GoalIteration; sessionId: string }) {
+function IterationRow({
+  goal,
+  iteration,
+  sessionId,
+  shown,
+}: {
+  goal: Goal;
+  iteration: GoalIteration;
+  sessionId: string;
+  shown: boolean;
+}) {
   const done = iteration.startedAt !== null && iteration.endedAt !== null;
   const spend = iterationSpend(goal, iteration);
   return (
     <button
       type="button"
-      onClick={() => jumpToIteration(sessionId, iteration)}
+      onClick={() => {
+        if (iteration.results.length > 0) useGoalAsideIteration.setState({ goalId: goal.id, n: iteration.n });
+        jumpToIteration(sessionId, iteration);
+      }}
       data-testid="goal-timeline-row"
-      className={rowClass({ tier: "compact", className: "flex w-full gap-2 px-2 text-left text-ui" })}
+      aria-current={shown ? "true" : undefined}
+      className={rowClass({
+        tier: "compact",
+        selected: shown ? "tint" : "none",
+        className: "flex w-full gap-2 px-2 text-left text-ui",
+      })}
     >
       <span className="flex w-3 shrink-0 justify-center">
         <OutcomeIcon iteration={iteration} />
@@ -91,10 +111,12 @@ export function GoalAside({ sessionId, workstreamId }: { sessionId: string | und
   const { goal, detail } = useSessionGoal(sessionId, workstreamId);
   const now = useTickingNow(goal ? goalActiveSince(goal) : null);
   const control = useGoalControl();
+  const picked = useGoalAsideIteration((s) => (goal && s.goalId === goal.id ? s.n : null));
   if (!goal || !sessionId) return null;
 
   const iterations = detail?.iterations ?? [];
-  const lastChecked = [...iterations].reverse().find((it) => it.results.length > 0) ?? null;
+  const checked = iterations.filter((it) => it.results.length > 0);
+  const shown = checked.find((it) => it.n === picked) ?? checked[checked.length - 1] ?? null;
   const values = goalMeterValues(goal, now);
   const pill = [GOAL_STATUS_LABEL[goal.status], goal.step && GOAL_STEP_LABEL[goal.step]].filter(Boolean).join(" · ");
 
@@ -139,15 +161,17 @@ export function GoalAside({ sessionId, workstreamId }: { sessionId: string | und
         {detail === null ? (
           <Spinner size="sm" />
         ) : (
-          iterations.map((it) => <IterationRow key={it.n} goal={goal} iteration={it} sessionId={sessionId} />)
+          iterations.map((it) => (
+            <IterationRow key={it.n} goal={goal} iteration={it} sessionId={sessionId} shown={it === shown} />
+          ))
         )}
       </div>
 
-      {lastChecked && (
+      {shown && (
         <>
-          <div className="mt-4 text-label text-ink-dim">Last check</div>
+          <div className="mt-4 text-label text-ink-dim">Checks · iteration {shown.n}</div>
           <div className="mt-1.5">
-            <GoalCheckList goal={goal} iteration={lastChecked} />
+            <GoalCheckResults key={`${goal.id}:${shown.n}`} goal={goal} iteration={shown} />
           </div>
         </>
       )}

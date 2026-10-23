@@ -344,6 +344,12 @@ pub enum GoalCheck {
         timeout_secs: u32,
         #[serde(default)]
         label: Option<String>,
+        /// Relative to the worktree; none runs at its root.
+        #[serde(default)]
+        cwd: Option<String>,
+        /// The plan phases that list this command, in plan order.
+        #[serde(default)]
+        phases: Vec<String>,
     },
     PlanBoxes {
         plan_path: String,
@@ -427,6 +433,9 @@ pub struct GoalCheckResult {
     /// The Validation check's validate session.
     #[serde(default)]
     pub session_id: Option<String>,
+    /// The check's first plan phase, so results group the way the goal's checks do.
+    #[serde(default)]
+    pub phase: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

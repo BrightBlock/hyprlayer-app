@@ -673,6 +673,7 @@ async fn run_check(check: &GoalCheck, cwd: &std::path::Path) -> GoalCheckResult 
         output_tail: output.tail,
         reason: None,
         session_id: None,
+        phase: None,
     }
 }
 
@@ -690,6 +691,8 @@ async fn a_counter_goal_meets_its_command_check() {
         command: r#"test "$(cat counter.txt)" = 3"#.into(),
         timeout_secs: 60,
         label: None,
+        cwd: None,
+        phases: vec![],
     };
     let spec = GoalSpec {
         condition: "counter.txt holds the number 3".into(),

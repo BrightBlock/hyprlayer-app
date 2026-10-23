@@ -501,11 +501,17 @@ pub fn goal_iteration_prompt(
             .checks
             .iter()
             .map(|check| {
-                format!(
-                    "{} ({})",
-                    goal_check_label(check),
-                    goal_check_kind(check).as_str()
-                )
+                let kind = goal_check_kind(check).as_str();
+                match check {
+                    GoalCheck::Command { cwd: Some(dir), .. } if !dir.trim().is_empty() => {
+                        format!(
+                            "{} ({kind}, run in {})",
+                            goal_check_label(check),
+                            dir.trim()
+                        )
+                    }
+                    _ => format!("{} ({kind})", goal_check_label(check)),
+                }
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -686,6 +692,8 @@ mod tests {
                 command: "test -f done".into(),
                 timeout_secs: 60,
                 label: None,
+                cwd: None,
+                phases: vec![],
             }],
             limits: GoalLimits {
                 max_iterations: 5,
@@ -706,6 +714,7 @@ mod tests {
             output_tail: "no such file".into(),
             reason: None,
             session_id: None,
+            phase: None,
         }
     }
 

@@ -73,7 +73,9 @@
           "evidence": {
             "sessions": [
               {
+                "appRule": true,
                 "doNotRerun": true,
+                "notesApp": true,
                 "notesPlain": true,
                 "notesShell": true,
                 "opensWithSkill": true,
@@ -81,7 +83,9 @@
                 "shellRule": false
               },
               {
+                "appRule": true,
                 "doNotRerun": true,
+                "notesApp": true,
                 "notesPlain": true,
                 "notesShell": true,
                 "opensWithSkill": true,
@@ -90,7 +94,7 @@
               }
             ]
           },
-          "guard": "each validate session allows the plain command only, and its prompt names both",
+          "guard": "each validate session allows the plain commands only, and its prompt names all three, the app one with its cd",
           "ok": true
         },
         {

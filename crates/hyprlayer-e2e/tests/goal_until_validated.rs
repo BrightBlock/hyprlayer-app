@@ -25,6 +25,7 @@ const GOAL_WAIT: Duration = Duration::from_secs(120);
 const IO: Duration = Duration::from_secs(30);
 const PLAIN_COMMAND: &str = "test -f counter.txt";
 const SHELL_COMMAND: &str = r#"test "$(cat counter.txt)" -ge 1"#;
+const APP_COMMAND: &str = "cd app && test -f marker.txt";
 const ISSUE: &str = "render() ignores the theme";
 const FIX_ALL: &str = "Resolve these findings from the plan validation.";
 
@@ -33,6 +34,8 @@ const PLAN: &str = "---\ntitle: Theme plan\ntype: plan\nstatus: active\nauthor: 
 ### Success Criteria\n\n#### Automated Verification:\n\
 - [ ] Counter file exists: `test -f counter.txt`\n\
 - [ ] Counter is positive: `test \"$(cat counter.txt)\" -ge 1`\n\n\
+#### Automated Verification (from `app/`):\n\
+- [ ] App marker: `test -f marker.txt`\n\n\
 #### Manual Verification:\n- [ ] The theme looks right\n";
 
 const REPORT_ISSUE: &str = "## Validation Report: Theme plan\n\n\
@@ -52,7 +55,10 @@ const SUMMARY_NOTES: &str = r#"{"gate":null,"checks":[{"text":"widget tests","ou
 async fn goal_until_validated() {
     let sandbox = Sandbox::new();
     sandbox.stage_tool("claude", GOAL_CLAUDE);
-    let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
+    let repo = sandbox.fixture_repo(
+        "demo",
+        &[("README.md", "# demo\n"), ("app/marker.txt", "here\n")],
+    );
     let mut j = Journey::new("goal_until_validated", &sandbox);
     let server = Server::start(&sandbox).await;
     let c = server.client();
@@ -178,22 +184,26 @@ async fn goal_until_validated() {
             json!({
                 "plainRule": argv.contains(&format!("Bash({PLAIN_COMMAND})")),
                 "shellRule": argv.contains("-ge 1"),
+                "appRule": argv.contains("Bash(cd app)") && argv.contains("Bash(test -f marker.txt)"),
                 "opensWithSkill": prompt.starts_with("/validate_plan"),
                 "notesPlain": prompt.contains(PLAIN_COMMAND),
                 "notesShell": prompt.contains(SHELL_COMMAND),
+                "notesApp": prompt.contains(APP_COMMAND),
                 "doNotRerun": prompt.contains("do not run them again"),
             })
         })
         .collect();
     j.guard(
-        "each validate session allows the plain command only, and its prompt names both",
+        "each validate session allows the plain commands only, and its prompt names all three, the app one with its cd",
         shapes.len() == 2
             && shapes.iter().all(|s| {
                 s["plainRule"] == true
                     && s["shellRule"] == false
+                    && s["appRule"] == true
                     && s["opensWithSkill"] == true
                     && s["notesPlain"] == true
                     && s["notesShell"] == true
+                    && s["notesApp"] == true
                     && s["doNotRerun"] == true
             }),
         json!({ "sessions": shapes }),

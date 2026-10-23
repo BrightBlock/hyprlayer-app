@@ -163,6 +163,8 @@ fn spec(condition: &str, command: &str, timeout_secs: u32, max_iterations: u32) 
             command: command.into(),
             timeout_secs,
             label: None,
+            cwd: None,
+            phases: vec![],
         }],
         limits: GoalLimits {
             max_iterations,

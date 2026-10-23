@@ -1,5 +1,6 @@
 //! Goals derived from a plan, a phase, a range, the composer and a research question, and the
 //! two checks that read them back: PlanBoxes against the live plan, and the evaluator one-shot.
+//! Plan commands run in the directory their criteria heading or a `Run from` line names.
 //!
 //! The harness is `goal_stub`'s claude stand-in; nothing here covers the real binary.
 #![cfg(unix)]
@@ -22,6 +23,10 @@ use hyprlayer_server::client::RpcClient;
 
 const GOAL_WAIT: Duration = Duration::from_secs(90);
 const COUNTER_COMMAND: &str = r#"test "$(cat counter.txt)" -ge 3"#;
+const DIR_COMMAND: &str = "test -d .";
+const MARKER_COMMAND: &str = "test -f marker.txt";
+const FENCED_COMMAND: &str = "test -f ../README.md &&\n  test -f marker.txt";
+const FENCED_LABEL: &str = "The app sits in the repo (gh alone would pass)";
 const REPO_COMMAND: &str = "test -f counter.txt";
 const QUESTION: &str = "Where does the counter live?";
 
@@ -32,7 +37,17 @@ const PLAN: &str = "---\ntitle: Counter plan\ntype: plan\nstatus: active\nauthor
 - [ ] Counter reaches 3: `test \"$(cat counter.txt)\" -ge 3`\n\n\
 #### Manual Verification:\n- [ ] The counter reads well\n\n\
 ## Phase 2: Keep\n\n### Success Criteria\n\n#### Automated Verification:\n\
-- [ ] Counter file exists\n\n#### Manual Verification:\n- [ ] Nobody minds the file\n";
+- [ ] Counter file exists\n\
+- [ ] The root is a directory: `test -d .`\n\n\
+#### Manual Verification:\n- [ ] Nobody minds the file\n\n\
+## Phase 3: App\n\n### Success Criteria\n\n#### Automated Verification (from `app/`):\n\
+- [ ] Marker is in the app dir: `test -f marker.txt`\n\
+- [ ] The app is a directory: `test -d .`\n\
+- [ ] The app sits in the repo (`gh` alone would pass):\n  ```sh\n  test -f ../README.md &&\n    test -f marker.txt\n  ```\n\n\
+#### Manual Verification:\n- [ ] The app dir looks right\n\n\
+## Phase 4: Again\n\n### Success Criteria\n\n#### Automated Verification:\n\nRun these from `./app`:\n\n\
+- [ ] Marker still there: `test -f marker.txt`\n\
+- [ ] A sample payload:\n  ```json\n  {\"a\": 1}\n  ```\n";
 
 const RESEARCH: &str = "---\ntitle: Counter research\ntype: research\nstatus: draft\n---\n\n\
 # Counter research\n\n## Research Question\n\nWhere does the counter live?\n\n## Summary\n\nTBD.\n";
@@ -47,6 +62,7 @@ async fn goal_from_plan() {
         "demo",
         &[
             ("README.md", "# demo\n"),
+            ("app/marker.txt", "here\n"),
             (
                 ".hyprlayer/settings.toml",
                 "[goals]\nchecks = [\"test -f counter.txt\"]\n",
@@ -92,20 +108,52 @@ async fn goal_from_plan() {
         json!({ "source": whole.source.as_str(), "sourcePhase": whole.source_phase }),
     );
     j.guard(
-        "one command from the criterion's last span, then the plan's boxes, then the evaluator",
-        kinds(&whole) == ["command", "plan_boxes", "evaluator"]
-            && matches!(&counter_check, Some(GoalCheck::Command { command, timeout_secs: 600, label: Some(label) })
+        "the commands from each criterion's last span or its fence, then the plan's boxes, then the evaluator",
+        kinds(&whole) == ["command", "command", "command", "command", "command", "plan_boxes", "evaluator"]
+            && matches!(&counter_check, Some(GoalCheck::Command { command, timeout_secs: 600, label: Some(label), .. })
                 if command == COUNTER_COMMAND && label.starts_with("Counter reaches 3") && !label.contains('`'))
-            && whole.checks.get(1)
+            && whole.checks.get(5)
                 == Some(&GoalCheck::PlanBoxes {
                     plan_path: plan_path.clone(),
                     phase: None,
                 }),
         json!({ "checks": whole.checks }),
     );
+    let placed = command_places(&whole);
+    let place = |command: &str, cwd: Option<&str>, phases: &[&str]| {
+        (
+            command.to_string(),
+            cwd.map(str::to_string),
+            phases.iter().map(|p| p.to_string()).collect::<Vec<_>>(),
+        )
+    };
     j.guard(
-        "the condition names the plan and carries the prose criterion",
-        whole.condition.contains("Counter plan") && whole.condition.contains("Counter file exists"),
+        "each command runs where its heading or Run-from line says, once per directory, listing every phase that names it",
+        placed
+            == [
+                place(COUNTER_COMMAND, None, &["1"]),
+                place(DIR_COMMAND, None, &["2"]),
+                place(MARKER_COMMAND, Some("app"), &["3", "4"]),
+                place(DIR_COMMAND, Some("app"), &["3"]),
+                place(FENCED_COMMAND, Some("app"), &["3"]),
+            ],
+        json!({ "commands": placed }),
+    );
+    j.guard(
+        "the fenced command's label is its sentence, without backticks or the colon",
+        whole.checks.iter().any(|check| {
+            matches!(check,
+            GoalCheck::Command { command, label: Some(label), .. }
+                if command == FENCED_COMMAND && label == FENCED_LABEL)
+        }),
+        json!({ "checks": whole.checks }),
+    );
+    j.guard(
+        "the condition names the plan and carries the prose criteria, the json sample among them",
+        whole.condition.contains("Counter plan")
+            && whole.condition.contains("Counter file exists")
+            && whole.condition.contains("A sample payload")
+            && !placed.iter().any(|(command, ..)| command.contains("\"a\"")),
         json!({ "condition": whole.condition }),
     );
     let spec_text = serde_json::to_string(&whole).unwrap_or_default();
@@ -151,9 +199,16 @@ async fn goal_from_plan() {
         }),
     );
     j.guard(
-        "only phase 2's criteria: its boxes and the evaluator, no phase 1 command",
+        "only phase 2's criteria: its command, its boxes and the evaluator, no phase 1 command",
         phase.checks
             == [
+                GoalCheck::Command {
+                    command: DIR_COMMAND.into(),
+                    timeout_secs: 600,
+                    label: Some("The root is a directory".into()),
+                    cwd: None,
+                    phases: vec!["2".into()],
+                },
                 GoalCheck::PlanBoxes {
                     plan_path: plan_path.clone(),
                     phase: Some("2".into()),
@@ -183,7 +238,14 @@ async fn goal_from_plan() {
         range.work_prompt == format!("/implement_plan {plan_path} phases 1-2 consecutively")
             && range.source_phase.as_deref() == Some("1-2")
             && boxes == [Some("1"), Some("2")]
-            && kinds(&range) == ["command", "plan_boxes", "plan_boxes", "evaluator"],
+            && kinds(&range)
+                == [
+                    "command",
+                    "command",
+                    "plan_boxes",
+                    "plan_boxes",
+                    "evaluator",
+                ],
         json!({
             "workPrompt": range.work_prompt,
             "sourcePhase": range.source_phase,
@@ -262,11 +324,61 @@ async fn goal_from_plan() {
     let third_command = result_of(&detail, 3, GoalCheckKind::Command);
     j.guard(
         "the third iteration's command passes and its boxes are still open",
-        third.as_ref().and_then(|r| r.reason.as_deref()) == Some("2 of 2 automated boxes open")
+        third.as_ref().and_then(|r| r.reason.as_deref()) == Some("8 of 8 automated boxes open")
             && third_command.as_ref().map(|r| r.outcome) == Some(GoalCheckOutcome::Pass),
         json!({
             "boxes": third.as_ref().map(|r| (r.outcome.as_str(), r.reason.clone())),
             "command": third_command.as_ref().map(|r| r.outcome.as_str()),
+        }),
+    );
+    let first_commands: Vec<(String, String, Option<String>)> = detail
+        .iterations
+        .iter()
+        .find(|i| i.n == 1)
+        .map(|i| {
+            i.results
+                .iter()
+                .filter(|r| r.kind == GoalCheckKind::Command)
+                .map(|r| {
+                    (
+                        r.label.clone(),
+                        r.outcome.as_str().to_string(),
+                        r.phase.clone(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let ran = |label: &str, outcome: &str, phase: &str| {
+        (
+            label.to_string(),
+            outcome.to_string(),
+            Some(phase.to_string()),
+        )
+    };
+    j.guard(
+        "the app's checks pass from the first iteration, run in app/, and each result names its first phase",
+        first_commands
+            == [
+                ran("Counter reaches 3", "fail", "1"),
+                ran("The root is a directory", "pass", "2"),
+                ran("Marker is in the app dir", "pass", "3"),
+                ran("The app is a directory", "pass", "3"),
+                ran(FENCED_LABEL, "pass", "3"),
+            ],
+        json!({ "first": first_commands }),
+    );
+    let opening = user_lines(&sandbox, &goal.session_id)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    j.guard(
+        "the first prompt says where each check runs",
+        opening.contains("Marker is in the app dir (command, run in app)")
+            && opening.contains("Counter reaches 3 (command)"),
+        json!({
+            "namesApp": opening.contains("Marker is in the app dir (command, run in app)"),
+            "rootPlain": opening.contains("Counter reaches 3 (command)"),
         }),
     );
     j.guard(
@@ -322,6 +434,29 @@ async fn goal_from_plan() {
         json!({ "evaluator": reply.as_ref().map(|r| (r.outcome.as_str(), r.reason.clone())) }),
     );
     clear(&sandbox, "evaluator");
+
+    j.step("a check whose directory is missing fails by its name");
+    let later = start_new(
+        &mut j,
+        &c,
+        &ws,
+        Stage::General,
+        &plan_path,
+        missing_dir_spec(),
+        "LATER",
+    )
+    .await;
+    let detail = wait_goal(&c, &later.id, |d| d.goal.status != GoalStatus::Running).await;
+    let missing = result_of(&detail, 1, GoalCheckKind::Command);
+    j.guard(
+        "the check fails rather than errors, so the goal is not broken, and its reason names the directory",
+        missing.as_ref().map(|r| r.outcome) == Some(GoalCheckOutcome::Fail)
+            && missing
+                .as_ref()
+                .and_then(|r| r.reason.as_deref())
+                .is_some_and(|reason| reason.contains("not-yet")),
+        json!({ "result": missing.as_ref().map(|r| (r.outcome.as_str(), r.reason.clone())) }),
+    );
 
     j.step("the validation summary rides the one-shot");
     control(&sandbox, "validation-summary", SUMMARY);
@@ -380,6 +515,22 @@ fn kinds(spec: &GoalSpec) -> Vec<&'static str> {
         .collect()
 }
 
+/// Each command check's command, directory and phases, in order.
+fn command_places(spec: &GoalSpec) -> Vec<(String, Option<String>, Vec<String>)> {
+    spec.checks
+        .iter()
+        .filter_map(|check| match check {
+            GoalCheck::Command {
+                command,
+                cwd,
+                phases,
+                ..
+            } => Some((command.clone(), cwd.clone(), phases.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 fn evaluator_spec() -> GoalSpec {
     GoalSpec {
         condition: "E2E_EVALUATOR_REPLY".into(),
@@ -392,6 +543,8 @@ fn evaluator_spec() -> GoalSpec {
                 command: "true".into(),
                 timeout_secs: 60,
                 label: None,
+                cwd: None,
+                phases: vec![],
             },
             GoalCheck::Evaluator { model: None },
         ],
@@ -402,6 +555,47 @@ fn evaluator_spec() -> GoalSpec {
             max_active_secs: 3600,
         },
     }
+}
+
+/// One check in a directory the repo doesn't have yet, as a plan's later phase might create.
+fn missing_dir_spec() -> GoalSpec {
+    GoalSpec {
+        condition: "E2E_MISSING_DIR".into(),
+        work_prompt: "Raise the counter.".into(),
+        source: GoalSource::Composer,
+        source_ref: None,
+        source_phase: None,
+        checks: vec![GoalCheck::Command {
+            command: "true".into(),
+            timeout_secs: 60,
+            label: Some("Later".into()),
+            cwd: Some("not-yet".into()),
+            phases: vec![],
+        }],
+        limits: GoalLimits {
+            max_iterations: 1,
+            max_cost_usd: Some(10.0),
+            max_tokens: None,
+            max_active_secs: 3600,
+        },
+    }
+}
+
+/// The text of each user message the stub read from stdin, in order.
+fn user_lines(sandbox: &Sandbox, session_id: &str) -> Vec<String> {
+    std::fs::read_to_string(
+        sandbox
+            .root
+            .join("goal-control")
+            .join(session_id)
+            .join("stdin.log"),
+    )
+    .unwrap_or_default()
+    .lines()
+    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    .filter(|line| line["type"] == "user")
+    .filter_map(|line| line["message"]["content"].as_str().map(str::to_string))
+    .collect()
 }
 
 async fn start_new(

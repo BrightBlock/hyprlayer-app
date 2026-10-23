@@ -13,11 +13,13 @@ import { useBootstrap, useReview, useWorkstreams } from "@/lib/queries";
 import type { PlanTracker } from "@/features/plan/planTracker";
 import { usePlanTracker } from "@/features/plan/usePlanTracker";
 import type { ReadyCardProps } from "@/features/session/readyCardSlot";
+import { useSessionGoalRow } from "@/features/session/sessionGoal";
 import { restoreSessionIfNeeded, useSession } from "@/features/session/sessionStore";
 import { openSessionTab, sessionPermissionMode } from "@/features/session/workstreamTabs";
 import type { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 
 import { FixUntilMetButton, ImplementUntilValidatedButton } from "./goalActions";
+import { goalOwnsNextStep } from "./GoalHandoff";
 import { useValidateFlow, type ValidateFlow } from "./validateFlow";
 import { useImplementSessionFor } from "./validateStep";
 
@@ -65,8 +67,15 @@ function AfterImplement({
   // get_review creates the review row, writes the exclude file and ingests notes.
   const review = useReview(workstreamId, flow.built).data;
   const tracker = plan.tracker;
+  const goal = useSessionGoalRow(implementId, workstreamId);
 
-  if (!tracker || !flow.built || !review?.files.files.length || review.status === "approved") return null;
+  // Past validation, the card stays while the agent works and refreshes when it finishes.
+  const reviewing = flow.phase === "done" || flow.phase === "skipped";
+  if (!tracker || !(flow.built || reviewing) || !review?.files.files.length || review.status === "approved") {
+    return null;
+  }
+  // The met goal's card offers this step itself.
+  if (goalOwnsNextStep(goal, flow.step ?? null)) return null;
   if (flow.phase === "choosing") {
     return (
       <div className={CARD}>
@@ -220,11 +229,13 @@ function ReviewCard({
           Review changes
           {reviewChord && <ChordHint chord={reviewChord} className="text-meta opacity-70" />}
         </Button>
-        <Button size="sm" disabled={!git.canShip} busy={git.shipping} onClick={git.doShip}>
-          <Icon name="ship" size="sm" />
-          Ship
-          {shipChord && <ChordHint chord={shipChord} className="text-meta opacity-70" />}
-        </Button>
+        <span title={git.shipBlocked ?? undefined}>
+          <Button size="sm" disabled={!git.canShip} busy={git.shipping} onClick={git.doShip}>
+            <Icon name="ship" size="sm" />
+            Ship
+            {shipChord && <ChordHint chord={shipChord} className="text-meta opacity-70" />}
+          </Button>
+        </span>
       </div>
     </div>
   );

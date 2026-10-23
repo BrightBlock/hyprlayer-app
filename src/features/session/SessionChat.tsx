@@ -1079,10 +1079,13 @@ export function SessionChat({
     [sid, workstreamId, sessionGoal, goalIterations],
   );
   const resumeGoal = useResumeGoal();
+  const worktreePath = view.item.worktreePath;
   const readyCard = useMemo(
     () =>
-      sid && (sessionStage === "implement" || sessionStage === "validate") ? { sessionId: sid, workstreamId } : null,
-    [sid, sessionStage, workstreamId],
+      sid && (sessionStage === "implement" || sessionStage === "validate")
+        ? { sessionId: sid, workstreamId, worktreePath }
+        : null,
+    [sid, sessionStage, workstreamId, worktreePath],
   );
   const detectedHandoffPath = useMemo(
     () => (sessionItems ? detectHandoffDoc(sessionItems, writtenDocs, dismissedSet) : null),
@@ -1518,6 +1521,7 @@ export function SessionChat({
               prompt={prompt}
               sync={transcriptSync}
               ready={readyCard}
+              turnOpen={session ? isBusy(session) : false}
               goal={transcriptGoal}
               queued={session?.queued}
               canWithdrawQueued={!usingCodex}
