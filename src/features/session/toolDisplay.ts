@@ -103,6 +103,11 @@ export function toolSummary(name: string, input: string): string {
   }
 }
 
+export function subagentType(name: string, input: string): string {
+  if (name !== "Agent" && name !== "Task") return "";
+  return str(parseToolInput(input)?.subagent_type);
+}
+
 const FILE_PATH_TOOLS = new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"]);
 
 export function toolFilePath(name: string, input: string): string | null {

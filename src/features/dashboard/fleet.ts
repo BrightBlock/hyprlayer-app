@@ -12,7 +12,7 @@ import {
   type SessionEntry,
   type WorkstreamActivity,
 } from "@/features/session/sessionStore";
-import { baseName, toolSummary } from "@/features/session/toolDisplay";
+import { baseName, subagentType, toolSummary } from "@/features/session/toolDisplay";
 import type { TranscriptItem } from "@/features/session/transcript";
 
 export type FleetActivity = Exclude<WorkstreamActivity, "idle">;
@@ -62,8 +62,11 @@ function toolLine(name: string, input: string): string {
   const verb = FILE_VERBS[name];
   if (verb) return summary ? `${verb} ${baseName(summary)}` : verb;
   if (name === "Bash" || name === "BashOutput") return summary || "running a command";
-  if (name === "Task" || name === "Agent")
-    return summary ? `subagent: ${summary}` : "running a subagent";
+  if (name === "Task" || name === "Agent") {
+    const type = subagentType(name, input);
+    if (type && summary !== type) return `${type}: ${summary}`;
+    return type ? `running ${type}` : summary ? `subagent: ${summary}` : "running a subagent";
+  }
   return summary ? `${name} · ${summary}` : name;
 }
 

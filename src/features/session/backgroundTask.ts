@@ -1,6 +1,6 @@
 
 import type { TranscriptItem } from "./transcript";
-import { parseToolInput } from "./toolDisplay";
+import { parseToolInput, subagentType } from "./toolDisplay";
 
 export type BackgroundTaskStatus = "running" | "awaiting";
 
@@ -73,7 +73,8 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
       const parsed = parseToolInput(item.input);
       const descStr = str(parsed?.description);
       const cmdStr = str(parsed?.command);
-      const label = descStr || firstLine(cmdStr);
+      const type = subagentType(item.name, item.input);
+      const label = type && descStr ? `${type}: ${descStr}` : type || descStr || firstLine(cmdStr);
 
       if (!tasks.has(item.toolUseId)) {
         tasks.set(item.toolUseId, {

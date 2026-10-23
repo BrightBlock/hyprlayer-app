@@ -57,6 +57,7 @@ import {
   parseToolInput,
   prettyToolInput,
   resultPreview,
+  subagentType,
   toolFilePath,
   toolSummary,
 } from "./toolDisplay";
@@ -390,7 +391,7 @@ function ToolArg({ name, input }: { name: string; input: string }) {
     return <FileCard path={filePath} diff={editDiffFromTool(name, input)} />;
   }
   const summary = toolSummary(name, input);
-  if (!summary) return null;
+  if (!summary || summary === subagentType(name, input)) return null;
   return (
     <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
       {summary}
@@ -430,7 +431,9 @@ const ToolBlock = memo(function ToolBlock({
         className={`${STEP_ROW} cursor-pointer`}
       >
         <ToolStatusDot result={result} busy={busy} running={bgRunning} />
-        <span className="shrink-0 font-mono font-medium text-ink">{item.name}</span>
+        <span className="shrink-0 font-mono font-medium text-ink">
+          {subagentType(item.name, item.input) || item.name}
+        </span>
         <ToolArg name={item.name} input={item.input} />
         <StepChevron open={open} reveal="hover" />
       </div>
@@ -1273,6 +1276,7 @@ function SubagentBlock({
   prompt: PromptHandlers;
 }) {
   const [open, setOpen] = useState(false);
+  const type = subagentType(item.name, item.input);
   const summary = toolSummary(item.name, item.input);
   const toolCount = childItems.filter((c) => c.kind === "tool").length;
   const result = item.result;
@@ -1283,10 +1287,10 @@ function SubagentBlock({
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
         <span className="shrink-0 font-mono font-medium text-ink">
-          {item.name === "Workflow" ? "Workflow" : "Subagent"}
+          {item.name === "Workflow" ? "Workflow" : type || "Subagent"}
         </span>
         <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
-          {summary}
+          {summary !== type && summary}
         </span>
         {toolCount > 0 && (
           <span className="shrink-0 text-ink-dim">
