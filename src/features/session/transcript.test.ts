@@ -279,6 +279,39 @@ describe("tool blocks", () => {
     expect(hasPendingPermission(view)).toBe(true);
     expect(view.state).toBe("awaiting_permission");
   });
+
+  function twoSameNameAsks(): SessionView {
+    let view = initialSessionView("running");
+    for (const t of ["t1", "t2"]) {
+      view = reduceEvent(view, { kind: "toolUse", id: t, name: "getJiraIssue", input: "{}", parentId: null });
+    }
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "r1", toolName: "getJiraIssue", input: "{}", toolUseId: "t1" });
+    return reduceEvent(view, { kind: "permissionAsk", requestId: "r2", toolName: "getJiraIssue", input: "{}", toolUseId: "t2" });
+  }
+
+  const decisionOf = (view: SessionView, requestId: string) =>
+    view.items.find((it) => it.kind === "permission" && it.requestId === requestId);
+
+  it("a result settles only its own ask when parallel asks share a tool name", () => {
+    let view = resolvePermission(twoSameNameAsks(), "r1", "allow");
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "t1", content: "403", isError: true, parentId: null });
+    expect(decisionOf(view, "r2")).toMatchObject({ decision: null });
+    expect(view.state).toBe("awaiting_permission");
+    expect(isWorking(view)).toBe(false);
+  });
+
+  it("a result answered elsewhere settles the ask for that tool use, not the latest", () => {
+    const view = reduceEvent(twoSameNameAsks(), {
+      kind: "toolResult",
+      toolUseId: "t1",
+      content: "ok",
+      isError: false,
+      parentId: null,
+    });
+    expect(decisionOf(view, "r1")).toMatchObject({ decision: "allow" });
+    expect(decisionOf(view, "r2")).toMatchObject({ decision: null });
+    expect(view.state).toBe("awaiting_permission");
+  });
 });
 
 describe("thinking", () => {

@@ -1471,7 +1471,13 @@ export async function allowForSession(
   if (current && !current.autoAllow.includes(toolName)) {
     setEntry(sessionId, { ...current, autoAllow: [...current.autoAllow, toolName] });
   }
+  const siblings = current
+    ? openPermissionRequestIds(current, toolName).filter((id) => id !== requestId)
+    : [];
   await respondPermission(sessionId, requestId, true, null);
+  // Parallel calls to the same tool are already waiting; the rule covers them too.
+  if (!channels.has(sessionId)) return;
+  await Promise.all(siblings.map((id) => respondPermission(sessionId, id, true, null)));
 }
 
 export async function interruptSession(sessionId: string): Promise<void> {
@@ -1498,8 +1504,9 @@ export async function stopSession(
       if (parked.pendingQuestion) {
         await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, {}));
       } else {
-        const requestId = openPermissionRequestId(parked);
-        if (requestId) await unwrap(commands.respondPermission(sessionId, requestId, false, null));
+        for (const requestId of openPermissionRequestIds(parked)) {
+          await unwrap(commands.respondPermission(sessionId, requestId, false, null));
+        }
       }
     } catch (e) {
       log.warn("session", `declining ${sessionId}'s open prompt failed`, e);
@@ -1521,12 +1528,17 @@ export async function stopSession(
   }
 }
 
-function openPermissionRequestId(entry: SessionEntry): string | null {
-  if (entry.pendingPermission) return entry.pendingPermission.requestId;
-  for (const it of entry.items) {
-    if (it.kind === "permission" && it.decision === null) return it.requestId;
+function openPermissionRequestIds(entry: SessionEntry, toolName?: string): string[] {
+  const ids = entry.items.flatMap((it) =>
+    it.kind === "permission" && it.decision === null && (toolName === undefined || it.toolName === toolName)
+      ? [it.requestId]
+      : [],
+  );
+  const pending = entry.pendingPermission;
+  if (pending && !ids.includes(pending.requestId) && (toolName === undefined || pending.toolName === toolName)) {
+    ids.push(pending.requestId);
   }
-  return null;
+  return ids;
 }
 
 function waitForView(

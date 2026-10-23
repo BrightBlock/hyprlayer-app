@@ -1245,6 +1245,7 @@ fn row_mutation_for(event: &SessionEvent) -> SessionRowMutation {
         SessionEvent::Init {
             provider_session_id,
             model,
+            ..
         } => SessionRowMutation {
             provider_session_id: FieldOp::Set(provider_session_id.clone()),
             model: model.clone().map(FieldOp::Set).unwrap_or(FieldOp::Clear),

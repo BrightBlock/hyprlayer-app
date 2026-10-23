@@ -100,16 +100,18 @@ fn carries_parent_tool_use_id_for_subagents() {
 
 #[test]
 fn parses_a_permission_request() {
-    let line = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}"#;
+    let line = r#"{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}}"#;
     match parse_line(line) {
         ParsedLine::CanUseTool {
             request_id,
             tool_name,
             input,
+            tool_use_id,
         } => {
             assert_eq!(request_id, "req-1");
             assert_eq!(tool_name, "Bash");
             assert_eq!(input["command"], "ls");
+            assert_eq!(tool_use_id.as_deref(), Some("toolu_1"));
         }
         other => panic!("expected CanUseTool, got {other:?}"),
     }

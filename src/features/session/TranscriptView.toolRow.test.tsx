@@ -107,6 +107,37 @@ describe("a still-running background subagent row", () => {
   });
 });
 
+const bash = (id: string, command: string, parentId: string | null = null): TranscriptItem => ({
+  kind: "tool",
+  id,
+  toolUseId: `toolu_${id}`,
+  name: "Bash",
+  input: JSON.stringify({ command }),
+  result: { content: "ok", isError: false },
+  parentId,
+});
+
+describe("consecutive tool calls", () => {
+  it("each show as their own row in the main transcript", () => {
+    renderTranscript([bash("b1", "git status"), bash("b2", "git diff"), bash("b3", "pnpm test")]);
+    expect(screen.queryByText(/tool calls/)).toBeNull();
+    for (const command of ["git status", "git diff", "pnpm test"]) {
+      expect(screen.getByText(command)).toBeTruthy();
+    }
+  });
+
+  it("still fold together inside a subagent", () => {
+    renderTranscript([
+      asyncAgentSpawn,
+      bash("c1", "git status", "toolu_agent"),
+      bash("c2", "git diff", "toolu_agent"),
+    ]);
+    fireEvent.click(screen.getByText("Subagent"));
+    expect(screen.getByText("2 tool calls")).toBeTruthy();
+    expect(screen.queryByText("git status")).toBeNull();
+  });
+});
+
 const askCard = (
   decision: "expired" | null,
   toolName = "Bash",

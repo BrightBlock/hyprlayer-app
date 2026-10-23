@@ -649,6 +649,7 @@ impl OpenCodeDriver {
         let _ = events.send(SessionEvent::Init {
             provider_session_id: session_id.clone(),
             model: model.as_ref().map(|(p, m)| format!("{p}/{m}")),
+            mcp_servers: None,
         });
 
         if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
@@ -1134,6 +1135,7 @@ impl Translator {
             "message.part.updated" => self.handle_part(p.get("part").unwrap_or(&Value::Null)),
             "permission.asked" => vec![SessionEvent::PermissionAsk {
                 request_id: str_field(p, "id"),
+                tool_use_id: None,
                 tool_name: {
                     let t = str_field(p, "permission");
                     if t.is_empty() {

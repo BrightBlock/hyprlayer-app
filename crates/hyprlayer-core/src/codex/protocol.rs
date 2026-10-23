@@ -447,6 +447,7 @@ impl Translator {
                 }
                 vec![SessionEvent::PermissionAsk {
                     request_id,
+                    tool_use_id: None,
                     tool_name: "Bash".into(),
                     input: Value::Object(input).to_string(),
                 }]
@@ -464,6 +465,7 @@ impl Translator {
                 }
                 vec![SessionEvent::PermissionAsk {
                     request_id,
+                    tool_use_id: None,
                     tool_name: "Edit".into(),
                     input: Value::Object(input).to_string(),
                 }]
@@ -482,6 +484,7 @@ impl Translator {
                 );
                 vec![SessionEvent::PermissionAsk {
                     request_id,
+                    tool_use_id: None,
                     tool_name: "Permissions".into(),
                     input: json!({
                         "cwd": p.get("cwd").cloned().unwrap_or(Value::Null),
@@ -515,6 +518,7 @@ impl Translator {
                 };
                 vec![SessionEvent::PermissionAsk {
                     request_id,
+                    tool_use_id: None,
                     tool_name: tool_name.into(),
                     input: input.to_string(),
                 }]
@@ -1286,6 +1290,7 @@ mod tests {
                 request_id,
                 tool_name,
                 input,
+                ..
             } => {
                 assert_eq!(request_id, "child-thread:child-edit");
                 assert_eq!(tool_name, "Edit");
@@ -1816,6 +1821,7 @@ mod tests {
                 request_id,
                 tool_name,
                 input,
+                ..
             } => {
                 assert_eq!(request_id, "c5");
                 assert_eq!(tool_name, "Bash");

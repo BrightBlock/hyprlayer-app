@@ -60,8 +60,10 @@ import {
   prettyToolInput,
   resultPreview,
   subagentType,
+  toolDisplayName,
   toolFilePath,
   toolSummary,
+  type ToolNaming,
 } from "./toolDisplay";
 
 export type PermissionHandlers = {
@@ -351,6 +353,12 @@ const OpenBackgroundIds = createContext<ReadonlySet<string>>(new Set<string>());
 
 const JumpTargetId = createContext<string | null>(null);
 
+const ToolNames = createContext<ToolNaming | undefined>(undefined);
+
+function useToolName(name: string): string {
+  return toolDisplayName(name, useContext(ToolNames));
+}
+
 function useBackgroundRunning(toolUseId: string): boolean {
   return useContext(OpenBackgroundIds).has(toolUseId);
 }
@@ -411,6 +419,7 @@ const ToolBlock = memo(function ToolBlock({
   const [open, setOpen] = useState(false);
   const result = item.result;
   const bgRunning = useBackgroundRunning(item.toolUseId);
+  const toolName = useToolName(item.name);
   const isFileTool = toolFilePath(item.name, item.input) !== null;
   const isSkill = item.name === "Skill";
   const preview =
@@ -433,8 +442,8 @@ const ToolBlock = memo(function ToolBlock({
         className={`${STEP_ROW} cursor-pointer`}
       >
         <ToolStatusDot result={result} busy={busy} running={bgRunning} />
-        <span className="shrink-0 font-mono font-medium text-ink">
-          {subagentType(item.name, item.input) || item.name}
+        <span className="min-w-0 truncate font-mono font-medium text-ink" title={toolName}>
+          {subagentType(item.name, item.input) || toolName}
         </span>
         <ToolArg name={item.name} input={item.input} />
         <StepChevron open={open} reveal="hover" />
@@ -507,12 +516,13 @@ const PermissionCard = memo(function PermissionCard({
 }) {
   const filePath = toolFilePath(item.toolName, item.input);
   const summary = toolSummary(item.toolName, item.input);
+  const toolName = useToolName(item.toolName);
 
   if (item.decision === "expired") {
     return (
       <div className="flex min-w-0 items-center gap-2 text-ui text-ink-dim">
         <Icon name="permissions" size="xs" />
-        <span className="shrink-0 font-mono text-ink">{item.toolName}</span>
+        <span className="shrink-0 font-mono text-ink">{toolName}</span>
         {summary && <span className="min-w-0 truncate font-mono">{summary}</span>}
         <span className="shrink-0">· expired</span>
       </div>
@@ -523,7 +533,7 @@ const PermissionCard = memo(function PermissionCard({
     return (
       <div className="flex items-center gap-2 text-ui text-ink-dim">
         <Icon name="permissions" size="xs" />
-        <span className="font-mono text-ink">{item.toolName}</span>
+        <span className="font-mono text-ink">{toolName}</span>
         <span>· denied</span>
       </div>
     );
@@ -536,7 +546,7 @@ const PermissionCard = memo(function PermissionCard({
         <span className="text-body font-medium">Permission required</span>
       </div>
       <div className="mt-2 flex items-center gap-1.5 rounded-control border border-warn/20 bg-surface/40 px-2.5 py-2">
-        <span className="shrink-0 text-meta font-medium text-ink">{item.toolName}</span>
+        <span className="shrink-0 text-meta font-medium text-ink">{toolName}</span>
         {filePath ? (
           <FileChip path={filePath} />
         ) : (
@@ -1186,6 +1196,7 @@ function SubagentBlock({
         <div className="mt-1 space-y-2 border-l border-edge pl-3">
           <ItemList
             items={childItems}
+            foldTools
             childrenByParent={childrenByParent}
             busy={busy}
             permission={permission}
@@ -1246,6 +1257,7 @@ function ItemList({
   divider = null,
   anchors = NO_ANCHORS,
   goalChecks = false,
+  foldTools = false,
 }: {
   items: TranscriptItem[];
   childrenByParent: ChildMap;
@@ -1258,6 +1270,8 @@ function ItemList({
   anchors?: Anchor[];
   /** Top level only: a check card closes each goal iteration. */
   goalChecks?: boolean;
+  // A subagent's runs fold; the main transcript shows each call as claude does.
+  foldTools?: boolean;
 }) {
   const planCards = useContext(PlanCardsContext);
   const selfClientId = useContext(SelfClientId);
@@ -1266,7 +1280,9 @@ function ItemList({
   const keepOut = (it: TranscriptItem) =>
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
   const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
-  const units = toUnits(visible, keepOut);
+  const units: Unit[] = foldTools
+    ? toUnits(visible, keepOut)
+    : visible.map((item) => ({ type: "single", item }));
 
   const renderUnit = (unit: Unit, i: number): ReactNode => {
     const gap = gapForKinds(i > 0 ? unitKind(units[i - 1]) : undefined, unitKind(unit));
@@ -1449,6 +1465,7 @@ type Props = {
   /** A turn is running or held on a prompt, so it has not finished editing. */
   turnOpen?: boolean;
   goal?: TranscriptGoal | null;
+  toolNaming?: ToolNaming;
   queued?: QueuedMessage[];
   /** Whether the harness can give back a message it already holds (codex cannot). */
   canWithdrawQueued?: boolean;
@@ -1510,6 +1527,7 @@ export const TranscriptView = memo(
       ready = null,
       turnOpen = false,
       goal = null,
+      toolNaming,
       queued = NO_QUEUED,
       canWithdrawQueued = true,
       onCancelQueued,
@@ -1726,22 +1744,24 @@ export const TranscriptView = memo(
             <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
               <SelfClientId.Provider value={sync.selfClientId}>
                 <GoalTranscript.Provider value={goal}>
-                  <ItemList
-                    items={topLevel}
-                    goalChecks
-                    childrenByParent={childrenByParent}
-                    busy={busy}
-                    permission={permission}
-                    prompt={prompt}
-                    freshFromSeq={sync.freshFromSeq}
-                    divider={
-                      divider && {
-                        seq: divider.seq,
-                        node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
+                  <ToolNames.Provider value={toolNaming}>
+                    <ItemList
+                      items={topLevel}
+                      goalChecks
+                      childrenByParent={childrenByParent}
+                      busy={busy}
+                      permission={permission}
+                      prompt={prompt}
+                      freshFromSeq={sync.freshFromSeq}
+                      divider={
+                        divider && {
+                          seq: divider.seq,
+                          node: <SyncDivider device={divider.device} rootRef={scrollRef} onPassed={onDividerPassed} />,
+                        }
                       }
-                    }
-                    anchors={anchors}
-                  />
+                      anchors={anchors}
+                    />
+                  </ToolNames.Provider>
                 </GoalTranscript.Provider>
               </SelfClientId.Provider>
             </JumpTargetId.Provider>

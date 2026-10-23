@@ -160,6 +160,9 @@ pub enum SessionEvent {
         #[serde(rename = "claudeSessionId")]
         provider_session_id: String,
         model: Option<String>,
+        // Tool ids carry a lossy form of these; the UI names MCP tools by the real one.
+        #[serde(default)]
+        mcp_servers: Option<Vec<String>>,
     },
     UserMessage {
         text: String,
@@ -201,6 +204,9 @@ pub enum SessionEvent {
         request_id: String,
         tool_name: String,
         input: String,
+        // Parallel asks can share a tool name; only this ties a result to its ask.
+        #[serde(default)]
+        tool_use_id: Option<String>,
     },
     QuestionAsk {
         request_id: String,
@@ -442,11 +448,12 @@ mod tests {
         let json = serde_json::to_string(&SessionEvent::Init {
             provider_session_id: "abc".into(),
             model: None,
+            mcp_servers: None,
         })
         .unwrap();
         assert_eq!(
             json,
-            r#"{"kind":"init","claudeSessionId":"abc","model":null}"#
+            r#"{"kind":"init","claudeSessionId":"abc","model":null,"mcpServers":null}"#
         );
         match serde_json::from_str::<SessionEvent>(&json).unwrap() {
             SessionEvent::Init {

@@ -12,9 +12,47 @@ import {
   parseToolInput,
   prettyToolInput,
   resultPreview,
+  toolDisplayName,
   toolFilePath,
   toolSummary,
 } from "./toolDisplay";
+
+describe("toolDisplayName", () => {
+  const claude = {
+    harness: "claude" as const,
+    mcpServers: ["claude.ai Atlassian Rovo", "@hypothesi/tauri-mcp-server", "plugin:engineering:linear"],
+  };
+
+  it("names a claude MCP tool as claude does, by the server's real name", () => {
+    expect(toolDisplayName("mcp__claude_ai_Atlassian_Rovo__getJiraIssue", claude)).toBe(
+      "claude.ai Atlassian Rovo - getJiraIssue (MCP)",
+    );
+    expect(toolDisplayName("mcp___hypothesi_tauri-mcp-server__webview_execute_js", claude)).toBe(
+      "@hypothesi/tauri-mcp-server - webview_execute_js (MCP)",
+    );
+    expect(toolDisplayName("mcp__plugin_engineering_linear__get_issue", claude)).toBe(
+      "plugin:engineering:linear - get_issue (MCP)",
+    );
+  });
+
+  it("falls back to the id's server segment when claude never listed the server", () => {
+    expect(toolDisplayName("mcp__ynab__list_budgets", claude)).toBe("ynab - list_budgets (MCP)");
+    expect(toolDisplayName("mcp__ynab__list_budgets")).toBe("ynab - list_budgets (MCP)");
+  });
+
+  it("names a codex MCP tool as codex does", () => {
+    expect(toolDisplayName("mcp__linear__create_issue", { harness: "codex", mcpServers: [] })).toBe(
+      "linear.create_issue",
+    );
+  });
+
+  it("leaves built-in tools and malformed MCP names alone", () => {
+    expect(toolDisplayName("Bash", claude)).toBe("Bash");
+    expect(toolDisplayName("mcp__orphan", claude)).toBe("mcp__orphan");
+    expect(toolDisplayName("mcp____tool", claude)).toBe("mcp____tool");
+    expect(toolDisplayName("mcp__server__", claude)).toBe("mcp__server__");
+  });
+});
 
 describe("parseToolInput", () => {
   it("parses a JSON object", () => {

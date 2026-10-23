@@ -506,6 +506,7 @@ async fn a_row_mutation_failure_rolls_back_atomically_and_a_retry_is_safe() {
     let event = SessionEvent::Init {
         provider_session_id: "p1".into(),
         model: Some("m1".into()),
+        mcp_servers: None,
     };
     ingress.send(event.clone()).await.unwrap();
 

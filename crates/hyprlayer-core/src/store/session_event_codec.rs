@@ -185,6 +185,7 @@ mod tests {
             SessionEvent::Init {
                 provider_session_id: "abc".into(),
                 model: Some("claude-opus-4-6".into()),
+                mcp_servers: None,
             },
             SessionEvent::PartialText {
                 text: "hi".into(),

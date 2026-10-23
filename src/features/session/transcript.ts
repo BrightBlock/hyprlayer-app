@@ -174,6 +174,7 @@ export type TranscriptItem =
       requestId: string;
       toolName: string;
       input: string;
+      toolUseId?: string | null;
       decision: PermissionDecision | null;
     } & Sequenced)
   | ({ kind: "error"; id: string; detail: string; raw: string } & Sequenced)
@@ -226,6 +227,7 @@ export type SessionView = {
   contextWindow: number | null;
   model: string | null;
   claudeSessionId: string | null;
+  mcpServers: string[];
   pendingPermission: { requestId: string; toolName: string; input: string } | null;
   pendingQuestion: PendingQuestion | null;
 };
@@ -242,6 +244,7 @@ export function initialSessionView(state: SessionState = "idle"): SessionView {
     contextWindow: null,
     model: null,
     claudeSessionId: null,
+    mcpServers: [],
     pendingPermission: null,
     pendingQuestion: null,
   };
@@ -308,6 +311,7 @@ function settleAnsweredPrompt(
   view: SessionView,
   items: TranscriptItem[],
   toolName: string,
+  toolUseId: string,
 ): SessionView {
   let nextItems = items;
   let pendingPermission = view.pendingPermission;
@@ -318,12 +322,13 @@ function settleAnsweredPrompt(
   } else {
     for (let i = nextItems.length - 1; i >= 0; i -= 1) {
       const it = nextItems[i];
-      if (it.kind === "permission" && it.decision === null && it.toolName === toolName) {
-        nextItems = nextItems.slice();
-        nextItems[i] = { ...it, decision: "allow" };
-        if (pendingPermission?.requestId === it.requestId) pendingPermission = null;
-        break;
-      }
+      if (it.kind !== "permission" || it.decision !== null) continue;
+      // Asks from older servers carry no tool use id; the name is all they have.
+      if (it.toolUseId ? it.toolUseId !== toolUseId : it.toolName !== toolName) continue;
+      nextItems = nextItems.slice();
+      nextItems[i] = { ...it, decision: "allow" };
+      if (pendingPermission?.requestId === it.requestId) pendingPermission = null;
+      break;
     }
   }
 
@@ -456,6 +461,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
         state: "running",
         claudeSessionId: event.claudeSessionId || view.claudeSessionId,
         model: event.model ?? view.model,
+        mcpServers: event.mcpServers ?? view.mcpServers,
         contextWindow: event.model && event.model !== view.model ? null : view.contextWindow,
         contextTokens: fresh ? null : view.contextTokens,
       };
@@ -656,7 +662,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
           items[i] = { ...item, result: { content: event.content, isError: event.isError } };
           return event.parentId
             ? { ...view, items }
-            : settleAnsweredPrompt(view, items, item.name);
+            : settleAnsweredPrompt(view, items, item.name, event.toolUseId);
         }
       }
       return {
@@ -685,6 +691,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
             requestId: event.requestId,
             toolName: event.toolName,
             input: event.input,
+            toolUseId: event.toolUseId ?? null,
             decision: null,
           }),
           true,

@@ -78,7 +78,7 @@ import { permissionModeOption } from "@/lib/domain/permissions";
 import { AgentModePicker } from "./AgentModePicker";
 import { controlsKey, usePublishSessionControls } from "./sessionControls";
 import { formatTokens } from "@/lib/format";
-import { detectHandoffDoc } from "./toolDisplay";
+import { detectHandoffDoc, type ToolNaming } from "./toolDisplay";
 import { useWrittenDocs } from "./writtenDocs";
 import { planRevisions } from "./planRevisions";
 import { PlanCardsContext } from "./planCardSlot";
@@ -1074,6 +1074,12 @@ export function SessionChat({
   );
   const { goal: sessionGoal, detail: goalDetail } = useSessionGoal(sid, workstreamId);
   const goalIterations = goalDetail?.iterations ?? null;
+  const sessionHarness = session?.harness;
+  const mcpServers = session?.mcpServers;
+  const toolNaming = useMemo<ToolNaming>(
+    () => ({ harness: sessionHarness, mcpServers: mcpServers ?? [] }),
+    [sessionHarness, mcpServers],
+  );
   const transcriptGoal = useMemo<TranscriptGoal | null>(
     () => (sid && sessionGoal ? { sessionId: sid, workstreamId, goal: sessionGoal, iterations: goalIterations } : null),
     [sid, workstreamId, sessionGoal, goalIterations],
@@ -1523,6 +1529,7 @@ export function SessionChat({
               ready={readyCard}
               turnOpen={session ? isBusy(session) : false}
               goal={transcriptGoal}
+              toolNaming={toolNaming}
               queued={session?.queued}
               canWithdrawQueued={!usingCodex}
               onCancelQueued={onCancelQueued}

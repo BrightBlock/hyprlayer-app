@@ -693,10 +693,12 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
         ParsedLine::Init {
             claude_session_id,
             model,
+            mcp_servers,
             ..
         } => vec![SessionEvent::Init {
             provider_session_id: claude_session_id.unwrap_or_default(),
             model,
+            mcp_servers: Some(mcp_servers),
         }],
         ParsedLine::PartialText { text, parent_id } => {
             vec![SessionEvent::PartialText { text, parent_id }]
@@ -741,6 +743,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             request_id,
             tool_name,
             input,
+            tool_use_id,
         } => {
             let questions = (tool_name == "AskUserQuestion")
                 .then(|| input.get("questions"))
@@ -755,6 +758,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                     request_id,
                     tool_name,
                     input: input.to_string(),
+                    tool_use_id,
                 }],
             }
         }
@@ -1060,6 +1064,7 @@ mod tests {
             request_id: "req-1".into(),
             tool_name: "AskUserQuestion".into(),
             input: json!({ "questions": questions }),
+            tool_use_id: None,
         });
         match events.as_slice() {
             [SessionEvent::QuestionAsk {
@@ -1116,6 +1121,7 @@ mod tests {
             request_id: "req-2".into(),
             tool_name: "Bash".into(),
             input: json!({ "command": "ls" }),
+            tool_use_id: None,
         });
         assert!(matches!(
             events.as_slice(),
@@ -1156,6 +1162,7 @@ mod tests {
                 request_id: "req-3".into(),
                 tool_name: "AskUserQuestion".into(),
                 input: bad.clone(),
+                tool_use_id: None,
             });
             assert!(
                 matches!(

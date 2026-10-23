@@ -102,9 +102,11 @@ fn init_row_carries_the_provider_session_id_under_its_legacy_wire_name() {
         SessionEvent::Init {
             provider_session_id,
             model,
+            mcp_servers,
         } => {
             assert_eq!(provider_session_id, "claude-legacy-abc123");
             assert_eq!(model.as_deref(), Some("claude-opus-4-6"));
+            assert_eq!(mcp_servers, None);
         }
         other => panic!("expected Init, got {other:?}"),
     }

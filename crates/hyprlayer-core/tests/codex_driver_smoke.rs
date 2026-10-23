@@ -45,6 +45,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         Ok(Ok(SessionEvent::Init {
             provider_session_id,
             model,
+            ..
         })) => {
             println!("init: thread={provider_session_id} model={model:?}");
             assert!(

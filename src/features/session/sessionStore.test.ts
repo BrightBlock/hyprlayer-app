@@ -99,6 +99,7 @@ vi.mock("../../lib/bindings", () => ({
 const {
   activeWorkstreamIds,
   agentStillWorking,
+  allowForSession,
   answerQuestion,
   endSession,
   restoreSessionIfNeeded,
@@ -479,6 +480,43 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     const entry = entryOf(id);
     expect(entry.pendingPermission).toBeNull();
     expect(isBusy(entry)).toBe(false);
+  });
+
+  function emitParallelAsks(): void {
+    for (const [req, tool] of [
+      ["r1", "getJiraIssue"],
+      ["r2", "getJiraIssue"],
+      ["r3", "Bash"],
+    ] as const) {
+      emit({ kind: "toolUse", id: `t-${req}`, name: tool, input: "{}", parentId: null });
+      emit({ kind: "permissionAsk", requestId: req, toolName: tool, input: "{}", toolUseId: `t-${req}` });
+    }
+  }
+
+  it("allow for this agent answers every open ask for that tool, and only that tool", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emitParallelAsks();
+
+    await allowForSession(id, "r1", "getJiraIssue");
+
+    expect(h.respondPermission).toHaveBeenCalledWith(id, "r1", true, null);
+    expect(h.respondPermission).toHaveBeenCalledWith(id, "r2", true, null);
+    expect(h.respondPermission).not.toHaveBeenCalledWith(id, "r3", expect.anything(), expect.anything());
+    expect(entryOf(id).state).toBe("awaiting_permission");
+  });
+
+  it("stop while parked on parallel asks declines every one of them", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emitParallelAsks();
+
+    await stopSession(id, () => {});
+
+    for (const req of ["r1", "r2", "r3"]) {
+      expect(h.respondPermission).toHaveBeenCalledWith(id, req, false, null);
+    }
+    expect(isBusy(entryOf(id))).toBe(false);
   });
 
   it("stop while parked on a question dismisses it, interrupts, and unlocks", async () => {

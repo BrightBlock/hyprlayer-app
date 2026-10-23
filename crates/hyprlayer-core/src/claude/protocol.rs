@@ -8,6 +8,7 @@ pub enum ParsedLine {
         claude_session_id: Option<String>,
         model: Option<String>,
         tools: Vec<String>,
+        mcp_servers: Vec<String>,
     },
     System {
         subtype: String,
@@ -32,6 +33,7 @@ pub enum ParsedLine {
         request_id: String,
         tool_name: String,
         input: Value,
+        tool_use_id: Option<String>,
     },
     Result {
         is_error: bool,
@@ -107,6 +109,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
                     claude_session_id: str_field(&v, "session_id"),
                     model: str_field(&v, "model"),
                     tools: string_list(v.get("tools")),
+                    mcp_servers: mcp_server_names(v.get("mcp_servers")),
                 },
                 "compact_boundary" => {
                     let meta = v.get("compact_metadata");
@@ -297,6 +300,7 @@ fn parse_can_use_tool(v: &Value) -> Option<ParsedLine> {
         request_id: str_field(v, "request_id")?,
         tool_name: request_field(request, "tool_name")?.to_string(),
         input: request.get("input").cloned().unwrap_or(Value::Null),
+        tool_use_id: str_field(request, "tool_use_id"),
     })
 }
 
@@ -384,6 +388,12 @@ fn context_windows(model_usage: Option<&Value>) -> Vec<(String, u32)> {
             (window > 0).then(|| (model.clone(), window.min(u32::MAX as u64) as u32))
         })
         .collect()
+}
+
+fn mcp_server_names(v: Option<&Value>) -> Vec<String> {
+    v.and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(|s| str_field(s, "name")).collect())
+        .unwrap_or_default()
 }
 
 fn string_list(v: Option<&Value>) -> Vec<String> {

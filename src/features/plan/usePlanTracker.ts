@@ -11,7 +11,7 @@ import { planTaskTimeline } from "@/features/session/planTasks";
 import { useSession, type SessionEntry } from "@/features/session/sessionStore";
 import { runningSubagent, type RunningSubagent } from "@/features/session/subagent";
 import { describeState, isBusy, isTerminal, isWorking } from "@/features/session/transcript";
-import { parseToolInput } from "@/features/session/toolDisplay";
+import { parseToolInput, toolDisplayName } from "@/features/session/toolDisplay";
 import { useWrittenDocs } from "@/features/session/writtenDocs";
 import { basename } from "@/lib/path";
 
@@ -36,7 +36,7 @@ export function sessionSignalOf(entry: SessionEntry): SessionSignal {
     return {
       stage: entry.stage,
       activity: "waiting",
-      reason: `${label} · ${entry.pendingPermission.toolName}`,
+      reason: `${label} · ${toolDisplayName(entry.pendingPermission.toolName, entry)}`,
       failureItemId: null,
       subagent,
     };

@@ -187,6 +187,7 @@ impl CodexDriver {
         let _ = driver.events.send(SessionEvent::Init {
             provider_session_id: driver.thread_id.clone(),
             model,
+            mcp_servers: None,
         });
 
         Ok((driver, primary_rx))

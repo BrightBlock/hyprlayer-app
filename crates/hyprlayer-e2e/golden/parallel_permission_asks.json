@@ -1,0 +1,98 @@
+{
+  "scenario": "parallel_permission_asks",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "servers": [
+              "claude.ai Atlassian Rovo"
+            ]
+          },
+          "guard": "init names the MCP servers as claude lists them",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asks": [
+              [
+                "req-a",
+                "toolu_a"
+              ],
+              [
+                "req-b",
+                "toolu_b"
+              ]
+            ]
+          },
+          "guard": "each ask names its own tool use",
+          "ok": true
+        }
+      ],
+      "step": "two calls to one tool ask at once"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "results": [
+              "toolu_a"
+            ],
+            "state": "awaiting_permission"
+          },
+          "guard": "only the answered call returns; the session still waits on the other",
+          "ok": true
+        }
+      ],
+      "step": "answer one ask"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "results": [
+              "toolu_b"
+            ]
+          },
+          "guard": "the second call returns and the turn ends",
+          "ok": true
+        }
+      ],
+      "step": "answer the other ask"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asks": [
+              [
+                "req-a",
+                "toolu_a"
+              ],
+              [
+                "req-b",
+                "toolu_b"
+              ]
+            ]
+          },
+          "guard": "the stored asks keep their tool use ids",
+          "ok": true
+        }
+      ],
+      "step": "replay the log"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

@@ -12,7 +12,13 @@ import {
   type SessionEntry,
   type WorkstreamActivity,
 } from "@/features/session/sessionStore";
-import { baseName, subagentType, toolSummary } from "@/features/session/toolDisplay";
+import {
+  baseName,
+  subagentType,
+  toolDisplayName,
+  toolSummary,
+  type ToolNaming,
+} from "@/features/session/toolDisplay";
 import type { TranscriptItem } from "@/features/session/transcript";
 
 export type FleetActivity = Exclude<WorkstreamActivity, "idle">;
@@ -57,7 +63,7 @@ const FILE_VERBS: Record<string, string> = {
   NotebookEdit: "editing",
 };
 
-function toolLine(name: string, input: string): string {
+function toolLine(name: string, input: string, naming?: ToolNaming): string {
   const summary = toolSummary(name, input);
   const verb = FILE_VERBS[name];
   if (verb) return summary ? `${verb} ${baseName(summary)}` : verb;
@@ -67,13 +73,14 @@ function toolLine(name: string, input: string): string {
     if (type && summary !== type) return `${type}: ${summary}`;
     return type ? `running ${type}` : summary ? `subagent: ${summary}` : "running a subagent";
   }
-  return summary ? `${name} · ${summary}` : name;
+  const label = toolDisplayName(name, naming);
+  return summary ? `${label} · ${summary}` : label;
 }
 
-export function workingLine(items: readonly TranscriptItem[]): string {
+export function workingLine(items: readonly TranscriptItem[], naming?: ToolNaming): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === "tool" && !item.parentId) return toolLine(item.name, item.input);
+    if (item.kind === "tool" && !item.parentId) return toolLine(item.name, item.input, naming);
     if (item.kind === "user") break;
   }
   return "thinking…";
@@ -89,7 +96,8 @@ function pendingLine(entry: SessionEntry): string {
     );
   if (!ask) return "waiting on a permission";
   const summary = toolSummary(ask.toolName, ask.input);
-  return summary ? `${ask.toolName} · ${summary}` : `${ask.toolName} permission`;
+  const label = toolDisplayName(ask.toolName, entry);
+  return summary ? `${label} · ${summary}` : `${label} permission`;
 }
 
 export type Picked = {
@@ -131,7 +139,7 @@ export function selectFleetKeys(
       activity === "needs-you"
         ? pendingLine(b.entry)
         : activity === "working"
-          ? workingLine(b.entry.items)
+          ? workingLine(b.entry.items, b.entry)
           : activity === "background"
             ? "background tasks running"
             : "";

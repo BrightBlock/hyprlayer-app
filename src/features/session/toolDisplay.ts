@@ -1,4 +1,5 @@
 
+import type { Harness } from "@/lib/bindings";
 import type { DocType } from "@/lib/domain/docs";
 import { diffStrings, type PatchLine } from "@/lib/diff";
 
@@ -49,6 +50,24 @@ function firstLine(value: string): string {
   const trimmed = value.trim();
   const nl = trimmed.indexOf("\n");
   return nl === -1 ? trimmed : `${trimmed.slice(0, nl).trim()} …`;
+}
+
+export type ToolNaming = { harness?: Harness | null; mcpServers: readonly string[] };
+
+// claude's own server-name normalization for `mcp__<server>__<tool>` ids.
+function mcpIdSegment(server: string): string {
+  const id = server.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return server.startsWith("claude.ai ") ? id.replace(/_+/g, "_").replace(/^_|_$/g, "") : id;
+}
+
+/** An MCP tool as its harness's own UI writes it; any other tool keeps its name. */
+export function toolDisplayName(name: string, naming?: ToolNaming): string {
+  const [prefix, server, ...rest] = name.split("__");
+  const tool = rest.join("__");
+  if (prefix !== "mcp" || !server || !tool) return name;
+  if (naming?.harness === "codex") return `${server}.${tool}`;
+  const listed = naming?.mcpServers.find((s) => mcpIdSegment(s) === server);
+  return `${listed ?? server} - ${tool} (MCP)`;
 }
 
 export function toolSummary(name: string, input: string): string {
