@@ -2,16 +2,22 @@
   "versions": [
     {
       "version": "0.8.16",
-      "date": "",
-      "summary": "Fixes the context meter and compact summary, and confirmations open inside the app instead of as native macOS alerts.",
+      "date": "2026-10-23",
+      "summary": "Goals keep agents working until checks pass, with clearer tool calls and context controls.",
       "notes": [
+        "Start a goal with /goal or the goal button to keep an agent working until its checks pass. Set limits for iterations, active time, and cost or tokens; pause, resume, or stop it from the Goal view. Works with Claude, Codex, and OpenCode.",
+        "Plans can now Build until met or Implement until validated, and validation findings offer Fix until met. Check results appear in the transcript and Goal view; plan checks run in the directory the plan names.",
+        "Each tool call now has its own row in the main transcript, MCP tools use their server names, and running subagents show their type.",
+        "Fixed parallel permission prompts settling the wrong tool call. Allow for session also answers open prompts for that tool, and stopping a session dismisses every pending prompt.",
+        "Outdated review notes now stay beside the code, folded like resolved notes. Fixed terminal theme detection for Claude in PTY tabs.",
         "Fixed the context meter still showing the pre-compaction fill after running /compact. It now drops to the size Claude reports for the compacted conversation, which leaves out the system prompt and tools, so the next turn reports a higher figure. Sessions compacted before this fix hide the meter until their next turn.",
         "Fixed the summary from a manual /compact never reaching the compact divider. The divider now expands to show it, as it does after an auto-compact.",
         "Fixed /clear leaving the old fill on the context meter and adding an \"unrecognized stream-json line\" error to the transcript. The meter now stays hidden until Claude reports the new conversation's size.",
         "Fixed notes Claude adds for itself, such as image size hints, resume nudges after a cut-off reply and hook feedback, showing up in the transcript as its replies.",
         "Clear context, Switch model, Restart session and Delete prompt now ask in an in-app dialog instead of a native alert. Escape or Cancel leaves everything as it was.",
         "Cmd/Ctrl+Shift+K now does what the Clear context button does: it asks first while the session is running, then starts fresh. It used to end the session without asking.",
-        "When another process holds this profile, Hyprlayer now opens and explains it in the server dialog, with a Relaunch button, instead of showing an alert and quitting."
+        "When another process holds this profile, Hyprlayer now opens and explains it in the server dialog, with a Relaunch button, instead of showing an alert and quitting.",
+        "This version needs hyprlayer-server 0.8.14. Remote hosts on an older server must update before connecting."
       ]
     },
     {
