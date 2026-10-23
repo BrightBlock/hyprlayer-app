@@ -7,7 +7,8 @@ import { commands, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { writeTerminal } from "@/lib/terminal/terminalInput";
 import {
   attachTerminalClipboard,
   useTerminalThemeSync,
@@ -73,6 +74,7 @@ export function TerminalTab({
     idRef.current = id;
     void (async () => {
       if (id) {
+        engine.bind(id);
         const ok = await unwrap(commands.terminalAttach(id, newChannel()));
         if (!ok) {
           id = undefined;
@@ -95,6 +97,7 @@ export function TerminalTab({
         id = opened;
         idRef.current = id;
         onTerminalId(id);
+        engine.bind(id);
       }
       if (id && !disposed) {
         lastGrid = engine.fit();
@@ -107,7 +110,7 @@ export function TerminalTab({
     });
 
     const unsubInput = engine.onInput((data) => {
-      if (id) void commands.terminalWrite(id, strToB64(data));
+      if (id) writeTerminal(id, data);
     });
 
     let raf = 0;

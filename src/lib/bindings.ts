@@ -228,6 +228,7 @@ export const commands = {
 	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	defaultShellName: () => typedError<string, AppError>(__TAURI_INVOKE("default_shell_name")),
+	setTerminalColorScheme: (dark: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_terminal_color_scheme", { dark })),
 	getScripts: (projectPath: string) => typedError<ScriptSettings, AppError>(__TAURI_INVOKE("get_scripts", { projectPath })),
 	setScripts: (projectPath: string, scripts: ScriptSettings) => typedError<null, AppError>(__TAURI_INVOKE("set_scripts", { projectPath, scripts })),
 	scriptRun: (workstreamId: string, kind: ScriptKind, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("script_run", { workstreamId, kind, cols, rows, onEvent })),

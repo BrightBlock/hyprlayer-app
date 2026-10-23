@@ -1,9 +1,14 @@
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { log } from "@/lib/log";
+import { b64ToBytes } from "./terminalCodec";
+import { isDarkBackground } from "./terminalTheme";
 
 export type TerminalTheme = ITheme;
 
@@ -11,6 +16,8 @@ export type TerminalGrid = { cols: number; rows: number };
 
 export interface TerminalEngine {
   mount(host: HTMLElement): void;
+  /** Ties the engine to a pty, so what its capped replay lost carries over from earlier engines. */
+  bind(terminalId: string): void;
   write(data: Uint8Array | string): void;
   onInput(cb: (data: string) => void): () => void;
   onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void;
@@ -32,6 +39,28 @@ export interface TerminalEngine {
 const FIT_RETRY_LIMIT = 20;
 
 const EMPTY_GRID: TerminalGrid = { cols: 0, rows: 0 };
+
+const THEME_REPORTS_MODE = 2031;
+const COLOR_SCHEME_QUERY = 996;
+const CLIPBOARD_OSC = 52;
+// The browsers' transient-activation window: room for a copy-on-select or `/copy` to come back over ssh.
+const USER_GESTURE_MS = 5000;
+
+// Ptys whose program asked for theme reports; its `CSI ? 2031 h` can scroll out of a replay.
+const themeReporting = new Set<string>();
+
+// xterm's defaults go through confirm() and window.open(), and neither reaches the browser here.
+function openLink(_event: MouseEvent, uri: string): void {
+  void openUrl(uri).catch((e) => log.warn("terminal", "opening a terminal link failed", e));
+}
+
+function copyFromProgram(base64: string): void {
+  try {
+    const text = new TextDecoder().decode(b64ToBytes(base64));
+    void writeText(text).catch((e) => log.warn("terminal", "copying for a program failed", e));
+  } catch {
+  }
+}
 
 type XtermCore = {
   _core: {
@@ -63,6 +92,12 @@ class XtermEngine implements TerminalEngine {
   private disposed = false;
   private fitRetries = 0;
   private fontFamilyRequest = "";
+  private dark: boolean;
+  private reportsTheme = false;
+  private terminalId?: string;
+  // Set by bind: the replay that follows is not yet written, then not yet parsed.
+  private replay: "awaiting" | "parsing" | null = null;
+  private lastGesture = -Infinity;
 
   constructor(opts: {
     fontSize: number;
@@ -82,14 +117,45 @@ class XtermEngine implements TerminalEngine {
       scrollback: 5000,
       convertEol: false,
       allowProposedApi: true,
+      // Option-drag still selects when a TUI has taken the mouse.
+      macOptionClickForcesSelection: true,
+      linkHandler: { activate: openLink },
     });
     this.fitAddon = new FitAddon();
     this.term.loadAddon(this.fitAddon);
+    this.term.loadAddon(new WebLinksAddon(openLink));
+    this.dark = isDarkBackground(opts.theme.background);
+    // xterm 5.5 has no DEC mode 2031, so a TUI that follows the terminal's theme never hears it flip.
+    const parser = this.term.parser;
+    parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) =>
+      this.noteThemeReports(params, true),
+    );
+    parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) =>
+      this.noteThemeReports(params, false),
+    );
+    parser.registerCsiHandler({ prefix: "?", final: "n" }, (params) => {
+      if (params[0] !== COLOR_SCHEME_QUERY) return false;
+      this.reportColorScheme();
+      return true;
+    });
+    // How a TUI that owns the mouse copies, and claude's only way over ssh. Only a write the user
+    // just asked for lands: not one replayed on remount, not a program's own. Reads are refused.
+    parser.registerOscHandler(CLIPBOARD_OSC, (data) => {
+      const payload = data.slice(data.indexOf(";") + 1);
+      if (payload && payload !== "?" && this.userJustActed()) copyFromProgram(payload);
+      return true;
+    });
   }
 
   mount(host: HTMLElement): void {
     if (!this.term) return;
     this.term.open(host);
+    const noteGesture = () => {
+      this.lastGesture = performance.now();
+    };
+    for (const type of ["keydown", "mousedown", "mouseup"]) {
+      this.term.element?.addEventListener(type, noteGesture, true);
+    }
     try {
       const webgl = new WebglAddon();
       webgl.onContextLoss(() => {
@@ -134,8 +200,30 @@ class XtermEngine implements TerminalEngine {
     return [...screen.querySelectorAll("canvas")].find((c) => !c.className) ?? null;
   }
 
+  bind(terminalId: string): void {
+    // Output parsed before the first bind is this pty's; a previous pty's mode is not.
+    if (this.terminalId !== undefined && this.terminalId !== terminalId) this.reportsTheme = false;
+    this.terminalId = terminalId;
+    this.setThemeReports(this.reportsTheme || themeReporting.has(terminalId));
+    this.replay = "awaiting";
+  }
+
   write(data: Uint8Array | string): void {
-    this.term?.write(data);
+    if (!this.term) return;
+    if (this.replay !== "awaiting") {
+      this.term.write(data);
+      return;
+    }
+    this.replay = "parsing";
+    this.term.write(data, () => {
+      this.replay = null;
+      // The theme may have flipped while no engine showed this pty.
+      if (this.reportsTheme) this.reportColorScheme();
+    });
+  }
+
+  private userJustActed(): boolean {
+    return this.replay === null && performance.now() - this.lastGesture < USER_GESTURE_MS;
   }
 
   onInput(cb: (data: string) => void): () => void {
@@ -201,6 +289,28 @@ class XtermEngine implements TerminalEngine {
   setTheme(theme: TerminalTheme): void {
     if (!this.term) return;
     this.term.options.theme = theme;
+    const dark = isDarkBackground(theme.background);
+    if (dark === this.dark) return;
+    this.dark = dark;
+    // After the recolor, so a program that re-queries OSC 11 reads the new background.
+    if (this.reportsTheme) this.reportColorScheme();
+  }
+
+  private noteThemeReports(params: (number | number[])[], on: boolean): boolean {
+    if (params.includes(THEME_REPORTS_MODE)) this.setThemeReports(on);
+    return false;
+  }
+
+  private setThemeReports(on: boolean): void {
+    this.reportsTheme = on;
+    if (!this.terminalId) return;
+    if (on) themeReporting.add(this.terminalId);
+    else themeReporting.delete(this.terminalId);
+  }
+
+  // 1 is dark, 2 is light.
+  private reportColorScheme(): void {
+    this.term?.input(`\x1b[?997;${this.dark ? 1 : 2}n`, false);
   }
 
   focus(): void {
@@ -225,6 +335,7 @@ class XtermEngine implements TerminalEngine {
 
   reset(): void {
     this.term?.reset();
+    this.setThemeReports(false);
   }
 
   // Dropping both references is what actually frees the scrollback buffer: an

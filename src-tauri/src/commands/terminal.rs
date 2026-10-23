@@ -1,3 +1,6 @@
+use std::collections::BTreeMap;
+use std::sync::{Mutex, PoisonError};
+
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_server::client::EventStream;
 use tauri::ipc::Channel;
@@ -5,6 +8,38 @@ use tauri::State;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
+
+/// Whether the desktop's terminals are dark, kept so a reconnect can resend it.
+#[derive(Default)]
+pub struct TerminalColors(Mutex<Option<bool>>);
+
+impl TerminalColors {
+    pub fn overlay(&self) -> Option<(String, String)> {
+        let dark = (*self.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        Some(colorfgbg(dark))
+    }
+}
+
+// rxvt's "fg;bg" palette indices, which claude's "auto" theme and vim read before any OSC 11 reply.
+fn colorfgbg(dark: bool) -> (String, String) {
+    let value = if dark { "15;0" } else { "0;15" };
+    ("COLORFGBG".to_string(), value.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_terminal_color_scheme(
+    state: State<'_, AppState>,
+    colors: State<'_, TerminalColors>,
+    dark: bool,
+) -> CmdResult<()> {
+    *colors.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(dark);
+    state
+        .client()?
+        .set_env_overlay(BTreeMap::from([colorfgbg(dark)]))
+        .await
+        .map_err(AppError::from)
+}
 
 #[tauri::command]
 #[specta::specta]

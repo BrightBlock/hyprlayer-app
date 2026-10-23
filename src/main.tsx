@@ -48,6 +48,7 @@ import { setupQueryFocus } from "./lib/queryFocus";
 import { router } from "./router";
 import { initAppearance } from "./lib/appearance";
 import { initTheme } from "./lib/theme";
+import { syncTerminalColorScheme } from "./lib/terminal/terminalChrome";
 import { useUpdate } from "./lib/updater";
 import { setupNotificationActions } from "./lib/notifications";
 import "@fontsource-variable/inter/wght.css";
@@ -64,6 +65,7 @@ import "./index.css";
 
 installGlobalHandlers();
 initTheme();
+syncTerminalColorScheme();
 initAppearance();
 registerEventBridge(scriptRunBridge);
 registerEventBridge(writtenDocsBridge);

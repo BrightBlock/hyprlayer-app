@@ -208,6 +208,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::spawn_cli_terminal,
             commands::terminal::spawn_shell_terminal,
             commands::terminal::default_shell_name,
+            commands::terminal::set_terminal_color_scheme,
             commands::scripts::get_scripts,
             commands::scripts::set_scripts,
             commands::scripts::script_run,
@@ -330,7 +331,9 @@ pub(crate) async fn attach_client(
     // Re-injected on every connect (ADR-0009 §7): a daemonized server has none
     // of these on its own — a respawned local server least of all — and without
     // SSH_AUTH_SOCK every `git push`/`gh` call would fail as ADR-0005 predicts.
-    let overlay = env_overlay_from_desktop(target);
+    let colors = handle.state::<commands::terminal::TerminalColors>();
+    let mut overlay = env_overlay_from_desktop(target);
+    overlay.extend(colors.overlay());
     log::info!(
         "sending the server {} ({})",
         overlay.keys().cloned().collect::<Vec<_>>().join(", "),
@@ -462,6 +465,7 @@ pub fn run() {
             let app_log_dir = app.path().app_log_dir()?;
             // Before any `attach_client`, which announces it.
             app.manage(client_identity::load_or_create(&app_config_dir));
+            app.manage(commands::terminal::TerminalColors::default());
             app.manage(commands::account::SignInFlight::default());
             let ssh = ssh::Ssh::new(ssh::SshSetup::for_app(&app_data_dir));
             forward_ssh_prompts(app.handle().clone(), &ssh);

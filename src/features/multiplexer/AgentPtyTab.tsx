@@ -7,7 +7,8 @@ import { Spinner } from "@/components/ui";
 import { monoFontStack } from "@/lib/appearance";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
-import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { writeTerminal } from "@/lib/terminal/terminalInput";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import {
   attachTerminalClipboard,
@@ -161,6 +162,7 @@ export function AgentPtyTab({
       if (disposed || !id) return;
       idRef.current = id;
       onTerminalId(id);
+      eng.bind(id);
 
       await unwrap(commands.terminalAttach(id, newChannel())).catch(() => false);
       if (disposed) return;
@@ -190,6 +192,7 @@ export function AgentPtyTab({
         if (disposed || !newId) return;
         idRef.current = newId;
         onTerminalId(newId);
+        eng.bind(newId);
         setAgentBypass(workstreamId, shellId, opts.bypass);
         onBypassChange?.(opts.bypass);
         await unwrap(commands.terminalAttach(newId, newChannel())).catch(() => false);
@@ -200,7 +203,7 @@ export function AgentPtyTab({
     };
 
     const unsubInput = eng.onInput((data) => {
-      if (idRef.current) void commands.terminalWrite(idRef.current, strToB64(data));
+      if (idRef.current) writeTerminal(idRef.current, data);
     });
 
     const unsubKey = eng.onKey(({ domEvent }) => {

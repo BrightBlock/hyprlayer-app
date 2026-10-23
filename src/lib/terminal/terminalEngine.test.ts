@@ -9,6 +9,10 @@ class FakeTerminal {
   rows = 24;
   options: Record<string, unknown> = {};
   element: HTMLElement | null = null;
+  parser = {
+    registerCsiHandler: () => ({ dispose() {} }),
+    registerOscHandler: () => ({ dispose() {} }),
+  };
   private selection = "";
 
   loadAddon(addon: { activate?: (t: FakeTerminal) => void }) {
@@ -35,6 +39,7 @@ class FakeTerminal {
     return this.selection;
   }
   paste() {}
+  input() {}
   attachCustomKeyEventHandler() {}
   reset() {}
   dispose() {
@@ -61,6 +66,11 @@ vi.mock("@xterm/addon-fit", () => ({
       fitAddons.push(a);
       return a as unknown as this;
     }
+  },
+}));
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: class {
+    dispose() {}
   },
 }));
 vi.mock("@xterm/addon-webgl", () => ({

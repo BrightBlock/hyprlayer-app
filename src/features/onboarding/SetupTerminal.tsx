@@ -10,7 +10,8 @@ import {
   useTerminalFontSync,
   useTerminalThemeSync,
 } from "@/lib/terminal/terminalChrome";
-import { b64ToBytes, strToB64 } from "@/lib/terminal/terminalCodec";
+import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { writeTerminal } from "@/lib/terminal/terminalInput";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
@@ -79,7 +80,7 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
 
     const unsubInput = engine.onInput((data) => {
       const id = idRef.current;
-      if (id) void commands.terminalWrite(id, strToB64(data));
+      if (id) writeTerminal(id, data);
     });
 
     let raf = 0;

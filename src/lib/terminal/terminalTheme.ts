@@ -8,6 +8,24 @@ const cssVar = (name: string, fallback: string): string => {
 const ansiVar = (ansi: string, semantic: string | null, fallback: string): string =>
   cssVar(ansi, "") || (semantic ? cssVar(semantic, fallback) : fallback);
 
+function parseRgb(color: string): [number, number, number] | null {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(color.trim())?.[1];
+  if (hex) {
+    const full = hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex;
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as [number, number, number];
+  }
+  const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(color.trim());
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
+}
+
+/** Claude Code's split of an OSC 11 reply, so a theme report never contradicts one. */
+export function isDarkBackground(color: string | undefined): boolean {
+  const rgb = parseRgb(color ?? "");
+  if (!rgb) return true;
+  const [r, g, b] = rgb;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b <= 127.5;
+}
+
 export function xtermThemeFromCss(): ITheme {
   const ink = cssVar("--color-ink", "#e8e6e2");
   const surface = cssVar("--color-surface", "#0c0c0c");

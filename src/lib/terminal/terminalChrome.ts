@@ -1,5 +1,6 @@
 
 import { useEffect, type RefObject } from "react";
+import { isTauri } from "@tauri-apps/api/core";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { monoFontStack, useAppearance } from "@/lib/appearance";
@@ -9,7 +10,24 @@ import { IS_MACOS } from "@/lib/platform";
 import { useThemeStore } from "@/lib/theme";
 import type { TerminalEngine, TerminalGrid } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
-import { xtermThemeFromCss } from "./terminalTheme";
+import { isDarkBackground, xtermThemeFromCss } from "./terminalTheme";
+
+let sentDark: boolean | undefined;
+
+function sendColorScheme(): void {
+  const dark = isDarkBackground(xtermThemeFromCss().background);
+  if (dark === sentDark) return;
+  sentDark = dark;
+  void commands.setTerminalColorScheme(dark).catch(() => {});
+}
+
+/** `COLORFGBG` for every pty spawned from here on, following the theme. Call after `initTheme`. */
+export function syncTerminalColorScheme(): void {
+  if (!isTauri()) return;
+  sendColorScheme();
+  useThemeStore.subscribe(sendColorScheme);
+  window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", sendColorScheme);
+}
 
 export function useTerminalZoom(
   engineRef: RefObject<TerminalEngine | null>,
@@ -71,15 +89,24 @@ export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>
   }, [engineRef]);
 }
 
+// WebKit enables the menu's Copy only for a DOM selection, and xterm keeps its own, so ⌘C is ours too.
+function clipboardKey(e: KeyboardEvent): "c" | "v" | null {
+  const chord = IS_MACOS
+    ? e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey
+    : e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+  const key = e.key.toLowerCase();
+  return chord && (key === "c" || key === "v") ? key : null;
+}
+
 export function attachTerminalClipboard(engine: TerminalEngine): void {
-  if (IS_MACOS) return;
   engine.interceptKeys((e) => {
     if (e.type !== "keydown") return true;
     // xterm maps ctrl+_ to ^_ and stops propagation, which would swallow terminal.zoomOut.
-    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key === "_") return false;
-    if (!e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return true;
-    const key = e.key.toLowerCase();
-    if (key !== "c" && key !== "v") return true;
+    if (!IS_MACOS && e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.key === "_") {
+      return false;
+    }
+    const key = clipboardKey(e);
+    if (!key) return true;
     e.preventDefault();
     e.stopPropagation();
     if (key === "c") {
