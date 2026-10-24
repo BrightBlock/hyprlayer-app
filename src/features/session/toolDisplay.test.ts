@@ -72,7 +72,10 @@ describe("parseToolInput", () => {
 describe("toolSummary", () => {
   it("surfaces the bash command, collapsing to one line", () => {
     expect(toolSummary("Bash", '{"command":"git status"}')).toBe("git status");
-    expect(toolSummary("Bash", '{"command":"line one\\nline two"}')).toBe("line one …");
+    expect(toolSummary("Bash", '{"command":"line one\\nline two"}')).toBe("line one\nline two");
+    expect(toolSummary("Bash", '{"command":"one\\ntwo\\nthree"}')).toBe("one\ntwo…");
+    const long = "git log && ".repeat(30);
+    expect(toolSummary("Bash", JSON.stringify({ command: long }))).toBe(`${long.slice(0, 160).trim()}…`);
   });
 
   it("surfaces file paths for file tools", () => {

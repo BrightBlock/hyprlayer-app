@@ -52,6 +52,20 @@ function firstLine(value: string): string {
   return nl === -1 ? trimmed : `${trimmed.slice(0, nl).trim()} …`;
 }
 
+// Claude Code's own limits for the collapsed Bash header (P3s in 2.1.300).
+const COMMAND_MAX_LINES = 2;
+const COMMAND_MAX_CHARS = 160;
+
+function commandSummary(value: string): string {
+  const command = value.trim();
+  const clipped = command
+    .split("\n")
+    .slice(0, COMMAND_MAX_LINES)
+    .join("\n")
+    .slice(0, COMMAND_MAX_CHARS);
+  return clipped.length < command.length ? `${clipped.trim()}…` : command;
+}
+
 export type ToolNaming = { harness?: Harness | null; mcpServers: readonly string[] };
 
 // claude's own server-name normalization for `mcp__<server>__<tool>` ids.
@@ -76,7 +90,7 @@ export function toolSummary(name: string, input: string): string {
   switch (name) {
     case "Bash":
     case "BashOutput":
-      return firstLine(str(obj.command));
+      return commandSummary(str(obj.command));
     case "Read":
     case "Write":
     case "NotebookEdit":
