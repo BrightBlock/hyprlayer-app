@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.17",
+      "date": "2026-10-24",
+      "summary": "Tool results summarized in the transcript, and fixes for NVIDIA on Linux and CLI detection.",
+      "notes": [
+        "This version works with hyprlayer-server 0.8.14 and later. Server 0.8.15 adds the CLI detection fix below; a host running an older server is updated once it has been idle for two minutes.",
+        "Tool calls in the transcript read as \"Name (args)\" with a one-line result under them, such as \"Found 12 files\" for Glob or \"… +40 lines\" for longer output.",
+        "Fixed Hyprlayer crashing a few seconds after launch on Linux with an NVIDIA GPU and WebKitGTK older than 2.54.2.",
+        "Onboarding now finds the hyprlayer CLI and other required tools installed after the server started, without restarting the app."
+      ]
+    },
+    {
       "version": "0.8.16",
       "date": "2026-10-23",
       "summary": "Goals keep agents working until checks pass, with clearer tool calls and context controls.",
