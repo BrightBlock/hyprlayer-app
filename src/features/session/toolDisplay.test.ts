@@ -134,9 +134,13 @@ describe("toolSummary", () => {
     expect(toolSummary("Workflow", JSON.stringify({ script: nameOnly }))).toBe("audit-deps");
   });
 
-  it("falls back to the first string arg for unknown tools", () => {
-    expect(toolSummary("Mystery", '{"n":1,"label":"hello"}')).toBe("hello");
-    expect(toolSummary("Mystery", '{"n":1}')).toBe("");
+  it("lists every arg for unknown and MCP tools, capped at 160 characters", () => {
+    expect(toolSummary("Mystery", '{"n":1,"label":"hello"}')).toBe('n: 1, label: "hello"');
+    expect(toolSummary("Mystery", '{"text":"a\\nb"}')).toBe('text: "a\\nb"');
+    expect(toolSummary("Mystery", "{}")).toBe("");
+    const long = "x".repeat(300);
+    const summary = toolSummary("mcp__ynab__list_budgets", JSON.stringify({ q: long }));
+    expect(summary).toBe(`${`q: "${long}"`.slice(0, 160)}…`);
   });
 
   it("is empty when input does not parse", () => {

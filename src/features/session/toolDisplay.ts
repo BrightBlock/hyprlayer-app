@@ -66,6 +66,16 @@ function commandSummary(value: string): string {
   return clipped.length < command.length ? `${clipped.trim()}…` : command;
 }
 
+// Claude Code lists every arg for MCP and unknown tools; the cap is ours.
+const ARGS_MAX_CHARS = 160;
+
+function argsSummary(obj: Record<string, unknown>): string {
+  const text = Object.entries(obj)
+    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+    .join(", ");
+  return text.length > ARGS_MAX_CHARS ? `${text.slice(0, ARGS_MAX_CHARS).trim()}…` : text;
+}
+
 export type ToolNaming = { harness?: Harness | null; mcpServers: readonly string[] };
 
 // claude's own server-name normalization for `mcp__<server>__<tool>` ids.
@@ -129,10 +139,8 @@ export function toolSummary(name: string, input: string): string {
     }
     case "KillBash":
       return str(obj.shell_id);
-    default: {
-      const firstString = Object.values(obj).find((v) => typeof v === "string");
-      return typeof firstString === "string" ? firstLine(firstString) : "";
-    }
+    default:
+      return argsSummary(obj);
   }
 }
 
