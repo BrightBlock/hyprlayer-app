@@ -11,6 +11,7 @@ import {
   editDiffFromTool,
   parseToolInput,
   prettyToolInput,
+  resultLine,
   resultPreview,
   toolDisplayName,
   toolFilePath,
@@ -235,6 +236,38 @@ describe("resultPreview", () => {
 
   it("leaves ordinary content untouched", () => {
     expect(resultPreview("Done (12 tool uses)", false)).toBe("Done (12 tool uses)");
+  });
+});
+
+describe("resultLine", () => {
+  it("shows a command's first line and counts the rest", () => {
+    expect(resultLine("Bash", '{"command":"ls"}', "a\n\nb\nc\n", false)).toEqual({ text: "a", more: 2 });
+  });
+
+  it("says a backgrounded command is running rather than echoing the launch notice", () => {
+    expect(
+      resultLine("Bash", '{"command":"x","run_in_background":true}', "Command running in background with ID: b1", false),
+    ).toEqual({ text: "Running in the background", more: 0 });
+  });
+
+  it("counts matches for searches", () => {
+    expect(resultLine("Glob", '{"pattern":"*.ts"}', "/a.ts\n/b.ts\n(Results are truncated.)", false).text).toBe(
+      "Found 2 files",
+    );
+    expect(resultLine("Glob", '{"pattern":"*.ts"}', "No files found", false).text).toBe("No files found");
+    expect(
+      resultLine("Grep", '{"pattern":"x","output_mode":"content"}', "a.rs:1:x\nb.rs:4:x", false),
+    ).toEqual({ text: "Found 2 lines", more: 0 });
+    expect(resultLine("Grep", '{"pattern":"x"}', "Found 3 files\na\nb\nc", false)).toEqual({
+      text: "Found 3 files",
+      more: 0,
+    });
+  });
+
+  it("unwraps a tool error", () => {
+    expect(resultLine("Read", "{}", "<tool_use_error>File does not exist.</tool_use_error>", true).text).toBe(
+      "File does not exist.",
+    );
   });
 });
 

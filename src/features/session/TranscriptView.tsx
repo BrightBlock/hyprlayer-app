@@ -58,7 +58,7 @@ import {
   editDiffFromTool,
   parseToolInput,
   prettyToolInput,
-  resultPreview,
+  resultLine,
   subagentType,
   toolDisplayName,
   toolFilePath,
@@ -326,16 +326,18 @@ function Collapsible({
 
 const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const preview = text.split("\n").find((line) => line.trim() !== "") ?? "";
   return (
     <div className="text-ui">
       <button
         type="button"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className={`${STEP_ROW} text-ink-dim`}
       >
-        <span className="shrink-0 font-medium">Thinking</span>
-        {!open && preview && <span className="min-w-0 flex-1 truncate italic">{preview}</span>}
+        <span aria-hidden="true" className="w-2 shrink-0 text-center">
+          ∴
+        </span>
+        <span className="italic">Thinking</span>
         <StepChevron open={open} reveal="hover" />
       </button>
       {open && (
@@ -395,16 +397,23 @@ function FileChip({ path }: { path: string }) {
   );
 }
 
-function ToolArg({ name, input }: { name: string; input: string }) {
+function ToolCall({ label, name, input }: { label: string; name: string; input: string }) {
   const filePath = toolFilePath(name, input);
-  if (filePath) {
-    return <FileCard path={filePath} diff={editDiffFromTool(name, input)} />;
-  }
-  const summary = toolSummary(name, input);
-  if (!summary || summary === subagentType(name, input)) return null;
+  const summary = filePath ? "" : toolSummary(name, input);
+  const args = summary && summary !== subagentType(name, input) ? summary : "";
   return (
-    <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
-      {summary}
+    <span className={`flex min-w-0 flex-1 items-center font-mono ${filePath ? "gap-2" : ""}`}>
+      <span className="max-w-[60%] shrink-0 truncate font-medium text-ink" title={label}>
+        {label}
+      </span>
+      {filePath && <FileCard path={filePath} diff={editDiffFromTool(name, input)} />}
+      {args && (
+        <span className="flex min-w-0 text-ink-dim" title={args}>
+          <span aria-hidden="true">(</span>
+          <span className="min-w-0 truncate">{args}</span>
+          <span aria-hidden="true">)</span>
+        </span>
+      )}
     </span>
   );
 }
@@ -422,9 +431,9 @@ const ToolBlock = memo(function ToolBlock({
   const toolName = useToolName(item.name);
   const isFileTool = toolFilePath(item.name, item.input) !== null;
   const isSkill = item.name === "Skill";
-  const preview =
+  const summary =
     result && !((isFileTool || isSkill) && !result.isError)
-      ? resultPreview(result.content, result.isError)
+      ? resultLine(item.name, item.input, result.content, result.isError)
       : null;
 
   return (
@@ -442,23 +451,25 @@ const ToolBlock = memo(function ToolBlock({
         className={`${STEP_ROW} cursor-pointer`}
       >
         <ToolStatusDot result={result} busy={busy} running={bgRunning} />
-        <span className="min-w-0 truncate font-mono font-medium text-ink" title={toolName}>
-          {subagentType(item.name, item.input) || toolName}
-        </span>
-        <ToolArg name={item.name} input={item.input} />
+        <ToolCall
+          label={subagentType(item.name, item.input) || toolName}
+          name={item.name}
+          input={item.input}
+        />
         <StepChevron open={open} reveal="hover" />
       </div>
 
-      {!open && preview && (
-        <div className="flex gap-1.5 pl-4 text-ink-dim">
+      {!open && summary && (
+        <div className="flex gap-2 pl-4 font-mono text-meta text-ink-dim">
           <span aria-hidden="true" className="select-none text-ink-dim/50">
             ⎿
           </span>
-          <span
-            className={`truncate text-meta ${result?.isError ? "text-bad/90" : ""}`}
-          >
-            {preview}
+          <span className={`min-w-0 truncate ${result?.isError ? "text-bad/90" : ""}`}>
+            {summary.text}
           </span>
+          {summary.more > 0 && (
+            <span className="shrink-0 text-ink-dim/60">… +{summary.more} lines</span>
+          )}
         </div>
       )}
 

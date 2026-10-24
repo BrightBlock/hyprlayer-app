@@ -185,6 +185,43 @@ export function resultPreview(content: string, isError: boolean): string {
   return cleaned || (isError ? "(error)" : "(no output)");
 }
 
+export type ResultLine = { text: string; more: number };
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// claude appends pagination and truncation notes in brackets or parens after the matches.
+const isListing = (line: string) => line.trim() !== "" && !/^\s*[[(]/.test(line);
+
+/** The `⎿` line under a tool call, summarized the way Claude Code's own transcript does. */
+export function resultLine(
+  name: string,
+  input: string,
+  content: string,
+  isError: boolean,
+): ResultLine {
+  const lines = content.split("\n").filter((line) => line.trim() !== "");
+  if (!isError) {
+    const obj = parseToolInput(input);
+    if (name === "Bash" && obj?.run_in_background === true) {
+      return { text: "Running in the background", more: 0 };
+    }
+    if (name === "Glob" && lines.length > 0 && !/^No files found/.test(lines[0])) {
+      return { text: `Found ${plural(lines.filter(isListing).length, "file")}`, more: 0 };
+    }
+    if (name === "Grep") {
+      const matches = str(obj?.output_mode) === "content" && !/^No matches found/.test(lines[0] ?? "");
+      return {
+        text: matches
+          ? `Found ${plural(lines.filter(isListing).length, "line")}`
+          : resultPreview(content, false),
+        more: 0,
+      };
+    }
+  }
+  const text = resultPreview(content.replace(/<\/?tool_use_error>/g, ""), isError);
+  return { text, more: Math.max(0, lines.length - 1) };
+}
+
 export function prettyToolInput(input: string): string {
   if (!input) return "";
   try {

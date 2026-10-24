@@ -107,13 +107,18 @@ describe("a still-running background subagent row", () => {
   });
 });
 
-const bash = (id: string, command: string, parentId: string | null = null): TranscriptItem => ({
+const bash = (
+  id: string,
+  command: string,
+  parentId: string | null = null,
+  output = "ok",
+): TranscriptItem => ({
   kind: "tool",
   id,
   toolUseId: `toolu_${id}`,
   name: "Bash",
   input: JSON.stringify({ command }),
-  result: { content: "ok", isError: false },
+  result: { content: output, isError: false },
   parentId,
 });
 
@@ -124,6 +129,13 @@ describe("consecutive tool calls", () => {
     for (const command of ["git status", "git diff", "pnpm test"]) {
       expect(screen.getByText(command)).toBeTruthy();
     }
+  });
+
+  it("read as Name(args) with a summarized result, the way Claude Code prints them", () => {
+    const { container } = renderTranscript([bash("b1", "pnpm test", null, "one\ntwo\nthree")]);
+    expect(container.textContent).toContain("Bash(pnpm test)");
+    expect(screen.getByText("one")).toBeTruthy();
+    expect(screen.getByText("… +2 lines")).toBeTruthy();
   });
 
   it("still fold together inside a subagent", () => {
