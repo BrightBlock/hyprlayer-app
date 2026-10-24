@@ -1,0 +1,48 @@
+{
+  "scenario": "tool_installed_while_away",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "claude": "missing"
+          },
+          "guard": "claude is missing",
+          "ok": true
+        }
+      ],
+      "step": "start without claude"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heard": true
+          },
+          "guard": "the client hears the binaries changed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "claude": "ok"
+          },
+          "guard": "claude is found without a redetect",
+          "ok": true
+        }
+      ],
+      "step": "install claude without the window ever losing focus"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heard": false
+          },
+          "guard": "no binaries event",
+          "ok": true
+        }
+      ],
+      "step": "with nothing missing, the server stays quiet, even on a focus change"
+    }
+  ]
+}

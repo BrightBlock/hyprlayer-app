@@ -22,6 +22,8 @@ pub enum CliInstallMethodId {
     Homebrew,
     Winget,
     Scoop,
+    Yay,
+    Paru,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +34,9 @@ pub struct CliInstallMethod {
     pub label: String,
     pub command: String,
     pub available: bool,
+    /// It asks for a password (an AUR helper's `sudo pacman`), so it runs in a
+    /// terminal the user can type into rather than through `install_hyprlayer_cli`.
+    pub in_terminal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,16 +54,39 @@ struct CliCandidate {
     label: &'static str,
     command: &'static str,
     probe: &'static str,
+    in_terminal: bool,
 }
 
+#[cfg(not(target_os = "windows"))]
+const HOMEBREW: CliCandidate = CliCandidate {
+    id: CliInstallMethodId::Homebrew,
+    label: "Homebrew",
+    command: "brew install brightblock/tap/hyprlayer",
+    probe: "brew",
+    in_terminal: false,
+};
+
 fn cli_install_candidates() -> &'static [CliCandidate] {
-    #[cfg(not(target_os = "windows"))]
-    let candidates: &[CliCandidate] = &[CliCandidate {
-        id: CliInstallMethodId::Homebrew,
-        label: "Homebrew",
-        command: "brew install brightblock/tap/hyprlayer",
-        probe: "brew",
-    }];
+    #[cfg(target_os = "linux")]
+    let candidates: &[CliCandidate] = &[
+        CliCandidate {
+            id: CliInstallMethodId::Yay,
+            label: "yay",
+            command: "yay -S --needed --noconfirm hyprlayer-bin",
+            probe: "yay",
+            in_terminal: true,
+        },
+        CliCandidate {
+            id: CliInstallMethodId::Paru,
+            label: "paru",
+            command: "paru -S --needed --noconfirm hyprlayer-bin",
+            probe: "paru",
+            in_terminal: true,
+        },
+        HOMEBREW,
+    ];
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    let candidates: &[CliCandidate] = &[HOMEBREW];
     #[cfg(target_os = "windows")]
     let candidates: &[CliCandidate] = &[
         CliCandidate {
@@ -66,12 +94,14 @@ fn cli_install_candidates() -> &'static [CliCandidate] {
             label: "winget",
             command: "winget install BrightBlock.Hyprlayer --force --accept-source-agreements --accept-package-agreements",
             probe: "winget",
+            in_terminal: false,
         },
         CliCandidate {
             id: CliInstallMethodId::Scoop,
             label: "Scoop",
             command: "scoop install hyprlayer",
             probe: "scoop",
+            in_terminal: false,
         },
     ];
     candidates
@@ -190,6 +220,7 @@ impl SettingsService<'_> {
                 label: c.label.to_string(),
                 command: c.command.to_string(),
                 available: package_manager_available(&shell, &path, c.probe).await,
+                in_terminal: c.in_terminal,
             });
         }
         methods
@@ -198,7 +229,7 @@ impl SettingsService<'_> {
     pub async fn install_hyprlayer_cli(&self, method: CliInstallMethodId) -> Result<()> {
         let command = cli_install_candidates()
             .iter()
-            .find(|c| c.id == method)
+            .find(|c| c.id == method && !c.in_terminal)
             .map(|c| c.command)
             .ok_or(CoreError::CliInstallUnsupported)?;
 

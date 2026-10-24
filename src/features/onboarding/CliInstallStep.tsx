@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { Badge, Button, Card, Spinner } from "@/components/ui";
@@ -13,6 +14,7 @@ import {
   useSetBinaryOverride,
 } from "@/lib/queries";
 import type { CliInstallMethod } from "@/lib/bindings";
+import { SetupTerminal } from "./SetupTerminal";
 import { CARD_CLASS, CheckDot, Step } from "./StepShell";
 
 const TITLE = "Install the CLI";
@@ -81,13 +83,30 @@ function InstallPicker() {
   const install = useInstallHyprlayerCli();
   const redetect = useRedetectBinaries();
   const override = useSetBinaryOverride();
+  const [terminal, setTerminal] = useState<CliInstallMethod | null>(null);
+  const [terminalExited, setTerminalExited] = useState(false);
 
   const all = methods.data ?? [];
   const available = all.filter((m) => m.available);
   const installingLabel = install.isPending
     ? (all.find((m) => m.id === install.variables)?.label ?? null)
     : null;
-  const installedButMissing = install.isSuccess && !bootstrap.isFetching;
+  const installedButMissing =
+    (install.isSuccess || terminalExited) && !bootstrap.isFetching && !redetect.isPending;
+
+  function startInstall(method: CliInstallMethod) {
+    if (method.inTerminal) {
+      setTerminalExited(false);
+      setTerminal(method);
+    } else {
+      install.mutate(method.id);
+    }
+  }
+
+  function finishTerminal() {
+    setTerminalExited(true);
+    redetect.mutate();
+  }
 
   async function locate() {
     const picked = await open({ title: "Locate hyprlayer" });
@@ -116,7 +135,17 @@ function InstallPicker() {
       )}
 
       <Card className={`${CARD_CLASS} space-y-3`}>
-        {methods.isLoading ? (
+        {terminal ? (
+          <div className="space-y-2">
+            <p className="text-body text-ink-dim">
+              Installing with {terminal.label}. Enter your password if it asks for one.
+            </p>
+            <div className="relative h-64 overflow-hidden rounded-lg border border-edge bg-surface">
+              <SetupTerminal shellCommand={terminal.command} onExit={finishTerminal} className="h-full" />
+            </div>
+            {terminalExited && <Button onClick={() => setTerminal(null)}>Back</Button>}
+          </div>
+        ) : methods.isLoading ? (
           <div className="flex items-center justify-center py-6">
             <Spinner />
           </div>
@@ -134,7 +163,7 @@ function InstallPicker() {
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               {available.map((m) => (
-                <Button key={m.id} variant="primary" className="h-[34px]" onClick={() => install.mutate(m.id)}>
+                <Button key={m.id} variant="primary" className="h-[34px]" onClick={() => startInstall(m)}>
                   Install with {m.label}
                 </Button>
               ))}
@@ -165,6 +194,9 @@ function InstallPicker() {
             ))}
           </div>
         )}
+        <p className="text-ui text-ink-dim">
+          Run one in a terminal, then come back to this window: Hyprlayer finds the CLI on its own.
+        </p>
         <div className="pt-1">
           <Button onClick={() => void locate()} busy={override.isPending}>
             <Icon name="folder" size="sm" /> Locate existing install…

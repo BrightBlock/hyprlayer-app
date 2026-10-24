@@ -684,9 +684,14 @@ export type CliInstallMethod = {
 	label: string,
 	command: string,
 	available: boolean,
+	/**
+	 *  It asks for a password (an AUR helper's `sudo pacman`), so it runs in a
+	 *  terminal the user can type into rather than through `install_hyprlayer_cli`.
+	 */
+	inTerminal: boolean,
 };
 
-export type CliInstallMethodId = "homebrew" | "winget" | "scoop";
+export type CliInstallMethodId = "homebrew" | "winget" | "scoop" | "yay" | "paru";
 
 export type CliUpdateCheck = {
 	current?: string | null,

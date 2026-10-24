@@ -244,6 +244,22 @@ impl Sandbox {
         path
     }
 
+    /// Installs a stub where an `ABSENT` pin already points, as an install the
+    /// running server was not told about would.
+    pub fn install_absent(&self, name: &str, script: &str) -> PathBuf {
+        assert!(ABSENT.contains(&name), "{name} is not pinned absent");
+        let path = self.root.join("absent").join(name);
+        std::fs::create_dir_all(path.parent().expect("absent dir")).expect("create the absent dir");
+        std::fs::write(&path, script).expect("write an installed tool");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("make an installed tool executable");
+        }
+        path
+    }
+
     /// Lets one of the `ABSENT` pins reach a real binary on the host. Only a
     /// scenario that deliberately leaves the sandbox — a live-network test —
     /// should call this; it is the one hole in the "keep the network out" pin.

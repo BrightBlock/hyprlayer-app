@@ -235,9 +235,15 @@ async fn serve() -> i32 {
         tracing::info!("received {signal}; stopping");
         stop.stop();
     });
+    let restart_watch = tokio::spawn(stop_when_unattended_and_missing_binaries(
+        runtime.clone(),
+        server.clients(),
+        server.stop_handle(),
+    ));
     if let Err(e) = server.run().await {
         tracing::error!("server loop failed: {e}");
     }
+    restart_watch.abort();
     let report = runtime.shutdown().await;
     let failures = if report.task_failures.is_empty() {
         String::new()
@@ -251,6 +257,34 @@ async fn serve() -> i32 {
         report.forced_process_count,
     );
     0
+}
+
+/// The desktop leaves its server running when it quits, so one started before
+/// a required tool was installed would never find it. Once the last client
+/// leaves with nothing running here and a required binary still missing, stop:
+/// the next launch spawns a server that looks again with a fresh environment.
+async fn stop_when_unattended_and_missing_binaries(
+    runtime: Arc<HyprlayerRuntime>,
+    clients: Clients,
+    stop: StopHandle,
+) {
+    loop {
+        clients.wait_unattended().await;
+        let missing = runtime.missing_required_binaries_when_idle().await;
+        // The probe can take seconds; a client that announced meanwhile keeps us.
+        if missing.is_empty() || !clients.is_unattended() {
+            tracing::debug!("the last client left; staying up");
+            continue;
+        }
+        let names: Vec<&str> = missing.iter().map(|kind| kind.command_name()).collect();
+        tracing::info!(
+            "stopping: the last client left and {} is still missing; the next launch \
+             starts a server that looks again",
+            names.join(", ")
+        );
+        stop.stop();
+        return;
+    }
 }
 
 /// The desktop's remote transport: `ssh <host> hyprlayer-server relay`, with
@@ -387,6 +421,10 @@ impl SocketServer {
 
     pub fn stop_handle(&self) -> StopHandle {
         StopHandle(self.stop.clone())
+    }
+
+    pub fn clients(&self) -> Clients {
+        self.clients.clone()
     }
 
     /// Accepts until stopped, then aborts every connection. Each connection

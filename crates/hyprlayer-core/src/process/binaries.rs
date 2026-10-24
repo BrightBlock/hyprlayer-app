@@ -90,6 +90,12 @@ pub struct BinaryStatus {
     pub overridden: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryFingerprint {
+    path: PathBuf,
+    modified: Option<std::time::SystemTime>,
+}
+
 pub struct BinaryResolver {
     augmented_path: RwLock<OsString>,
     overrides: RwLock<HashMap<BinaryKind, PathBuf>>,
@@ -171,6 +177,14 @@ impl BinaryResolver {
         which_in_augmented(kind.command_name(), &path, &self.cwd)
     }
 
+    /// Where `kind` resolves to a runnable file, and when that file last
+    /// changed: enough to notice an install without running anything.
+    pub async fn fingerprint(&self, kind: BinaryKind) -> Option<BinaryFingerprint> {
+        let path = self.resolve(kind).await.filter(|p| is_runnable(p))?;
+        let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        Some(BinaryFingerprint { path, modified })
+    }
+
     pub async fn require(&self, kind: BinaryKind) -> Result<PathBuf> {
         let status = self.status(kind).await;
         match (&status.state, &status.path) {
@@ -228,6 +242,9 @@ impl BinaryResolver {
     }
 
     pub async fn redetect(&self) {
+        // A tool installed since startup may sit in a directory only the
+        // shell's rc files add, which the `PATH` captured at startup lacks.
+        self.enrich_with_login_shell().await;
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.cache.write().await.clear();
     }
@@ -404,6 +421,8 @@ fn well_known_dirs(environment: &crate::env::RuntimeEnvironment) -> Vec<PathBuf>
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let platform = [
         Some(PathBuf::from("/usr/local/bin")),
+        Some(PathBuf::from("/home/linuxbrew/.linuxbrew/bin")),
+        Some(home.join(".linuxbrew").join("bin")),
         Some(PathBuf::from("/var/lib/flatpak/exports/bin")),
         Some(PathBuf::from("/snap/bin")),
         Some(home.join(".nix-profile").join("bin")),

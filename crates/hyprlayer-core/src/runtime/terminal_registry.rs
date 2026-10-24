@@ -27,6 +27,10 @@ impl TerminalRegistry {
         self.live.lock().await.remove(id)
     }
 
+    pub async fn is_empty(&self) -> bool {
+        self.live.lock().await.is_empty()
+    }
+
     /// How many were killed, or `None` when the registry was busy and none were.
     pub fn kill_all_blocking(&self) -> Option<usize> {
         let Ok(mut live) = self.live.try_lock() else {

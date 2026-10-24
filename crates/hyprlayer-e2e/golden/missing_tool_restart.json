@@ -1,0 +1,86 @@
+{
+  "scenario": "missing_tool_restart",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "claude": "missing"
+          },
+          "guard": "the sandbox starts without claude",
+          "ok": true
+        }
+      ],
+      "step": "start a server without claude"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "decided": true
+          },
+          "guard": "the server decides to stay up",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": null
+          },
+          "guard": "the server is still running",
+          "ok": true
+        }
+      ],
+      "step": "a terminal keeps a server missing claude running"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the server exits cleanly",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "its log names the missing tool",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listening": false
+          },
+          "guard": "nothing listens on the socket",
+          "ok": true
+        }
+      ],
+      "step": "with the terminal closed, it stops once its last client leaves"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "claude": "ok"
+          },
+          "guard": "claude is found",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "decided": true
+          },
+          "guard": "the server decides to stay up",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": null
+          },
+          "guard": "the server is still running",
+          "ok": true
+        }
+      ],
+      "step": "the next server finds claude installed meanwhile and stays up"
+    }
+  ]
+}

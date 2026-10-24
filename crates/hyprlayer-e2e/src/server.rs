@@ -93,6 +93,14 @@ impl Server {
             .expect("connect to hyprlayer-server")
     }
 
+    /// How the server ended, if it exits on its own within `within`.
+    pub async fn exited(&mut self, within: Duration) -> Option<ExitStatus> {
+        tokio::time::timeout(within, self.child.wait())
+            .await
+            .ok()
+            .map(|status| status.expect("wait for hyprlayer-server"))
+    }
+
     /// Stops the server the way `hyprlayer-server stop` does.
     pub async fn shutdown(mut self, client: &RpcClient) -> Stopped {
         client.request_shutdown().await.expect("request a shutdown");

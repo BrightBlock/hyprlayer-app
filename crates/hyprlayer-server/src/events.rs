@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use hyprlayer_core::{HyprlayerRuntime, RuntimeEvent};
 use hyprlayer_models::ClientRef;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 
 use crate::transport::{encode_control, Control};
@@ -66,6 +66,7 @@ enum Audience {
 #[derive(Clone, Default)]
 pub struct Clients {
     inner: Arc<Mutex<HashMap<u64, Outbound>>>,
+    unattended: Arc<Notify>,
 }
 
 impl Clients {
@@ -83,9 +84,12 @@ impl Clients {
 
     /// Returns the sessions the connection watched, whose viewers may have changed.
     pub fn unregister(&self, conn: u64) -> Vec<String> {
-        let Some(outbound) = self.lock().remove(&conn) else {
+        let mut clients = self.lock();
+        let Some(outbound) = clients.remove(&conn) else {
             return Vec::new();
         };
+        self.note_departure(&clients, outbound.announced.is_some());
+        drop(clients);
         if outbound.dropped > 0 {
             tracing::warn!(
                 "conn {conn}: closed having dropped {} runtime event(s)",
@@ -168,6 +172,7 @@ impl Clients {
             }
         };
         let mut clients = self.lock();
+        let mut lost_announced = false;
         clients.retain(|conn, outbound| {
             if !outbound.receives(&audience) {
                 return true;
@@ -183,7 +188,10 @@ impl Clients {
                     }
                     true
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => false,
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    lost_announced |= outbound.announced.is_some();
+                    false
+                }
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     // The queue is shared with responses and stream frames, so a busy
                     // terminal can fill it for a client that is still reading.
@@ -195,11 +203,32 @@ impl Clients {
                 }
             }
         });
+        self.note_departure(&clients, lost_announced);
+    }
+
+    /// Resolves once the last announced client has gone; a client that never
+    /// announced (`status`, a version probe) neither triggers nor holds it.
+    pub async fn wait_unattended(&self) {
+        self.unattended.notified().await;
+    }
+
+    pub fn is_unattended(&self) -> bool {
+        no_announced(&self.lock())
+    }
+
+    fn note_departure(&self, clients: &HashMap<u64, Outbound>, was_announced: bool) {
+        if was_announced && no_announced(clients) {
+            self.unattended.notify_one();
+        }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Outbound>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+fn no_announced(clients: &HashMap<u64, Outbound>) -> bool {
+    clients.values().all(|o| o.announced.is_none())
 }
 
 fn audience(event: &RuntimeEvent) -> Audience {
@@ -258,5 +287,65 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::ProjectCreateProgress { .. } => "ProjectCreateProgress",
         E::AccountChanged => "AccountChanged",
         E::GoalChanged { .. } => "GoalChanged",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn connect(clients: &Clients, conn: u64, announce: bool) -> mpsc::Receiver<Vec<u8>> {
+        let (tx, rx) = mpsc::channel(8);
+        clients.register(conn, tx);
+        if announce {
+            let client = ClientRef {
+                client_id: format!("client-{conn}"),
+                device: "test".into(),
+            };
+            clients.announce(conn, client, Vec::new());
+        }
+        rx
+    }
+
+    async fn unattended(clients: &Clients) -> bool {
+        tokio::time::timeout(Duration::from_millis(50), clients.wait_unattended())
+            .await
+            .is_ok()
+    }
+
+    #[tokio::test]
+    async fn only_the_last_announced_client_leaving_is_unattended() {
+        let clients = Clients::default();
+        let _a = connect(&clients, 1, true);
+        let _b = connect(&clients, 2, true);
+        let _probe = connect(&clients, 3, false);
+        assert!(!clients.is_unattended());
+
+        clients.unregister(3);
+        assert!(!unattended(&clients).await, "a probe never announced");
+        clients.unregister(1);
+        assert!(
+            !unattended(&clients).await,
+            "another client is still announced"
+        );
+        clients.unregister(2);
+        assert!(unattended(&clients).await);
+        assert!(clients.is_unattended());
+    }
+
+    #[tokio::test]
+    async fn an_announced_client_pruned_by_a_send_is_unattended() {
+        let clients = Clients::default();
+        drop(connect(&clients, 1, true));
+        let _probe = connect(&clients, 2, false);
+
+        clients.send_event(RuntimeEvent::BinariesChanged);
+        assert!(unattended(&clients).await);
+        assert!(
+            clients.is_unattended(),
+            "an unannounced probe does not count"
+        );
     }
 }

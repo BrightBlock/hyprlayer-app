@@ -25,7 +25,7 @@ pub mod terminal_registry;
 pub mod terminals;
 pub mod workstreams;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -44,7 +44,9 @@ use crate::error::Result;
 use crate::index::watcher::WatchHandle;
 use crate::index::ThoughtsIndex;
 use crate::opencode::runtime::OpenCodeManager;
-use crate::process::binaries::BinaryResolver;
+use crate::process::binaries::{
+    BinaryFingerprint, BinaryKind, BinaryResolver, BinaryState, BinaryStatus,
+};
 use crate::settings::SettingsStore;
 use crate::store::Db;
 use crate::worktree::WorktreeManager;
@@ -62,6 +64,7 @@ use terminal_registry::TerminalRegistry;
 
 const EVENT_CAP: usize = 256;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const MISSING_BINARY_POLL: Duration = Duration::from_secs(3);
 const ARCHIVE_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PROVIDER_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const ORPHAN_EXIT_WAIT: Duration = Duration::from_secs(2);
@@ -390,6 +393,43 @@ impl HyprlayerRuntime {
 
         let goal_task = goals::spawn_resumer(self.goal_runners.clone(), Arc::downgrade(self));
 
+        // A required tool is usually installed from a terminal, outside the
+        // app. Coming back to the window re-reads the login shell's `PATH`;
+        // some Linux compositors never report focus, so a missing tool's
+        // likely locations are also checked on a timer, spawning nothing.
+        let rescanner = Arc::downgrade(self);
+        let focused = self.focused.clone();
+        let focus_changed = self.focus_changed.clone();
+        let rescan_task = TrackedTask::spawn(move |stop| async move {
+            let mut was_focused = focused.load(Ordering::Relaxed);
+            let mut seen = HashMap::new();
+            loop {
+                let changed = focus_changed.notified();
+                tokio::pin!(changed);
+                // Registered before the read: `notify_waiters` keeps no permit.
+                changed.as_mut().enable();
+                let now = focused.load(Ordering::Relaxed);
+                let regained = now && !was_focused;
+                was_focused = now;
+                {
+                    let Some(runtime) = rescanner.upgrade() else {
+                        return;
+                    };
+                    if runtime.missing_binary_appeared(&mut seen).await || regained {
+                        tokio::select! {
+                            _ = runtime.rescan_missing_binaries() => {}
+                            _ = stop.notified() => return,
+                        }
+                    }
+                }
+                tokio::select! {
+                    _ = changed => {}
+                    _ = tokio::time::sleep(MISSING_BINARY_POLL) => {}
+                    _ = stop.notified() => return,
+                }
+            }
+        });
+
         self.tasks.lock().await.extend([
             startup_task,
             config_task,
@@ -398,6 +438,7 @@ impl HyprlayerRuntime {
             account_task,
             title_task,
             goal_task,
+            rescan_task,
         ]);
 
         Ok(())
@@ -439,6 +480,74 @@ impl HyprlayerRuntime {
         self.binaries
             .child_env(self.environment.overlay_env())
             .await
+    }
+
+    /// The required binaries missing after a fresh look, or none while a
+    /// terminal or agent session runs here: only an idle runtime offers them
+    /// as a reason to restart.
+    pub async fn missing_required_binaries_when_idle(&self) -> Vec<BinaryKind> {
+        let busy =
+            !self.terminals.is_empty().await || !self.session_registry.live_ids().await.is_empty();
+        if busy {
+            return Vec::new();
+        }
+        self.binaries.redetect().await;
+        self.binaries
+            .status_all()
+            .await
+            .into_iter()
+            .filter(is_missing_required)
+            .map(|status| status.kind)
+            .collect()
+    }
+
+    /// Whether a missing required binary now has a runnable file where it
+    /// would resolve that `seen` has not recorded: a cheap look, no process.
+    async fn missing_binary_appeared(
+        &self,
+        seen: &mut HashMap<BinaryKind, Option<BinaryFingerprint>>,
+    ) -> bool {
+        let missing: Vec<BinaryKind> = self
+            .binaries
+            .status_all()
+            .await
+            .iter()
+            .filter(|status| is_missing_required(status))
+            .map(|status| status.kind)
+            .collect();
+        seen.retain(|kind, _| missing.contains(kind));
+        let mut appeared = false;
+        for kind in missing {
+            let found = self.binaries.fingerprint(kind).await;
+            let changed = seen.get(&kind) != Some(&found);
+            appeared |= changed && found.is_some();
+            seen.insert(kind, found);
+        }
+        appeared
+    }
+
+    /// Looks again only while a required binary is missing, and tells clients
+    /// only when something changed.
+    async fn rescan_missing_binaries(&self) {
+        let before = self.binaries.status_all().await;
+        if !before.iter().any(is_missing_required) {
+            return;
+        }
+        self.binaries.redetect().await;
+        let after = self.binaries.status_all().await;
+        let found = |all: &[BinaryStatus]| {
+            all.iter()
+                .map(|s| (s.kind, s.state.clone(), s.path.clone(), s.version.clone()))
+                .collect::<Vec<_>>()
+        };
+        if found(&before) == found(&after) {
+            return;
+        }
+        log_binaries(&self.binaries).await;
+        let _ = self.events.send(RuntimeEvent::BinariesChanged);
+        if self.migrate_config_if_needed().await {
+            let _ = self.events.send(RuntimeEvent::ConfigChanged);
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RuntimeEvent> {
@@ -698,6 +807,10 @@ impl HyprlayerRuntime {
     pub fn test_db(&self) -> Arc<Db> {
         self.db.clone()
     }
+}
+
+fn is_missing_required(status: &BinaryStatus) -> bool {
+    !status.optional && status.state != BinaryState::Ok
 }
 
 /// Which binary and version each tool resolved to: a daemon sees a different
