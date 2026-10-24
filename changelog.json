@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.18",
+      "date": "2026-10-24",
+      "summary": "Long shell commands no longer fill the transcript.",
+      "notes": [
+        "Shell commands in the transcript now show at most two lines and 160 characters, as in Claude Code. Expand the row to see the full command.",
+        "MCP and other tool calls in the transcript now list all their arguments as key: value pairs, capped at 160 characters, instead of only the first text argument.",
+        "This version works with hyprlayer-server 0.8.14 and later."
+      ]
+    },
+    {
       "version": "0.8.17",
       "date": "2026-10-24",
       "summary": "Tool results summarized in the transcript, and fixes for NVIDIA on Linux and CLI detection.",
