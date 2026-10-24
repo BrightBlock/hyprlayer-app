@@ -2031,6 +2031,7 @@ dependencies = [
  "time",
  "tokio",
  "uuid",
+ "webkit2gtk-sys",
  "which",
 ]
 

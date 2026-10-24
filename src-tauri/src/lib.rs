@@ -13,6 +13,7 @@ pub mod ssh;
 mod state;
 pub mod supervisor;
 mod traffic_lights;
+mod webkit_env;
 mod webview_gestures;
 mod window_geometry;
 
@@ -388,6 +389,7 @@ pub(crate) async fn attach_client(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    webkit_env::apply();
     logging::install_panic_hook();
     let builder = specta_builder();
     // Bound before the builder so the identifier is readable: the profile id
