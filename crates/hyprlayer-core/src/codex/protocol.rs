@@ -601,6 +601,10 @@ impl Translator {
     }
 
     fn item_started(&mut self, item: &Value) -> Vec<SessionEvent> {
+        // codex fills a web search's action in only on completion, and a tool's input is fixed once used.
+        if item.get("type").and_then(Value::as_str) == Some("webSearch") {
+            return Vec::new();
+        }
         let Some((id, name, input)) = tool_call(item) else {
             return Vec::new();
         };
@@ -884,23 +888,53 @@ fn tool_call(item: &Value) -> Option<(String, String, Value)> {
                 .to_string(),
             item.get("arguments").cloned().unwrap_or(json!({})),
         )),
-        "webSearch" => Some((
-            id,
-            "WebSearch".into(),
-            json!({
-                "query": item
-                    .get("action")
-                    .and_then(|a| a.get("query"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-            }),
-        )),
+        "webSearch" => Some(web_search_tool(id, item)),
         "imageView" => Some((
             id,
             "Read".into(),
             json!({ "file_path": item.get("path").cloned().unwrap_or(Value::Null) }),
         )),
         _ => None,
+    }
+}
+
+fn web_search_tool(id: String, item: &Value) -> (String, String, Value) {
+    let action = item.get("action");
+    let field = |key: &str| {
+        action
+            .and_then(|a| a.get(key))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+    };
+    match (field("url"), field("pattern")) {
+        (Some(url), Some(pattern)) => (
+            id,
+            "WebSearch".into(),
+            json!({ "query": format!("'{pattern}' in {url}") }),
+        ),
+        (Some(url), None) => (id, "WebFetch".into(), json!({ "url": url })),
+        _ => {
+            let queries = action
+                .and_then(|a| a.get("queries"))
+                .and_then(Value::as_array)
+                .map(|qs| {
+                    qs.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .filter(|q| !q.is_empty());
+            let query = field("query")
+                .map(str::to_string)
+                .or(queries)
+                .or_else(|| {
+                    item.get("query")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            (id, "WebSearch".into(), json!({ "query": query }))
+        }
     }
 }
 
@@ -995,14 +1029,16 @@ fn tool_result(item: &Value) -> (String, bool) {
                 .unwrap_or_default()
                 .to_string();
             let code = item.get("exitCode").and_then(Value::as_i64);
+            if code == Some(1) && out.is_empty() && only_searches(item) {
+                return ("No matches found".to_string(), false);
+            }
             let is_error = failed || code.is_some_and(|c| c != 0);
-            let text = if out.is_empty() && is_error {
-                match code {
-                    Some(c) => format!("exited with {c}"),
-                    None => "command failed".to_string(),
-                }
-            } else {
-                out
+            // Claude's Bash leads a failed result with the same line.
+            let text = match code.filter(|_| is_error) {
+                Some(c) if out.is_empty() => format!("Exit code {c}"),
+                Some(c) => format!("Exit code {c}\n{out}"),
+                None if out.is_empty() && is_error => "command failed".to_string(),
+                None => out,
             };
             (text, is_error)
         }
@@ -1030,6 +1066,17 @@ fn tool_result(item: &Value) -> (String, bool) {
         }
         _ => (value_to_text(item.get("result")), failed),
     }
+}
+
+fn only_searches(item: &Value) -> bool {
+    item.get("commandActions")
+        .and_then(Value::as_array)
+        .is_some_and(|actions| {
+            !actions.is_empty()
+                && actions
+                    .iter()
+                    .all(|a| a.get("type").and_then(Value::as_str) == Some("search"))
+        })
 }
 
 fn value_to_text(v: Option<&Value>) -> String {
@@ -1483,10 +1530,81 @@ mod tests {
                 is_error, content, ..
             } => {
                 assert!(is_error);
-                assert_eq!(content, "exited with 1");
+                assert_eq!(content, "Exit code 1");
             }
             other => panic!("expected ToolResult, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn failed_command_output_follows_its_exit_code() {
+        let (text, is_error) = tool_result(&json!({ "type": "commandExecution",
+            "status": "failed", "aggregatedOutput": "boom\n", "exitCode": 2 }));
+        assert!(is_error);
+        assert_eq!(text, "Exit code 2\nboom\n");
+    }
+
+    #[test]
+    fn a_search_with_no_matches_is_not_a_failure() {
+        let search = json!({ "type": "commandExecution", "status": "failed",
+            "aggregatedOutput": "", "exitCode": 1,
+            "commandActions": [{ "type": "search", "command": "rg x", "query": "x" }] });
+        assert_eq!(
+            tool_result(&search),
+            ("No matches found".to_string(), false)
+        );
+        let mut other = search.clone();
+        other["commandActions"] = json!([{ "type": "unknown", "command": "false" }]);
+        assert_eq!(tool_result(&other), ("Exit code 1".to_string(), true));
+    }
+
+    #[test]
+    fn a_web_search_appears_once_it_completes_with_its_action() {
+        let mut t = Translator::default();
+        let started = json!({ "item": { "type": "webSearch", "id": "w1", "query": "" } });
+        assert!(t.notification("item/started", &started).is_empty());
+        let out = t.notification(
+            "item/completed",
+            &json!({ "item": { "type": "webSearch", "id": "w1", "query": "",
+                               "action": { "type": "openPage", "url": "https://a.dev" } } }),
+        );
+        assert_eq!(ev_names(&out), ["toolUse", "toolResult"]);
+        match &out[0] {
+            SessionEvent::ToolUse { name, input, .. } => {
+                assert_eq!(name, "WebFetch");
+                assert_eq!(input, r#"{"url":"https://a.dev"}"#);
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn web_search_actions_keep_their_url_and_pattern() {
+        let call = |action: Value| {
+            let (_, name, input) = tool_call(&json!({ "type": "webSearch", "id": "w1",
+                "query": "fallback", "action": action }))
+            .unwrap();
+            (name, input)
+        };
+        assert_eq!(
+            call(json!({ "type": "openPage", "url": "https://a.dev" })),
+            ("WebFetch".into(), json!({ "url": "https://a.dev" }))
+        );
+        assert_eq!(
+            call(json!({ "type": "findInPage", "url": "https://a.dev", "pattern": "x" })),
+            (
+                "WebSearch".into(),
+                json!({ "query": "'x' in https://a.dev" })
+            )
+        );
+        assert_eq!(
+            call(json!({ "type": "search", "queries": ["a", "b"] })),
+            ("WebSearch".into(), json!({ "query": "a, b" }))
+        );
+        assert_eq!(
+            call(json!({ "type": "other" })),
+            ("WebSearch".into(), json!({ "query": "fallback" }))
+        );
     }
 
     #[test]

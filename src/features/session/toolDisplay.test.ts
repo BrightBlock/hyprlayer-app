@@ -9,6 +9,9 @@ import {
   sessionDocs,
   docTitle,
   editDiffFromTool,
+  exploreKind,
+  exploreLabel,
+  isHiddenTool,
   parseToolInput,
   prettyToolInput,
   resultLine,
@@ -47,11 +50,72 @@ describe("toolDisplayName", () => {
     );
   });
 
-  it("leaves built-in tools and malformed MCP names alone", () => {
+  it("names built-in tools as claude's transcript does", () => {
+    expect(toolDisplayName("Grep", claude)).toBe("Search");
+    expect(toolDisplayName("Glob", claude)).toBe("Search");
+    expect(toolDisplayName("Edit", claude)).toBe("Update");
+    expect(toolDisplayName("WebFetch", { harness: "codex", mcpServers: [] })).toBe("Fetch");
+    expect(toolDisplayName("WebSearch")).toBe("Web Search");
+  });
+
+  it("leaves other built-in tools and malformed MCP names alone", () => {
     expect(toolDisplayName("Bash", claude)).toBe("Bash");
     expect(toolDisplayName("mcp__orphan", claude)).toBe("mcp__orphan");
     expect(toolDisplayName("mcp____tool", claude)).toBe("mcp____tool");
     expect(toolDisplayName("mcp__server__", claude)).toBe("mcp__server__");
+  });
+});
+
+describe("isHiddenTool", () => {
+  it("hides bookkeeping calls unless they fail", () => {
+    expect(isHiddenTool({ name: "ToolSearch", result: null })).toBe(true);
+    expect(isHiddenTool({ name: "TodoWrite", result: { isError: false } })).toBe(true);
+    expect(isHiddenTool({ name: "TaskUpdate", result: { isError: true } })).toBe(false);
+    expect(isHiddenTool({ name: "Bash", result: null })).toBe(false);
+  });
+});
+
+describe("exploreKind", () => {
+  const bash = (command: string) => exploreKind("Bash", JSON.stringify({ command }));
+
+  it("folds reads, searches and MCP calls", () => {
+    expect(exploreKind("Read", "{}")).toEqual({ kind: "read" });
+    expect(exploreKind("Glob", "{}")).toEqual({ kind: "search" });
+    expect(exploreKind("mcp__tauri__driver_session", "{}")).toEqual({ kind: "mcp", server: "tauri" });
+    expect(exploreKind("Edit", "{}")).toBeNull();
+  });
+
+  it("folds a shell command only when every part only reads", () => {
+    expect(bash("cd src && rg -n foo | head -20")).toEqual({ kind: "search" });
+    expect(bash("ls -la; cat a.txt 2>/dev/null")).toEqual({ kind: "read" });
+    expect(bash("ls")).toEqual({ kind: "list" });
+    expect(bash("echo hi")).toBeNull();
+    expect(bash("cat a > b")).toBeNull();
+    expect(bash("sed -i s/a/b/ f")).toBeNull();
+    expect(bash("find . -name x -delete")).toBeNull();
+    expect(bash("cat $(git ls-files)")).toBeNull();
+    expect(bash("git status")).toBeNull();
+  });
+
+  it("reads through codex's shell wrapper", () => {
+    const input = JSON.stringify({ command: `/usr/bin/bash -lc 'sed -n '"'"'1,80p'"'"' a.rs'` });
+    expect(exploreKind("Bash", input, { harness: "codex", mcpServers: [] })).toEqual({ kind: "read" });
+    expect(toolSummary("Bash", input, { harness: "codex", mcpServers: [] })).toBe("sed -n '1,80p' a.rs");
+    expect(toolSummary("Bash", input)).toContain("/usr/bin/bash -lc");
+  });
+});
+
+describe("exploreLabel", () => {
+  it("counts each kind the way claude's collapsed row does", () => {
+    const kinds = [
+      { kind: "read" as const },
+      { kind: "read" as const },
+      { kind: "search" as const },
+      { kind: "mcp" as const, server: "tauri" },
+      { kind: "mcp" as const, server: "tauri" },
+    ];
+    expect(exploreLabel(kinds, false)).toBe("Read 2 files, searched for 1 pattern, called tauri 2 times");
+    expect(exploreLabel(kinds.slice(2, 4), true)).toBe("Searching for 1 pattern, calling tauri…");
   });
 });
 
@@ -88,6 +152,10 @@ describe("toolSummary", () => {
     expect(toolSummary("Grep", '{"pattern":"foo"}')).toBe("foo");
     expect(toolSummary("Grep", '{"pattern":"foo","path":"src"}')).toBe("foo  in src");
     expect(toolSummary("Glob", '{"pattern":"**/*.ts"}')).toBe("**/*.ts");
+    const naming = { mcpServers: [], cwd: "/repo/" };
+    expect(toolSummary("Grep", '{"pattern":"foo","path":"/repo/src"}', naming)).toBe("foo  in src");
+    expect(toolSummary("Glob", '{"pattern":"*.md","path":"/repo"}', naming)).toBe("*.md  (.)");
+    expect(toolSummary("Grep", '{"pattern":"foo","path":"/repository"}', naming)).toBe("foo  in /repository");
   });
 
   it("summarises task / web / todo tools", () => {

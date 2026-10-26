@@ -144,7 +144,7 @@ describe("consecutive tool calls", () => {
       bash("c1", "git status", "toolu_agent"),
       bash("c2", "git diff", "toolu_agent"),
     ]);
-    fireEvent.click(screen.getByText("Subagent"));
+    fireEvent.click(screen.getByText("Agent"));
     expect(screen.getByText("2 tool calls")).toBeTruthy();
     expect(screen.queryByText("git status")).toBeNull();
   });

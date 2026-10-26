@@ -76,7 +76,7 @@ function argsSummary(obj: Record<string, unknown>): string {
   return text.length > ARGS_MAX_CHARS ? `${text.slice(0, ARGS_MAX_CHARS).trim()}…` : text;
 }
 
-export type ToolNaming = { harness?: Harness | null; mcpServers: readonly string[] };
+export type ToolNaming = { harness?: Harness | null; mcpServers: readonly string[]; cwd?: string | null };
 
 // claude's own server-name normalization for `mcp__<server>__<tool>` ids.
 function mcpIdSegment(server: string): string {
@@ -84,23 +84,206 @@ function mcpIdSegment(server: string): string {
   return server.startsWith("claude.ai ") ? id.replace(/_+/g, "_").replace(/^_|_$/g, "") : id;
 }
 
-/** An MCP tool as its harness's own UI writes it; any other tool keeps its name. */
-export function toolDisplayName(name: string, naming?: ToolNaming): string {
+function mcpParts(name: string, naming?: ToolNaming): { server: string; tool: string } | null {
   const [prefix, server, ...rest] = name.split("__");
   const tool = rest.join("__");
-  if (prefix !== "mcp" || !server || !tool) return name;
-  if (naming?.harness === "codex") return `${server}.${tool}`;
-  const listed = naming?.mcpServers.find((s) => mcpIdSegment(s) === server);
-  return `${listed ?? server} - ${tool} (MCP)`;
+  if (prefix !== "mcp" || !server || !tool) return null;
+  if (naming?.harness === "codex") return { server, tool };
+  return { server: naming?.mcpServers.find((s) => mcpIdSegment(s) === server) ?? server, tool };
 }
 
-export function toolSummary(name: string, input: string): string {
+// Claude Code 2.1.300's userFacingName for its built-in tools.
+const DISPLAY_NAMES: Record<string, string> = {
+  Grep: "Search",
+  Glob: "Search",
+  Edit: "Update",
+  MultiEdit: "Update",
+  NotebookEdit: "Edit Notebook",
+  WebFetch: "Fetch",
+  WebSearch: "Web Search",
+  TaskStop: "Stop Task",
+};
+
+/** A tool as Claude Code's transcript names it; an MCP tool as its own harness writes it. */
+export function toolDisplayName(name: string, naming?: ToolNaming): string {
+  const mcp = mcpParts(name, naming);
+  if (!mcp) return DISPLAY_NAMES[name] ?? name;
+  return naming?.harness === "codex" ? `${mcp.server}.${mcp.tool}` : `${mcp.server} - ${mcp.tool} (MCP)`;
+}
+
+const BOOKKEEPING_TOOLS = new Set([
+  "ToolSearch",
+  "ScheduleWakeup",
+  "TodoWrite",
+  "TaskCreate",
+  "TaskGet",
+  "TaskUpdate",
+  "TaskList",
+]);
+
+/** Calls Claude Code leaves out of its transcript unless they fail. */
+export function isHiddenTool(item: { name: string; result: { isError: boolean } | null }): boolean {
+  return BOOKKEEPING_TOOLS.has(item.name) && !item.result?.isError;
+}
+
+function relativePath(path: string, cwd?: string | null): string {
+  const root = cwd?.replace(/[/\\]+$/, "");
+  if (!root || !path.startsWith(root)) return path;
+  const rest = path.slice(root.length);
+  if (rest === "") return ".";
+  return /^[/\\]/.test(rest) ? rest.slice(1) : path;
+}
+
+// codex reports a command as one shlex-joined `bash -lc <script>` string.
+const SHELL_WRAPPER = /^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+/;
+
+function shellWord(text: string): string | null {
+  let out = "";
+  let i = 0;
+  while (i < text.length && !/\s/.test(text[i])) {
+    const c = text[i];
+    if (c === "'") {
+      const end = text.indexOf("'", i + 1);
+      if (end < 0) return null;
+      out += text.slice(i + 1, end);
+      i = end + 1;
+    } else if (c === '"') {
+      i += 1;
+      while (i < text.length && text[i] !== '"') {
+        if (text[i] === "\\" && /["\\$`\n]/.test(text[i + 1] ?? "")) i += 1;
+        out += text[i++];
+      }
+      if (i >= text.length) return null;
+      i += 1;
+    } else if (c === "\\") {
+      out += text[i + 1] ?? "";
+      i += 2;
+    } else {
+      out += c;
+      i += 1;
+    }
+  }
+  return text.slice(i).trim() ? null : out;
+}
+
+function shellCommand(obj: Record<string, unknown>, naming?: ToolNaming): string {
+  const command = str(obj.command);
+  if (naming?.harness !== "codex") return command;
+  const wrapper = SHELL_WRAPPER.exec(command);
+  return (wrapper && shellWord(command.slice(wrapper[0].length))) || command;
+}
+
+type Explore = "read" | "search" | "list";
+
+// Claude Code's read-only command classes for collapsing Bash; codex's `sed -n`/`nl`/`cd` reads join them.
+const EXPLORE_COMMANDS: Record<string, Explore | "ignore"> = {
+  find: "search",
+  grep: "search",
+  rg: "search",
+  ag: "search",
+  ack: "search",
+  locate: "search",
+  which: "search",
+  whereis: "search",
+  cat: "read",
+  head: "read",
+  tail: "read",
+  less: "read",
+  more: "read",
+  wc: "read",
+  stat: "read",
+  file: "read",
+  strings: "read",
+  jq: "read",
+  awk: "read",
+  cut: "read",
+  sort: "read",
+  uniq: "read",
+  tr: "read",
+  sed: "read",
+  nl: "read",
+  ls: "list",
+  tree: "list",
+  du: "list",
+  echo: "ignore",
+  printf: "ignore",
+  true: "ignore",
+  false: "ignore",
+  ":": "ignore",
+  cd: "ignore",
+  pwd: "ignore",
+};
+
+const EXPLORE_RANK: Record<Explore, number> = { list: 1, read: 2, search: 3 };
+
+const WRITING_FLAGS: Record<string, RegExp> = {
+  find: /^-(exec|execdir|ok|okdir|delete|fprint)/,
+  sed: /^(-i|--in-place)/,
+  sort: /^(-o|--output)/,
+};
+
+function shellExploreKind(command: string): Explore | null {
+  if (/[`<>]|\$\(/.test(command.replace(/\d?>&\d|\d?>\s*\/dev\/null/g, ""))) return null;
+  let kind: Explore | null = null;
+  for (const part of command.split(/&&|\|\||[;|\n]/)) {
+    const tokens = tokenize(part);
+    if (tokens.length === 0) continue;
+    const name = commandName(tokens[0]);
+    const cls = EXPLORE_COMMANDS[name];
+    if (!cls || tokens.some((t) => WRITING_FLAGS[name]?.test(t))) return null;
+    if (cls !== "ignore" && (kind === null || EXPLORE_RANK[cls] > EXPLORE_RANK[kind])) kind = cls;
+  }
+  return kind;
+}
+
+export type ExploreKind = { kind: Explore } | { kind: "mcp"; server: string };
+
+/** How a read-only call counts toward a collapsed run, or null when it can't fold. */
+export function exploreKind(name: string, input: string, naming?: ToolNaming): ExploreKind | null {
+  if (name === "Read") return { kind: "read" };
+  if (name === "Grep" || name === "Glob") return { kind: "search" };
+  if (name === "Bash") {
+    const obj = parseToolInput(input);
+    if (!obj || obj.run_in_background === true) return null;
+    const kind = shellExploreKind(shellCommand(obj, naming));
+    return kind && { kind };
+  }
+  const mcp = mcpParts(name, naming);
+  return mcp && { kind: "mcp", server: mcp.server };
+}
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Claude Code's one-line summary of a collapsed run of reads, searches and MCP calls. */
+export function exploreLabel(kinds: readonly ExploreKind[], active: boolean): string {
+  const tally = { read: 0, search: 0, list: 0 };
+  const servers = new Map<string, number>();
+  for (const k of kinds) {
+    if (k.kind === "mcp") servers.set(k.server, (servers.get(k.server) ?? 0) + 1);
+    else tally[k.kind] += 1;
+  }
+  const parts: string[] = [];
+  if (tally.read) parts.push(`${active ? "reading" : "read"} ${count(tally.read, "file", "files")}`);
+  if (tally.search) {
+    parts.push(`${active ? "searching" : "searched"} for ${count(tally.search, "pattern", "patterns")}`);
+  }
+  if (tally.list) {
+    parts.push(`${active ? "listing" : "listed"} ${count(tally.list, "directory", "directories")}`);
+  }
+  for (const [server, n] of servers) {
+    parts.push(`${active ? "calling" : "called"} ${server}${n > 1 ? ` ${n} times` : ""}`);
+  }
+  const text = parts.join(", ");
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}${active ? "…" : ""}`;
+}
+
+export function toolSummary(name: string, input: string, naming?: ToolNaming): string {
   const obj = parseToolInput(input);
   if (!obj) return "";
   switch (name) {
     case "Bash":
     case "BashOutput":
-      return commandSummary(str(obj.command));
+      return commandSummary(shellCommand(obj, naming));
     case "Read":
     case "Write":
     case "NotebookEdit":
@@ -109,10 +292,10 @@ export function toolSummary(name: string, input: string): string {
     case "MultiEdit":
       return str(obj.file_path);
     case "Glob":
-      return str(obj.pattern) + (obj.path ? `  (${str(obj.path)})` : "");
+      return str(obj.pattern) + (obj.path ? `  (${relativePath(str(obj.path), naming?.cwd)})` : "");
     case "Grep": {
       const pattern = str(obj.pattern);
-      const path = str(obj.path);
+      const path = relativePath(str(obj.path), naming?.cwd);
       return path ? `${pattern}  in ${path}` : pattern;
     }
     case "Task":

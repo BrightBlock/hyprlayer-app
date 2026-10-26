@@ -56,6 +56,9 @@ import { SkillChip } from "./SkillChip";
 import {
   baseName,
   editDiffFromTool,
+  exploreKind,
+  exploreLabel,
+  isHiddenTool,
   parseToolInput,
   prettyToolInput,
   resultLine,
@@ -63,6 +66,7 @@ import {
   toolDisplayName,
   toolFilePath,
   toolSummary,
+  type ExploreKind,
   type ToolNaming,
 } from "./toolDisplay";
 
@@ -399,7 +403,8 @@ function FileChip({ path }: { path: string }) {
 
 function ToolCall({ label, name, input }: { label: string; name: string; input: string }) {
   const filePath = toolFilePath(name, input);
-  const summary = filePath ? "" : toolSummary(name, input);
+  const naming = useContext(ToolNames);
+  const summary = filePath ? "" : toolSummary(name, input, naming);
   const args = summary && summary !== subagentType(name, input) ? summary : "";
   return (
     <span className={`flex min-w-0 flex-1 items-center font-mono ${filePath ? "gap-2" : ""}`}>
@@ -526,7 +531,7 @@ const PermissionCard = memo(function PermissionCard({
   handlers: PermissionHandlers;
 }) {
   const filePath = toolFilePath(item.toolName, item.input);
-  const summary = toolSummary(item.toolName, item.input);
+  const summary = toolSummary(item.toolName, item.input, useContext(ToolNames));
   const toolName = useToolName(item.toolName);
 
   if (item.decision === "expired") {
@@ -1008,7 +1013,7 @@ function gapForKinds(prev: ItemKind | undefined, cur: ItemKind): string {
 
 type Unit =
   | { type: "single"; item: TranscriptItem }
-  | { type: "group"; id: string; items: TranscriptItem[] };
+  | { type: "group"; id: string; items: TranscriptItem[]; explored?: ExploreKind[] };
 
 const unitKind = (u: Unit): ItemKind => (u.type === "group" ? "tool" : u.item.kind);
 
@@ -1045,7 +1050,50 @@ function toUnits(items: TranscriptItem[], keepOut: (it: TranscriptItem) => boole
   return units;
 }
 
-function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) {
+// Claude Code's collapsed read/search runs: thinking between the calls folds in, trailing thinking stays out.
+function toExploredUnits(
+  items: TranscriptItem[],
+  keepOut: (it: TranscriptItem) => boolean,
+  naming?: ToolNaming,
+): Unit[] {
+  const units: Unit[] = [];
+  let run: TranscriptItem[] = [];
+  let kinds: ExploreKind[] = [];
+  const flush = () => {
+    let end = run.length;
+    while (end > 0 && run[end - 1].kind !== "tool") end -= 1;
+    const calls = run.slice(0, end);
+    if (kinds.length >= 2) units.push({ type: "group", id: calls[0].id, items: calls, explored: kinds });
+    else for (const item of calls) units.push({ type: "single", item });
+    for (const item of run.slice(end)) units.push({ type: "single", item });
+    run = [];
+    kinds = [];
+  };
+  for (const item of items) {
+    const kind = item.kind === "tool" && !keepOut(item) ? exploreKind(item.name, item.input, naming) : null;
+    if (kind) {
+      run.push(item);
+      kinds.push(kind);
+    } else if (item.kind === "thinking" && run.length > 0) {
+      run.push(item);
+    } else {
+      flush();
+      units.push({ type: "single", item });
+    }
+  }
+  flush();
+  return units;
+}
+
+function ToolGroup({
+  items,
+  busy,
+  explored,
+}: {
+  items: TranscriptItem[];
+  busy: boolean;
+  explored?: ExploreKind[];
+}) {
   const [open, setOpen] = useState(false);
   const openBg = useContext(OpenBackgroundIds);
   const jump = useContext(JumpTargetId);
@@ -1058,8 +1106,10 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
   const running = tools.some(
     (t) => t.kind === "tool" && ((busy && t.result === null) || openBg.has(t.toolUseId)),
   );
-  const label =
-    tools.length > 0
+  const failed = tools.filter((t) => t.kind === "tool" && t.result?.isError).length;
+  const label = explored
+    ? exploreLabel(explored, running)
+    : tools.length > 0
       ? `${tools.length} tool call${tools.length === 1 ? "" : "s"}`
       : `${items.length} steps`;
   return (
@@ -1070,8 +1120,9 @@ function ToolGroup({ items, busy }: { items: TranscriptItem[]; busy: boolean }) 
         className={`${STEP_ROW} text-ink-dim`}
       >
         {running ? <Spinner size="xs" /> : <Icon name="tool" size="xs" className="text-ink-dim" />}
-        <span className="font-medium text-ink">{label}</span>
-        {running && <span className="text-ink-dim">· working…</span>}
+        <span className={`truncate ${explored ? "text-ink-dim" : "font-medium text-ink"}`}>{label}</span>
+        {running && !explored && <span className="text-ink-dim">· working…</span>}
+        {failed > 0 && <span className="shrink-0 text-bad/90">· {failed} failed</span>}
         <StepChevron open={open} />
       </button>
       {open && (
@@ -1179,8 +1230,7 @@ function SubagentBlock({
   prompt: PromptHandlers;
 }) {
   const [open, setOpen] = useState(false);
-  const type = subagentType(item.name, item.input);
-  const summary = toolSummary(item.name, item.input);
+  const toolName = useToolName(item.name);
   const toolCount = childItems.filter((c) => c.kind === "tool").length;
   const result = item.result;
   const bgRunning = useBackgroundRunning(item.toolUseId);
@@ -1189,12 +1239,7 @@ function SubagentBlock({
     <div className="text-ui" data-tooluse-id={item.toolUseId}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={STEP_ROW}>
         <ToolStatusDot result={result} busy={busy} running={running} />
-        <span className="shrink-0 font-mono font-medium text-ink">
-          {item.name === "Workflow" ? "Workflow" : type || "Subagent"}
-        </span>
-        <span className="min-w-0 flex-1 truncate font-mono text-ink-dim" title={summary}>
-          {summary !== type && summary}
-        </span>
+        <ToolCall label={subagentType(item.name, item.input) || toolName} name={item.name} input={item.input} />
         {toolCount > 0 && (
           <span className="shrink-0 text-ink-dim">
             {toolCount} tool{toolCount === 1 ? "" : "s"}
@@ -1281,19 +1326,20 @@ function ItemList({
   anchors?: Anchor[];
   /** Top level only: a check card closes each goal iteration. */
   goalChecks?: boolean;
-  // A subagent's runs fold; the main transcript shows each call as claude does.
+  // A subagent's runs fold whole; the main transcript folds only read/search runs, as claude does.
   foldTools?: boolean;
 }) {
   const planCards = useContext(PlanCardsContext);
   const selfClientId = useContext(SelfClientId);
   const goalIterations = useContext(GoalTranscript)?.iterations;
+  const naming = useContext(ToolNames);
   // Subagents and plan cards (a Bash-written plan, a presented one) never fold into a tool group.
   const keepOut = (it: TranscriptItem) =>
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
-  const visible = items.filter((it) => it.kind !== "permission" || it.decision !== "allow");
-  const units: Unit[] = foldTools
-    ? toUnits(visible, keepOut)
-    : visible.map((item) => ({ type: "single", item }));
+  const visible = items.filter(
+    (it) => (it.kind !== "permission" || it.decision !== "allow") && (it.kind !== "tool" || !isHiddenTool(it)),
+  );
+  const units: Unit[] = foldTools ? toUnits(visible, keepOut) : toExploredUnits(visible, keepOut, naming);
 
   const renderUnit = (unit: Unit, i: number): ReactNode => {
     const gap = gapForKinds(i > 0 ? unitKind(units[i - 1]) : undefined, unitKind(unit));
@@ -1303,7 +1349,7 @@ function ItemList({
     if (unit.type === "group") {
       return (
         <div key={`g:${unit.id}`} className={className}>
-          <ToolGroup items={unit.items} busy={busy} />
+          <ToolGroup items={unit.items} busy={busy} explored={unit.explored} />
         </div>
       );
     }

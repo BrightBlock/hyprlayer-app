@@ -14,6 +14,7 @@ import {
 } from "@/features/session/sessionStore";
 import {
   baseName,
+  isHiddenTool,
   subagentType,
   toolDisplayName,
   toolSummary,
@@ -64,7 +65,7 @@ const FILE_VERBS: Record<string, string> = {
 };
 
 function toolLine(name: string, input: string, naming?: ToolNaming): string {
-  const summary = toolSummary(name, input);
+  const summary = toolSummary(name, input, naming);
   const verb = FILE_VERBS[name];
   if (verb) return summary ? `${verb} ${baseName(summary)}` : verb;
   if (name === "Bash" || name === "BashOutput") return summary || "running a command";
@@ -80,7 +81,7 @@ function toolLine(name: string, input: string, naming?: ToolNaming): string {
 export function workingLine(items: readonly TranscriptItem[], naming?: ToolNaming): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
-    if (item.kind === "tool" && !item.parentId) return toolLine(item.name, item.input, naming);
+    if (item.kind === "tool" && !item.parentId && !isHiddenTool(item)) return toolLine(item.name, item.input, naming);
     if (item.kind === "user") break;
   }
   return "thinking…";
@@ -95,7 +96,7 @@ function pendingLine(entry: SessionEntry): string {
         it.kind === "permission" && it.decision === null,
     );
   if (!ask) return "waiting on a permission";
-  const summary = toolSummary(ask.toolName, ask.input);
+  const summary = toolSummary(ask.toolName, ask.input, entry);
   const label = toolDisplayName(ask.toolName, entry);
   return summary ? `${label} · ${summary}` : `${label} permission`;
 }

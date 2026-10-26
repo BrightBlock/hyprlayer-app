@@ -1076,9 +1076,10 @@ export function SessionChat({
   const goalIterations = goalDetail?.iterations ?? null;
   const sessionHarness = session?.harness;
   const mcpServers = session?.mcpServers;
+  const sessionCwd = view.item.worktreePath;
   const toolNaming = useMemo<ToolNaming>(
-    () => ({ harness: sessionHarness, mcpServers: mcpServers ?? [] }),
-    [sessionHarness, mcpServers],
+    () => ({ harness: sessionHarness, mcpServers: mcpServers ?? [], cwd: sessionCwd }),
+    [sessionHarness, mcpServers, sessionCwd],
   );
   const transcriptGoal = useMemo<TranscriptGoal | null>(
     () => (sid && sessionGoal ? { sessionId: sid, workstreamId, goal: sessionGoal, iterations: goalIterations } : null),
