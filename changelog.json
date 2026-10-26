@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.19",
+      "date": "2026-10-26",
+      "summary": "Clearer tool rows for searches, fetches and failed commands.",
+      "notes": [
+        "Codex web searches now show as search or fetch rows with their query or URL instead of an empty search.",
+        "Failed Codex commands lead with \"Exit code N\", and grep-style commands that match nothing read \"No matches found\" instead of an error.",
+        "Tool paths in the transcript render relative to the session directory, and Agent and Workflow rows now look like every other tool row.",
+        "This version works with hyprlayer-server 0.8.16 and later."
+      ]
+    },
+    {
       "version": "0.8.18",
       "date": "2026-10-24",
       "summary": "Long shell commands no longer fill the transcript.",
