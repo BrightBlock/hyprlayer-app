@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.21",
+      "date": "2026-10-27",
+      "summary": "The activity bar no longer reports done while background agents are still running.",
+      "notes": [
+        "The activity bar no longer flashes done when a turn ends with background agents or workflows still running; it shows \"Waiting for ... to finish\" and times the closing turn from the start of the wait.",
+        "A subagent permission ask you resolved locally no longer comes back as pending or marks the session as streaming.",
+        "This version works with hyprlayer-server 0.8.17 and later."
+      ]
+    },
+    {
       "version": "0.8.20",
       "date": "2026-10-27",
       "summary": "A status bar shows what the agent is doing, and recaps summarize turns you missed.",
