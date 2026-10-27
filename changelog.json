@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.8.20",
+      "date": "2026-10-27",
+      "summary": "A status bar shows what the agent is doing, and recaps summarize turns you missed.",
+      "notes": [
+        "A bar above the composer now names what the agent is doing (current tool, waiting on you, or another device working) with elapsed time, and shows the last turn's duration once idle. It replaces the status lines at the bottom of the transcript.",
+        "When a turn finishes while you are in another tab, the bar shows a short recap of what it did. Turn this off under Recaps in General settings.",
+        "This version works with hyprlayer-server 0.8.17 and later."
+      ]
+    },
+    {
       "version": "0.8.19",
       "date": "2026-10-26",
       "summary": "Clearer tool rows for searches, fetches and failed commands.",
