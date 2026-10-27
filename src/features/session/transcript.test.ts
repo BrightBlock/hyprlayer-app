@@ -280,6 +280,43 @@ describe("tool blocks", () => {
     expect(view.state).toBe("awaiting_permission");
   });
 
+  function backgroundAgentAsk(): SessionView {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "ag", name: "Agent", input: '{"run_in_background":true}', parentId: null });
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "ag", content: "Async agent launched", isError: false, parentId: null });
+    view = reduceEvent(view, { kind: "turnDone", contextTokens: null, costUsd: null, numTurns: 1, threadTokens: null, turnStatus: "completed" });
+    view = reduceEvent(view, { kind: "toolUse", id: "s1", name: "Bash", input: "{}", parentId: "ag" });
+    return reduceEvent(view, { kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}", toolUseId: "s1" });
+  }
+
+  it("a background subagent's ask after the turn ended does not reopen the turn", () => {
+    const asked = backgroundAgentAsk();
+    expect(asked.state).toBe("awaiting_permission");
+    expect(asked.streaming).toBe(false);
+    const allowed = resolvePermission(asked, "r1", "allow");
+    expect(allowed.state).toBe("running");
+    expect(allowed.streaming).toBe(false);
+    expect(isWorking(allowed)).toBe(false);
+  });
+
+  it("a subagent's tool result settles its permission card without reopening the turn", () => {
+    let view = backgroundAgentAsk();
+    view = reduceEvent(view, { kind: "toolResult", toolUseId: "s1", content: "ok", isError: false, parentId: "ag" });
+    expect(hasPendingPermission(view)).toBe(false);
+    expect(view.pendingPermission).toBeNull();
+    expect(view.state).toBe("running");
+    expect(view.streaming).toBe(false);
+  });
+
+  it("approving the turn's own tool keeps the turn streaming, even after a restore", () => {
+    let view = initialSessionView("running");
+    view = reduceEvent(view, { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null });
+    view = reduceEvent(view, { kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}", toolUseId: "t1" });
+    expect(view.streaming).toBe(true);
+    expect(resolvePermission(view, "r1", "allow").streaming).toBe(true);
+    expect(resolvePermission(restoredView(view, true), "r1", "allow").streaming).toBe(true);
+  });
+
   function twoSameNameAsks(): SessionView {
     let view = initialSessionView("running");
     for (const t of ["t1", "t2"]) {

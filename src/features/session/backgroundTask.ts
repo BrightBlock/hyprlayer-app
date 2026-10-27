@@ -4,9 +4,12 @@ import { parseToolInput, subagentType } from "./toolDisplay";
 
 export type BackgroundTaskStatus = "running" | "awaiting";
 
+export type BackgroundTaskKind = "agent" | "workflow" | "shell";
+
 export type BackgroundTask = {
   taskId: string | null;
   toolUseId: string;
+  kind: BackgroundTaskKind;
   label: string;
   command: string;
   status: BackgroundTaskStatus;
@@ -80,6 +83,7 @@ export function backgroundTasksFromItems(items: TranscriptItem[]): BackgroundTas
         tasks.set(item.toolUseId, {
           taskId: null,
           toolUseId: item.toolUseId,
+          kind: item.name === "Bash" ? "shell" : item.name === "Workflow" ? "workflow" : "agent",
           label,
           command: cmdStr,
           status: "running",

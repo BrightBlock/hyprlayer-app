@@ -307,6 +307,18 @@ export function restoredView(view: SessionView, live: boolean): SessionView {
   };
 }
 
+// Its card's decision was local only; a restore would offer it again, and turnDone would park on it.
+function settleSubagentAsk(view: SessionView, items: TranscriptItem[], toolUseId: string): SessionView {
+  const i = items.findIndex((it) => it.kind === "permission" && it.decision === null && it.toolUseId === toolUseId);
+  if (i === -1) return { ...view, items };
+  const ask = items[i] as Extract<TranscriptItem, { kind: "permission" }>;
+  const settled = items.slice();
+  settled[i] = { ...ask, decision: "allow" };
+  const pendingPermission = view.pendingPermission?.requestId === ask.requestId ? null : view.pendingPermission;
+  const next = { ...view, items: settled, pendingPermission };
+  return { ...next, state: parkedState(next) };
+}
+
 function settleAnsweredPrompt(
   view: SessionView,
   items: TranscriptItem[],
@@ -661,7 +673,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
           const items = view.items.slice();
           items[i] = { ...item, result: { content: event.content, isError: event.isError } };
           return event.parentId
-            ? { ...view, items }
+            ? settleSubagentAsk(view, items, event.toolUseId)
             : settleAnsweredPrompt(view, items, item.name, event.toolUseId);
         }
       }
@@ -698,7 +710,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
           seq,
         ),
         state: "awaiting_permission",
-        streaming: true,
+        streaming: view.streaming || !isSubagentTool(view.items, event.toolUseId),
         pendingPermission: {
           requestId: event.requestId,
           toolName: event.toolName,
@@ -855,11 +867,18 @@ export function addUserMessage(
   };
 }
 
+// A background subagent asks after its launching turn ended; answering it doesn't reopen that turn.
+function isSubagentTool(items: TranscriptItem[], toolUseId: string | null | undefined): boolean {
+  return !!toolUseId && items.some((it) => it.kind === "tool" && it.toolUseId === toolUseId && !!it.parentId);
+}
+
 export function resolvePermission(
   view: SessionView,
   requestId: string,
   decision: PermissionDecision,
 ): SessionView {
+  const asked = view.items.find((it) => it.kind === "permission" && it.requestId === requestId);
+  const subagent = asked?.kind === "permission" && isSubagentTool(view.items, asked.toolUseId);
   const items = view.items.map((item) =>
     item.kind === "permission" && item.requestId === requestId && item.decision === null
       ? { ...item, decision }
@@ -868,7 +887,7 @@ export function resolvePermission(
   const pendingPermission =
     view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
   const next = { ...view, items, pendingPermission };
-  return { ...next, state: parkedState(next), streaming: true };
+  return { ...next, state: parkedState(next), streaming: view.streaming || !subagent };
 }
 
 export function resolveQuestion(view: SessionView, requestId: string): SessionView {

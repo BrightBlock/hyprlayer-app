@@ -45,6 +45,7 @@ import { forgetWorkstreamDocs, useWrittenDocs } from "./writtenDocs";
 import {
   backgroundTasksFromItems,
   type BackgroundTask,
+  type BackgroundTaskKind,
   type BackgroundTaskStatus,
 } from "./backgroundTask";
 import { planTasksFromItems, todoPhaseLabel, type PlanTask, type PlanTaskStatus } from "./planTasks";
@@ -140,6 +141,8 @@ export type SessionEntry = SessionView & {
   turnSince?: number | null;
   /** The last finished turn, for the idle activity line. */
   lastTurn?: LastTurn | null;
+  /** Start of the turn that left background agents running; the turn that closes the wait is timed from here. */
+  waitSince?: number | null;
   recap?: TurnRecap | null;
   taskStartedAt: Record<string, number>;
   /** Highest log seq in the view; a rewind's reload lowers it, since the rewind reuses seqs. */
@@ -2226,18 +2229,19 @@ export function useSessionBackgroundTasks(sessionId: string | undefined): LiveBa
       const tasks = backgroundTasksFromItems(entry.items);
       return tasks.map((t) => {
         const startedAt = entry.taskStartedAt[t.toolUseId] ?? 0;
-        return [t.toolUseId, t.taskId ?? "", t.status, startedAt, t.label, t.command].join("\0");
+        return [t.toolUseId, t.taskId ?? "", t.status, t.kind, startedAt, t.label, t.command].join("\0");
       });
     }),
   );
   return useMemo(
     () =>
       keys.map((k) => {
-        const [toolUseId, taskIdRaw, status, startedAtStr, label, ...cmdParts] = k.split("\0");
+        const [toolUseId, taskIdRaw, status, kind, startedAtStr, label, ...cmdParts] = k.split("\0");
         return {
           toolUseId,
           taskId: taskIdRaw || null,
           status: status as BackgroundTaskStatus,
+          kind: kind as BackgroundTaskKind,
           startedAt: Number(startedAtStr) || null,
           label,
           command: cmdParts.join("\0"),

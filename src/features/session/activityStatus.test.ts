@@ -37,6 +37,22 @@ function entry(items: TranscriptItem[], over: Partial<ActivityInput> = {}): Acti
 
 const ctx = { harnessLabel: "Claude Code", otherDevice: null };
 
+const spawned = (id: string) => ok(`Task ID: ${id}`);
+const bgAgent = (id = "ag") => tool("Agent", { subagent_type: "foreman", description: "Phase 1" }, id, { result: spawned(id) });
+const bgWorkflow = (id = "wf") => tool("Workflow", { description: "fan out" }, id, { result: spawned(id) });
+const bgShell = (id = "sh") =>
+  tool("Bash", { command: "pnpm dev", run_in_background: true }, id, {
+    result: ok(`Command running in background with ID: ${id}.`),
+  });
+const finished = (id: string): TranscriptItem => ({
+  kind: "taskUpdate",
+  id: `up-${id}`,
+  taskId: id,
+  toolUseId: id,
+  status: "completed",
+});
+const VERB = /^(Baked|Brewed|Churned|Cogitated|Cooked|Crunched|Sautéed|Worked) for /;
+
 describe("activityStatus", () => {
   it("is null with no session before start", () => {
     expect(activityStatus(undefined, { ...ctx, started: false })).toBeNull();
@@ -247,8 +263,48 @@ describe("activityStatus", () => {
       ctx,
     );
     expect(s).toMatchObject({ tone: "quiet", since: null });
-    expect(s?.label).toBe("Worked for 4m 03s");
+    expect(s?.label).toMatch(VERB);
+    expect(s?.label).toMatch(/ for 4m 03s$/);
     expect(s?.detail).toMatch(/^done 10:20/);
+  });
+
+  it("keeps one verb per turn and varies it across turns", () => {
+    const label = (endedAt: number) =>
+      activityStatus(entry([user()], { streaming: false, lastTurn: { ms: 1000, endedAt } }), ctx)?.label;
+    expect(label(5)).toBe(label(5));
+    const verbs = new Set([0, 1, 2, 3, 4, 5, 6, 7].map((n) => label(n)?.split(" ")[0]));
+    expect(verbs.size).toBe(8);
+  });
+
+  it("waits on background agents instead of saying the turn is done", () => {
+    const s = activityStatus(
+      entry([user(), bgAgent()], {
+        streaming: false,
+        lastTurn: { ms: 79_000, endedAt: 50, waiting: { agents: 1, workflows: 0 } },
+        waitSince: 10,
+        recap: { text: "half done", endedAt: 50 },
+      }),
+      ctx,
+    );
+    expect(s).toMatchObject({ label: "Waiting for 1 background agent to finish", detail: null, tone: "quiet", since: null });
+    expect(s?.recap).toBeUndefined();
+  });
+
+  it("counts agents and workflows the way the CLI words them", () => {
+    const waiting = (agents: number, workflows: number) =>
+      activityStatus(
+        entry([user()], { streaming: false, lastTurn: { ms: 1, endedAt: 2, waiting: { agents, workflows } }, waitSince: 1 }),
+        ctx,
+      )?.label;
+    expect(waiting(2, 1)).toBe("Waiting for 2 background agents and 1 dynamic workflow to finish");
+    expect(waiting(0, 2)).toBe("Waiting for 2 dynamic workflows to finish");
+  });
+
+  it("names background shells still running after the turn", () => {
+    const detail = (items: TranscriptItem[]) =>
+      activityStatus(entry([user(), ...items], { streaming: false, lastTurn: { ms: 1000, endedAt: 50 } }), ctx)?.detail;
+    expect(detail([bgShell()])).toMatch(/^done .* · 1 shell still running$/);
+    expect(detail([bgShell("a"), bgShell("b")])).toMatch(/ · 2 shells still running$/);
   });
 
   it("carries the recap written for that turn", () => {
@@ -298,20 +354,20 @@ describe("nextTurn", () => {
   const approving = view({ streaming: false, state: "awaiting_permission" });
 
   it("starts timing when the stream starts", () => {
-    expect(nextTurn(idle, streaming, 100)).toEqual({ turnSince: 100, lastTurn: null });
+    expect(nextTurn(idle, streaming, 100)).toEqual({ turnSince: 100, lastTurn: null, waitSince: null });
   });
 
   it("keeps one start across an approval wait", () => {
     const a = { ...streaming, ...nextTurn(idle, streaming, 100) };
     const b = { ...approving, ...nextTurn(a, approving, 200) };
     const c = { ...streaming, ...nextTurn(b, streaming, 300) };
-    expect(nextTurn(c, idle, 1100)).toEqual({ turnSince: null, lastTurn: { ms: 1000, endedAt: 1100 } });
+    expect(nextTurn(c, idle, 1100)).toEqual({ turnSince: null, lastTurn: { ms: 1000, endedAt: 1100 }, waitSince: null });
   });
 
   it("does not count spawning the harness as a turn", () => {
     const starting = view({ state: "starting", streaming: false });
     const t = { ...starting, ...nextTurn(undefined, starting, 100) };
-    expect(nextTurn(t, idle, 500)).toEqual({ turnSince: null, lastTurn: null });
+    expect(nextTurn(t, idle, 500)).toEqual({ turnSince: null, lastTurn: null, waitSince: null });
   });
 
   it("keeps the last summary while idle", () => {
@@ -328,7 +384,62 @@ describe("nextTurn", () => {
   });
 
   it("records nothing for an entry first seen idle", () => {
-    expect(nextTurn(undefined, idle, 50)).toEqual({ turnSince: null, lastTurn: null });
+    expect(nextTurn(undefined, idle, 50)).toEqual({ turnSince: null, lastTurn: null, waitSince: null });
+  });
+
+  it("opens a wait when a turn ends with background agents or workflows running", () => {
+    const items = [user(), bgAgent(), bgWorkflow()];
+    const prev = { ...view({ items }), turnSince: 100 };
+    expect(nextTurn(prev, view({ items, streaming: false }), 1000)).toEqual({
+      turnSince: null,
+      lastTurn: { ms: 900, endedAt: 1000, waiting: { agents: 1, workflows: 1 } },
+      waitSince: 100,
+    });
+  });
+
+  it("does not wait on background shells", () => {
+    const items = [user(), bgShell()];
+    const prev = { ...view({ items }), turnSince: 100 };
+    expect(nextTurn(prev, view({ items, streaming: false }), 1000)).toEqual({
+      turnSince: null,
+      lastTurn: { ms: 900, endedAt: 1000 },
+      waitSince: null,
+    });
+  });
+
+  it("carries the wait into the follow-up turn", () => {
+    const waiting = { ...idle, waitSince: 100 };
+    expect(nextTurn(waiting, streaming, 2000)).toEqual({ turnSince: 2000, lastTurn: null, waitSince: 100 });
+  });
+
+  it("times the follow-up turn from the start of the turn that waited", () => {
+    const items = [user(), bgAgent(), finished("ag"), user("u2")];
+    const prev = { ...view({ items }), turnSince: 2000, waitSince: 100 };
+    expect(nextTurn(prev, view({ items, streaming: false }), 3000)).toEqual({
+      turnSince: null,
+      lastTurn: { ms: 2900, endedAt: 3000 },
+      waitSince: null,
+    });
+  });
+
+  it("opens a wait for a live session restored while background agents run", () => {
+    const restored = { ...view({ items: [user(), bgAgent()], streaming: false }), live: true };
+    expect(nextTurn(undefined, restored, 500)).toEqual({
+      turnSince: null,
+      lastTurn: { ms: 0, endedAt: 500, waiting: { agents: 1, workflows: 0 } },
+      waitSince: 500,
+    });
+  });
+
+  it("opens no wait for a restored session whose harness is gone", () => {
+    const restored = { ...view({ items: [user(), bgAgent()], streaming: false }), live: false };
+    expect(nextTurn(undefined, restored, 500)).toEqual({ turnSince: null, lastTurn: null, waitSince: null });
+  });
+
+  it("drops the wait when the session ends or the harness respawns", () => {
+    const waiting = { ...idle, waitSince: 100 };
+    expect(nextTurn(waiting, view({ state: "completed", streaming: false }), 500).waitSince).toBeNull();
+    expect(nextTurn(waiting, view({ state: "starting", streaming: false }), 500).waitSince).toBeNull();
   });
 });
 
@@ -350,6 +461,10 @@ describe("recapWanted", () => {
 
   it("skips a session that ended, since the bar never shows its recap", () => {
     expect(recapWanted(null, last, { ...ended, state: "crashed" })).toBe(false);
+  });
+
+  it("skips a turn still waiting on background work, since the bar shows the wait instead", () => {
+    expect(recapWanted(null, { ...last, waiting: { agents: 1, workflows: 0 } }, ended)).toBe(false);
   });
 
   it("skips turns a running goal drives", () => {

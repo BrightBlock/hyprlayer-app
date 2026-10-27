@@ -13,6 +13,7 @@ function running(toolUseId = "tu-1", startedAt: number | null = Date.now()): Liv
     taskId: `task-${toolUseId}`,
     label: `sleep 999 (${toolUseId})`,
     command: "sleep 999",
+    kind: "shell",
     status: "running",
     startedAt,
   };

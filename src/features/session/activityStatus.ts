@@ -1,7 +1,7 @@
 import { formatElapsed } from "@/lib/format";
 import { basename } from "@/lib/path";
 
-import { isBackgroundSpawn } from "./backgroundTask";
+import { backgroundTasksFromItems, isBackgroundSpawn } from "./backgroundTask";
 import type { SessionEntry } from "./sessionStore";
 import { runningSubagent } from "./subagent";
 import {
@@ -15,9 +15,15 @@ import {
 import { hasPendingPermission, isBusy, isTerminal, type SessionView, type TranscriptItem } from "./transcript";
 
 export type ActivityInput = SessionView &
-  Pick<SessionEntry, "workingSince" | "awaitingSince" | "turnAuthor" | "turnSince" | "lastTurn" | "recap" | "goal">;
+  Pick<
+    SessionEntry,
+    "workingSince" | "awaitingSince" | "turnAuthor" | "turnSince" | "lastTurn" | "waitSince" | "recap" | "goal"
+  >;
 
-export type LastTurn = { ms: number; endedAt: number };
+/** Background agents and workflows still running when the turn ended. */
+export type PendingWork = { agents: number; workflows: number };
+
+export type LastTurn = { ms: number; endedAt: number; waiting?: PendingWork };
 
 /** A model-written recap of the turn that ended at `endedAt`. */
 export type TurnRecap = { text: string; endedAt: number };
@@ -69,6 +75,29 @@ const work = (label: string, since: number | null, detail: string | null = null,
 });
 
 const quiet = (label: string, since: number | null): Activity => ({ label, detail: null, tone: "quiet", since, more: 0 });
+
+// Claude Code's turn-end verbs, one per turn.
+const DONE_VERBS = ["Baked", "Brewed", "Churned", "Cogitated", "Cooked", "Crunched", "Sautéed", "Worked"];
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+function pendingWork(items: TranscriptItem[]): PendingWork & { shells: number } {
+  const counts = { agents: 0, workflows: 0, shells: 0 };
+  for (const task of backgroundTasksFromItems(items)) {
+    if (task.kind === "agent") counts.agents++;
+    else if (task.kind === "workflow") counts.workflows++;
+    else counts.shells++;
+  }
+  return counts;
+}
+
+function waitingLabel({ agents, workflows }: PendingWork): string {
+  const parts = [
+    agents > 0 && plural(agents, "background agent", "background agents"),
+    workflows > 0 && plural(workflows, "dynamic workflow", "dynamic workflows"),
+  ].filter(Boolean);
+  return `Waiting for ${parts.join(" and ")} to finish`;
+}
 
 function toolActivity(tool: Tool, items: TranscriptItem[], since: number | null, more: number, naming?: ToolNaming) {
   if (tool.name === "Agent" || tool.name === "Task") {
@@ -132,34 +161,69 @@ export function activityStatus(entry: ActivityInput | undefined, ctx: ActivityCo
   if (entry.streaming) return streamActivity(entry, ctx.naming);
   const last = entry.lastTurn;
   if (!last) return null;
+  // Held until the follow-up turn ends, not until the task does, so the line doesn't flash "done" in between.
+  if (last.waiting && entry.waitSince != null) return quiet(waitingLabel(last.waiting), null);
   const at = new Date(last.endedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const { shells } = pendingWork(entry.items);
+  const running = shells > 0 ? ` · ${plural(shells, "shell", "shells")} still running` : "";
   const recap = entry.recap?.endedAt === last.endedAt ? entry.recap.text : undefined;
-  return { label: `Worked for ${formatElapsed(last.ms)}`, detail: `done ${at}`, tone: "quiet", since: null, more: 0, recap };
+  const verb = DONE_VERBS[last.endedAt % DONE_VERBS.length];
+  return {
+    label: `${verb} for ${formatElapsed(last.ms)}`,
+    detail: `done ${at}${running}`,
+    tone: "quiet",
+    since: null,
+    more: 0,
+    recap,
+  };
 }
 
-type TurnInput = SessionView & Partial<Pick<SessionEntry, "turnSince" | "lastTurn">>;
+type TurnInput = SessionView & Partial<Pick<SessionEntry, "turnSince" | "lastTurn" | "waitSince" | "live">>;
 
 // Harness spawn isn't part of a turn; approval waits are, and so is a reload mid-turn.
 const inTurn = (e: TurnInput) => isBusy(e) && e.state !== "starting";
 
-/** Times a turn from its first streamed event to idle, across any approval or question it waits on. */
+/**
+ * Times a turn from its first streamed event to idle, across any approval or question it waits on.
+ * A turn that leaves background agents running opens a wait; the turn that closes it is timed from the wait's start.
+ */
 export function nextTurn(
   prev: TurnInput | undefined,
   next: TurnInput,
   now: number,
-): { turnSince: number | null; lastTurn: LastTurn | null } {
+): { turnSince: number | null; lastTurn: LastTurn | null; waitSince: number | null } {
   const prevSince = prev && isBusy(prev) ? (prev.turnSince ?? null) : null;
+  const prevWait = prev?.waitSince ?? null;
   if (inTurn(next) || (prevSince !== null && next.state === "starting")) {
-    return { turnSince: prevSince ?? now, lastTurn: null };
+    return { turnSince: prevSince ?? now, lastTurn: null, waitSince: prevWait };
   }
-  if (prevSince !== null) return { turnSince: null, lastTurn: { ms: now - prevSince, endedAt: now } };
-  return { turnSince: null, lastTurn: prev?.lastTurn ?? null };
+  // A respawn or exit drops its background tasks.
+  const waitSince = isTerminal(next.state) || next.state === "starting" ? null : prevWait;
+  if (prevSince === null) {
+    // A reload loses the wait's start; the follow-up is timed from here.
+    if (waitSince === null && next.live && !isTerminal(next.state) && !isBusy(next)) {
+      const { agents, workflows } = pendingWork(next.items);
+      if (agents > 0 || workflows > 0) {
+        return { turnSince: null, lastTurn: { ms: 0, endedAt: now, waiting: { agents, workflows } }, waitSince: now };
+      }
+    }
+    return { turnSince: null, lastTurn: prev?.lastTurn ?? null, waitSince };
+  }
+  const { agents, workflows } = pendingWork(next.items);
+  if (agents > 0 || workflows > 0) {
+    return {
+      turnSince: null,
+      lastTurn: { ms: now - prevSince, endedAt: now, waiting: { agents, workflows } },
+      waitSince: waitSince ?? prevSince,
+    };
+  }
+  return { turnSince: null, lastTurn: { ms: now - (waitSince ?? prevSince), endedAt: now }, waitSince: null };
 }
 
 type RecapInput = TurnInput & Pick<SessionEntry, "turnAuthor" | "goal">;
 
 /** A turn that just ended here, on a session that can still show its recap. */
 export function recapWanted(prevLast: LastTurn | null | undefined, last: LastTurn | null, next: RecapInput): boolean {
-  if (!last || last === prevLast) return false;
+  if (!last || last === prevLast || last.waiting) return false;
   return next.turnAuthor !== "other" && !isTerminal(next.state) && next.goal?.status !== "running";
 }
