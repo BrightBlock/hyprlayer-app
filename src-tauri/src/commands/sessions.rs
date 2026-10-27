@@ -381,6 +381,19 @@ pub async fn set_session_title(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn recap_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> CmdResult<Option<String>> {
+    state
+        .client()?
+        .recap_session(session_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn set_session_archived(
     state: State<'_, AppState>,
     session_id: String,

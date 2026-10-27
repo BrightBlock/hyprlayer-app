@@ -31,6 +31,7 @@ export function GeneralSettings({ data }: { data: Bootstrap }) {
       <HyprlayerCard data={data} />
       <DefaultHarnessCard settings={data.settings} />
       <TabTitlesCard settings={data.settings} />
+      <RecapsCard settings={data.settings} />
       <QuitCard settings={data.settings} />
       <SetupWizardCard />
     </>
@@ -131,6 +132,32 @@ function TabTitlesCard({ settings }: { settings: AppSettings }) {
             : "Defaults to Claude Haiku, and follows your default harness. Pick a model to pin it."}
         </SettingRow>
       </div>
+    </SettingsCard>
+  );
+}
+
+function RecapsCard({ settings }: { settings: AppSettings }) {
+  const save = useSetAppSettings();
+  const enabled = settings.recaps?.enabled ?? true;
+  return (
+    <SettingsCard title="Recaps">
+      {save.isError && (
+        <div className="mb-3">
+          <ErrorNote error={save.error} onDismiss={() => save.reset()} />
+        </div>
+      )}
+      <SettingRow
+        title="Recap turns that finish while you're away"
+        control={
+          <Toggle
+            aria-label="Recap turns that finish while you're away"
+            checked={enabled}
+            onChange={(v) => save.mutate({ ...settings, recaps: { enabled: v } })}
+          />
+        }
+      >
+        Uses the title model.
+      </SettingRow>
     </SettingsCard>
   );
 }

@@ -14,9 +14,10 @@ use crate::Sandbox;
 /// `slow-exit` is read at launch; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
 /// and, on an optional second line, the turn that ticks every box in it. Launches log to `argv.log`
 /// and `DISPLAY` to `env.log`. One-shots answer from `evaluator` (its prompts append to
-/// `evaluator.log`) and `validation-summary`; `hold-summary` holds the summary until `release`,
-/// touching `summary-held`. A session opened by `/validate_plan` reads its
-/// controls from `goal-control/validate/` instead and replies with `validation-report`.
+/// `evaluator.log`), `validation-summary` and a fixed recap (its prompts append to `recap.log`);
+/// `hold-summary` holds the summary until `release`, touching `summary-held`. A session opened by
+/// `/validate_plan` reads its controls from `goal-control/validate/` instead and replies with
+/// `validation-report`.
 pub const GOAL_CLAUDE: &str = r#"#!/bin/sh
 argv="$*"
 base="$(dirname "$0")/../goal-control"
@@ -45,6 +46,10 @@ if [ -n "$oneshot" ]; then
       verdict='{"met":true,"reason":"looks done"}'
       [ -f "$base/evaluator" ] && verdict=$(cat "$base/evaluator")
       answer "$verdict" 0.01 ;;
+    "You recap a coding agent's last turn"*)
+      mkdir -p "$base"
+      { cat; printf '\n---\n'; } >> "$base/recap.log"
+      answer "You asked for a count, and the counter is now 2." 0.01 ;;
     "You condense plan-validation reports"*)
       cat >/dev/null
       if [ -f "$base/hold-summary" ]; then

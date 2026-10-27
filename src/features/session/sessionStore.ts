@@ -119,6 +119,7 @@ import {
   syncOf,
   syncSupport,
 } from "./syncStore";
+import { nextTurn, recapWanted, type LastTurn, type TurnRecap } from "./activityStatus";
 
 export type SessionEntry = SessionView & {
   workstreamId: string;
@@ -136,6 +137,10 @@ export type SessionEntry = SessionView & {
   workingSince: number | null;
   /** Optional so setEntry's callers needn't supply it; derived on every write. */
   awaitingSince?: number | null;
+  turnSince?: number | null;
+  /** The last finished turn, for the idle activity line. */
+  lastTurn?: LastTurn | null;
+  recap?: TurnRecap | null;
   taskStartedAt: Record<string, number>;
   /** Highest log seq in the view; a rewind's reload lowers it, since the rewind reuses seqs. */
   appliedSeq?: number;
@@ -175,18 +180,43 @@ function entryOf(sessionId: string): SessionEntry | undefined {
 }
 
 function setEntry(sessionId: string, next: SessionEntry): void {
-  const added = !useSessionStore.getState().sessions[sessionId];
-  useSessionStore.setState((s) => {
-    const prev = s.sessions[sessionId];
-    const workingSince = nextWorkingSince(prev, next);
-    const awaitingSince = nextAwaitingSince(prev, next);
-    const taskStartedAt = nextTaskStartedAt(prev, next);
-    return {
-      sessions: { ...s.sessions, [sessionId]: { ...next, workingSince, awaitingSince, taskStartedAt } },
-    };
-  });
+  const prev = useSessionStore.getState().sessions[sessionId];
+  const workingSince = nextWorkingSince(prev, next);
+  const awaitingSince = nextAwaitingSince(prev, next);
+  const taskStartedAt = nextTaskStartedAt(prev, next);
+  const turn = nextTurn(prev, next, Date.now());
+  const recap = turn.turnSince !== null ? null : (next.recap ?? prev?.recap ?? null);
+  useSessionStore.setState((s) => ({
+    sessions: {
+      ...s.sessions,
+      [sessionId]: { ...next, workingSince, awaitingSince, taskStartedAt, ...turn, recap },
+    },
+  }));
+  if (turn.lastTurn && recapWanted(prev?.lastTurn, turn.lastTurn, next)) {
+    void recapIfAway(sessionId, next.workstreamId, turn.lastTurn.endedAt);
+  }
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
-  if (added) scheduleWatch();
+  if (!prev) scheduleWatch();
+}
+
+// Keyed by the turn's end, so a turn that ends mid-request still gets its own.
+const recapping = new Set<string>();
+
+// Only for a turn that ended out of view; errors (an older server, recaps off) just leave none.
+async function recapIfAway(sessionId: string, workstreamId: string, endedAt: number): Promise<void> {
+  const key = `${sessionId}:${endedAt}`;
+  if (recapping.has(key)) return;
+  recapping.add(key);
+  try {
+    if (await isSessionVisible(sessionId, workstreamId)) return;
+    const text = await unwrap(commands.recapSession(sessionId));
+    const current = entryOf(sessionId);
+    if (!text || current?.lastTurn?.endedAt !== endedAt) return;
+    setEntry(sessionId, { ...current, recap: { text, endedAt } });
+  } catch {
+  } finally {
+    recapping.delete(key);
+  }
 }
 
 function forgetSession(sessionId: string): void {

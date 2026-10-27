@@ -2,6 +2,7 @@ pub mod delivery;
 mod followup;
 mod forwarder;
 pub(crate) mod goal_loop;
+mod recap;
 pub mod registry;
 mod service;
 pub(crate) mod titles;

@@ -79,6 +79,8 @@ import { AgentModePicker } from "./AgentModePicker";
 import { controlsKey, usePublishSessionControls } from "./sessionControls";
 import { formatTokens } from "@/lib/format";
 import { detectHandoffDoc, type ToolNaming } from "./toolDisplay";
+import { ActivityBar } from "./ActivityBar";
+import { activityStatus } from "./activityStatus";
 import { useWrittenDocs } from "./writtenDocs";
 import { planRevisions } from "./planRevisions";
 import { PlanCardsContext } from "./planCardSlot";
@@ -1081,6 +1083,18 @@ export function SessionChat({
     () => ({ harness: sessionHarness, mcpServers: mcpServers ?? [], cwd: sessionCwd }),
     [sessionHarness, mcpServers, sessionCwd],
   );
+  const otherOwnsTurn = otherTurnRunning || (session?.turnAuthor === "other" && busy);
+  const otherDevice = otherOwnsTurn && sync ? sentenceDevice(sync) : null;
+  const activity = useMemo(
+    () =>
+      activityStatus(session, {
+        harnessLabel: harness.label,
+        otherDevice,
+        naming: toolNaming,
+        started: started || starting,
+      }),
+    [session, harness.label, otherDevice, toolNaming, started, starting],
+  );
   const transcriptGoal = useMemo<TranscriptGoal | null>(
     () => (sid && sessionGoal ? { sessionId: sid, workstreamId, goal: sessionGoal, iterations: goalIterations } : null),
     [sid, workstreamId, sessionGoal, goalIterations],
@@ -1521,9 +1535,6 @@ export function SessionChat({
               ref={transcriptRef}
               items={session?.items ?? []}
               busy={working}
-              connecting={!session || session.state === "starting"}
-              harnessLabel={harness.label}
-              workingSince={session?.workingSince ?? null}
               permission={permission}
               prompt={prompt}
               sync={transcriptSync}
@@ -1632,6 +1643,7 @@ export function SessionChat({
               {pinnedPrompts.length > 0 && (
                 <PromptChips view={view} onPick={pickPrompt} className="mb-1.5 ml-auto max-w-[70%]" />
               )}
+              <ActivityBar activity={activity} />
               <div
                 className={`relative rounded-lg border bg-panel-2 transition-colors ${
                   sync?.phase === "guard"

@@ -154,6 +154,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::attach_session,
             commands::sessions::list_active_sessions,
             commands::sessions::set_session_title,
+            commands::sessions::recap_session,
             commands::sessions::set_session_archived,
             commands::sessions::delete_session,
             commands::attachments::import_attachment,

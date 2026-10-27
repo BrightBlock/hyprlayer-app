@@ -166,6 +166,7 @@ export const commands = {
 	attachSession: (sessionId: string, onEvent: Channel<SessionStreamItemDto>) => typedError<null, AppError>(__TAURI_INVOKE("attach_session", { sessionId, onEvent })),
 	listActiveSessions: () => typedError<ActiveSessionView[], AppError>(__TAURI_INVOKE("list_active_sessions")),
 	setSessionTitle: (sessionId: string, title: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_title", { sessionId, title })),
+	recapSession: (sessionId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("recap_session", { sessionId })),
 	setSessionArchived: (sessionId: string, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_session_archived", { sessionId, archived })),
 	deleteSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_session", { sessionId })),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
@@ -540,6 +541,7 @@ export type AppSettings = {
 	notifications?: NotificationSettings,
 	quit?: QuitSettings,
 	tabTitles?: TabTitleSettings,
+	recaps?: RecapSettings,
 	multiplexer?: MultiplexerSettings,
 	goals?: GoalSettings,
 	devTools?: boolean,
@@ -1562,6 +1564,11 @@ export type QuitRequested = null;
 
 export type QuitSettings = {
 	confirm?: boolean,
+};
+
+/**  A short recap of a turn that finished while the user was away, on the tab-title model. */
+export type RecapSettings = {
+	enabled?: boolean,
 };
 
 export type RelatedLink = {

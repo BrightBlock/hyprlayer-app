@@ -1,0 +1,73 @@
+{
+  "scenario": "session_recap",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnDone": true
+          },
+          "guard": "the second turn finishes",
+          "ok": true
+        }
+      ],
+      "step": "two turns finish"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "recap": "You asked for a count, and the counter is now 2."
+          },
+          "guard": "the recap is the model's reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "asksLastTurn": true,
+            "endsOnFinalReply": true,
+            "skipsFirstTurn": true
+          },
+          "guard": "the prompt holds the last turn's ask and final reply, and nothing from the first turn",
+          "ok": true
+        }
+      ],
+      "step": "the recap covers only the last turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "recaps": {
+              "enabled": false
+            }
+          },
+          "guard": "the setting is stored",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "modelCalls": 0,
+            "recap": null
+          },
+          "guard": "a recap with recaps off is empty and calls no model",
+          "ok": true
+        }
+      ],
+      "step": "turning recaps off"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

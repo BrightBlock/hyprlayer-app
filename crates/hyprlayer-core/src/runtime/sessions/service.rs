@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use super::followup::{self, Followup};
 use super::goal_loop::is_idle;
+use super::recap;
 use super::workflow_bridge::{self, WorkflowChannel};
 use super::SessionAttachment;
 
@@ -506,6 +507,40 @@ impl SessionService<'_> {
             }
         }
         Ok(sessions)
+    }
+
+    /// `None` when recaps are off or the last turn did nothing worth recapping.
+    pub async fn recap(&self, session_id: &str) -> Result<Option<String>> {
+        let settings = self.runtime.settings.get().await;
+        if !settings.recaps.enabled {
+            return Ok(None);
+        }
+        let id = session_id.to_string();
+        let db = self.runtime.db.clone();
+        // Only the last turn: from its user message on.
+        let tail = blocking(move || {
+            let turns = db.count_user_messages(&id)?;
+            let from = db.nth_user_message_seq(&id, turns)?;
+            db.session_log_after(&id, from.map(|seq| seq - 1))
+        })
+        .await?;
+        let events: Vec<SessionEvent> = tail.into_iter().map(|e| e.event).collect();
+        let Some(excerpt) = recap::recap_excerpt(&events) else {
+            return Ok(None);
+        };
+        let model = settings.tab_titles.effective_model(&settings.providers);
+        let reply = self
+            .runtime
+            .providers()
+            .one_shot(
+                model,
+                recap::RECAP_SYSTEM,
+                &recap::recap_prompt(&excerpt),
+                recap::RECAP_TIMEOUT,
+            )
+            .await?;
+        let text = reply.text.trim();
+        Ok((!text.is_empty()).then(|| text.to_string()))
     }
 
     pub async fn log(&self, session_id: &str) -> Result<Vec<SessionLogEntry>> {

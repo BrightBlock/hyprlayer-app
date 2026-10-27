@@ -263,6 +263,7 @@ hyprlayer_proto::commands! {
     WatchSessions: watch_sessions(sessions: Vec<WatchedSession>) -> Vec<SessionRev>;
     ListActiveSessions: list_active_sessions() -> Vec<ActiveSession>;
     SetSessionTitle: set_session_title(session_id: String, title: Option<String>) -> ();
+    RecapSession: recap_session(session_id: String) -> Option<String>;
     SetSessionArchived: set_session_archived(session_id: String, archived: bool) -> ();
     DeleteSession: delete_session(session_id: String) -> ();
     LaunchAndConverse: launch_and_converse(session_id: String) -> ();

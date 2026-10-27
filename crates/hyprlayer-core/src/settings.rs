@@ -75,6 +75,7 @@ pub struct AppSettings {
     pub notifications: NotificationSettings,
     pub quit: QuitSettings,
     pub tab_titles: TabTitleSettings,
+    pub recaps: RecapSettings,
     pub multiplexer: MultiplexerSettings,
     pub goals: GoalSettings,
     pub dev_tools: bool,
@@ -164,6 +165,20 @@ impl TabTitleSettings {
             return explicit;
         }
         Self::default_model_for(providers.default_harness.as_deref())
+    }
+}
+
+/// A short recap of a turn that finished while the user was away, on the tab-title model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct RecapSettings {
+    pub enabled: bool,
+}
+
+impl Default for RecapSettings {
+    fn default() -> Self {
+        Self { enabled: true }
     }
 }
 

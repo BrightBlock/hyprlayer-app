@@ -1607,6 +1607,10 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn recap_session(&self, session_id: String) -> Result<Option<String>, WireError> {
+        self.runtime.sessions().recap(&session_id).await.wire()
+    }
+
     async fn set_session_archived(
         &self,
         session_id: String,

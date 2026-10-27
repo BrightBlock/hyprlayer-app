@@ -33,14 +33,11 @@ const reply = (id: string, seq: number): TranscriptItem => ({
   seq,
 });
 
-function renderSync(items: TranscriptItem[], sync: Partial<TranscriptSync>, workingSince: number | null = null) {
+function renderSync(items: TranscriptItem[], sync: Partial<TranscriptSync>) {
   return render(
     <TranscriptView
       items={items}
       busy={false}
-      connecting={false}
-      harnessLabel="Claude Code"
-      workingSince={workingSince}
       permission={{ onAllow: () => {}, onAllowForSession: () => {}, onDeny: () => {} }}
       prompt={{ onRewind: () => {} }}
       sync={{ ...NONE, ...sync }}
@@ -90,11 +87,10 @@ describe("skeleton tail", () => {
     expect(screen.queryByText(/5 turns/)).toBeNull();
   });
 
-  it("shows only the working line, not a placeholder too, while the other device's turn runs", () => {
+  it("draws no placeholder while the other device's turn runs; the activity bar names it", () => {
     const tail = { phase: "behind" as const, turns: [{ rev: 42, kinds: ["user" as const] }], count: 3, working: "nexus" };
     const { container } = renderSync([], { tail });
     expect(container.querySelectorAll("[data-sync-placeholder]")).toHaveLength(0);
-    expect(screen.getByText("nexus is working…")).toBeTruthy();
   });
 
   it("shimmers only while syncing", () => {
@@ -105,24 +101,11 @@ describe("skeleton tail", () => {
       <TranscriptView
         items={[]}
         busy={false}
-        connecting={false}
-        harnessLabel="Claude Code"
-        workingSince={null}
         permission={{ onAllow: () => {}, onAllowForSession: () => {}, onDeny: () => {} }}
         prompt={{ onRewind: () => {} }}
         sync={{ ...NONE, tail: { ...tail, phase: "syncing" } }}
       />,
     );
     expect(container.querySelector(".animate-shimmer")).not.toBeNull();
-  });
-
-  it("replaces the elapsed counter while another device works", () => {
-    const { container } = renderSync(
-      [],
-      { tail: { phase: "inSync", turns: [], count: 0, working: "Another device" } },
-      Date.now(),
-    );
-    expect(screen.getByText("Another device is working…")).toBeTruthy();
-    expect(container.textContent).not.toMatch(/\d+s/);
   });
 });

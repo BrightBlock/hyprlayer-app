@@ -30,9 +30,6 @@ function renderTranscript(items: TranscriptItem[]) {
       ref={createRef()}
       items={items}
       busy={false}
-      connecting={false}
-      harnessLabel="Claude Code"
-      workingSince={null}
       permission={{ onAllow: () => {}, onAllowForSession: () => {}, onDeny: () => {} }}
       prompt={{ onRewind: () => {} }}
     />,

@@ -141,9 +141,6 @@ describe("re-pinning on resize", () => {
       <TranscriptView
         items={[]}
         busy={busy}
-        connecting={false}
-        harnessLabel="Claude Code"
-        workingSince={null}
         permission={{ onAllow: () => {}, onAllowForSession: () => {}, onDeny: () => {} }}
         prompt={{ onRewind: () => {} }}
       />,

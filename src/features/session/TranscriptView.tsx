@@ -16,7 +16,6 @@ import {
 
 import { Button, ROW_ACTION, Skeleton, Spinner, cx } from "@/components/ui";
 import { useCopyFeedback } from "@/lib/clipboard";
-import { HyprlayerMark } from "@/components/Logo";
 import { Icon } from "@/components/Icon";
 import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { stageLabel } from "@/lib/domain/stages";
@@ -983,21 +982,6 @@ const ExitNotice = memo(function ExitNotice({
   );
 });
 
-function ElapsedCounter({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 100);
-    return () => clearInterval(id);
-  }, [since]);
-  return (
-    <div className="mt-3 flex items-center gap-1.5 text-meta tabular-nums text-ink-dim">
-      <HyprlayerMark size={14} animated />
-      {formatElapsed(now - since)}
-    </div>
-  );
-}
-
 
 type ItemKind = TranscriptItem["kind"];
 
@@ -1416,7 +1400,7 @@ export type SkeletonTail = {
   turns: PendingTurn[];
   /** Revisions not shown; padded past `turns` when a refusal counted turns no revision named. */
   count: number;
-  /** Another device's turn is running; its label replaces the elapsed counter. */
+  /** Another device's turn is running; the activity bar names it. */
   working: string | null;
 };
 
@@ -1451,15 +1435,6 @@ function SyncSkeletonTail({ tail }: { tail: SkeletonTail }) {
           <Skeleton shimmer={shimmer} className="h-2.5 w-1/2" />
         </div>
       </div>
-    </div>
-  );
-}
-
-function WorkingSkeleton({ device }: { device: string }) {
-  return (
-    <div className="mt-3 flex items-center gap-2.5">
-      <Skeleton shimmer className="h-[22px] w-[22px] shrink-0 rounded-md" />
-      <span className="text-meta text-ink-dim">{device} is working…</span>
     </div>
   );
 }
@@ -1511,9 +1486,6 @@ function SyncDivider({
 type Props = {
   items: TranscriptItem[];
   busy: boolean;
-  connecting: boolean;
-  harnessLabel: string;
-  workingSince: number | null;
   permission: PermissionHandlers;
   prompt: PromptHandlers;
   sync?: TranscriptSync;
@@ -1575,9 +1547,6 @@ export const TranscriptView = memo(
     {
       items,
       busy,
-      connecting,
-      harnessLabel,
-      workingSince,
       permission,
       prompt,
       sync = NO_SYNC,
@@ -1826,17 +1795,6 @@ export const TranscriptView = memo(
           {!goalAnchor && goalCard}
           {!readyAnchor && readyCard}
           {tail && <SyncSkeletonTail tail={tail} />}
-          {connecting && (
-            <div className="mt-3 flex items-center gap-2 text-body text-ink-dim">
-              <Spinner size="sm" />
-              Connecting to {harnessLabel}…
-            </div>
-          )}
-          {tail?.working ? (
-            <WorkingSkeleton device={tail.working} />
-          ) : (
-            workingSince !== null && <ElapsedCounter since={workingSince} />
-          )}
           {queued.map((message, i) => (
             <div key={message.clientMessageId ?? `local:${i}`} className={items.length > 0 || i > 0 ? "mt-5" : ""}>
               <QueuedUserMessage
