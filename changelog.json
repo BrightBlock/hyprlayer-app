@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.22",
+      "date": "2026-11-04",
+      "summary": "Renaming a workstream can rename its branch, and PR lookups follow the real branch.",
+      "notes": [
+        "Renaming a workstream can now also rename its app-made branch. The new name is previewed first, and the rename is blocked once the branch is pushed, has a PR, has moved, or the new name is taken.",
+        "PR status, merge, base edits and the PR watcher now follow the worktree's actual branch, so a renamed or switched worktree no longer loses its PR. Archive skips deleting the remote branch in that case.",
+        "Starting a later stage's session now advances the workstream's stage and never moves it back.",
+        "This version works with hyprlayer-server 0.8.18 and later."
+      ]
+    },
+    {
       "version": "0.8.21",
       "date": "2026-10-27",
       "summary": "The activity bar no longer reports done while background agents are still running.",
