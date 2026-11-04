@@ -732,9 +732,22 @@ export function useCreateWorkstream(projectPath: string) {
 
 export function useRenameWorkstream() {
   return useMutation({
-    mutationFn: ({ id, title }: { id: string; title: string }) =>
-      unwrap(commands.renameWorkstream(id, title)),
+    mutationFn: async ({ id, title, branch }: { id: string; title: string; branch: boolean }) => {
+      if (branch) await unwrap(commands.renameWorkstreamBranch(id, title));
+      await unwrap(commands.renameWorkstream(id, title));
+    },
     onSettled: (_data, _error, { id }) => invalidateWorkstream(id),
+  });
+}
+
+// A server too old for the command errors, which leaves the dialog without the branch option.
+export function useBranchRenamePreview(id: string, title: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["branch-rename", id, title],
+    queryFn: () => unwrap(commands.previewBranchRename(id, title)),
+    enabled: enabled && id.length > 0 && title.length > 0,
+    retry: false,
+    placeholderData: (prev) => prev,
   });
 }
 

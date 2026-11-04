@@ -47,6 +47,11 @@ export const commands = {
 	getBranchPrefixes: (projectPath: string) => typedError<ResolvedBranchPrefixes, AppError>(__TAURI_INVOKE("get_branch_prefixes", { projectPath })),
 	setBranchPrefixes: (projectPath: string, prefixes: BranchPrefix[]) => typedError<BranchPrefix[], AppError>(__TAURI_INVOKE("set_branch_prefixes", { projectPath, prefixes })),
 	renameWorkstream: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream", { id, title })),
+	previewBranchRename: (id: string, title: string) => typedError<{
+	branch: string,
+	blocked: BranchRenameBlock | null,
+} | null, AppError>(__TAURI_INVOKE("preview_branch_rename", { id, title })),
+	renameWorkstreamBranch: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream_branch", { id, title })),
 	setWorkstreamBaseBranch: (id: string, base: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_base_branch", { id, base })),
 	updateWorkstreamFromBase: (id: string) => typedError<PullOutcome, AppError>(__TAURI_INVOKE("update_workstream_from_base", { id })),
 	fetchWorkstreamRemote: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_workstream_remote", { id })),
@@ -612,6 +617,14 @@ export type BranchPrefix = {
 	prefix: string,
 	keywords?: string[],
 };
+
+/**  The branch a title rename would move an app-made branch to. */
+export type BranchRename = {
+	branch: string,
+	blocked: BranchRenameBlock | null,
+};
+
+export type BranchRenameBlock = "pushed" | "hasPr" | "moved" | "taken";
 
 export type BranchWorktree = {
 	branch: string,

@@ -150,7 +150,7 @@ pub fn branch_worktrees(repo_path: &Path) -> Result<Vec<(String, PathBuf)>> {
     Ok(found)
 }
 
-fn linked_head_branch(worktree: &Path) -> Option<String> {
+pub fn linked_head_branch(worktree: &Path) -> Option<String> {
     let pointer = std::fs::read_to_string(worktree.join(".git")).ok()?;
     let admin = worktree.join(pointer.trim().strip_prefix("gitdir: ")?);
     let head = std::fs::read_to_string(admin.join("HEAD")).ok()?;

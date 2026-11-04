@@ -202,6 +202,34 @@ pub async fn rename_workstream(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn preview_branch_rename(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> CmdResult<Option<core_workstreams::BranchRename>> {
+    state
+        .client()?
+        .preview_branch_rename(id, title)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_workstream_branch(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .rename_workstream_branch(id, title)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn set_workstream_base_branch(
     state: State<'_, AppState>,
     id: String,

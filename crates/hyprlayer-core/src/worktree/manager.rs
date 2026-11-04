@@ -666,6 +666,20 @@ pub async fn delete_remote_branch(
     Ok(())
 }
 
+/// Run inside the worktree, so git moves that worktree's HEAD along with the branch.
+pub async fn rename_branch(
+    git: &Path,
+    worktree: &Path,
+    from: &str,
+    to: &str,
+    overlay: &[(String, String)],
+) -> Result<()> {
+    git_in(git, worktree, &["branch", "-m", from, to], overlay)
+        .run()
+        .await?;
+    Ok(())
+}
+
 async fn unmerged_files(git: &Path, worktree: &Path, overlay: &[(String, String)]) -> Vec<String> {
     match git_in(
         git,
@@ -840,6 +854,11 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
 }
 
 pub fn unique_slug(title: &str) -> String {
+    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
+    format!("{}-{suffix}", slug_stem(title))
+}
+
+pub fn slug_stem(title: &str) -> String {
     let mut kebab = String::new();
     let mut last_dash = true;
     for c in title.chars() {
@@ -855,9 +874,7 @@ pub fn unique_slug(title: &str) -> String {
         }
     }
     let kebab = kebab.trim_matches('-');
-    let stem = if kebab.is_empty() { "work-item" } else { kebab };
-    let suffix = &uuid::Uuid::new_v4().simple().to_string()[..4];
-    format!("{stem}-{suffix}")
+    if kebab.is_empty() { "work-item" } else { kebab }.to_string()
 }
 
 #[cfg(test)]

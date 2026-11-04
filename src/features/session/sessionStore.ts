@@ -34,7 +34,12 @@ import type { EventBridge } from "@/lib/events";
 import { isAppError, isStaleTranscript, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
-import { invalidateWorkstreamPr, invalidateWorktreeGit, useActiveSessions } from "@/lib/queries";
+import {
+  invalidateWorkstreamLists,
+  invalidateWorkstreamPr,
+  invalidateWorktreeGit,
+  useActiveSessions,
+} from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
@@ -647,6 +652,8 @@ export async function startSession(args: {
   );
 
   channels.set(session.id, channel);
+  // Starting a later stage advances the workstream, which moves its board card.
+  invalidateWorkstreamLists();
 
   let view = initialSessionView("starting");
   view = { ...view, model: session.model, claudeSessionId: session.claudeSessionId };

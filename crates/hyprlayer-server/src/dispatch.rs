@@ -66,7 +66,7 @@ use hyprlayer_core::runtime::terminals::{
     ResizeAgentTerminalRequest, ResizeTerminalRequest, SessionExistsRequest, WriteTerminalRequest,
 };
 use hyprlayer_core::runtime::workstreams::{
-    ArchiveCleanupReport, ArchiveWorkstreamRequest, CleanupArchivedRequest,
+    ArchiveCleanupReport, ArchiveWorkstreamRequest, BranchRename, CleanupArchivedRequest,
     CreateWorkstreamRequest, HeadBranchObservation, ListWorkstreamsRequest, ProjectMemory,
     PurgeWorkstreamRequest, RenameWorkstreamRequest, ReprovisionWorkstreamRequest,
     RestoreWorkstreamRequest, UpdateWorkstreamRequest, WorkstreamBases, WorkstreamDocumentsRequest,
@@ -857,6 +857,27 @@ impl Dispatch for Server {
         self.runtime
             .workstreams()
             .rename(RenameWorkstreamRequest { id, title })
+            .await
+            .wire()?;
+        Ok(())
+    }
+
+    async fn preview_branch_rename(
+        &self,
+        id: String,
+        title: String,
+    ) -> Result<Option<BranchRename>, WireError> {
+        self.runtime
+            .workstreams()
+            .preview_branch_rename(&id, &title)
+            .await
+            .wire()
+    }
+
+    async fn rename_workstream_branch(&self, id: String, title: String) -> Result<(), WireError> {
+        self.runtime
+            .workstreams()
+            .rename_branch(&id, &title)
             .await
             .wire()?;
         Ok(())

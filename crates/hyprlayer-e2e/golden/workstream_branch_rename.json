@@ -1,0 +1,90 @@
+{
+  "scenario": "workstream_branch_rename",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "offered": {
+              "blocked": null,
+              "branch": "$RENAMED"
+            },
+            "same": null
+          },
+          "guard": "a title with the same slug offers nothing; a new title offers the renamed branch, unblocked",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "head": "$RENAMED",
+            "oldGone": true,
+            "recorded": "$RENAMED",
+            "slugKept": true,
+            "worktreeKept": true
+          },
+          "guard": "the row and the worktree's HEAD move to the new branch; the old one is gone; slug and folder stay",
+          "ok": true
+        }
+      ],
+      "step": "a local branch follows the new title"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "again": {
+              "blocked": null,
+              "branch": "$TAKEN"
+            },
+            "refused": {
+              "blocked": "taken",
+              "branch": "$TAKEN"
+            }
+          },
+          "guard": "a second rename is offered; an existing branch with that name blocks it",
+          "ok": true
+        }
+      ],
+      "step": "a renamed branch can be renamed again, unless the name is taken"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "blocked": "pushed",
+            "error": "branch_rename_blocked",
+            "head": "$RENAMED"
+          },
+          "guard": "the preview says pushed, the rename errors, and HEAD keeps its branch",
+          "ok": true
+        }
+      ],
+      "step": "a pushed branch is refused and left alone"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "blocked": "moved"
+          },
+          "guard": "HEAD on another branch blocks the rename",
+          "ok": true
+        }
+      ],
+      "step": "a worktree switched off its branch is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

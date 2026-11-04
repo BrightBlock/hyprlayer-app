@@ -1036,6 +1036,14 @@ impl SessionService<'_> {
             blocking(move || db.insert_session(new)).await?
         };
         self.runtime.session_titler.enqueue(&session.id, true);
+        if let Err(e) = self
+            .runtime
+            .workstreams()
+            .advance_stage(&workstream, stage)
+            .await
+        {
+            tracing::warn!("workstream {}: stage not advanced: {e}", workstream.id);
+        }
 
         Ok(StartedStageSession {
             session: session.clone(),

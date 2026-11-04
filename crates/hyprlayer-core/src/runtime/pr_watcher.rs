@@ -16,7 +16,7 @@ use hyprlayer_models::RuntimeEvent;
 
 use super::doc_status;
 use super::shutdown::TrackedTask;
-use super::workstreams::has_own_pr;
+use super::workstreams::{has_own_pr, pr_lookup_ref};
 
 const FAST: Duration = Duration::from_secs(8);
 const MEDIUM: Duration = Duration::from_secs(20);
@@ -328,7 +328,7 @@ async fn poll_all(
             let res = pr::pr_status(
                 &gh,
                 Path::new(&item.worktree_path),
-                &item.pr_ref(),
+                &pr_lookup_ref(&item),
                 &overlay,
             )
             .await;

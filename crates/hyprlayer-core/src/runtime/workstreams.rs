@@ -71,6 +71,25 @@ pub struct RenameWorkstreamRequest {
     pub title: String,
 }
 
+/// The branch a title rename would move an app-made branch to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct BranchRename {
+    pub branch: String,
+    pub blocked: Option<BranchRenameBlock>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum BranchRenameBlock {
+    Pushed,
+    HasPr,
+    Moved,
+    Taken,
+}
+
 pub struct UpdateWorkstreamRequest {
     pub id: String,
     pub stage: Option<Stage>,
@@ -352,7 +371,8 @@ impl WorkstreamService<'_> {
             let (gh, overlay, permits) = (gh.clone(), overlay.clone(), permits.clone());
             lookups.spawn(async move {
                 let _permit = permits.acquire_owned().await;
-                let found = pr::pr_status(&gh, pr_dir(&item), &item.pr_ref(), &overlay).await;
+                let found =
+                    pr::pr_status(&gh, pr_dir(&item), &pr_lookup_ref(&item), &overlay).await;
                 (item, record, found)
             });
         }
@@ -457,18 +477,13 @@ impl WorkstreamService<'_> {
         }
         if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
             let dir = pr_dir(&item);
+            let pr_ref = pr_lookup_ref(&item);
             if let Ok(Some(status)) =
-                pr::pr_status(&gh, dir, &item.pr_ref(), &self.runtime.child_env().await).await
+                pr::pr_status(&gh, dir, &pr_ref, &self.runtime.child_env().await).await
             {
                 if status.state == pr::PrState::Open {
-                    pr::edit_pr_base(
-                        &gh,
-                        dir,
-                        &item.pr_ref(),
-                        &base,
-                        &self.runtime.child_env().await,
-                    )
-                    .await?;
+                    pr::edit_pr_base(&gh, dir, &pr_ref, &base, &self.runtime.child_env().await)
+                        .await?;
                 }
             }
         }
@@ -699,7 +714,8 @@ impl WorkstreamService<'_> {
             return Ok(None);
         };
         let dir = pr_dir(&item);
-        match pr::pr_status(&gh, dir, &item.pr_ref(), &self.runtime.child_env().await).await {
+        let pr_ref = pr_lookup_ref(&item);
+        match pr::pr_status(&gh, dir, &pr_ref, &self.runtime.child_env().await).await {
             Ok(status) => Ok(status),
             // An error, not "no PR": the client keeps the last known PR and
             // backs off, where `None` made a spent GraphQL quota erase it.
@@ -712,7 +728,7 @@ impl WorkstreamService<'_> {
                 } else {
                     "gh failed"
                 };
-                tracing::debug!("PR status for {} unavailable: {cause}: {e}", item.pr_ref());
+                tracing::debug!("PR status for {pr_ref} unavailable: {cause}: {e}");
                 Err(e)
             }
         }
@@ -876,7 +892,7 @@ impl WorkstreamService<'_> {
         pr::merge_pr(
             &gh,
             Path::new(&item.worktree_path),
-            &item.pr_ref(),
+            &pr_lookup_ref(&item),
             method,
             auto,
             &self.runtime.child_env().await,
@@ -892,6 +908,73 @@ impl WorkstreamService<'_> {
         let id = req.id.clone();
         blocking(move || db.update_workstream_title(&id, &title)).await?;
         self.find(&req.id).await
+    }
+
+    /// `None` when the workstream has no app-made branch or `title` wouldn't change it.
+    pub async fn preview_branch_rename(
+        &self,
+        id: &str,
+        title: &str,
+    ) -> Result<Option<BranchRename>> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let title = title.trim().to_string();
+        blocking(move || Ok(branch_rename(&item, &title))).await
+    }
+
+    /// Renames a local, PR-less branch to follow `title`; the slug and folders keep their names.
+    pub async fn rename_branch(&self, id: &str, title: &str) -> Result<Workstream> {
+        ensure_running(self.runtime)?;
+        let peek = self.find(id).await?;
+        let _guard = self
+            .runtime
+            .workstream_locks
+            .lock_pair(&peek.project_path, id)
+            .await;
+        let item = self.find(id).await?;
+        let (probe, title) = (item.clone(), title.trim().to_string());
+        let Some(rename) = blocking(move || Ok(branch_rename(&probe, &title))).await? else {
+            return Ok(item);
+        };
+        if rename.blocked.is_some() {
+            return Err(CoreError::BranchRenameBlocked {
+                branch: item.branch,
+            });
+        }
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        worktree::rename_branch(
+            &git,
+            Path::new(&item.worktree_path),
+            &item.branch,
+            &rename.branch,
+            &self.runtime.child_env().await,
+        )
+        .await?;
+        let db = self.runtime.db.clone();
+        let (wid, branch) = (item.id.clone(), rename.branch.clone());
+        blocking(move || db.update_workstream_branch(&wid, &branch)).await?;
+        let _ = self
+            .runtime
+            .events
+            .send(RuntimeEvent::WorkstreamBranchChanged {
+                workstream_id: item.id.clone(),
+                branch: rename.branch,
+                previous: item.branch,
+            });
+        self.find(id).await
+    }
+
+    /// Starting a later stage's session moves the workstream forward; an earlier one never moves it back.
+    pub async fn advance_stage(&self, item: &Workstream, stage: Stage) -> Result<()> {
+        let Some(to) = pipeline_rank(stage) else {
+            return Ok(());
+        };
+        if pipeline_rank(item.stage).is_some_and(|from| from >= to) {
+            return Ok(());
+        }
+        let db = self.runtime.db.clone();
+        let id = item.id.clone();
+        blocking(move || db.update_workstream_stage(&id, stage)).await
     }
 
     pub async fn update(&self, req: UpdateWorkstreamRequest) -> Result<Workstream> {
@@ -1267,7 +1350,10 @@ impl WorkstreamService<'_> {
         self.runtime.scripts.clear_workstream(&id).await;
 
         // After the kills: no agent of this workstream can write a doc past this point.
-        let pr = self.archive_pr_status(&item).await;
+        let moved = moved_head(&item);
+        let pr = self
+            .archive_pr_status(&item, moved.clone().unwrap_or_else(|| item.pr_ref()))
+            .await;
         if let Some(status) = &pr {
             doc_status::settle_workstream(
                 self.runtime.db.clone(),
@@ -1307,6 +1393,8 @@ impl WorkstreamService<'_> {
             .git
             .delete_branch_on_archive
             && item.app_owns_branch()
+            // A PR found on a renamed or switched branch says nothing about the app's branch.
+            && moved.is_none()
             && pr.is_some_and(|s| s.state == pr::PrState::Merged)
         {
             if let Err(e) = worktree::delete_remote_branch(
@@ -1399,22 +1487,17 @@ impl WorkstreamService<'_> {
         self.find(&id).await
     }
 
-    async fn archive_pr_status(&self, item: &Workstream) -> Option<pr::PrStatus> {
+    async fn archive_pr_status(&self, item: &Workstream, pr_ref: String) -> Option<pr::PrStatus> {
         if !has_own_pr(item) {
             return None;
         }
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await.ok()?;
-        pr::pr_status(
-            &gh,
-            pr_dir(item),
-            &item.pr_ref(),
-            &self.runtime.child_env().await,
-        )
-        .await
-        .unwrap_or_else(|e| {
-            tracing::debug!("archive of {}: PR lookup failed: {e}", item.id);
-            None
-        })
+        pr::pr_status(&gh, pr_dir(item), &pr_ref, &self.runtime.child_env().await)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::debug!("archive of {}: PR lookup failed: {e}", item.id);
+                None
+            })
     }
 
     pub async fn restore(&self, req: RestoreWorkstreamRequest) -> Result<RestoreWorkstreamResult> {
@@ -1859,6 +1942,79 @@ fn own_branch(item: &Workstream) -> bool {
 /// Whether a PR `pr_ref` finds is this workstream's own, not one whose head is its base branch.
 pub(crate) fn has_own_pr(item: &Workstream) -> bool {
     !item.is_folder() && (item.pr_number.is_some() || own_branch(item))
+}
+
+/// The branch is `<prefix><slug>`, or `<prefix><title stem>-<suffix>` once renamed with its title;
+/// a branch matching neither (named at create time) is never offered.
+fn branch_rename(item: &Workstream, title: &str) -> Option<BranchRename> {
+    if !item.app_owns_branch() || item.status != WorkstreamStatus::Active {
+        return None;
+    }
+    let (_, suffix) = item.slug.rsplit_once('-')?;
+    let titled = format!("{}-{suffix}", worktree::slug_stem(&item.title));
+    let prefix = item
+        .branch
+        .strip_suffix(item.slug.as_str())
+        .or_else(|| item.branch.strip_suffix(titled.as_str()))?;
+    let branch = format!("{prefix}{}-{suffix}", worktree::slug_stem(title));
+    if branch == item.branch {
+        return None;
+    }
+    let worktree = Path::new(&item.worktree_path);
+    let pushed = crate::gitops::list_remote_branches(worktree)
+        .unwrap_or_default()
+        .iter()
+        .any(|r| crate::gitops::local_name_for_remote(r) == Some(item.branch.as_str()));
+    let blocked = if item.pr_number.is_some() {
+        Some(BranchRenameBlock::HasPr)
+    } else if crate::gitops::linked_head_branch(worktree).as_deref() != Some(item.branch.as_str()) {
+        Some(BranchRenameBlock::Moved)
+    } else if pushed {
+        Some(BranchRenameBlock::Pushed)
+    } else if crate::gitops::list_local_branches(worktree)
+        .unwrap_or_default()
+        .contains(&branch)
+    {
+        Some(BranchRenameBlock::Taken)
+    } else {
+        None
+    };
+    Some(BranchRename { branch, blocked })
+}
+
+fn pipeline_rank(stage: Stage) -> Option<u8> {
+    match stage {
+        Stage::Research => Some(0),
+        Stage::Plan => Some(1),
+        Stage::Implement => Some(2),
+        Stage::Validate => Some(3),
+        Stage::Commit => Some(4),
+        Stage::Ship => Some(5),
+        Stage::Revise => Some(6),
+        Stage::General => None,
+    }
+}
+
+/// What `gh` should look up: the attached number, else the branch the worktree is really on.
+pub(crate) fn pr_lookup_ref(item: &Workstream) -> String {
+    moved_head(item).unwrap_or_else(|| item.pr_ref())
+}
+
+/// An isolated worktree's HEAD once renamed or switched off the app's branch. The row keeps
+/// the app's branch because archive may delete it; only PR lookups follow HEAD.
+fn moved_head(item: &Workstream) -> Option<String> {
+    if item.pr_number.is_some() || !item.app_owns_branch() {
+        return None;
+    }
+    let dir = if item.status == WorkstreamStatus::Archived {
+        archive_dir_for(Path::new(&item.project_path), &item.slug)
+    } else {
+        PathBuf::from(&item.worktree_path)
+    };
+    let head = crate::gitops::linked_head_branch(&dir)?;
+    let on_base =
+        head == item.base_branch || item.base_branch.strip_prefix("origin/") == Some(head.as_str());
+    (head != item.branch && !on_base).then_some(head)
 }
 
 /// Unknown or open, and not asked recently: a lookup could still change it.

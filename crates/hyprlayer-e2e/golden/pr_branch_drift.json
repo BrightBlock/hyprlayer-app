@@ -1,0 +1,86 @@
+{
+  "scenario": "pr_branch_drift",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "general": "ship",
+            "plan": "plan",
+            "planAgain": "ship",
+            "ship": "ship"
+          },
+          "guard": "plan → ship advances; a later plan or general session leaves it at ship",
+          "ok": true
+        }
+      ],
+      "step": "stage sessions move the workstream forward, never back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterRename": 339,
+            "beforeRename": null,
+            "keepsAppBranch": true,
+            "renamed": true
+          },
+          "guard": "no PR on the app's branch; after `git branch -m` the PR on the new name is found, and the row keeps the app's branch",
+          "ok": true
+        }
+      ],
+      "step": "a renamed branch still finds its PR"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pr": 340,
+            "switched": true
+          },
+          "guard": "after `git switch -c` the new branch's PR is found",
+          "ok": true
+        }
+      ],
+      "step": "a switched branch follows HEAD"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pr": 339
+          },
+          "guard": "with #339 attached the lookup ignores HEAD's #340",
+          "ok": true
+        }
+      ],
+      "step": "an attached PR wins over HEAD"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "number": 340,
+            "state": "merged"
+          },
+          "guard": "the archive sweep reads HEAD from the archived worktree and records #340 merged",
+          "ok": true
+        }
+      ],
+      "step": "an archive looks up the branch it was archived on"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

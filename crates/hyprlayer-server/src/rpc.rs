@@ -57,7 +57,7 @@ use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
 };
 use hyprlayer_core::runtime::workstreams::{
-    ArchiveCleanupReport, ArchiveInfo, ProjectMemory, WorkstreamBases,
+    ArchiveCleanupReport, ArchiveInfo, BranchRename, ProjectMemory, WorkstreamBases,
 };
 use hyprlayer_core::settings::AppSettings;
 use hyprlayer_core::skill_sources::skills_sh::{
@@ -187,6 +187,8 @@ hyprlayer_proto::commands! {
     GetBranchPrefixes: get_branch_prefixes(project_path: String) -> ResolvedBranchPrefixes;
     SetBranchPrefixes: set_branch_prefixes(project_path: String, prefixes: Vec<BranchPrefix>) -> Vec<BranchPrefix>;
     RenameWorkstream: rename_workstream(id: String, title: String) -> ();
+    PreviewBranchRename: preview_branch_rename(id: String, title: String) -> Option<BranchRename>;
+    RenameWorkstreamBranch: rename_workstream_branch(id: String, title: String) -> ();
     SetWorkstreamBaseBranch: set_workstream_base_branch(id: String, base: String) -> ();
     UpdateWorkstreamFromBase: update_workstream_from_base(id: String) -> PullOutcome;
     FetchWorkstreamRemote: fetch_workstream_remote(id: String) -> ();

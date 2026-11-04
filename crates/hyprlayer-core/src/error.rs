@@ -378,6 +378,9 @@ pub enum CoreError {
     #[error("This workstream runs in a plain folder, so it has no branches or PRs.")]
     WorkstreamFolderNoGit,
 
+    #[error("The branch {branch} can't be renamed any more; rename the workstream without it.")]
+    BranchRenameBlocked { branch: String },
+
     #[error(fmt = fmt_pr_not_found)]
     PrNotFound { pr_number: u32, detail: String },
 
@@ -873,6 +876,7 @@ impl CoreError {
             CoreError::CliInstallUnsupported => "cli_install_unsupported",
             CoreError::RemoteUnsupported { .. } => "remote_unsupported",
             CoreError::WorkstreamFolderNoGit => "folder_no_git",
+            CoreError::BranchRenameBlocked { .. } => "branch_rename_blocked",
             CoreError::PrNotFound { .. } => "pr_not_found",
             CoreError::ReviewCommentNotFound { .. } => "review_comment_not_found",
             CoreError::ReviewNoteNotFound { .. } => "review_note_not_found",
