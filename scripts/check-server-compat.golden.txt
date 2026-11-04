@@ -1,0 +1,139 @@
+## baseline
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## new_command_app_calls
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  new_thing (called in src-tauri/src/commands/new.rs): not in server-v0.9.0
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## new_command_server_only_with_comment_mention
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## arg_type_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  get_thing (called in src-tauri/src/commands/things.rs): signature differs
+    server-v0.9.0: GetThing(id:String) -> Thing
+    now: GetThing(id:u64) -> Thing
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## arg_renamed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  get_thing (called in src-tauri/src/commands/things.rs): signature differs
+    server-v0.9.0: GetThing(id:String) -> Thing
+    now: GetThing(thing_id:String) -> Thing
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## return_type_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  get_thing (called in src-tauri/src/commands/things.rs): signature differs
+    server-v0.9.0: GetThing(id:String) -> Thing
+    now: GetThing(id:String) -> Option<Thing>
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## variant_renamed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  get_thing (called in src-tauri/src/commands/things.rs): signature differs
+    server-v0.9.0: GetThing(id:String) -> Thing
+    now: FetchThing(id:String) -> Thing
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## method_renamed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  fetch_thing (called in src-tauri/src/commands/things.rs): not in server-v0.9.0
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## multiline_entry_arg_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  list_things (called in src-tauri/src/commands/things.rs): signature differs
+    server-v0.9.0: ListThings(project:Option<String>,limit:u32) -> Vec<Thing>
+    now: ListThings(project:Option<String>,limit:u64) -> Vec<Thing>
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## multiline_entry_reflowed_only
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## trailing_comment_on_entry
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## helper_wrapper_call_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  set_flag (called in src-tauri/src/commands/helpers.rs): signature differs
+    server-v0.9.0: SetFlag(on:bool) -> ()
+    now: SetFlag(on:bool,why:String) -> ()
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## non_commands_file_call_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  get_status (called in src-tauri/src/lib.rs): signature differs
+    server-v0.9.0: GetStatus() -> Status
+    now: GetStatus() -> Option<Status>
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## request_dispatch_changed
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  ping (called in src-tauri/src/lib.rs): signature differs
+    server-v0.9.0: Ping(nonce:u64) -> u64
+    now: Ping(nonce:u32) -> u64
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## server_only_command_changed
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## command_removed
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## min_tag_missing
+exit: 1
+✗ tag server-v0.8.0 (MIN_SERVER_VERSION) is not in this clone, so its command table can't be compared.
+  Run `git fetch --tags` and re-run.
+
+## min_equals_untagged_server
+exit: 0
+✓ server compat: app RPCs match server 0.10.0 (MIN_SERVER_VERSION); server 0.10.0
+
+## min_above_server
+exit: 1
+✗ MIN_SERVER_VERSION 0.11.0 is above the server crate's version 0.10.0.
+  Lower it in src-tauri/src/server_version.rs, or bump the version in crates/hyprlayer-server/Cargo.toml.
+
+## released_server_min_not_raised
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  new_thing (called in src-tauri/src/commands/new.rs): not in server-v0.9.0
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## table_drift_without_bump
+exit: 1
+✗ the command table changed since server-v0.10.0, but crates/hyprlayer-server is still 0.10.0:
+  new_thing:
+    server-v0.10.0: (absent)
+    now: NewThing() -> Thing
+  Bump the version in crates/hyprlayer-server/Cargo.toml.
+
+## table_drift_without_bump_app_calls_old_min
+exit: 1
+✗ the command table changed since server-v0.10.0, but crates/hyprlayer-server is still 0.10.0:
+  new_thing:
+    server-v0.10.0: (absent)
+    now: NewThing() -> Thing
+  Bump the version in crates/hyprlayer-server/Cargo.toml.
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  new_thing (called in src-tauri/src/commands/new.rs): not in server-v0.9.0
+  Bump the version in crates/hyprlayer-server/Cargo.toml, then raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to it.
+

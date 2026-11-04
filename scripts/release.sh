@@ -14,6 +14,9 @@ if [[ "$BRANCH" != "main" ]]; then
   exit 1
 fi
 
+# Runs even with RELEASE_SKIP_CHECKS: an app calling RPCs its MIN_SERVER_VERSION lacks breaks at runtime.
+node scripts/check-server-compat.mjs
+
 if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   echo "→ Verification gate (one cargo nextest run with local and container E2E, library targets, typecheck, lint, vitest)…"
   # The container E2E tier reaches a Linux host over real SSH, the path remote

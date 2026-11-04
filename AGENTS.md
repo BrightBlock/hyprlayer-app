@@ -67,7 +67,10 @@ regenerate and commit `bindings.ts`. On the frontend,
 
 **Server versioning.** Changes under `crates/hyprlayer-{server,core,models,proto}`
 need a server version bump before release (`release.sh` enforces it). Raise
-`MIN_SERVER_VERSION` only when the app depends on the change.
+`MIN_SERVER_VERSION` only when the app depends on the change;
+`scripts/check-server-compat.mjs` (in `pnpm lint` and `release.sh`) fails when an
+RPC the app calls is missing or different at `server-v<MIN_SERVER_VERSION>`. Its
+fixtures run with `scripts/test-server-compat.sh`.
 
 **Errors.** `CoreError` converts into the error envelope on its own; app-level
 failures use the constructors in `src-tauri/src/error.rs`. The UI reads them with
