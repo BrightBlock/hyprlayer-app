@@ -7,7 +7,7 @@ import { useDoc, useWorkstreamPr } from "@/lib/queries";
 import { parsePlanDoc, phaseRows } from "@/features/plan/planDoc";
 import { useSessionStore } from "@/features/session/sessionStore";
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
-import type { PipelineSession } from "./pipeline";
+import { prNumberOf, type PipelineSession } from "./pipeline";
 
 // Newest session per workstream; the registry only lists live ones.
 export function sessionsByWorkstream(active: ActiveSessionView[]): Map<string, PipelineSession> {
@@ -62,10 +62,10 @@ export function usePlanProgress(wsId: string, enabled: boolean): { done: number;
   }, [path, content]);
 }
 
-// No poll: PR status shares the GitHub GraphQL quota with the Ship button.
+// No poll, and only an attached PR fetches: PR status shares the GitHub GraphQL quota with the Ship button.
 export function usePrSummary(view: WorkstreamView, enabled: boolean): string | null {
   const pr = useWorkstreamPr(view.item.id, enabled && view.item.prNumber != null);
-  const number = view.item.prNumber;
+  const number = prNumberOf(view);
   if (number == null) return null;
   const status = pr.data;
   if (!status) return `PR #${number}`;

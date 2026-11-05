@@ -159,6 +159,18 @@ pub fn linked_head_branch(worktree: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// False when HEAD can't be read, which is not the same as being off a branch.
+pub fn linked_head_detached(worktree: &Path) -> bool {
+    let Some(pointer) = std::fs::read_to_string(worktree.join(".git")).ok() else {
+        return false;
+    };
+    let Some(admin) = pointer.trim().strip_prefix("gitdir: ") else {
+        return false;
+    };
+    std::fs::read_to_string(worktree.join(admin).join("HEAD"))
+        .is_ok_and(|head| !head.starts_with("ref: "))
+}
+
 pub fn remote_to_web_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let (host, path) = if let Some(rest) = raw

@@ -20,7 +20,7 @@ export type PipelineCardHandlers = {
 export function workstreamPlace(view: WorkstreamView): string {
   if (isFolderWorkstream(view)) return "folder";
   if (isDetachedHead(view)) return "detached HEAD";
-  return shortBranch(view.item.branch);
+  return shortBranch(view.git.branch ?? view.item.branch);
 }
 
 export function harnessLabel(session: PipelineSession | undefined): string | null {

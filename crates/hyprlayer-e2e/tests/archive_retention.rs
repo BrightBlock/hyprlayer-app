@@ -124,10 +124,11 @@ async fn archive_retention() {
         json!({ "uncommitted": b["info"]["uncommitted"], "unpushed": b["info"]["unpushed"] }),
     );
     j.guard(
-        "PR state is unknown until refreshed",
-        [&a, &b, &c, &d]
-            .iter()
-            .all(|e| e["info"]["pr"] == json!({ "state": "unknown" })),
+        "a PR found while archiving is recorded at once; the rest are unknown until refreshed",
+        a["info"]["pr"] == json!({ "state": "merged", "number": 7 })
+            && [&b, &c, &d]
+                .iter()
+                .all(|e| e["info"]["pr"] == json!({ "state": "unknown" })),
         json!([&a, &b, &c, &d].map(|e| e["info"]["pr"].clone())),
     );
     j.guard(
@@ -144,7 +145,7 @@ async fn archive_retention() {
     let listed = list(&mut j, &client).await;
     let [a, b, c, d] = [&merged, &dirty, &kept, &legacy].map(|ws| find(&listed, &ws.id));
     j.guard(
-        "refresh records the merged PR",
+        "refresh keeps the merged PR",
         a["info"]["pr"] == json!({ "state": "merged", "number": 7 }),
         json!({ "pr": a["info"]["pr"] }),
     );
@@ -157,7 +158,7 @@ async fn archive_retention() {
     );
     j.guard(
         "refresh counts the rows it changed",
-        changed == json!(4),
+        changed == json!(3),
         json!({ "changed": changed }),
     );
     let again = j

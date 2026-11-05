@@ -145,9 +145,9 @@ import { planGoalTarget, usePlanPath } from "@/features/board/pipelineData";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import {
   setNewWorkstreamStage,
+  settleWorkstreamStage,
   useBootstrap,
   useDetachPr,
-  useSetWorkstreamStage,
   useWorkstreams,
 } from "@/lib/queries";
 import { basename } from "@/lib/path";
@@ -315,7 +315,6 @@ export function ProjectPage() {
   const { projectPath } = useParams({ from: "/projects/$projectPath" });
   const bootstrap = useBootstrap();
   const workstreams = useWorkstreams(projectPath);
-  const setStage = useSetWorkstreamStage(projectPath);
 
   const search = useSearch({ from: "/projects/$projectPath" });
   const navigate = useNavigate({ from: "/projects/$projectPath" });
@@ -868,7 +867,7 @@ export function ProjectPage() {
   const changeShellMode = (shell: ShellTab, key: StageKey) => {
     if (!activeView || key === shell.mode) return;
     patchShell(shell.id, { mode: key });
-    setStage.mutate({ id: activeView.item.id, stage: key });
+    settleWorkstreamStage(activeView.item.id, key);
   };
   const addAttachmentsToShell = (shellId: number, atts: Attachment[]) => {
     if (atts.length === 0) return;

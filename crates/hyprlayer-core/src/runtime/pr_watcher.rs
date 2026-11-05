@@ -11,12 +11,12 @@ use crate::error::Result;
 use crate::index::watcher::WatchHandle;
 use crate::pr::{self, ChecksState, PrState, PrStatus};
 use crate::process::binaries::{BinaryKind, BinaryResolver};
-use crate::store::{Db, Workstream};
+use crate::store::{Db, ObservedPr, Workstream};
 use hyprlayer_models::RuntimeEvent;
 
 use super::doc_status;
 use super::shutdown::TrackedTask;
-use super::workstreams::{has_own_pr, pr_lookup_ref};
+use super::workstreams::{current_pr_ref, has_own_pr, pr_dir};
 
 const FAST: Duration = Duration::from_secs(8);
 const MEDIUM: Duration = Duration::from_secs(20);
@@ -54,6 +54,9 @@ pub struct PrWatcherContext {
 struct Tracked {
     status: Option<PrStatus>,
     due: Instant,
+    pr_ref: String,
+    /// A moved-to ref whose lookup failed: it waits out `due` instead of retrying every tick.
+    failed_ref: Option<String>,
 }
 
 #[derive(Default)]
@@ -165,12 +168,23 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         }
     }
 
-    let to_poll: Vec<Workstream> = items
+    let to_poll: Vec<(Workstream, String)> = items
         .into_iter()
         .filter(|item| !item.is_folder())
-        .filter(|item| match st.tracked.get(&item.id) {
-            Some(t) => !matches!(&t.status, Some(s) if s.state == PrState::Merged) && t.due <= now,
-            None => true,
+        .filter_map(|item| {
+            let pr_ref = current_pr_ref(&item)?;
+            let due = match st.tracked.get(&item.id) {
+                Some(t) => {
+                    let moved = t.pr_ref != pr_ref;
+                    // A merge settles one ref; the worktree can move on to another.
+                    let settled =
+                        !moved && matches!(&t.status, Some(s) if s.state == PrState::Merged);
+                    (moved && t.failed_ref.as_deref() != Some(pr_ref.as_str()))
+                        || (!settled && t.due <= now)
+                }
+                None => true,
+            };
+            due.then_some((item, pr_ref))
         })
         .collect();
 
@@ -190,7 +204,8 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
     let polled_at = Instant::now();
     let mut rate_limited = false;
 
-    for (id, res) in results {
+    for (item, pr_ref, res) in results {
+        let id = item.id.clone();
         let status = match res {
             Ok(status) => {
                 if SIGNED_OUT_REPORTED.swap(false, Ordering::Relaxed) {
@@ -206,16 +221,38 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
                     tracing::warn!("pr watch: gh is not signed in; run `gh auth login`: {e}");
                 }
                 tracing::debug!("pr watch: gh status failed for {id}: {e}");
+                let moved = item
+                    .observed_ref
+                    .as_deref()
+                    .is_some_and(|seen| seen != pr_ref);
                 let is_active = active.as_deref() == Some(id.as_str());
-                let due = polled_at
-                    + st.tracked
+                let wait = if moved {
+                    MEDIUM
+                } else {
+                    st.tracked
                         .get(&id)
                         .map_or(SLOW, |t| cadence(&t.status, is_active))
-                        .max(MEDIUM);
-                st.tracked
-                    .entry(id)
-                    .and_modify(|t| t.due = due)
-                    .or_insert(Tracked { status: None, due });
+                        .max(MEDIUM)
+                };
+                let t = st.tracked.entry(id.clone()).or_insert(Tracked {
+                    status: None,
+                    due: polled_at,
+                    pr_ref: item.observed_ref.clone().unwrap_or_else(|| pr_ref.clone()),
+                    failed_ref: None,
+                });
+                t.due = polled_at + wait;
+                if !moved && t.pr_ref != pr_ref {
+                    t.status = None;
+                    t.pr_ref.clone_from(&pr_ref);
+                }
+                // Lists stop showing the old ref's PR now, not once a lookup succeeds.
+                if moved && t.failed_ref.as_deref() != Some(pr_ref.as_str()) {
+                    t.failed_ref = Some(pr_ref);
+                    let _ = ctx.events.send(RuntimeEvent::PrStatusChanged {
+                        workstream_id: id,
+                        observed_pr_changed: true,
+                    });
+                }
                 continue;
             }
         };
@@ -233,12 +270,29 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
                 .await;
             }
         }
+        let observed = status
+            .as_ref()
+            .filter(|_| projects.contains_key(&id))
+            .map(|s| ObservedPr {
+                number: s.number,
+                state: s.state,
+            });
+        let recorded = record_observed(ctx.db.clone(), &id, observed, &pr_ref).await;
         let due = polled_at + cadence(&status, active.as_deref() == Some(id.as_str()));
-        st.tracked.insert(id.clone(), Tracked { status, due });
-        if changed {
-            let _ = ctx
-                .events
-                .send(RuntimeEvent::PrStatusChanged { workstream_id: id });
+        st.tracked.insert(
+            id.clone(),
+            Tracked {
+                status,
+                due,
+                pr_ref,
+                failed_ref: None,
+            },
+        );
+        if changed || recorded {
+            let _ = ctx.events.send(RuntimeEvent::PrStatusChanged {
+                workstream_id: id,
+                observed_pr_changed: recorded,
+            });
         }
     }
 
@@ -261,6 +315,29 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
     });
 
     next_tick(&st.tracked, polled_at, st.backoff_until)
+}
+
+async fn record_observed(
+    db: Arc<Db>,
+    id: &str,
+    observed: Option<ObservedPr>,
+    pr_ref: &str,
+) -> bool {
+    let (wid, reference) = (id.to_string(), pr_ref.to_string());
+    let written =
+        tokio::task::spawn_blocking(move || db.record_pr_observation(&wid, observed, &reference))
+            .await;
+    match written {
+        Ok(Ok(recorded)) => recorded,
+        Ok(Err(e)) => {
+            tracing::warn!("pr watch: recording {id}'s PR failed: {e}");
+            false
+        }
+        Err(e) => {
+            tracing::warn!("pr watch: record task join error: {e}");
+            false
+        }
+    }
 }
 
 fn is_rate_limited(stderr: &str) -> bool {
@@ -309,14 +386,14 @@ async fn sweep_records(
 
 async fn poll_all(
     gh: &Path,
-    items: Vec<Workstream>,
+    items: Vec<(Workstream, String)>,
     overlay: &[(String, String)],
-) -> Vec<(String, Result<Option<PrStatus>>)> {
+) -> Vec<(Workstream, String, Result<Option<PrStatus>>)> {
     use tokio::task::JoinSet;
 
-    let mut set: JoinSet<(String, Result<Option<PrStatus>>)> = JoinSet::new();
+    let mut set: JoinSet<(Workstream, String, Result<Option<PrStatus>>)> = JoinSet::new();
     let mut results = Vec::with_capacity(items.len());
-    for item in items {
+    for (item, pr_ref) in items {
         if set.len() >= MAX_CONCURRENT {
             if let Some(Ok(r)) = set.join_next().await {
                 results.push(r);
@@ -325,14 +402,8 @@ async fn poll_all(
         let gh = gh.to_path_buf();
         let overlay = overlay.to_vec();
         set.spawn(async move {
-            let res = pr::pr_status(
-                &gh,
-                Path::new(&item.worktree_path),
-                &pr_lookup_ref(&item),
-                &overlay,
-            )
-            .await;
-            (item.id, res)
+            let res = pr::pr_status(&gh, pr_dir(&item), &pr_ref, &overlay).await;
+            (item, pr_ref, res)
         });
     }
     while let Some(joined) = set.join_next().await {
@@ -393,7 +464,12 @@ mod tests {
     }
 
     fn tracked(status: Option<PrStatus>, due: Instant) -> Tracked {
-        Tracked { status, due }
+        Tracked {
+            status,
+            due,
+            pr_ref: String::new(),
+            failed_ref: None,
+        }
     }
 
     #[test]

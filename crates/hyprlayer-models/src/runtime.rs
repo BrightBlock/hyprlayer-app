@@ -41,6 +41,9 @@ pub enum RuntimeEvent {
     ProjectsChanged,
     PrStatusChanged {
         workstream_id: String,
+        /// The row's `observed_pr` changed, so workstream lists are stale too.
+        #[serde(default)]
+        observed_pr_changed: bool,
     },
     WorktreeChanged {
         workstream_id: String,

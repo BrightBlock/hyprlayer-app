@@ -110,6 +110,8 @@ export function attachEventListeners(): () => void {
     }),
     events.prStatusChanged.listen((event) => {
       invalidateWorkstreamPr(event.payload.workstreamId);
+      // Not on every status change: CI churn would recompute git status for every worktree.
+      if (event.payload.observedPrChanged) invalidateWorkstreamLists();
     }),
     events.worktreeChanged.listen((event) => {
       invalidateWorktreeGit(event.payload.workstreamId);

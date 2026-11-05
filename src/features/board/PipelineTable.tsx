@@ -7,6 +7,7 @@ import {
   PIPELINE_COLUMNS,
   columnDot,
   pipelineColumnOf,
+  prNumberOf,
   type PipelineLive,
   type PipelineSession,
 } from "./pipeline";
@@ -49,6 +50,7 @@ export function PipelineTable({
             const s = sessions.get(view.item.id);
             const column = pipelineColumnOf(view, l?.activity === "needs-you");
             const { additions, deletions } = view.git;
+            const pr = prNumberOf(view);
             return (
               <tr
                 key={view.item.id}
@@ -81,7 +83,7 @@ export function PipelineTable({
                   {deletions > 0 && <span className="text-diff-del">−{formatCompactCount(deletions)}</span>}
                 </td>
                 <td className={`${CELL} whitespace-nowrap font-mono text-meta text-ink-dim`}>
-                  {view.item.prNumber != null ? `#${view.item.prNumber}` : ""}
+                  {pr != null ? `#${pr}` : ""}
                 </td>
                 <td className={`${CELL} whitespace-nowrap text-right font-mono text-meta text-ink-4`}>
                   {formatRelativeTime(view.item.updatedAt, now)}

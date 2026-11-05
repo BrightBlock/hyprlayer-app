@@ -7,6 +7,19 @@ use crate::claude::PermissionMode;
 
 pub use hyprlayer_models::agent::Stage;
 
+pub fn pipeline_rank(stage: Stage) -> Option<u8> {
+    match stage {
+        Stage::Research => Some(0),
+        Stage::Plan => Some(1),
+        Stage::Implement => Some(2),
+        Stage::Validate => Some(3),
+        Stage::Commit => Some(4),
+        Stage::Ship => Some(5),
+        Stage::Revise => Some(6),
+        Stage::General => None,
+    }
+}
+
 pub struct StagePolicy {
     pub permission_mode: PermissionMode,
     pub allowed_tools: Vec<String>,

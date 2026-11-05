@@ -27,11 +27,12 @@ export function PipelineBoard({
   handlers: PipelineCardHandlers;
   onOpenArchived: () => void;
 }) {
-  const grouped: Record<Exclude<PipelineKey, "merged">, WorkstreamView[]> = {
+  const grouped: Record<PipelineKey, WorkstreamView[]> = {
     planning: [],
     implementing: [],
     waiting: [],
     review: [],
+    merged: [],
   };
   for (const view of views) {
     grouped[pipelineColumnOf(view, live.get(view.item.id)?.activity === "needs-you")].push(view);
@@ -41,7 +42,7 @@ export function PipelineBoard({
   return (
     <div className="flex min-h-0 flex-1 gap-3.5 overflow-x-auto px-6 pt-3 pb-5">
       {PIPELINE_COLUMNS.map((col) => {
-        const count = col.key === "merged" ? merged.length : grouped[col.key].length;
+        const count = grouped[col.key].length + (col.key === "merged" ? merged.length : 0);
         return (
           <section key={col.key} aria-label={col.label} className="flex min-w-[200px] flex-1 flex-col">
             <div className="mb-2.5 flex items-center gap-2 px-1">
@@ -54,7 +55,18 @@ export function PipelineBoard({
               <span className={`font-mono text-meta ${col.count}`}>{count}</span>
             </div>
             <div role="list" className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
-              {col.key === "merged" ? (
+              {grouped[col.key].map((view) => (
+                <div key={view.item.id} role="listitem">
+                  <PipelineCard
+                    view={view}
+                    live={live.get(view.item.id)}
+                    session={sessions.get(view.item.id)}
+                    now={now}
+                    handlers={handlers}
+                  />
+                </div>
+              ))}
+              {col.key === "merged" && (
                 <>
                   {merged.slice(0, MERGED_VISIBLE).map((v) => (
                     <div key={v.item.id} role="listitem">
@@ -80,18 +92,6 @@ export function PipelineBoard({
                     </button>
                   )}
                 </>
-              ) : (
-                grouped[col.key].map((view) => (
-                  <div key={view.item.id} role="listitem">
-                    <PipelineCard
-                      view={view}
-                      live={live.get(view.item.id)}
-                      session={sessions.get(view.item.id)}
-                      now={now}
-                      handlers={handlers}
-                    />
-                  </div>
-                ))
               )}
             </div>
           </section>

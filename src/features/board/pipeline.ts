@@ -25,10 +25,18 @@ export const PIPELINE_VIEWS: { value: PipelineView; label: string }[] = [
 
 export const MERGED_VISIBLE = 2;
 
-// A live question or permission outranks the stage; an open PR outranks the stage too.
-export function pipelineColumnOf(view: WorkstreamView, waiting: boolean): Exclude<PipelineKey, "merged"> {
+// Untracked files don't count: a worktree's .envrc and thoughts/ would mark every one as started.
+function hasBranchChanges(view: WorkstreamView): boolean {
+  return view.git.dirty > 0 || view.git.aheadOfBase > 0;
+}
+
+// A live question outranks everything, then the PR, then the stage; a closed PR didn't ship.
+export function pipelineColumnOf(view: WorkstreamView, waiting: boolean): PipelineKey {
   if (waiting) return "waiting";
-  if (view.item.prNumber != null) return "review";
+  const pr = view.item.observedPr?.state;
+  if (pr === "merged") return "merged";
+  if (pr === "closed") return "implementing";
+  if (pr === "open" || (pr === undefined && view.item.prNumber != null)) return "review";
   switch (view.item.stage) {
     case "implement":
       return "implementing";
@@ -37,9 +45,17 @@ export function pipelineColumnOf(view: WorkstreamView, waiting: boolean): Exclud
     case "ship":
     case "revise":
       return "review";
+    case "general":
+      return hasBranchChanges(view) ? "implementing" : "planning";
     default:
       return "planning";
   }
+}
+
+export function prNumberOf(view: WorkstreamView): number | null {
+  const observed = view.item.observedPr;
+  if (observed && observed.state !== "closed") return observed.number;
+  return view.item.prNumber;
 }
 
 export function columnDot(key: PipelineKey): string {

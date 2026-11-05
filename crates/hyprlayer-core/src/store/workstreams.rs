@@ -2,10 +2,12 @@ use rusqlite::{params, Row};
 
 use super::{now_ms, Db};
 use crate::error::Result;
-use crate::pipeline::Stage;
+use crate::pipeline::{pipeline_rank, Stage};
 use crate::worktree::ArchiveScan;
 
-pub use hyprlayer_models::workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
+pub use hyprlayer_models::workstream::{
+    ObservedPr, PrState, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+};
 
 pub struct NewWorkstream {
     pub project_path: String,
@@ -15,6 +17,14 @@ pub struct NewWorkstream {
     pub worktree_path: String,
     pub base_branch: String,
     pub worktree_mode: WorktreeMode,
+}
+
+fn observed_pr(number: Option<u32>, state: Option<String>) -> Option<ObservedPr> {
+    let state = PrState::parse(state.as_deref()?)?;
+    Some(ObservedPr {
+        number: number?,
+        state,
+    })
 }
 
 fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
@@ -33,6 +43,11 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
         stage: Stage::parse(&stage),
         status: WorkstreamStatus::parse(&status),
         pr_number: row.get("pr_number")?,
+        observed_pr: observed_pr(
+            row.get("observed_pr_number")?,
+            row.get("observed_pr_state")?,
+        ),
+        observed_ref: row.get("observed_ref")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         archived_at: row.get("archived_at")?,
@@ -40,7 +55,9 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
 }
 
 const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_branch, \
-                    worktree_mode, stage, status, pr_number, created_at, updated_at, archived_at";
+                    worktree_mode, stage, status, pr_number, observed_pr_number, observed_pr_state, \
+                    observed_ref, \
+                    created_at, updated_at, archived_at";
 
 const DAY_MS: f64 = 86_400_000.0;
 /// An archive is purged this long after it was archived, unless kept.
@@ -102,6 +119,8 @@ impl Db {
             stage: Stage::General,
             status: WorkstreamStatus::Active,
             pr_number: None,
+            observed_pr: None,
+            observed_ref: None,
             created_at: now,
             updated_at: now,
             archived_at: None,
@@ -200,8 +219,40 @@ impl Db {
         })
     }
 
-    pub fn update_workstream_stage(&self, id: &str, stage: Stage) -> Result<()> {
-        self.touch(id, "stage", stage.as_str())
+    /// Forward only, in one transaction so concurrent writers can't undo each other. `current_ref`
+    /// is the ref PRs are looked up by now: a worktree that moved off the observed one starts its
+    /// stage over from this pick, before the watcher's next poll can reset it.
+    pub fn advance_workstream_stage(
+        &self,
+        id: &str,
+        stage: Stage,
+        current_ref: Option<&str>,
+    ) -> Result<()> {
+        let Some(to) = pipeline_rank(stage) else {
+            return Ok(());
+        };
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (from, seen): (String, Option<String>) = tx.query_row(
+                "SELECT stage, observed_ref FROM workstreams WHERE id = ?1",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
+            let moved_to = current_ref.filter(|now| seen.as_deref().is_some_and(|s| s != *now));
+            if let Some(now) = moved_to {
+                tx.execute(
+                    "UPDATE workstreams SET stage = ?2, observed_ref = ?3, observed_pr_number = NULL,
+                        observed_pr_state = NULL, updated_at = ?4 WHERE id = ?1",
+                    params![id, stage.as_str(), now, now_ms()],
+                )?;
+            } else if pipeline_rank(Stage::parse(&from)).is_none_or(|rank| rank < to) {
+                tx.execute(
+                    "UPDATE workstreams SET stage = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![id, stage.as_str(), now_ms()],
+                )?;
+            }
+            tx.commit()
+        })
     }
 
     pub fn update_workstream_title(&self, id: &str, title: &str) -> Result<()> {
@@ -222,13 +273,70 @@ impl Db {
         })
     }
 
+    /// An in-app rename is the same work, so unlike a move it keeps the observation's place.
+    pub fn rename_workstream_branch(&self, id: &str, branch: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE workstreams SET branch = ?2, pr_number = NULL,
+                    observed_ref = CASE WHEN observed_ref IS NULL THEN NULL ELSE ?2 END
+                 WHERE id = ?1",
+                params![id, branch],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn set_workstream_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
         self.with(|conn| {
             conn.execute(
-                "UPDATE workstreams SET pr_number = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE workstreams SET pr_number = ?2, observed_pr_number = NULL,
+                    observed_pr_state = NULL, observed_ref = NULL, updated_at = ?3 WHERE id = ?1",
                 params![id, pr_number, now_ms()],
             )?;
             Ok(())
+        })
+    }
+
+    /// Returns whether the row changed. Moving to a ref with no merged PR starts the stage over;
+    /// `updated_at` otherwise stays, since a background poll isn't activity on the workstream.
+    pub fn record_pr_observation(
+        &self,
+        id: &str,
+        observed: Option<ObservedPr>,
+        pr_ref: &str,
+    ) -> Result<bool> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (number, state, seen): (Option<u32>, Option<String>, Option<String>) = tx
+                .query_row(
+                    "SELECT observed_pr_number, observed_pr_state, observed_ref
+                     FROM workstreams WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?;
+            let moved = seen.as_deref().is_some_and(|s| s != pr_ref);
+            let changed = moved || observed_pr(number, state) != observed;
+            if !changed && seen.is_some() {
+                return Ok(false);
+            }
+            if moved && observed.is_none_or(|now| now.state != PrState::Merged) {
+                tx.execute(
+                    "UPDATE workstreams SET stage = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![id, Stage::General.as_str(), now_ms()],
+                )?;
+            }
+            tx.execute(
+                "UPDATE workstreams SET observed_pr_number = ?2, observed_pr_state = ?3,
+                    observed_ref = ?4 WHERE id = ?1",
+                params![
+                    id,
+                    observed.map(|o| o.number),
+                    observed.map(|o| o.state.as_str()),
+                    pr_ref
+                ],
+            )?;
+            tx.commit()?;
+            Ok(changed)
         })
     }
 
@@ -280,6 +388,15 @@ impl Db {
                     params![id, from, to],
                 )?;
             }
+            // What the archive learned is newer than the row; `none` may only mean a failed lookup.
+            tx.execute(
+                "UPDATE workstreams SET
+                    observed_pr_number = a.pr_number, observed_pr_state = a.pr_state
+                 FROM workstream_archives a
+                 WHERE workstreams.id = ?1 AND a.workstream_id = ?1 AND a.pr_number IS NOT NULL
+                    AND a.pr_state IN ('open', 'merged', 'closed')",
+                params![id],
+            )?;
             tx.execute(
                 "DELETE FROM workstream_archives WHERE workstream_id = ?1",
                 params![id],
@@ -499,7 +616,8 @@ mod tests {
         assert!(listed[0].app_owns_branch());
         assert!(!listed[0].is_inplace());
 
-        db.update_workstream_stage(&a.id, Stage::Research).unwrap();
+        db.advance_workstream_stage(&a.id, Stage::Research, None)
+            .unwrap();
         db.update_workstream_title(&a.id, "Auth revamp").unwrap();
         let got = db.get_workstream(&a.id).unwrap().unwrap();
         assert_eq!(got.stage, Stage::Research);

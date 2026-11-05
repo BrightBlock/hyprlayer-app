@@ -40,6 +40,7 @@ pub struct DocStateChanged {
 #[serde(rename_all = "camelCase")]
 pub struct PrStatusChanged {
     pub workstream_id: String,
+    pub observed_pr_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

@@ -60,6 +60,42 @@ impl WorkstreamStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum PrState {
+    Open,
+    Merged,
+    Closed,
+}
+
+impl PrState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrState::Open => "open",
+            PrState::Merged => "merged",
+            PrState::Closed => "closed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "open" => Some(PrState::Open),
+            "merged" => Some(PrState::Merged),
+            "closed" => Some(PrState::Closed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ObservedPr {
+    pub number: u32,
+    pub state: PrState,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +110,14 @@ pub struct Workstream {
     pub worktree_mode: WorktreeMode,
     pub stage: Stage,
     pub status: WorkstreamStatus,
+    /// Set only by attaching a PR; lookups then stop following the worktree's HEAD.
     pub pr_number: Option<u32>,
+    /// What the PR watcher last saw for the current branch or attached PR.
+    #[serde(default)]
+    pub observed_pr: Option<ObservedPr>,
+    /// The ref that observation came from, kept even when it found no PR.
+    #[serde(default)]
+    pub observed_ref: Option<String>,
     pub created_at: f64,
     pub updated_at: f64,
     pub archived_at: Option<f64>,
@@ -148,6 +191,8 @@ mod tests {
             stage: Stage::General,
             status,
             pr_number: None,
+            observed_pr: None,
+            observed_ref: None,
             created_at: 0.0,
             updated_at: 0.0,
             archived_at: None,

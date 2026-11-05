@@ -275,6 +275,7 @@ impl Server {
             {
                 view.item.branch = adoption.branch;
                 view.item.pr_number = None;
+                view.item.observed_pr = None;
             }
         }
         views

@@ -83,8 +83,15 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
             }
             .emit(handle);
         }
-        RuntimeEvent::PrStatusChanged { workstream_id } => {
-            let _ = events::PrStatusChanged { workstream_id }.emit(handle);
+        RuntimeEvent::PrStatusChanged {
+            workstream_id,
+            observed_pr_changed,
+        } => {
+            let _ = events::PrStatusChanged {
+                workstream_id,
+                observed_pr_changed,
+            }
+            .emit(handle);
         }
         RuntimeEvent::WorktreeChanged { workstream_id } => {
             let _ = events::WorktreeChanged { workstream_id }.emit(handle);

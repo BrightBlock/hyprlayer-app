@@ -1330,6 +1330,11 @@ export type NotificationSettings = {
 	sound?: boolean,
 };
 
+export type ObservedPr = {
+	number: number,
+	state: PrState,
+};
+
 export type OllamaModelInfo = {
 	id: string,
 	family: string | null,
@@ -1412,6 +1417,7 @@ export type PrStatus = {
 
 export type PrStatusChanged = {
 	workstreamId: string,
+	observedPrChanged: boolean,
 };
 
 export type PrSummary = {
@@ -2258,7 +2264,12 @@ export type Workstream = {
 	worktreeMode: WorktreeMode,
 	stage: Stage,
 	status: WorkstreamStatus,
+	/**  Set only by attaching a PR; lookups then stop following the worktree's HEAD. */
 	prNumber: number | null,
+	/**  What the PR watcher last saw for the current branch or attached PR. */
+	observedPr?: ObservedPr | null,
+	/**  The ref that observation came from, kept even when it found no PR. */
+	observedRef?: string | null,
 	createdAt: number | null,
 	updatedAt: number | null,
 	archivedAt: number | null,

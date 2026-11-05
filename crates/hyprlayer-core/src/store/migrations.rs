@@ -271,6 +271,11 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (goal_id, n)
     );
     ",
+    "
+    ALTER TABLE workstreams ADD COLUMN observed_pr_number INTEGER;
+    ALTER TABLE workstreams ADD COLUMN observed_pr_state TEXT;
+    ALTER TABLE workstreams ADD COLUMN observed_ref TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

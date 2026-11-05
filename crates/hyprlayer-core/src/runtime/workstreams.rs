@@ -20,7 +20,8 @@ use crate::runtime::script_registry::RunPhase;
 use crate::runtime::scripts::RunLifecycleRequest;
 use crate::scripts::ScriptKind;
 use crate::store::{
-    now_ms, ArchiveRecord, NewWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+    now_ms, ArchiveRecord, Db, NewWorkstream, ObservedPr, Workstream, WorkstreamDoc,
+    WorkstreamStatus, WorktreeMode,
 };
 use crate::worktree::seed::SeedReport;
 use crate::worktree::thoughts_links::{self, LinkStatus};
@@ -290,13 +291,21 @@ impl WorkstreamService<'_> {
     pub async fn list(&self, req: ListWorkstreamsRequest) -> Result<Vec<Workstream>> {
         ensure_running(self.runtime)?;
         let db = self.runtime.db.clone();
-        blocking(move || db.list_workstreams(&req.project_path, req.include_archived)).await
+        blocking(move || {
+            let items = db.list_workstreams(&req.project_path, req.include_archived)?;
+            Ok(items.into_iter().map(without_moved_observation).collect())
+        })
+        .await
     }
 
     pub async fn list_all(&self) -> Result<Vec<Workstream>> {
         ensure_running(self.runtime)?;
         let db = self.runtime.db.clone();
-        blocking(move || db.list_active_workstreams()).await
+        blocking(move || {
+            let items = db.list_active_workstreams()?;
+            Ok(items.into_iter().map(without_moved_observation).collect())
+        })
+        .await
     }
 
     pub async fn list_archived(&self) -> Result<Vec<Workstream>> {
@@ -394,7 +403,7 @@ impl WorkstreamService<'_> {
                 .await;
             }
             let cached = match found {
-                Ok(Some(status)) => Some((Some(status.number), pr_state_name(&status.state))),
+                Ok(Some(status)) => Some((Some(status.number), status.state.as_str())),
                 Ok(None) => Some((None, "none")),
                 Err(e) => {
                     tracing::debug!("PR lookup for archived workstream {id} failed: {e}");
@@ -888,6 +897,13 @@ impl WorkstreamService<'_> {
             Err(e) => return Err(pr_not_found(pr_number, Some(e))),
         };
         self.set_pr(id, Some(pr_number)).await?;
+        let (db, wid) = (self.runtime.db.clone(), id.to_string());
+        let observed = ObservedPr {
+            number: status.number,
+            state: status.state,
+        };
+        blocking(move || db.record_pr_observation(&wid, Some(observed), &pr_number.to_string()))
+            .await?;
         Ok(Some(status))
     }
 
@@ -959,7 +975,7 @@ impl WorkstreamService<'_> {
         .await?;
         let db = self.runtime.db.clone();
         let (wid, branch) = (item.id.clone(), rename.branch.clone());
-        blocking(move || db.update_workstream_branch(&wid, &branch)).await?;
+        blocking(move || db.rename_workstream_branch(&wid, &branch)).await?;
         let _ = self
             .runtime
             .events
@@ -971,26 +987,22 @@ impl WorkstreamService<'_> {
         self.find(id).await
     }
 
-    /// Starting a later stage's session moves the workstream forward; an earlier one never moves it back.
-    pub async fn advance_stage(&self, item: &Workstream, stage: Stage) -> Result<()> {
-        let Some(to) = pipeline_rank(stage) else {
-            return Ok(());
-        };
-        if pipeline_rank(item.stage).is_some_and(|from| from >= to) {
-            return Ok(());
-        }
+    /// The stored stage only moves forward, whether a session started or a tab's mode changed.
+    pub async fn advance_stage(&self, id: &str, stage: Stage) -> Result<()> {
+        let item = self.find(id).await?;
         let db = self.runtime.db.clone();
-        let id = item.id.clone();
-        blocking(move || db.update_workstream_stage(&id, stage)).await
+        blocking(move || {
+            let current = (!item.is_folder()).then(|| current_pr_ref(&item)).flatten();
+            db.advance_workstream_stage(&item.id, stage, current.as_deref())
+        })
+        .await
     }
 
     pub async fn update(&self, req: UpdateWorkstreamRequest) -> Result<Workstream> {
         ensure_running(self.runtime)?;
         self.find(&req.id).await?;
         if let Some(stage) = req.stage {
-            let db = self.runtime.db.clone();
-            let id = req.id.clone();
-            blocking(move || db.update_workstream_stage(&id, stage)).await?;
+            self.advance_stage(&req.id, stage).await?;
         }
         self.find(&req.id).await
     }
@@ -1376,7 +1388,12 @@ impl WorkstreamService<'_> {
         if !item.app_owns_worktree() {
             let db = self.runtime.db.clone();
             let aid = id.clone();
-            blocking(move || db.archive_workstream(&aid)).await?;
+            let found = pr.map(|s| (s.number, s.state));
+            blocking(move || {
+                db.archive_workstream(&aid)?;
+                cache_found_pr(&db, &aid, found)
+            })
+            .await?;
             return self.find(&id).await;
         }
 
@@ -1402,7 +1419,7 @@ impl WorkstreamService<'_> {
             && item.app_owns_branch()
             // A PR found on a renamed or switched branch says nothing about the app's branch.
             && moved.is_none()
-            && pr.is_some_and(|s| s.state == pr::PrState::Merged)
+            && pr.as_ref().is_some_and(|s| s.state == pr::PrState::Merged)
         {
             if let Err(e) = worktree::delete_remote_branch(
                 &git,
@@ -1498,10 +1515,12 @@ impl WorkstreamService<'_> {
         let base = item.base_branch.clone();
         let db = self.runtime.db.clone();
         let aid = id.clone();
+        let found = pr.map(|s| (s.number, s.state));
         blocking(move || {
             // Scanned once: nothing writes to an archive after this.
             let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base));
             db.archive_workstream(&aid)?;
+            cache_found_pr(&db, &aid, found)?;
             match scan {
                 Some(scan) => db.cache_archive_scan(&aid, &scan, now_ms()),
                 None => Ok(()),
@@ -1923,7 +1942,7 @@ impl WorkstreamService<'_> {
     }
 }
 
-fn pr_dir(item: &Workstream) -> &Path {
+pub(crate) fn pr_dir(item: &Workstream) -> &Path {
     let worktree = Path::new(&item.worktree_path);
     if worktree.is_dir() {
         worktree
@@ -2006,22 +2025,52 @@ fn branch_rename(item: &Workstream, title: &str) -> Option<BranchRename> {
     Some(BranchRename { branch, blocked })
 }
 
-fn pipeline_rank(stage: Stage) -> Option<u8> {
-    match stage {
-        Stage::Research => Some(0),
-        Stage::Plan => Some(1),
-        Stage::Implement => Some(2),
-        Stage::Validate => Some(3),
-        Stage::Commit => Some(4),
-        Stage::Ship => Some(5),
-        Stage::Revise => Some(6),
-        Stage::General => None,
-    }
-}
-
 /// What `gh` should look up: the attached number, else the branch the worktree is really on.
 pub(crate) fn pr_lookup_ref(item: &Workstream) -> String {
     moved_head(item).unwrap_or_else(|| item.pr_ref())
+}
+
+/// The ref to look up, or `None` while HEAD has left its branch (a rebase, or the base branch):
+/// `pr_lookup_ref` would fall back to the app's branch, which would read as the worktree moving.
+pub(crate) fn current_pr_ref(item: &Workstream) -> Option<String> {
+    let looked_up = pr_lookup_ref(item);
+    let elsewhere = item
+        .observed_ref
+        .as_deref()
+        .is_some_and(|seen| seen != looked_up);
+    (!(elsewhere && head_off_branch(item))).then_some(looked_up)
+}
+
+/// A worktree that moved since its last observation has no PR of its own to show yet.
+fn without_moved_observation(mut item: Workstream) -> Workstream {
+    if item.status == WorkstreamStatus::Active
+        && item.observed_ref.is_some()
+        && current_pr_ref(&item).is_some_and(|now| item.observed_ref.as_deref() != Some(&now))
+    {
+        item.observed_pr = None;
+    }
+    item
+}
+
+fn head_off_branch(item: &Workstream) -> bool {
+    if item.pr_number.is_some() || !item.app_owns_branch() {
+        return false;
+    }
+    let dir = head_dir(item);
+    crate::gitops::linked_head_detached(&dir)
+        || crate::gitops::linked_head_branch(&dir).is_some_and(|head| on_base(item, &head))
+}
+
+fn head_dir(item: &Workstream) -> PathBuf {
+    if item.status == WorkstreamStatus::Archived {
+        archive_dir_for(Path::new(&item.project_path), &item.slug)
+    } else {
+        PathBuf::from(&item.worktree_path)
+    }
+}
+
+fn on_base(item: &Workstream, head: &str) -> bool {
+    head == item.base_branch || item.base_branch.strip_prefix("origin/") == Some(head)
 }
 
 /// An isolated worktree's HEAD once renamed or switched off the app's branch. The row keeps
@@ -2030,15 +2079,8 @@ fn moved_head(item: &Workstream) -> Option<String> {
     if item.pr_number.is_some() || !item.app_owns_branch() {
         return None;
     }
-    let dir = if item.status == WorkstreamStatus::Archived {
-        archive_dir_for(Path::new(&item.project_path), &item.slug)
-    } else {
-        PathBuf::from(&item.worktree_path)
-    };
-    let head = crate::gitops::linked_head_branch(&dir)?;
-    let on_base =
-        head == item.base_branch || item.base_branch.strip_prefix("origin/") == Some(head.as_str());
-    (head != item.branch && !on_base).then_some(head)
+    let head = crate::gitops::linked_head_branch(&head_dir(item))?;
+    (head != item.branch && !on_base(item, &head)).then_some(head)
 }
 
 /// Unknown or open, and not asked recently: a lookup could still change it.
@@ -2054,11 +2096,13 @@ fn pr_lookup_due(item: &Workstream, record: &ArchiveRecord, now: f64) -> bool {
     own_branch && !settled && !recent
 }
 
-fn pr_state_name(state: &pr::PrState) -> &'static str {
-    match state {
-        pr::PrState::Open => "open",
-        pr::PrState::Merged => "merged",
-        pr::PrState::Closed => "closed",
+/// Archiving resets the record, so what it just learned goes back in; a miss waits for the sweep.
+fn cache_found_pr(db: &Db, id: &str, found: Option<(u32, pr::PrState)>) -> Result<()> {
+    match found {
+        Some((number, state)) => {
+            db.cache_archive_pr(id, Some((Some(number), state.as_str())), now_ms())
+        }
+        None => Ok(()),
     }
 }
 

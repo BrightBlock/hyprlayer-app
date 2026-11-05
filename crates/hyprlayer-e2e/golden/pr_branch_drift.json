@@ -60,6 +60,189 @@
       "guards": [
         {
           "evidence": {
+            "attached": null,
+            "churnChangesRow": false,
+            "mergeChangesRow": true,
+            "merged": {
+              "number": 340,
+              "state": "merged"
+            },
+            "open": {
+              "number": 340,
+              "state": "open"
+            }
+          },
+          "guard": "a PR nobody attached is observed open, then merged, and pr_number stays empty; only the merge tells clients their workstream lists are stale",
+          "ok": true
+        }
+      ],
+      "step": "the watcher records the current branch's PR on the row"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fresh": null,
+            "freshStage": "general",
+            "hotfix": {
+              "number": 341,
+              "state": "merged"
+            },
+            "hotfixStage": "ship"
+          },
+          "guard": "another merged PR keeps the stage; a branch with no PR clears it and restarts at general",
+          "ok": true
+        }
+      ],
+      "step": "a merged worktree keeps following its branch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "general": "implement",
+            "implement": "implement",
+            "plan": "implement"
+          },
+          "guard": "implement advances; plan and general leave it at implement",
+          "ok": true
+        }
+      ],
+      "step": "a tab's mode only moves the stage forward"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "noPrBefore": "general",
+            "openBefore": "general",
+            "openCleared": null
+          },
+          "guard": "ship with no PR, and ship with an open PR, both restart at general on a new branch",
+          "ok": true
+        }
+      ],
+      "step": "moving to another branch starts the card over, whatever came before"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "after": {
+              "pr": {
+                "number": 343,
+                "state": "merged"
+              },
+              "stage": "ship"
+            },
+            "during": {
+              "pr": {
+                "number": 343,
+                "state": "merged"
+              },
+              "stage": "ship"
+            }
+          },
+          "guard": "a rebase-style detach shows the same PR and stage during it and after it",
+          "ok": true
+        }
+      ],
+      "step": "leaving the branch for a detached HEAD holds the card"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterTicks": "plan",
+            "picked": "plan"
+          },
+          "guard": "plan is lower than ship but sticks, because it is the new branch's first stage",
+          "ok": true
+        }
+      ],
+      "step": "a stage picked on a new branch survives the watcher noticing the move"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "failing": {
+              "pr": null,
+              "stage": "plan"
+            },
+            "hidden": null,
+            "recovered": "general",
+            "toldClients": true
+          },
+          "guard": "the old branch's PR disappears at once, the stage waits for a real answer, then restarts",
+          "ok": true
+        }
+      ],
+      "step": "a failed lookup after a move shows no PR, and recovers"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "stage": "implement"
+          },
+          "guard": "the stage stays through the rename and the watcher's next ticks",
+          "ok": true
+        }
+      ],
+      "step": "an in-app branch rename is the same work"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "onAttach": {
+              "number": 360,
+              "state": "open"
+            },
+            "worktreeGone": {
+              "number": 360,
+              "state": "merged"
+            }
+          },
+          "guard": "attaching records the PR at once, and the watcher still sees it merge with no worktree",
+          "ok": true
+        }
+      ],
+      "step": "a merged PR reads through a missing worktree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "number": 350,
+            "state": "merged"
+          },
+          "guard": "the archive list has #350 merged without a sweep",
+          "ok": true
+        }
+      ],
+      "step": "archiving records the PR it just looked up"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pr": {
+              "number": 350,
+              "state": "merged"
+            }
+          },
+          "guard": "the restored row has #350 merged without waiting for a poll",
+          "ok": true
+        }
+      ],
+      "step": "restoring keeps what the archive learned"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "number": 340,
             "state": "merged"
           },

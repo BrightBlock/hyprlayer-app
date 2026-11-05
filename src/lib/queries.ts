@@ -34,7 +34,6 @@ import {
   type ThoughtQuery,
   type ThoughtsProfile,
   type ThoughtsSource,
-  type WorkstreamView,
   type WorktreeFile,
 } from "./bindings";
 import type { HostProbeResult } from "./domain/hosts";
@@ -751,33 +750,19 @@ export function useBranchRenamePreview(id: string, title: string, enabled: boole
   });
 }
 
-export function useSetWorkstreamStage(projectPath: string) {
-  return useMutation({
-    mutationFn: ({ id, stage }: { id: string; stage: Stage }) =>
-      unwrap(commands.setWorkstreamStage(id, stage)),
-    onMutate: async ({ id, stage }) => {
-      await queryClient.cancelQueries({ queryKey: ["workstreams", projectPath] });
-      const previous = queryClient.getQueriesData<WorkstreamView[]>({
-        queryKey: ["workstreams", projectPath],
-      });
-      queryClient.setQueriesData<WorkstreamView[]>(
-        { queryKey: ["workstreams", projectPath] },
-        (views) =>
-          views?.map((view) =>
-            view.item.id === id ? { ...view, item: { ...view.item, stage } } : view,
-          ),
-      );
-      return { previous };
-    },
-    onError: (_error, _vars, context) => {
-      for (const [key, data] of context?.previous ?? []) {
-        queryClient.setQueryData(key, data);
-      }
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ["workstreams", projectPath] });
-    },
-  });
+const STAGE_SETTLE_MS = 500;
+const unsettledStages = new Map<string, ReturnType<typeof setTimeout>>();
+
+// Cycling modes passes through stages and the stored stage only moves forward, so only the settled pick writes.
+export function settleWorkstreamStage(id: string, stage: Stage) {
+  clearTimeout(unsettledStages.get(id));
+  unsettledStages.set(
+    id,
+    setTimeout(() => {
+      unsettledStages.delete(id);
+      void commands.setWorkstreamStage(id, stage).finally(invalidateWorkstreamLists);
+    }, STAGE_SETTLE_MS),
+  );
 }
 
 // No optimistic cancel: the create's list refetch must land, or ProjectPage drops the new selection.
