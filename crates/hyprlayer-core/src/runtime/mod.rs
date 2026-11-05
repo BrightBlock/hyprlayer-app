@@ -789,6 +789,18 @@ impl HyprlayerRuntime {
         self.terminals.clone()
     }
 
+    /// Test-only view of which workstream the worktree watcher is armed on.
+    /// Not part of the supported facade.
+    #[doc(hidden)]
+    pub async fn test_watched_workstream(&self) -> Option<String> {
+        self.watchers
+            .worktree_watch
+            .lock()
+            .await
+            .as_ref()
+            .map(|(id, _)| id.clone())
+    }
+
     /// Test-only raw ingress into a session's actor, for forcing an
     /// attachment past its lag threshold without a real harness process. Not
     /// part of the supported facade.

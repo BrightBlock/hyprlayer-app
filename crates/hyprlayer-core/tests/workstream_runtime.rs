@@ -433,6 +433,11 @@ async fn failed_archive_script_leaves_disk_and_row_active() {
         .unwrap();
     let worktree_path = PathBuf::from(&created.item.worktree_path);
     assert!(worktree_path.is_dir());
+    f.runtime
+        .workstreams()
+        .watch(Some(created.item.id.clone()))
+        .await
+        .unwrap();
 
     let result = f
         .runtime
@@ -448,6 +453,11 @@ async fn failed_archive_script_leaves_disk_and_row_active() {
     );
 
     assert!(worktree_path.is_dir(), "the worktree must not have moved");
+    assert_eq!(
+        f.runtime.test_watched_workstream().await,
+        Some(created.item.id.clone()),
+        "the UI stays on this workstream and only re-arms on navigation"
+    );
     let row = f
         .runtime
         .workstreams()
@@ -500,6 +510,98 @@ async fn archive_stops_a_live_terminal_before_moving_the_worktree() {
     assert!(
         f.runtime.test_terminals().get(&terminal_id).await.is_none(),
         "archive must stop terminals attached to the workstream before moving it"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+// On Windows the archive itself fails with "Permission denied" if the watcher is still armed.
+#[tokio::test]
+async fn archive_releases_its_own_worktree_watch_and_no_other() {
+    let (f, repo) = fixture(Some(0)).await;
+    let watched = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Watched"))
+        .await
+        .unwrap();
+    let other = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Other"))
+        .await
+        .unwrap();
+    f.runtime
+        .workstreams()
+        .watch(Some(watched.item.id.clone()))
+        .await
+        .unwrap();
+
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: other.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        f.runtime.test_watched_workstream().await,
+        Some(watched.item.id.clone()),
+        "archiving another workstream must leave the watch alone"
+    );
+
+    let worktree = PathBuf::from(&watched.item.worktree_path);
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: watched.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+    assert!(!worktree.exists(), "the worktree must have moved");
+    assert_eq!(
+        f.runtime.test_watched_workstream().await,
+        None,
+        "nothing may hold the moved worktree open"
+    );
+
+    f.runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn failed_archive_move_keeps_the_worktree_watched() {
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Blocked"))
+        .await
+        .unwrap();
+    f.runtime
+        .workstreams()
+        .watch(Some(created.item.id.clone()))
+        .await
+        .unwrap();
+    std::fs::create_dir_all(archive_dir_for(&repo, &created.item.slug)).unwrap();
+
+    let result = f
+        .runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await;
+    assert!(
+        result.is_err(),
+        "an occupied destination must fail the move"
+    );
+    assert_eq!(
+        f.runtime.test_watched_workstream().await,
+        Some(created.item.id.clone()),
+        "the UI stays on this workstream and only re-arms on navigation"
     );
 
     f.runtime.shutdown().await;

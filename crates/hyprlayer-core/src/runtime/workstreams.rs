@@ -11,6 +11,7 @@ use crate::claude::memory;
 use crate::config::EffectiveConfig;
 use crate::error::{CoreError, Result};
 use crate::hyprcli::HyprCli;
+use crate::index::watcher::WatchHandle;
 use crate::pipeline::Stage;
 use crate::pr::{self, MergeMethod, PrStatus, PrSummary};
 use crate::process::binaries::BinaryKind;
@@ -573,15 +574,22 @@ impl WorkstreamService<'_> {
         }
         *guard = None;
 
-        let item = self.find(&workstream_id).await?;
+        if let Some(handle) = self.open_worktree_watch(&workstream_id).await? {
+            *guard = Some((workstream_id, handle));
+        }
+        Ok(())
+    }
+
+    async fn open_worktree_watch(&self, workstream_id: &str) -> Result<Option<WatchHandle>> {
+        let item = self.find(workstream_id).await?;
         let path = PathBuf::from(&item.worktree_path);
         if !path.is_dir() {
-            return Ok(());
+            return Ok(None);
         }
 
         let events = self.runtime.events.clone();
-        let watched = workstream_id.clone();
-        let handle = blocking(move || {
+        let watched = workstream_id.to_string();
+        blocking(move || {
             let git_dir = crate::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
             crate::index::watcher::watch_worktree(
                 &path,
@@ -593,9 +601,8 @@ impl WorkstreamService<'_> {
                 }),
             )
         })
-        .await?;
-        *guard = Some((workstream_id, handle));
-        Ok(())
+        .await
+        .map(Some)
     }
 
     pub async fn git_status(&self, req: WorkstreamGitStatusRequest) -> Result<WorkstreamGitStatus> {
@@ -1450,11 +1457,28 @@ impl WorkstreamService<'_> {
             }
         }
 
-        let moved = self
+        // Windows refuses to move a directory a watcher holds open. Holding the lock through
+        // the move stops `watch` re-arming; the UI itself only re-arms on navigation.
+        let mut watch = self.runtime.watchers.worktree_watch.lock().await;
+        let disarmed = watch.take_if(|(watched, _)| *watched == id).is_some();
+        let moved = match self
             .runtime
             .worktrees
             .archive(&git, project_path, worktree_path, &archive_path)
-            .await?;
+            .await
+        {
+            Ok(moved) => moved,
+            Err(e) => {
+                if disarmed {
+                    match self.open_worktree_watch(&id).await {
+                        Ok(handle) => *watch = handle.map(|h| (id.clone(), h)),
+                        Err(rearm) => tracing::warn!("worktree watch on {id} stays off: {rearm}"),
+                    }
+                }
+                return Err(e);
+            }
+        };
+        drop(watch);
         if moved {
             if let Err(e) = worktree::ensure_archive_excluded(project_path) {
                 tracing::warn!("could not write .git/info/exclude for archive: {e}");

@@ -15,7 +15,9 @@ const QUIET: Duration = Duration::from_secs(5);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_installed_while_away() {
-    let sandbox = Sandbox::new();
+    let mut sandbox = Sandbox::new();
+    // A login shell that adds to PATH sends its own BinariesChanged at startup, whenever it finishes.
+    sandbox.set_env("SHELL", "/usr/bin/false");
     let mut j = Journey::new("tool_installed_while_away", &sandbox);
 
     j.step("start without claude");
