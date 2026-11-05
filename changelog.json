@@ -1,6 +1,17 @@
 {
   "versions": [
     {
+      "version": "0.8.23",
+      "date": "2026-11-05",
+      "summary": "Board cards follow their real PR and branch, and Windows archive no longer fails.",
+      "notes": [
+        "Board columns now follow the PR the watcher last saw: a merged PR places the card in Merged and an open one in Review. A worktree that moves to a branch with no merged PR returns to General, and a closed PR shows as Implementing.",
+        "General cards with uncommitted or unpushed changes show as Implementing, and the card shows the live git branch. Stage changes only move forward and are no longer applied before the server confirms them.",
+        "Fixed archiving a workstream failing with \"Permission denied\" on Windows while the worktree watcher held the folder open.",
+        "This version works with hyprlayer-server 0.8.19 and later."
+      ]
+    },
+    {
       "version": "0.8.22",
       "date": "2026-11-04",
       "summary": "Renaming a workstream can rename its branch, and PR lookups follow the real branch.",
