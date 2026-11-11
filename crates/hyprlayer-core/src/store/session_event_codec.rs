@@ -191,7 +191,7 @@ mod tests {
                 text: "hi".into(),
                 parent_id: None,
             },
-            SessionEvent::Relaunched {},
+            SessionEvent::Relaunched { quiet: true },
             SessionEvent::Exited {
                 outcome: ExitOutcome::Completed,
                 code: Some(0),

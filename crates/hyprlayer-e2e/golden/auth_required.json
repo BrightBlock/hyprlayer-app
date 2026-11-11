@@ -1,0 +1,102 @@
+{
+  "scenario": "auth_required",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "flagged": [
+              "Invalid API key · Please run /login"
+            ]
+          },
+          "guard": "the client hears claude's error text flagged as an auth failure",
+          "ok": true
+        }
+      ],
+      "step": "the first message hits an expired login"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "flagged": [
+              "Invalid API key · Please run /login"
+            ]
+          },
+          "guard": "the stored error text keeps its auth flag",
+          "ok": true
+        }
+      ],
+      "step": "the flag is history, so a reload or another device sees it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "flagged": []
+          },
+          "guard": "a subagent's auth error is not the session's",
+          "ok": true
+        }
+      ],
+      "step": "a subagent's rejected login raises no second prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "restarted": null
+          },
+          "guard": "the restart is accepted for a session whose only message failed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawns": [
+              "new",
+              "resume"
+            ]
+          },
+          "guard": "the relaunched harness resumes the same conversation",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "relaunched",
+              "userMessage",
+              "init",
+              "assistantText",
+              "turnDone"
+            ]
+          },
+          "guard": "the resent message is answered with no new prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "quiet": [
+              true
+            ]
+          },
+          "guard": "a restart the server outlived is not announced",
+          "ok": true
+        }
+      ],
+      "step": "sign in, restart, and resend the failed message"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

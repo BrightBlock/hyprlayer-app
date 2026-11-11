@@ -807,6 +807,7 @@ impl OpenCodeDriver {
                     text: format!("⚠ OpenCode request failed: {e}"),
                     parent_id: None,
                     injected: false,
+                    auth_required: false,
                 });
                 let _ = events.send(SessionEvent::TurnDone {
                     cost_usd: None,
@@ -837,6 +838,7 @@ impl OpenCodeDriver {
                     text: format!("⚠ OpenCode request failed: {e}"),
                     parent_id: None,
                     injected: false,
+                    auth_required: false,
                 });
                 let _ = events.send(SessionEvent::TurnDone {
                     cost_usd: None,
@@ -1184,11 +1186,18 @@ impl Translator {
                         thread_tokens: None,
                     }];
                 }
+                let auth_failed = name == "ProviderAuthError"
+                    || (name == "APIError"
+                        && err
+                            .and_then(|e| e.pointer("/data/statusCode"))
+                            .and_then(Value::as_u64)
+                            == Some(401));
                 vec![
                     SessionEvent::AssistantText {
                         text: format!("⚠ OpenCode error: {msg}"),
                         parent_id: None,
                         injected: false,
+                        auth_required: auth_failed,
                     },
                     SessionEvent::TurnDone {
                         cost_usd: None,
@@ -1240,6 +1249,7 @@ impl Translator {
                         text: full.to_string(),
                         parent_id: None,
                         injected: false,
+                        auth_required: false,
                     });
                 }
             }

@@ -120,6 +120,8 @@ pub struct HyprlayerRuntime {
     account_state: account::AccountState,
     coordinator: ShutdownCoordinator,
     tasks: AsyncMutex<Vec<TrackedTask>>,
+    /// Sessions whose harness the last server run left running; only their next relaunch is announced.
+    cut_off: std::sync::Mutex<HashSet<String>>,
     _profile_lock: ProfileLock,
 }
 
@@ -158,7 +160,9 @@ impl HyprlayerRuntime {
         let db_path = paths.app_data_dir.join("hyprlayer.db");
         let db = Arc::new(Db::open(&db_path)?);
 
+        let mut cut_off = HashSet::new();
         if let Ok(orphans) = db.list_orphans() {
+            cut_off.extend(orphans.iter().map(|(_, session, _)| session.clone()));
             if !orphans.is_empty() {
                 let reaped = reap_goal_orphans(&db, &orphans).await;
                 // A pid may since belong to something else; the program says.
@@ -268,8 +272,16 @@ impl HyprlayerRuntime {
             paths,
             coordinator: ShutdownCoordinator::new(),
             tasks: AsyncMutex::new(Vec::new()),
+            cut_off: std::sync::Mutex::new(cut_off),
             _profile_lock: profile_lock,
         }))
+    }
+
+    pub(crate) fn take_cut_off(&self, session_id: &str) -> bool {
+        self.cut_off
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(session_id)
     }
 
     pub async fn start(self: &Arc<Self>) -> Result<()> {

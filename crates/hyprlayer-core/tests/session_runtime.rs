@@ -570,12 +570,14 @@ async fn live_delivery_preserves_the_order_events_were_ingressed() {
             text: "a".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         },
         turn_done(2.0),
         SessionEvent::AssistantText {
             text: "b".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         },
         turn_done(3.0),
     ];
@@ -1325,6 +1327,7 @@ async fn another_authors_in_flight_reservation_counts_from_the_committed_rev() {
                 text: "ok".into(),
                 parent_id: None,
                 injected: false,
+                auth_required: false,
             })
             .await
             .unwrap();
@@ -1453,6 +1456,7 @@ async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone()
             text: "partial reply".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();
@@ -1489,6 +1493,7 @@ async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone()
             text: "still a's turn".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();
@@ -1511,6 +1516,7 @@ async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone()
             text: "b's reply".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();
@@ -1559,6 +1565,7 @@ async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
             text: "both".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();
@@ -1599,6 +1606,7 @@ async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
             text: "reply".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();
@@ -1766,6 +1774,7 @@ async fn a_rewind_bumps_rev_sets_reset_rev_raises_the_foreign_floor_and_emits_se
             text: "reply".into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         })
         .await
         .unwrap();

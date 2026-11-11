@@ -49,6 +49,7 @@ pub(crate) fn recap_excerpt(events: &[SessionEvent]) -> Option<String> {
                 text,
                 parent_id: None,
                 injected: false,
+                auth_required: false,
             } if !text.trim().is_empty() => steps.push(format!("Agent: {}", text.trim())),
             _ => {}
         }

@@ -35,6 +35,14 @@
         },
         {
           "evidence": {
+            "firstAnnounced": true,
+            "restQuiet": true
+          },
+          "guard": "only the relaunch after the server restart is announced",
+          "ok": true
+        },
+        {
+          "evidence": {
             "counter": "2",
             "iteration": 2,
             "status": "met"

@@ -415,11 +415,13 @@ fn stamp_parent(parsed: ParsedLine, parent_id: &str) -> ParsedLine {
         ParsedLine::Assistant {
             blocks,
             context_tokens,
+            error,
             ..
         } => ParsedLine::Assistant {
             blocks,
             context_tokens,
             parent_id: Some(parent_id.to_string()),
+            error,
         },
         ParsedLine::User {
             blocks,

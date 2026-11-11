@@ -156,7 +156,7 @@ export type TranscriptItem =
       clientMessageId?: string | null;
       author?: ClientRef | null;
     } & Sequenced)
-  | ({ kind: "assistant"; id: string; text: string; streaming: boolean } & Parented & Sequenced)
+  | ({ kind: "assistant"; id: string; text: string; streaming: boolean; authRequired?: boolean } & Parented & Sequenced)
   | ({ kind: "thinking"; id: string; text: string } & Parented & Sequenced)
   | ({ kind: "skill"; id: string; name: string; body: string } & Parented & Sequenced)
   | ({
@@ -203,6 +203,7 @@ export type TranscriptItem =
   | ({
       kind: "relaunched";
       id: string;
+      quiet?: boolean;
     } & Sequenced)
   | ({
       kind: "rewound";
@@ -283,6 +284,44 @@ export function isWorking(view: SessionView): boolean {
   if (view.state === "awaiting_permission" || view.state === "awaiting_question") return false;
   if (hasPendingPermission(view) || view.pendingQuestion !== null) return false;
   return view.state === "starting" || view.streaming;
+}
+
+export function isAuthExit(stderrTail: string): boolean {
+  return /\/login\b|not logged in|unauthor/i.test(stderrTail);
+}
+
+/**
+ * The auth prompt nothing has answered yet: no message since and no turn running.
+ * A relaunch answers it only when it had nothing to resend (a goal's prompt) or it was an auth exit.
+ */
+export function openAuthPrompt(view: SessionView): string | null {
+  if (isBusy(view)) return null;
+  let relaunched = false;
+  for (let i = view.items.length - 1; i >= 0; i -= 1) {
+    const it = view.items[i];
+    if (it.kind === "user") return null;
+    if (it.kind === "relaunched") relaunched = true;
+    if (it.kind === "assistant" && it.authRequired) {
+      return relaunched && messageStoppedByAuth(view.items)?.promptName === GOAL_PROMPT ? null : it.id;
+    }
+    const authExit =
+      it.kind === "exit" && (it.outcome === "crashed" || it.outcome === "spawn_failed") && isAuthExit(it.stderrTail);
+    if (authExit) return isTerminal(view.state) ? it.id : null;
+  }
+  return null;
+}
+
+/** The message the open auth prompt stopped, to send again once signed in. */
+export function messageStoppedByAuth(
+  items: TranscriptItem[],
+): Extract<TranscriptItem, { kind: "user" }> | null {
+  let prompted = false;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "assistant" && it.authRequired) prompted = true;
+    else if (it.kind === "user") return prompted ? it : null;
+  }
+  return null;
 }
 
 export function parkedState(view: SessionView): SessionState {
@@ -457,10 +496,23 @@ export function reduceEvent(view: SessionView, event: SessionEvent, seq: number 
     "parentId" in event && event.parentId && inner.streaming && !view.streaming
       ? { ...inner, streaming: false }
       : inner;
-  if (next.state === "starting" && next.streaming) {
-    return { ...next, state: "running" };
+  const flagged = event.kind === "assistantText" && event.authRequired && !event.parentId ? flagAuthText(next) : next;
+  if (flagged.state === "starting" && flagged.streaming) {
+    return { ...flagged, state: "running" };
   }
-  return next;
+  return flagged;
+}
+
+// The text may have merged into a streamed block, so the flag goes on whichever item holds it now.
+function flagAuthText(view: SessionView): SessionView {
+  for (let i = view.items.length - 1; i >= 0; i -= 1) {
+    const it = view.items[i];
+    if (it.kind !== "assistant" || it.parentId) continue;
+    const items = view.items.slice();
+    items[i] = { ...it, authRequired: true };
+    return { ...view, items };
+  }
+  return view;
 }
 
 function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | null): SessionView {
@@ -820,7 +872,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     case "relaunched":
       return {
         ...view,
-        ...appended(view, (id) => ({ kind: "relaunched", id }), false, seq),
+        ...appended(view, (id) => ({ kind: "relaunched", id, quiet: event.quiet }), false, seq),
       };
 
     case "rewound":

@@ -427,6 +427,7 @@ async fn validate(
                         text,
                         parent_id: None,
                         injected: false,
+                        auth_required: false,
                     } => Some(text.as_str()),
                     _ => None,
                 })

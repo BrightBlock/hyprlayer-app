@@ -214,7 +214,7 @@ export const router = createRouter({
 registerAppNav({
   currentLocation: () => {
     const loc = router.state.location;
-    return { pathname: loc.pathname, search: loc.search as Record<string, unknown> };
+    return { pathname: loc.pathname, search: loc.search as Record<string, unknown>, href: loc.href };
   },
   goToWorkstream: ({ projectPath, workstreamId }) => {
     void router.navigate({
@@ -239,6 +239,12 @@ registerAppNav({
   },
   openPrompt: (prompt) => {
     void router.navigate({ to: "/workshop", search: { section: "prompts", prompt } });
+  },
+  openSettings: (section) => {
+    void router.navigate({ to: "/settings", search: { section } });
+  },
+  goToHref: (href) => {
+    void router.navigate({ href });
   },
 });
 

@@ -29,7 +29,7 @@ import {
   goalSpent,
 } from "@/lib/domain/goals";
 import type { SyncPhase } from "@/lib/domain/sync";
-import { exitLabel, type TranscriptItem } from "./transcript";
+import { exitLabel, isAuthExit, type TranscriptItem } from "./transcript";
 import type { PendingTurn } from "./transcriptSync";
 import { backgroundTasksFromItems } from "./backgroundTask";
 import { AttachmentCards } from "./AttachmentCard";
@@ -75,8 +75,17 @@ export type PermissionHandlers = {
   onDeny: (requestId: string) => void;
 };
 
+export type AuthPromptHandlers = {
+  openId: string | null;
+  harnessLabel: string;
+  retrying: boolean;
+  onOpenSettings: () => void;
+  onRetry: () => void;
+};
+
 export type PromptHandlers = {
   onRewind: (itemId: string, text: string) => void;
+  auth?: AuthPromptHandlers;
 };
 
 
@@ -611,12 +620,30 @@ const ProtocolErrorBlock = memo(function ProtocolErrorBlock({
   );
 });
 
-function exitRemedy(stderrTail: string): string | null {
-  if (/\/login\b|not logged in|unauthor/i.test(stderrTail)) {
-    return "claude isn't logged in. Run `claude /login` in a terminal, then start a new session.";
-  }
-  return null;
+function AuthActions({ auth }: { auth: AuthPromptHandlers }) {
+  return (
+    <div className="mt-2.5 flex flex-wrap gap-2">
+      <Button variant="primary" disabled={auth.retrying} onClick={auth.onOpenSettings}>
+        Open {auth.harnessLabel} settings
+      </Button>
+      <Button busy={auth.retrying} onClick={auth.onRetry}>
+        Retry
+      </Button>
+    </div>
+  );
 }
+
+const AuthPromptCard = memo(function AuthPromptCard({ auth }: { auth: AuthPromptHandlers }) {
+  return (
+    <div className="mt-3 rounded-card border border-q-card-border bg-q-card-bg p-3.5 shadow-card">
+      <div className="flex items-center gap-2 text-q-label">
+        <Icon name="lock" size="sm" />
+        <span className="text-body font-medium">{auth.harnessLabel} couldn&apos;t sign in</span>
+      </div>
+      <AuthActions auth={auth} />
+    </div>
+  );
+});
 
 const CompactDivider = memo(function CompactDivider({
   item,
@@ -957,11 +984,14 @@ const QueuedCommandRow = memo(function QueuedCommandRow({
 
 const ExitNotice = memo(function ExitNotice({
   item,
+  auth,
 }: {
   item: Extract<TranscriptItem, { kind: "exit" }>;
+  auth: AuthPromptHandlers | undefined;
 }) {
   const bad = item.outcome === "crashed" || item.outcome === "spawn_failed";
-  const remedy = bad ? exitRemedy(item.stderrTail) : null;
+  const remedy =
+    bad && isAuthExit(item.stderrTail) ? `${auth?.harnessLabel ?? "The agent"} isn't signed in.` : null;
   return (
     <div
       className={`rounded-md border px-3 py-2 shadow-card ${
@@ -973,6 +1003,11 @@ const ExitNotice = memo(function ExitNotice({
         {item.code !== null && item.code !== 0 ? ` (exit ${item.code})` : ""}
       </p>
       {remedy && <p className="mt-1 text-center text-ui text-ink-dim">{remedy}</p>}
+      {remedy && auth && auth.openId === item.id && (
+        <div className="flex justify-center">
+          <AuthActions auth={auth} />
+        </div>
+      )}
       {bad && !remedy && item.stderrTail && (
         <pre className="selectable mt-2 max-h-40 overflow-auto rounded bg-surface/60 p-2 text-meta text-ink-dim">
           {item.stderrTail}
@@ -1149,6 +1184,7 @@ function renderSingle(
       return (
         <div data-item-id={item.id}>
           <AssistantMessage text={item.text} streaming={item.streaming} />
+          {item.authRequired && prompt.auth?.openId === item.id && <AuthPromptCard auth={prompt.auth} />}
         </div>
       );
     case "thinking":
@@ -1188,7 +1224,7 @@ function renderSingle(
     case "exit":
       return (
         <div data-item-id={item.id}>
-          <ExitNotice item={item} />
+          <ExitNotice item={item} auth={prompt.auth} />
         </div>
       );
     default:
@@ -1321,7 +1357,10 @@ function ItemList({
   const keepOut = (it: TranscriptItem) =>
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
   const visible = items.filter(
-    (it) => (it.kind !== "permission" || it.decision !== "allow") && (it.kind !== "tool" || !isHiddenTool(it)),
+    (it) =>
+      (it.kind !== "permission" || it.decision !== "allow") &&
+      (it.kind !== "tool" || !isHiddenTool(it)) &&
+      (it.kind !== "relaunched" || !it.quiet),
   );
   const units: Unit[] = foldTools ? toUnits(visible, keepOut) : toExploredUnits(visible, keepOut, naming);
 

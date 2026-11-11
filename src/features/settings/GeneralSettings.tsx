@@ -181,8 +181,8 @@ function QuitCard({ settings }: { settings: AppSettings }) {
           />
         }
       >
-        Ask before {IS_MACOS ? "⌘Q or closing the window" : "closing the window"} stops running
-        agents, terminals, and scripts.
+        Ask before {IS_MACOS ? "⌘Q or closing the window" : "closing the window"} quits. Agents,
+        terminals, and scripts keep running on the server.
       </SettingRow>
     </SettingsCard>
   );

@@ -37,6 +37,7 @@ import {
   TextInput,
   Toggle,
 } from "@/components/ui";
+import { reauthSucceeded } from "@/lib/reauth";
 import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
@@ -58,11 +59,14 @@ export function ClaudeHarnessTab({
   const save = useSetAppSettings();
   const catalog = claudeModels(useClaudeProbe().data?.models);
 
-  function patchClaude(next: Partial<ClaudeSettings>) {
-    save.mutate({
-      ...settings,
-      providers: { ...providers, claude: { ...claude, ...next } },
-    });
+  function patchClaude(next: Partial<ClaudeSettings>, onSaved?: () => void) {
+    save.mutate(
+      {
+        ...settings,
+        providers: { ...providers, claude: { ...claude, ...next } },
+      },
+      { onSuccess: onSaved },
+    );
   }
 
   const authMode = claude.authMode === "apiKey" ? "apiKey" : "cli";
@@ -78,7 +82,9 @@ export function ClaudeHarnessTab({
             label="CLI"
             sublabel="Sign in with your Claude subscription"
             selected={authMode === "cli"}
-            onSelect={() => patchClaude({ authMode: "cli" })}
+            onSelect={() =>
+              authMode !== "cli" && patchClaude({ authMode: "cli" }, () => reauthSucceeded("claude"))
+            }
           />
           <AuthCard
             label="API key"
@@ -288,6 +294,7 @@ function CliAuthPanel() {
               if (code === 0) {
                 void status.refetch();
                 setLoginOpen(false);
+                reauthSucceeded("claude");
               }
             }}
             className="h-full"
@@ -303,9 +310,11 @@ function ApiKeyAuthPanel({
   patchClaude,
 }: {
   claude: ClaudeSettings;
-  patchClaude: (next: Partial<ClaudeSettings>) => void;
+  patchClaude: (next: Partial<ClaudeSettings>, onSaved?: () => void) => void;
 }) {
   const [key, setKey] = useState(claude.apiKey ?? "");
+  const saveKey = (signedIn: boolean) =>
+    patchClaude({ apiKey: key }, () => signedIn && key && reauthSucceeded("claude"));
   const [baseUrl, setBaseUrl] = useState(claude.baseUrl ?? "");
 
   return (
@@ -318,12 +327,12 @@ function ApiKeyAuthPanel({
             placeholder="sk-ant-…"
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            onBlur={() => key !== (claude.apiKey ?? "") && patchClaude({ apiKey: key })}
+            onBlur={() => key !== (claude.apiKey ?? "") && saveKey(false)}
           />
           <Button
             variant="primary"
             disabled={key === (claude.apiKey ?? "")}
-            onClick={() => patchClaude({ apiKey: key })}
+            onClick={() => saveKey(true)}
           >
             Save
           </Button>

@@ -56,6 +56,7 @@ fn assistant(text: &str) -> SessionEvent {
         text: text.into(),
         parent_id: None,
         injected: false,
+        auth_required: false,
     }
 }
 

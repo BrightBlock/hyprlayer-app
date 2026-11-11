@@ -4,6 +4,7 @@ import type { CatalogProvider } from "@/lib/bindings";
 import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
 import { useSetOpencodeProviderKey } from "@/lib/queries";
 import { Button, Dialog, ErrorNote, TextInput } from "@/components/ui";
+import { reauthSucceeded } from "@/lib/reauth";
 import { Icon } from "@/components/Icon";
 
 const FEATURED = 7;
@@ -122,6 +123,7 @@ function KeyEntry({
     if (!key.trim()) return;
     await save.mutateAsync({ provider: provider.id, key: key.trim() });
     onDone();
+    reauthSucceeded("opencode");
   }
 
   return (

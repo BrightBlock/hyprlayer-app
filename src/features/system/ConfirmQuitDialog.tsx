@@ -59,7 +59,8 @@ export function ConfirmQuitDialog() {
       onDismissError={() => setError(null)}
     >
       <p className="text-body leading-prose text-ink-dim">
-        Running agents, terminals, and lifecycle scripts all stop when the app quits.
+        Agents, terminals, and scripts keep running on the server. Notifications pause until you
+        reopen Hyprlayer.
       </p>
 
       <label

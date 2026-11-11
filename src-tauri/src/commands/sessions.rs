@@ -181,6 +181,7 @@ fn emit_start_failure(channel: &Channel<SessionStreamItemDto>, reason: &str) {
             text: format!("⚠ Failed to start the agent: {reason}"),
             parent_id: None,
             injected: false,
+            auth_required: false,
         },
         SessionEvent::Exited {
             outcome: ExitOutcome::SpawnFailed,

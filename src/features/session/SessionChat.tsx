@@ -17,6 +17,7 @@ import { Icon, stageIconName } from "@/components/Icon";
 import { goalDraft, goalSpent } from "@/lib/domain/goals";
 import { openGoalSheet } from "@/lib/goalSheet";
 import { errorMessage, isStaleTranscript } from "@/lib/ipc";
+import { beginReauth, forgetCard, signedInSinceCard, useReauth } from "@/lib/reauth";
 import { eventToChord, formatChord, hasPrimaryModifier } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
@@ -110,6 +111,7 @@ import {
   respondPermission,
   restoreSessionIfNeeded,
   resumeSession,
+  retryAfterSignIn,
   rewindToMessage,
   sendMessage,
   startSession,
@@ -131,6 +133,7 @@ import {
   isBusy,
   isTerminal,
   isWorking,
+  openAuthPrompt,
   type PendingQuestion,
 } from "./transcript";
 import {
@@ -1429,6 +1432,29 @@ export function SessionChat({
     [sid],
   );
 
+  const authOpenId = session ? openAuthPrompt(session) : null;
+  const [retryingAuth, setRetryingAuth] = useState(false);
+  const retryAuth = useCallback(async () => {
+    if (!sid) return;
+    setError(null);
+    setRetryingAuth(true);
+    try {
+      await retryAfterSignIn(sid);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setRetryingAuth(false);
+    }
+  }, [sid]);
+  // Re-runs on every sign-in for this harness, wherever in settings it happened.
+  const signIns = useReauth((s) => s.signIns[harness.key] ?? 0);
+  const settled = session ? !isBusy(session) : false;
+  useEffect(() => {
+    if (!sid || !settled) return;
+    if (!authOpenId) forgetCard(sid);
+    else if (signedInSinceCard(sid, harness.key)) void retryAuth();
+  }, [sid, settled, authOpenId, signIns, harness.key, retryAuth]);
+
   const prompt: PromptHandlers = useMemo(
     () => ({
       onRewind: (itemId, text) => {
@@ -1440,8 +1466,15 @@ export function SessionChat({
           void rewindToMessage(sid, itemId);
         }
       },
+      auth: {
+        openId: authOpenId,
+        harnessLabel: harness.label,
+        retrying: retryingAuth,
+        onOpenSettings: () => sid && beginReauth(sid, harness.key),
+        onRetry: () => void retryAuth(),
+      },
     }),
-    [sid, onDraftChange, onResetSession],
+    [sid, onDraftChange, onResetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
   );
 
   usePublishSessionControls(

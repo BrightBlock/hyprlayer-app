@@ -17,6 +17,8 @@ pub enum ParsedLine {
         blocks: Vec<Block>,
         context_tokens: Option<u32>,
         parent_id: Option<String>,
+        /// claude's API failure class, e.g. `authentication_failed`.
+        error: Option<String>,
     },
     User {
         blocks: Vec<Block>,
@@ -159,6 +161,7 @@ pub fn parse_line(line: &str) -> ParsedLine {
             blocks: parse_blocks(v.get("message")),
             context_tokens: context_tokens(v.get("message").and_then(|m| m.get("usage"))),
             parent_id: str_field(&v, "parent_tool_use_id"),
+            error: str_field(&v, "error"),
         },
         Some("user") => {
             let is_synthetic = v

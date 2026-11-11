@@ -351,6 +351,7 @@ impl CodexDriver {
                         text: format!("⚠ Codex request failed: {e}"),
                         parent_id: None,
                         injected: false,
+                        auth_required: false,
                     });
                     let _ = events.send(SessionEvent::TurnDone {
                         cost_usd: None,

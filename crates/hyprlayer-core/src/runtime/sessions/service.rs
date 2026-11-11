@@ -1245,7 +1245,8 @@ impl SessionService<'_> {
 
         if has_history {
             if params.boundary_on_relaunch {
-                let _ = ingress.send(SessionEvent::Relaunched {}).await;
+                let quiet = !self.runtime.take_cut_off(&session_id);
+                let _ = ingress.send(SessionEvent::Relaunched { quiet }).await;
             }
             workflow_bridge::recover_workflow_runs(&self.runtime.db, &session_id, &workflow).await;
         }

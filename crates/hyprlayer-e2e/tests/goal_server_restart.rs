@@ -91,6 +91,21 @@ async fn goal_server_restart() {
         relaunched,
         json!({ "resumed": relaunched }),
     );
+    let boundaries: Vec<bool> = log
+        .iter()
+        .filter_map(|e| match e.event {
+            SessionEvent::Relaunched { quiet } => Some(quiet),
+            _ => None,
+        })
+        .collect();
+    // The cap lift's own relaunch may land before this read; it is not a restart's.
+    let announced = boundaries.first() == Some(&false);
+    let rest_quiet = boundaries.iter().skip(1).all(|quiet| *quiet);
+    j.guard(
+        "only the relaunch after the server restart is announced",
+        announced && rest_quiet,
+        json!({ "firstAnnounced": announced, "restQuiet": rest_quiet }),
+    );
     let counter = std::fs::read_to_string(clean_tree.join("counter.txt")).unwrap_or_default();
     j.guard(
         "the goal is met at iteration 2",

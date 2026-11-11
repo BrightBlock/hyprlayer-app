@@ -149,6 +149,8 @@ pub struct Translator {
     last_user_turn: Option<String>,
     /// Steers codex has yet to commit, by client id, with the echo to emit when it does.
     steering: Vec<(String, SessionEvent)>,
+    // codex reports one failure as both `error` and a failed `turn/completed`.
+    error_reported: bool,
 }
 
 impl Translator {
@@ -307,6 +309,7 @@ impl Translator {
                         text: format!("⚠ Codex sub-agent error: {msg}"),
                         parent_id: None,
                         injected: false,
+                        auth_required: false,
                     }];
                 }
             }
@@ -314,6 +317,7 @@ impl Translator {
         }
         match method {
             "turn/started" => {
+                self.error_reported = false;
                 self.active_turn = p
                     .get("turn")
                     .and_then(|t| t.get("id"))
@@ -336,19 +340,15 @@ impl Translator {
                     .and_then(Value::as_str);
                 let status = raw_status.unwrap_or("completed");
                 let mut out = self.decline_steers();
-                if status == "failed" {
-                    if let Some(msg) = p
-                        .get("turn")
-                        .and_then(|t| t.get("error"))
-                        .and_then(|e| e.get("message"))
-                        .and_then(Value::as_str)
-                    {
-                        out.push(SessionEvent::AssistantText {
-                            text: format!("⚠ Codex error: {msg}"),
-                            parent_id: None,
-                            injected: false,
-                        });
-                    }
+                let error = p.get("turn").and_then(|t| t.get("error"));
+                let msg = error.and_then(|e| e.get("message")).and_then(Value::as_str);
+                if let (true, false, Some(msg)) = (status == "failed", self.error_reported, msg) {
+                    out.push(SessionEvent::AssistantText {
+                        text: format!("⚠ Codex error: {msg}"),
+                        parent_id: None,
+                        injected: false,
+                        auth_required: error.is_some_and(is_auth_failure),
+                    });
                 }
                 out.push(SessionEvent::TurnDone {
                     cost_usd: None,
@@ -384,10 +384,12 @@ impl Translator {
             "error" => match error_text(p) {
                 Some(msg) => {
                     let mut out = self.decline_steers();
+                    self.error_reported = true;
                     out.push(SessionEvent::AssistantText {
                         text: format!("⚠ Codex error: {msg}"),
                         parent_id: None,
                         injected: false,
+                        auth_required: p.get("error").is_some_and(is_auth_failure),
                     });
                     out.push(SessionEvent::TurnDone {
                         cost_usd: None,
@@ -650,6 +652,7 @@ impl Translator {
                     .to_string(),
                 parent_id: None,
                 injected: false,
+                auth_required: false,
             }],
             "reasoning" => {
                 let text = join_strings(item.get("content"))
@@ -729,6 +732,17 @@ fn note_unhandled(method: &str) {
     if !seen.iter().any(|m| m == method) {
         seen.push(method.to_string());
         tracing::debug!("codex notification {method} is not handled");
+    }
+}
+
+/// `"unauthorized"`, or an HTTP variant such as `{responseStreamConnectionFailed:{httpStatusCode:401}}`.
+fn is_auth_failure(error: &Value) -> bool {
+    match error.get("codexErrorInfo") {
+        Some(Value::String(tag)) => tag == "unauthorized",
+        Some(Value::Object(variants)) => variants
+            .values()
+            .any(|v| v.get("httpStatusCode").and_then(Value::as_u64) == Some(401)),
+        _ => false,
     }
 }
 

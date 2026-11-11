@@ -2,6 +2,7 @@
 export type AppLocation = {
   pathname: string;
   search: Record<string, unknown>;
+  href: string;
 };
 
 type WorkstreamTarget = { projectPath: string; workstreamId: string };
@@ -15,6 +16,8 @@ let workstreamNavigator: ((target: WorkstreamTarget) => void) | null = null;
 let reviewOpener: ((target: ReviewTarget) => void) | null = null;
 let reviewCloser: (() => void) | null = null;
 let promptOpener: ((prompt: string) => void) | null = null;
+let settingsOpener: ((section: string) => void) | null = null;
+let hrefNavigator: ((href: string) => void) | null = null;
 
 export function registerAppNav(impl: {
   currentLocation: () => AppLocation;
@@ -22,12 +25,16 @@ export function registerAppNav(impl: {
   openReview: (target: ReviewTarget) => void;
   closeReview: () => void;
   openPrompt: (prompt: string) => void;
+  openSettings: (section: string) => void;
+  goToHref: (href: string) => void;
 }): void {
   locationGetter = impl.currentLocation;
   workstreamNavigator = impl.goToWorkstream;
   reviewOpener = impl.openReview;
   reviewCloser = impl.closeReview;
   promptOpener = impl.openPrompt;
+  settingsOpener = impl.openSettings;
+  hrefNavigator = impl.goToHref;
 }
 
 export function currentAppLocation(): AppLocation | null {
@@ -48,4 +55,12 @@ export function closeReview(): void {
 
 export function openPrompt(prompt: string): void {
   promptOpener?.(prompt);
+}
+
+export function openSettings(section: string): void {
+  settingsOpener?.(section);
+}
+
+export function goToHref(href: string): void {
+  hrefNavigator?.(href);
 }

@@ -707,19 +707,38 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             blocks,
             context_tokens,
             parent_id,
-        } => context_tokens
-            .filter(|_| parent_id.is_none())
-            .map(|t| SessionEvent::Usage {
-                context_tokens: t,
-                thread_tokens: None,
-            })
-            .into_iter()
-            .chain(
-                blocks
-                    .into_iter()
-                    .filter_map(|b| block_to_event(b, parent_id.as_deref())),
-            )
-            .collect(),
+            error,
+        } => {
+            let auth_failed =
+                parent_id.is_none() && error.as_deref() == Some("authentication_failed");
+            context_tokens
+                .filter(|_| parent_id.is_none())
+                .map(|t| SessionEvent::Usage {
+                    context_tokens: t,
+                    thread_tokens: None,
+                })
+                .into_iter()
+                .chain(
+                    blocks
+                        .into_iter()
+                        .filter_map(|b| block_to_event(b, parent_id.as_deref())),
+                )
+                .map(|event| match event {
+                    SessionEvent::AssistantText {
+                        text,
+                        parent_id,
+                        injected,
+                        ..
+                    } if auth_failed => SessionEvent::AssistantText {
+                        text,
+                        parent_id,
+                        injected,
+                        auth_required: true,
+                    },
+                    other => other,
+                })
+                .collect()
+        }
         ParsedLine::User {
             blocks,
             parent_id,
@@ -735,6 +754,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                     text,
                     parent_id,
                     injected: true,
+                    auth_required: false,
                 },
                 other => other,
             })
@@ -840,6 +860,7 @@ pub(crate) fn block_to_event(block: Block, parent_id: Option<&str>) -> Option<Se
             text,
             parent_id,
             injected: false,
+            auth_required: false,
         }),
         Block::Thinking { text } => Some(SessionEvent::Thinking { text, parent_id }),
         Block::ToolUse { id, name, input } => Some(SessionEvent::ToolUse {
@@ -1110,6 +1131,7 @@ mod tests {
             events.as_slice(),
             [SessionEvent::AssistantText {
                 injected: false,
+                auth_required: false,
                 ..
             }]
         ));

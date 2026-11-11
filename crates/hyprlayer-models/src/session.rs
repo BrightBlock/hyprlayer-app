@@ -183,6 +183,9 @@ pub enum SessionEvent {
         parent_id: Option<String>,
         #[serde(default)]
         injected: bool,
+        // The harness rejected its credentials; this text is its error.
+        #[serde(default)]
+        auth_required: bool,
     },
     Thinking {
         text: String,
@@ -253,7 +256,11 @@ pub enum SessionEvent {
     PlanModeChanged {
         active: bool,
     },
-    Relaunched {},
+    // Quiet unless a server restart cut the harness off; clients draw no boundary then.
+    Relaunched {
+        #[serde(default)]
+        quiet: bool,
+    },
     Rewound {},
     ProtocolError {
         detail: String,
@@ -432,10 +439,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn relaunched_and_rewound_serialize_with_only_their_kind_tag() {
+    fn relaunched_carries_quiet_and_rewound_only_its_tag() {
         assert_eq!(
-            serde_json::to_string(&SessionEvent::Relaunched {}).unwrap(),
-            r#"{"kind":"relaunched"}"#
+            serde_json::to_string(&SessionEvent::Relaunched { quiet: false }).unwrap(),
+            r#"{"kind":"relaunched","quiet":false}"#
+        );
+        // Rows stored before `quiet` existed were all drawn.
+        assert_eq!(
+            serde_json::from_str::<SessionEvent>(r#"{"kind":"relaunched"}"#).unwrap(),
+            SessionEvent::Relaunched { quiet: false }
         );
         assert_eq!(
             serde_json::to_string(&SessionEvent::Rewound {}).unwrap(),

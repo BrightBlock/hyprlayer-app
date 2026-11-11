@@ -281,6 +281,7 @@ impl IterationWatch {
                 text,
                 parent_id,
                 injected,
+                ..
             } => {
                 if parent_id.is_none() && !injected {
                     self.end.last_text = Some(text);

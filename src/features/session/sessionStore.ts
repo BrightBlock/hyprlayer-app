@@ -93,6 +93,8 @@ import {
   isBusy,
   isTerminal,
   isWorking,
+  messageStoppedByAuth,
+  openAuthPrompt,
   parkedState,
   reduceEvent,
   resolvePermission,
@@ -126,6 +128,7 @@ import {
   syncSupport,
 } from "./syncStore";
 import { nextTurn, recapWanted, type LastTurn, type TurnRecap } from "./activityStatus";
+import { GOAL_PROMPT } from "./goalPrompt";
 
 export type SessionEntry = SessionView & {
   workstreamId: string;
@@ -1052,6 +1055,18 @@ export async function applyPermissionMode(
   if (!channels.has(sessionId)) return;
   if (inPlace) await unwrap(commands.setSessionPermissionMode(sessionId, mode));
   else await restartSession(sessionId, mode);
+}
+
+/** Relaunches first: API keys and injected credentials are read only at spawn. */
+export async function retryAfterSignIn(sessionId: string): Promise<void> {
+  const current = entryOf(sessionId);
+  if (!current || !openAuthPrompt(current)) return;
+  const stopped = messageStoppedByAuth(current.items);
+  await restartSession(sessionId, current.permissionMode);
+  // The goal loop owns its prompts; resuming the goal sends the next one.
+  if (stopped && stopped.promptName !== GOAL_PROMPT) {
+    await sendMessage(sessionId, stopped.text, stopped.attachments, stopped.promptName);
+  }
 }
 
 export async function applyModel(

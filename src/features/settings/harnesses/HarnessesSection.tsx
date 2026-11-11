@@ -1,6 +1,10 @@
 import { useState } from "react";
 
 import type { AppSettings, BinaryStatus } from "@/lib/bindings";
+import { harnessLabel } from "@/lib/domain/harnessing";
+import { returnFromReauth, useReauth } from "@/lib/reauth";
+import { Button, Callout } from "@/components/ui";
+import { Icon } from "@/components/Icon";
 import { ClaudeHarnessTab } from "./ClaudeHarnessTab";
 import { CodexHarnessTab } from "./CodexHarnessTab";
 import { OpenCodeHarnessTab } from "./OpenCodeHarnessTab";
@@ -28,7 +32,8 @@ export function HarnessesSection({
   settings: AppSettings;
   binaries: BinaryStatus[];
 }) {
-  const [active, setActive] = useState<HarnessTabId>("claude");
+  const reauth = useReauth((s) => s.pending);
+  const [active, setActive] = useState<HarnessTabId>(reauth?.harness ?? "claude");
   const opencode = binaries.find((b) => b.kind === "opencode");
   const claude = binaries.find((b) => b.kind === "claude");
   const ollama = binaries.find((b) => b.kind === "ollama");
@@ -37,6 +42,15 @@ export function HarnessesSection({
   return (
     <div className="space-y-4">
       <h1 className="text-h3 text-ink">Harnesses</h1>
+
+      {reauth && (
+        <Callout tone="warn" icon={<Icon name="warning" size="sm" />}>
+          Sign in to {harnessLabel(reauth.harness)} and your agent resends its last message.
+          <Button size="sm" className="ml-2" onClick={returnFromReauth}>
+            Back to agent
+          </Button>
+        </Callout>
+      )}
 
       <div className="flex items-center gap-5 border-b border-edge">
         {TABS.map((tab) => {

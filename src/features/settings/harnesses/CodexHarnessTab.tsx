@@ -26,6 +26,7 @@ import {
   TextInput,
   SettingRow,
 } from "@/components/ui";
+import { reauthSucceeded } from "@/lib/reauth";
 import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { AuthCard, AuthDetailRows } from "./AuthCard";
@@ -417,6 +418,7 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
               if (code === 0) {
                 void probe.refetch();
                 setLoginOpen(false);
+                reauthSucceeded("codex");
               }
             }}
             className="h-full"
@@ -430,7 +432,14 @@ function ChatgptAuthPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }
 function CodexApiKeyPanel({ probe }: { probe: ReturnType<typeof useCodexProbe> }) {
   const [key, setKey] = useState("");
   const login = useCodexLoginWithApiKey();
-  const submit = () => key.trim() && login.mutate(key, { onSuccess: () => setKey("") });
+  const submit = () =>
+    key.trim() &&
+    login.mutate(key, {
+      onSuccess: () => {
+        setKey("");
+        reauthSucceeded("codex");
+      },
+    });
 
   return (
     <div className="space-y-3">

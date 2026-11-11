@@ -944,6 +944,7 @@ mod tests {
             text: text.into(),
             parent_id: None,
             injected: false,
+            auth_required: false,
         }
     }
     fn turn_done() -> SessionEvent {

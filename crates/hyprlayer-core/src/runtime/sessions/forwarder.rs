@@ -1230,7 +1230,7 @@ fn log_lifecycle(session_id: &str, event: &SessionEvent) {
                 _ => tracing::info!("session {session_id} exited: {outcome:?}, code {code:?}"),
             }
         }
-        SessionEvent::Relaunched {} => {
+        SessionEvent::Relaunched { .. } => {
             tracing::info!("session {session_id}: harness relaunched")
         }
         SessionEvent::ProtocolError { detail, .. } => {

@@ -165,6 +165,7 @@ async fn context_resets() {
                 text,
                 parent_id: None,
                 injected: true,
+                auth_required: false,
             }] if text.starts_with(SUMMARY_START)
         ),
         json!({ "events": shape(&compacted) }),

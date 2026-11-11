@@ -378,7 +378,7 @@ async fn goal_budget() {
         .any(|e| matches!(e, SessionEvent::Exited { .. }));
     let relaunched = streamed
         .iter()
-        .any(|e| matches!(e, SessionEvent::Relaunched {}));
+        .any(|e| matches!(e, SessionEvent::Relaunched { .. }));
     let goal_turns = streamed
         .iter()
         .filter(|e| matches!(e, SessionEvent::UserMessage { prompt_name: Some(name), .. } if name == GOAL_PROMPT))
@@ -743,6 +743,7 @@ fn reply_to(log: &[SessionLogEntry], needle: &str) -> Reply {
                 text,
                 parent_id: None,
                 injected: false,
+                auth_required: false,
             } => reply.text = Some(text.clone()),
             SessionEvent::TurnDone { turn_status, .. } => {
                 reply.done = true;
