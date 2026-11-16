@@ -19,7 +19,7 @@ use crate::review::validation_report::{find_validation_report, parse_validation_
 use crate::runtime::providers::CheckOutcome;
 use crate::runtime::scripts::script_env;
 use crate::runtime::sessions::goal_loop::{idle_probe, IterationWatch, Progress, Watch, QUIET};
-use crate::runtime::sessions::StartStageSessionRequest;
+use crate::runtime::sessions::{SessionLineage, StartStageSessionRequest};
 use crate::runtime::terminals::{default_shell, login_shell_args};
 use crate::runtime::HyprlayerRuntime;
 use crate::scripts::build_block;
@@ -337,18 +337,22 @@ async fn validate(
     let nonce = uuid::Uuid::new_v4().to_string();
     let sessions = runtime.sessions();
     let prepared = sessions
-        .prepare_start(StartStageSessionRequest {
-            workstream: run.workstream.clone(),
-            stage: Stage::Validate,
-            input: validation_goal_note(&head, &commands),
-            attached_docs: vec![plan_path.to_string()],
-            harness: Some(run.harness),
-            model: None,
-            effort: None,
-            permission_mode: None,
-            prompt_name: None,
-            client_message_id: Some(nonce.clone()),
-        })
+        .prepare_start_with(
+            StartStageSessionRequest {
+                workstream: run.workstream.clone(),
+                stage: Stage::Validate,
+                input: validation_goal_note(&head, &commands),
+                attached_docs: vec![plan_path.to_string()],
+                harness: Some(run.harness),
+                model: None,
+                effort: None,
+                permission_mode: None,
+                prompt_name: None,
+                client_message_id: Some(nonce.clone()),
+                parent_session_id: None,
+            },
+            SessionLineage::goal(),
+        )
         .await;
     let prepared = match prepared {
         Ok(prepared) => prepared,

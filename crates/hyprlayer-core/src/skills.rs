@@ -113,7 +113,12 @@ pub fn is_valid_skill_name(name: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-pub fn list_slash_commands(worktree: &Path, home: &SkillHome) -> Vec<SlashCommand> {
+/// `launch_plugin` is the server's orchestration plugin, which claude and codex launches get.
+pub fn list_slash_commands(
+    worktree: &Path,
+    home: &SkillHome,
+    launch_plugin: Option<&Path>,
+) -> Vec<SlashCommand> {
     let mut found: Vec<SlashCommand> = Vec::new();
 
     let mut roots: Vec<(PathBuf, &str)> = vec![(worktree.join(".claude"), "project")];
@@ -126,6 +131,9 @@ pub fn list_slash_commands(worktree: &Path, home: &SkillHome) -> Vec<SlashComman
     }
 
     collect_plugins(&mut found, home.claude.as_deref());
+    if let Some(dir) = launch_plugin {
+        collect_launch_plugin(dir, &mut found);
+    }
 
     found.extend(builtin_commands());
 
@@ -287,6 +295,25 @@ fn collect_plugins(out: &mut Vec<SlashCommand>, claude: Option<&Path>) {
     for install in plugin_installs(claude) {
         collect_skills(&install.path.join("skills"), "plugin", out);
         collect_commands(&install.path.join("commands"), "", "plugin", out);
+    }
+}
+
+/// Named as claude names a plugin's skills, `<plugin>:<skill>`; the menu offers them to claude and codex only.
+fn collect_launch_plugin(dir: &Path, out: &mut Vec<SlashCommand>) {
+    let Some(plugin) = std::fs::read(dir.join(".claude-plugin/plugin.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|manifest| manifest.get("name")?.as_str().map(str::to_string))
+    else {
+        return;
+    };
+    for entry in scan_skills(&dir.join("skills")) {
+        out.push(SlashCommand {
+            name: format!("{plugin}:{}", entry.dir),
+            description: entry.description.unwrap_or_default(),
+            source: "agent-control".to_string(),
+            kind: SlashKind::Skill,
+        });
     }
 }
 
@@ -870,7 +897,7 @@ mod tests {
             "---\nname: demo\ndescription: A demo skill.\n---\n",
         )
         .unwrap();
-        let cmds = list_slash_commands(wt, &SkillHome::default());
+        let cmds = list_slash_commands(wt, &SkillHome::default(), None);
         assert!(cmds
             .iter()
             .any(|c| c.name == "demo" && c.source == "project"));
@@ -904,7 +931,7 @@ mod tests {
     #[test]
     fn includes_builtin_commands() {
         let dir = tempfile::tempdir().unwrap();
-        let cmds = list_slash_commands(dir.path(), &SkillHome::default());
+        let cmds = list_slash_commands(dir.path(), &SkillHome::default(), None);
         for name in ["init", "review", "security-review"] {
             assert!(
                 cmds.iter().any(|c| c.name == name && c.source == "builtin"),
@@ -1071,7 +1098,7 @@ mod tests {
         let skills = list_skills(Some(wt), &SkillHome::default());
         assert!(!skills.iter().any(|s| s.name == "sync"));
 
-        let cmds = list_slash_commands(wt, &SkillHome::default());
+        let cmds = list_slash_commands(wt, &SkillHome::default(), None);
         assert!(cmds.iter().any(|c| c.name == "sync"));
     }
 
@@ -1092,7 +1119,7 @@ mod tests {
         )
         .unwrap();
 
-        let cmds = list_slash_commands(wt, &SkillHome::default());
+        let cmds = list_slash_commands(wt, &SkillHome::default(), None);
         let kind = |name: &str| cmds.iter().find(|c| c.name == name).map(|c| c.kind);
         assert_eq!(kind("plan"), Some(SlashKind::Skill));
         assert_eq!(kind("sync"), Some(SlashKind::Command));

@@ -10,12 +10,18 @@ import {
   type RefObject,
 } from "react";
 
+import { EngineGlyph } from "@/components/EngineGlyph";
+import { AgentStateDot } from "@/features/multiplexer/agentStateUi";
+import { engineOrFallback, useMultiplexer } from "@/features/multiplexer/engines";
+import { reattachPtyAgent } from "@/features/multiplexer/ptyAgentBridge";
+import { toAgentState } from "@/features/multiplexer/ptyAgentState";
 import type { Session } from "@/lib/bindings";
+import type { PtyAgent } from "@/lib/domain/agentControl";
 import { harnessOption } from "@/lib/domain/harnessing";
 import { stageLabel } from "@/lib/domain/stages";
 import { formatCompactAge } from "@/lib/format";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
-import { useActiveSessions, useWorkstreamSessions } from "@/lib/queries";
+import { useActiveSessions, usePtyAgents, useWorkstreamSessions } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
 import { cx, Popover, ROW_ACTION, SegmentedControl } from "@/components/ui";
 
@@ -36,8 +42,23 @@ const LIST_MAX_HEIGHT = `calc(100dvh - ${CHROME_PX + STATUS_BAR_HEIGHT}px)`;
 
 const NONE_SESSIONS: Session[] = [];
 const NONE_SHELLS: ShellTab[] = [];
+const NONE_PTY: PtyAgent[] = [];
 
 type Row = { session: Session; title: string; live: boolean; localOpen: boolean };
+type PtyRow = { agent: PtyAgent; title: string; glyph: string; accentToken: string; engine: string };
+type ListRow = { kind: "session"; key: string; row: Row } | { kind: "pty"; key: string; row: PtyRow };
+
+/** Running PTY agents with no tab on this desktop, such as one whose shared tab was closed here. */
+function useUnboundPtyAgents(workstreamId: string): PtyAgent[] {
+  const multiplexer = useMultiplexer();
+  const agents = usePtyAgents(workstreamId, multiplexer.enabled).data ?? NONE_PTY;
+  const shells = useWorkstreamTabsStore((s) => s.byWs[workstreamId]?.shells) ?? NONE_SHELLS;
+  return useMemo(() => {
+    if (!multiplexer.enabled) return NONE_PTY;
+    const bound = new Set(shells.flatMap((s) => s.ptyAgent?.terminalId ?? []));
+    return agents.filter((a) => a.state !== "exited" && !bound.has(a.terminalId));
+  }, [multiplexer.enabled, agents, shells]);
+}
 
 export function AgentSessionsPopover({
   workstreamId,
@@ -91,9 +112,10 @@ function PopoverBody({
   onClose: () => void;
 }) {
   const view = useAgentSessions((s) => s.view);
-  const currentCount = (useWorkstreamSessions(workstreamId).data ?? NONE_SESSIONS).filter(
-    (s) => s.archivedAt == null,
-  ).length;
+  const ptyCount = useUnboundPtyAgents(workstreamId).length;
+  const currentCount =
+    (useWorkstreamSessions(workstreamId).data ?? NONE_SESSIONS).filter((s) => s.archivedAt == null).length +
+    ptyCount;
   const archivedCount = useArchivedRows(workstreamId).length;
   const counted = (label: string, n: number) => (n > 0 ? `${label} ${n}` : label);
   const switcher = (
@@ -141,27 +163,53 @@ function CurrentSessionsList({ workstreamId, headingId, searchRef, onClose, swit
   const [active, setActive] = useState(0);
   const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
 
-  const rows = useMemo<Row[]>(
-    () =>
-      sessions
+  const multiplexer = useMultiplexer();
+  const ptyAgents = useUnboundPtyAgents(workstreamId);
+
+  // PTY agents lead: they are running and have no start time to sort by.
+  const rows = useMemo<ListRow[]>(
+    () => [
+      ...ptyAgents.map((agent): ListRow => {
+        const engine = engineOrFallback(multiplexer, agent.engineId);
+        return {
+          kind: "pty",
+          key: `pty:${agent.terminalId}`,
+          row: {
+            agent,
+            title: agent.title ?? engine.label,
+            glyph: engine.glyph,
+            accentToken: engine.accentToken,
+            engine: engine.label,
+          },
+        };
+      }),
+      ...sessions
         .filter((s) => s.archivedAt == null)
         .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
-        .map((session) => ({
-          session,
-          title: localTitles.get(session.id) ?? session.title ?? session.preview ?? stageLabel(session.stage),
-          live: liveIds.has(session.id),
-          localOpen: localTitles.has(session.id),
-        })),
-    [sessions, localTitles, liveIds],
+        .map(
+          (session): ListRow => ({
+            kind: "session",
+            key: session.id,
+            row: {
+              session,
+              title: localTitles.get(session.id) ?? session.title ?? session.preview ?? stageLabel(session.stage),
+              live: liveIds.has(session.id),
+              localOpen: localTitles.has(session.id),
+            },
+          }),
+        ),
+    ],
+    [ptyAgents, multiplexer, sessions, localTitles, liveIds],
   );
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter(
-      (row) =>
-        row.title.toLowerCase().includes(q) ||
-        (row.session.preview?.toLowerCase().includes(q) ?? false) ||
-        stageLabel(row.session.stage).toLowerCase().includes(q),
+    return rows.filter((item) =>
+      item.kind === "pty"
+        ? item.row.title.toLowerCase().includes(q) || item.row.engine.toLowerCase().includes(q)
+        : item.row.title.toLowerCase().includes(q) ||
+          (item.row.session.preview?.toLowerCase().includes(q) ?? false) ||
+          stageLabel(item.row.session.stage).toLowerCase().includes(q),
     );
   }, [rows, query]);
   const current = Math.min(active, Math.max(visible.length - 1, 0));
@@ -172,12 +220,16 @@ function CurrentSessionsList({ workstreamId, headingId, searchRef, onClose, swit
     rowRefs.current[next]?.focus();
   };
 
-  const openRow = (session: Session) => {
+  const openRow = (item: ListRow) => {
     onClose();
-    openSessionTab(workstreamId, session);
+    if (item.kind === "session") {
+      openSessionTab(workstreamId, item.row.session);
+      return;
+    }
+    reattachPtyAgent(item.row.agent);
   };
 
-  const onRowKey = (session: Session, index: number) => (e: KeyboardEvent<HTMLLIElement>) => {
+  const onRowKey = (item: ListRow, index: number) => (e: KeyboardEvent<HTMLLIElement>) => {
     if (e.target !== e.currentTarget) return;
     if (e.key === "ArrowDown") focusRow(index + 1);
     else if (e.key === "ArrowUp") {
@@ -185,7 +237,7 @@ function CurrentSessionsList({ workstreamId, headingId, searchRef, onClose, swit
       else focusRow(index - 1);
     } else if (e.key === "Home") focusRow(0);
     else if (e.key === "End") focusRow(visible.length - 1);
-    else if (e.key === "Enter") openRow(session);
+    else if (e.key === "Enter") openRow(item);
     else return;
     e.preventDefault();
     e.stopPropagation();
@@ -251,21 +303,28 @@ function CurrentSessionsList({ workstreamId, headingId, searchRef, onClose, swit
         </p>
       ) : (
         <ul aria-labelledby={headingId} className="overflow-y-auto" style={{ maxHeight: LIST_MAX_HEIGHT }}>
-          {visible.map((row, index) => (
-            <AgentSessionRow
-              key={row.session.id}
-              row={row}
-              now={now}
-              focusable={index === current}
-              rowRef={(el) => {
+          {visible.map((item, index) => {
+            const nav = {
+              focusable: index === current,
+              rowRef: (el: HTMLLIElement | null) => {
                 rowRefs.current[index] = el;
-              }}
-              onFocus={() => setActive(index)}
-              onKeyDown={onRowKey(row.session, index)}
-              onOpen={() => openRow(row.session)}
-              onArchive={() => void setSessionArchived(workstreamId, row.session.id, true)}
-            />
-          ))}
+              },
+              onFocus: () => setActive(index),
+              onKeyDown: onRowKey(item, index),
+              onOpen: () => openRow(item),
+            };
+            return item.kind === "pty" ? (
+              <PtyAgentRow key={item.key} row={item.row} {...nav} />
+            ) : (
+              <AgentSessionRow
+                key={item.key}
+                row={item.row}
+                now={now}
+                {...nav}
+                onArchive={() => void setSessionArchived(workstreamId, item.row.session.id, true)}
+              />
+            );
+          })}
         </ul>
       )}
     </>
@@ -335,6 +394,49 @@ function AgentSessionRow({
           </button>
         </span>
       )}
+    </li>
+  );
+}
+
+function PtyAgentRow({
+  row,
+  focusable,
+  rowRef,
+  onFocus,
+  onKeyDown,
+  onOpen,
+}: {
+  row: PtyRow;
+  focusable: boolean;
+  rowRef: Ref<HTMLLIElement>;
+  onFocus: () => void;
+  onKeyDown: (e: KeyboardEvent<HTMLLIElement>) => void;
+  onOpen: () => void;
+}) {
+  const { agent, title } = row;
+  return (
+    <li
+      ref={rowRef}
+      tabIndex={focusable ? 0 : -1}
+      aria-label={[title, row.engine].join(", ")}
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
+      onClick={onOpen}
+      className={cx(
+        "group flex cursor-pointer items-center gap-[11px] border-t border-edge-2 px-3.5 py-2.5",
+        "hover:bg-panel-2 focus-within:bg-panel-2 focus:outline-none",
+      )}
+    >
+      <span aria-hidden="true" className="flex h-[7px] w-[7px] shrink-0 items-center justify-center">
+        <AgentStateDot state={toAgentState(agent.state, agent.lastReply != null)} />
+      </span>
+      <EngineGlyph glyph={row.glyph} accentToken={row.accentToken} className="shrink-0 text-meta leading-none" />
+      <div
+        className="min-w-0 flex-1 truncate text-meta font-medium text-ink group-hover:font-semibold group-focus-within:font-semibold"
+        title={title}
+      >
+        {title}
+      </div>
     </li>
   );
 }

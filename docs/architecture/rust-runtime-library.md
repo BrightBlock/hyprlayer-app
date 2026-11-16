@@ -216,24 +216,27 @@ lags and receives `RecvError::Lagged`.
 | `ProjectCreateProgress` | `op_id`, `step: CreateStep`, `status: StepStatus`, `detail: Option<String>` |
 | `DocStateChanged` | `ids: Vec<String>`, `change: DocStateChange` |
 | `AccountChanged` | — |
+| `PtyAgentChanged` | `terminal_id`, `workstream_id`, `engine_id`, `state: PtyAgentState`, `provider_session_id`, `activity`, `last_reply` (all three `Option<String>`) |
 
 `ThoughtsIndexUpdateKind` is `Updated | Removed | Rescanned`. `DocStateChange` is `Read | Agent`; read state never rides `ThoughtsIndexUpdated`, which clients treat as a write.
 
 ## Services
 
-Fifteen handles, each borrowed from the runtime for the duration of one call:
+Seventeen handles, each borrowed from the runtime for the duration of one call:
 
 ```rust
 runtime.settings()   runtime.providers()  runtime.sessions()   runtime.projects()
 runtime.library()    runtime.agents()     runtime.prompts()    runtime.workstreams()
 runtime.attachments() runtime.terminals() runtime.scripts()    runtime.reviews()
-runtime.skills()     runtime.account()    runtime.goals()
+runtime.skills()     runtime.account()    runtime.goals()      runtime.agent_control()
+runtime.pty_controls()
 ```
 
 Each handle's operational request/result types live in that service's module and
 are supported alongside it: `hyprlayer_core::runtime::{settings_service,
 providers, sessions, projects, library, agents, prompts, workstreams,
-attachments, terminals, scripts, reviews, skills, account, goals}`. The handles
+attachments, terminals, scripts, reviews, skills, account, goals, agent_control,
+agent_control::pty_controls}`. The handles
 themselves are also re-exported at the crate root.
 
 Every method takes `&self` and returns `Result<T>` unless shown otherwise.
@@ -288,6 +291,7 @@ and `opencode_config_file`. Setting or removing a key invalidates the cached
 | `log_after(&str, epoch: u64, after_seq: Option<i64>)` | `Vec<SessionLogEntry>` |
 | `attach(&str)` | `SessionAttachment` |
 | `prepare_start(StartStageSessionRequest)` | `StartedStageSession` |
+| `prepare_start_with(StartStageSessionRequest, SessionLineage)` | `StartedStageSession` (records `origin` and `parent_session_id`) |
 | `launch(LaunchSessionParams)` | `Arc<dyn AgentDriver>` |
 | `launch_and_converse(LaunchAndConverseParams, Option<ClientRef>)` | `()` |
 | `rewind(RewindSessionRequest)` | `RewindSessionOutcome` |
@@ -506,7 +510,9 @@ E2E scenario is their headless test.
 
 ### `GoalService`
 
-`start(StartGoalRequest, Option<ClientRef>)`, `pause(&str)`, `resume(&str)`,
+`start(StartGoalRequest, Option<ClientRef>)`, `start_with(StartGoalRequest,
+Option<ClientRef>, SessionLineage)` (what a `NewSession` target's row records; `start` uses
+origin `goal`), `pause(&str)`, `resume(&str)`,
 `stop(&str)`, `update(&str, GoalPatch)`, `get(&str)` and
 `list(Option<&str>, active_only: bool)`. The `&str` is a goal id; `list` filters by an
 optional workstream id. The first five return the `Goal`, `get` a `GoalDetail` (the
@@ -582,6 +588,115 @@ concern and cannot delete a file.
 `session_exists(SessionExistsRequest)`.
 
 `TerminalAttachment { terminal_id: String, live: mpsc::Receiver<TerminalEvent> }`.
+
+`launch_agent(LaunchAgentRequest)` returns `(TerminalAttachment, PtyLaunched)`. It
+resolves the engine from `settings.multiplexer.engines` (else the builtin), builds the
+argv itself, and gives the PTY the agent's `HYPRLAYER_*` env unless agent control is
+`off`. `claude-code`, and `codex` 0.164 or newer, also get hooks that report through
+`hyprlayer-server hook`, and reach the `hyprlayer` MCP server: claude's `--mcp-config`
+and `--settings` files live under `<app data>/agent-control/launch/<terminal id>/` until
+the PTY exits. An engine whose
+args carry their own `--settings` launches unhooked, and so does any other engine. An
+unhooked codex with no session id is minted with `codex exec` first, and
+`PtyLaunched.provider_session_id` carries the id. `list_pty_agents(Option<&str>)`
+returns the hooked agents, plus unhooked ones an agent spawned (`PtyAgent.spawned_by`,
+`hooked: false`), optionally for one workstream; each state change sends
+`RuntimeEvent::PtyAgentChanged`, which the server forwards only to connections that
+announced it. The `pty_hook_signals` E2E scenario is their headless test.
+`LaunchAgentRequest.lineage` is `None` for the desktop's launches; an agent's spawn sets
+`PtyLineage { parent, depth, mode }`, which becomes the PTY's identity and an in-memory
+link to its parent until it exits.
+
+### `AgentControlService`
+
+What an agent spawned by the runtime may ask of it. `identity_env(AgentIdentity)` mints a
+per-spawn token and returns the `HYPRLAYER_*` env plus the `TokenGuard` that revokes it, or
+`None` with no endpoint or at `off`; `session_lineage(&Session)` gives a session's parent
+and depth (one per agent hop). `identify(&str) -> AgentIdentity` looks a token up (`agent_control_denied` once its
+spawn has exited); `level_of(&AgentIdentity)` resolves the level per call from the
+session's live permission mode, so a bypass caller is `full` unless the setting is `off`;
+`whoami(&AgentIdentity) -> AgentWhoami`. `notify` and `request_attention` send
+`RuntimeEvent::UiRequested { Notify }` for the caller's workstream, which the server
+forwards only to connections that announced it. `check_workstream`, `check_session`,
+`check_goal`, `check_doc` (a write, attaching included, takes only a doc mapped to the
+caller's project; a doc attached to its workstream only reads), `check_project`,
+`check_terminal` (a PTY agent the server launched, never a plain shell or script) and
+`check_own_goal` (the caller's or a descendant's goal) refuse out-of-scope ids as
+`agent_control_denied`, and
+`project_scope` returns what a list verb keeps. `report_signal(&str, &AgentSignal)` folds
+a hook's signal into its PTY agent, and titles it from its first prompt;
+`report_status(&str, AgentStatusReport)` applies a claude statusLine run.
+`model_switch_pending(&str) -> bool` tells a claude's `PreModelSwitch` hook whether the
+status bar is switching it right now.
+
+### `PtyControlService`
+
+The status bar's changes to a hooked claude PTY, made session-only by driving its TUI
+against a terminal-emulated copy of its screen. `set_model(&str, &str) -> PtyControlOutcome`
+picks the model's row in `/model` by the way round that never lands on "More models" and
+presses `s`, confirmed by the picker's `PostModelSwitch`, the statusLine or claude's own note;
+`Relaunch` asks the desktop to restart an idle agent with `--resume`, `--model` and the
+session's `--permission-mode` and `--effort` when claude never confirmed it. Any failure with a
+picker on screen sends it one Esc. `set_effort(&str, &str)` slides `/effort`, and
+`set_permission_mode(&str, &str)` takes claude's own mode key (`auto` included) and reaches
+it with `/plan` or shift+tab, confirmed by the footer. Each holds the terminal's input lock,
+which an agent's message also takes, and refuses an agent that is asking its user something
+or not showing its input box (`pty_control_failed`). It never sends a digit, an Enter in a
+picker or a typed `/model <x>`: each saves a claude default, the model one on the account.
+
+Mutating verbs need `require_full(&AgentIdentity)`: level `full`, not report-only, and not a
+codex session or PTY outside bypass (codex approves the `hyprlayer` tools unasked).
+`check_goal_checks(&AgentIdentity, &[GoalCheck])` refuses a command check, a shell on the
+server, from a caller outside bypass; the server runs it for `start_goal` and `update_goal`.
+`check_descendant(&AgentIdentity, &str, or_self: bool)` refuses a session or terminal the
+caller did not spawn. Lineage no row can hold (anything a terminal spawned, and terminals a
+session spawned) lives in memory until the child's PTY exits or its session row is deleted;
+a session whose terminal parent is gone counts as `max_depth` deep. `check_spawn(&AgentIdentity,
+&str, Stage, Option<Harness>, Option<PermissionMode>) -> SpawnCheck` (it also takes the
+attached docs, each of which must pass the read scope check, or the write one for an
+Implement or Validate start, which activates the plans it attaches) runs every spawn
+refusal before anything is written: level, project, `max_depth`
+and `max_live_children` (`agent_limit_reached`), a permission mode above the caller's
+own (Plan < Default < AcceptEdits < Bypass; unset means the caller's), and, outside bypass, a
+stage whose pre-approved tools the caller's own stage lacks
+(`pipeline::pre_approves_within`; a terminal counts as General). The `SpawnCheck` holds the
+caller's spawn lock until it is dropped, after the child is live.
+`spawn_session(&AgentIdentity, SpawnSessionRequest) -> Session` starts a composer session
+with origin `agent` and no stream: its first turn is sent before it returns, headed
+`[from agent "<caller>" · <caller id>]` and attributed to `agent:<caller id>`, and a failed
+launch leaves no row. It sends `UiRequested { OpenSessionTab { focus: false } }`.
+`wait_session(&AgentIdentity, &str, WaitUntil, u32) -> WaitOutcome` returns once the
+session is idle, needs a person, or exits (each `until` also stops at the later ones), when
+an idle session has not moved for 5 s (`stalled`), or at the timeout (capped at 600 s).
+`send_message(&AgentIdentity, &str, &str)` sends a headed, attributed turn and counts a
+hop once it is delivered; past `max_agent_hops` without a human turn it refuses with
+`agent_limit_reached` and notifies the user once. A target running in a higher permission
+mode than the caller is refused unless the caller spawned it. `note_human_turn(&str)` resets a target's hops; the server calls
+it for a desktop's `send_user_message`, and `TerminalService::write` for typed input.
+The `agent_spawn_and_message` E2E scenario is the headless test of these.
+
+PTY agents: `spawn_pty_agent(&AgentIdentity, SpawnPtyAgentRequest) -> PtyAgent` refuses an
+engine id that is neither configured nor builtin, runs the
+spawn checks (bypass only from a bypass caller), launches through `launch_agent` at 120×32,
+sends `UiRequested { OpenTerminalTab }`, and pastes an optional first prompt once the TUI is
+ready (its first idle when hooked, 3 s of quiet otherwise). `send_pty_message(&AgentIdentity,
+&str, &str)` pastes a headed message into a descendant PTY agent as a bracketed paste, then
+Enter 100 ms later; it counts a hop, never a human turn, and refuses while the target is
+asking its user something. `read_terminal(&AgentIdentity, &str, u32) -> String` returns the
+last lines (at most 500) of a PTY agent's scrollback with escape sequences stripped.
+`wait_pty_agent(&AgentIdentity, &str, WaitUntil, u32) -> WaitOutcome` is `wait_session`
+over a hooked agent's folded state; an unhooked one is refused. `interrupt_pty_agent` writes
+Esc into a descendant PTY agent and `kill_pty_agent` closes its terminal. When an
+agent-spawned PTY starts asking (permission or question), the registry sends
+`UiRequested { Notify { terminal_id } }`, since no desktop may have its tab shown. `start_goal(&AgentIdentity,
+StartGoalRequest) -> Goal` runs a goal on the caller or a descendant, or on a new session
+under the spawn checks with origin `agent`. `reveal(&AgentIdentity, RevealTarget)` sends
+`UiRequested { Reveal }` for the caller's workstream. The `agent_breadth` E2E scenario is
+the headless test of these.
+
+The server decides which commands an agent connection may call (`agent_access.rs`); this
+service only resolves identity, level and scope. The `agent_control_read` E2E scenario is
+its headless test.
 
 ### `ScriptService`
 

@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { Icon } from "@/components/Icon";
 import { Spinner } from "@/components/ui";
 import { monoFontStack } from "@/lib/appearance";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
+import { useToast } from "@/lib/toast";
 import { b64ToBytes } from "@/lib/terminal/terminalCodec";
 import { writeTerminal } from "@/lib/terminal/terminalInput";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
@@ -18,17 +18,18 @@ import {
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { xtermThemeFromCss } from "@/lib/terminal/terminalTheme";
 import { useScriptsStore } from "@/features/session/scriptsStore";
-import { closeAgent, ensureAgent, resolveResume, setAgentBypass } from "./agentRuntime";
-import { EngineGlyph } from "@/components/EngineGlyph";
-import { AgentStatePill } from "./agentStateUi";
 import {
-  engineBypassArgs,
-  engineMintsViaExec,
-  engineResumesById,
-  relaunchArgs,
-  type ResolvedEngine,
-} from "./engines";
+  closeAgent,
+  ensureAgent,
+  onAgentTerminalGone,
+  resolveResume,
+  setAgentBypass,
+  type AgentLaunchSession,
+  type EnsureAgentOpts,
+} from "./agentRuntime";
+import { engineMintsViaExec, engineResumesById, type ResolvedEngine } from "./engines";
 import { markAgentStarted, useAgentState } from "./multiplexerStore";
+import { PtySessionControls } from "./PtySessionControls";
 
 const CAPTURE_INTERVAL_MS = 1500;
 const CAPTURE_TRIES = 20;
@@ -43,6 +44,7 @@ export function AgentPtyTab({
   sessionId,
   started: startedProp,
   bypass,
+  adopted = false,
   autoFocus,
   excludeSessionIds,
   onTerminalId,
@@ -60,6 +62,7 @@ export function AgentPtyTab({
   sessionId?: string;
   started?: boolean;
   bypass?: boolean;
+  adopted?: boolean;
   autoFocus?: boolean;
   excludeSessionIds?: string[];
   onTerminalId: (id: string) => void;
@@ -77,16 +80,16 @@ export function AgentPtyTab({
   const launchedAtRef = useRef(0);
   const excludeRef = useRef<string[]>(excludeSessionIds ?? []);
   excludeRef.current = excludeSessionIds ?? [];
-  const restartRef = useRef<((opts: { resume: boolean; bypass: boolean }) => void) | null>(null);
+  const restartRef = useRef<((opts: Omit<AgentLaunchSession, "sessionId">) => void) | null>(null);
 
   const fontSize = useTerminalZoom(engineRef, idRef);
   useTerminalThemeSync(engineRef);
 
   const agent = useAgentState(workstreamId, shellId);
-  const state = agent?.state ?? "idle";
   const bypassOn = !!agent?.bypass;
   const started = !!agent?.started;
-  const hasBypass = engineBypassArgs(engine.id).length > 0;
+  const hooked = !!agent?.hooked;
+  const reportedSessionId = agent?.sessionId;
   const startedSeed = startedProp ?? !!terminalId;
   const markedStartedRef = useRef(startedSeed);
   const [minting, setMinting] = useState(false);
@@ -110,15 +113,37 @@ export function AgentPtyTab({
 
     let disposed = false;
     const created: Channel<TerminalEvent>[] = [];
-    const newChannel = (): Channel<TerminalEvent> => {
+    // A terminal can end both ways at once (its exit races a reconnect's check); it says so once.
+    let exitShownFor: string | undefined;
+    const showExited = (id: string) => {
+      if (disposed || exitShownFor === id) return;
+      exitShownFor = id;
+      eng.write("\r\n\x1b[2m[agent exited]\x1b[0m\r\n");
+    };
+    const newChannel = (id: string): Channel<TerminalEvent> => {
       const channel = new Channel<TerminalEvent>();
       created.push(channel);
       channel.onmessage = (ev) => {
         if (disposed) return;
         if (ev.kind === "output") eng.write(b64ToBytes(ev.data));
-        else if (ev.kind === "exited") eng.write("\r\n\x1b[2m[agent exited]\x1b[0m\r\n");
+        else if (ev.kind === "exited") showExited(id);
       };
       return channel;
+    };
+    const unsubGone = onAgentTerminalGone(workstreamId, shellId, (id) => {
+      if (id === idRef.current) showExited(id);
+    });
+    // An unhooked codex launch without a session waits on the server's `codex exec` mint (up to 90 s).
+    const launch = async (opts: EnsureAgentOpts) => {
+      const { sessionId, resume } = opts.session;
+      const mints =
+        !opts.persistedTerminalId && !sessionId && !resume && engineMintsViaExec(engine.id);
+      if (mints) setMinting(true);
+      try {
+        return await ensureAgent(opts);
+      } finally {
+        if (mints && !disposed) setMinting(false);
+      }
     };
     void (async () => {
       await new Promise<void>((resolve) =>
@@ -128,74 +153,69 @@ export function AgentPtyTab({
       lastGrid = eng.fit();
       launchedAtRef.current = Date.now();
 
-      if (!sessionIdRef.current && engineMintsViaExec(engine.id)) {
-        setMinting(true);
-        const minted = await unwrap(
-          commands.mintCodexSession(workstreamId, engine.command),
-        ).catch(() => null);
-        setMinting(false);
-        if (disposed) return;
-        if (minted) {
-          sessionIdRef.current = minted;
-          onSessionId?.(minted);
-        }
-      }
-
-      const resume = await resolveResume(engine.id, sessionIdRef.current, workstreamId, startedSeed);
+      // A codex with no id starts on a fresh mint; `resume --last` could pick up another tab's session.
+      const resume =
+        !sessionIdRef.current && engineMintsViaExec(engine.id)
+          ? false
+          : await resolveResume(engine.id, sessionIdRef.current, workstreamId, startedSeed);
       if (disposed) return;
-      const id = await ensureAgent({
+      const launched = await launch({
         workstreamId,
         shellId,
-        engine: {
-          ...engine,
-          args: relaunchArgs(engine, { sessionId: sessionIdRef.current, resume, bypass: !!bypass }),
-        },
+        engine,
         projectPath,
         workstreamTitle,
         cols: lastGrid.cols,
         rows: lastGrid.rows,
         persistedTerminalId: idRef.current,
         notifyOnBlocked,
-        bypass: !!bypass,
+        session: { sessionId: sessionIdRef.current, resume, bypass: !!bypass },
         started: startedSeed,
+        adopted,
       });
-      if (disposed || !id) return;
+      if (disposed || !launched) return;
+      if (launched.exited) {
+        showExited(launched.terminalId);
+        return;
+      }
+      const id = launched.terminalId;
       idRef.current = id;
       onTerminalId(id);
       eng.bind(id);
 
-      await unwrap(commands.terminalAttach(id, newChannel())).catch(() => false);
+      await unwrap(commands.terminalAttach(id, newChannel(id))).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
     })();
 
-    restartRef.current = (opts: { resume: boolean; bypass: boolean }) => {
+    restartRef.current = (opts: Omit<AgentLaunchSession, "sessionId">) => {
       if (disposed) return;
       void (async () => {
         closeAgent(workstreamId, shellId);
         idRef.current = undefined;
         eng.reset();
         launchedAtRef.current = Date.now();
-        const newId = await ensureAgent({
+        const relaunched = await launch({
           workstreamId,
           shellId,
-          engine: { ...engine, args: relaunchArgs(engine, { sessionId: sessionIdRef.current, ...opts }) },
+          engine,
           projectPath,
           workstreamTitle,
           cols: lastGrid.cols,
           rows: lastGrid.rows,
           notifyOnBlocked,
-          bypass: opts.bypass,
+          session: { sessionId: sessionIdRef.current, ...opts },
           started: opts.resume,
         });
-        if (disposed || !newId) return;
+        if (disposed || !relaunched) return;
+        const newId = relaunched.terminalId;
         idRef.current = newId;
         onTerminalId(newId);
         eng.bind(newId);
         setAgentBypass(workstreamId, shellId, opts.bypass);
         onBypassChange?.(opts.bypass);
-        await unwrap(commands.terminalAttach(newId, newChannel())).catch(() => false);
+        await unwrap(commands.terminalAttach(newId, newChannel(newId))).catch(() => false);
         if (disposed) return;
         lastGrid = eng.fit();
         void commands.agentResize(newId, lastGrid.cols, lastGrid.rows);
@@ -257,6 +277,7 @@ export function AgentPtyTab({
       if (raf) cancelAnimationFrame(raf);
       unsubInput();
       unsubKey();
+      unsubGone();
       ro.disconnect();
       eng.dispose();
       engineRef.current = null;
@@ -283,8 +304,16 @@ export function AgentPtyTab({
     };
   }, [dockOpen]);
 
+  // The launch result and hook-reported changes (`/clear`, in-TUI resume) land here.
   useEffect(() => {
-    if (sessionId || !started || !engineResumesById(engine.id)) return;
+    if (!reportedSessionId || reportedSessionId === sessionId) return;
+    sessionIdRef.current = reportedSessionId;
+    onSessionId?.(reportedSessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportedSessionId, sessionId]);
+
+  useEffect(() => {
+    if (hooked || sessionId || !started || !engineResumesById(engine.id)) return;
     let cancelled = false;
     const afterMs = launchedAtRef.current || Date.now();
     void (async () => {
@@ -306,10 +335,37 @@ export function AgentPtyTab({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine.id, sessionId, started, workstreamId]);
+  }, [engine.id, hooked, sessionId, started, workstreamId]);
+
+  // Restart and the bypass toggle resume the conversation when one exists.
+  const relaunch = async (bypass: boolean) => {
+    const resume = await resolveResume(engine.id, sessionIdRef.current, workstreamId, started);
+    restartRef.current?.({ resume, bypass });
+  };
+  // A relaunch kills the terminal, which an adopted agent shares with its parent and every desktop.
+  const refuseShared = (what: string): boolean => {
+    if (!adopted) return false;
+    useToast.getState().show(`${what} not changed`, `Restart the agent to change its ${what.toLowerCase()}.`, {
+      tone: "warn",
+    });
+    return true;
+  };
 
   return (
     <div ref={rootRef} className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
+      <PtySessionControls
+        workstreamId={workstreamId}
+        shellId={shellId}
+        engineId={engine.id}
+        agent={agent}
+        onRestart={() => void relaunch(bypassOn)}
+        onBypass={(on) => {
+          if (!refuseShared("Permission mode")) void relaunch(on);
+        }}
+        onModelRelaunch={(relaunch) => {
+          if (!refuseShared("Model")) restartRef.current?.({ resume: true, bypass: bypassOn, ...relaunch });
+        }}
+      />
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
         {minting && (
@@ -320,54 +376,6 @@ export function AgentPtyTab({
             </span>
           </div>
         )}
-      </div>
-      <div className="flex h-7 shrink-0 items-center gap-3 border-t border-edge px-3 text-meta text-ink-dim">
-        <span className="inline-flex items-center gap-1.5">
-          <EngineGlyph glyph={engine.glyph} accentToken={engine.accentToken} />
-          <span style={{ color: `var(${engine.accentToken})` }}>{engine.label}</span>
-        </span>
-        <AgentStatePill state={state} />
-        <div className="ml-auto flex items-center gap-1.5 font-sans">
-          <button
-            type="button"
-            onClick={async () => {
-              const resume = await resolveResume(engine.id, sessionIdRef.current, workstreamId, started);
-              restartRef.current?.({ resume, bypass: bypassOn });
-            }}
-            title={
-              bypassOn
-                ? "Restart the agent (resumes its conversation, stays in bypass mode)"
-                : "Restart the agent (resumes its conversation if one exists)"
-            }
-            className="inline-flex items-center gap-1.5 rounded-md border border-edge px-2 py-0.5 hover:bg-edge/60 hover:text-ink"
-          >
-            <Icon name="retry" size="xs" />
-            Restart
-          </button>
-          {hasBypass && (
-            <button
-              type="button"
-              onClick={async () => {
-                const resume = await resolveResume(engine.id, sessionIdRef.current, workstreamId, started);
-                restartRef.current?.({ resume, bypass: !bypassOn });
-              }}
-              aria-pressed={bypassOn}
-              title={
-                bypassOn
-                  ? "Bypass-permissions mode is ON (auto-approving everything). Click to turn off"
-                  : "Restart in bypass-permissions mode. Auto-approves every command"
-              }
-              aria-label="Toggle bypass-permissions mode"
-              className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 ${
-                bypassOn
-                  ? "border-bad/40 bg-bad/15 text-bad-ink"
-                  : "border-edge text-ink-dim hover:border-bad/40 hover:bg-bad/10 hover:text-bad-ink"
-              }`}
-            >
-              <Icon name="permissions" size="xs" className={bypassOn ? "fill-current" : undefined} />
-            </button>
-          )}
-        </div>
       </div>
     </div>
   );

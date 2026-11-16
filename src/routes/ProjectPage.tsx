@@ -35,6 +35,7 @@ import { DiffTab } from "@/features/workstreams/DiffTab";
 import { FileViewerTab } from "@/features/workstreams/FileViewerTab";
 import { SessionChat, SessionTabDot, SessionTabIcon } from "@/features/session/SessionChat";
 import { SessionPresenceBadge } from "@/features/session/SessionPresenceBadge";
+import { SpawnedByBadge, useAgentSpawnedSessionIds } from "@/features/session/SpawnedByBadge";
 import { classifyArchivedStatus, restoreArchivedAgent } from "@/features/session/archivedAgents";
 import { archiveStoppedSession, setSessionArchived } from "@/features/session/sessionArchive";
 import { StopAgentDialog } from "@/features/session/StopAgentDialog";
@@ -52,6 +53,7 @@ import { EngineGlyph } from "@/components/EngineGlyph";
 import { PtyTabDot } from "@/features/multiplexer/agentStateUi";
 import {
   closeAgent,
+  endAgent,
   ensureAgent,
   resolveResume,
   setAllNotifyOnBlocked,
@@ -63,8 +65,6 @@ import {
   enabledEngines,
   engineMintsViaExec,
   engineOrFallback,
-  mintPtySessionId,
-  relaunchArgs,
   useMultiplexer,
   type ResolvedEngine,
 } from "@/features/multiplexer/engines";
@@ -121,6 +121,7 @@ import {
   type ShellTab,
   type WsTabState,
   isAgentTab,
+  isSpawnedSessionTab,
 } from "@/features/session/workstreamTabs";
 import {
   leaves,
@@ -212,16 +213,18 @@ function classifyPtyArchivedStatus(state: AgentState | undefined): ArchivedStatu
 
 function TabCloseControl({
   shell,
+  detaches,
   hoverOnly,
   onArchive,
   onClose,
 }: {
   shell: ShellTab;
+  detaches: boolean;
   hoverOnly: boolean;
   onArchive: () => void;
   onClose: () => void;
 }) {
-  const archivable = isArchivable(shell);
+  const archivable = isArchivable(shell) && !detaches;
   const label = archivable ? `Archive ${shell.title}` : `Close ${shell.title}`;
   return (
     <button
@@ -424,6 +427,8 @@ export function ProjectPage() {
     if (!wsId || !activeView) return;
     for (const s of tabsByWs[wsId]?.shells ?? []) {
       if (!s.ptyAgent) continue;
+      // An adopted PTY already runs on the server; its tab attaches when first shown.
+      if (s.ptyAgent.adopted) continue;
       if (engineMintsViaExec(s.ptyAgent.engineId) && !s.ptyAgent.sessionId) continue;
       const base = engineOrFallback(multiplexer, s.ptyAgent.engineId);
       const bypass = !!s.ptyAgent.bypass;
@@ -434,12 +439,12 @@ export function ProjectPage() {
         void ensureAgent({
           workstreamId: wsId,
           shellId: s.id,
-          engine: { ...base, args: relaunchArgs(base, { sessionId: pty.sessionId, resume, bypass }) },
+          engine: base,
           projectPath,
           workstreamTitle: activeView.item.title,
           persistedTerminalId: pty.terminalId,
           notifyOnBlocked: multiplexer.notifyOnBlocked,
-          bypass,
+          session: { sessionId: pty.sessionId, resume, bypass },
           started: resume,
         });
       })();
@@ -519,6 +524,7 @@ export function ProjectPage() {
   const asideSessionId = planTabs ? activeShellIn(planTabs, focusedPaneId(planTabs))?.sessionId : undefined;
   const planAside = usePlanAside(asideSessionId, narrow);
   const goalAside = useGoalAside(asideSessionId, wsId, planAside.available, narrow);
+  const spawnedSessionIds = useAgentSpawnedSessionIds(wsId);
 
   if (bootstrap.isLoading || workstreams.isLoading) return <PageSpinner />;
   if (bootstrap.isError) return <PageError error={bootstrap.error} />;
@@ -601,8 +607,17 @@ export function ProjectPage() {
   ) => modifyShell(shellId, (s) => ({ ...s, ...patch }));
   const setTerminalId = (shellId: number, terminalId: string) =>
     patchShell(shellId, { terminalView: { terminalId } });
+  // A new terminal is one this desktop launched (Restart, a failed reattach), so the tab no longer adopts.
   const setPtyTerminalId = (shellId: number, engineId: string, terminalId: string) =>
-    modifyShell(shellId, (s) => ({ ...s, ptyAgent: { ...s.ptyAgent, engineId, terminalId } }));
+    modifyShell(shellId, (s) => ({
+      ...s,
+      ptyAgent: {
+        ...s.ptyAgent,
+        engineId,
+        terminalId,
+        adopted: s.ptyAgent?.terminalId === terminalId ? s.ptyAgent.adopted : undefined,
+      },
+    }));
   const setPtyBypass = (shellId: number, bypass: boolean) =>
     modifyShell(shellId, (s) => (s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, bypass } } : s));
   const setPtyStarted = (shellId: number) =>
@@ -627,7 +642,7 @@ export function ProjectPage() {
     paneId,
     ...(ptyEngineId
       ? {
-          ptyAgent: { engineId: ptyEngineId, sessionId: mintPtySessionId(ptyEngineId), started: false },
+          ptyAgent: { engineId: ptyEngineId, started: false },
         }
       : {}),
   });
@@ -716,14 +731,20 @@ export function ProjectPage() {
     updateTabs((current) => mergePaneState(current, paneId));
     setMaximized(null);
   };
+  const detaches = (shell: ShellTab) =>
+    !!shell.ptyAgent?.adopted || (!!tabs && isSpawnedSessionTab(tabs, shell, spawnedSessionIds));
+  // Unlike a composer tab, an agent-spawned session runs for every desktop; only its parent or an archive ends it.
+  const endOrDetach = (shell: ShellTab) => {
+    if (shell.sessionId && !detaches(shell)) void endSession(shell.sessionId);
+  };
   const closePane = (paneId: PaneId) => {
     if (!tabs || paneIds.length < 2) return;
     setMaximized(null);
     const closing = paneShells(tabs, paneId);
     for (const s of closing) {
-      if (s.sessionId) void endSession(s.sessionId);
+      endOrDetach(s);
       if (s.terminalView?.terminalId) void commands.terminalClose(s.terminalView.terminalId);
-      if (s.ptyAgent && wsId) closeAgent(wsId, s.id);
+      if (s.ptyAgent && wsId) closeAgent(wsId, s.id, s.ptyAgent.adopted);
     }
     updateTabs((current) => closePaneState(current, paneId));
     for (const s of closing) if (s.sessionId) dropSession(s.sessionId);
@@ -755,9 +776,9 @@ export function ProjectPage() {
     const shell = tabs.shells.find((s) => s.id === shellId);
     if (!shell) return;
     if (isLastTab(tabs, shellId)) return;
-    if (shell.sessionId) void endSession(shell.sessionId);
+    endOrDetach(shell);
     if (shell.terminalView?.terminalId) void commands.terminalClose(shell.terminalView.terminalId);
-    if (shell.ptyAgent && wsId) closeAgent(wsId, shellId);
+    if (shell.ptyAgent && wsId) closeAgent(wsId, shellId, shell.ptyAgent.adopted);
     updateTabs((current) => removeShellState(current, shellId));
     if (shell.sessionId) dropSession(shell.sessionId);
   };
@@ -770,7 +791,7 @@ export function ProjectPage() {
         ? useMultiplexerStore.getState().agents[agentKey(wsId, shellId)]?.state
         : undefined;
       status = classifyPtyArchivedStatus(ptyState);
-      if (wsId) closeAgent(wsId, shellId);
+      if (wsId) endAgent(wsId, shellId, shell.ptyAgent.terminalId);
     } else {
       const entry = shell.sessionId
         ? useSessionStore.getState().sessions[shell.sessionId]
@@ -801,7 +822,7 @@ export function ProjectPage() {
   const archiveOrCloseShell = (shellId: number) => {
     const shell = shells.find((s) => s.id === shellId);
     if (!shell) return;
-    if (!isArchivable(shell)) {
+    if (!isArchivable(shell) || detaches(shell)) {
       closeShell(shellId);
       return;
     }
@@ -1111,6 +1132,7 @@ export function ProjectPage() {
       {opts.closable && (
         <TabCloseControl
           shell={shell}
+          detaches={detaches(shell)}
           hoverOnly={!opts.active}
           onArchive={() => archiveShell(shell.id)}
           onClose={() => closeShell(shell.id)}
@@ -1156,6 +1178,7 @@ export function ProjectPage() {
           )}
         </ScrollableTabStrip>
         <div className="flex shrink-0 items-center gap-1">
+          <SpawnedByBadge workstreamId={wsId ?? ""} sessionId={active?.sessionId} />
           <SessionPresenceBadge sessionId={active?.sessionId} />
           <IconButton
             onClick={(e) => openSplitMenu(e, paneId)}
@@ -1242,6 +1265,7 @@ export function ProjectPage() {
           sessionId={shell.ptyAgent.sessionId}
           started={shell.ptyAgent.started}
           bypass={shell.ptyAgent.bypass}
+          adopted={!!shell.ptyAgent.adopted}
           autoFocus={shell.id === focusedShell?.id}
           excludeSessionIds={ptySessionIds}
           onTerminalId={(tid) => setPtyTerminalId(shell.id, engine.id, tid)}
@@ -1465,14 +1489,14 @@ export function ProjectPage() {
                           </ContextMenuItem>
                         )}
                         <ContextMenuItem
-                          danger={isArchivable(contextShell)}
+                          danger={isArchivable(contextShell) && !detaches(contextShell)}
                           disabled={contextIsLast}
                           onClick={() => {
                             closeShell(contextShell.id);
                             setShellMenu(null);
                           }}
                         >
-                          {isArchivable(contextShell) ? "Close agent" : "Close tab"}
+                          {isArchivable(contextShell) && !detaches(contextShell) ? "Close agent" : "Close tab"}
                         </ContextMenuItem>
                       </ContextMenu>
                     );

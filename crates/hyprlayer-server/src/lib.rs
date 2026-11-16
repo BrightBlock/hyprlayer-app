@@ -1,13 +1,19 @@
 //! `hyprlayer-server`: one `HyprlayerRuntime` behind a local socket (ADR-0009).
 //! The library is the server; `main.rs` only parses a subcommand.
 
+mod agent_access;
+mod agent_plugin;
 pub mod client;
+mod ctl;
 pub mod dispatch;
 pub mod events;
+pub mod hook;
 pub mod logging;
+mod mcp;
 mod relay;
 pub mod rpc;
 pub mod socket;
+mod statusline;
 pub mod streams;
 pub mod transport;
 
@@ -18,7 +24,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hyprlayer_core::{
-    CoreError, HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions, RuntimePaths,
+    AgentControlEndpoint, CoreError, HyprlayerRuntime, RuntimeEnvironment, RuntimeOptions,
+    RuntimePaths,
 };
 use hyprlayer_proto::frame::Frame;
 use hyprlayer_proto::{check_version, Outcome, WireError, PROTOCOL_VERSION};
@@ -29,8 +36,8 @@ use tokio::task::{JoinHandle, JoinSet};
 use client::{ConnectError, RpcClient};
 use dispatch::Server;
 use events::Clients;
+use hook::HookEngine;
 use logging::RepeatGate;
-use rpc::Dispatch;
 use streams::StreamRegistry;
 use transport::{
     encode_control, label, parse_control, reject_undecodable, undecodable_id, Control, FrameReader,
@@ -41,7 +48,7 @@ use transport::{
 /// standalone server must land on the same profile (ADR-0009).
 pub const APP_IDENTIFIER: &str = "ai.brightblock.hyprlayer";
 
-const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version]";
+const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version|hook <claude|codex> [event]|statusline claude|ctl <verb>|mcp [--read-only]]";
 const STOP_POLLS: u32 = 100;
 /// How much of each log file `logs` prints.
 const LOGS_TAIL_BYTES: u64 = 64 * 1024;
@@ -55,7 +62,7 @@ tokio::task_local! {
     pub(crate) static CONN: u64;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Serve,
     Relay,
@@ -67,6 +74,16 @@ pub enum Command {
     /// The client provisions a version-keyed server on a remote host and needs
     /// to read back what it installed (plan Phase 7 §3).
     Version,
+    /// An engine hook reporting one signal for the agent named by `HYPRLAYER_AGENT_TOKEN`.
+    Hook(HookEngine, Option<String>),
+    /// claude's statusLine for a hooked PTY: reports, then runs the user's own.
+    Statusline,
+    /// An agent's command line into the runtime; the verb and its arguments follow.
+    Ctl(Vec<String>),
+    /// The `hyprlayer` MCP server over stdio; `--read-only` lists only the read tools.
+    Mcp {
+        read_only: bool,
+    },
 }
 
 impl Command {
@@ -80,6 +97,23 @@ impl Command {
             Some("stop") => Command::Stop,
             Some("logs") => Command::Logs,
             Some("--version" | "-V") => Command::Version,
+            Some("hook") => {
+                let engine = args.next();
+                let Some(engine) = engine.as_deref().and_then(HookEngine::parse) else {
+                    return Err(format!("hook needs an engine: claude or codex\n{USAGE}"));
+                };
+                Command::Hook(engine, args.next())
+            }
+            Some("statusline") => match args.next().as_deref() {
+                Some("claude") => Command::Statusline,
+                _ => return Err(format!("statusline needs an engine: claude\n{USAGE}")),
+            },
+            Some("ctl") => return Ok(Command::Ctl(args.collect())),
+            Some("mcp") => match args.next().as_deref() {
+                None => Command::Mcp { read_only: false },
+                Some("--read-only") => Command::Mcp { read_only: true },
+                Some(other) => return Err(format!("unexpected argument `{other}`\n{USAGE}")),
+            },
             Some(other) => return Err(format!("unknown command `{other}`\n{USAGE}")),
         };
         if let Some(extra) = args.next() {
@@ -91,6 +125,13 @@ impl Command {
 
 /// Runs one subcommand to completion and returns the process exit code.
 pub async fn run(command: Command) -> i32 {
+    // A speed bump, not a boundary: refused before any profile dir or socket is touched.
+    if matches!(command, Command::Stop | Command::Relay)
+        && std::env::var_os("HYPRLAYER_AGENT_TOKEN").is_some_and(|t| !t.is_empty())
+    {
+        eprintln!("hyprlayer-server: this command is not available inside a hyprlayer agent");
+        return 2;
+    }
     match command {
         Command::Serve => serve().await,
         Command::Relay => relay().await,
@@ -108,6 +149,10 @@ pub async fn run(command: Command) -> i32 {
             println!("{VERSION}");
             0
         }
+        Command::Hook(engine, event) => hook::run_hook(engine, event).await,
+        Command::Statusline => statusline::run_statusline().await,
+        Command::Ctl(args) => ctl::run(args).await,
+        Command::Mcp { read_only } => mcp::run(read_only).await,
     }
 }
 
@@ -191,7 +236,23 @@ async fn serve() -> i32 {
     let app_data_dir = paths.app_data_dir.clone();
     let fatal_path = runtime_fatal_path(&app_data_dir);
 
-    let runtime = match HyprlayerRuntime::open(RuntimeOptions::new(environment, paths)).await {
+    let mut options = RuntimeOptions::new(environment, paths);
+    match std::env::current_exe() {
+        Ok(ctl) => {
+            options = options.with_agent_control(AgentControlEndpoint {
+                ctl,
+                socket: socket::socket_path(&app_data_dir),
+                plugin_dir: agent_plugin::install(&app_data_dir),
+                #[cfg(unix)]
+                runtime_dir: socket::runtime_dir(&app_data_dir),
+                #[cfg(not(unix))]
+                runtime_dir: None,
+            });
+        }
+        Err(e) => tracing::warn!("agents get no control endpoint: cannot resolve this binary: {e}"),
+    }
+
+    let runtime = match HyprlayerRuntime::open(options).await {
         Ok(runtime) => runtime,
         Err(e) => {
             // Only the two the desktop's migration-ledger dialog already
@@ -212,6 +273,7 @@ async fn serve() -> i32 {
         }
     };
     let _ = std::fs::remove_file(&fatal_path);
+    agent_plugin::prune(&app_data_dir);
     if let Err(e) = runtime.start().await {
         tracing::error!("runtime failed to start: {e}");
     }
@@ -471,7 +533,11 @@ async fn handle_connection<S>(
     let conn = NEXT_CONN.fetch_add(1, Ordering::Relaxed);
     let started = Instant::now();
     match serve_connection(conn, stream, &peer, server, clients, stop).await {
-        Ok(Some(requests)) => tracing::info!(
+        Ok(Some((requests, true))) => tracing::info!(
+            "conn {conn}: closed after {:?}, {requests} request(s)",
+            started.elapsed()
+        ),
+        Ok(Some((requests, false))) => tracing::debug!(
             "conn {conn}: closed after {:?}, {requests} request(s)",
             started.elapsed()
         ),
@@ -480,7 +546,7 @@ async fn handle_connection<S>(
     }
 }
 
-/// `Ok(None)` when the peer never got past the handshake.
+/// `Ok(None)` when the peer never got past the handshake; else the request count, and whether it was logged at info.
 async fn serve_connection<S>(
     conn: u64,
     stream: S,
@@ -488,7 +554,7 @@ async fn serve_connection<S>(
     server: Arc<Server>,
     clients: Clients,
     stop: Arc<Notify>,
-) -> io::Result<Option<u64>>
+) -> io::Result<Option<(u64, bool)>>
 where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
@@ -504,7 +570,7 @@ where
             return Ok(None);
         }
     }
-    tracing::info!("conn {conn}: client connected ({peer})");
+    tracing::debug!("conn {conn}: client connected ({peer})");
 
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_FRAMES);
     clients.register(conn, tx.clone());
@@ -518,7 +584,7 @@ where
     });
 
     let streams = StreamRegistry::default();
-    let result = read_requests(conn, &mut reader, &server, &tx, &stop, &streams).await;
+    let result = read_requests(conn, peer, &mut reader, &server, &tx, &stop, &streams).await;
     // A dropped connection cancels every stream it owned.
     streams.abort_all();
     let left = clients.unregister(conn);
@@ -583,16 +649,32 @@ where
     }
 }
 
-/// Returns how many requests the connection made.
+/// A hook or statusLine face: one short connection per agent event, too many to log at info.
+fn is_face_report(command: &str) -> bool {
+    matches!(
+        command,
+        "report_agent_signal" | "report_agent_status" | "model_switch_pending"
+    )
+}
+
+/// Returns how many requests the connection made, and whether it announced itself at info.
 async fn read_requests<R: AsyncRead + Unpin>(
     conn: u64,
+    peer: &str,
     reader: &mut FrameReader<R>,
     server: &Arc<Server>,
     tx: &mpsc::Sender<Vec<u8>>,
     stop: &Arc<Notify>,
     streams: &StreamRegistry,
-) -> io::Result<u64> {
+) -> io::Result<(u64, bool)> {
     let mut requests = 0u64;
+    let mut loud = false;
+    let mut announce = |command: &str| {
+        if !loud && !is_face_report(command) {
+            loud = true;
+            tracing::info!("conn {conn}: client connected ({peer})");
+        }
+    };
     while let Some(frame) = reader.next_frame().await? {
         let line = match frame {
             Frame::Control(line) => line,
@@ -644,6 +726,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
         match control {
             Control::Request { id, body } => {
                 requests += 1;
+                announce(body.command());
                 let server = server.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {
@@ -653,7 +736,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     // back to the caller instead of leaving it waiting.
                     let outcome: Outcome<_> =
                         // A task-local scope does not survive a further spawn, so it wraps the inner one.
-                        match tokio::spawn(CONN.scope(conn, async move { server.dispatch(body).await }))
+                        match tokio::spawn(CONN.scope(conn, async move { server.dispatch_checked(body).await }))
                             .await
                         {
                             Ok(result) => result.into(),
@@ -680,6 +763,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
             }
             Control::StreamRequest { id, body } => {
                 requests += 1;
+                announce(body.command());
                 let server = server.clone();
                 let tx = tx.clone();
                 let streams = streams.clone();
@@ -752,10 +836,13 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 tracing::debug!("conn {conn}: cancelled stream {stream_id}");
                 streams.abort(stream_id)
             }
+            Control::Shutdown if server.is_agent(conn) => {
+                tracing::warn!("conn {conn}: refused an agent connection's shutdown");
+            }
             Control::Shutdown => {
                 tracing::info!("conn {conn}: asked the server to stop");
                 stop.notify_one();
-                return Ok(requests);
+                return Ok((requests, loud));
             }
             other => tracing::warn!(
                 "conn {conn}: unexpected {} frame from client",
@@ -763,7 +850,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
             ),
         }
     }
-    Ok(requests)
+    Ok((requests, loud))
 }
 
 fn crashed(command: &str) -> WireError {

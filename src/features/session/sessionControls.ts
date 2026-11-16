@@ -6,17 +6,22 @@ import type { GoalStatus, GoalStep, Harness } from "@/lib/bindings";
 import { activeShellIn, defaultTabState, focusedPaneId, useWorkstreamTabsStore } from "./workstreamTabs";
 
 export type SessionControlsSnapshot = {
-  harness: Harness;
+  /** Null on a PTY engine that reports nothing (gemini, agy, custom). */
+  harness: Harness | null;
   /** False once the session is terminal, when the composer hides its toolbar. */
   interactive: boolean;
-  model: { label: string; hint: string | null; activeKey: string; groups: OptionMenuGroup[] };
+  /** Null until a PTY agent reports its model. */
+  model: { label: string; hint: string | null; activeKey: string; groups: OptionMenuGroup[] } | null;
   /** Null on OpenCode, and on a Claude model without effort tiers. */
   effort: { label: string; activeKey: string; items: OptionMenuItem[] } | null;
   /** Null on OpenCode, which has no mode menu. */
   permissionKey: string | null;
+  /** A PTY agent the bar can't drive offers only these modes, each a relaunch, so they stay pickable when not `interactive`. */
+  permissionChoices?: string[];
   /** The harness put itself in plan mode; it leaves on its own. */
   planning: boolean;
-  context: { tokens: number; window: number; title: string } | null;
+  /** `percent` is the CLI's own rounded figure, when it reports one. */
+  context: { tokens: number; window: number; percent?: number; title: string } | null;
   /** Fixed values; the chip ticks its clock from `activeSince`, so nothing republishes per second. */
   goal: {
     id: string;
@@ -35,13 +40,15 @@ export type SessionControlActions = {
   pickEffort(key: string): void;
   setPermissionMode(key: string): void;
   openHarnessSettings(): void;
+  /** PTY agents only: relaunch it, resuming its conversation. */
+  restart?(): void;
 };
 
 export type SessionControls = SessionControlsSnapshot & { actions: SessionControlActions };
 
 type Entry = SessionControls & { owner: object };
 
-/** Each chat pane's composer controls, published by `SessionChat` for the status bar. */
+/** Each chat pane's composer controls, and each PTY agent's status, for the status bar. */
 export const useSessionControlsStore = create<{ byShell: Record<string, Entry> }>(() => ({
   byShell: {},
 }));
@@ -62,14 +69,17 @@ export function usePublishSessionControls(
   const [owner] = useState(() => ({}));
   const latest = useRef({ snapshot, actions });
   latest.current = { snapshot, actions };
+  const restartable = !!actions.restart;
   const stableActions = useMemo<SessionControlActions>(
     () => ({
       pickModel: (k) => latest.current.actions.pickModel(k),
       pickEffort: (k) => latest.current.actions.pickEffort(k),
       setPermissionMode: (k) => latest.current.actions.setPermissionMode(k),
       openHarnessSettings: () => latest.current.actions.openHarnessSettings(),
+      // Present only when the publisher has one, so the bar can tell.
+      restart: restartable ? () => latest.current.actions.restart?.() : undefined,
     }),
-    [],
+    [restartable],
   );
   const signature = controlsSignature(snapshot);
 
@@ -95,7 +105,7 @@ export function usePublishSessionControls(
 
 const DEFAULT_TABS = defaultTabState();
 
-/** The focused pane's controls; null when it is not a chat (PTY, terminal, viewer). */
+/** The focused pane's controls; null when it is not a chat or a PTY agent. */
 export function useFocusedSessionControls(workstreamId: string | null): SessionControls | null {
   const shellId = useWorkstreamTabsStore((s) => {
     if (!workstreamId) return null;

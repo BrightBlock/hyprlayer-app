@@ -276,6 +276,10 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE workstreams ADD COLUMN observed_pr_state TEXT;
     ALTER TABLE workstreams ADD COLUMN observed_ref TEXT;
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
+    ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

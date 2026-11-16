@@ -1,0 +1,479 @@
+{
+  "scenario": "agent_spawn_and_message",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "origin": "agent",
+            "parentSessionId": "$LEAD",
+            "spawned": true
+          },
+          "guard": "the child is an agent-origin row whose parent is the caller",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "tab": {
+              "effort": null,
+              "focus": false,
+              "kind": "openSessionTab",
+              "model": null,
+              "permissionMode": "default",
+              "sessionId": "$CHILD",
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "announced desktops get an unfocused tab carrying the mode the child launched in",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "heardBroadcasts": true,
+            "uiRequests": 0
+          },
+          "guard": "an unannounced client hears no UiRequested, though it hears broadcasts",
+          "ok": true
+        }
+      ],
+      "step": "spawn starts a background child"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "clientId": "agent:$LEAD",
+            "device": "Lead"
+          },
+          "guard": "its author is agent:<caller>, on the caller's title",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "logged": "[from agent \"Lead\" · $LEAD]",
+            "wire": "[from agent \"Lead\" · $LEAD]"
+          },
+          "guard": "the logged turn and the harness's stdin both open with the header",
+          "ok": true
+        }
+      ],
+      "step": "the first turn is attributed and headed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": "counter is 2",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "idle, with the child's reply to its first turn",
+          "ok": true
+        }
+      ],
+      "step": "wait returns the last reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": "counter is 3",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "idle with the new turn's reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "clientId": "agent:$LEAD",
+            "text": "[from agent \"Lead\" · $LEAD]\n\nE2E_AGAIN"
+          },
+          "guard": "the message is attributed and headed too",
+          "ok": true
+        }
+      ],
+      "step": "prompt_and_wait sends then waits"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterFiveSeconds": true,
+            "beforeTheDeadline": true,
+            "outcome": {
+              "lastReply": "counter is 3",
+              "stalled": true,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "waiting for an exit that never comes returns stalled after about 5 s, not at the deadline",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": null,
+              "stalled": false,
+              "state": "working",
+              "timedOut": true
+            },
+            "sent": "\"sent\""
+          },
+          "guard": "a working child is never stalled; the wait times out at its deadline",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": "counter is 4",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "after a waiting caller is killed mid-wait, the child finishes and another wait still answers",
+          "ok": true
+        }
+      ],
+      "step": "wait on an idle, unchanged session stalls"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "volleys": [
+              "idle",
+              "idle",
+              "idle",
+              "idle"
+            ]
+          },
+          "guard": "two messages each way pass: the spawn's own first turn was not counted",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "again": "agent_limit_reached: an agent limit was reached: Partner got 2 agent messages with no human turn between (Max agent hops)",
+            "toLead": "agent_limit_reached: an agent limit was reached: Lead got 2 agent messages with no human turn between (Max agent hops)",
+            "toPartner": "agent_limit_reached: an agent limit was reached: Partner got 2 agent messages with no human turn between (Max agent hops)"
+          },
+          "guard": "the third message into each target is agent_limit_reached, naming that target",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "afterAnotherRefusal": 0,
+            "notifies": [
+              {
+                "body": "Partner got 2 agent messages in a row. Reply to it to let agents continue.",
+                "kind": "notify",
+                "sessionId": null,
+                "terminalId": null,
+                "title": "An agent needs you",
+                "workstreamId": "$WS"
+              },
+              {
+                "body": "Lead got 2 agent messages in a row. Reply to it to let agents continue.",
+                "kind": "notify",
+                "sessionId": null,
+                "terminalId": null,
+                "title": "An agent needs you",
+                "workstreamId": "$WS"
+              }
+            ]
+          },
+          "guard": "each crossing raises one session-less Notify; a further refusal raises none",
+          "ok": true
+        }
+      ],
+      "step": "the hop limit stops a ping-pong"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "toLead": "agent_limit_reached: an agent limit was reached: Lead got 2 agent messages with no human turn between (Max agent hops)",
+            "toPartner": "idle"
+          },
+          "guard": "the desktop's turn into the partner lets agents message it again; the lead stays capped",
+          "ok": true
+        }
+      ],
+      "step": "a human turn resets the hops"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "child": {
+              "depth": 1,
+              "parent": {
+                "kind": "session",
+                "sessionId": "$LEAD"
+              }
+            },
+            "grandchild": {
+              "depth": 2,
+              "parent": {
+                "kind": "session",
+                "sessionId": "$CHILD"
+              }
+            }
+          },
+          "guard": "the child is depth 1 under the lead, the grandchild depth 2 under the child",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "agent_limit_reached: an agent limit was reached: a child would be 3 agents deep, past the Max depth of 2",
+            "rowsUnchanged": true
+          },
+          "guard": "a great-grandchild is refused at Max depth 2, and no row is written",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "agent_limit_reached: an agent limit was reached: this agent already has 2 live children, the Max live children"
+          },
+          "guard": "with the child and the partner live, Max live children 2 refuses a third",
+          "ok": true
+        }
+      ],
+      "step": "depth and children limits"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "killSibling": "agent_control_denied: agent control refused this: that agent was not spawned by this one",
+            "siblingStillLive": true,
+            "stopSiblingsChild": "agent_control_denied: agent control refused this: that agent was not spawned by this one"
+          },
+          "guard": "the partner can neither kill its sibling nor interrupt the sibling's child",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "gone": true,
+            "kill": "\"killed\""
+          },
+          "guard": "the lead kills its own child",
+          "ok": true
+        }
+      ],
+      "step": "only descendants can be stopped"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rowsUnchanged": true,
+            "spawnAgent": "agent_control_denied: agent control refused this: a child cannot run in bypass mode, above this agent's own default",
+            "startGoal": "agent_control_denied: agent control refused this: a child cannot run in bypass mode, above this agent's own default"
+          },
+          "guard": "a Default caller asking for bypass is refused through spawn_agent and start_goal alike",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rowsUnchanged": true,
+            "spawnAgent": "agent_control_denied: agent control refused this: a child cannot run the ship stage, which pre-approves tools this agent's general stage does not",
+            "startGoal": "agent_control_denied: agent control refused this: a child cannot run the ship stage, which pre-approves tools this agent's general stage does not"
+          },
+          "guard": "a Default General caller's ship child is refused through spawn_agent and start_goal, though its mode is Default too",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "childToBypassLead": "agent_control_denied: agent control refused this: that session runs in bypass mode, which outranks this agent's default",
+            "leadToChild": "\"sent\"",
+            "reachedTheLead": false
+          },
+          "guard": "with the lead in bypass, its Default child's message to it is refused; the lead still messages its own child",
+          "ok": true
+        }
+      ],
+      "step": "no escalation"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "message": "agent_control_denied: agent control refused this: that belongs to another project",
+            "otherProjectRows": 1,
+            "spawn": "agent_control_denied: agent control refused this: that belongs to another project",
+            "wait": "agent_control_denied: agent control refused this: that belongs to another project"
+          },
+          "guard": "spawning into, messaging and waiting on another project's workstream are refused",
+          "ok": true
+        }
+      ],
+      "step": "other projects are out of scope"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "error": "binary_missing: required binary `codex` was not found",
+            "launchedThenDiscarded": true,
+            "openSessionTabs": 0,
+            "rowsUnchanged": true
+          },
+          "guard": "a codex child with no codex installed fails its launch, leaves no row and opens no tab",
+          "ok": true
+        }
+      ],
+      "step": "a failed launch leaves no row"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "origin": "goal",
+            "parentSessionId": null,
+            "status": "met"
+          },
+          "guard": "a desktop's goal session is origin goal with no parent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "origin": "agent",
+            "parentSessionId": "$LEAD",
+            "status": "met"
+          },
+          "guard": "an agent's goal session is origin agent under the caller",
+          "ok": true
+        }
+      ],
+      "step": "goal sessions are origin goal"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "openSessionTabs": 0,
+            "origin": "user",
+            "parentSessionId": "$LEAD"
+          },
+          "guard": "the validation is a person's session linked to the implement one, and no agent tab opens",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after": "agent_limit_reached: an agent limit was reached: this agent already has 2 live children, the Max live children",
+            "before": "agent_limit_reached: an agent limit was reached: this agent already has 2 live children, the Max live children"
+          },
+          "guard": "the link adds nothing to the implement agent's live children",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archive": "agent_control_denied: agent control refused this: that agent was not spawned by this one",
+            "kill": "agent_control_denied: agent control refused this: that agent was not spawned by this one",
+            "stillLive": true
+          },
+          "guard": "the implement agent can neither kill nor archive the validation it didn't spawn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "depth": 0,
+            "parent": null
+          },
+          "guard": "the validation's own agent is depth 0 with no parent, so its spawn budget is whole",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "foreign": {
+              "origin": "user",
+              "parentSessionId": null
+            },
+            "missing": {
+              "origin": "user",
+              "parentSessionId": null
+            }
+          },
+          "guard": "a link to another workstream's session or to no session is dropped, and the session still starts",
+          "ok": true
+        }
+      ],
+      "step": "a validation links to its implement session without being its spawn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lead": {
+              "origin": "user",
+              "parentSessionId": null
+            },
+            "restarted": true,
+            "rows": [
+              {
+                "row": {
+                  "origin": "agent",
+                  "parentSessionId": "$LEAD"
+                },
+                "session": "$CHILD"
+              },
+              {
+                "row": {
+                  "origin": "agent",
+                  "parentSessionId": "$CHILD"
+                },
+                "session": "$GRANDCHILD"
+              },
+              {
+                "row": {
+                  "origin": "agent",
+                  "parentSessionId": "$LEAD"
+                },
+                "session": "$AGENT_GOAL_SESSION"
+              },
+              {
+                "row": {
+                  "origin": "goal",
+                  "parentSessionId": null
+                },
+                "session": "$DESKTOP_GOAL_SESSION"
+              },
+              {
+                "row": {
+                  "origin": "user",
+                  "parentSessionId": "$LEAD"
+                },
+                "session": "$VALIDATE"
+              }
+            ]
+          },
+          "guard": "after a restart every row keeps its origin and parent",
+          "ok": true
+        }
+      ],
+      "step": "lineage survives a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

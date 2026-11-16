@@ -137,6 +137,11 @@ export function modelOption(
   };
 }
 
+/** The catalog key for a launch's model flag or id; an unknown one stays as given. */
+export function claudeModelKey(flagOrId: string, catalog: readonly ModelOption[]): string {
+  return catalog.find((m) => m.key === flagOrId || m.flag === flagOrId || m.resolvedModel === flagOrId)?.key ?? flagOrId;
+}
+
 export function resumeModelFlag(model: ModelOption): string {
   return model.flag ?? model.resolvedModel ?? "claude-opus-5";
 }

@@ -80,8 +80,8 @@ describe("controlsSignature", () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     const withIcon = snapshot();
-    withIcon.model.groups[0].icon = circular as unknown as ReactNode;
-    withIcon.model.groups[0].items[0].icon = createElement("b");
+    withIcon.model!.groups[0].icon = circular as unknown as ReactNode;
+    withIcon.model!.groups[0].items[0].icon = createElement("b");
     expect(() => controlsSignature(withIcon)).not.toThrow();
     expect(controlsSignature(withIcon)).toBe(controlsSignature(snapshot()));
   });
@@ -89,8 +89,8 @@ describe("controlsSignature", () => {
   it("changes with each value the bar shows", () => {
     const base = controlsSignature(snapshot());
     const changed: SessionControlsSnapshot[] = [
-      snapshot({ model: { ...snapshot().model, label: "Sonnet 5" } }),
-      snapshot({ model: { ...snapshot().model, activeKey: "claude:sonnet" } }),
+      snapshot({ model: { ...snapshot().model!, label: "Sonnet 5" } }),
+      snapshot({ model: { ...snapshot().model!, activeKey: "claude:sonnet" } }),
       snapshot({ effort: { ...snapshot().effort!, activeKey: "medium", label: "Medium" } }),
       snapshot({ effort: null }),
       snapshot({ permissionKey: "plan" }),
@@ -110,7 +110,7 @@ describe("usePublishSessionControls", () => {
       renders += 1;
       usePublishSessionControls(KEY, snapshot(), actions());
     });
-    expect(entry(KEY)?.model.label).toBe("Opus 5");
+    expect(entry(KEY)?.model?.label).toBe("Opus 5");
     expect(renders).toBe(1);
   });
 
@@ -151,10 +151,10 @@ describe("usePublishSessionControls", () => {
   it("leaves a newer publisher's entry alone when an old one unmounts late", () => {
     const old = renderHook(() => usePublishSessionControls(KEY, snapshot(), actions()));
     renderHook(() =>
-      usePublishSessionControls(KEY, snapshot({ model: { ...snapshot().model, label: "Newer" } }), actions()),
+      usePublishSessionControls(KEY, snapshot({ model: { ...snapshot().model!, label: "Newer" } }), actions()),
     );
     old.unmount();
-    expect(entry(KEY)?.model.label).toBe("Newer");
+    expect(entry(KEY)?.model?.label).toBe("Newer");
   });
 
   it("keeps other shells' entries when one unmounts", () => {
@@ -197,7 +197,7 @@ describe("useFocusedSessionControls", () => {
     const first = defaultTabState().shells[0].id;
     renderHook(() => usePublishSessionControls(controlsKey("w1", first), snapshot(), actions()));
     const { result } = renderHook(() => useFocusedSessionControls("w1"));
-    expect(result.current?.model.label).toBe("Opus 5");
+    expect(result.current?.model?.label).toBe("Opus 5");
   });
 
   it("is null when the focused tab publishes nothing, or there is no workstream", () => {

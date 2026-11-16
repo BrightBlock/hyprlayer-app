@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { scopedKey } from "@/lib/hostScope";
-import type { Session } from "@/lib/bindings";
+import type { PermissionMode, Session } from "@/lib/bindings";
 
 import type { Attachment } from "./attachments";
 import { debouncedJSONStorage } from "@/lib/persistedStorage";
@@ -63,9 +63,14 @@ export type ShellTab = {
     bypass?: boolean;
     sessionId?: string;
     started?: boolean;
+    /** Spawned by an agent and shared by every desktop: closing the tab detaches, the agent keeps running. */
+    adopted?: boolean;
   };
   paneId: PaneId;
 };
+
+/** The model and effort a session launched with, as its tab stores them for that harness. */
+export type LaunchedAgent = { model: string | null; effort: string | null };
 
 export type WsTabState = {
   shells: ShellTab[];
@@ -73,6 +78,8 @@ export type WsTabState = {
   panes: Record<PaneId, { activeId: number }>;
   activePaneId: PaneId;
   archived?: ArchivedShell[];
+  /** Agent-spawned sessions and PTYs this desktop has opened, so reconcile never reopens one the user closed. */
+  agentTabsSeen?: string[];
 };
 
 export type ArchivedStatus = "done" | "stopped" | "idle";
@@ -251,7 +258,9 @@ export function archiveShellState(
   if (!shell) return state;
   const next = removeShellState(state, shellId);
   if (next === state) return state;
-  return { ...next, archived: [{ shell, archivedAt, status }, ...(state.archived ?? [])] };
+  // Archiving ends a PTY, so a restore resumes it as this desktop's own rather than reattaching a dead shared one.
+  const kept = shell.ptyAgent?.adopted ? { ...shell, ptyAgent: { ...shell.ptyAgent, adopted: undefined } } : shell;
+  return { ...next, archived: [{ shell: kept, archivedAt, status }, ...(state.archived ?? [])] };
 }
 
 export function unarchiveShellState(state: WsTabState, shellId: number): WsTabState {
@@ -375,7 +384,10 @@ export function useAgentTabCount(workstreamId: string | null): number {
 export function updateWorkstreamTabs(
   next: (prev: Record<string, WsTabState>) => Record<string, WsTabState>,
 ): void {
-  useWorkstreamTabsStore.setState((s) => ({ byWs: next(s.byWs) }));
+  // persist serialises the whole store on every setState, even one that returns the same state.
+  const prev = useWorkstreamTabsStore.getState().byWs;
+  const byWs = next(prev);
+  if (byWs !== prev) useWorkstreamTabsStore.setState({ byWs });
 }
 
 export function seedWorkstreamMode(workstreamId: string, mode: StageKey): void {
@@ -432,13 +444,20 @@ export function sessionPermissionMode(workstreamId: string, sessionId: string): 
 const tabMode = (stage: StageKey): StageKey =>
   MODE_STAGES.some((s) => s.key === stage) ? stage : "general";
 
-export function openSessionTab(workstreamId: string, session: Session, opts?: { frozen?: boolean }): void {
+export function openSessionTab(
+  workstreamId: string,
+  session: Session,
+  opts?: { frozen?: boolean; background?: boolean; permissionMode?: string; launched?: LaunchedAgent },
+): void {
   if (session.title != null) markTitleSeen(session.id, session.title);
+  if (session.origin === "agent") markAgentTabSeen(workstreamId, session.id);
+  const background = opts?.background === true;
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? defaultTabState();
     const open = current.shells.find((s) => s.sessionId === session.id);
-    if (open) return { ...all, [workstreamId]: focusShell(current, open.id) };
+    if (open) return background ? all : { ...all, [workstreamId]: focusShell(current, open.id) };
     const parked = current.archived?.find((a) => a.shell.sessionId === session.id);
+    if (parked && background) return all;
     if (parked) {
       const restored = unarchiveShellState(current, parked.shell.id);
       if (session.title == null) return { ...all, [workstreamId]: restored };
@@ -448,25 +467,201 @@ export function openSessionTab(workstreamId: string, session: Session, opts?: { 
       );
       return { ...all, [workstreamId]: { ...restored, shells } };
     }
+    const shell: ShellTab = {
+      id: nextShellId(current.shells, current.archived),
+      title: session.title ?? session.preview ?? stageLabel(session.stage),
+      // Locked only for a server title, so a fallback never syncs back as one.
+      titleLocked: session.title != null,
+      mode: tabMode(session.stage),
+      // The entry's stage must stay the server's, or a picked ship session is invisible to workstreamShipBusy.
+      sessionStage: session.stage,
+      ...(opts?.frozen ? { frozen: true } : {}),
+      ...(opts?.permissionMode ? { permissionMode: opts.permissionMode } : {}),
+      ...(opts?.launched ? shellSeedFromDefaults({ harness: session.harness, ...opts.launched }) : {}),
+      harness: session.harness,
+      draft: "",
+      docs: [],
+      attachments: [],
+      sessionId: session.id,
+      paneId: focusedPaneId(current),
+    };
     return {
       ...all,
-      [workstreamId]: appendShell(current, {
-        id: nextShellId(current.shells, current.archived),
-        title: session.title ?? session.preview ?? stageLabel(session.stage),
-        // Locked only for a server title, so a fallback never syncs back as one.
-        titleLocked: session.title != null,
-        mode: tabMode(session.stage),
-        // The entry's stage must stay the server's, or a picked ship session is invisible to workstreamShipBusy.
-        sessionStage: session.stage,
-        ...(opts?.frozen ? { frozen: true } : {}),
-        harness: session.harness,
-        draft: "",
-        docs: [],
-        attachments: [],
-        sessionId: session.id,
-        paneId: focusedPaneId(current),
-      }),
+      [workstreamId]: background
+        ? { ...current, shells: [...current.shells, shell] }
+        : appendShell(current, shell),
     };
+  });
+}
+
+const AGENT_TABS_SEEN_CAP = 200;
+
+const agentTabSeen = (workstreamId: string, id: string): boolean =>
+  (useWorkstreamTabsStore.getState().byWs[workstreamId]?.agentTabsSeen ?? []).includes(id);
+
+function markAgentTabSeen(workstreamId: string, id: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    if (current.agentTabsSeen?.includes(id)) return all;
+    const agentTabsSeen = [...(current.agentTabsSeen ?? []), id].slice(-AGENT_TABS_SEEN_CAP);
+    return { ...all, [workstreamId]: { ...current, agentTabsSeen } };
+  });
+}
+
+/**
+ * An agent-spawned session belongs to every desktop, so closing its tab only detaches it here.
+ * `spawned` is the server's `origin === "agent"` rows, since `agentTabsSeen` evicts its oldest.
+ */
+export function isSpawnedSessionTab(
+  state: WsTabState,
+  shell: ShellTab,
+  spawned?: readonly string[],
+): boolean {
+  if (!shell.sessionId) return false;
+  return !!spawned?.includes(shell.sessionId) || !!state.agentTabsSeen?.includes(shell.sessionId);
+}
+
+/**
+ * Opens an agent-spawned session in a background tab once per desktop; a closed one stays closed.
+ * `permissionMode` pins what a relaunch from the tab asks for, so it never lands above the launch.
+ */
+export function openAgentSessionTab(
+  workstreamId: string,
+  session: Session,
+  permissionMode: PermissionMode,
+  launched?: LaunchedAgent,
+): void {
+  if (agentTabSeen(workstreamId, session.id)) return;
+  openSessionTab(workstreamId, session, { background: true, permissionMode, launched });
+  markAgentTabSeen(workstreamId, session.id);
+}
+
+/**
+ * Adopts an agent-spawned PTY in a background tab once per desktop; it attaches when first shown.
+ * `focus` is a user's pick from Agent sessions, which reattaches even a tab closed here.
+ */
+export function openAgentTerminalTab(
+  workstreamId: string,
+  pty: { terminalId: string; engineId: string; sessionId?: string; bypass: boolean },
+  opts?: { focus?: boolean },
+): void {
+  const focus = opts?.focus === true;
+  if (!focus && agentTabSeen(workstreamId, pty.terminalId)) return;
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const open = current.shells.find((s) => s.ptyAgent?.terminalId === pty.terminalId);
+    if (open) return focus ? { ...all, [workstreamId]: focusShell(current, open.id) } : all;
+    const parked = focus && current.archived?.find((a) => a.shell.ptyAgent?.terminalId === pty.terminalId);
+    if (parked && parked.shell.ptyAgent) {
+      // Still running, so it is shared: closing it again must detach, never kill.
+      const ptyAgent = { ...parked.shell.ptyAgent, started: true, adopted: true };
+      const restored = unarchiveShellState(current, parked.shell.id);
+      const shells = restored.shells.map((s) => (s.id === parked.shell.id ? { ...s, ptyAgent } : s));
+      return { ...all, [workstreamId]: { ...restored, shells } };
+    }
+    const id = nextShellId(current.shells, current.archived);
+    const shell: ShellTab = {
+      id,
+      title: `Agent ${id}`,
+      mode: "general",
+      draft: "",
+      docs: [],
+      attachments: [],
+      paneId: focusedPaneId(current),
+      ptyAgent: { ...pty, started: true, adopted: true },
+    };
+    return {
+      ...all,
+      [workstreamId]: focus ? appendShell(current, shell) : { ...current, shells: [...current.shells, shell] },
+    };
+  });
+  markAgentTabSeen(workstreamId, pty.terminalId);
+}
+
+/** A PTY's new provider session (`/clear`, an in-TUI resume) reaches its tab even while the tab is unmounted. */
+export function setPtyTabSessionId(workstreamId: string, terminalId: string, sessionId: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId];
+    const bound = (s: ShellTab) => s.ptyAgent?.terminalId === terminalId && s.ptyAgent.sessionId !== sessionId;
+    if (!current?.shells.some(bound)) return all;
+    const shells = current.shells.map((s) =>
+      bound(s) && s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, sessionId } } : s,
+    );
+    return { ...all, [workstreamId]: { ...current, shells } };
+  });
+}
+
+/** A hooked agent's first prompt starts its tab even with no keystroke (agent or injected input). */
+export function setPtyTabStarted(workstreamId: string, terminalId: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId];
+    const bound = (s: ShellTab) => s.ptyAgent?.terminalId === terminalId && !s.ptyAgent.started;
+    if (!current?.shells.some(bound)) return all;
+    const shells = current.shells.map((s) =>
+      bound(s) && s.ptyAgent ? { ...s, ptyAgent: { ...s.ptyAgent, started: true } } : s,
+    );
+    return { ...all, [workstreamId]: { ...current, shells } };
+  });
+}
+
+/**
+ * Binds a tab to the terminal its agent now runs in, even while the tab is unmounted, and returns
+ * the binding it replaced. A new terminal is this desktop's own launch, so the tab no longer adopts.
+ */
+export function bindPtyTabTerminal(
+  workstreamId: string,
+  shellId: number,
+  terminalId: string,
+  sessionId: string | undefined,
+): ShellTab["ptyAgent"] {
+  const prev = useWorkstreamTabsStore
+    .getState()
+    .byWs[workstreamId]?.shells.find((s) => s.id === shellId)?.ptyAgent;
+  if (!prev || (prev.terminalId === terminalId && (!sessionId || prev.sessionId === sessionId))) {
+    return prev;
+  }
+  const ptyAgent = {
+    ...prev,
+    terminalId,
+    sessionId: sessionId ?? prev.sessionId,
+    adopted: prev.terminalId === terminalId ? prev.adopted : undefined,
+  };
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId];
+    if (!current) return all;
+    const shells = current.shells.map((s) => (s.id === shellId && s.ptyAgent ? { ...s, ptyAgent } : s));
+    return { ...all, [workstreamId]: { ...current, shells } };
+  });
+  return prev;
+}
+
+type ViewerPatch = Pick<ShellTab, "docPreviewPath" | "filePath" | "diffView">;
+
+/** An agent's Reveal: opens the viewer without taking focus; an open one is left as it is. */
+export function openViewerTabInBackground(workstreamId: string, patch: ViewerPatch, title: string): void {
+  updateWorkstreamTabs((all) => {
+    const current = all[workstreamId] ?? defaultTabState();
+    const open = current.shells.some(
+      (s) =>
+        (patch.docPreviewPath !== undefined && s.docPreviewPath === patch.docPreviewPath) ||
+        (patch.filePath !== undefined && s.filePath === patch.filePath) ||
+        (patch.diffView !== undefined &&
+          s.diffView?.path === patch.diffView.path &&
+          s.diffView.staged === patch.diffView.staged &&
+          s.diffView.sha === undefined),
+    );
+    if (open) return all;
+    const shell: ShellTab = {
+      id: nextShellId(current.shells, current.archived),
+      title,
+      mode: "general",
+      draft: "",
+      docs: [],
+      attachments: [],
+      paneId: focusedPaneId(current),
+      ...patch,
+    };
+    return { ...all, [workstreamId]: { ...current, shells: [...current.shells, shell] } };
   });
 }
 

@@ -25,6 +25,34 @@ pub fn socket_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("hyprlayer.sock")
 }
 
+/// A private dir for the sockets of PTY codex app-servers, short where `app_data_dir` may not be:
+/// `$XDG_RUNTIME_DIR/hyprlayer/<hash>` on Linux, the per-user `$TMPDIR/hl-<hash>` on macOS, else
+/// `<app_data_dir>/run`. `None` when it can't be made private, which keeps codex embedded.
+#[cfg(unix)]
+pub fn runtime_dir(app_data_dir: &Path) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let hash = profile_hash(app_data_dir);
+    let xdg = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty());
+    let dir = match xdg {
+        Some(xdg) if cfg!(target_os = "linux") => PathBuf::from(xdg).join("hyprlayer").join(hash),
+        _ if cfg!(target_os = "macos") => std::env::temp_dir().join(format!("hl-{hash}")),
+        _ => app_data_dir.join("run"),
+    };
+    let made = std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)));
+    match made {
+        Ok(()) => Some(dir),
+        Err(e) => {
+            tracing::warn!(
+                "PTY codex stays embedded: cannot make {}: {e}",
+                dir.display()
+            );
+            None
+        }
+    }
+}
+
 /// FNV-1a over the canonical path. Stable across builds, which `DefaultHasher`
 /// is not: a newer client has to find an older server's socket.
 pub fn profile_hash(app_data_dir: &Path) -> String {

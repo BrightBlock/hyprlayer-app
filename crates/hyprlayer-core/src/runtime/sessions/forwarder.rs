@@ -5,7 +5,9 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use hyprlayer_models::{ClientRef, RevisedTurn, RuntimeEvent, SessionTurns};
+use hyprlayer_models::{
+    ClientRef, GoalStatus, RevisedTurn, RuntimeEvent, SessionOrigin, SessionTurns, UiRequest,
+};
 
 use crate::agent::AgentDriver;
 use crate::claude::{ExitOutcome, SessionEvent, SessionState};
@@ -408,6 +410,8 @@ async fn run(
 struct ActorState {
     session_id: String,
     workstream_id: String,
+    /// An agent spawned it: its asks are announced server-side, since its tab may never have attached.
+    agent_spawned: bool,
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
     ingress_sender: mpsc::Sender<SessionEvent>,
@@ -458,20 +462,21 @@ impl ActorState {
     ) -> Self {
         let sid = session_id.clone();
         let handle = db.clone();
-        let (seq, workstream_id, rev, reset_rev) = blocking(move || {
+        let (seq, workstream_id, agent_spawned, rev, reset_rev) = blocking(move || {
             let seq = handle.next_session_seq(&sid)?;
-            let workstream_id = handle
+            let (workstream_id, agent_spawned) = handle
                 .get_session(&sid)?
-                .map(|s| s.workstream_id)
+                .map(|s| (s.workstream_id, s.origin == SessionOrigin::Agent))
                 .unwrap_or_default();
             let (rev, reset_rev) = handle.session_rev(&sid)?;
-            Ok((seq, workstream_id, rev, reset_rev))
+            Ok((seq, workstream_id, agent_spawned, rev, reset_rev))
         })
         .await
-        .unwrap_or((0, String::new(), 0, 0));
+        .unwrap_or((0, String::new(), false, 0, 0));
         Self {
             session_id,
             workstream_id,
+            agent_spawned,
             db,
             events,
             ingress_sender,
@@ -917,6 +922,9 @@ impl ActorState {
                 state,
             });
         }
+        if self.agent_spawned {
+            self.announce_ask(&event);
+        }
 
         self.track_in_flight(&event, &author);
         let delivery = SessionDelivery {
@@ -1200,6 +1208,56 @@ impl ActorState {
         if self.reservations.remove(id).is_some() {
             self.announce_revision(self.current_author());
         }
+    }
+}
+
+impl ActorState {
+    /// Tells every announced desktop an agent-spawned session is asking; a desktop streaming it skips this.
+    fn announce_ask(&self, event: &SessionEvent) {
+        let body = match event {
+            SessionEvent::PermissionAsk { tool_name, .. } => tool_name.clone(),
+            SessionEvent::QuestionAsk { questions, .. } => questions
+                .first()
+                .map(|q| {
+                    if q.header.is_empty() {
+                        q.question.clone()
+                    } else {
+                        q.header.clone()
+                    }
+                })
+                .unwrap_or_default(),
+            _ => return,
+        };
+        let (db, events) = (self.db.clone(), self.events.clone());
+        let (session_id, workstream_id) = (self.session_id.clone(), self.workstream_id.clone());
+        // Off the actor: a row read must not hold up the event stream.
+        tokio::spawn(async move {
+            let id = session_id.clone();
+            let row = match blocking(move || db.get_session(&id)).await {
+                Ok(Some(row)) => row,
+                Ok(None) => return,
+                Err(e) => {
+                    tracing::warn!("session {session_id}: its ask was not announced: {e}");
+                    return;
+                }
+            };
+            // A running goal's asks are announced by the goal itself.
+            if row.goal.is_some_and(|g| g.status == GoalStatus::Running) {
+                return;
+            }
+            let name = row
+                .title
+                .unwrap_or_else(|| format!("{} session", row.stage.as_str()));
+            let _ = events.send(RuntimeEvent::UiRequested {
+                request: UiRequest::Notify {
+                    workstream_id,
+                    title: format!("{name} needs you"),
+                    body,
+                    session_id: Some(session_id),
+                    terminal_id: None,
+                },
+            });
+        });
     }
 }
 

@@ -33,6 +33,7 @@ import type { GoalSheetRequest } from "@/lib/goalSheet";
 import type { EventBridge } from "@/lib/events";
 import { isAppError, isStaleTranscript, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
+import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { queryClient } from "@/lib/queryClient";
 import {
   invalidateWorkstreamLists,
@@ -57,6 +58,7 @@ import { planTasksFromItems, todoPhaseLabel, type PlanTask, type PlanTaskStatus 
 import { type Attachment } from "./attachments";
 import { REVIEW_PROMPT } from "./reviewCardSlot";
 import { permissionModeOption } from "@/lib/domain/permissions";
+import { isAgentAuthor } from "@/lib/domain/agentControl";
 import {
   bodyHasVars,
   effectiveBuiltinBody,
@@ -271,6 +273,8 @@ export function removeSessionsForWorkstream(workstreamId: string): void {
 }
 
 export function dropSession(sessionId: string): void {
+  // A detached session keeps streaming; a later reopen's fresh attach would see its events twice.
+  retireChannel(sessionId);
   forgetSession(sessionId);
   useSessionStore.setState((s) => {
     if (!s.sessions[sessionId]) return s;
@@ -606,6 +610,11 @@ async function maybeNotifyTransition(
 }
 
 /** This device answers the tool's asks itself ("Allow for this agent"). */
+/** This desktop folds the session's live stream, and so raises its asks itself. */
+export function isStreamingSession(sessionId: string): boolean {
+  return channels.has(sessionId);
+}
+
 export function isAutoAllowed(sessionId: string, toolName: string): boolean {
   return entryOf(sessionId)?.autoAllow.includes(toolName) ?? false;
 }
@@ -631,6 +640,7 @@ export async function startSession(args: {
   effort?: string | null;
   permissionMode?: PermissionMode | null;
   promptName?: string | null;
+  parentSessionId?: string | null;
 }): Promise<Session> {
   const { channel, activate } = bufferedChannel();
   const attachments = args.attachments ?? [];
@@ -649,6 +659,7 @@ export async function startSession(args: {
         permissionMode: args.permissionMode ?? null,
         promptName: args.promptName ?? null,
         clientMessageId,
+        parentSessionId: args.parentSessionId ?? null,
       },
       channel,
     ),
@@ -743,6 +754,10 @@ async function readTurns(sessionId: string): Promise<LogRead | null> {
   }
 }
 
+// An agent's turn reads as unattributed, so it applies live and its asks notify like the app's own.
+const attributed = (author: ClientRef | null | undefined): ClientRef | null =>
+  author && !isAgentAuthor(author) ? author : null;
+
 // Who opened the last turn among rows after `afterSeq`, and the last other device among them.
 function turnOpeners(
   entries: SessionLogEntryDto[],
@@ -753,7 +768,7 @@ function turnOpeners(
   let device: string | null = null;
   for (const entry of entries) {
     if (entry.event.kind !== "userMessage" || (entry.seq ?? -1) <= afterSeq) continue;
-    const author = entry.event.author ?? null;
+    const author = attributed(entry.event.author);
     turnAuthor = !author ? null : author.clientId === selfId ? "self" : "other";
     if (author && author.clientId !== selfId) device = author.device;
   }
@@ -976,8 +991,7 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
   if (ordinal === 0) return;
 
   // A live rewind keeps the old stream attached; its seq-less deltas would land twice.
-  const old = channels.get(sessionId);
-  if (old) retired.add(old);
+  retireChannel(sessionId);
   channels.delete(sessionId);
   setEntry(sessionId, { ...current, reloading: true, live: false, state: "starting" });
 
@@ -1267,7 +1281,7 @@ function unsentTurn(
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i];
     if (item.kind !== "user") continue;
-    author = item.author ?? null;
+    author = attributed(item.author);
     break;
   }
   const turnAuthor: TurnAuthor = !author ? null : author.clientId === selfClientId() ? "self" : "other";
@@ -1840,6 +1854,8 @@ export async function validatePlanInNewSession(
     attachments: [{ path: planPath, name: docTitle(planPath), kind: "file" }],
     ...newChatLaunchArgs(settings, from, claudeCatalogSnapshot()),
     permissionMode: null,
+    // On the row, so a desktop that never saw this click still pairs the validation with its implement session.
+    parentSessionId: implementSessionId,
   });
   openPlanStageTab(workstreamId, session.id, "validate", planPath, from);
   return session;
@@ -1971,16 +1987,21 @@ async function liveSessionIds(): Promise<Set<string>> {
 
 // A retired channel may still be delivering (a live stream this window
 // replaced); its events would land twice beside the fresh attach's replay.
-// ponytail: the retired stream keeps running server-side until the session
-// exits; expose cancel_stream to the frontend if that ever shows up in load.
 const retired = new WeakSet<Channel<SessionStreamItemDto>>();
+
+// Releasing also ends its server stream, which would otherwise run until the session exits.
+function retireChannel(sessionId: string): void {
+  const old = channels.get(sessionId);
+  if (!old) return;
+  retired.add(old);
+  releaseChannels([old]);
+}
 
 async function resync(sessionId: string, live: boolean): Promise<void> {
   const inFlight = resuming.get(sessionId);
   if (inFlight) return inFlight;
   if (entryOf(sessionId)?.reloading) return;
-  const old = channels.get(sessionId);
-  if (old) retired.add(old);
+  retireChannel(sessionId);
   channels.delete(sessionId);
   if (live) return resumeSession(sessionId);
   const read = await readLog(sessionId);
@@ -2047,12 +2068,12 @@ function onRevised(event: SessionRevised): void {
     kind: "remote",
     rev: at,
     turns: event.turns.length > 0 ? [{ rev: at, kinds: [...new Set(event.turns.map((t) => t.kind))] }] : [],
-    device: event.author?.device ?? null,
+    device: attributed(event.author)?.device ?? null,
     working: event.working,
     // A turnless revision must not clear what the held buffer reported.
     flushable: queue ? heldSummary(queue).flushable : false,
     attached: channels.has(sessionId),
-    own: selfId !== null && event.author?.clientId === selfId,
+    own: selfId !== null && attributed(event.author)?.clientId === selfId,
   });
 }
 

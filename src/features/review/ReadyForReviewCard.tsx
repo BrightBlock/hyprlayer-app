@@ -36,7 +36,7 @@ export function ReadyForReviewCard({ sessionId, workstreamId }: ReadyCardProps) 
 function ReadyCard({ sessionId, workstreamId, projectPath }: ReadyCardProps & { projectPath: string }) {
   const view = useWorkstreams(projectPath).data?.find((w) => w.item.id === workstreamId);
   const validates = useSession(sessionId)?.stage === "validate";
-  const implementId = useImplementSessionFor(sessionId);
+  const implementId = useImplementSessionFor(workstreamId, sessionId);
   if (!view) return null;
   if (!validates) return <AfterImplement implementId={sessionId} view={view} inValidateTab={false} />;
   return implementId ? <AfterImplement implementId={implementId} view={view} inValidateTab /> : null;

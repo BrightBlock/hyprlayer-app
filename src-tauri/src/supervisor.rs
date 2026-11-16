@@ -7,6 +7,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime};
 
+use hyprlayer_core::runtime::agent_control::AGENT_ENV;
 use hyprlayer_core::CoreError;
 use hyprlayer_core::{Session, SessionState};
 use hyprlayer_proto::{check_version, WireError, PROTOCOL_VERSION};
@@ -929,6 +930,10 @@ fn spawn_detached(
         .env(server_logging::LOG_DIR_ENV, app_log_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null());
+    // A dev app started from an agent's shell must not hand that agent's identity to the server.
+    for var in AGENT_ENV {
+        cmd.env_remove(var);
+    }
     let written = match stderr {
         Some((file, dir, start)) => {
             cmd.stderr(Stdio::from(file));

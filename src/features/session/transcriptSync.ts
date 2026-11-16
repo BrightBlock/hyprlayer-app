@@ -1,4 +1,5 @@
 import type { ClientRef, LogCursorDto, SessionEvent, SessionLogEntryDto, TurnKind } from "@/lib/bindings";
+import { isAgentAuthor } from "@/lib/domain/agentControl";
 import type { SyncPhase } from "@/lib/domain/sync";
 import { reduceEvent, type SessionView } from "./transcript";
 
@@ -254,8 +255,11 @@ const COMMIT_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["userMessage", 
 const WAIT_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["turnDone", "exited", "permissionAsk", "questionAsk"]);
 const TURN_END_KINDS: ReadonlySet<SessionEvent["kind"]> = new Set(["turnDone", "exited"]);
 
-const isForeign = (author: ClientRef | null, selfId: string | null) => !!author && author.clientId !== selfId;
-const isOwn = (author: ClientRef | null, selfId: string | null) => !!author && author.clientId === selfId;
+// An agent's turn routes like the app's own unattributed ones: applied live, never held behind a pull.
+const isForeign = (author: ClientRef | null, selfId: string | null) =>
+  !!author && !isAgentAuthor(author) && author.clientId !== selfId;
+const isOwn = (author: ClientRef | null, selfId: string | null) =>
+  !!author && !isAgentAuthor(author) && author.clientId === selfId;
 
 export function route(item: Routed, ctx: RouteContext): "apply" | "hold" | "drop" | "skip" | "flush" | "reset" {
   const { event } = item;
@@ -276,7 +280,8 @@ export function turnAuthorAfter(
   selfId: string | null,
   wasStreaming: boolean,
 ): TurnAuthor {
-  const author: TurnAuthor = item.author ? (isOwn(item.author, selfId) ? "self" : "other") : null;
+  const author: TurnAuthor =
+    item.author && !isAgentAuthor(item.author) ? (isOwn(item.author, selfId) ? "self" : "other") : null;
   // A user message opens a turn only when none is running; mid-turn it waits for the next one.
   if (item.event.kind === "userMessage") return wasStreaming ? current : author;
   return author ?? current;

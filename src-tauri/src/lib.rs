@@ -201,6 +201,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::ollama::ollama_set_default_model,
             commands::terminal::terminal_open,
             commands::terminal::agent_open,
+            commands::terminal::pty_launch,
+            commands::terminal::list_pty_agents,
+            commands::terminal::pty_agent_set_model,
+            commands::terminal::pty_agent_set_effort,
+            commands::terminal::pty_agent_set_permission_mode,
             commands::terminal::agent_resize,
             commands::terminal::capture_agent_session,
             commands::terminal::mint_codex_session,
@@ -209,6 +214,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
+            commands::terminal::terminal_release,
             commands::terminal::spawn_cli_terminal,
             commands::terminal::spawn_shell_terminal,
             commands::terminal::default_shell_name,
@@ -292,7 +298,9 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ServerDisconnected,
             events::AccountChanged,
             events::SshPromptsChanged,
-            events::GoalChanged
+            events::GoalChanged,
+            events::PtyAgentChanged,
+            events::UiRequested
         ])
         // Vocabulary no command signature carries yet.
         .typ::<DocType>()

@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 const DISABLE_DMABUF: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
 
 /// WebKitGTK before 2.54.2 turns on Wayland explicit sync for the NVIDIA EGL

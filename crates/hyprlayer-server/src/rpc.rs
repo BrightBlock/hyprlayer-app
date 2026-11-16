@@ -74,7 +74,11 @@ use hyprlayer_core::{
     LogCursor, ProjectSource, ScriptKind, Session, SessionLogEntry, Stage, Workstream,
     WorkstreamDoc, WorktreeMode,
 };
-use hyprlayer_models::{ScriptRuntime, SessionRev, SessionTurns};
+use hyprlayer_models::{
+    AgentSignal, AgentStatusReport, AgentWhoami, PtyAgent, PtyControlOutcome, RevealTarget,
+    ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
+    WaitOutcome, WaitUntil,
+};
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
 
@@ -322,9 +326,30 @@ hyprlayer_proto::commands! {
     CaptureAgentSession: capture_agent_session(workstream_id: String, engine_id: String, after_ms: f64, exclude: Vec<String>) -> Option<String>;
     MintCodexSession: mint_codex_session(workstream_id: String, command: String) -> Option<String>;
     AgentSessionExists: agent_session_exists(workstream_id: String, engine_id: String, session_id: String) -> bool;
+    ReportAgentSignal: report_agent_signal(token: String, signal: AgentSignal) -> ();
+    ReportAgentStatus: report_agent_status(token: String, report: AgentStatusReport) -> ();
+    ModelSwitchPending: model_switch_pending(token: String) -> bool;
+    PtyAgentSetModel: pty_agent_set_model(terminal_id: String, model: String) -> PtyControlOutcome;
+    PtyAgentSetEffort: pty_agent_set_effort(terminal_id: String, effort: String) -> ();
+    PtyAgentSetPermissionMode: pty_agent_set_permission_mode(terminal_id: String, mode: String) -> ();
+    ListPtyAgents: list_pty_agents(workstream_id: Option<String>) -> Vec<PtyAgent>;
+    AnnounceAgent: announce_agent(token: String) -> AgentWhoami;
+    NotifyUser: notify_user(title: String, body: String) -> ();
+    RequestAttention: request_attention(reason: String) -> ();
+    SpawnSession: spawn_session(request: SpawnSessionRequest) -> Session;
+    WaitSession: wait_session(session_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
+    SendAgentMessage: send_agent_message(session_id: String, text: String) -> ();
+    SpawnPtyAgent: spawn_pty_agent(request: SpawnPtyAgentRequest) -> PtyAgent;
+    SendPtyMessage: send_pty_message(terminal_id: String, text: String) -> ();
+    ReadTerminal: read_terminal(terminal_id: String, lines: u32) -> String;
+    WaitPtyAgent: wait_pty_agent(terminal_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
+    InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();
+    KillPtyAgent: kill_pty_agent(terminal_id: String) -> ();
+    RequestReveal: request_reveal(target: RevealTarget) -> ();
 
     GetScripts: get_scripts(project_path: String) -> ScriptSettings;
     SetScripts: set_scripts(project_path: String, scripts: ScriptSettings) -> ();
+    ScriptStart: script_start(workstream_id: String, kind: ScriptKind) -> ();
     ScriptStop: script_stop(workstream_id: String) -> ();
     GetScriptRuntime: get_script_runtime(workstream_id: String) -> ScriptRuntime;
     ListRunningScripts: list_running_scripts() -> Vec<String>;

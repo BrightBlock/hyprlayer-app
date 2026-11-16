@@ -6,7 +6,8 @@ and Research gains a posture of its own) · amended 2026-09-19 (codex floor rais
 0.155.1: paginated threads rewind with `thread/revert`, the planning tool is switched
 on, and a skipped phase two leaves plan mode; Claude's Commit never denied `git push`)
 · amended 2026-10-16 (goals: the follow-up send path gains a second, persisted arm; codex
-native goals off)
+native goals off) · amended 2026-11-11 (mcp__hyprlayer__ read tools are allowed in every
+stage; mutating agent-control verbs are refused for report-only sessions server-side)
 
 ## Decision
 
@@ -203,6 +204,13 @@ Two related, harness-aware seams sit alongside it:
 - Opencode drives its own permission model and takes nothing from the policy; the
   `Opencode` variant carries `permission_mode` for symmetry, and the launch arm
   leaves `launched_mode` unset as before.
+- *(Amended 2026-11-11 —)* **Agent control's read tools are allowed in every stage.**
+  When agent control is not `off`, a Claude launch appends `mcp__hyprlayer__<tool>` for
+  each read tool to `--allowedTools` at spawn (`runtime/sessions/service.rs`), never to
+  `policy_for`'s lists, so the stage pins in `capability.rs` and `pipeline.rs` are
+  unchanged. The policy's resolved mode also decides the agent's control level, so a
+  stage default of bypass counts as bypass. Mutating agent-control verbs are refused
+  server-side for a report-only session, whatever its level.
 
 ## Rationale
 

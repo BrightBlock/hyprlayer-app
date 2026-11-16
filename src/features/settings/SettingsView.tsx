@@ -4,6 +4,7 @@ import { useBootstrap, useHosts } from "@/lib/queries";
 import { PageError, PageSpinner } from "@/components/ui";
 
 import { AdvancedSettings } from "./AdvancedSettings";
+import { AgentControlSettings } from "./AgentControlSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { BinariesSettings } from "./BinariesSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -67,6 +68,8 @@ function SectionBody({
       return <NotificationsSettings settings={data.settings} />;
     case "goals":
       return <GoalsSettings settings={data.settings} />;
+    case "agentControl":
+      return <AgentControlSettings settings={data.settings} />;
     case "keyboard":
       return <KeyboardSettings settings={data.settings} />;
     case "advanced":

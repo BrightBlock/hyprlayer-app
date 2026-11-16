@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use hyprlayer_core::CoreError;
 use hyprlayer_proto::WireError;
@@ -26,6 +28,104 @@ struct Connection {
 
 pub struct AppState {
     connection: RwLock<Connection>,
+    streams: Arc<ChannelStreams>,
+}
+
+/// Server streams pumped into Tauri channels, keyed by channel id, so the webview can end one it stopped reading.
+#[derive(Default)]
+pub struct ChannelStreams(Mutex<OpenStreams>);
+
+#[derive(Default)]
+struct OpenStreams {
+    open: HashMap<u32, OpenStream>,
+    // A release can land before the command that opened its stream registers the pump.
+    early: VecDeque<u32>,
+}
+
+struct OpenStream {
+    stream_id: u64,
+    // Stream ids are per connection, so the cancel goes to the one that opened it.
+    client: Arc<RpcClient>,
+    task: tauri::async_runtime::JoinHandle<()>,
+}
+
+const EARLY_RELEASE_CAP: usize = 256;
+
+impl ChannelStreams {
+    pub fn spawn<F>(
+        self: &Arc<Self>,
+        channel_id: u32,
+        client: Arc<RpcClient>,
+        stream_id: u64,
+        pump: F,
+    ) where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut guard = self.lock();
+        if let Some(i) = guard.early.iter().position(|&id| id == channel_id) {
+            guard.early.remove(i);
+            drop(guard);
+            cancel(client, stream_id);
+            return;
+        }
+        let streams = Arc::clone(self);
+        let task = tauri::async_runtime::spawn(async move {
+            pump.await;
+            streams.finished(channel_id, stream_id);
+        });
+        guard.open.insert(
+            channel_id,
+            OpenStream {
+                stream_id,
+                client,
+                task,
+            },
+        );
+    }
+
+    pub fn release(&self, channel_ids: &[u32]) {
+        let mut ended = Vec::new();
+        {
+            let mut guard = self.lock();
+            for id in channel_ids {
+                match guard.open.remove(id) {
+                    Some(stream) => ended.push(stream),
+                    None => {
+                        guard.early.push_back(*id);
+                        if guard.early.len() > EARLY_RELEASE_CAP {
+                            guard.early.pop_front();
+                        }
+                    }
+                }
+            }
+        }
+        for stream in ended {
+            stream.task.abort();
+            cancel(stream.client, stream.stream_id);
+        }
+    }
+
+    fn finished(&self, channel_id: u32, stream_id: u64) {
+        let mut guard = self.lock();
+        if guard
+            .open
+            .get(&channel_id)
+            .is_some_and(|s| s.stream_id == stream_id)
+        {
+            guard.open.remove(&channel_id);
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, OpenStreams> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+// A gone connection fails the send, which is fine: its streams died with it.
+fn cancel(client: Arc<RpcClient>, stream_id: u64) {
+    tauri::async_runtime::spawn(async move {
+        let _ = client.cancel_stream(stream_id).await;
+    });
 }
 
 impl AppState {
@@ -39,6 +139,7 @@ impl AppState {
                 outdated,
                 transcript_sync: false,
             }),
+            streams: Arc::default(),
         }
     }
 
@@ -54,7 +155,12 @@ impl AppState {
                 outdated: false,
                 transcript_sync: false,
             }),
+            streams: Arc::default(),
         }
+    }
+
+    pub fn streams(&self) -> &Arc<ChannelStreams> {
+        &self.streams
     }
 
     fn read(&self) -> std::sync::RwLockReadGuard<'_, Connection> {

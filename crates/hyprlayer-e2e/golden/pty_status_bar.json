@@ -1,0 +1,398 @@
+{
+  "scenario": "pty_status_bar",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "postModelSwitch": "'$CTL' hook claude PostModelSwitch",
+            "statusLine": "'$CTL' statusline claude"
+          },
+          "guard": "the launch's settings run the statusline face and a PostModelSwitch hook",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": {
+              "context": null,
+              "controllable": true,
+              "effort": "low",
+              "model": "claude-haiku-5-5",
+              "permissionMode": null,
+              "planning": false
+            }
+          },
+          "guard": "model and effort arrive as claude reported them; a null used_percentage is no context; a hooked claude is controllable",
+          "ok": true
+        }
+      ],
+      "step": "statusLine values reach the agent's status"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "printed": "user:{\"session_id\"",
+            "runs": [
+              "StatusLine exit=0"
+            ]
+          },
+          "guard": "the face prints the project's own statusLine output, fed the same input, and exits 0",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "stdout": "",
+            "underOneSecond": true
+          },
+          "guard": "with no statusLine of the user's and no agent token, the face prints nothing and exits 0 at once",
+          "ok": true
+        }
+      ],
+      "step": "the user's statusLine output passes through"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "listed": "Status bar E2E",
+            "promptsNameTheRequest": true,
+            "title": "Status bar E2E",
+            "titleCalls": 3,
+            "untitledAfterFailures": true
+          },
+          "guard": "the first prompt's title calls both fail and leave no title; the second prompt earns one, and a third asks for none",
+          "ok": true
+        }
+      ],
+      "step": "a failed title leaves the tab to the next prompt, which earns one, and none after"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "context": {
+              "percent": 5,
+              "tokens": 53568,
+              "window": 1000000
+            }
+          },
+          "guard": "tokens and window are claude's own, with its rounded percentage",
+          "ok": true
+        }
+      ],
+      "step": "context follows the first response"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "modes": [
+              "acceptEdits",
+              "plan"
+            ]
+          },
+          "guard": "each shift+tab's footer, read after the statusLine report, moves the mode along the ring",
+          "ok": true
+        }
+      ],
+      "step": "a typed shift+tab updates the mode via the footer"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": {
+              "context": {
+                "percent": 5,
+                "tokens": 53568,
+                "window": 1000000
+              },
+              "controllable": true,
+              "effort": "low",
+              "model": "claude-sonnet-5-5",
+              "permissionMode": "plan",
+              "planning": false
+            }
+          },
+          "guard": "PostModelSwitch and the next statusLine both name the new model; the mode stays",
+          "ok": true
+        }
+      ],
+      "step": "a model switch reports the new model"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "activity": "authentication_failed",
+            "idle": true,
+            "lastReply": "done: work"
+          },
+          "guard": "StopFailure, which claude fires instead of Stop, reads idle with the error as its activity and the last reply kept",
+          "ok": true
+        }
+      ],
+      "step": "a turn an API error ends settles to idle"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "listed": null,
+            "titleCalls": 3,
+            "titled": false
+          },
+          "guard": "with titles off a first prompt asks for no title",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "title": "Status bar E2E",
+            "titleCalls": 4
+          },
+          "guard": "titles turned back on, the untitled tab's next prompt earns its title",
+          "ok": true
+        }
+      ],
+      "step": "titles off"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": {
+              "context": {
+                "percent": 2,
+                "tokens": 16042,
+                "window": 258400
+              },
+              "controllable": false,
+              "effort": "low",
+              "model": "gpt-5.6-luna",
+              "permissionMode": "default",
+              "planning": false
+            }
+          },
+          "guard": "the hook's model and mode, then the rollout's effort, tokens, and the used share codex's own footer implies (100 - its % left)",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "status": {
+              "context": {
+                "percent": 2,
+                "tokens": 16042,
+                "window": 258400
+              },
+              "controllable": false,
+              "effort": "high",
+              "model": "gpt-5.6-sol",
+              "permissionMode": "default",
+              "planning": true
+            }
+          },
+          "guard": "a later thread_settings_applied, read from where the last read stopped, sets model, effort and Plan",
+          "ok": true
+        }
+      ],
+      "step": "codex status from its hooks and rollout"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "applied",
+            "switchPath": [
+              "PreModelSwitch allow"
+            ],
+            "switched": true
+          },
+          "guard": "/model, the Sonnet row and `s` switch it for the session; PreModelSwitch allows the driven switch, so no dialog shows",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "stdout": ""
+          },
+          "guard": "with no switch of the bar's pending, the hook prints nothing, so the user's own switch keeps claude's dialog",
+          "ok": true
+        }
+      ],
+      "step": "the bar changes a claude's model in its running TUI"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "ok",
+            "reported": "high"
+          },
+          "guard": "the /effort slider moves to high and `s` applies it; the statusLine reports it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "modes": [
+              {
+                "asked": "acceptEdits",
+                "now": "acceptEdits",
+                "outcome": "ok"
+              },
+              {
+                "asked": "plan",
+                "now": "plan",
+                "outcome": "ok"
+              },
+              {
+                "asked": "bypassPermissions",
+                "now": "plan",
+                "outcome": "pty_control_failed: claude's shift+tab cycle never reached bypassPermissions in this session"
+              }
+            ]
+          },
+          "guard": "shift+tab reaches accept edits and /plan reaches plan; bypass, outside this ring, is refused and the cycle stops back at plan",
+          "ok": true
+        }
+      ],
+      "step": "the bar changes effort and mode"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "keysWhileRefused": 0,
+            "refusal": "pty_control_failed: the agent's input holds a draft; clear your draft first",
+            "sent": "draft"
+          },
+          "guard": "with text on the input line the change is refused before a key is sent, and the draft is sent intact",
+          "ok": true
+        }
+      ],
+      "step": "a change is refused over a person's draft, which survives it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asking": "pty_control_failed: that agent is asking you something; answer it first",
+            "keysWhileAsking": 0,
+            "prompted": "pty_control_failed: the agent is showing a prompt"
+          },
+          "guard": "asking, the change is refused before a key is sent; with the user's own /model picker open, it is refused as a prompt",
+          "ok": true
+        }
+      ],
+      "step": "a change is refused while the agent asks or shows a prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "applied",
+            "switchPath": [
+              "PreModelSwitch allow"
+            ],
+            "switched": true
+          },
+          "guard": "Haiku to Opus, three rows either way round, goes up: down would land on More models, whose Enter expands it",
+          "ok": true
+        }
+      ],
+      "step": "a model route never lands on More models"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "applied",
+            "plan": "ok",
+            "planModeModel": "claude-sonnet-5-5"
+          },
+          "guard": "the picker's PostModelSwitch to Haiku confirms it, and the bar then shows the Sonnet claude's plan mode runs",
+          "ok": true
+        }
+      ],
+      "step": "a switch in plan mode confirms though claude's own switch follows it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": "applied",
+            "switchPath": [
+              "PreModelSwitch allow",
+              "dialog shown",
+              "dialog answered"
+            ]
+          },
+          "guard": "a \"Switch model?\" dialog shown despite the hook gets one Enter on its Yes row, and the switch confirms",
+          "ok": true
+        }
+      ],
+      "step": "the dialog fallback answers only claude's own dialog"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "busy": "pty_control_failed: claude didn't confirm the switch to Opus 5.5",
+            "idle": "relaunch",
+            "relaunchKeepsModeAndEffort": true,
+            "relaunchResumesOnTheModel": true
+          },
+          "guard": "idle and unconfirmed, the desktop is told to relaunch, which resumes the session on the model in its mode and effort; working, it is an error",
+          "ok": true
+        }
+      ],
+      "step": "an unconfirmed change falls back to a relaunch, or errors mid-turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "interrupts": 0,
+            "traps": [],
+            "typed": [
+              "status",
+              "/model",
+              "/effort",
+              "/plan",
+              "draft",
+              "ask",
+              "work",
+              "/model",
+              "status",
+              "/model",
+              "/plan",
+              "/model",
+              "/model",
+              "/model",
+              "hold",
+              "/model"
+            ],
+            "unsafe": []
+          },
+          "guard": "every picker key is an arrow, `s` or Esc, the only Enter outside the input is the dialog's, no Esc reached the input, and commands are typed bare",
+          "ok": true
+        }
+      ],
+      "step": "the TUI never got a digit, an Enter in a picker, or a Tab in the slider"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

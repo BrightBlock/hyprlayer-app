@@ -4,6 +4,7 @@ export const SETTINGS_SECTIONS = [
   "git",
   "notifications",
   "goals",
+  "agentControl",
   "keyboard",
   "appearance",
   "servers",

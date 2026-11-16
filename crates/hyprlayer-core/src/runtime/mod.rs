@@ -1,4 +1,5 @@
 pub mod account;
+pub mod agent_control;
 pub mod agents;
 pub mod attachments;
 mod attribution;
@@ -28,7 +29,7 @@ pub mod workstreams;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use tokio::sync::{broadcast, watch, Mutex as AsyncMutex, Notify};
@@ -51,6 +52,9 @@ use crate::settings::SettingsStore;
 use crate::store::Db;
 use crate::worktree::WorktreeManager;
 
+use agent_control::links::AgentLinks;
+use agent_control::pty_agents::PtyAgents;
+use agent_control::{AgentControlEndpoint, AgentHops, AgentTokens, SpawnLocks};
 use attribution::DocAttribution;
 use operation_locks::{SkillLocks, WorkstreamLocks};
 use ports::{CliConfigCli, ConfigCli, LifecycleRunner, ProviderHttp, ReqwestProviderHttp};
@@ -73,11 +77,22 @@ const ORPHAN_POLL: Duration = Duration::from_millis(50);
 pub struct RuntimeOptions {
     pub environment: RuntimeEnvironment,
     pub paths: RuntimePaths,
+    pub agent_control: Option<AgentControlEndpoint>,
 }
 
 impl RuntimeOptions {
     pub fn new(environment: RuntimeEnvironment, paths: RuntimePaths) -> Self {
-        Self { environment, paths }
+        Self {
+            environment,
+            paths,
+            agent_control: None,
+        }
+    }
+
+    /// Without an endpoint no spawn carries agent identity.
+    pub fn with_agent_control(mut self, endpoint: AgentControlEndpoint) -> Self {
+        self.agent_control = Some(endpoint);
+        self
     }
 }
 
@@ -87,6 +102,8 @@ struct Watchers {
 }
 
 pub struct HyprlayerRuntime {
+    /// For tasks that outlive a call; a `Weak`, so they never hold the profile lock.
+    handle: Weak<HyprlayerRuntime>,
     environment: RuntimeEnvironment,
     paths: RuntimePaths,
     config: Arc<ConfigService>,
@@ -118,6 +135,12 @@ pub struct HyprlayerRuntime {
     workstream_locks: WorkstreamLocks,
     skill_locks: SkillLocks,
     account_state: account::AccountState,
+    agent_control_endpoint: Option<AgentControlEndpoint>,
+    agent_tokens: AgentTokens,
+    agent_hops: AgentHops,
+    agent_spawn_locks: SpawnLocks,
+    agent_links: Arc<AgentLinks>,
+    pty_agents: Arc<PtyAgents>,
     coordinator: ShutdownCoordinator,
     tasks: AsyncMutex<Vec<TrackedTask>>,
     /// Sessions whose harness the last server run left running; only their next relaunch is announced.
@@ -135,7 +158,11 @@ impl HyprlayerRuntime {
         config_cli: Option<Arc<dyn ConfigCli>>,
         lifecycle_runner: Option<Arc<dyn LifecycleRunner + Send + Sync>>,
     ) -> Result<Arc<Self>> {
-        let RuntimeOptions { environment, paths } = options;
+        let RuntimeOptions {
+            environment,
+            paths,
+            agent_control,
+        } = options;
 
         let profile_lock = ProfileLock::acquire(&paths.app_data_dir)?;
 
@@ -238,13 +265,32 @@ impl HyprlayerRuntime {
                 .with_binaries(binaries.clone()),
         );
 
-        Ok(Arc::new(Self {
+        let terminals = Arc::new(TerminalRegistry::new());
+        let agent_links = Arc::new(AgentLinks::default());
+        let pty_agents = Arc::new(PtyAgents::new(
+            &paths.app_data_dir,
+            agent_control
+                .as_ref()
+                .and_then(|endpoint| endpoint.runtime_dir.as_deref()),
+            events.clone(),
+            terminals.clone(),
+            agent_links.clone(),
+        ));
+
+        Ok(Arc::new_cyclic(|handle| Self {
+            handle: handle.clone(),
             config_cli,
             provider_http,
             lifecycle_runner,
             workstream_locks: WorkstreamLocks::new(),
             skill_locks: SkillLocks::default(),
             account_state: account::AccountState::new(cloud, &paths.app_config_dir),
+            agent_control_endpoint: agent_control,
+            agent_tokens: AgentTokens::default(),
+            agent_hops: AgentHops::default(),
+            agent_spawn_locks: SpawnLocks::default(),
+            agent_links,
+            pty_agents,
             config,
             binaries,
             settings,
@@ -256,7 +302,7 @@ impl HyprlayerRuntime {
             goal_runners: Arc::default(),
             attribution,
             session_titler: Arc::default(),
-            terminals: Arc::new(TerminalRegistry::new()),
+            terminals,
             scripts: Arc::new(ScriptRegistry::new()),
             opencode: Arc::new(OpenCodeManager::new()),
             watchers: Watchers {
@@ -578,6 +624,7 @@ impl HyprlayerRuntime {
                 let (forced_tasks, _) = shutdown::stop_tasks(tasks).await;
                 self.goal_runners.stop_all().await;
 
+                self.pty_agents.stop_app_servers();
                 let terminals = self.terminals.kill_all_blocking();
                 let sessions = self.session_registry.kill_all_blocking();
                 self.opencode.shutdown().await;
@@ -603,6 +650,7 @@ impl HyprlayerRuntime {
 
     pub fn shutdown_now(&self) {
         self.coordinator.shutdown_now(|| {
+            self.pty_agents.stop_app_servers();
             self.terminals.kill_all_blocking();
             self.session_registry.kill_all_blocking();
             self.opencode.kill_blocking();

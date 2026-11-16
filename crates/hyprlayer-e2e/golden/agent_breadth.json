@@ -1,0 +1,480 @@
+{
+  "scenario": "agent_breadth",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "tab": {
+              "bypass": false,
+              "engineId": "claude-code",
+              "kind": "openTerminalTab",
+              "providerSessionId": "$PTY_SESSION",
+              "terminalId": "$PTY",
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "every announced desktop gets an OpenTerminalTab for it, not in bypass",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hooked": true,
+            "spawnedBy": {
+              "kind": "session",
+              "sessionId": "$LEAD"
+            },
+            "state": "idle"
+          },
+          "guard": "it is listed hooked, spawned by the caller",
+          "ok": true
+        }
+      ],
+      "step": "a spawned PTY agent opens an adopted tab"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "otherPtys": 0,
+            "refusal": "agent_control_denied: agent control refused this: bash is not a configured engine"
+          },
+          "guard": "terminal_engine bash is agent_control_denied and no PTY starts",
+          "ok": true
+        }
+      ],
+      "step": "an engine nobody configured is refused"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstRow": "033 [ 2 0 0 ~ [ f r o m a g e n",
+            "lastRow": "E 2 E _ E N D 033 [ 2 0 1 ~ \\n",
+            "matchesThePaste": true,
+            "sent": true
+          },
+          "guard": "the TUI reads ESC[200~ and the header, a blank line, the text, then ESC[201~ and the line's end",
+          "ok": true
+        }
+      ],
+      "step": "a message is bracketed paste then Enter"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": "done: work",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            },
+            "replyBefore": null
+          },
+          "guard": "prompt_and_wait blocks through the turn it started: no reply before, Stop's reply after",
+          "ok": true
+        }
+      ],
+      "step": "wait_pty_agent returns the last reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: that agent is asking its user something, and a message now would answer it",
+            "typedSince": 0,
+            "waited": "needs_you"
+          },
+          "guard": "while it asks for permission a message is agent_control_denied and nothing reaches the TUI",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "outcome": {
+              "lastReply": "done: work",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "the person's answer settles it, and the old reply stands",
+          "ok": true
+        }
+      ],
+      "step": "a message is refused while the target asks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: the agent is showing a prompt",
+            "state": "idle",
+            "typedSince": 0
+          },
+          "guard": "idle with a picker over its input box, a message is agent_control_denied and nothing reaches the TUI",
+          "ok": true
+        }
+      ],
+      "step": "a message is refused while the target shows a prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "banner": true,
+            "echoedMessage": true,
+            "escapes": false,
+            "title": false
+          },
+          "guard": "the agent's colored banner reads as plain text, with no escape sequence or title left",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "isTheTail": true,
+            "lines": 2
+          },
+          "guard": "lines bounds the tail",
+          "ok": true
+        }
+      ],
+      "step": "read_terminal returns the stripped tail"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hooked": false,
+            "readable": true,
+            "refusal": "agent_control_denied: agent control refused this: that agent's engine reports no state to wait on; read its terminal instead"
+          },
+          "guard": "an agent-spawned unhooked PTY is listed unhooked, readable, and its wait is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: that agent reports no state, so typed input could answer a prompt it shows",
+            "typedSince": 0
+          },
+          "guard": "a Default caller's message to an unhooked PTY is refused, since nothing reports a prompt it may show",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kill": "\"killed\"",
+            "unlisted": true
+          },
+          "guard": "the caller can kill the PTY it spawned",
+          "ok": true
+        }
+      ],
+      "step": "unhooked agents cannot be waited on"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterKeystroke": "ok",
+            "messages": [
+              "ok",
+              "ok",
+              "agent_limit_reached: an agent limit was reached: claude-code got 2 agent messages with no human turn between (Max agent hops)"
+            ]
+          },
+          "guard": "two messages pass, the third is agent_limit_reached, and the desktop's keystroke lets the next through",
+          "ok": true
+        }
+      ],
+      "step": "a non-reply terminal_write resets a PTY's hops"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "agent_limit_reached: an agent limit was reached: this agent already has 1 live children, the Max live children"
+          },
+          "guard": "with its PTY child live, Max live children 1 refuses a session child",
+          "ok": true
+        }
+      ],
+      "step": "child PTYs count toward max_live_children"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pty": {
+              "depth": 1,
+              "parent": {
+                "kind": "session",
+                "sessionId": "$LEAD"
+              }
+            },
+            "session": {
+              "depth": 2,
+              "parent": {
+                "kind": "terminal",
+                "terminalId": "$PTY"
+              }
+            }
+          },
+          "guard": "the PTY child is depth 1 under the lead; the session it spawns is depth 2 under the terminal",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kill": "\"killed\"",
+            "refusal": "agent_limit_reached: an agent limit was reached: a child would be 3 agents deep, past the Max depth of 2"
+          },
+          "guard": "so a third level is refused at Max depth 2, and the terminal can stop its own child",
+          "ok": true
+        }
+      ],
+      "step": "depth carries through a terminal parent"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "attached": "invalid_arguments: `worktree_mode` is isolated or existing"
+          },
+          "guard": "the MCP face offers only the isolated and existing modes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "inProject": true,
+            "setupRanInWorktree": true,
+            "title": "Spawned work"
+          },
+          "guard": "the agent's workstream lands in its project and the setup script runs in its worktree",
+          "ok": true
+        }
+      ],
+      "step": "create_workstream runs the setup script"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fileUnchanged": true,
+            "read": true,
+            "save": "agent_control_denied: agent control refused this: an agent writes only documents mapped to its own project"
+          },
+          "guard": "a global doc the desktop attached reads, yet the agent's save of it is refused and the file is unchanged",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "attach": "agent_control_denied: agent control refused this: an agent writes only documents mapped to its own project"
+          },
+          "guard": "the agent's own attach of a global doc is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "createGlobal": "agent_control_denied: agent control refused this: create_doc is never open to agents: a global document is the user's",
+            "createShared": true,
+            "saveShared": "ok"
+          },
+          "guard": "create_doc with global scope is refused though it names the caller's project; a shared doc there is created and saved",
+          "ok": true
+        }
+      ],
+      "step": "documents outside the project stay read-only"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "approve": "agent_control_denied: agent control refused this: a child cannot run the implement stage, which pre-approves tools this agent's general stage does not",
+            "planStillDraft": true,
+            "validate": "agent_control_denied: agent control refused this: a child cannot run the validate stage, which pre-approves tools this agent's general stage does not"
+          },
+          "guard": "approve_plan and validate_plan are refused: implement and validate pre-approve tools a General caller lacks, and the plan stays a draft",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "goals": 0,
+            "startGoal": "agent_control_denied: agent control refused this: a goal's command check runs a shell, so only a bypass agent may set one"
+          },
+          "guard": "a goal with a command check is refused outside bypass, and no goal is written",
+          "ok": true
+        }
+      ],
+      "step": "a Default caller cannot widen what it may run"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "origin": "agent",
+            "parentSessionId": "$LEAD",
+            "planAttached": true,
+            "planStatus": "active",
+            "stage": "implement"
+          },
+          "guard": "the plan is active, and an implement session under the caller has it attached",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "tab": {
+              "effort": null,
+              "focus": false,
+              "kind": "openSessionTab",
+              "model": null,
+              "permissionMode": "bypassPermissions",
+              "sessionId": "$IMPLEMENT",
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "desktops open it in the background in the caller's mode, now bypass",
+          "ok": true
+        }
+      ],
+      "step": "approve_plan activates and builds the plan"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "planAttached": true,
+            "stage": "validate",
+            "tabMode": "bypassPermissions"
+          },
+          "guard": "a validate session on the plan, in the caller's own mode",
+          "ok": true
+        }
+      ],
+      "step": "validate_plan opens a validate session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "sessionId": "$LEAD",
+            "status": "met"
+          },
+          "guard": "in bypass, a command-checked goal with no target runs on the caller's own session and meets",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "checksKept": true,
+            "updateGoal": "agent_control_denied: agent control refused this: a goal's command check runs a shell, so only a bypass agent may set one"
+          },
+          "guard": "back in Default, update_goal swapping in a command check is refused and the goal keeps its checks",
+          "ok": true
+        }
+      ],
+      "step": "start_goal on itself"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agentReads": true,
+            "desktopReads": true,
+            "started": "\"started\""
+          },
+          "guard": "run_script starts the run script with nobody attached, and its output is readable after",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archiveRan": false,
+            "runScript": "agent_control_denied: agent control refused this: script_start is never open to agents: the archive script is the user's",
+            "scriptStart": "agent_control_denied: agent control refused this: script_start is never open to agents: the archive script is the user's"
+          },
+          "guard": "the archive script is refused through run_script and raw script_start, and never runs",
+          "ok": true
+        }
+      ],
+      "step": "script_start runs without a stream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "body": "E2E agent note",
+            "line": 1,
+            "path": "README.md",
+            "resolvedAfter": true,
+            "resolvedBefore": false,
+            "side": "modified"
+          },
+          "guard": "the agent's comment reads back on its line, and resolving it sticks",
+          "ok": true
+        }
+      ],
+      "step": "review comments"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "reveals": [
+              {
+                "kind": "reveal",
+                "target": {
+                  "kind": "doc",
+                  "path": "$SHARED/plans/2026-01-01-breadth-plan.md"
+                },
+                "workstreamId": "$WS"
+              },
+              {
+                "kind": "reveal",
+                "target": {
+                  "kind": "file",
+                  "path": "README.md"
+                },
+                "workstreamId": "$WS"
+              },
+              {
+                "kind": "reveal",
+                "target": {
+                  "kind": "diff",
+                  "path": "README.md"
+                },
+                "workstreamId": "$WS"
+              }
+            ]
+          },
+          "guard": "a doc, a file and a diff each reach the desktop as a Reveal in the caller's workstream",
+          "ok": true
+        }
+      ],
+      "step": "reveal reaches desktops"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "archive": "agent_control_denied: agent control refused this: archive_workstream is never open to agents: it ends a workstream",
+            "merge": "agent_control_denied: agent control refused this: merge_workstream_pr is never open to agents: merging is the user's call",
+            "workstreamOpen": true
+          },
+          "guard": "a full agent's merge and archive are refused as never open to agents, and the workstream stays",
+          "ok": true
+        }
+      ],
+      "step": "merge and archive stay excluded"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

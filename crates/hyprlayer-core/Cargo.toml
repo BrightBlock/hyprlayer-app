@@ -24,6 +24,7 @@ regex = "1"
 serde_yaml = "0.9"
 git2 = { version = "0.19", default-features = false }
 memchr = "2"
+vt100 = "0.16"
 aho-corasick = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 walkdir = "2"
@@ -61,3 +62,6 @@ windows-sys = { version = "0.60", features = [
 
 [target."cfg(unix)".dependencies]
 libc = "0.2"
+# The PTY codex's own app-server speaks WebSocket JSON-RPC over a unix socket.
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }

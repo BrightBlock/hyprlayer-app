@@ -1708,7 +1708,7 @@ fn warn_over(goal_id: &str, error: crate::error::CoreError) -> Over {
 }
 
 /// Between turns, with no send waiting to land.
-pub(super) async fn is_idle(actors: &SessionActors, session_id: &str) -> bool {
+pub(crate) async fn is_idle(actors: &SessionActors, session_id: &str) -> bool {
     actors
         .rev_state(session_id, None)
         .await

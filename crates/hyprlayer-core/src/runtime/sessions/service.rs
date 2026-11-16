@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use hyprlayer_models::goal::GoalEndReason;
 use hyprlayer_models::session::QuestionAnswers;
+use hyprlayer_models::{AgentCaller, SessionOrigin};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::agent::{AgentDriver, Harness};
@@ -19,8 +20,9 @@ use crate::error::{CoreError, Result};
 use crate::opencode::runtime::OpenCodeDriver;
 use crate::opencode::support::opencode_model_is_supported;
 use crate::pipeline::{self, Stage};
-use crate::process::binaries::BinaryKind;
+use crate::process::binaries::{parse_semver, BinaryKind};
 use crate::review::sidecar;
+use crate::runtime::agent_control::{inject, AgentIdentity, TokenGuard};
 use crate::runtime::doc_status;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
@@ -28,7 +30,7 @@ use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
 use hyprlayer_models::{ClientRef, RuntimeEvent, SessionRev, SessionTurns};
 use serde::{Deserialize, Serialize};
 
-use super::followup::{self, Followup};
+use super::followup::{self, Followup, FollowupTurn};
 use super::goal_loop::is_idle;
 use super::recap;
 use super::workflow_bridge::{self, WorkflowChannel};
@@ -65,6 +67,34 @@ pub struct StartStageSessionRequest {
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
     pub client_message_id: Option<String>,
+    /// A person's link to the session this one follows from, such as a validation's implement session.
+    pub parent_session_id: Option<String>,
+}
+
+/// Who started a session, as its row records it.
+pub struct SessionLineage {
+    pub origin: SessionOrigin,
+    pub parent_session_id: Option<String>,
+    /// A spawning terminal and the child's depth; no row can name a terminal, so it is kept in memory.
+    pub parent_terminal: Option<(String, u32)>,
+}
+
+impl SessionLineage {
+    pub fn user() -> Self {
+        Self {
+            origin: SessionOrigin::User,
+            parent_session_id: None,
+            parent_terminal: None,
+        }
+    }
+
+    pub fn goal() -> Self {
+        Self {
+            origin: SessionOrigin::Goal,
+            parent_session_id: None,
+            parent_terminal: None,
+        }
+    }
 }
 
 pub struct StartedStageSession {
@@ -104,6 +134,47 @@ impl LaunchAndConverseParams {
         );
         self.report_only = true;
     }
+
+    /// A line ahead of the first turn, so the harness knows who is asking.
+    pub(crate) fn prefix_prompt(&mut self, header: &str) {
+        self.wire_prompt = format!("{header}\n\n{}", self.wire_prompt);
+    }
+
+    fn into_parts(self) -> (LaunchSessionParams, FirstTurn) {
+        let followup = followup::followup_for(self.session.harness, self.stage, &self.bodies);
+        let first = FirstTurn {
+            session_id: self.session.id.clone(),
+            wire_prompt: self.wire_prompt,
+            stage: self.stage,
+            prompt_name: self.prompt_name,
+            client_message_id: self.client_message_id,
+            followup,
+        };
+        let launch = LaunchSessionParams {
+            session: self.session,
+            project_path: self.project_path,
+            model: self.model,
+            effort: self.effort,
+            permission_mode: self.permission_mode,
+            resume: false,
+            boundary_on_relaunch: false,
+            max_budget_usd: None,
+            extra_allowed_tools: self.extra_allowed_tools,
+            extra_disallowed_tools: self.extra_disallowed_tools,
+            report_only: self.report_only,
+        };
+        (launch, first)
+    }
+}
+
+/// A new session's first send and the follow-up its stage asks for after it.
+struct FirstTurn {
+    session_id: String,
+    wire_prompt: String,
+    stage: Stage,
+    prompt_name: Option<String>,
+    client_message_id: Option<String>,
+    followup: Option<Followup>,
 }
 
 pub struct LaunchSessionParams {
@@ -448,6 +519,7 @@ impl SessionService<'_> {
         }
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
         blocking(move || db.delete_session(&id)).await?;
+        self.runtime.agent_links.unlink(session_id);
         self.runtime.session_actors.remove(session_id).await;
         self.announce(session);
         Ok(())
@@ -455,6 +527,7 @@ impl SessionService<'_> {
 
     /// Removes a session whose harness never started and that no client was handed.
     pub(crate) async fn discard_unlaunched(&self, session: &Session) {
+        self.runtime.agent_links.unlink(&session.id);
         let (db, id) = (self.runtime.db.clone(), session.id.clone());
         if let Err(e) = blocking(move || db.delete_session(&id)).await {
             tracing::warn!("session {}: its unlaunched row stays: {e}", session.id);
@@ -973,7 +1046,30 @@ impl SessionService<'_> {
 
     pub async fn prepare_start(
         &self,
+        mut request: StartStageSessionRequest,
+    ) -> Result<StartedStageSession> {
+        let mut lineage = SessionLineage::user();
+        if let Some(parent) = request.parent_session_id.take() {
+            let (db, workstream_id) = (self.runtime.db.clone(), request.workstream.id.clone());
+            let lookup = parent.clone();
+            let found = blocking(move || db.get_session(&lookup)).await?;
+            // A stale or foreign link is dropped, never fatal: the session still starts.
+            if found.is_some_and(|s| s.workstream_id == workstream_id) {
+                lineage.parent_session_id = Some(parent);
+            } else {
+                tracing::warn!(
+                    "workstream {}: ignored a link to session {parent}, which isn't in it",
+                    request.workstream.id
+                );
+            }
+        }
+        self.prepare_start_with(request, lineage).await
+    }
+
+    pub async fn prepare_start_with(
+        &self,
         request: StartStageSessionRequest,
+        lineage: SessionLineage,
     ) -> Result<StartedStageSession> {
         let StartStageSessionRequest {
             workstream,
@@ -986,6 +1082,7 @@ impl SessionService<'_> {
             permission_mode,
             prompt_name,
             client_message_id,
+            parent_session_id: _,
         } = request;
 
         let harness = harness.unwrap_or_default();
@@ -1023,6 +1120,7 @@ impl SessionService<'_> {
         }
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
 
+        let parent_terminal = lineage.parent_terminal.clone();
         let session = {
             let new = NewSession {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -1033,8 +1131,29 @@ impl SessionService<'_> {
                 first_input,
             };
             let db = self.runtime.db.clone();
-            blocking(move || db.insert_session(new)).await?
+            blocking(move || {
+                let mut session = db.insert_session(new)?;
+                if lineage.origin != SessionOrigin::User || lineage.parent_session_id.is_some() {
+                    db.set_session_lineage(
+                        &session.id,
+                        lineage.origin,
+                        lineage.parent_session_id.as_deref(),
+                    )?;
+                    session.origin = lineage.origin;
+                    session.parent_session_id = lineage.parent_session_id;
+                }
+                Ok(session)
+            })
+            .await?
         };
+        // Before the launch: its identity's depth is read from the link.
+        if let Some((terminal_id, depth)) = parent_terminal {
+            self.runtime.agent_links.link(
+                &session.id,
+                AgentCaller::Terminal { terminal_id },
+                depth,
+            );
+        }
         self.runtime.session_titler.enqueue(&session.id, true);
         if let Err(e) = self
             .runtime
@@ -1071,43 +1190,72 @@ impl SessionService<'_> {
         params: LaunchAndConverseParams,
         author: Option<ClientRef>,
     ) -> Result<()> {
-        let LaunchAndConverseParams {
-            session,
-            project_path,
+        let (launch, first) = params.into_parts();
+        let session_id = first.session_id.clone();
+        let driver = self.launch_driver(launch).await?;
+        let Some((mut rx, followup)) = self.send_first_turn(&driver, first, &author).await? else {
+            return Ok(());
+        };
+        if let Some(turn) =
+            followup::await_followup(&session_id, driver.as_ref(), &mut rx, followup).await
+        {
+            self.send_followup(&session_id, turn, author).await;
+        }
+        Ok(())
+    }
+
+    /// Launches and sends the first turn before returning, so a waiter never sees the session idle before it; only the follow-up runs on.
+    pub(crate) async fn start_detached(
+        &self,
+        params: LaunchAndConverseParams,
+        author: Option<ClientRef>,
+    ) -> Result<()> {
+        let (launch, first) = params.into_parts();
+        let session = launch.session.clone();
+        let driver = match self.launch_driver(launch).await {
+            Ok(driver) => driver,
+            Err(e) => {
+                self.discard_unlaunched(&session).await;
+                return Err(e);
+            }
+        };
+        let Some((mut rx, followup)) = self.send_first_turn(&driver, first, &author).await? else {
+            return Ok(());
+        };
+        let runtime = self.runtime.handle.clone();
+        tokio::spawn(async move {
+            let Some(turn) =
+                followup::await_followup(&session.id, driver.as_ref(), &mut rx, followup).await
+            else {
+                return;
+            };
+            if let Some(runtime) = runtime.upgrade() {
+                runtime
+                    .sessions()
+                    .send_followup(&session.id, turn, author)
+                    .await;
+            }
+        });
+        Ok(())
+    }
+
+    /// The follow-up's receiver is subscribed before the send, so the first turn's end is never missed.
+    async fn send_first_turn(
+        &self,
+        driver: &Arc<dyn AgentDriver>,
+        first: FirstTurn,
+        author: &Option<ClientRef>,
+    ) -> Result<Option<(broadcast::Receiver<SessionEvent>, Followup)>> {
+        let FirstTurn {
+            session_id,
             wire_prompt,
             stage,
             prompt_name,
             client_message_id,
-            model,
-            effort,
-            permission_mode,
-            bodies,
-            extra_allowed_tools,
-            extra_disallowed_tools,
-            report_only,
-        } = params;
-
-        let followup = followup::followup_for(session.harness, stage, &bodies);
-        let session_id = session.id.clone();
-
-        let driver = self
-            .launch_driver(LaunchSessionParams {
-                session,
-                project_path,
-                model,
-                effort,
-                permission_mode,
-                resume: false,
-                boundary_on_relaunch: false,
-                max_budget_usd: None,
-                extra_allowed_tools,
-                extra_disallowed_tools,
-                report_only,
-            })
-            .await?;
-
+            followup,
+        } = first;
         let op_lock = self.op_lock(&session_id).await;
-        let mut turns = followup.as_ref().map(|_| driver.subscribe());
+        let turns = followup.as_ref().map(|_| driver.subscribe());
         let first_send = {
             let _guard = op_lock.lock().await;
             let ctx = SendContext {
@@ -1128,28 +1276,25 @@ impl SessionService<'_> {
             )
         };
         first_send?;
-        if let (Some(rx), Some(followup)) = (turns.as_mut(), followup) {
-            if let Some(turn) =
-                followup::await_followup(&session_id, driver.as_ref(), rx, followup).await
-            {
-                let sent = self
-                    .send_app_turn(
-                        &session_id,
-                        AppTurn {
-                            text: turn.prompt,
-                            prompt_name: None,
-                            author,
-                            nonce: uuid::Uuid::new_v4().to_string(),
-                            collab_mode: turn.collab_mode,
-                        },
-                    )
-                    .await;
-                if let Err(e) = sent {
-                    tracing::warn!("session {session_id}: the follow-up was not sent: {e}");
-                }
-            }
+        Ok(turns.zip(followup))
+    }
+
+    async fn send_followup(&self, session_id: &str, turn: FollowupTurn, author: Option<ClientRef>) {
+        let sent = self
+            .send_app_turn(
+                session_id,
+                AppTurn {
+                    text: turn.prompt,
+                    prompt_name: None,
+                    author,
+                    nonce: uuid::Uuid::new_v4().to_string(),
+                    collab_mode: turn.collab_mode,
+                },
+            )
+            .await;
+        if let Err(e) = sent {
+            tracing::warn!("session {session_id}: the follow-up was not sent: {e}");
         }
-        Ok(())
     }
 
     pub async fn launch(&self, params: LaunchSessionParams) -> Result<()> {
@@ -1189,7 +1334,33 @@ impl SessionService<'_> {
             params.model.as_deref().unwrap_or("default"),
             params.effort.as_deref().unwrap_or("default"),
         );
-        let spawned = self.spawn_driver(&params).await;
+        let policy = launch_policy(session.harness, session.stage, params.permission_mode);
+        // opencode's one shared server has no per-session identity to attach a token to.
+        let identity = match session.harness {
+            Harness::Opencode => None,
+            Harness::Claude | Harness::Codex => {
+                let control = self.runtime.agent_control();
+                let (parent, depth) = control.session_lineage(session).await;
+                control
+                    .identity_env(AgentIdentity {
+                        caller: AgentCaller::Session {
+                            session_id: session_id.clone(),
+                        },
+                        workstream_id: session.workstream_id.clone(),
+                        project_path: params.project_path.clone(),
+                        depth,
+                        parent,
+                        launch_mode: Some(policy.permission_mode()),
+                        report_only: params.report_only,
+                        harness: Some(session.harness),
+                    })
+                    .await
+            }
+        };
+        let (identity_env, token) = identity.unzip();
+        let spawned = self
+            .spawn_driver(&params, policy, identity_env.unwrap_or_default())
+            .await;
         let (driver, rx, launched_mode) = match spawned {
             Ok(spawned) => spawned,
             Err(e) => {
@@ -1256,6 +1427,7 @@ impl SessionService<'_> {
             ingress,
             self.runtime.session_registry.clone(),
             session_id,
+            token,
         );
 
         Ok(driver)
@@ -1264,6 +1436,8 @@ impl SessionService<'_> {
     async fn spawn_driver(
         &self,
         params: &LaunchSessionParams,
+        policy: LaunchPolicy,
+        identity_env: Vec<(String, String)>,
     ) -> Result<(
         Arc<dyn AgentDriver>,
         broadcast::Receiver<SessionEvent>,
@@ -1272,7 +1446,6 @@ impl SessionService<'_> {
         let LaunchSessionParams {
             session,
             project_path,
-            permission_mode,
             resume,
             max_budget_usd,
             extra_allowed_tools,
@@ -1281,7 +1454,12 @@ impl SessionService<'_> {
             ..
         } = params;
         let (model, effort, resume) = (params.model.clone(), params.effort.clone(), *resume);
-        let policy = launch_policy(session.harness, session.stage, *permission_mode);
+        // Empty at `off`: no identity, so no MCP server either.
+        let endpoint = self
+            .runtime
+            .agent_control_endpoint
+            .as_ref()
+            .filter(|_| !identity_env.is_empty());
         match session.harness {
             Harness::Opencode => {
                 if model
@@ -1315,7 +1493,28 @@ impl SessionService<'_> {
                     unreachable!("codex harness yields a codex launch policy")
                 };
 
-                let env = self.runtime.child_env().await;
+                let mut extra_args = Vec::new();
+                if let Some(endpoint) = endpoint {
+                    if self.codex_supports_mcp().await {
+                        let read_only = permission_mode != PermissionMode::BypassPermissions;
+                        match inject::codex_mcp_args(&endpoint.ctl, &identity_env, read_only) {
+                            Some(args) => extra_args = args,
+                            None => tracing::info!(
+                                "codex session {} gets no MCP server: a value cannot be a TOML literal",
+                                session.id
+                            ),
+                        }
+                    }
+                }
+                let mut env = self.runtime.child_env().await;
+                env.extend(identity_env);
+                let mut skill_roots = skills::skill_roots(
+                    Some(std::path::Path::new(&session.cwd)),
+                    &self.runtime.skills().skill_home(),
+                );
+                if let Some(plugin) = endpoint.and_then(|endpoint| endpoint.plugin_dir.as_ref()) {
+                    skill_roots.push(plugin.join("skills"));
+                }
 
                 let developer_instructions = self.codex_developer_instructions(session).await;
 
@@ -1343,10 +1542,7 @@ impl SessionService<'_> {
                     cwd: PathBuf::from(&session.cwd),
                     posture,
                     add_dirs,
-                    skill_roots: skills::skill_roots(
-                        Some(std::path::Path::new(&session.cwd)),
-                        &self.runtime.skills().skill_home(),
-                    ),
+                    skill_roots,
                     resume: resume_thread,
                     prior_user_turns,
                     model,
@@ -1354,6 +1550,7 @@ impl SessionService<'_> {
                     ephemeral: false,
                     env,
                     developer_instructions,
+                    extra_args,
                 })
                 .await?;
                 // codex 0.156+ resumes a thread in its saved plan mode, and a
@@ -1401,6 +1598,10 @@ impl SessionService<'_> {
                 }
                 allowed_tools.extend(extra_allowed_tools.iter().cloned());
                 disallowed_tools.extend(extra_disallowed_tools.iter().cloned());
+                let mcp_config = endpoint.map(|endpoint| {
+                    allowed_tools.extend(inject::mcp_allow_rules());
+                    inject::claude_mcp_config(&endpoint.ctl, &identity_env).to_string()
+                });
 
                 let path = self.runtime.binaries.augmented_path().await;
                 let mut env = vec![("PATH".to_string(), path.to_string_lossy().into_owned())];
@@ -1409,6 +1610,7 @@ impl SessionService<'_> {
                 // A daemonized server has no SSH_AUTH_SOCK of its own; without this an
                 // agent's own `git push` fails where a terminal's succeeds (ADR-0009 §7).
                 env.extend(self.runtime.environment.overlay_env());
+                env.extend(identity_env);
 
                 let (driver, rx) = ClaudeDriver::spawn(SpawnConfig {
                     claude_bin: claude,
@@ -1429,11 +1631,27 @@ impl SessionService<'_> {
                         .then(|| pipeline::review_notes_instruction(&session.workstream_id)),
                     env,
                     claude_config_dir: Some(self.runtime.paths.claude_config_dir.clone()),
+                    mcp_config,
+                    plugin_dir: endpoint.and_then(|endpoint| endpoint.plugin_dir.clone()),
                 })?;
                 let driver: Arc<dyn AgentDriver> = Arc::new(driver);
                 Ok((driver, rx, Some(permission_mode)))
             }
         }
+    }
+
+    /// The MCP `-c` keys were probed on 0.164; nothing proves older codex accepts them.
+    async fn codex_supports_mcp(&self) -> bool {
+        let status = self.runtime.binaries.status(BinaryKind::Codex).await;
+        let version = status.version.as_deref().and_then(parse_semver);
+        let supported = version.is_some_and(|v| v >= inject::CODEX_HOOKS_MIN);
+        if !supported {
+            tracing::info!(
+                "codex {} gets no MCP server: it predates 0.164",
+                status.version.as_deref().unwrap_or("of unknown version")
+            );
+        }
+        supported
     }
 
     pub async fn rewind(&self, request: RewindSessionRequest) -> Result<RewindSessionOutcome> {
@@ -1525,8 +1743,11 @@ fn spawn_relay(
     ingress: mpsc::Sender<SessionEvent>,
     registry: Arc<super::registry::SessionRegistry>,
     session_id: String,
+    token: Option<TokenGuard>,
 ) {
     tokio::spawn(async move {
+        // Revoked when the relay ends, not when this function returns.
+        let _token = token;
         loop {
             match rx.recv().await {
                 Ok(event) => {
@@ -1536,18 +1757,18 @@ fn spawn_relay(
                         registry.set_permission_mode(&session_id, mode).await;
                     }
                     if ingress.send(event).await.is_err() {
-                        return;
+                        break;
                     }
                     if terminal {
                         registry.remove(&session_id).await;
-                        return;
+                        break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("session {session_id} relay lagged {n} events");
                     continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => return,
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });

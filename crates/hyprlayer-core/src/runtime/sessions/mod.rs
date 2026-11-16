@@ -25,7 +25,7 @@ pub use delivery::{LiveReceiver, SessionAttachment, SessionStreamError};
 pub use forwarder::ActorRevState;
 pub use service::{
     ActiveSession, LaunchAndConverseParams, LaunchSessionParams, RewindSessionOutcome,
-    RewindSessionRequest, SendContext, SessionService, StartStageSessionRequest,
+    RewindSessionRequest, SendContext, SessionLineage, SessionService, StartStageSessionRequest,
     StartedStageSession,
 };
 

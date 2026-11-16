@@ -1,7 +1,12 @@
+pub mod engines;
+pub mod screen;
+pub mod text;
+
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 
 use base64::Engine as _;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -20,10 +25,15 @@ const MARK_BYTES: u64 = 1024;
 /// threads in one process. Unbounded, a `cat` of a large file outruns the
 /// coalescer and the queue grows without limit.
 const READ_QUEUE_CHUNKS: usize = 16;
+/// How long an exited child's output may take to reach EOF before the exit is signalled anyway.
+const EXIT_DRAIN: Duration = Duration::from_millis(500);
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 
 pub use hyprlayer_models::terminal::TerminalEvent;
+
+/// Sees every flush, in order.
+type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
 /// The one copy of a pty's output: a byte-capped ring every subscriber reads
 /// through its own cursor, so scrollback replay and the live stream are the
@@ -44,6 +54,7 @@ struct RingInner {
     // drops back to one, so head always lands on a flush end — a char boundary.
     flush_ends: VecDeque<u64>,
     exited: Option<Option<i32>>,
+    tap: Option<OutputTap>,
 }
 
 impl OutputRing {
@@ -56,6 +67,7 @@ impl OutputRing {
                 snapshot_floor: 0,
                 flush_ends: VecDeque::new(),
                 exited: None,
+                tap: None,
             }),
             tail_tx,
         }
@@ -65,7 +77,7 @@ impl OutputRing {
         if flush.is_empty() {
             return;
         }
-        let tail = {
+        let (tail, tap) = {
             let mut inner = self.inner.lock().unwrap();
             inner.make_room(flush.len());
             inner.bytes.extend(flush.iter().copied());
@@ -77,9 +89,24 @@ impl OutputRing {
             {
                 inner.flush_ends.push_back(tail);
             }
-            tail
+            (tail, inner.tap.clone())
         };
+        // Outside the lock, before the wakeup: one thread pushes, so order holds and a woken reader sees it.
+        if let Some(tap) = tap {
+            tap(flush);
+        }
         self.tail_tx.send_replace(tail);
+    }
+
+    /// Feeds `tap` the retained output, then every later flush; `false` when output was already
+    /// trimmed. One tap per ring: a second replaces the first.
+    fn set_tap(&self, tap: OutputTap) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        let (front, back) = inner.bytes.as_slices();
+        tap(front);
+        tap(back);
+        inner.tap = Some(tap);
+        inner.head == 0
     }
 
     fn exit(&self, code: Option<i32>) {
@@ -91,6 +118,18 @@ impl OutputRing {
         self.tail_tx.send_replace(tail);
     }
 
+    // `next_event` without copying: `true` when output moved the cursor, `false` once exited.
+    fn advance(&self, cursor: &mut u64) -> Option<bool> {
+        let inner = self.inner.lock().unwrap();
+        *cursor = (*cursor).max(inner.head);
+        let tail = inner.tail();
+        if *cursor < tail {
+            *cursor = tail;
+            return Some(true);
+        }
+        inner.exited.map(|_| false)
+    }
+
     // One lock for cursor and wakeup, so nothing lands between snapshot and stream.
     fn attach(&self) -> (u64, watch::Receiver<u64>) {
         let inner = self.inner.lock().unwrap();
@@ -100,6 +139,32 @@ impl OutputRing {
     fn scrollback_bytes(&self) -> Vec<u8> {
         let inner = self.inner.lock().unwrap();
         let from = (inner.replay_start() - inner.head) as usize;
+        inner.bytes.range(from..).copied().collect()
+    }
+
+    fn next_raw(&self, cursor: &mut u64) -> Option<RawOutput> {
+        let inner = self.inner.lock().unwrap();
+        let gap = *cursor < inner.head;
+        *cursor = (*cursor).max(inner.head);
+        let tail = inner.tail();
+        if *cursor == tail {
+            return None;
+        }
+        let from = (*cursor - inner.head) as usize;
+        *cursor = tail;
+        Some(RawOutput {
+            bytes: inner.bytes.range(from..).copied().collect(),
+            gap,
+        })
+    }
+
+    fn exited(&self) -> bool {
+        self.inner.lock().unwrap().exited.is_some()
+    }
+
+    fn tail_bytes(&self, max: usize) -> Vec<u8> {
+        let inner = self.inner.lock().unwrap();
+        let from = inner.bytes.len().saturating_sub(max);
         inner.bytes.range(from..).copied().collect()
     }
 
@@ -153,6 +218,12 @@ impl RingInner {
     }
 }
 
+/// Output past a reader's cursor, undecoded; `gap` when the ring dropped bytes before it was read.
+pub struct RawOutput {
+    pub bytes: Vec<u8>,
+    pub gap: bool,
+}
+
 /// One subscriber's cursor into a session's output ring.
 pub struct RingReader {
     ring: Arc<OutputRing>,
@@ -186,6 +257,38 @@ impl RingReader {
         }
         None
     }
+
+    /// `recv` without the base64; `None` once the child is gone and the ring is drained.
+    pub async fn recv_raw(&mut self) -> Option<RawOutput> {
+        while !self.done {
+            if let Some(out) = self.ring.next_raw(&mut self.cursor) {
+                return Some(out);
+            }
+            if self.ring.exited() {
+                self.done = true;
+            } else if self.tail_rx.changed().await.is_err() {
+                break;
+            }
+        }
+        None
+    }
+
+    /// Waits for output without copying it; `false` once the child is gone.
+    /// A fresh reader's first wake is the retained scrollback.
+    pub async fn skip(&mut self) -> bool {
+        while !self.done {
+            match self.ring.advance(&mut self.cursor) {
+                Some(true) => return true,
+                Some(false) => self.done = true,
+                None => {
+                    if self.tail_rx.changed().await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 pub struct SpawnTerminal {
@@ -203,6 +306,8 @@ pub struct PtySession {
     killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     writer: StdMutex<Box<dyn Write + Send>>,
     ring: Arc<OutputRing>,
+    /// `(rows, cols)` as last set.
+    size: Arc<StdMutex<(u16, u16)>>,
     #[cfg(unix)]
     pid: Option<u32>,
     pub workstream_id: String,
@@ -250,12 +355,13 @@ impl PtySession {
             killer: StdMutex::new(killer),
             writer: StdMutex::new(writer),
             ring: ring.clone(),
+            size: Arc::new(StdMutex::new((cfg.rows, cfg.cols))),
             #[cfg(unix)]
             pid,
             workstream_id: cfg.workstream_id,
         });
 
-        let (code_tx, code_rx) = std::sync::mpsc::channel::<Option<i32>>();
+        let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
 
         let (chunk_tx, chunk_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(READ_QUEUE_CHUNKS);
 
@@ -271,6 +377,7 @@ impl PtySession {
             }
         });
 
+        let exit_ring = ring.clone();
         std::thread::spawn(move || {
             let mut pending: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
             while let Ok(first) = chunk_rx.recv() {
@@ -296,16 +403,26 @@ impl PtySession {
                 }
             }
             ring.push(&pending);
-            let code = code_rx.recv().unwrap_or(None);
-            ring.exit(code);
+            let _ = drained_tx.send(());
         });
 
         std::thread::spawn(move || {
             let code = child.wait().ok().map(|s| s.exit_code() as i32);
-            let _ = code_tx.send(code);
-            if let Ok(mut guard) = master.lock() {
-                let _ = guard.take();
+            // Dropped outside the lock and on its own thread: a hung ClosePseudoConsole would hold up `resize`.
+            let close_master = || {
+                let closing = master.lock().ok().and_then(|mut guard| guard.take());
+                std::thread::spawn(move || drop(closing));
+            };
+            if cfg!(windows) {
+                // ConPTY's reader sees EOF only once conhost closes its output, which a hung one never does.
+                close_master();
+                let _ = drained_rx.recv_timeout(EXIT_DRAIN);
+            } else {
+                // A Unix reader reaches EOF once every holder of the slave is gone, background jobs included.
+                let _ = drained_rx.recv();
+                close_master();
             }
+            exit_ring.exit(code);
         });
 
         Ok(session)
@@ -321,8 +438,21 @@ impl PtySession {
         self.ring.scrollback_bytes()
     }
 
+    /// The newest `max` output bytes; may start mid-character.
+    pub fn tail_bytes(&self, max: usize) -> Vec<u8> {
+        self.ring.tail_bytes(max)
+    }
+
     pub fn clear_scrollback(&self) {
         self.ring.clear_scrollback();
+    }
+
+    /// Calls `tap` on the coalescer thread with every flush from the first byte, so it never lags
+    /// the ring; `false` when the earliest output was already gone.
+    pub fn tap_output(&self, tap: impl Fn(&[u8], (u16, u16)) + Send + Sync + 'static) -> bool {
+        let size = self.size.clone();
+        self.ring
+            .set_tap(Arc::new(move |bytes| tap(bytes, *size.lock().unwrap())))
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
@@ -331,7 +461,12 @@ impl PtySession {
         w.flush()
     }
 
+    pub fn size(&self) -> (u16, u16) {
+        *self.size.lock().unwrap()
+    }
+
     pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
+        *self.size.lock().unwrap() = (rows, cols);
         match self.master.lock().unwrap().as_ref() {
             Some(master) => master
                 .resize(PtySize {

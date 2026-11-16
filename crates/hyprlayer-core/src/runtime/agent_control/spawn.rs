@@ -1,0 +1,926 @@
+//! Agents starting, waiting on and messaging composer sessions and PTY agents.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use hyprlayer_models::{
+    AgentCaller, ClientRef, Goal, Harness, PermissionMode, PtyAgent, PtyAgentState,
+    PtyLaunchSession, RuntimeEvent, SessionEvent, SessionOrigin, SpawnPtyAgentRequest,
+    SpawnSessionRequest, UiRequest, WaitOutcome, WaitUntil,
+};
+use tokio::sync::OwnedMutexGuard;
+use tokio::time::Instant;
+
+use super::pty_agents::{asking, PtyAgents, PtySnapshot};
+use super::pty_controls::{self, composing};
+use super::{blocking, denied, in_project, AgentControlService, AgentIdentity};
+use crate::error::{CoreError, Result};
+use crate::pipeline::{self, Stage};
+use crate::runtime::goals::{GoalTarget, StartGoalRequest};
+use crate::runtime::sessions::goal_loop::{is_idle, Watch};
+use crate::runtime::sessions::{SendContext, SessionLineage, StartStageSessionRequest};
+use crate::runtime::terminals::{CloseTerminalRequest, LaunchAgentRequest, PtyLineage};
+use crate::store::{Session, Workstream};
+use crate::terminal::{engines, text, PtySession};
+
+/// A wait's caller may be gone; the request task still runs to its end, so the end is bounded.
+const WAIT_CAP: Duration = Duration::from_secs(600);
+const STALL: Duration = Duration::from_secs(5);
+const POLL: Duration = Duration::from_millis(250);
+/// A spawned PTY has no window yet; this is the size a desktop tab starts from.
+const SPAWN_COLS: u16 = 120;
+const SPAWN_ROWS: u16 = 32;
+/// How long a spawned PTY's first prompt waits for its TUI to be ready.
+const PROMPT_WAIT: Duration = Duration::from_secs(60);
+/// An unhooked TUI reports no ready state; this much quiet output stands in for one.
+const PROMPT_QUIET: Duration = Duration::from_secs(3);
+/// A paste the TUI swallowed never submits; past this a wait stops counting it as pending.
+const PROMPT_ACK: Duration = Duration::from_secs(10);
+/// The TUI must see the paste end before the Enter, or the Enter joins the paste.
+const PASTE_SETTLE: Duration = Duration::from_millis(100);
+const READ_LINES_CAP: u32 = 500;
+
+/// What a spawn may start, once every refusal has been ruled out.
+pub struct SpawnCheck {
+    pub workstream: Workstream,
+    pub harness: Option<Harness>,
+    pub permission_mode: PermissionMode,
+    /// The child's depth.
+    pub depth: u32,
+    pub lineage: SessionLineage,
+    /// Held until the child is live, so the caller's next spawn counts it.
+    _slot: OwnedMutexGuard<()>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Observed {
+    Working,
+    NeedsYou,
+    Idle,
+    Exited,
+}
+
+impl Observed {
+    fn as_str(self) -> &'static str {
+        match self {
+            Observed::Working => "working",
+            Observed::NeedsYou => "needs_you",
+            Observed::Idle => "idle",
+            Observed::Exited => "exited",
+        }
+    }
+
+    /// A wait stops at its state or any later one: an asking child never reaches idle on its own.
+    fn reaches(self, until: WaitUntil) -> bool {
+        match until {
+            WaitUntil::Idle => self != Observed::Working,
+            WaitUntil::NeedsYou => matches!(self, Observed::NeedsYou | Observed::Exited),
+            WaitUntil::Exited => self == Observed::Exited,
+        }
+    }
+}
+
+struct LastTurn {
+    asking: bool,
+    reply: Option<String>,
+}
+
+impl AgentControlService<'_> {
+    /// Every refusal a spawn can meet, run before anything is written: level, project, docs, depth, children, escalation.
+    pub async fn check_spawn(
+        &self,
+        identity: &AgentIdentity,
+        workstream_id: &str,
+        stage: Stage,
+        harness: Option<Harness>,
+        permission_mode: Option<PermissionMode>,
+        attached_docs: &[String],
+    ) -> Result<SpawnCheck> {
+        self.require_full(identity).await?;
+        let workstream = self.runtime.workstreams().find(workstream_id).await?;
+        in_project(identity, &workstream.project_path)?;
+        // An Implement or Validate start activates the plans it attaches, which writes them.
+        let activates = matches!(stage, Stage::Implement | Stage::Validate);
+        for doc in attached_docs {
+            self.check_doc(identity, doc, activates).await?;
+        }
+        let limits = self.runtime.settings.get().await.agent_control;
+        let depth = identity.depth.saturating_add(1);
+        if depth > limits.max_depth {
+            return Err(CoreError::AgentLimitReached {
+                detail: format!(
+                    "a child would be {depth} agents deep, past the Max depth of {}",
+                    limits.max_depth
+                ),
+            });
+        }
+        let slot = self
+            .runtime
+            .agent_spawn_locks
+            .acquire(identity.caller.id())
+            .await;
+        let live = self.live_children(identity).await?;
+        if live >= limits.max_live_children as usize {
+            return Err(CoreError::AgentLimitReached {
+                detail: format!(
+                    "this agent already has {live} live children, the Max live children"
+                ),
+            });
+        }
+        let own = self
+            .mode_of(identity)
+            .await
+            .unwrap_or(PermissionMode::Default);
+        let permission_mode = permission_mode.unwrap_or(own);
+        if rank(permission_mode) > rank(own) {
+            return Err(denied(&format!(
+                "a child cannot run in {} mode, above this agent's own {}",
+                mode_name(permission_mode),
+                mode_name(own)
+            )));
+        }
+        // A stage's pre-approved tools run unasked whatever the mode, so they must not widen the caller's.
+        if own != PermissionMode::BypassPermissions {
+            let own_stage = self.caller_stage(identity).await;
+            if !pipeline::pre_approves_within(stage, own_stage) {
+                return Err(denied(&format!(
+                    "a child cannot run the {} stage, which pre-approves tools this agent's {} stage does not",
+                    stage.as_str(),
+                    own_stage.as_str()
+                )));
+            }
+        }
+        let (parent_session_id, parent_terminal) = match &identity.caller {
+            AgentCaller::Session { session_id } => (Some(session_id.clone()), None),
+            AgentCaller::Terminal { terminal_id } => (None, Some((terminal_id.clone(), depth))),
+        };
+        Ok(SpawnCheck {
+            workstream,
+            harness: harness.or(identity.harness),
+            permission_mode,
+            depth,
+            lineage: SessionLineage {
+                origin: SessionOrigin::Agent,
+                parent_session_id,
+                parent_terminal,
+            },
+            _slot: slot,
+        })
+    }
+
+    /// A session caller's own stage; a terminal, or an unreadable row, counts as General.
+    async fn caller_stage(&self, identity: &AgentIdentity) -> Stage {
+        let AgentCaller::Session { session_id } = &identity.caller else {
+            return Stage::General;
+        };
+        match self.runtime.sessions().get(session_id).await {
+            Ok(Some(session)) => session.stage,
+            _ => Stage::General,
+        }
+    }
+
+    /// Starts a composer session for the caller with no stream; every attached desktop opens it in the background.
+    pub async fn spawn_session(
+        &self,
+        identity: &AgentIdentity,
+        request: SpawnSessionRequest,
+    ) -> Result<Session> {
+        let SpawnSessionRequest {
+            workstream_id,
+            stage,
+            prompt,
+            harness,
+            model,
+            effort,
+            permission_mode,
+            attached_docs,
+            title,
+        } = request;
+        let stage = stage.unwrap_or(Stage::General);
+        let check = self
+            .check_spawn(
+                identity,
+                &workstream_id,
+                stage,
+                harness,
+                permission_mode,
+                &attached_docs,
+            )
+            .await?;
+        let label = self.caller_label(identity).await;
+        let sessions = self.runtime.sessions();
+        let started = sessions
+            .prepare_start_with(
+                StartStageSessionRequest {
+                    workstream: check.workstream,
+                    stage,
+                    input: prompt,
+                    attached_docs,
+                    harness: check.harness,
+                    model: model.clone(),
+                    effort: effort.clone(),
+                    // Never `None`: a stage's own default can outrank the caller.
+                    permission_mode: Some(check.permission_mode),
+                    prompt_name: None,
+                    client_message_id: None,
+                    parent_session_id: None,
+                },
+                check.lineage,
+            )
+            .await?;
+        let session = started.session;
+        let mut launch = started.launch;
+        launch.prefix_prompt(&header(identity, &label));
+        sessions
+            .start_detached(launch, Some(author(identity, label)))
+            .await?;
+        if title.is_some() {
+            if let Err(e) = sessions.set_title(&session.id, title).await {
+                tracing::warn!("session {}: its title was not set: {e}", session.id);
+            }
+        }
+        // The launched mode, not the asked one: the launch policy may have resolved it differently.
+        let launched = sessions.permission_mode(&session.id).await;
+        let _ = self.runtime.events.send(RuntimeEvent::UiRequested {
+            request: UiRequest::OpenSessionTab {
+                workstream_id: session.workstream_id.clone(),
+                session_id: session.id.clone(),
+                focus: false,
+                permission_mode: launched.or(Some(check.permission_mode)),
+                model,
+                effort,
+            },
+        });
+        Ok(sessions.get(&session.id).await?.unwrap_or(session))
+    }
+
+    /// Returns once the session reaches `until`, stalls, or the timeout (at most 600 s) passes.
+    pub async fn wait_session(
+        &self,
+        identity: &AgentIdentity,
+        session_id: &str,
+        until: WaitUntil,
+        timeout_ms: u32,
+    ) -> Result<WaitOutcome> {
+        self.check_session(identity, session_id).await?;
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.into()).min(WAIT_CAP);
+        let actors = self.runtime.session_actors.clone();
+        // Lost or ended, the watch only stops waking the loop early; the poll still runs.
+        let mut watch = Watch::attach(actors.clone(), session_id).await.ok();
+        let mut asking = self.last_turn(session_id).await?.asking;
+        let rev_of = || async { actors.rev_state(session_id, None).await.map(|s| s.rev) };
+        let mut rev = rev_of().await;
+        let mut moved = Instant::now();
+        loop {
+            let observed = self.observe(session_id, asking).await;
+            if observed.reaches(until) {
+                return self.outcome(session_id, observed, false, false).await;
+            }
+            let now = rev_of().await;
+            if now != rev {
+                rev = now;
+                moved = Instant::now();
+            } else if observed != Observed::Working && moved.elapsed() >= STALL {
+                return self.outcome(session_id, observed, true, false).await;
+            }
+            if Instant::now() >= deadline {
+                return self.outcome(session_id, observed, false, true).await;
+            }
+            let tick = tokio::time::sleep(POLL);
+            let ended = match watch.as_mut() {
+                Some(w) => tokio::select! {
+                    event = w.next() => match event {
+                        Some(event) => {
+                            asking = asks_after(asking, &event);
+                            false
+                        }
+                        None => true,
+                    },
+                    () = tick => false,
+                },
+                None => {
+                    tick.await;
+                    false
+                }
+            };
+            if ended {
+                watch = None;
+            }
+        }
+    }
+
+    /// An attributed, headed turn into a session in the caller's project; hop-counted once delivered.
+    pub async fn send_message(
+        &self,
+        identity: &AgentIdentity,
+        session_id: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.require_full(identity).await?;
+        let sessions = self.runtime.sessions();
+        let target = sessions
+            .get(session_id)
+            .await?
+            .ok_or_else(|| CoreError::SessionNotFound {
+                session_id: session_id.to_string(),
+            })?;
+        self.check_workstream(identity, &target.workstream_id)
+            .await?;
+        self.check_message_rank(identity, &target).await?;
+        self.admit_hop(session_id, &target.workstream_id, &session_label(&target))
+            .await?;
+        let label = self.caller_label(identity).await;
+        let text = format!("{}\n\n{text}", header(identity, &label));
+        sessions
+            .send(
+                session_id,
+                &text,
+                &[],
+                None,
+                None,
+                SendContext {
+                    base_rev: None,
+                    author: Some(author(identity, label)),
+                },
+            )
+            .await?;
+        self.record_hop(session_id).await;
+        Ok(())
+    }
+
+    /// A message steers its target, so one running above the caller must be the caller's own child.
+    async fn check_message_rank(&self, identity: &AgentIdentity, target: &Session) -> Result<()> {
+        let own = self
+            .mode_of(identity)
+            .await
+            .unwrap_or(PermissionMode::Default);
+        let theirs = match self
+            .runtime
+            .session_registry
+            .permission_mode(&target.id)
+            .await
+        {
+            Some(mode) => mode,
+            None => pipeline::policy_for(target.stage).permission_mode,
+        };
+        if rank(theirs) <= rank(own)
+            || self
+                .check_descendant(identity, &target.id, false)
+                .await
+                .is_ok()
+        {
+            return Ok(());
+        }
+        Err(denied(&format!(
+            "that session runs in {} mode, which outranks this agent's {}",
+            mode_name(theirs),
+            mode_name(own)
+        )))
+    }
+
+    /// Launches a PTY agent for the caller; every attached desktop adopts it in a background tab.
+    pub async fn spawn_pty_agent(
+        &self,
+        identity: &AgentIdentity,
+        request: SpawnPtyAgentRequest,
+    ) -> Result<PtyAgent> {
+        let SpawnPtyAgentRequest {
+            workstream_id,
+            engine_id,
+            prompt,
+            bypass,
+            model,
+            title,
+        } = request;
+        let mode = if bypass {
+            PermissionMode::BypassPermissions
+        } else {
+            PermissionMode::Default
+        };
+        let configured = self.runtime.settings.get().await.multiplexer.engines;
+        // An unknown id would launch as a bare command, a shell the agent could then type into.
+        if !engines::is_known(&configured, &engine_id) {
+            return Err(denied(&format!("{engine_id} is not a configured engine")));
+        }
+        let prompted = prompt.as_ref().is_some_and(|p| !p.trim().is_empty());
+        if prompted && !matches!(engine_id.as_str(), "claude-code" | "codex") {
+            self.check_unhooked_input(identity, false).await?;
+        }
+        // Asking for `mode` makes the spawn check refuse a bypass PTY from a caller that isn't one.
+        let check = self
+            .check_spawn(
+                identity,
+                &workstream_id,
+                Stage::General,
+                None,
+                Some(mode),
+                &[],
+            )
+            .await?;
+        let (_, launched) = self
+            .runtime
+            .terminals()
+            .launch_agent(LaunchAgentRequest {
+                workstream_id: check.workstream.id.clone(),
+                engine_id: engine_id.clone(),
+                session: PtyLaunchSession {
+                    session_id: None,
+                    resume: false,
+                    bypass,
+                    model,
+                    permission_mode: None,
+                    effort: None,
+                },
+                cols: SPAWN_COLS,
+                rows: SPAWN_ROWS,
+                lineage: Some(PtyLineage {
+                    parent: identity.caller.clone(),
+                    depth: check.depth,
+                    mode,
+                }),
+            })
+            .await?;
+        // A claude or codex that came up unhooked (old codex, a user `--settings`) gets the same rule.
+        if prompted && !launched.hooked {
+            if let Err(e) = self.check_unhooked_input(identity, false).await {
+                let _ = self
+                    .runtime
+                    .terminals()
+                    .close(CloseTerminalRequest {
+                        terminal_id: launched.terminal_id.clone(),
+                    })
+                    .await;
+                return Err(e);
+            }
+        }
+        let snapshot = self.runtime.pty_agents.snapshot(&launched.terminal_id);
+        let mut agent = snapshot.as_ref().map_or_else(
+            || PtyAgent {
+                terminal_id: launched.terminal_id.clone(),
+                workstream_id: check.workstream.id.clone(),
+                engine_id,
+                state: PtyAgentState::Exited,
+                provider_session_id: launched.provider_session_id.clone(),
+                activity: None,
+                last_reply: None,
+                spawned_by: Some(identity.caller.clone()),
+                hooked: launched.hooked,
+                title: None,
+                status: Default::default(),
+            },
+            |s| s.agent.clone(),
+        );
+        let _ = self.runtime.events.send(RuntimeEvent::UiRequested {
+            request: UiRequest::OpenTerminalTab {
+                workstream_id: agent.workstream_id.clone(),
+                terminal_id: agent.terminal_id.clone(),
+                engine_id: agent.engine_id.clone(),
+                provider_session_id: agent.provider_session_id.clone(),
+                bypass,
+            },
+        });
+        // After the tab opens, so desktops adopt it as they do a generated title, which it then rules out.
+        if let Some(title) = title.filter(|t| !t.trim().is_empty()) {
+            self.runtime
+                .pty_agents
+                .set_title(&agent.terminal_id, title.clone());
+            agent.title = Some(title);
+        }
+        if let (Some(prompt), Some(snapshot)) = (prompt.filter(|p| !p.trim().is_empty()), snapshot)
+        {
+            let label = self.caller_label(identity).await;
+            let text = format!("{}\n\n{prompt}", header(identity, &label));
+            // A wait right after the spawn must not see the pre-prompt idle as the agent's answer.
+            self.runtime
+                .pty_agents
+                .owe_prompt(&agent.terminal_id, PROMPT_WAIT);
+            tokio::spawn(first_prompt(
+                self.runtime.pty_agents.clone(),
+                snapshot,
+                text,
+            ));
+        }
+        Ok(agent)
+    }
+
+    /// A headed, hop-counted paste into a PTY agent the caller spawned.
+    pub async fn send_pty_message(
+        &self,
+        identity: &AgentIdentity,
+        terminal_id: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.require_full(identity).await?;
+        let target = self.pty_target(identity, terminal_id).await?;
+        self.check_descendant(identity, terminal_id, false).await?;
+        self.check_unhooked_input(identity, target.agent.hooked)
+            .await?;
+        let label = self.caller_label(identity).await;
+        let text = format!("{}\n\n{text}", header(identity, &label));
+        let agents = &self.runtime.pty_agents;
+        let _input = target.input.lock().await;
+        // Read under the lock: a bar change or message that held it may have moved the agent on.
+        if let Some(reason) = paste_refusal(agents, terminal_id) {
+            return Err(denied(reason));
+        }
+        self.admit_hop(
+            terminal_id,
+            &target.agent.workstream_id,
+            &target.agent.engine_id,
+        )
+        .await?;
+        // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
+        agents.owe_prompt(terminal_id, PROMPT_ACK);
+        paste(agents, terminal_id, &target.session, &text).await?;
+        self.record_hop(terminal_id).await;
+        Ok(())
+    }
+
+    /// Ends a PTY agent the caller spawned, freeing its live-children slot.
+    pub async fn kill_pty_agent(&self, identity: &AgentIdentity, terminal_id: &str) -> Result<()> {
+        self.require_full(identity).await?;
+        self.pty_target(identity, terminal_id).await?;
+        self.check_descendant(identity, terminal_id, false).await?;
+        self.runtime
+            .terminals()
+            .close(CloseTerminalRequest {
+                terminal_id: terminal_id.to_string(),
+            })
+            .await
+    }
+
+    /// Esc, the TUI's interrupt, into a PTY agent the caller spawned; never a human turn.
+    pub async fn interrupt_pty_agent(
+        &self,
+        identity: &AgentIdentity,
+        terminal_id: &str,
+    ) -> Result<()> {
+        self.require_full(identity).await?;
+        let target = self.pty_target(identity, terminal_id).await?;
+        self.check_descendant(identity, terminal_id, false).await?;
+        target.session.write_input(b"\x1b")?;
+        Ok(())
+    }
+
+    /// The PTY agent's screen as plain text: its last `lines` lines, at most 500.
+    pub async fn read_terminal(
+        &self,
+        identity: &AgentIdentity,
+        terminal_id: &str,
+        lines: u32,
+    ) -> Result<String> {
+        let target = self.pty_target(identity, terminal_id).await?;
+        let lines = lines.clamp(1, READ_LINES_CAP) as usize;
+        Ok(text::tail(&target.session.scrollback_bytes(), lines))
+    }
+
+    /// `wait_session` over a hooked PTY agent's folded state.
+    pub async fn wait_pty_agent(
+        &self,
+        identity: &AgentIdentity,
+        terminal_id: &str,
+        until: WaitUntil,
+        timeout_ms: u32,
+    ) -> Result<WaitOutcome> {
+        let first = self.pty_target(identity, terminal_id).await?;
+        if !first.agent.hooked {
+            return Err(denied(
+                "that agent's engine reports no state to wait on; read its terminal instead",
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_millis(timeout_ms.into()).min(WAIT_CAP);
+        let (mut signals, mut last_reply) = (first.signals, first.agent.last_reply);
+        let mut moved = Instant::now();
+        loop {
+            let observed = match self.runtime.pty_agents.snapshot(terminal_id) {
+                Some(now) => {
+                    if now.signals != signals {
+                        signals = now.signals;
+                        moved = Instant::now();
+                    }
+                    last_reply = now.agent.last_reply;
+                    if now.prompt_owed {
+                        Observed::Working
+                    } else {
+                        observe_pty(now.agent.state)
+                    }
+                }
+                None => Observed::Exited,
+            };
+            let outcome = |stalled, timed_out| WaitOutcome {
+                state: observed.as_str().to_string(),
+                last_reply: last_reply.clone(),
+                stalled,
+                timed_out,
+            };
+            if observed.reaches(until) {
+                return Ok(outcome(false, false));
+            }
+            if observed != Observed::Working && moved.elapsed() >= STALL {
+                return Ok(outcome(true, false));
+            }
+            if Instant::now() >= deadline {
+                return Ok(outcome(false, true));
+            }
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    /// A goal on the caller or a session it spawned, or on a new session under `spawn_session`'s limits.
+    pub async fn start_goal(
+        &self,
+        identity: &AgentIdentity,
+        request: StartGoalRequest,
+    ) -> Result<Goal> {
+        self.require_full(identity).await?;
+        let StartGoalRequest { target, spec } = request;
+        let label = self.caller_label(identity).await;
+        let author = Some(author(identity, label));
+        let goals = self.runtime.goals();
+        match target {
+            GoalTarget::Session { session_id } => {
+                self.check_session(identity, &session_id).await?;
+                self.check_descendant(identity, &session_id, true).await?;
+                let target = GoalTarget::Session { session_id };
+                goals.start(StartGoalRequest { target, spec }, author).await
+            }
+            GoalTarget::NewSession {
+                workstream_id,
+                stage,
+                harness,
+                model,
+                effort,
+                permission_mode,
+                attached_docs,
+            } => {
+                let check = self
+                    .check_spawn(
+                        identity,
+                        &workstream_id,
+                        stage,
+                        harness,
+                        permission_mode,
+                        &attached_docs,
+                    )
+                    .await?;
+                let target = GoalTarget::NewSession {
+                    workstream_id,
+                    stage,
+                    harness: check.harness,
+                    model,
+                    effort,
+                    // Never `None`: a stage's own default can outrank the caller.
+                    permission_mode: Some(check.permission_mode),
+                    attached_docs,
+                };
+                goals
+                    .start_with(StartGoalRequest { target, spec }, author, check.lineage)
+                    .await
+            }
+        }
+    }
+
+    async fn observe(&self, session_id: &str, asking: bool) -> Observed {
+        if !self.runtime.sessions().is_live(session_id).await {
+            Observed::Exited
+        } else if asking {
+            Observed::NeedsYou
+        } else if is_idle(&self.runtime.session_actors, session_id).await {
+            Observed::Idle
+        } else {
+            Observed::Working
+        }
+    }
+
+    async fn outcome(
+        &self,
+        session_id: &str,
+        observed: Observed,
+        stalled: bool,
+        timed_out: bool,
+    ) -> Result<WaitOutcome> {
+        Ok(WaitOutcome {
+            state: observed.as_str().to_string(),
+            last_reply: self.last_turn(session_id).await?.reply,
+            stalled,
+            timed_out,
+        })
+    }
+
+    /// Only the latest turn's rows: its open ask and its last top-level reply.
+    async fn last_turn(&self, session_id: &str) -> Result<LastTurn> {
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        let tail = blocking(move || {
+            let turns = db.count_user_messages(&id)?;
+            let from = db.nth_user_message_seq(&id, turns)?;
+            db.session_log_after(&id, from.map(|seq| seq - 1))
+        })
+        .await?;
+        let mut last = LastTurn {
+            asking: false,
+            reply: None,
+        };
+        for entry in tail {
+            last.asking = asks_after(last.asking, &entry.event);
+            if let SessionEvent::AssistantText {
+                text,
+                parent_id: None,
+                ..
+            } = entry.event
+            {
+                last.reply = Some(text);
+            }
+        }
+        Ok(last)
+    }
+
+    /// An unhooked PTY reports no prompt, so typed input could answer one; only a bypass caller may risk it.
+    async fn check_unhooked_input(&self, identity: &AgentIdentity, hooked: bool) -> Result<()> {
+        if hooked || self.mode_of(identity).await == Some(PermissionMode::BypassPermissions) {
+            return Ok(());
+        }
+        Err(denied(
+            "that agent reports no state, so typed input could answer a prompt it shows",
+        ))
+    }
+
+    /// How a message names its sender: a session's title, or a terminal's engine.
+    async fn caller_label(&self, identity: &AgentIdentity) -> String {
+        match &identity.caller {
+            AgentCaller::Session { session_id } => {
+                match self.runtime.sessions().get(session_id).await {
+                    Ok(Some(session)) => session_label(&session),
+                    _ => "an agent".to_string(),
+                }
+            }
+            AgentCaller::Terminal { terminal_id } => self
+                .runtime
+                .pty_agents
+                .list(Some(&identity.workstream_id))
+                .into_iter()
+                .find(|a| &a.terminal_id == terminal_id)
+                .map_or_else(|| "a terminal agent".to_string(), |a| a.engine_id),
+        }
+    }
+}
+
+fn header(identity: &AgentIdentity, label: &str) -> String {
+    format!("[from agent \"{label}\" · {}]", identity.caller.id())
+}
+
+/// The `agent:` prefix is how desktops tell an agent's turn from a person's.
+fn author(identity: &AgentIdentity, label: String) -> ClientRef {
+    ClientRef {
+        client_id: format!("agent:{}", identity.caller.id()),
+        device: label,
+    }
+}
+
+fn session_label(session: &Session) -> String {
+    session
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("{} session", session.stage.as_str()))
+}
+
+/// `exited` while still registered is a session ending inside a live process, as `/clear` does.
+fn observe_pty(state: PtyAgentState) -> Observed {
+    match state {
+        PtyAgentState::Idle => Observed::Idle,
+        PtyAgentState::AwaitingPermission | PtyAgentState::AwaitingQuestion => Observed::NeedsYou,
+        PtyAgentState::Starting | PtyAgentState::Working | PtyAgentState::Exited => {
+            Observed::Working
+        }
+    }
+}
+
+/// Why a paste now would answer the agent's prompt or send a person's draft; `None` when it may go.
+fn paste_refusal(agents: &PtyAgents, terminal_id: &str) -> Option<&'static str> {
+    let Some(now) = agents.snapshot(terminal_id) else {
+        return Some("that agent is no longer running");
+    };
+    if asking(now.agent.state) {
+        return Some("that agent is asking its user something, and a message now would answer it");
+    }
+    now.screen.as_deref().and_then(pty_controls::paste_refusal)
+}
+
+/// Bracketed paste, then Enter on its own: a CR inside the paste is a newline to the TUI. Call it
+/// under the input lock once `paste_refusal` passes.
+async fn paste(agents: &PtyAgents, terminal_id: &str, pty: &PtySession, text: &str) -> Result<()> {
+    // An ESC in the text could end the paste early and type the rest as keys.
+    let text = text.replace('\x1b', "");
+    pty.write_input(format!("\x1b[200~{text}\x1b[201~").as_bytes())?;
+    tokio::time::sleep(PASTE_SETTLE).await;
+    // A prompt that opened since would take the Enter as its answer.
+    let clear = agents.snapshot(terminal_id).is_some_and(|now| {
+        !asking(now.agent.state)
+            && now
+                .screen
+                .is_none_or(|screen| screen.rows().is_some_and(|rows| composing(&rows)))
+    });
+    if !clear {
+        agents.clear_prompt_owed(terminal_id);
+        return Err(denied(
+            "a prompt opened while the message was pasted, so it was left unsent in the agent's input",
+        ));
+    }
+    pty.write_input(b"\r")?;
+    Ok(())
+}
+
+/// Waits for the TUI to be ready, then pastes under the input lock: hooked, idle with nothing
+/// over its input box; unhooked, a quiet spell.
+async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String) {
+    let terminal_id = launch.agent.terminal_id.clone();
+    let send = || async {
+        agents.owe_prompt(&terminal_id, PROMPT_ACK);
+        paste(&agents, &terminal_id, &launch.session, &text).await
+    };
+    let sent = if launch.agent.hooked {
+        // `SessionStart` can idle it before claude has painted its input box.
+        let idle = || {
+            agents
+                .snapshot(&terminal_id)
+                .is_some_and(|now| now.agent.state == PtyAgentState::Idle)
+                && paste_refusal(&agents, &terminal_id).is_none()
+        };
+        let ready = async {
+            loop {
+                agents.snapshot(&terminal_id)?;
+                if idle() {
+                    let _input = launch.input.lock().await;
+                    // Again under the lock: a bar change that held it may have opened a picker.
+                    if idle() {
+                        return Some(send().await);
+                    }
+                }
+                tokio::time::sleep(POLL).await;
+            }
+        };
+        tokio::time::timeout(PROMPT_WAIT, ready)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        let mut reader = launch.session.subscribe();
+        let quiet = async {
+            loop {
+                match tokio::time::timeout(PROMPT_QUIET, reader.skip()).await {
+                    Err(_) => return true,
+                    Ok(false) => return false,
+                    Ok(true) => {}
+                }
+            }
+        };
+        if matches!(tokio::time::timeout(PROMPT_WAIT, quiet).await, Ok(true)) {
+            let _input = launch.input.lock().await;
+            Some(send().await)
+        } else {
+            None
+        }
+    };
+    match sent {
+        Some(Ok(())) => {}
+        Some(Err(e)) => {
+            tracing::warn!("terminal {terminal_id}: its first prompt was not written: {e}")
+        }
+        None => {
+            agents.clear_prompt_owed(&terminal_id);
+            tracing::warn!(
+                "terminal {terminal_id}: its first prompt was dropped; the agent never became ready"
+            );
+        }
+    }
+}
+
+fn asks_after(asking: bool, event: &SessionEvent) -> bool {
+    match event {
+        SessionEvent::PermissionAsk { .. } | SessionEvent::QuestionAsk { .. } => true,
+        SessionEvent::UserMessage { .. }
+        | SessionEvent::AssistantText { .. }
+        | SessionEvent::ToolResult { .. }
+        | SessionEvent::TurnDone { .. }
+        | SessionEvent::Exited { .. } => false,
+        _ => asking,
+    }
+}
+
+/// Plan < Default < AcceptEdits < Bypass: a child never runs above its parent.
+fn rank(mode: PermissionMode) -> u8 {
+    match mode {
+        PermissionMode::Plan => 0,
+        PermissionMode::Default => 1,
+        PermissionMode::AcceptEdits => 2,
+        PermissionMode::BypassPermissions => 3,
+    }
+}
+
+fn mode_name(mode: PermissionMode) -> &'static str {
+    match mode {
+        PermissionMode::Plan => "plan",
+        PermissionMode::Default => "default",
+        PermissionMode::AcceptEdits => "accept-edits",
+        PermissionMode::BypassPermissions => "bypass",
+    }
+}

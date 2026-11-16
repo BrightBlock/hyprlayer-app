@@ -1,0 +1,129 @@
+{
+  "scenario": "agent_skill_plugin",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "onlyCurrent": true,
+            "staleGone": true
+          },
+          "guard": "only this server's version dir is left",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "name": "hyprlayer",
+            "skillNamed": true,
+            "versionMatches": true
+          },
+          "guard": "the manifest names the hyprlayer plugin at this version, beside the orchestrate skill",
+          "ok": true
+        }
+      ],
+      "step": "the plugin is written per version and stale versions are pruned"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterMcpConfig": true,
+            "pluginDir": "$PLUGIN"
+          },
+          "guard": "composer claude passes the plugin dir right after its MCP config",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "afterSettings": true,
+            "hooked": true,
+            "pluginDir": "$PLUGIN"
+          },
+          "guard": "PTY claude passes the plugin dir after its hook settings",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "handshaken": true,
+            "pluginSkills": true
+          },
+          "guard": "composer codex gets the plugin's skills as an extra root",
+          "ok": true
+        }
+      ],
+      "step": "composer and PTY claude get --plugin-dir"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mcpConfig": false,
+            "pluginDir": false
+          },
+          "guard": "composer claude gets neither MCP nor the plugin",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hooked": false,
+            "pluginDir": false
+          },
+          "guard": "PTY claude launches unhooked and without the plugin",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "handshaken": true,
+            "pluginSkills": false
+          },
+          "guard": "composer codex's skill roots leave the plugin out",
+          "ok": true
+        }
+      ],
+      "step": "off omits the plugin"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mcpConfig": true,
+            "pluginDir": false,
+            "restarted": true
+          },
+          "guard": "composer claude keeps its MCP config but loses the plugin",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hooked": true,
+            "pluginDir": false,
+            "settings": true
+          },
+          "guard": "PTY claude stays hooked without the plugin",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "warned": true
+          },
+          "guard": "the server logs why",
+          "ok": true
+        }
+      ],
+      "step": "an unwritable plugin dir is left out of every launch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

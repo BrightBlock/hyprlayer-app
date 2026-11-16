@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::agent_control::{PtyAgentState, PtyAgentStatus, UiRequest};
 use crate::goal::{GoalEndReason, GoalPauseReason, GoalStatus, GoalStep};
 use crate::project::{CreateStep, StepStatus};
 use crate::script::{RunPhase, ScriptKind};
@@ -107,4 +108,20 @@ pub enum RuntimeEvent {
     },
     /// Re-read `account_status`; carries no identity or token.
     AccountChanged,
+    PtyAgentChanged {
+        terminal_id: String,
+        workstream_id: String,
+        engine_id: String,
+        state: PtyAgentState,
+        provider_session_id: Option<String>,
+        activity: Option<String>,
+        last_reply: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        status: PtyAgentStatus,
+    },
+    UiRequested {
+        request: UiRequest,
+    },
 }

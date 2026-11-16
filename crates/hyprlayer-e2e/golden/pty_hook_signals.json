@@ -1,0 +1,601 @@
+{
+  "scenario": "pty_hook_signals",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "argv": [
+              "--mcp-config",
+              "$SANDBOX/app-data/agent-control/launch/$CLAUDE_TERMINAL/mcp.json",
+              "--settings",
+              "$SANDBOX/app-data/agent-control/launch/$CLAUDE_TERMINAL/settings.json",
+              "--plugin-dir",
+              "$PLUGIN",
+              "--session-id",
+              "$CLAUDE_SESSION"
+            ],
+            "hooked": true,
+            "launchDirLive": true
+          },
+          "guard": "argv is --mcp-config, --settings, --plugin-dir from the launch dir, then the session id the launch returned",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "commandsRunCtl": true,
+            "events": [
+              "Notification",
+              "PermissionRequest",
+              "PostModelSwitch",
+              "PostToolUse",
+              "PreModelSwitch",
+              "PreToolUse",
+              "SessionEnd",
+              "SessionStart",
+              "Stop",
+              "StopFailure",
+              "UserPromptSubmit"
+            ],
+            "statusLine": "'$CTL' statusline claude"
+          },
+          "guard": "the settings file runs `<ctl> hook claude <Event>` for all 11 events, and `<ctl> statusline claude`",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "allow": [
+              "mcp__hyprlayer__whoami",
+              "mcp__hyprlayer__list_workstreams",
+              "mcp__hyprlayer__list_agents",
+              "mcp__hyprlayer__read_agent",
+              "mcp__hyprlayer__list_docs",
+              "mcp__hyprlayer__read_doc",
+              "mcp__hyprlayer__pr_status",
+              "mcp__hyprlayer__git_status",
+              "mcp__hyprlayer__script_output",
+              "mcp__hyprlayer__notify_user",
+              "mcp__hyprlayer__request_attention",
+              "mcp__hyprlayer__read_terminal"
+            ]
+          },
+          "guard": "the same file allows the 12 hyprlayer read tools, read_terminal included",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "args": [
+              "mcp"
+            ],
+            "command": "$CTL",
+            "env": [
+              "HYPRLAYER_AGENT_TOKEN",
+              "HYPRLAYER_SOCKET",
+              "HYPRLAYER_TERMINAL_ID",
+              "HYPRLAYER_WORKSTREAM_ID"
+            ]
+          },
+          "guard": "the MCP config runs `<ctl> mcp` with this terminal's identity",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "identityKeys": [
+              "HYPRLAYER_AGENT_TOKEN",
+              "HYPRLAYER_CTL",
+              "HYPRLAYER_SOCKET",
+              "HYPRLAYER_TERMINAL_ID",
+              "HYPRLAYER_WORKSTREAM_ID"
+            ]
+          },
+          "guard": "env names this terminal, its workstream, the socket and the server binary",
+          "ok": true
+        }
+      ],
+      "step": "the launch injects hooks, MCP and the plugin"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "provider": "$CLAUDE_SESSION",
+            "states": [
+              "starting",
+              "idle"
+            ]
+          },
+          "guard": "the launch reads starting, then SessionStart idles it with the provider session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listed": {
+              "activity": null,
+              "engineId": "claude-code",
+              "hooked": true,
+              "lastReply": null,
+              "providerSessionId": "$CLAUDE_SESSION",
+              "spawnedBy": null,
+              "state": "idle",
+              "status": {
+                "context": null,
+                "controllable": true,
+                "effort": null,
+                "model": null,
+                "permissionMode": null,
+                "planning": false
+              },
+              "terminalId": "$CLAUDE_TERMINAL",
+              "title": null,
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "list_pty_agents shows it hooked and idle on that session",
+          "ok": true
+        }
+      ],
+      "step": "SessionStart records the provider session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "activity": "Bash ls -la",
+            "lastReply": "done: work",
+            "states": [
+              "working",
+              "idle"
+            ]
+          },
+          "guard": "working, then idle with Stop's reply and the last tool as activity",
+          "ok": true
+        }
+      ],
+      "step": "a prompt works, then Stop settles with the reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "states": [
+              "awaiting_permission"
+            ]
+          },
+          "guard": "PermissionRequest reads awaiting_permission",
+          "ok": true
+        }
+      ],
+      "step": "a permission ask blocks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "listed": "awaiting_permission",
+            "states": []
+          },
+          "guard": "a Read's PreToolUse and PostToolUse during the Bash ask change nothing, and no settle idles it",
+          "ok": true
+        }
+      ],
+      "step": "another tool's hooks leave the ask open"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "states": []
+          },
+          "guard": "a terminal reply alone leaves it asking",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "states": []
+          },
+          "guard": "an arrow key with the prompt still on screen leaves it asking past the quiet window",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "afterQuiet": true,
+            "newStops": 0,
+            "states": [
+              "idle"
+            ],
+            "within4s": true
+          },
+          "guard": "the typed deny settles to idle after the quiet window, within 4 s, with no Stop",
+          "ok": true
+        }
+      ],
+      "step": "a deny settles after quiet output"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "states": [
+              "awaiting_question"
+            ]
+          },
+          "guard": "AskUserQuestion reads awaiting_question",
+          "ok": true
+        }
+      ],
+      "step": "a question blocks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "listed": {
+              "activity": "clear",
+              "engineId": "claude-code",
+              "hooked": true,
+              "lastReply": "done: work",
+              "providerSessionId": "$CLAUDE_SESSION-cleared",
+              "spawnedBy": null,
+              "state": "idle",
+              "status": {
+                "context": null,
+                "controllable": true,
+                "effort": null,
+                "model": null,
+                "permissionMode": null,
+                "planning": false
+              },
+              "terminalId": "$CLAUDE_TERMINAL",
+              "title": null,
+              "workstreamId": "$WS"
+            },
+            "states": [
+              "exited",
+              "idle"
+            ]
+          },
+          "guard": "SessionEnd exits it, and SessionStart on the same token revives it on the new session",
+          "ok": true
+        }
+      ],
+      "step": "/clear tracks the new session id"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "badHooks": [
+              "Stop exit=0",
+              "Stop exit=0",
+              "Stop exit=0"
+            ],
+            "states": [
+              "awaiting_permission"
+            ]
+          },
+          "guard": "three bad Stop payloads exit 0 and change nothing before the next ask",
+          "ok": true
+        }
+      ],
+      "step": "malformed payloads are ignored"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "states": [
+              "working",
+              "idle"
+            ]
+          },
+          "guard": "PostToolUse for the asked Bash call reads working, then Stop idles it",
+          "ok": true
+        }
+      ],
+      "step": "the asked tool's own result ends the ask"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "launchDirGone": true,
+            "ptyExited": true,
+            "states": [
+              "exited"
+            ],
+            "unlisted": true
+          },
+          "guard": "SessionEnd reads exited, the PTY exits, and the server forgets it and its launch dir",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changes": 0,
+            "exit": 0,
+            "stdout": ""
+          },
+          "guard": "the old token's hook exits 0 and changes nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "agent_control_denied",
+            "message": "agent control refused this: the agent that held this token has exited"
+          },
+          "guard": "announce_agent with the old token is agent_control_denied",
+          "ok": true
+        }
+      ],
+      "step": "exit revokes the token"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "argc": 27,
+            "hooked": true,
+            "launchSessionId": null,
+            "shape": {
+              "commandsRunCtl": true,
+              "endsWithTrustBypass": true,
+              "events": [
+                "Interrupt",
+                "PermissionRequest",
+                "PostToolUse",
+                "PreToolUse",
+                "SessionEnd",
+                "SessionStart",
+                "Stop",
+                "UserPromptSubmit"
+              ],
+              "mcp": true
+            }
+          },
+          "guard": "argv is the MCP pairs, a -c hook per event running `<ctl> hook codex <Event>`, then the trust bypass, and nothing else",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "minted": false,
+            "provider": "codex-hooked-thread",
+            "states": [
+              "starting",
+              "idle"
+            ]
+          },
+          "guard": "no exec mint runs; the session id arrives with SessionStart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ask": [
+              "awaiting_permission"
+            ],
+            "esc": [
+              "idle"
+            ],
+            "exit": [
+              "exited"
+            ],
+            "lastReply": "done: work",
+            "work": [
+              "working",
+              "idle"
+            ]
+          },
+          "guard": "codex's turn, ask, Interrupt and SessionEnd fold like claude's",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "acks": [
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "ok"
+            ],
+            "calls": 8
+          },
+          "guard": "every hook call printed {} and exited 0",
+          "ok": true
+        }
+      ],
+      "step": "codex launches hooked without a mint"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "argv": [
+              "resume",
+              "minted-thread-e2e"
+            ],
+            "hooked": false,
+            "mints": 1,
+            "provider": "minted-thread-e2e",
+            "unlisted": true
+          },
+          "guard": "below 0.164 nothing is injected, one exec mint names the session, and it isn't listed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hooks": 0
+          },
+          "guard": "it fires no hooks",
+          "ok": true
+        }
+      ],
+      "step": "old codex launches unhooked and minted"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "level": "full",
+            "mcpArgs": "['mcp']",
+            "mode": "bypassPermissions",
+            "revealOk": true,
+            "revealed": true
+          },
+          "guard": "launched in bypass: a writable MCP face, whoami full, and a mutating reveal reaches the desktop",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refused": true
+          },
+          "guard": "codex can't switch in place, so a mode change is a restart",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mcpArgs": "['mcp','--read-only']",
+            "oldToken": "agent_control_denied",
+            "relaunched": true
+          },
+          "guard": "restarted in Default: a read-only MCP face and the bypass token revoked",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "level": "full",
+            "mode": "default",
+            "reveal": "agent_control_denied: agent control refused this: a codex session changes things only in bypass mode\nAsk the user to do this in Hyprlayer.",
+            "spawnAgent": "agent_control_denied: agent control refused this: a codex session changes things only in bypass mode\nAsk the user to do this in Hyprlayer."
+          },
+          "guard": "whoami still says full, yet reveal and spawn_agent are refused for codex outside bypass",
+          "ok": true
+        }
+      ],
+      "step": "a codex session out of bypass has no mutating access"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heardBroadcasts": true,
+            "targeted": 0
+          },
+          "guard": "no PtyAgentChanged or UiRequested, though it heard broadcasts",
+          "ok": true
+        }
+      ],
+      "step": "an unannounced client hears nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "flags": [
+              "--mcp-config",
+              "--settings",
+              "--plugin-dir",
+              "--verbose",
+              "--session-id",
+              "--dangerously-skip-permissions"
+            ],
+            "hooked": true,
+            "sessionIdAfterFlag": true
+          },
+          "guard": "injected flags, then the engine's args, the session id and the bypass flag",
+          "ok": true
+        }
+      ],
+      "step": "engine args and bypass follow the injected flags"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "argv": [
+              "--session-id",
+              "$OFF_SESSION"
+            ],
+            "hooked": false,
+            "identityEnv": [],
+            "unlisted": true
+          },
+          "guard": "only the session id; no agent identity env, not hooked, not listed",
+          "ok": true
+        }
+      ],
+      "step": "off disables injection"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "argv": [
+              "--settings",
+              "$SANDBOX/user-settings.json",
+              "--session-id",
+              "$USER_SETTINGS_SESSION"
+            ],
+            "hooked": false,
+            "identityEnv": true,
+            "unlisted": true
+          },
+          "guard": "hooks, MCP and the plugin are all skipped; the user's settings pass through; identity env stays",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hooks": 0
+          },
+          "guard": "it fires no hooks",
+          "ok": true
+        }
+      ],
+      "step": "a user --settings disables hooks"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "claude": {
+              "exit": 0,
+              "stdout": "",
+              "underASecond": true
+            },
+            "codex": {
+              "exit": 0,
+              "stdout": "{}\n",
+              "underASecond": true
+            }
+          },
+          "guard": "codex and claude hooks exit 0 in under a second; codex still prints {}",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "stdout": "{}\n",
+            "underTwoSeconds": true,
+            "waitedForBudget": true
+          },
+          "guard": "against a hung server the 500 ms budget ends it, still exit 0 with {}",
+          "ok": true
+        }
+      ],
+      "step": "a hook against a dead server returns at once"
+    }
+  ]
+}

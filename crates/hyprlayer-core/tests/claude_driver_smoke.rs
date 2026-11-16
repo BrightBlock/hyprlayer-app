@@ -39,6 +39,8 @@ async fn drives_a_real_no_tool_turn_to_completion() {
         append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
+        mcp_config: None,
+        plugin_dir: None,
     })
     .expect("spawn claude");
 
@@ -150,6 +152,8 @@ async fn rewind_to_ordinal_truncates_model_memory() {
         append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
+        mcp_config: None,
+        plugin_dir: None,
     })
     .expect("spawn claude");
 
@@ -228,6 +232,8 @@ fn spawn_haiku(
         append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
+        mcp_config: None,
+        plugin_dir: None,
     })
     .expect("spawn claude")
 }
@@ -542,6 +548,8 @@ fn spawn_goal_haiku(
         append_system_prompt: None,
         env: std::env::vars().collect(),
         claude_config_dir: dirs::home_dir().map(|h| h.join(".claude")),
+        mcp_config: None,
+        plugin_dir: None,
     })
     .expect("spawn claude")
 }

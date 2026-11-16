@@ -105,6 +105,18 @@ pub enum CoreError {
     #[error("the runtime has been stopped")]
     RuntimeStopped,
 
+    #[error("agent control is off")]
+    AgentControlOff,
+
+    #[error("agent control refused this: {detail}")]
+    AgentControlDenied { detail: String },
+
+    #[error("an agent limit was reached: {detail}")]
+    AgentLimitReached { detail: String },
+
+    #[error("{detail}")]
+    PtyControlFailed { detail: String },
+
     #[error("enter an API key first")]
     ApiKeyEmpty,
 
@@ -568,6 +580,16 @@ impl CoreError {
             CoreError::StaleTranscript { .. } => {
                 Some("Pull the new turns, then send again.".into())
             }
+            CoreError::AgentControlOff => {
+                Some("Turn on agent control in Settings → Agent control.".into())
+            }
+            CoreError::AgentControlDenied { .. } => {
+                Some("Ask the user to do this in Hyprlayer.".into())
+            }
+            CoreError::AgentLimitReached { .. } => Some(
+                "Ask the user to step in, or to raise that limit in Settings → Agent control."
+                    .into(),
+            ),
             CoreError::NpmMissing => Some(
                 "Install Node.js (it includes npm) and click Refresh, or install OpenCode with \
                  Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
@@ -785,6 +807,10 @@ impl CoreError {
             CoreError::RuntimeInUse { .. } => "runtime_in_use",
             CoreError::RuntimeAlreadyStarted => "runtime_already_started",
             CoreError::RuntimeStopped => "runtime_stopped",
+            CoreError::AgentControlOff => "agent_control_off",
+            CoreError::AgentControlDenied { .. } => "agent_control_denied",
+            CoreError::AgentLimitReached { .. } => "agent_limit_reached",
+            CoreError::PtyControlFailed { .. } => "pty_control_failed",
             CoreError::ApiKeyEmpty => "api_key_empty",
             CoreError::TitleGenerationEmpty { .. } => "title_generation_empty",
             CoreError::Opencode { .. } => "opencode",

@@ -957,6 +957,7 @@ async fn project_memory_lists_the_projects_claude_memory() {
             permission_mode: None,
             prompt_name: None,
             client_message_id: None,
+            parent_session_id: None,
         })
         .await
         .unwrap();

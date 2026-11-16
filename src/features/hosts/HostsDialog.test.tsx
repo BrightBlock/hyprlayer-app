@@ -28,7 +28,10 @@ vi.mock("@/lib/queries", () => ({
   useHostProbes: () => ({}),
 }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: b.relaunch }));
-vi.mock("@/lib/persistedStorage", () => ({ flushPersistedWrites: b.flushPersistedWrites }));
+vi.mock("@/lib/persistedStorage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/persistedStorage")>()),
+  flushPersistedWrites: b.flushPersistedWrites,
+}));
 
 const h = vi.hoisted(() => {
   class FakeChannel {

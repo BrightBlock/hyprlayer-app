@@ -8,7 +8,7 @@ use crate::claude::{SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 
-pub use hyprlayer_models::session::{LogCursor, Session, SessionLogEntry};
+pub use hyprlayer_models::session::{LogCursor, Session, SessionLogEntry, SessionOrigin};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -207,6 +207,7 @@ fn apply_row_mutation(
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
                     cost_usd, started_at, ended_at, exit_summary, title, archived_at, \
+                    origin, parent_session_id, \
                     (SELECT e.kind FROM session_events e
                       WHERE e.session_id = sessions.id AND e.kind IN ('userMessage', 'turnDone')
                       ORDER BY e.seq DESC LIMIT 1) AS last_turn_kind, \
@@ -255,6 +256,8 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         goal: goal_brief
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok()),
+        origin: SessionOrigin::parse(&row.get::<_, String>("origin")?),
+        parent_session_id: row.get("parent_session_id")?,
     })
 }
 
@@ -315,6 +318,8 @@ impl Db {
             working: true,
             last_active_at: None,
             goal: None,
+            origin: SessionOrigin::User,
+            parent_session_id: None,
         };
         self.with(|conn| {
             conn.execute(
@@ -404,6 +409,21 @@ impl Db {
             conn.execute(
                 "UPDATE sessions SET state = ?2 WHERE id = ?1",
                 params![id, state.as_str()],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn set_session_lineage(
+        &self,
+        id: &str,
+        origin: SessionOrigin,
+        parent_session_id: Option<&str>,
+    ) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET origin = ?2, parent_session_id = ?3 WHERE id = ?1",
+                params![id, origin.as_str(), parent_session_id],
             )?;
             Ok(())
         })

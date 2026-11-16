@@ -111,7 +111,7 @@ pub async fn script_run(
         .script_run_stream(workstream_id, kind, cols, rows)
         .await
         .map_err(AppError::from)?;
-    pump(state.client()?.clone(), stream_id, events, on_event);
+    pump(&state, state.client()?, stream_id, events, on_event);
     Ok(terminal_id)
 }
 

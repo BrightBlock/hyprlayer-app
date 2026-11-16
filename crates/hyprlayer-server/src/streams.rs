@@ -20,7 +20,7 @@ use hyprlayer_core::{
     CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
     SessionEvent, SessionLogEntry, Stage,
 };
-use hyprlayer_models::SessionStreamItem;
+use hyprlayer_models::{PtyLaunchSession, PtyLaunched, SessionStreamItem};
 use hyprlayer_proto::{frame, WireError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -37,6 +37,9 @@ pub struct StreamStartOpts {
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
     pub client_message_id: Option<String>,
+    /// An older server drops it unread, so the session just starts unlinked.
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +67,14 @@ pub enum StreamRequest {
         workstream_id: String,
         command: String,
         args: Vec<String>,
+        cols: u16,
+        rows: u16,
+    },
+    /// The server builds the argv; `AgentOpen` stays for released desktops.
+    PtyLaunch {
+        workstream_id: String,
+        engine_id: String,
+        session: PtyLaunchSession,
         cols: u16,
         rows: u16,
     },
@@ -153,6 +164,10 @@ pub enum StreamResponse {
     AttachSession {
         stream_id: u64,
     },
+    PtyLaunch {
+        launched: PtyLaunched,
+        stream_id: u64,
+    },
 }
 
 impl StreamRequest {
@@ -163,6 +178,7 @@ impl StreamRequest {
             Self::SpawnCliTerminal { .. } => "spawn_cli_terminal",
             Self::SpawnShellTerminal { .. } => "spawn_shell_terminal",
             Self::AgentOpen { .. } => "agent_open",
+            Self::PtyLaunch { .. } => "pty_launch",
             Self::ScriptRun { .. } => "script_run",
             Self::StartStageSession { .. } => "start_stage_session",
             Self::ResumeSession { .. } => "resume_session",
@@ -202,6 +218,7 @@ impl std::fmt::Debug for StreamResponse {
             Self::StartStageSession { .. } => "StartStageSession",
             Self::RewindSession { .. } => "RewindSession",
             Self::AttachSession { .. } => "AttachSession",
+            Self::PtyLaunch { .. } => "PtyLaunch",
         };
         f.debug_struct(variant)
             .field("stream_id", &self.stream_id())
@@ -216,7 +233,8 @@ impl StreamResponse {
             | Self::Session { stream_id, .. }
             | Self::StartStageSession { stream_id, .. }
             | Self::RewindSession { stream_id, .. }
-            | Self::AttachSession { stream_id } => Some(*stream_id),
+            | Self::AttachSession { stream_id }
+            | Self::PtyLaunch { stream_id, .. } => Some(*stream_id),
             Self::TerminalAttach { stream_id, .. } => *stream_id,
         }
     }
@@ -334,6 +352,14 @@ pub(crate) async fn prepare_stream(
     server: &Server,
     body: StreamRequest,
 ) -> Result<(StreamResponse, Option<StreamSource>), WireError> {
+    if server.agent_token().is_some() {
+        return Err(wire_error(CoreError::AgentControlDenied {
+            detail: format!(
+                "{} is a stream, and streams are not open to agents",
+                body.command()
+            ),
+        }));
+    }
     let runtime = server.runtime();
     match body {
         StreamRequest::TerminalOpen {
@@ -450,6 +476,34 @@ pub(crate) async fn prepare_stream(
                 Some(StreamSource::Terminal(attachment.live)),
             ))
         }
+        StreamRequest::PtyLaunch {
+            workstream_id,
+            engine_id,
+            session,
+            cols,
+            rows,
+        } => {
+            let (attachment, launched) = runtime
+                .terminals()
+                .launch_agent(core_terminals::LaunchAgentRequest {
+                    workstream_id,
+                    engine_id,
+                    session,
+                    cols,
+                    rows,
+                    lineage: None,
+                })
+                .await
+                .wire()?;
+            let stream_id = server.streams().next_id();
+            Ok((
+                StreamResponse::PtyLaunch {
+                    launched,
+                    stream_id,
+                },
+                Some(StreamSource::Terminal(attachment.live)),
+            ))
+        }
         StreamRequest::ScriptRun {
             workstream_id,
             kind,
@@ -492,6 +546,7 @@ pub(crate) async fn prepare_stream(
                 permission_mode,
                 prompt_name,
                 client_message_id,
+                parent_session_id,
             } = opts;
             let prepared = runtime
                 .sessions()
@@ -506,6 +561,7 @@ pub(crate) async fn prepare_stream(
                     permission_mode,
                     prompt_name,
                     client_message_id,
+                    parent_session_id,
                 })
                 .await
                 .wire()?;
@@ -999,7 +1055,7 @@ impl SessionEvents {
     }
 }
 
-/// The eleven streaming commands' client entry points. Hand-written, not
+/// The streaming commands' client entry points. Hand-written, not
 /// macro-generated — each one's post-processing (unwrap a `StreamResponse`
 /// variant, wrap the receiver in a typed `EventStream`) differs too much for
 /// a shared body. Each also returns the stream id, for `cancel_stream(id)`
@@ -1129,6 +1185,36 @@ impl RpcClient {
                 EventStream::new(expect_stream(rx, "agent_open")?),
             )),
             other => Err(unexpected("agent_open", &other)),
+        }
+    }
+
+    pub async fn pty_launch_stream(
+        &self,
+        workstream_id: String,
+        engine_id: String,
+        session: PtyLaunchSession,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(PtyLaunched, u64, EventStream<TerminalEvent>), WireError> {
+        let (response, rx) = self
+            .call_stream(StreamRequest::PtyLaunch {
+                workstream_id,
+                engine_id,
+                session,
+                cols,
+                rows,
+            })
+            .await?;
+        match response {
+            StreamResponse::PtyLaunch {
+                launched,
+                stream_id,
+            } => Ok((
+                launched,
+                stream_id,
+                EventStream::new(expect_stream(rx, "pty_launch")?),
+            )),
+            other => Err(unexpected("pty_launch", &other)),
         }
     }
 

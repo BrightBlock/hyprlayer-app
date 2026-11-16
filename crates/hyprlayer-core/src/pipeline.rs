@@ -73,6 +73,19 @@ pub fn thoughts_edit_rules(stage: Stage, thoughts_roots: &[std::path::PathBuf]) 
         .collect()
 }
 
+/// Whether `child` pre-approves nothing `parent` does not, counting Validate's thoughts edits.
+pub fn pre_approves_within(child: Stage, parent: Stage) -> bool {
+    let parent_tools = policy_for(parent).allowed_tools;
+    let thoughts_edits_covered = child != Stage::Validate
+        || parent == Stage::Validate
+        || parent_tools.iter().any(|t| t == "Edit");
+    thoughts_edits_covered
+        && policy_for(child)
+            .allowed_tools
+            .iter()
+            .all(|t| parent_tools.contains(t))
+}
+
 /// A goal's validate run only reports; promoting the plan stays with the person.
 pub const REPORT_ONLY_DENY: [&str; 4] = [
     "Edit",

@@ -13,12 +13,14 @@ use tokio::task::JoinHandle;
 use crate::transport::{encode_control, Control};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
-pub const TARGETED_EVENTS: [&str; 5] = [
+pub const TARGETED_EVENTS: [&str; 7] = [
     "SessionRevised",
     "SessionReset",
     "SessionViewers",
     "AccountChanged",
     "GoalChanged",
+    "PtyAgentChanged",
+    "UiRequested",
 ];
 /// Reported by `announce_client` when this server targets them.
 pub const TRANSCRIPT_SYNC: &str = "transcript_sync";
@@ -35,10 +37,15 @@ struct Outbound {
     dropped: u64,
     announced: Option<Announced>,
     watching: HashSet<String>,
+    /// The token an agent connection announced; such a connection hears no events.
+    agent: Option<String>,
 }
 
 impl Outbound {
     fn receives(&self, audience: &Audience) -> bool {
+        if self.agent.is_some() {
+            return false;
+        }
         let announced = |kind: &str| {
             self.announced
                 .as_ref()
@@ -78,6 +85,7 @@ impl Clients {
                 dropped: 0,
                 announced: None,
                 watching: HashSet::new(),
+                agent: None,
             },
         );
     }
@@ -110,6 +118,16 @@ impl Clients {
             capabilities: capabilities.into_iter().collect(),
         });
         outbound.watching.iter().cloned().collect()
+    }
+
+    pub fn tag_agent(&self, conn: u64, token: String) {
+        if let Some(outbound) = self.lock().get_mut(&conn) {
+            outbound.agent = Some(token);
+        }
+    }
+
+    pub fn agent_token(&self, conn: u64) -> Option<String> {
+        self.lock().get(&conn)?.agent.clone()
     }
 
     pub fn client_ref(&self, conn: u64) -> Option<ClientRef> {
@@ -244,6 +262,8 @@ fn audience(event: &RuntimeEvent) -> Audience {
         }
         RuntimeEvent::AccountChanged => Audience::Announced("AccountChanged"),
         RuntimeEvent::GoalChanged { .. } => Audience::Announced("GoalChanged"),
+        RuntimeEvent::PtyAgentChanged { .. } => Audience::Announced("PtyAgentChanged"),
+        RuntimeEvent::UiRequested { .. } => Audience::Announced("UiRequested"),
         _ => Audience::Everyone,
     }
 }
@@ -287,6 +307,8 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::ProjectCreateProgress { .. } => "ProjectCreateProgress",
         E::AccountChanged => "AccountChanged",
         E::GoalChanged { .. } => "GoalChanged",
+        E::PtyAgentChanged { .. } => "PtyAgentChanged",
+        E::UiRequested { .. } => "UiRequested",
     }
 }
 

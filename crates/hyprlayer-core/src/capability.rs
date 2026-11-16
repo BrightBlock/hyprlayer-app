@@ -33,6 +33,21 @@ pub enum LaunchPolicy {
     },
 }
 
+impl LaunchPolicy {
+    /// The mode the session launches in, after the stage default fills an unset request.
+    pub fn permission_mode(&self) -> PermissionMode {
+        match self {
+            LaunchPolicy::Claude {
+                permission_mode, ..
+            }
+            | LaunchPolicy::Codex {
+                permission_mode, ..
+            }
+            | LaunchPolicy::Opencode { permission_mode } => *permission_mode,
+        }
+    }
+}
+
 /// Resolve the launch policy for a stage on a given harness. `requested` is the
 /// user's explicit permission-mode override (from the UI toggle); when absent the
 /// stage's own default applies.

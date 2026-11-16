@@ -223,6 +223,11 @@ export const commands = {
 	ollamaSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("ollama_set_default_model", { model })),
 	terminalOpen: (workstreamId: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("terminal_open", { workstreamId, cols, rows, onEvent })),
 	agentOpen: (workstreamId: string, command: string, args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("agent_open", { workstreamId, command, args, cols, rows, onEvent })),
+	ptyLaunch: (workstreamId: string, engineId: string, session: PtyLaunchSession, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<PtyLaunched, AppError>(__TAURI_INVOKE("pty_launch", { workstreamId, engineId, session, cols, rows, onEvent })),
+	listPtyAgents: (workstreamId: string | null) => typedError<PtyAgent[], AppError>(__TAURI_INVOKE("list_pty_agents", { workstreamId })),
+	ptyAgentSetModel: (terminalId: string, model: string) => typedError<PtyControlOutcome, AppError>(__TAURI_INVOKE("pty_agent_set_model", { terminalId, model })),
+	ptyAgentSetEffort: (terminalId: string, effort: string) => typedError<null, AppError>(__TAURI_INVOKE("pty_agent_set_effort", { terminalId, effort })),
+	ptyAgentSetPermissionMode: (terminalId: string, mode: string) => typedError<null, AppError>(__TAURI_INVOKE("pty_agent_set_permission_mode", { terminalId, mode })),
 	agentResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("agent_resize", { terminalId, cols, rows })),
 	captureAgentSession: (workstreamId: string, engineId: string, afterMs: number | null, exclude: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("capture_agent_session", { workstreamId, engineId, afterMs, exclude })),
 	mintCodexSession: (workstreamId: string, command: string) => typedError<string | null, AppError>(__TAURI_INVOKE("mint_codex_session", { workstreamId, command })),
@@ -231,6 +236,8 @@ export const commands = {
 	terminalWrite: (terminalId: string, data: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_write", { terminalId, data })),
 	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
+	/**  Ends the server streams behind channels the webview released; their terminals and sessions keep running. */
+	terminalRelease: (channelIds: number[]) => typedError<null, AppError>(__TAURI_INVOKE("terminal_release", { channelIds })),
 	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	defaultShellName: () => typedError<string, AppError>(__TAURI_INVOKE("default_shell_name")),
@@ -358,6 +365,7 @@ export const events = {
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
+	ptyAgentChanged: makeEvent<PtyAgentChanged>("pty-agent-changed"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
 	reviewChanged: makeEvent<ReviewChanged>("review-changed"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
@@ -368,6 +376,7 @@ export const events = {
 	sessionViewers: makeEvent<SessionViewers>("session-viewers"),
 	sshPromptsChanged: makeEvent<SshPromptsChanged>("ssh-prompts-changed"),
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
+	uiRequested: makeEvent<UiRequested>("ui-requested"),
 	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
 };
@@ -419,6 +428,9 @@ export type AgentBundleStatus = {
 	updateAvailable: boolean,
 };
 
+/**  The agent a control call speaks for: a composer session or a PTY terminal. */
+export type AgentCaller = { kind: "session"; sessionId: string } | { kind: "terminal"; terminalId: string };
+
 export type AgentCollaborator = {
 	name: string,
 	email: string,
@@ -428,6 +440,16 @@ export type AgentCollaborator = {
 export type AgentContextFile = {
 	path: string,
 	note: string,
+};
+
+export type AgentControlLevel = "off" | "read" | "full";
+
+/**  What an agent may ask of the runtime, and the fan-out limits on agents that spawn agents. */
+export type AgentControlSettings = {
+	level?: AgentControlLevel,
+	maxDepth?: number,
+	maxLiveChildren?: number,
+	maxAgentHops?: number,
 };
 
 export type AgentFile = {
@@ -549,6 +571,7 @@ export type AppSettings = {
 	recaps?: RecapSettings,
 	multiplexer?: MultiplexerSettings,
 	goals?: GoalSettings,
+	agentControl?: AgentControlSettings,
 	devTools?: boolean,
 	fullDiskAccessNoticeDismissed?: boolean,
 };
@@ -1554,6 +1577,83 @@ export type ProviderSettings = {
 
 export type ProvisionStep = "probe" | "download" | "verify" | "upload" | "install" | "done";
 
+/**  A server-launched PTY agent whose engine reports through hooks. */
+export type PtyAgent = {
+	terminalId: string,
+	workstreamId: string,
+	engineId: string,
+	state: PtyAgentState,
+	providerSessionId: string | null,
+	activity: string | null,
+	lastReply: string | null,
+	/**  The agent that launched it; desktops adopt these in a background tab. */
+	spawnedBy?: AgentCaller | null,
+	/**  Unhooked entries are listed only when an agent spawned them; their state is never folded. */
+	hooked?: boolean,
+	/**  Generated from its first prompt; set once. */
+	title?: string | null,
+	status?: PtyAgentStatus,
+};
+
+export type PtyAgentChanged = {
+	terminalId: string,
+	workstreamId: string,
+	engineId: string,
+	state: PtyAgentState,
+	providerSessionId: string | null,
+	activity: string | null,
+	lastReply: string | null,
+	title: string | null,
+	status: PtyAgentStatus,
+};
+
+/**  Context use as the CLI reported it; `None` on the agent until it reports any. */
+export type PtyAgentContext = {
+	tokens: number,
+	window: number,
+	/**  claude's own rounded `used_percentage`; codex reports none. */
+	percent: number | null,
+};
+
+/**  A hooked PTY agent's state, folded from its hook signals. */
+export type PtyAgentState = "starting" | "working" | "awaiting_permission" | "awaiting_question" | "idle" | "exited";
+
+/**  What a hooked PTY agent's own CLI last reported about its settings; never an app-side estimate. */
+export type PtyAgentStatus = {
+	model: string | null,
+	effort: string | null,
+	/**  The CLI's own mode key (`default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`…), which `PermissionMode` doesn't cover. */
+	permissionMode: string | null,
+	/**  codex's Plan collaboration mode, which sits beside its permissions. */
+	planning: boolean,
+	context: PtyAgentContext | null,
+	/**  Whether the bar may change these on the running agent. */
+	controllable: boolean,
+};
+
+/**  A model change from the bar: applied in the running TUI, or unconfirmed while idle, so the desktop relaunches with `--resume` and `--model`. */
+export type PtyControlOutcome = "applied" | "relaunch";
+
+/**  Which provider session a PTY agent launch starts or resumes. */
+export type PtyLaunchSession = {
+	sessionId: string | null,
+	resume: boolean,
+	bypass: boolean,
+	/**  A session-only model for engines that take one at launch. */
+	model?: string | null,
+	/**  The CLI's own mode key to start in, so a relaunch keeps the session's mode. */
+	permissionMode?: string | null,
+	/**  A session-only effort for engines that take one at launch. */
+	effort?: string | null,
+};
+
+export type PtyLaunched = {
+	terminalId: string,
+	/**  Assigned or minted by the server; a hooked codex learns its id from `SessionStart`. */
+	providerSessionId: string | null,
+	hooked: boolean,
+};
+
 export type PullOutcome = { kind: "upToDate" } | { kind: "merged" } | { kind: "conflicts"; files: string[] };
 
 export type QueryResult = {
@@ -1610,6 +1710,8 @@ export type ResumedSession = {
 	session: Session,
 	permissionMode: PermissionMode | null,
 };
+
+export type RevealTarget = { kind: "doc"; path: string } | { kind: "file"; path: string } | { kind: "diff"; path: string };
 
 export type ReviewChanged = {
 	workstreamId: string,
@@ -1806,6 +1908,9 @@ export type Session = {
 	lastActiveAt?: number | null,
 	/**  Only a running or paused goal; an ended one is read through `get_goal`. */
 	goal?: GoalBrief | null,
+	origin?: SessionOrigin,
+	/**  The session this one came from: its spawning agent, or the implement session a validation checks. */
+	parentSessionId?: string | null,
 };
 
 export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null; mcpServers?: string[] | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean; authRequired?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string; toolUseId?: string | null } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched"; quiet?: boolean } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
@@ -1822,6 +1927,9 @@ export type SessionLogEntryDto = {
 	event: SessionEvent,
 	createdAt: number | null,
 };
+
+/**  Who started a session: the user, a goal, or another agent. */
+export type SessionOrigin = "user" | "goal" | "agent";
 
 export type SessionReset = {
 	sessionId: string,
@@ -2116,6 +2224,7 @@ export type StartOpts = {
 	permissionMode?: PermissionMode | null,
 	promptName?: string | null,
 	clientMessageId?: string | null,
+	parentSessionId?: string | null,
 };
 
 export type StartedSession = {
@@ -2232,6 +2341,13 @@ export type TurnKind = "user" | "assistant" | "tool";
 export type TypeCount = {
 	docType: DocType,
 	count: number,
+};
+
+/**  An agent's ask of every attached desktop. */
+export type UiRequest = { kind: "openSessionTab"; workstreamId: string; sessionId: string; focus: boolean; permissionMode?: PermissionMode | null; model?: string | null; effort?: string | null } | { kind: "openTerminalTab"; workstreamId: string; terminalId: string; engineId: string; providerSessionId: string | null; bypass: boolean } | { kind: "notify"; workstreamId: string; title: string; body: string; sessionId?: string | null; terminalId?: string | null } | { kind: "reveal"; workstreamId: string; target: RevealTarget };
+
+export type UiRequested = {
+	request: UiRequest,
 };
 
 export type ValidationCheck = {

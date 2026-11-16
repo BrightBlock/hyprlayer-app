@@ -19,6 +19,9 @@ import {
   sessionBridge,
 } from "./features/session/sessionStore";
 import { goalBridge } from "./features/session/goalBridge";
+import { agentControlBridge, reconcileAgentTabs } from "./features/session/agentControlBridge";
+import { ptyAgentBridge, reconcilePtyAgents } from "./features/multiplexer/ptyAgentBridge";
+import { reconcileAgentTerminals } from "./features/multiplexer/agentRuntime";
 import {
   setupTranscriptSync,
   transcriptSyncBridge,
@@ -74,6 +77,8 @@ registerEventBridge(sshPromptBridge);
 registerEventBridge(sessionBridge);
 registerEventBridge(transcriptSyncBridge);
 registerEventBridge(goalBridge);
+registerEventBridge(ptyAgentBridge);
+registerEventBridge(agentControlBridge);
 // Ahead of the reattach, whose folds ask whether the new connection syncs.
 onServerReconnected(transcriptSyncReconnected);
 onServerReconnected(() => {
@@ -81,6 +86,15 @@ onServerReconnected(() => {
 });
 // No goal event replays across a reconnect.
 onServerReconnected(() => invalidateGoals());
+onServerReconnected(() => {
+  reconcilePtyAgents().catch((e) => log.warn("reconnect", "PTY agent states did not load", e));
+});
+onServerReconnected(() => {
+  reconcileAgentTerminals().catch((e) => log.warn("reconnect", "PTY terminals were not checked", e));
+});
+onServerReconnected(() => {
+  reconcileAgentTabs().catch((e) => log.warn("reconnect", "agent-spawned tabs did not load", e));
+});
 registerActiveWorkstreams(activeWorkstreamIds);
 registerPlanCard(PlanCard);
 registerReviewCard(ReviewCard);
@@ -96,6 +110,8 @@ attachEventListeners();
 void unwrap(commands.listRunningScripts())
   .then(hydrateRunning)
   .catch((e) => log.warn("startup", "running scripts did not load", e));
+reconcilePtyAgents().catch((e) => log.warn("startup", "PTY agent states did not load", e));
+reconcileAgentTabs().catch((e) => log.warn("startup", "agent-spawned tabs did not load", e));
 useUpdate.getState().init();
 void startServerAutoUpdate();
 setupNotificationActions();

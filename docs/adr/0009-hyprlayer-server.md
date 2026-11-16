@@ -12,7 +12,10 @@ server profile; `AccountChanged` is targeted by capability alone) · amended 202
 (the cross-process lock test is an integration test, so it no longer builds the server
 binary mid-run; the release gate runs its tests under `cargo nextest`) · amended 2026-10-16
 (`runtime_in_use` opens the recovery screen instead of a native dialog and exit) ·
-amended 2026-10-16 (`GoalChanged` is targeted by capability alone)
+amended 2026-10-16 (`GoalChanged` is targeted by capability alone) · amended 2026-11-11
+(agent connections: per-spawn identity, a narrower command set; PtyAgentChanged and
+UiRequested are targeted; the `statusline` face; PTY codex over its own app-server;
+`portable-pty` is vendored)
 
 ## Decision
 
@@ -126,6 +129,24 @@ Three consequences follow, accepted rather than designed around:
   every connection that announced it, watching a session or not.)*
   *(Amended 2026-10-16 — `GoalChanged` is targeted the same way, so a goal's notices reach
   every announced device and a released desktop never receives a kind it cannot decode.)*
+
+*(Amended 2026-11-11 — agents spawned by the runtime carry `HYPRLAYER_CTL`,
+`HYPRLAYER_SOCKET` and a per-spawn `HYPRLAYER_AGENT_TOKEN`. The `hook`, `ctl` and `mcp`
+faces of this binary connect with them, and `announce_agent(token)` tags the connection.
+The token is not a security boundary: any same-uid process can open the socket. Identity
+grants nothing. An agent connection gets a narrower, default-deny command set and no event
+stream: read verbs at `read`, mutating verbs at `full`, never the excluded table. A bypass
+caller resolves to `full` unless agent control is `off`. `PtyAgentChanged` and
+`UiRequested` are targeted by capability alone. Codex PTY launches pass
+`--dangerously-bypass-hook-trust`, which also trusts the user's own unreviewed `~/.codex`
+hooks for that launch. A hooked PTY claude's statusLine is the `statusline` face: it reports
+model, effort and context, then runs the user's own statusLine command with the same input
+and prints its output. On Unix, when the installed codex has `--remote`, a PTY codex runs over
+a per-terminal `codex app-server` that the server spawns, and reaps with the terminal or, after
+a crash, at its next start; the TUI attaches with `--remote`, so the status bar changes
+settings through that app-server. Otherwise, and on Windows, codex keeps the embedded launch. `portable-pty` is vendored (`vendor/portable-pty`) without
+`PSEUDOCONSOLE_INHERIT_CURSOR`: that handshake blocks a ConPTY child until a terminal answers
+`ESC[6n`, and a PTY no desktop has mounted never gets one.)*
 
 ### The environment overlay: the exception to freeze-at-construction
 

@@ -345,6 +345,55 @@ pub struct Session {
     /// Only a running or paused goal; an ended one is read through `get_goal`.
     #[serde(default)]
     pub goal: Option<GoalBrief>,
+    #[serde(default)]
+    pub origin: SessionOrigin,
+    /// The session this one came from: its spawning agent, or the implement session a validation checks.
+    #[serde(default)]
+    pub parent_session_id: Option<String>,
+}
+
+impl Session {
+    /// The parent only when an agent spawned this row; a person's link (validate → implement) is no spawn.
+    pub fn spawn_parent(&self) -> Option<&str> {
+        match self.origin {
+            SessionOrigin::Agent => self.parent_session_id.as_deref(),
+            SessionOrigin::User | SessionOrigin::Goal => None,
+        }
+    }
+}
+
+/// Who started a session: the user, a goal, or another agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum SessionOrigin {
+    #[default]
+    User,
+    Goal,
+    Agent,
+}
+
+impl SessionOrigin {
+    pub fn try_parse(s: &str) -> Option<SessionOrigin> {
+        match s {
+            "user" => Some(SessionOrigin::User),
+            "goal" => Some(SessionOrigin::Goal),
+            "agent" => Some(SessionOrigin::Agent),
+            _ => None,
+        }
+    }
+
+    pub fn parse(s: &str) -> SessionOrigin {
+        SessionOrigin::try_parse(s).unwrap_or(SessionOrigin::User)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SessionOrigin::User => "user",
+            SessionOrigin::Goal => "goal",
+            SessionOrigin::Agent => "agent",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -497,6 +546,8 @@ mod tests {
             working: false,
             last_active_at: None,
             goal: None,
+            origin: SessionOrigin::User,
+            parent_session_id: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

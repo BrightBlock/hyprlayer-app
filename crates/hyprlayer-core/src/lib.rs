@@ -76,6 +76,8 @@ pub use runtime::shutdown::ShutdownReport;
 pub use runtime::{HyprlayerRuntime, RuntimeOptions};
 
 pub use runtime::account::AccountService;
+pub use runtime::agent_control::pty_controls::PtyControlService;
+pub use runtime::agent_control::{AgentControlEndpoint, AgentControlService};
 pub use runtime::agents::AgentService;
 pub use runtime::attachments::AttachmentService;
 pub use runtime::goals::GoalService;

@@ -75,6 +75,8 @@ export function skillSigilFor(harness: string, model?: string | null): string {
 }
 
 export function resolvesInHarness(command: SlashCommand, harness: string): boolean {
+  // The server's orchestration plugin reaches claude and codex launches only.
+  if (command.source === "agent-control") return harness === "claude" || harness === "codex";
   return harness !== "codex" || command.kind === "skill";
 }
 

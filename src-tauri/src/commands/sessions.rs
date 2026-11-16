@@ -28,6 +28,7 @@ pub struct StartOpts {
     pub permission_mode: Option<PermissionMode>,
     pub prompt_name: Option<String>,
     pub client_message_id: Option<String>,
+    pub parent_session_id: Option<String>,
 }
 
 impl From<StartOpts> for StreamStartOpts {
@@ -39,6 +40,7 @@ impl From<StartOpts> for StreamStartOpts {
             permission_mode: opts.permission_mode,
             prompt_name: opts.prompt_name,
             client_message_id: opts.client_message_id,
+            parent_session_id: opts.parent_session_id,
         }
     }
 }
@@ -91,27 +93,31 @@ impl From<SessionFrame> for SessionStreamItemDto {
 /// (`hyprlayer-server::streams::run_stream`), so this is just `pump`'s shape
 /// with an early return on the terminal `Exited` event.
 fn spawn_live_pump(
+    state: &AppState,
     client: Arc<RpcClient>,
     stream_id: u64,
     mut events: SessionEvents,
     on_event: Channel<SessionStreamItemDto>,
 ) {
-    tauri::async_runtime::spawn(async move {
-        while let Some(frame) = events.recv().await {
-            let item = SessionStreamItemDto::from(frame);
-            let terminal = matches!(item.event, SessionEvent::Exited { .. });
-            if on_event.send(item).is_err() {
-                log::debug!("session stream {stream_id}: the window stopped listening");
-                let _ = client.cancel_stream(stream_id).await;
-                return;
+    let cancel = client.clone();
+    state
+        .streams()
+        .spawn(on_event.id(), client, stream_id, async move {
+            while let Some(frame) = events.recv().await {
+                let item = SessionStreamItemDto::from(frame);
+                let terminal = matches!(item.event, SessionEvent::Exited { .. });
+                if on_event.send(item).is_err() {
+                    log::debug!("session stream {stream_id}: the window stopped listening");
+                    let _ = cancel.cancel_stream(stream_id).await;
+                    return;
+                }
+                if terminal {
+                    return;
+                }
             }
-            if terminal {
-                return;
-            }
-        }
-        // Ended with no `Exited`: the connection dropped or a frame did not decode.
-        log::info!("session stream {stream_id} ended before the session exited");
-    });
+            // Ended with no `Exited`: the connection dropped or a frame did not decode.
+            log::info!("session stream {stream_id} ended before the session exited");
+        });
 }
 
 /// The server answered with another command's response; nothing will read its stream.
@@ -154,7 +160,7 @@ pub async fn start_stage_session(
         return Err(unexpected_response(&client, stream_id, "start_stage_session").await);
     };
     let session_id = session.id.clone();
-    spawn_live_pump(client.clone(), stream_id, events, on_event.clone());
+    spawn_live_pump(&state, client.clone(), stream_id, events, on_event.clone());
 
     // The launch is fire-and-forget, exactly as before: the command returns
     // as soon as the stream is open, and this task's only job is to surface
@@ -263,7 +269,7 @@ pub async fn resume_session(
     else {
         return Err(unexpected_response(&client, stream_id, "resume_session").await);
     };
-    spawn_live_pump(client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event);
     Ok(ResumedSession {
         session,
         permission_mode,
@@ -295,7 +301,7 @@ pub async fn restart_session(
     let StreamResponse::Session { session, .. } = response else {
         return Err(unexpected_response(&client, stream_id, "restart_session").await);
     };
-    spawn_live_pump(client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event);
     Ok(session)
 }
 
@@ -334,7 +340,7 @@ pub async fn rewind_session(
     else {
         return Err(unexpected_response(&client, stream_id, "rewind_session").await);
     };
-    spawn_live_pump(client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event);
     Ok(RewindResult {
         session,
         live_rewound,
@@ -697,7 +703,7 @@ pub async fn attach_session(
     let StreamResponse::AttachSession { .. } = response else {
         return Err(unexpected_response(&client, stream_id, "attach_session").await);
     };
-    spawn_live_pump(client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event);
     Ok(())
 }
 

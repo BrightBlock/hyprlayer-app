@@ -121,7 +121,7 @@ fi
 
 SHA="$(git -C "$SRC_DIR" rev-parse --verify "$REF^{commit}" 2>/dev/null)" \
   || die "no such ref in the build clone: $REF"
-SHORT="$(git -C "$SRC_DIR" rev-parse --short "$SHA")"
+SHORT="${SHA:0:8}"  # fixed width: --short varies by repo, and --remote compares versions across hosts
 SUBJECT="$(git -C "$SRC_DIR" log -1 --format=%s "$SHA")"
 
 install_remotes() {

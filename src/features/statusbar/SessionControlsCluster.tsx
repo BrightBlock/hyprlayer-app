@@ -29,7 +29,7 @@ const PERMISSION_ITEMS = PERMISSION_MODES.map((p) => ({
   danger: p.danger,
 }));
 
-/** The focused chat pane's controls; absent for PTY, terminal and viewer tabs. */
+/** The focused chat or PTY pane's controls; absent for terminal and viewer tabs. */
 export function SessionControlsCluster({
   workstreamId,
   compact,
@@ -39,9 +39,9 @@ export function SessionControlsCluster({
 }) {
   const controls = useFocusedSessionControls(workstreamId);
   if (!controls) return null;
-  const { context } = controls;
+  const { context, model, effort, permissionChoices } = controls;
   // TODO(statusbar): 5h/wk need account usage windows; claude's rate_limit_event (dropped, driver.rs:619) has no utilization.
-  const percent = context ? meterPercent(context.tokens, context.window) : null;
+  const percent = context ? (context.percent ?? meterPercent(context.tokens, context.window)) : null;
   return (
     <div className="flex min-w-0 items-center gap-3">
       {context && percent !== null && (
@@ -56,26 +56,31 @@ export function SessionControlsCluster({
         controls.permissionKey !== null && (
           <PermissionPill
             permissionKey={controls.permissionKey}
-            interactive={controls.interactive}
+            interactive={permissionChoices ? true : controls.interactive}
+            items={permissionChoices ? PERMISSION_ITEMS.filter((p) => permissionChoices.includes(p.key)) : undefined}
             onPick={controls.actions.setPermissionMode}
           />
         )
       )}
-      {/* Model and effort read as one setting, so they sit closer than the cluster's gap. */}
-      <div className="flex min-w-0 items-center">
-        <ModelPicker controls={controls} compact={compact} />
-        {controls.effort && (
-          <EffortPicker
-            effort={controls.effort}
-            interactive={controls.interactive}
-            onPick={controls.actions.pickEffort}
-          />
-        )}
-      </div>
+      {model && (
+        // Model and effort read as one setting, so they sit closer than the cluster's gap.
+        <div className="flex min-w-0 items-center">
+          <ModelPicker model={model} controls={controls} compact={compact} />
+          {effort && (
+            <EffortPicker effort={effort} interactive={controls.interactive} onPick={controls.actions.pickEffort} />
+          )}
+        </div>
+      )}
       {controls.goal && workstreamId && (
         <>
           <Divider />
           <GoalChip goal={controls.goal} workstreamId={workstreamId} />
+        </>
+      )}
+      {controls.actions.restart && (
+        <>
+          <Divider />
+          <RestartButton onRestart={controls.actions.restart} />
         </>
       )}
     </div>
@@ -251,15 +256,31 @@ function ContextMeter({
   );
 }
 
+function RestartButton({ onRestart }: { onRestart: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onRestart}
+      aria-label="Restart"
+      title="Restart"
+      className={cx(BAR_BUTTON, "w-[26px] justify-center px-0 text-ink-dim enabled:hover:text-ink")}
+    >
+      <Icon name="retry" size="sm" />
+    </button>
+  );
+}
+
 // Opens a menu rather than cycling: one step past Plan is Bypass.
 function PermissionPill({
   permissionKey,
   interactive,
+  items = PERMISSION_ITEMS,
   setByAgent = false,
   onPick,
 }: {
   permissionKey: string;
   interactive: boolean;
+  items?: typeof PERMISSION_ITEMS;
   setByAgent?: boolean;
   onPick: (key: string) => void;
 }) {
@@ -293,7 +314,7 @@ function PermissionPill({
       >
         <MenuPanel aria-label="Permission mode">
           <OptionMenuList
-            items={PERMISSION_ITEMS}
+            items={items}
             activeKey={mode.key}
             onSelect={(key) => {
               onPick(key);
@@ -306,8 +327,16 @@ function PermissionPill({
   );
 }
 
-function ModelPicker({ controls, compact }: { controls: SessionControls; compact: boolean }) {
-  const { model, actions, interactive } = controls;
+function ModelPicker({
+  model,
+  controls,
+  compact,
+}: {
+  model: NonNullable<SessionControls["model"]>;
+  controls: SessionControls;
+  compact: boolean;
+}) {
+  const { actions, interactive } = controls;
   const [open, setOpen] = useMenuOpen(interactive);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const close = () => setOpen(false);

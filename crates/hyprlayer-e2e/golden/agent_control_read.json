@@ -1,0 +1,573 @@
+{
+  "scenario": "agent_control_read",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "identityKeys": [
+              "HYPRLAYER_AGENT_TOKEN",
+              "HYPRLAYER_CTL",
+              "HYPRLAYER_SESSION_ID",
+              "HYPRLAYER_SOCKET",
+              "HYPRLAYER_WORKSTREAM_ID"
+            ]
+          },
+          "guard": "the agent-env names this session, its workstream, the socket and the server binary",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hyprlayerRules": [
+              "git_status",
+              "list_agents",
+              "list_docs",
+              "list_workstreams",
+              "notify_user",
+              "pr_status",
+              "read_agent",
+              "read_doc",
+              "read_terminal",
+              "request_attention",
+              "script_output",
+              "whoami"
+            ]
+          },
+          "guard": "--allowedTools holds mcp__hyprlayer__whoami and every read tool, read_terminal included",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "args": [
+              "mcp"
+            ],
+            "command": "$CTL",
+            "env": [
+              "HYPRLAYER_AGENT_TOKEN",
+              "HYPRLAYER_SESSION_ID",
+              "HYPRLAYER_SOCKET",
+              "HYPRLAYER_WORKSTREAM_ID"
+            ]
+          },
+          "guard": "--mcp-config runs `<ctl> mcp` with this session's identity",
+          "ok": true
+        }
+      ],
+      "step": "composer launches carry identity and MCP"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "serverName": "hyprlayer",
+            "versions": [
+              {
+                "answered": "2025-06-18",
+                "asked": "2025-06-18"
+              },
+              {
+                "answered": "2025-03-26",
+                "asked": "2025-03-26"
+              },
+              {
+                "answered": "2024-11-05",
+                "asked": "2024-11-05"
+              },
+              {
+                "answered": "2025-06-18",
+                "asked": "2099-01-01"
+              }
+            ]
+          },
+          "guard": "known protocol versions are echoed, an unknown one gets 2025-06-18",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ping": {},
+            "unknown": -32601
+          },
+          "guard": "ping answers and an unknown method is -32601",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "allReadOnly": true,
+            "tools": [
+              "git_status",
+              "list_agents",
+              "list_docs",
+              "list_workstreams",
+              "notify_user",
+              "pr_status",
+              "read_agent",
+              "read_doc",
+              "read_terminal",
+              "request_attention",
+              "script_output",
+              "whoami"
+            ]
+          },
+          "guard": "at read only the 12 read tools are listed, each marked read-only",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "call": "not_an_agent: not inside a hyprlayer agent: HYPRLAYER_SOCKET and HYPRLAYER_AGENT_TOKEN are unset",
+            "tools": 12
+          },
+          "guard": "with no agent env it still lists the read tools and refuses a call as not_an_agent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "full": 31,
+            "readOnly": 12
+          },
+          "guard": "at full every tool is listed; --read-only still lists only the read tools",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "call": "agent_control_denied: spawn_agent is not available: this agent's hyprlayer tools are read-only"
+          },
+          "guard": "--read-only refuses a mutating tool a client calls anyway",
+          "ok": true
+        }
+      ],
+      "step": "initialize and tools/list"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "whoami": {
+              "caller": {
+                "kind": "session",
+                "sessionId": "$SESSION"
+              },
+              "depth": 0,
+              "level": "read",
+              "parent": null,
+              "permissionMode": "default",
+              "projectPath": "$SANDBOX/home/code/demo",
+              "reportOnly": false,
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "the composer session, its workstream and project, at read, depth 0 with no parent",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "whoami": {
+              "caller": {
+                "kind": "terminal",
+                "terminalId": "$PTY"
+              },
+              "depth": 0,
+              "level": "read",
+              "parent": null,
+              "permissionMode": "default",
+              "projectPath": "$SANDBOX/home/code/demo",
+              "reportOnly": false,
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "`ctl whoami` from the PTY agent names the terminal",
+          "ok": true
+        }
+      ],
+      "step": "whoami names the caller"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ptyAgents": [
+              "$PTY"
+            ],
+            "sessions": [
+              "$SESSION"
+            ],
+            "workstreams": [
+              "$WS"
+            ]
+          },
+          "guard": "list_workstreams and list_agents hold this project's rows only",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "reply": "counter is 1",
+            "roles": [
+              "user",
+              "assistant"
+            ]
+          },
+          "guard": "read_agent returns the session's prompt and reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "escapes": false,
+            "showsTypedLine": true
+          },
+          "guard": "read_terminal returns the PTY agent's screen, without escape codes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "gitStatus": true,
+            "listDocs": true
+          },
+          "guard": "git_status and list_docs answer for the caller's workstream",
+          "ok": true
+        }
+      ],
+      "step": "read tools see the project"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "reveal": "agent_control_denied: agent control refused this: this needs agent control at Full",
+            "spawnAgent": "agent_control_denied: agent control refused this: this needs agent control at Full",
+            "spawned": 0
+          },
+          "guard": "spawn_agent and reveal are agent_control_denied, and nothing was spawned",
+          "ok": true
+        }
+      ],
+      "step": "a mutating tool is refused at read"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "notify": {
+              "body": "tests pass",
+              "namesSessionOrTerminal": false,
+              "workstreamId": "$WS"
+            },
+            "sent": "\"sent\""
+          },
+          "guard": "notify_user reaches the desktop as UiRequested::Notify for the caller's workstream",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "notify": {
+              "body": "pick a database",
+              "namesSessionOrTerminal": false,
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "request_attention is a Notify that the agent needs the user",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0,
+            "notify": {
+              "body": "hello",
+              "namesSessionOrTerminal": false,
+              "workstreamId": "$WS"
+            }
+          },
+          "guard": "`ctl notify` from the PTY agent reaches it too",
+          "ok": true
+        }
+      ],
+      "step": "notify reaches announced desktops"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "merge": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: merge_workstream_pr is never open to agents: merging is the user's call"
+            },
+            "setAppSettings": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: set_app_settings is never open to agents: settings are the user's"
+            }
+          },
+          "guard": "merge_workstream_pr and set_app_settings are never open to agents, even at full",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "level": "full"
+          },
+          "guard": "the level the agent tried to change is still full",
+          "ok": true
+        }
+      ],
+      "step": "excluded commands are refused at full"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "newPtys": 0,
+            "newSessions": 0,
+            "ptyLaunch": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: pty_launch is a stream, and streams are not open to agents"
+            },
+            "startStageSession": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: start_stage_session is a stream, and streams are not open to agents"
+            }
+          },
+          "guard": "pty_launch and start_stage_session are refused as streams at full, and nothing started",
+          "ok": true
+        }
+      ],
+      "step": "agent connections cannot open streams"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "announce": {
+              "code": "agent_control_off",
+              "message": "agent control is off"
+            },
+            "ctl": {
+              "exit": 1,
+              "stderr": "agent_control_off: agent control is off"
+            },
+            "mcpListWorkstreams": "agent_control_off: agent control is off",
+            "mcpWhoami": "agent_control_off: agent control is off",
+            "raw": {
+              "code": "agent_control_off",
+              "message": "agent control is off"
+            }
+          },
+          "guard": "an announced MCP face, a raw call, a fresh announce and ctl all get agent_control_off",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "states": [
+              "working",
+              "idle"
+            ],
+            "titled": true
+          },
+          "guard": "the running PTY agent's hooks still fold at off, and its first prompt still earns a title",
+          "ok": true
+        }
+      ],
+      "step": "off refuses every call"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "announced": {
+              "level": "full",
+              "mode": "bypassPermissions"
+            },
+            "mcpWhoami": "full",
+            "revealOk": true,
+            "revealReachedDesktop": true
+          },
+          "guard": "switched to bypass at read: whoami says full, and a connection from before the switch may reveal",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "level": "read",
+            "reveal": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: this needs agent control at Full"
+            }
+          },
+          "guard": "switched back, the same connection is read again and the reveal is refused",
+          "ok": true
+        }
+      ],
+      "step": "a bypass caller resolves to full"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "agentHeard": [],
+            "desktopHeardBroadcast": true,
+            "desktopHeardNotify": true
+          },
+          "guard": "the desktop heard the notify and a broadcast; the agent connection heard nothing",
+          "ok": true
+        }
+      ],
+      "step": "agent connections receive no events"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heardBroadcast": true,
+            "targeted": 0
+          },
+          "guard": "after every notify so far it heard the broadcast, and no UiRequested or PtyAgentChanged",
+          "ok": true
+        }
+      ],
+      "step": "an unannounced client never receives UiRequested"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "getSessionLog": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that belongs to another project"
+            },
+            "listSessionTurns": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that belongs to another project"
+            },
+            "mcpReadAgent": "agent_control_denied: agent control refused this: that belongs to another project",
+            "ownScreen": true,
+            "ownTurns": true,
+            "readTerminal": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that belongs to another project"
+            },
+            "worktreeGitStatus": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that belongs to another project"
+            }
+          },
+          "guard": "turns, the log, the screen and git status of another project's ids are refused; the caller's own pass",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "readTerminal": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that is not a running PTY agent"
+            }
+          },
+          "guard": "read_terminal refuses an id no PTY agent holds",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "lists": [
+              {
+                "agent": [],
+                "desktop": [
+                  "otherWorkstream"
+                ],
+                "list": "listWorkstreams(other)"
+              },
+              {
+                "agent": [
+                  "ownWorkstream"
+                ],
+                "desktop": [
+                  "ownWorkstream"
+                ],
+                "list": "listWorkstreams(own)"
+              },
+              {
+                "agent": [],
+                "desktop": [
+                  "otherSession"
+                ],
+                "list": "listSessions(other)"
+              },
+              {
+                "agent": [
+                  "ownSession"
+                ],
+                "desktop": [
+                  "otherSession",
+                  "ownSession"
+                ],
+                "list": "listActiveSessions"
+              },
+              {
+                "agent": [
+                  "ownPty"
+                ],
+                "desktop": [
+                  "otherPty",
+                  "ownPty"
+                ],
+                "list": "listPtyAgents"
+              }
+            ]
+          },
+          "guard": "list verbs keep only the caller's project, though the desktop sees both",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "desktopCountsMore": true,
+            "pageItems": 1,
+            "pageKeepsTotal": true,
+            "projects": 1,
+            "seesOtherDoc": false,
+            "seesOwnDoc": true,
+            "totalMatchesItems": true,
+            "unreadMatchesItems": true
+          },
+          "guard": "query_docs counts only what the agent may read: its total, project count and unread match its items, and a page keeps that total",
+          "ok": true
+        }
+      ],
+      "step": "other projects are out of scope for reads"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "connectionAnswers": true,
+            "exited": null,
+            "logged": true,
+            "reconnects": true
+          },
+          "guard": "Control::Shutdown from the agent is logged and refused; the server and the connection stay up",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "relay": {
+              "exit": 2,
+              "stderr": "hyprlayer-server: this command is not available inside a hyprlayer agent"
+            },
+            "serverExited": false,
+            "stop": {
+              "exit": 2,
+              "stderr": "hyprlayer-server: this command is not available inside a hyprlayer agent"
+            }
+          },
+          "guard": "`stop` and `relay` under an agent token exit 2 and the server keeps running",
+          "ok": true
+        }
+      ],
+      "step": "an agent connection cannot shut the server down"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "the desktop's shutdown still stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

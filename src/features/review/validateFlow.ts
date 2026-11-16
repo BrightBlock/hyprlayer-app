@@ -19,7 +19,7 @@ import { sessionPermissionMode } from "@/features/session/workstreamTabs";
 import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 
 import { findValidationReport } from "./validationReport";
-import { useValidateStep, useValidateStepStore } from "./validateStep";
+import { linkedValidateStep, useValidateStep, useValidateStepStore } from "./validateStep";
 
 export type ValidatePhase =
   | "summarizing"
@@ -96,7 +96,11 @@ export function useValidateFlow(
   const workstreamId = view.item.id;
   const git = useWorkstreamGitActions(view);
   const sessions = useWorkstreamSessions(workstreamId).data;
-  const step = useValidateStep(implementId);
+  // Busy, not just working: a turn held on a permission prompt hasn't ended.
+  const implementBusy = useSessionBusy(workstreamId, sessions, implementId);
+  const implementItems = useSession(implementId)?.items;
+  const step =
+    useValidateStep(implementId) ?? linkedValidateStep(sessions, implementId, implementItems, implementBusy);
   const setStep = useValidateStepStore((s) => s.setStep);
   const [busy, setBusy] = useState<"agent" | "inline" | "fix" | null>(null);
   const validateId = step?.kind === "agent" ? step.sessionId : null;
@@ -112,8 +116,6 @@ export function useValidateFlow(
     return [...report.issues, ...report.checks.filter((c) => c.outcome === "fail").map((c) => `Failed check: ${c.text}`)];
   }, [report]);
 
-  // Busy, not just working: a turn held on a permission prompt hasn't ended.
-  const implementBusy = useSessionBusy(workstreamId, sessions, implementId);
   const built = (plan.tracker?.tasksDone ?? false) && !git.implementWorking && !implementBusy;
   const planPath = plan.key && !plan.inline ? plan.key : null;
   const passed = plan.tracker?.status === "implemented";

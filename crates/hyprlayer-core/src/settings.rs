@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use hyprlayer_models::AgentControlLevel;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -78,6 +79,7 @@ pub struct AppSettings {
     pub recaps: RecapSettings,
     pub multiplexer: MultiplexerSettings,
     pub goals: GoalSettings,
+    pub agent_control: AgentControlSettings,
     pub dev_tools: bool,
     pub full_disk_access_notice_dismissed: bool,
 }
@@ -212,6 +214,28 @@ impl GoalSettings {
             return explicit;
         }
         TabTitleSettings::default_model_for(providers.default_harness.as_deref())
+    }
+}
+
+/// What an agent may ask of the runtime, and the fan-out limits on agents that spawn agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct AgentControlSettings {
+    pub level: AgentControlLevel,
+    pub max_depth: u32,
+    pub max_live_children: u32,
+    pub max_agent_hops: u32,
+}
+
+impl Default for AgentControlSettings {
+    fn default() -> Self {
+        Self {
+            level: AgentControlLevel::Read,
+            max_depth: 2,
+            max_live_children: 4,
+            max_agent_hops: 6,
+        }
     }
 }
 

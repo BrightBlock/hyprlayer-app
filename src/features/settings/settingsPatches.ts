@@ -1,4 +1,4 @@
-import type { AppSettings, GoalSettings } from "@/lib/bindings";
+import type { AgentControlSettings, AppSettings, GoalSettings } from "@/lib/bindings";
 
 // The server's own defaults (crates/hyprlayer-core/src/settings.rs) for slices a fresh profile omits.
 export function quickSettings(s: AppSettings) {
@@ -34,4 +34,18 @@ export function goalSettings(s: AppSettings): Required<GoalSettings> {
 
 export function withGoals(s: AppSettings, next: Partial<GoalSettings>): AppSettings {
   return { ...s, goals: { ...goalSettings(s), ...next } };
+}
+
+export function agentControlSettings(s: AppSettings): Required<AgentControlSettings> {
+  const a = s.agentControl ?? {};
+  return {
+    level: a.level ?? "read",
+    maxDepth: a.maxDepth ?? 2,
+    maxLiveChildren: a.maxLiveChildren ?? 4,
+    maxAgentHops: a.maxAgentHops ?? 6,
+  };
+}
+
+export function withAgentControl(s: AppSettings, next: Partial<AgentControlSettings>): AppSettings {
+  return { ...s, agentControl: { ...agentControlSettings(s), ...next } };
 }

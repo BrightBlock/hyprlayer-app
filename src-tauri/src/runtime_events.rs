@@ -201,5 +201,32 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
             }
             .emit(handle);
         }
+        RuntimeEvent::PtyAgentChanged {
+            terminal_id,
+            workstream_id,
+            engine_id,
+            state,
+            provider_session_id,
+            activity,
+            last_reply,
+            title,
+            status,
+        } => {
+            let _ = events::PtyAgentChanged {
+                terminal_id,
+                workstream_id,
+                engine_id,
+                state,
+                provider_session_id,
+                activity,
+                last_reply,
+                title,
+                status,
+            }
+            .emit(handle);
+        }
+        RuntimeEvent::UiRequested { request } => {
+            let _ = events::UiRequested { request }.emit(handle);
+        }
     }
 }

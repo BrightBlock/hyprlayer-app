@@ -13,7 +13,8 @@ amended 2026-10-03 (the Workshop's three-pane shell; see "Workshop: three-pane s
 amended 2026-10 (the Library's mail shell; see "Library: mail shell") ·
 amended 2026-10-06 (`Dialog` gains `4xl`; the Agents editor's `Segmented` moved onto `SegmentedControl`; macOS traffic lights follow app zoom; `Popover` hover cards) ·
 amended 2026-10-08 (keyboard focus is a soft fill, never a ring; see "Focus") ·
-amended 2026-10-16 (no native alerts, and `useConfirm`; see "Native alerts")
+amended 2026-10-16 (no native alerts, and `useConfirm`; see "Native alerts") ·
+amended 2026-11-12 (a PTY tab has only the status bar; its Restart ends the session controls)
 
 ## Decision
 
@@ -452,6 +453,7 @@ exception like those under "Typography".
 **Sizes recorded as exceptions.**
 - The status bar is 34px (`STATUS_BAR_HEIGHT`, `src/lib/layout.ts`).
 - Its gear and the Scripts dock toggle are 26×24; the toggle trails the session controls 4px after Effort, with an `sm` icon; the permission pill 24px; a meter's track 34×4; the account button 26×26, its initials or mark 20px.
+- A focused PTY tab has no bar of its own. Its Restart is icon-only, 26×24 with an `sm` icon, and ends the session controls after a divider, so the Scripts dock toggle trails Restart rather than Effort.
 - The Settings nav's rows are 34px, which is not a third `rowClass` tier.
 - Toast sits `STATUS_BAR_HEIGHT + 24` above the window's bottom edge.
 - The header's Archive button is 26×26 beside 28×28 neighbours. Its Archived

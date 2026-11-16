@@ -131,6 +131,17 @@ export async function notifyGoal(args: {
   await dispatch(args, `${args.workstreamTitle}: ${args.title}`, args.body);
 }
 
+/** An agent's own `notify_user` or `request_attention`; the workstream names where it came from. */
+export async function notifyFromAgent(args: {
+  workstreamId: string;
+  projectPath: string;
+  workstreamTitle: string;
+  title: string;
+  body: string;
+}): Promise<void> {
+  await dispatch(args, `${args.workstreamTitle}: ${args.title}`, args.body);
+}
+
 export async function sendTestNotification(): Promise<{
   sent: boolean;
   reason?: "permission_denied" | "error";

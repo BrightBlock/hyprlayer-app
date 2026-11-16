@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Session } from "@/lib/bindings";
 
 import { markTitleSeen } from "./titleSeen";
-import { updateWorkstreamTabs, useWorkstreamTabsStore } from "./workstreamTabs";
+import { updateWorkstreamTabs, useWorkstreamTabsStore, type ShellTab } from "./workstreamTabs";
 
 const animKey = (workstreamId: string, shellId: number) => `${workstreamId}:${shellId}`;
 
@@ -23,6 +23,20 @@ export function consumeTabTitleAnimation(workstreamId: string, shellId: number):
     return { keys: next };
   });
   return true;
+}
+
+/** A PTY agent's generated title, into the tab bound to its terminal unless the tab was renamed. */
+export function adoptPtyTitle(workstreamId: string, terminalId: string, title: string): void {
+  const bound = (s: ShellTab) => s.ptyAgent?.terminalId === terminalId && !s.titleLocked;
+  const shell = useWorkstreamTabsStore.getState().byWs[workstreamId]?.shells.find(bound);
+  if (!shell) return;
+  markTabTitleAnimation(workstreamId, shell.id);
+  updateWorkstreamTabs((all) => {
+    const w = all[workstreamId];
+    if (!w) return all;
+    const shells = w.shells.map((s) => (bound(s) ? { ...s, title, titleLocked: true } : s));
+    return { ...all, [workstreamId]: { ...w, shells } };
+  });
 }
 
 /**

@@ -32,6 +32,7 @@ use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
 use hyprlayer_core::review;
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::account::{AccountStatus, SignInStart};
+use hyprlayer_core::runtime::agent_control::AgentIdentity;
 use hyprlayer_core::runtime::agents::{BundleInstall, BundleReport, BundleStatus};
 use hyprlayer_core::runtime::attachments::{ImportAttachmentRequest, SaveAttachmentRequest};
 use hyprlayer_core::runtime::goals::{DeriveGoalRequest, GoalPatch, StartGoalRequest};
@@ -54,8 +55,8 @@ use hyprlayer_core::runtime::reviews::{
     SubmitReviewRequest, SubmitReviewResult,
 };
 use hyprlayer_core::runtime::scripts::{
-    RunLifecycleRequest, ScriptOutputRequest, ScriptRuntimeRequest, ScriptSettingsRequest,
-    StopScriptRequest,
+    RunLifecycleRequest, RunScriptRequest, ScriptOutputRequest, ScriptRuntimeRequest,
+    ScriptSettingsRequest, StopScriptRequest,
 };
 use hyprlayer_core::runtime::sessions::{ActiveSession, SendContext};
 use hyprlayer_core::runtime::settings_service::{
@@ -88,13 +89,18 @@ use hyprlayer_core::{
     CoreError, HyprlayerRuntime, LogCursor, ProjectSource, ScriptKind, Session, SessionLogEntry,
     Stage, Workstream, WorkstreamDoc, WorktreeMode,
 };
-use hyprlayer_models::{ClientRef, ScriptRuntime, SessionRev, SessionTurns};
+use hyprlayer_models::{
+    AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClientRef, PtyAgent,
+    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
+    SpawnSessionRequest, WaitOutcome, WaitUntil,
+};
 use hyprlayer_proto::{StaleTranscript, WireError};
 
+use crate::agent_access;
 use crate::events::{Clients, TRANSCRIPT_SYNC};
 use crate::rpc::{
-    AnnouncedClient, ArchivedWorkstreamView, CreatedProject, Dispatch, PromptContext,
-    ResolvedBranchPrefixes, WatchedSession, WorkstreamView, WorktreeFile,
+    AnnouncedClient, ArchivedWorkstreamView, CreatedProject, Dispatch, PromptContext, Request,
+    ResolvedBranchPrefixes, Response, WatchedSession, WorkstreamView, WorktreeFile,
 };
 use crate::streams::StreamState;
 
@@ -119,6 +125,47 @@ impl Server {
 
     pub(crate) fn streams(&self) -> &StreamState {
         &self.streams
+    }
+
+    /// The one entry point for requests: an agent connection is checked against its allowlist first.
+    pub(crate) async fn dispatch_checked(&self, mut body: Request) -> Result<Response, WireError> {
+        let Some(token) = self.agent_token() else {
+            return self.dispatch(body).await;
+        };
+        let control = self.runtime.agent_control();
+        let identity = control.identify(&token).wire()?;
+        if control.level_of(&identity).await == AgentControlLevel::Off {
+            return Err(wire_error(CoreError::AgentControlOff));
+        }
+        let filter = agent_access::authorize(&control, &identity, &mut body)
+            .await
+            .wire()?;
+        let response = self.dispatch(body).await?;
+        match filter {
+            Some(filter) => agent_access::filter(response, filter).wire(),
+            None => Ok(response),
+        }
+    }
+
+    pub(crate) fn is_agent(&self, conn: u64) -> bool {
+        self.clients.agent_token(conn).is_some()
+    }
+
+    /// The token this request's connection announced with `announce_agent`.
+    pub(crate) fn agent_token(&self) -> Option<String> {
+        crate::CONN
+            .try_with(|conn| self.clients.agent_token(*conn))
+            .ok()
+            .flatten()
+    }
+
+    fn agent_identity(&self, command: &str) -> Result<AgentIdentity, WireError> {
+        let token = self.agent_token().ok_or_else(|| {
+            wire_error(CoreError::AgentControlDenied {
+                detail: format!("{command} is for agent connections; call announce_agent first"),
+            })
+        })?;
+        self.runtime.agent_control().identify(&token).wire()
     }
 
     /// The announced identity of the connection this request came on.
@@ -1243,6 +1290,16 @@ impl Dispatch for Server {
     }
 
     async fn start_goal(&self, request: StartGoalRequest) -> Result<Goal, WireError> {
+        // An agent's goal runs the spawn checks and records the agent as the new session's parent.
+        if self.agent_token().is_some() {
+            let identity = self.agent_identity("start_goal")?;
+            return self
+                .runtime
+                .agent_control()
+                .start_goal(&identity, request)
+                .await
+                .wire();
+        }
         self.runtime
             .goals()
             .start(request, self.caller())
@@ -1335,8 +1392,9 @@ impl Dispatch for Server {
 
     async fn list_slash_commands(&self, id: String) -> Result<Vec<SlashCommand>, WireError> {
         let home = self.runtime.skills().skill_home();
+        let plugin = self.runtime.agent_control().launch_plugin_dir().await;
         self.with_worktree(&id, "list_slash_commands", move |p| {
-            Ok(skills::list_slash_commands(p, &home))
+            Ok(skills::list_slash_commands(p, &home, plugin.as_deref()))
         })
         .await
     }
@@ -1453,6 +1511,9 @@ impl Dispatch for Server {
         client_message_id: Option<String>,
         base_rev: Option<u64>,
     ) -> Result<(), WireError> {
+        if self.agent_token().is_none() {
+            self.runtime.agent_control().note_human_turn(&session_id);
+        }
         self.runtime
             .sessions()
             .send(
@@ -2051,6 +2112,197 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn report_agent_signal(
+        &self,
+        token: String,
+        signal: AgentSignal,
+    ) -> Result<(), WireError> {
+        self.runtime.agent_control().report_signal(&token, &signal);
+        Ok(())
+    }
+
+    async fn report_agent_status(
+        &self,
+        token: String,
+        report: AgentStatusReport,
+    ) -> Result<(), WireError> {
+        self.runtime.agent_control().report_status(&token, report);
+        Ok(())
+    }
+
+    async fn model_switch_pending(&self, token: String) -> Result<bool, WireError> {
+        Ok(self.runtime.agent_control().model_switch_pending(&token))
+    }
+
+    async fn pty_agent_set_model(
+        &self,
+        terminal_id: String,
+        model: String,
+    ) -> Result<PtyControlOutcome, WireError> {
+        self.runtime
+            .pty_controls()
+            .set_model(&terminal_id, &model)
+            .await
+            .wire()
+    }
+
+    async fn pty_agent_set_effort(
+        &self,
+        terminal_id: String,
+        effort: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .pty_controls()
+            .set_effort(&terminal_id, &effort)
+            .await
+            .wire()
+    }
+
+    async fn pty_agent_set_permission_mode(
+        &self,
+        terminal_id: String,
+        mode: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .pty_controls()
+            .set_permission_mode(&terminal_id, &mode)
+            .await
+            .wire()
+    }
+
+    async fn list_pty_agents(
+        &self,
+        workstream_id: Option<String>,
+    ) -> Result<Vec<PtyAgent>, WireError> {
+        Ok(self
+            .runtime
+            .terminals()
+            .list_pty_agents(workstream_id.as_deref()))
+    }
+
+    /// Tags the connection before the level check, so at `off` its later calls are still refused as an agent's.
+    async fn announce_agent(&self, token: String) -> Result<AgentWhoami, WireError> {
+        let conn = connection("announce_agent")?;
+        let control = self.runtime.agent_control();
+        let identity = control.identify(&token).wire()?;
+        self.clients.tag_agent(conn, token);
+        if control.level_of(&identity).await == AgentControlLevel::Off {
+            return Err(wire_error(CoreError::AgentControlOff));
+        }
+        Ok(control.whoami(&identity).await)
+    }
+
+    async fn notify_user(&self, title: String, body: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("notify_user")?;
+        self.runtime.agent_control().notify(&identity, title, body);
+        Ok(())
+    }
+
+    async fn request_attention(&self, reason: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("request_attention")?;
+        self.runtime
+            .agent_control()
+            .request_attention(&identity, reason);
+        Ok(())
+    }
+
+    async fn spawn_session(&self, request: SpawnSessionRequest) -> Result<Session, WireError> {
+        let identity = self.agent_identity("spawn_session")?;
+        self.runtime
+            .agent_control()
+            .spawn_session(&identity, request)
+            .await
+            .wire()
+    }
+
+    async fn wait_session(
+        &self,
+        session_id: String,
+        until: WaitUntil,
+        timeout_ms: u32,
+    ) -> Result<WaitOutcome, WireError> {
+        let identity = self.agent_identity("wait_session")?;
+        self.runtime
+            .agent_control()
+            .wait_session(&identity, &session_id, until, timeout_ms)
+            .await
+            .wire()
+    }
+
+    async fn send_agent_message(&self, session_id: String, text: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("send_agent_message")?;
+        self.runtime
+            .agent_control()
+            .send_message(&identity, &session_id, &text)
+            .await
+            .wire()
+    }
+
+    async fn spawn_pty_agent(&self, request: SpawnPtyAgentRequest) -> Result<PtyAgent, WireError> {
+        let identity = self.agent_identity("spawn_pty_agent")?;
+        self.runtime
+            .agent_control()
+            .spawn_pty_agent(&identity, request)
+            .await
+            .wire()
+    }
+
+    async fn send_pty_message(&self, terminal_id: String, text: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("send_pty_message")?;
+        self.runtime
+            .agent_control()
+            .send_pty_message(&identity, &terminal_id, &text)
+            .await
+            .wire()
+    }
+
+    async fn read_terminal(&self, terminal_id: String, lines: u32) -> Result<String, WireError> {
+        let identity = self.agent_identity("read_terminal")?;
+        self.runtime
+            .agent_control()
+            .read_terminal(&identity, &terminal_id, lines)
+            .await
+            .wire()
+    }
+
+    async fn wait_pty_agent(
+        &self,
+        terminal_id: String,
+        until: WaitUntil,
+        timeout_ms: u32,
+    ) -> Result<WaitOutcome, WireError> {
+        let identity = self.agent_identity("wait_pty_agent")?;
+        self.runtime
+            .agent_control()
+            .wait_pty_agent(&identity, &terminal_id, until, timeout_ms)
+            .await
+            .wire()
+    }
+
+    async fn interrupt_pty_agent(&self, terminal_id: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("interrupt_pty_agent")?;
+        self.runtime
+            .agent_control()
+            .interrupt_pty_agent(&identity, &terminal_id)
+            .await
+            .wire()
+    }
+
+    async fn kill_pty_agent(&self, terminal_id: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("kill_pty_agent")?;
+        self.runtime
+            .agent_control()
+            .kill_pty_agent(&identity, &terminal_id)
+            .await
+            .wire()
+    }
+
+    async fn request_reveal(&self, target: RevealTarget) -> Result<(), WireError> {
+        let identity = self.agent_identity("request_reveal")?;
+        self.runtime.agent_control().reveal(&identity, target);
+        Ok(())
+    }
+
     async fn get_scripts(&self, project_path: String) -> Result<ScriptSettings, WireError> {
         self.runtime
             .scripts()
@@ -2075,6 +2327,24 @@ impl Dispatch for Server {
             })
             .await
             .wire()?;
+        Ok(())
+    }
+
+    /// No stream; the output stays readable through `get_script_output`.
+    async fn script_start(&self, workstream_id: String, kind: ScriptKind) -> Result<(), WireError> {
+        let mut run = self
+            .runtime
+            .scripts()
+            .run(RunScriptRequest {
+                workstream_id,
+                kind,
+                cols: 120,
+                rows: 32,
+            })
+            .await
+            .wire()?;
+        // Drained, not dropped: the forwarder drops the terminal only once it hands over the exit.
+        tokio::spawn(async move { while run.live.recv().await.is_some() {} });
         Ok(())
     }
 

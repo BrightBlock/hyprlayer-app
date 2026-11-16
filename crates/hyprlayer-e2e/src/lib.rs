@@ -1,6 +1,7 @@
 //! End-to-end harness: the real `hyprlayer-server` binary in a sandboxed
 //! profile, driven over its socket with the desktop's own `RpcClient`.
 
+pub mod agent_stub;
 mod cli_assets;
 pub mod containers;
 pub mod flows;
@@ -15,7 +16,7 @@ pub use hyprlayer_server::rpc::Request;
 pub use journey::Journey;
 pub use sandbox::Sandbox;
 pub use serde_json::{json, Value};
-pub use server::{Server, Stopped};
+pub use server::{server_binary, Server, Stopped};
 pub use terminal::{keystrokes, read_until, wait_for_exit};
 
 /// Polls `check` until it holds or `within` passes.

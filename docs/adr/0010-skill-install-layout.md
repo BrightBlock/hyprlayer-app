@@ -1,6 +1,6 @@
 # ADR 0010: Installed skills live in app-owned stores reached by per-skill links
 
-**Status:** proposed · 2026-10-05
+**Status:** proposed · 2026-10-05 · amended 2026-11-11 (the server's embedded orchestration plugin is per-launch, not an installed skill)
 
 ## Decision
 
@@ -48,6 +48,10 @@ network work under `<app_data_dir>/skill-staging/<token>/`, install commits from
 and returns a step report. Tokens are single-use: install claims one by renaming its
 directory and deletes it on every exit, so a failed install needs a fresh preview. Staging
 older than an hour is swept at every preview.
+
+**Not a store.** The `<app_data_dir>/agent-control/plugin/<version>/` dir is server-owned,
+versioned and passed per launch; it is not a store, has no lock entry, and never links into
+`~/.claude`.
 
 ## Updates and restore
 

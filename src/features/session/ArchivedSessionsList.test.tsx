@@ -26,6 +26,8 @@ vi.mock("@/lib/queries", () => ({
   useClaudeProbe: () => ({ data: undefined }),
   useWorkstreamSessions: () => ({ data: undefined }),
   useActiveSessions: () => ({ data: undefined }),
+  useBootstrap: () => ({ data: undefined }),
+  usePtyAgents: () => ({ data: undefined }),
 }));
 vi.mock("./sessionStore", () => ({ dropSession: h.dropSession }));
 

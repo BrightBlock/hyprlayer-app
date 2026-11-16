@@ -46,6 +46,9 @@ pub struct SpawnConfig {
     pub append_system_prompt: Option<String>,
     pub env: Vec<(String, String)>,
     pub claude_config_dir: Option<PathBuf>,
+    /// `--mcp-config` JSON; variadic, which is safe here because `-p` stream-json takes no positional.
+    pub mcp_config: Option<String>,
+    pub plugin_dir: Option<PathBuf>,
 }
 
 const STDERR_RING_LINES: usize = 200;
@@ -165,6 +168,12 @@ impl ClaudeDriver {
         }
         if !config.disallowed_tools.is_empty() {
             cmd.args(["--disallowedTools", &config.disallowed_tools.join(" ")]);
+        }
+        if let Some(mcp) = &config.mcp_config {
+            cmd.args(["--mcp-config", mcp]);
+        }
+        if let Some(dir) = &config.plugin_dir {
+            cmd.arg("--plugin-dir").arg(dir);
         }
         for dir in &config.add_dirs {
             cmd.arg("--add-dir").arg(dir);

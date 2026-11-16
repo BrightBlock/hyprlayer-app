@@ -26,6 +26,7 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
         ephemeral: false,
         env: std::env::vars().collect(),
         developer_instructions: None,
+        extra_args: Vec::new(),
     }
 }
 

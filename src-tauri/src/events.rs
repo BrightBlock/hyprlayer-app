@@ -1,6 +1,8 @@
 use hyprlayer_core::claude::SessionState;
 use hyprlayer_core::models::goal::{GoalEndReason, GoalPauseReason, GoalStatus, GoalStep};
-use hyprlayer_core::models::{ClientRef, DocStateChange, TurnKind};
+use hyprlayer_core::models::{
+    ClientRef, DocStateChange, PtyAgentState, PtyAgentStatus, TurnKind, UiRequest,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
@@ -68,6 +70,26 @@ pub struct GoalChanged {
     pub reason: Option<String>,
     pub iteration: u32,
     pub max_iterations: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct PtyAgentChanged {
+    pub terminal_id: String,
+    pub workstream_id: String,
+    pub engine_id: String,
+    pub state: PtyAgentState,
+    pub provider_session_id: Option<String>,
+    pub activity: Option<String>,
+    pub last_reply: Option<String>,
+    pub title: Option<String>,
+    pub status: PtyAgentStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+pub struct UiRequested {
+    pub request: UiRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]

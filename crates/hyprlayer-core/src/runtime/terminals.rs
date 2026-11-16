@@ -4,21 +4,37 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
+use hyprlayer_models::{
+    AgentCaller, PermissionMode, PtyAgent, PtyAgentState, PtyLaunchSession, PtyLaunched,
+};
 use tokio::sync::mpsc;
 
 use crate::error::{CoreError, Result};
-use crate::process::binaries::BinaryKind;
+use crate::process::binaries::{parse_semver, BinaryKind};
+use crate::process::Exec;
+use crate::settings::Engine;
 use crate::store::Workstream;
+use crate::terminal::engines;
+#[cfg(unix)]
+use crate::terminal::screen::ScreenMirror;
 use crate::terminal::{PtySession, SpawnTerminal, TerminalEvent};
 
+#[cfg(unix)]
+use super::agent_control::codex_remote;
+use super::agent_control::codex_remote::CodexRemote;
+use super::agent_control::pty_agents::{is_terminal_reply, CodexGate, PtyLaunchEntry};
+use super::agent_control::{inject, AgentIdentity};
 use super::terminal_registry::TerminalRegistry;
 use super::HyprlayerRuntime;
+
+type CodexGateCell = tokio::sync::OnceCell<CodexGate>;
 
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 const CAPTURE_SKEW_MS: f64 = 2000.0;
 const ATTACH_CHANNEL_CAPACITY: usize = 256;
 const MINT_TIMEOUT: Duration = Duration::from_secs(90);
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -88,6 +104,24 @@ pub struct OpenAgentTerminalRequest {
     pub rows: u16,
 }
 
+/// A PTY agent the server builds argv for, from the engine table and settings.
+pub struct LaunchAgentRequest {
+    pub workstream_id: String,
+    pub engine_id: String,
+    pub session: PtyLaunchSession,
+    pub cols: u16,
+    pub rows: u16,
+    pub lineage: Option<PtyLineage>,
+}
+
+/// The agent that asked for a PTY launch; the desktop's own launches have none.
+pub struct PtyLineage {
+    pub parent: AgentCaller,
+    /// The new agent's depth.
+    pub depth: u32,
+    pub mode: PermissionMode,
+}
+
 pub struct ResizeAgentTerminalRequest {
     pub terminal_id: String,
     pub cols: u16,
@@ -144,7 +178,15 @@ impl TerminalService<'_> {
     }
 
     async fn register(&self, session: Arc<PtySession>) -> TerminalAttachment {
-        let terminal_id = uuid::Uuid::new_v4().to_string();
+        self.register_with_id(uuid::Uuid::new_v4().to_string(), session)
+            .await
+    }
+
+    async fn register_with_id(
+        &self,
+        terminal_id: String,
+        session: Arc<PtySession>,
+    ) -> TerminalAttachment {
         self.runtime
             .terminals
             .insert(terminal_id.clone(), session.clone())
@@ -193,6 +235,12 @@ impl TerminalService<'_> {
             .map_err(|e| io_context("bad input", std::io::Error::other(e)))?;
         if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
             s.write_input(&bytes)?;
+            if !is_terminal_reply(&bytes) {
+                self.runtime.pty_agents.note_input(&req.terminal_id);
+                self.runtime
+                    .agent_control()
+                    .note_human_turn(&req.terminal_id);
+            }
         }
         Ok(())
     }
@@ -210,6 +258,8 @@ impl TerminalService<'_> {
         if let Some(s) = self.runtime.terminals.remove(&req.terminal_id).await {
             s.kill();
         }
+        // Not left to the exit watcher: a PTY that never started or never reports its exit would stay listed.
+        self.runtime.pty_agents.release(&req.terminal_id);
         Ok(())
     }
 
@@ -265,6 +315,415 @@ impl TerminalService<'_> {
         })
         .map_err(|e| io_context("open agent pty", e))?;
         Ok(self.register(session).await)
+    }
+
+    /// Spawns `[...injected hooks and MCP, ...engine.args, ...session args, ...bypass]` with the
+    /// agent's identity env, and tracks it in the PTY agent registry until it exits. A hooked codex
+    /// that can runs its TUI over an app-server of its own, which carries the hooks and MCP instead.
+    pub async fn launch_agent(
+        &self,
+        req: LaunchAgentRequest,
+    ) -> Result<(TerminalAttachment, PtyLaunched)> {
+        ensure_running(self.runtime)?;
+        let ws = self.find_workstream(&req.workstream_id).await?;
+        let configured = self.runtime.settings.get().await.multiplexer.engines;
+        let engine = engines::resolve(&configured, &req.engine_id);
+        if engine.command.trim().is_empty() {
+            return Err(CoreError::TerminalCommandEmpty);
+        }
+        let mode = match &req.lineage {
+            Some(lineage) => lineage.mode,
+            None if req.session.bypass => PermissionMode::BypassPermissions,
+            None => PermissionMode::Default,
+        };
+        let terminal_id = uuid::Uuid::new_v4().to_string();
+        let identity = self
+            .runtime
+            .agent_control()
+            .identity_env(AgentIdentity {
+                caller: AgentCaller::Terminal {
+                    terminal_id: terminal_id.clone(),
+                },
+                workstream_id: ws.id.clone(),
+                project_path: ws.project_path.clone(),
+                depth: req.lineage.as_ref().map_or(0, |l| l.depth),
+                parent: req.lineage.as_ref().map(|l| l.parent.clone()),
+                launch_mode: Some(mode),
+                report_only: false,
+                harness: engines::harness_of(&engine.id),
+            })
+            .await;
+        let gate = CodexGateCell::new();
+        let injected = match &identity {
+            Some((identity_env, _)) => {
+                self.injected_args(&engine, &terminal_id, &ws, identity_env, mode, &gate)
+                    .await
+            }
+            None => None,
+        };
+        let hooked = injected.is_some();
+        let hooked_codex = hooked && engine.id == "codex";
+
+        let mut session = req.session;
+        if !hooked
+            && engines::mints_via_exec(&engine.id)
+            && !session.resume
+            && session.session_id.is_none()
+        {
+            session.session_id = self
+                .mint_codex_session(MintCodexSessionRequest {
+                    workstream_id: ws.id.clone(),
+                    command: engine.command.clone(),
+                })
+                .await?;
+        }
+
+        let (identity_env, token) = identity.unzip();
+        let mut env = self.runtime.child_env().await;
+        env.extend(identity_env.unwrap_or_default());
+        #[cfg(unix)]
+        let remote = match injected.as_ref().filter(|_| hooked_codex) {
+            Some(config) => {
+                self.start_codex_remote(&engine, &terminal_id, &ws, &env, config, &gate)
+                    .await
+            }
+            None => None,
+        };
+        #[cfg(not(unix))]
+        let remote: Option<Arc<CodexRemote>> = None;
+        // A remote resume rejects permission flags; bypass goes through the API once the thread loads.
+        let owe_bypass = remote.is_some() && session.resume && session.bypass;
+        if owe_bypass {
+            session.bypass = false;
+        }
+        let (engine_argv, provider_session_id) =
+            engines::session_argv(&engine, &session, hooked_codex);
+        let mut argv = match &remote {
+            Some(remote) => [
+                "--remote".to_string(),
+                remote.url(),
+                "-C".to_string(),
+                ws.worktree_path.clone(),
+                inject::CODEX_HOOK_TRUST.to_string(),
+            ]
+            .into_iter()
+            .chain(inject::CODEX_REMOTE_FOOTER.map(String::from))
+            .collect(),
+            None => {
+                let mut args = injected.unwrap_or_default();
+                if hooked_codex {
+                    args.push(inject::CODEX_HOOK_TRUST.to_string());
+                }
+                args
+            }
+        };
+        argv.extend(engine_argv);
+
+        let pty = match PtySession::spawn(SpawnTerminal {
+            shell: default_shell(),
+            args: login_shell_args(&agent_command_line(&engine.command, &argv)),
+            cwd: PathBuf::from(&ws.worktree_path),
+            cols: req.cols,
+            rows: req.rows,
+            env,
+            workstream_id: ws.id.clone(),
+        }) {
+            Ok(pty) => pty,
+            Err(e) => {
+                if let Some(remote) = &remote {
+                    remote.stop();
+                }
+                self.runtime.pty_agents.remove_launch_dir(&terminal_id);
+                return Err(io_context("open agent pty", e));
+            }
+        };
+        // From the first byte, like claude's: the review dialog is read off the screen.
+        #[cfg(unix)]
+        let review = (remote.is_some() && session.resume).then(|| ScreenMirror::follow(&pty));
+        let attachment = self
+            .register_with_id(terminal_id.clone(), pty.clone())
+            .await;
+        // Before the exit watcher starts, so a fast exit cannot leave the link behind.
+        let spawned_by = req.lineage.as_ref().map(|l| l.parent.clone());
+        if let Some(lineage) = req.lineage {
+            self.runtime
+                .agent_links
+                .link(&terminal_id, lineage.parent, lineage.depth);
+        }
+        self.runtime.pty_agents.register(PtyLaunchEntry {
+            agent: PtyAgent {
+                terminal_id: terminal_id.clone(),
+                workstream_id: ws.id,
+                engine_id: engine.id,
+                state: PtyAgentState::Starting,
+                provider_session_id: provider_session_id.clone(),
+                activity: None,
+                last_reply: None,
+                spawned_by,
+                hooked,
+                title: None,
+                status: Default::default(),
+            },
+            session: pty.clone(),
+            token,
+            remote: remote.clone(),
+        });
+        #[cfg(unix)]
+        if let Some(remote) = remote {
+            // It may have died before the entry existed to hear of it.
+            if !remote.alive() {
+                pty.kill();
+            } else if session.resume {
+                remote.resume(provider_session_id.clone(), owe_bypass);
+                match (review, self.runtime.pty_agents.snapshot(&terminal_id)) {
+                    (Some(screen), Some(snapshot)) => {
+                        // Waits for the lock: skipping it would leave the dialog for typed input to answer.
+                        tokio::spawn(async move {
+                            let input = snapshot.input.lock_owned().await;
+                            codex_remote::skip_hook_review(pty, screen, input).await;
+                        });
+                    }
+                    _ => tracing::warn!(
+                        "resumed codex {terminal_id}: no screen to dismiss its hook review from"
+                    ),
+                }
+            }
+        }
+        Ok((
+            attachment,
+            PtyLaunched {
+                terminal_id,
+                provider_session_id,
+                hooked,
+            },
+        ))
+    }
+
+    /// Hooks plus the MCP server, ahead of the engine's own args; `None` leaves it on the regex detector.
+    async fn injected_args(
+        &self,
+        engine: &Engine,
+        terminal_id: &str,
+        ws: &Workstream,
+        identity_env: &[(String, String)],
+        mode: PermissionMode,
+        gate: &CodexGateCell,
+    ) -> Option<Vec<String>> {
+        if !matches!(engine.id.as_str(), "claude-code" | "codex") {
+            return None;
+        }
+        let endpoint = self.runtime.agent_control_endpoint.as_ref()?;
+        let ctl = &endpoint.ctl;
+        if engine
+            .args
+            .iter()
+            .any(|a| a == "--settings" || a.starts_with("--settings="))
+        {
+            tracing::info!(
+                "{} launches unhooked: its args carry their own --settings",
+                engine.id
+            );
+            return None;
+        }
+        if engine.id == "codex" {
+            if !self
+                .codex_gate(gate, &engine.command, Path::new(&ws.worktree_path))
+                .await
+                .hooks
+            {
+                return None;
+            }
+            let Some(hooks) = inject::codex_hook_args(ctl) else {
+                tracing::info!(
+                    "codex launches unhooked: {} cannot run unquoted in a hook command",
+                    ctl.display()
+                );
+                return None;
+            };
+            let read_only = mode != PermissionMode::BypassPermissions;
+            let mut args =
+                inject::codex_mcp_args(ctl, identity_env, read_only).unwrap_or_else(|| {
+                    tracing::info!("codex launches without MCP: a value cannot be a TOML literal");
+                    Vec::new()
+                });
+            args.extend(hooks);
+            return Some(args);
+        }
+        let settings = inject::claude_settings(ctl).to_string();
+        let settings = match self.runtime.pty_agents.write_launch_file(
+            terminal_id,
+            "settings.json",
+            settings.as_bytes(),
+        ) {
+            Ok(path) => path,
+            Err(e) => {
+                tracing::warn!("claude launches unhooked: cannot write its hook settings: {e}");
+                return None;
+            }
+        };
+        let mcp = inject::claude_mcp_config(ctl, identity_env).to_string();
+        // `--mcp-config` is variadic: our single-value `--settings` must follow it.
+        let mut args =
+            match self
+                .runtime
+                .pty_agents
+                .write_launch_file(terminal_id, "mcp.json", mcp.as_bytes())
+            {
+                Ok(path) => vec![
+                    "--mcp-config".to_string(),
+                    path.to_string_lossy().into_owned(),
+                ],
+                Err(e) => {
+                    tracing::warn!("claude launches without MCP: cannot write its config: {e}");
+                    Vec::new()
+                }
+            };
+        args.extend([
+            "--settings".to_string(),
+            settings.to_string_lossy().into_owned(),
+        ]);
+        if let Some(plugin) = &endpoint.plugin_dir {
+            args.extend([
+                "--plugin-dir".to_string(),
+                plugin.to_string_lossy().into_owned(),
+            ]);
+        }
+        Some(args)
+    }
+
+    /// Probes the binary the launch will run, through the same login shell and cwd, once per launch.
+    async fn codex_gate(&self, gate: &CodexGateCell, command: &str, cwd: &Path) -> CodexGate {
+        *gate
+            .get_or_init(|| self.probe_codex_gate(command, cwd))
+            .await
+    }
+
+    /// `--version` every launch: a project can pin its own codex (mise, asdf), and an upgrade must
+    /// show. Only the slower `--help` probes are cached, per command and version.
+    async fn probe_codex_gate(&self, command: &str, cwd: &Path) -> CodexGate {
+        // The first semver anywhere: a version manager's shim may print a banner first.
+        let version = self
+            .probe_codex(command, &["--version"], cwd)
+            .await
+            .and_then(|out| out.split_whitespace().find_map(parse_semver));
+        // Uncached when a probe can't run, so a codex installed later is seen on the next launch.
+        let unhooked = CodexGate {
+            hooks: false,
+            remote: false,
+        };
+        let Some(version) = version else {
+            tracing::info!("codex launches unhooked: `{command} --version` gave no version");
+            return unhooked;
+        };
+        let hooks = version >= inject::CODEX_HOOKS_MIN;
+        if !hooks {
+            tracing::info!(
+                "codex launches unhooked: {}.{}.{} predates hook support",
+                version[0],
+                version[1],
+                version[2]
+            );
+        }
+        let pty_agents = &self.runtime.pty_agents;
+        let remote = if !cfg!(unix) || !hooks {
+            false
+        } else if let Some(known) = pty_agents.codex_remote(command, version) {
+            known
+        } else {
+            let remote = self.codex_runs_remote(command, cwd).await;
+            if let Some(remote) = remote {
+                pty_agents.set_codex_remote(command, version, remote);
+            }
+            remote.unwrap_or(false)
+        };
+        CodexGate { hooks, remote }
+    }
+
+    /// `--remote` on the TUI and `--listen unix://PATH` on its app-server; `--help` only, so nothing
+    /// starts. `None` when a probe couldn't run.
+    async fn codex_runs_remote(&self, command: &str, cwd: &Path) -> Option<bool> {
+        let lists = |help: &str, flag: &str| help.contains(flag) && help.contains("unix://PATH");
+        let tui = self.probe_codex(command, &["--help"], cwd).await?;
+        let runs = lists(&tui, "--remote")
+            && lists(
+                &self
+                    .probe_codex(command, &["app-server", "--help"], cwd)
+                    .await?,
+                "--listen",
+            );
+        if !runs {
+            tracing::info!("codex runs embedded: `{command}` has no unix --remote/--listen pair");
+        }
+        Some(runs)
+    }
+
+    async fn probe_codex(&self, command: &str, args: &[&str], cwd: &Path) -> Option<String> {
+        let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+        Exec::new(default_shell())
+            .args(login_shell_args(&agent_command_line(command, &args)))
+            .cwd(cwd)
+            .envs(self.runtime.child_env().await)
+            .timeout(VERSION_PROBE_TIMEOUT)
+            .run_unchecked()
+            .await
+            .ok()
+            .map(|out| out.stdout)
+    }
+
+    /// The app-server a PTY codex's TUI connects to, with its socket in the server's short runtime
+    /// dir; `None` keeps the embedded launch.
+    #[cfg(unix)]
+    async fn start_codex_remote(
+        &self,
+        engine: &Engine,
+        terminal_id: &str,
+        ws: &Workstream,
+        env: &[(String, String)],
+        config: &[String],
+        gate: &CodexGateCell,
+    ) -> Option<Arc<CodexRemote>> {
+        use codex_remote::{AppServerSpec, MAX_SOCKET_PATH};
+
+        let cwd = PathBuf::from(&ws.worktree_path);
+        if !self.codex_gate(gate, &engine.command, &cwd).await.remote {
+            return None;
+        }
+        let dir = self
+            .runtime
+            .agent_control_endpoint
+            .as_ref()?
+            .runtime_dir
+            .as_ref()?;
+        let name: String = terminal_id.chars().filter(|c| *c != '-').take(12).collect();
+        let socket = dir.join(format!("{name}.sock"));
+        if socket.as_os_str().len() > MAX_SOCKET_PATH {
+            tracing::info!(
+                "codex runs embedded: {} is too long for a socket",
+                socket.display()
+            );
+            return None;
+        }
+        let spec = AppServerSpec {
+            command: engine.command.clone(),
+            config: config.to_vec(),
+            cwd,
+            env: env.to_vec(),
+            socket,
+            pid_file: dir.join(format!("{name}.pid")),
+            terminal_id: terminal_id.to_string(),
+        };
+        match CodexRemote::start(spec, &self.runtime.pty_agents).await {
+            Ok(remote) => Some(remote),
+            Err(e) => {
+                tracing::warn!("codex runs embedded: {e}");
+                None
+            }
+        }
+    }
+
+    /// Hooked agents, plus unhooked ones an agent spawned; an unhooked entry's state means nothing.
+    pub fn list_pty_agents(&self, workstream_id: Option<&str>) -> Vec<PtyAgent> {
+        self.runtime.pty_agents.list(workstream_id)
     }
 
     pub async fn resize_agent(&self, req: ResizeAgentTerminalRequest) -> Result<()> {
@@ -369,7 +828,7 @@ fn spawn_forward(
     rx
 }
 
-fn agent_command_line(command: &str, args: &[String]) -> String {
+pub(crate) fn agent_command_line(command: &str, args: &[String]) -> String {
     #[cfg(not(windows))]
     {
         let mut parts = Vec::with_capacity(args.len() + 2);
@@ -388,7 +847,7 @@ fn agent_command_line(command: &str, args: &[String]) -> String {
 }
 
 #[cfg(not(windows))]
-fn sh_quote(s: &str) -> String {
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 

@@ -7,6 +7,7 @@
 //! desktop shell generates.
 
 pub mod agent;
+pub mod agent_control;
 pub mod goal;
 pub mod project;
 pub mod review;
@@ -18,6 +19,11 @@ pub mod terminal;
 pub mod workstream;
 
 pub use agent::{Harness, PermissionMode, Stage};
+pub use agent_control::{
+    AgentCaller, AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, PtyAgent,
+    PtyAgentContext, PtyAgentState, PtyAgentStatus, PtyControlOutcome, RevealTarget,
+    SpawnPtyAgentRequest, SpawnSessionRequest, UiRequest, WaitOutcome, WaitUntil,
+};
 pub use goal::{
     Goal, GoalBrief, GoalCheck, GoalCheckKind, GoalCheckOutcome, GoalCheckResult, GoalDetail,
     GoalEndReason, GoalIteration, GoalIterationNote, GoalLimits, GoalPauseReason, GoalSource,
@@ -31,9 +37,9 @@ pub use runtime::{DocStateChange, RuntimeEvent, ThoughtsIndexUpdateKind};
 pub use script::{RunPhase, ScriptKind, ScriptRuntime, ScriptStatus};
 pub use session::{
     ClientRef, ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, RevisedTurn,
-    Session, SessionEvent, SessionLogEntry, SessionRev, SessionState, SessionStreamItem,
-    SessionTurns, TurnKind, TurnStatus,
+    Session, SessionEvent, SessionLogEntry, SessionOrigin, SessionRev, SessionState,
+    SessionStreamItem, SessionTurns, TurnKind, TurnStatus,
 };
 pub use skill::{SkillScope, SkillSourceKind, SkillTarget};
-pub use terminal::TerminalEvent;
+pub use terminal::{PtyLaunchSession, PtyLaunched, TerminalEvent};
 pub use workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};

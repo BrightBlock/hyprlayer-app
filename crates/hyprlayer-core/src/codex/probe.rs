@@ -73,7 +73,7 @@ fn parse_auth(result: &Value) -> CodexAuthStatus {
     }
 }
 
-fn parse_models(result: &Value) -> Vec<CodexModel> {
+pub(crate) fn parse_models(result: &Value) -> Vec<CodexModel> {
     result
         .get("data")
         .and_then(Value::as_array)

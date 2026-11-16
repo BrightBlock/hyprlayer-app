@@ -44,7 +44,7 @@ const APP_SERVER_ARGS: [&str; 10] = [
     GOALS_DISABLED_CONFIG,
 ];
 
-fn initialize_params() -> Value {
+pub(crate) fn initialize_params() -> Value {
     json!({
         "clientInfo": {
             "name": "hyprlayer",
@@ -68,6 +68,8 @@ pub struct SpawnConfig {
     pub ephemeral: bool,
     pub env: Vec<(String, String)>,
     pub developer_instructions: Option<String>,
+    /// Per-spawn `-c` pairs after the fixed app-server args.
+    pub extra_args: Vec<String>,
 }
 
 type PendingReplies =
@@ -97,6 +99,7 @@ impl CodexDriver {
         let mut cmd = Command::new(&config.codex_bin);
         crate::process::appimage::scrub_tokio(&mut cmd);
         cmd.args(APP_SERVER_ARGS)
+            .args(&config.extra_args)
             .current_dir(&config.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1240,6 +1243,7 @@ mod tests {
             ephemeral: false,
             env: Vec::new(),
             developer_instructions: developer_instructions.map(str::to_string),
+            extra_args: Vec::new(),
         }
     }
 

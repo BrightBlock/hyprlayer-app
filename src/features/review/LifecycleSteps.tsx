@@ -164,7 +164,7 @@ function ReportRow({
 
 export function LifecycleSteps({ view, sessionId, header, phases }: LifecycleStepsProps) {
   const validates = useSession(sessionId)?.stage === "validate";
-  const linked = useImplementSessionFor(sessionId);
+  const linked = useImplementSessionFor(view.item.id, sessionId);
   const implementId = validates ? linked : sessionId;
   if (!implementId) {
     return (

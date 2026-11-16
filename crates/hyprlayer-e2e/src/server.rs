@@ -116,6 +116,11 @@ impl Server {
     }
 }
 
+/// The binary every `Server` runs; agents reach it as `HYPRLAYER_CTL`.
+pub fn server_binary() -> &'static Path {
+    binary()
+}
+
 /// `HYPRLAYER_E2E_SERVER_BIN` when set (prebuilt, so parallel tests don't queue on
 /// cargo's lock); else built from the current tree, as `tauri dev` never rebuilds it.
 fn binary() -> &'static Path {

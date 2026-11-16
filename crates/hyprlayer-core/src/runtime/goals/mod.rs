@@ -27,7 +27,7 @@ use crate::error::{CoreError, Result};
 use crate::pipeline::{fix_findings_prompt, goal_check_kind, Stage};
 use crate::repo_settings;
 use crate::runtime::sessions::goal_loop::{self, StartMode};
-use crate::runtime::sessions::{LaunchSessionParams, StartStageSessionRequest};
+use crate::runtime::sessions::{LaunchSessionParams, SessionLineage, StartStageSessionRequest};
 use crate::settings::GoalSettings;
 use crate::store::{now_ms, FieldOp, GoalRow, GoalStateUpdate, NewGoal};
 
@@ -576,6 +576,17 @@ impl GoalService<'_> {
         request: StartGoalRequest,
         author: Option<ClientRef>,
     ) -> Result<Goal> {
+        self.start_with(request, author, SessionLineage::goal())
+            .await
+    }
+
+    /// `lineage` is what a `NewSession` target's row records; an agent's goal names the agent.
+    pub async fn start_with(
+        &self,
+        request: StartGoalRequest,
+        author: Option<ClientRef>,
+        lineage: SessionLineage,
+    ) -> Result<Goal> {
         ensure_running(self.runtime)?;
         let StartGoalRequest { target, spec } = request;
         let sessions = self.runtime.sessions();
@@ -612,18 +623,22 @@ impl GoalService<'_> {
                     let project_path = workstream.project_path.clone();
                     // The docs only activate the plan: iteration 1 is the goal prompt, which names it.
                     let started = sessions
-                        .prepare_start(StartStageSessionRequest {
-                            workstream,
-                            stage,
-                            input: spec.work_prompt.clone(),
-                            attached_docs,
-                            harness,
-                            model: model.clone(),
-                            effort: effort.clone(),
-                            permission_mode,
-                            prompt_name: None,
-                            client_message_id: None,
-                        })
+                        .prepare_start_with(
+                            StartStageSessionRequest {
+                                workstream,
+                                stage,
+                                input: spec.work_prompt.clone(),
+                                attached_docs,
+                                harness,
+                                model: model.clone(),
+                                effort: effort.clone(),
+                                permission_mode,
+                                prompt_name: None,
+                                client_message_id: None,
+                                parent_session_id: None,
+                            },
+                            lineage,
+                        )
                         .await?;
                     let cap = spec
                         .limits

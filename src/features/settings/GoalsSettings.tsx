@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import type { AppSettings, GoalSettings } from "@/lib/bindings";
 import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { useClaudeProbe, useOpencodeCatalog, useSetAppSettings } from "@/lib/queries";
 import { SettingsCardTitle } from "@/components/SettingsCard";
-import { Card, DropdownSelect, ErrorNote, SettingRow, TextInput } from "@/components/ui";
+import { Card, DropdownSelect, ErrorNote, SettingRow } from "@/components/ui";
 
+import { NumberField } from "./NumberField";
 import { goalSettings, withGoals } from "./settingsPatches";
 import { titleModelFromValue, titleModelGroups, titleModelValue } from "./titleModel";
 
@@ -82,45 +83,6 @@ export function GoalsSettings({ settings }: { settings: AppSettings }) {
         />
       </div>
     </Card>
-  );
-}
-
-// Commits on blur or Enter; an out-of-range entry snaps back to the saved value.
-function NumberField({
-  label,
-  value,
-  parse,
-  onCommit,
-  step,
-  wide,
-}: {
-  label: string;
-  value: number;
-  parse: (n: number) => number | null;
-  onCommit: (n: number) => void;
-  step?: string;
-  wide?: boolean;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    if (draft === null) return;
-    const next = draft.trim() === "" ? null : parse(Number(draft));
-    setDraft(null);
-    if (next !== null && next !== value) onCommit(next);
-  };
-  return (
-    <TextInput
-      type="number"
-      aria-label={label}
-      step={step}
-      value={draft ?? String(value)}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-      }}
-      className={wide ? "w-[140px]" : "w-[96px]"}
-    />
   );
 }
 

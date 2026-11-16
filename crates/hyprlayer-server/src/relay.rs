@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use hyprlayer_core::runtime::agent_control::AGENT_ENV;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::{logging, socket};
@@ -104,6 +105,10 @@ fn spawn_detached(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(stderr);
+    // A server must never re-export an outer agent's identity to the agents it spawns.
+    for var in AGENT_ENV {
+        cmd.env_remove(var);
+    }
     let child = hyprlayer_core::process::spawn_orphan(&mut cmd)?;
     tracing::info!("started {} serve as pid {:?}", bin.display(), child.id());
     Ok((child, start))

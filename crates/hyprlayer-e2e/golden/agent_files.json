@@ -130,7 +130,7 @@
         },
         {
           "evidence": {
-            "commands": 18
+            "commands": 19
           },
           "guard": "slash commands read from the worktree",
           "ok": true
