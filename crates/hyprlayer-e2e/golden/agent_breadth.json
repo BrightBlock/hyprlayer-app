@@ -125,9 +125,11 @@
             "banner": true,
             "echoedMessage": true,
             "escapes": false,
-            "title": false
+            "spaced": true,
+            "title": false,
+            "widest": 124
           },
-          "guard": "the agent's colored banner reads as plain text, with no escape sequence or title left",
+          "guard": "the agent's colored banner reads as plain text, its column moves as spaces up to the terminal's edge, with no escape sequence or title left",
           "ok": true
         },
         {

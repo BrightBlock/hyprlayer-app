@@ -613,9 +613,8 @@ fn model_picker(rows: &[String]) -> Option<ModelPicker> {
     if input_line(rows).is_some() {
         return None;
     }
-    let footer = rows
-        .iter()
-        .rposition(|r| r.contains(MODEL_FOOTER) || r.contains(MORE_FOOTER))?;
+    let model_footer = rfind_wrapped(rows, MODEL_FOOTER);
+    let footer = model_footer.max(rfind_wrapped(rows, MORE_FOOTER))?;
     let title = rows[..footer]
         .iter()
         .rposition(|r| r.trim() == "Select model");
@@ -625,7 +624,7 @@ fn model_picker(rows: &[String]) -> Option<ModelPicker> {
             .iter()
             .any(|r| r.trim_start().starts_with('❯') && r.contains("More models"))
     };
-    if title.is_none() && !rows[footer].contains(MODEL_FOOTER) && !more_lit() {
+    if title.is_none() && model_footer != Some(footer) && !more_lit() {
         return None;
     }
     let top = title.map_or(0, |i| i + 1);
@@ -675,7 +674,7 @@ fn effort_slider(rows: &[String]) -> Option<EffortSlider> {
     if input_line(rows).is_some() {
         return None;
     }
-    let footer = rows.iter().rposition(|r| r.contains(EFFORT_FOOTER))?;
+    let footer = rfind_wrapped(rows, EFFORT_FOOTER)?;
     let (at, levels) = rows[..footer]
         .iter()
         .enumerate()
@@ -741,8 +740,8 @@ pub(super) fn paste_refusal(screen: &ScreenMirror) -> Option<&'static str> {
 }
 
 fn covered(rows: &[String]) -> bool {
-    rows.iter()
-        .any(|r| r.contains("Enter to confirm") || r.contains("Esc to cancel"))
+    rows.iter().any(|r| r.contains("Enter to confirm"))
+        || rfind_wrapped(rows, "Esc to cancel").is_some()
 }
 
 fn is_rule(row: &str) -> bool {
@@ -781,9 +780,23 @@ fn input_text(line: &str) -> &str {
 fn showing_picker(rows: &[String]) -> bool {
     input_line(rows).is_none()
         && (model_picker(rows).is_some()
-            || rows.iter().any(|r| {
-                r.contains(MODEL_FOOTER) || r.contains(EFFORT_FOOTER) || r.contains(SWITCH_DIALOG)
-            }))
+            || [MODEL_FOOTER, EFFORT_FOOTER, SWITCH_DIALOG]
+                .iter()
+                .any(|text| rfind_wrapped(rows, text).is_some()))
+}
+
+/// The newest row `text` starts on; a narrow terminal wraps a footer at words onto up to three rows,
+/// indenting the rest.
+fn rfind_wrapped(rows: &[String], text: &str) -> Option<usize> {
+    (0..rows.len()).rev().find(|&i| {
+        let mut joined = rows[i].trim_end().to_string();
+        joined.contains(text)
+            || rows[i + 1..].iter().take(2).any(|next| {
+                joined.push(' ');
+                joined.push_str(next.trim());
+                joined.contains(text)
+            })
+    })
 }
 
 /// claude's `Set model to <name> for this session only` below the newest `❯ /model`; notes from
@@ -807,7 +820,7 @@ fn switch_dialog_for(rows: &[String], label: &str) -> bool {
 }
 
 /// The newest footer among the last four lines.
-fn footer_mode(rows: &[String]) -> Option<&'static str> {
+pub(super) fn footer_mode(rows: &[String]) -> Option<&'static str> {
     rows.iter()
         .rev()
         .filter(|r| !r.trim().is_empty())

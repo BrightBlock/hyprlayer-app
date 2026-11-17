@@ -1,7 +1,7 @@
 //! `hyprlayer-server hook <engine> [Event]`: a claude or codex hook that reports one signal and gets out of the way.
 
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use hyprlayer_models::AgentSignal;
@@ -131,7 +131,30 @@ fn trim(raw: &[u8], engine: HookEngine, event: Option<String>) -> Option<AgentSi
         to_model: text("to_model"),
         // Only codex's rollout carries what its hooks lack.
         transcript_path: text("transcript_path").filter(|_| engine == HookEngine::Codex),
+        written_paths: written_paths(payload),
     })
+}
+
+fn written_paths(payload: &serde_json::Map<String, Value>) -> Vec<String> {
+    let tool = payload.get("tool_name").and_then(Value::as_str);
+    let (Some("Write" | "Edit" | "MultiEdit"), Some(input)) = (tool, payload.get("tool_input"))
+    else {
+        return Vec::new();
+    };
+    let cwd = payload.get("cwd").and_then(Value::as_str).map(Path::new);
+    let edits = input.get("edits").and_then(Value::as_array);
+    let mut paths: Vec<String> = std::iter::once(input.get("file_path"))
+        .chain(edits.into_iter().flatten().map(|e| e.get("file_path")))
+        .filter_map(|p| p?.as_str())
+        // Without its `cwd` a relative path would resolve against the server's.
+        .filter_map(|p| match cwd {
+            Some(cwd) => Some(cwd.join(p).to_string_lossy().into_owned()),
+            None => Path::new(p).is_absolute().then(|| p.to_string()),
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 fn truncate(mut s: String, max_bytes: usize) -> String {

@@ -16,6 +16,7 @@ const q = vi.hoisted(() => ({
   useCommitFiles: vi.fn(),
   useProjectMemory: vi.fn(),
   invalidateWorkstreamLists: vi.fn(),
+  useWorkstreamDocList: vi.fn(() => ({ data: undefined })),
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/lib/queryClient", () => ({ queryClient: { invalidateQueries: vi.fn() } }));

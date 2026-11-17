@@ -374,6 +374,21 @@ impl ThoughtsIndex {
             .map(|r| r.content_hash)
     }
 
+    /// The project's docs whose frontmatter names `branch`, as the plan and research skills write it,
+    /// dated `since` (`YYYY-MM-DD`) or later; an undated doc counts.
+    pub fn on_branch(&self, project: &str, branch: &str, since: &str) -> Vec<String> {
+        let map = self.records.read().expect("index lock poisoned");
+        let mut ids: Vec<String> = map
+            .values()
+            .filter(|r| r.meta.project.as_deref() == Some(project))
+            .filter(|r| r.meta.fm.extra.get("branch").map(String::as_str) == Some(branch))
+            .filter(|r| r.meta.fm.date.as_deref().is_none_or(|d| d >= since))
+            .map(|r| r.meta.id.clone())
+            .collect();
+        ids.sort();
+        ids
+    }
+
     pub fn doc_path(&self, id: &str) -> Option<PathBuf> {
         self.records
             .read()

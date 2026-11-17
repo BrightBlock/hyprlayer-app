@@ -93,7 +93,7 @@
               "plan"
             ]
           },
-          "guard": "each shift+tab's footer, read after the statusLine report, moves the mode along the ring",
+          "guard": "each shift+tab's footer, painted after its statusLine report, moves the mode along the ring",
           "ok": true
         }
       ],
@@ -203,6 +203,13 @@
       "guards": [
         {
           "evidence": {
+            "mode": "default"
+          },
+          "guard": "the mode reads off a footer whose words claude places with column moves",
+          "ok": true
+        },
+        {
+          "evidence": {
             "outcome": "applied",
             "switchPath": [
               "PreModelSwitch allow"
@@ -307,6 +314,19 @@
       "guards": [
         {
           "evidence": {
+            "outcome": "ok",
+            "reported": "max"
+          },
+          "guard": "with /model's and /effort's footers wrapped onto a second row, the switch above and an effort change both apply",
+          "ok": true
+        }
+      ],
+      "step": "a narrow terminal's wrapped picker footers still drive the change"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "outcome": "applied",
             "plan": "ok",
             "planModeModel": "claude-sonnet-5-5"
@@ -366,6 +386,7 @@
               "/model",
               "status",
               "/model",
+              "/effort",
               "/plan",
               "/model",
               "/model",

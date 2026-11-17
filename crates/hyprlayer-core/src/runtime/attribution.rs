@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -7,6 +7,7 @@ use tokio::sync::broadcast;
 use hyprlayer_models::runtime::DocStateChange;
 use hyprlayer_models::RuntimeEvent;
 
+use crate::agent::Harness;
 use crate::config::ConfigService;
 use crate::error::{CoreError, Result};
 use crate::index::roots::{canon_roots, rebase_onto_roots, thoughts_roots, RootCanon};
@@ -49,11 +50,18 @@ pub(crate) fn doc_id_for_tool_path(roots: &[RootCanon], cwd: &Path, raw: &str) -
     ThoughtsIndex::classify(root, &local).map(|_| local.to_string_lossy().into_owned())
 }
 
-fn doc_ids(roots: &[RootCanon], cwd: &str, paths: &[String]) -> BTreeSet<String> {
+fn doc_ids(roots: &[RootCanon], cwd: &Path, paths: &[String]) -> BTreeSet<String> {
     paths
         .iter()
-        .filter_map(|raw| doc_id_for_tool_path(roots, Path::new(cwd), raw))
+        .filter_map(|raw| doc_id_for_tool_path(roots, cwd, raw))
         .collect()
+}
+
+/// The agent a write is credited to: a composer session, or a PTY agent by its harness session.
+pub(crate) struct DocWriter {
+    pub session_id: String,
+    pub harness: Harness,
+    pub workstream_id: String,
 }
 
 /// Records which harness session wrote each thoughts doc.
@@ -79,25 +87,44 @@ impl DocAttribution {
     }
 
     async fn try_record(&self, session_id: &str, paths: Vec<String>) -> Result<()> {
+        let db = self.db.clone();
+        let id = session_id.to_string();
+        let Some(session) = blocking(move || db.get_session(&id)).await? else {
+            return Ok(());
+        };
+        let writer = DocWriter {
+            session_id: session.id,
+            harness: session.harness,
+            workstream_id: session.workstream_id,
+        };
+        self.attribute(writer, PathBuf::from(session.cwd), paths)
+            .await
+    }
+
+    /// A PTY agent's writes; its hooks send absolute paths.
+    pub(crate) async fn record_writer(self: Arc<Self>, writer: DocWriter, paths: Vec<String>) {
+        let session_id = writer.session_id.clone();
+        if let Err(e) = self.attribute(writer, PathBuf::new(), paths).await {
+            tracing::warn!("agent {session_id}: doc attribution not recorded: {e}");
+        }
+    }
+
+    async fn attribute(&self, writer: DocWriter, cwd: PathBuf, paths: Vec<String>) -> Result<()> {
         let roots = thoughts_roots(&self.config.load().await?.config);
         if roots.is_empty() {
             return Ok(());
         }
         let db = self.db.clone();
-        let session_id = session_id.to_string();
         let changed = blocking(move || {
-            let Some(session) = db.get_session(&session_id)? else {
-                return Ok(Vec::new());
-            };
             let roots = canon_roots(&roots);
             let at_ms = now_ms();
             let mut changed = Vec::new();
-            for doc_id in doc_ids(&roots, &session.cwd, &paths) {
+            for doc_id in doc_ids(&roots, &cwd, &paths) {
                 let row = DocAgentRow {
                     doc_id,
-                    session_id: session.id.clone(),
-                    harness: session.harness,
-                    workstream_id: session.workstream_id.clone(),
+                    session_id: writer.session_id.clone(),
+                    harness: writer.harness,
+                    workstream_id: writer.workstream_id.clone(),
                     at_ms,
                 };
                 if db.record_doc_agent(&row)? {
@@ -175,7 +202,7 @@ fn backfill_window(db: &Db, roots: &[RootCanon], lo: i64, hi: i64) -> Result<Vec
             if !ok.contains(&(write.session_id.clone(), write.tool_use_id.clone())) {
                 continue;
             }
-            for doc_id in doc_ids(roots, &write.cwd, &write.paths) {
+            for doc_id in doc_ids(roots, Path::new(&write.cwd), &write.paths) {
                 let row = DocAgentRow {
                     doc_id,
                     session_id: write.session_id.clone(),

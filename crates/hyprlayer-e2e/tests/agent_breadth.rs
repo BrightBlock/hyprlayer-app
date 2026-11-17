@@ -42,8 +42,9 @@ run = 'printf "E2E_RUN_OK\n"'
 archive = 'touch "$HOME/e2e-archive-ran"'
 "#;
 
-/// Colors and a title before the stub runs, so `read_terminal` has escapes to strip.
-const ANSI_CLAUDE: &str = "#!/bin/sh\nprintf '\\033]0;E2E title\\007\\033[1;32mE2E_READY\\033[0m\\n'\nexec \"$(dirname \"$0\")/pty-claude\" \"$@\"\n";
+/// Colors, a title, words placed by column moves (as claude places them) and a move far past the
+/// edge before the stub runs, so `read_terminal` has escapes to strip.
+const ANSI_CLAUDE: &str = "#!/bin/sh\nprintf '\\033]0;E2E title\\007\\033[1;32mE2E_READY\\033[0m\\nE2E\\033[6Gspaced\\033[14Gwords\\nE2E_FAR\\033[999999999CEDGE\\n'\nexec \"$(dirname \"$0\")/pty-claude\" \"$@\"\n";
 
 const PLAN: &str = "---\ntitle: Breadth plan\ntype: plan\nstatus: draft\nauthor: e2e\n---\n\n\
 # Breadth plan\n\n## Phase 1\n\n- [ ] Raise the counter\n";
@@ -300,13 +301,17 @@ async fn agent_breadth() {
     );
     let two: String = serde_json::from_str(&two).unwrap_or_default();
     j.guard(
-        "the agent's colored banner reads as plain text, with no escape sequence or title left",
+        "the agent's colored banner reads as plain text, its column moves as spaces up to the terminal's edge, with no escape sequence or title left",
         screen.lines().any(|l| l == "E2E_READY")
+            && screen.lines().any(|l| l == "E2E  spaced  words")
+            && screen.lines().all(|l| l.chars().count() <= 200)
             && !screen.contains('\x1b')
             && !screen.contains("E2E title")
             && screen.contains("E2E_END"),
         json!({
             "banner": screen.lines().any(|l| l == "E2E_READY"),
+            "spaced": screen.lines().any(|l| l == "E2E  spaced  words"),
+            "widest": screen.lines().map(|l| l.chars().count()).max(),
             "escapes": screen.contains('\x1b'),
             "title": screen.contains("E2E title"),
             "echoedMessage": screen.contains("E2E_END"),

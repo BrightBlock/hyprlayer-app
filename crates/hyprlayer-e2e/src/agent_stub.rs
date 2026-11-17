@@ -27,14 +27,17 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `question` (`AskUserQuestion`), `tools` (a parallel Read's `PreToolUse` and `PostToolUse` alone),
 /// `approve` (the asked tool's `PostToolUse`, then `Stop`), `clear` (`SessionEnd`, then
 /// `SessionStart` as `<id>-cleared`), `bad` (malformed, non-object and empty payloads), `fail`
-/// (`StopFailure` for an expired login, in place of `Stop`), `exit` (`SessionEnd`, then exit).
+/// (`StopFailure` for an expired login, in place of `Stop`), `exit` (`SessionEnd`, then exit),
+/// `write <path>` (writes it, then a `Write`'s `PostToolUse` with the relative path and `cwd`) and
+/// `shell <path> <branch> [date]` (a plan naming `branch`, through a redirect, so no hook fires).
 /// Without `--stub-tui` it paints claude's empty input box at launch and after each line, a
 /// permission or question prompt after `ask` or `question`, the `/model` picker after `picker`, and
 /// nothing after `tools`. The statusLine
 /// `--settings` names runs on `status` (its stdout to `statusline.out`, its exit to
-/// `statusline.log`), after shift+tab (`ESC [ Z`: the next footer of the manual → accept edits →
-/// plan → auto ring) and after `switch` (`PostModelSwitch` to sonnet). Its context reads null until
-/// the first `work`.
+/// `statusline.log`), on shift+tab (`ESC [ Z`: the next mode of the manual → accept edits → plan →
+/// auto ring, whose footer the box shows from then on, painted only after the statusLine as claude's
+/// launch paints it) and after `switch` (`PostModelSwitch` to sonnet). Its context reads null until
+/// the first `work`. Footers place their words with column moves, as claude 2.1.326 paints them.
 ///
 /// `--stub-tui` makes it a raw-mode TUI painted as claude 2.1.322 is: an input box (its placeholder
 /// dim while empty), a footer, and
@@ -43,14 +46,15 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `s` fires `PreModelSwitch` (its stdout decides `--stub-dialog`'s "Switch model?", which
 /// `--stub-ignore-allow` shows anyway), then `PostModelSwitch`, the `❯ /model` note and the
 /// statusLine; in plan mode a switch to Haiku is followed by claude's own `auto` switch to Sonnet.
-/// `--stub-silent-switch` closes it with neither. The
+/// `--stub-silent-switch` closes it with neither; `--stub-narrow` wraps the pickers' footers as
+/// claude does in a narrow terminal. The
 /// `/effort` slider stops at the ends of ←/→ and `s` reruns the statusLine. Every byte it reads is
 /// logged as `<screen> <hex>` to `keys.log`; a digit, an Enter in a picker or a Tab in the slider
 /// goes to `traps.log` too, as it would save a claude default. `tui.log` records the switch path.
 pub const PTY_CLAUDE: &str = r#"#!/bin/sh
 base="$(dirname "$0")/../agent-control"
 sid=""; settings=""; mcp=""; prev=""
-tui=""; dialog=""; ignore_allow=""; silent=""
+tui=""; dialog=""; ignore_allow=""; silent=""; narrow=""
 for a in "$@"; do
   case "$prev" in
     --session-id|--resume) sid="$a" ;;
@@ -62,6 +66,7 @@ for a in "$@"; do
     --stub-dialog) dialog=1 ;;
     --stub-ignore-allow) ignore_allow=1 ;;
     --stub-silent-switch) silent=1 ;;
+    --stub-narrow) narrow=1 ;;
   esac
   prev="$a"
 done
@@ -82,7 +87,15 @@ hook() {
   printf '%s exit=%s\n' "$1" "$?" >> "$dir/hooks.log"
 }
 ev() { printf '{"session_id":"%s","hook_event_name":"%s"%s}' "$sid" "$1" "$2"; }
-model="claude-haiku-5-5"; effort="low"; mode=0; used=""; esc=$(printf '\033')
+model="claude-haiku-5-5"; effort="low"; mode=0; moded=""; used=""; esc=$(printf '\033')
+footer() {
+  case $mode in
+    0) printf '\033[3G⏸\033[5Gmanual\033[12Gmode\033[17Gon (shift+tab to cycle)' ;;
+    1) printf '\033[3G⏵⏵\033[6Gaccept\033[13Gedits\033[19Gon (shift+tab to cycle)' ;;
+    2) printf '\033[3G⏸\033[5Gplan\033[10Gmode\033[15Gon (shift+tab to cycle)' ;;
+    3) printf '\033[3G⏵⏵\033[6Gauto\033[11Gmode\033[16Gon (shift+tab to cycle)' ;;
+  esac
+}
 statusline() {
   cmd=""
   [ -f "$settings" ] && cmd=$(sed -n 's/.*"command":"\([^"]*statusline claude\)".*/\1/p' "$settings")
@@ -107,17 +120,17 @@ run_line() {
     hold) hook UserPromptSubmit "$(ev UserPromptSubmit '')" ;;
     fail) hook StopFailure "$(ev StopFailure ',"error":"authentication_failed","error_details":"Login expired · Please run /login"')" ;;
     status) statusline ;;
-    "$esc[Z")
-      mode=$(( (mode + 1) % 4 ))
-      case $mode in
-        0) printf '\342\217\270 manual mode on\n' ;;
-        1) printf '\342\217\265\342\217\265 accept edits on\n' ;;
-        2) printf '\342\217\270 plan mode on\n' ;;
-        3) printf '\342\217\265\342\217\265 auto mode on\n' ;;
-      esac
-      # The footer must reach the server's ring before the report that reads it.
-      sleep 0.3
-      statusline ;;
+    write\ *)
+      path=${1#write }
+      mkdir -p "$(dirname "$path")"
+      printf '# Written by a PTY agent\n' > "$path"
+      hook PostToolUse "$(ev PostToolUse ",\"cwd\":\"$PWD\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$path\"},\"tool_response\":{}")" ;;
+    shell\ *)
+      set -- ${1#shell }
+      mkdir -p "$(dirname "$1")"
+      dated=""; [ -n "$3" ] && dated="date: $3\n"
+      printf -- "---\ntype: plan\nstatus: draft\n${dated}branch: %s\n---\n\n# Written through a shell redirect\n" "$2" > "$1" ;;
+    "$esc[Z") mode=$(( (mode + 1) % 4 )); moded=1; statusline ;;
     switch)
       hook PostModelSwitch "$(ev PostModelSwitch ',"from_model":"claude-haiku-5-5","to_model":"claude-sonnet-5-5","source":"picker"')"
       model="claude-sonnet-5-5"
@@ -146,7 +159,10 @@ run_line() {
 rule="────────────────────────────────────────"
 if [ -z "$tui" ]; then
   # One write each, so a screen read never lands between the clear and the paint.
-  box() { printf '\033[2J\033[H\n%s\n\342\235\257\302\240\033[2mTry "work"\033[22m\n%s\n' "$rule" "$rule"; }
+  box() {
+    f=""; [ -n "$moded" ] && f=$(footer)
+    printf '\033[2J\033[H\n%s\n\342\235\257\302\240\033[2mTry "work"\033[22m\n%s\n%s' "$rule" "$rule" "$f"
+  }
   box
   hook SessionStart "$(ev SessionStart ',"source":"startup"')"
   while IFS= read -r line; do
@@ -217,12 +233,7 @@ paint_input() {
   else
     printf '\n%s\n❯\302\240\033[2mTry "refactor <filepath>"\033[22m\n%s\n' "$rule" "$rule"
   fi
-  case $mode in
-    0) printf '  ⏸ manual mode on (shift+tab to cycle)\n' ;;
-    1) printf '  ⏵⏵ accept edits on (shift+tab to cycle)\n' ;;
-    2) printf '  ⏸ plan mode on (shift+tab to cycle)\n' ;;
-    3) printf '  ⏵⏵ auto mode on (shift+tab to cycle)\n' ;;
-  esac
+  footer; printf '\n'
 }
 paint_model() {
   cls
@@ -238,7 +249,12 @@ paint_model() {
     echo "more highlighted" >> "$dir/tui.log"
     printf '   ❯ ▸   More models\n\n   Enter to expand · Esc to cancel\n'
   else
-    printf '     ▸   More models\n\n   Enter to set as default · s to use this session only · Esc to cancel\n'
+    printf '     ▸   More models\n\n'
+    if [ -n "$narrow" ]; then
+      printf '   Enter to set as default · s to use this session only · Esc to\n   cancel\n'
+    else
+      printf '   Enter to set as default · s to use this session only · Esc to cancel\n'
+    fi
   fi
 }
 paint_dialog() {
@@ -251,7 +267,11 @@ paint_effort() {
   printf '   Effort\n\n'
   printf "%$(eff_col $eidx)s▲\n" ''
   printf '          low     medium     high     xhigh      max      Tab to toggle\n\n'
-  printf '   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel\n'
+  if [ -n "$narrow" ]; then
+    printf '   ←/→ to adjust · Enter to confirm · s for this session only · Esc\n   to cancel\n'
+  else
+    printf '   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel\n'
+  fi
 }
 hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
 # claude would save a default here: the driver must never send it.

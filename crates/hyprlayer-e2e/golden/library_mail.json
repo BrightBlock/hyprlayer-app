@@ -682,6 +682,51 @@
       "guards": [
         {
           "evidence": {
+            "agent": {
+              "harness": "claude",
+              "projectPath": "$SANDBOX/home/code/demo",
+              "sessionId": "$PTY_SESSION",
+              "workstreamId": "$WS"
+            },
+            "documents": [
+              [
+                "$PTY_PLAN",
+                "written"
+              ],
+              [
+                "$SHELL_PLAN",
+                "branch"
+              ]
+            ]
+          },
+          "guard": "a PTY Write credits the plan to its claude session and workstream; a plan written through a shell redirect joins by its branch, unless it predates the workstream",
+          "ok": true
+        }
+      ],
+      "step": "a PTY agent's docs reach its workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstWorkstream": [
+              [
+                "$SHELL_PLAN",
+                "branch"
+              ]
+            ],
+            "laterWorkstreamListsIt": true
+          },
+          "guard": "a later Write from another workstream's agent moves pty-plan to that workstream, out of the first one's list",
+          "ok": true
+        }
+      ],
+      "step": "a doc belongs to the workstream that wrote it last"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "livePlan": {
               "harness": "claude",
               "projectPath": null

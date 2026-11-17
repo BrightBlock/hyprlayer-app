@@ -41,8 +41,10 @@ function reportFailure(title: string): (e: unknown) => void {
 
 type ModelControls = Pick<SessionControlsSnapshot, "model" | "effort">;
 
+/** What a relaunch carries over, since claude's session-only changes die with its process. */
+export type RelaunchKeep = { model?: string; permissionMode?: string; effort?: string };
 /** What a model relaunch starts with: the picked model in the session's mode and effort. */
-export type ModelRelaunch = { model: string; permissionMode?: string; effort?: string };
+export type ModelRelaunch = RelaunchKeep & { model: string };
 
 /** Publishes a PTY agent's controls to the status bar, and carries out its changes. */
 export function PtySessionControls({
@@ -58,8 +60,8 @@ export function PtySessionControls({
   shellId: number;
   engineId: string;
   agent: AgentRuntimeState | undefined;
-  onRestart: () => void;
-  onBypass: (on: boolean) => void;
+  onRestart: (keep: RelaunchKeep) => void;
+  onBypass: (on: boolean, keep: RelaunchKeep) => void;
   onModelRelaunch: (relaunch: ModelRelaunch) => void;
 }) {
   const harness = PTY_HARNESS[engineId] ?? null;
@@ -141,6 +143,8 @@ export function PtySessionControls({
   const toggleKey =
     reportedMode === "default" || reportedMode === BYPASS ? reportedMode : bypassOn ? BYPASS : "default";
   const context = status?.context;
+  // The bypass flag alone sets the mode a toggle relaunch lands in.
+  const keepSettings = { model: model ?? undefined, effort: reportedEffort ?? undefined };
 
   const snapshot: SessionControlsSnapshot = {
     harness,
@@ -193,10 +197,10 @@ export function PtySessionControls({
         );
         return;
       }
-      if (TOGGLE_CHOICES.includes(key) && key !== toggleKey) onBypass(key === BYPASS);
+      if (TOGGLE_CHOICES.includes(key) && key !== toggleKey) onBypass(key === BYPASS, keepSettings);
     },
     openHarnessSettings: () => {},
-    restart: onRestart,
+    restart: () => onRestart({ ...keepSettings, permissionMode: reportedMode ?? undefined }),
   };
 
   usePublishSessionControls(controlsKey(workstreamId, shellId), snapshot, actions);

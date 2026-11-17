@@ -8,12 +8,11 @@ use std::time::{Duration, Instant};
 use hyprlayer_models::{
     AgentSignal, AgentStatusReport, PtyAgent, PtyAgentState, RuntimeEvent, UiRequest,
 };
-use memchr::memmem;
 use tokio::sync::broadcast;
 
 use super::codex_remote::CodexRemote;
 use super::links::AgentLinks;
-use super::pty_controls::ready;
+use super::pty_controls::{footer_mode, ready};
 use super::rollout::RolloutTail;
 use super::TokenGuard;
 use crate::runtime::terminal_registry::TerminalRegistry;
@@ -26,19 +25,10 @@ const SETTLE_QUIET: Duration = Duration::from_secs(2);
 const SETTLE_GIVE_UP: Duration = Duration::from_secs(30);
 /// Title model calls per terminal, so a broken one isn't called on every prompt.
 const TITLE_TRIES: u8 = 3;
-/// Enough for claude's footer redraws, which follow every mode change.
-const FOOTER_TAIL_BYTES: usize = 16 * 1024;
-/// claude's footer per mode, glyph included so conversation text never matches.
-const FOOTERS: [(&str, &str); 5] = [
-    ("\u{23f8} manual mode on", "default"),
-    ("\u{23f5}\u{23f5} accept edits on", "acceptEdits"),
-    ("\u{23f8} plan mode on", "plan"),
-    ("\u{23f5}\u{23f5} auto mode on", "auto"),
-    (
-        "\u{23f5}\u{23f5} bypass permissions on",
-        "bypassPermissions",
-    ),
-];
+/// claude runs its statusLine just before it paints the footer, so a report follows the screen this long.
+const FOOTER_FOLLOW: Duration = Duration::from_millis(1500);
+/// One screen read per burst: claude streams a repaint over many writes.
+const FOOTER_COALESCE: Duration = Duration::from_millis(100);
 
 pub(crate) struct PtyLaunchEntry {
     pub agent: PtyAgent,
@@ -79,6 +69,8 @@ struct Entry {
     screen: Option<Arc<ScreenMirror>>,
     /// Held by an agent's message or a change from the bar, so their keystrokes never interleave.
     input: Arc<tokio::sync::Mutex<()>>,
+    /// Until when a footer follower reads the screen; each report extends it rather than spawning another.
+    footer_watch: Option<Instant>,
     /// While set, `PreModelSwitch` lets claude switch without its "Switch model?" dialog.
     switch_pending: bool,
     /// The model a `PostModelSwitch` named while a switch was pending; plan mode's own switch
@@ -223,6 +215,7 @@ impl PtyAgents {
                 rollout: Arc::default(),
                 screen,
                 input: Arc::default(),
+                footer_watch: None,
                 switch_pending: false,
                 switched_to: None,
                 remote,
@@ -449,21 +442,69 @@ impl PtyAgents {
 
     /// A statusLine run: model, effort and context as claude reported them, then the mode its footer shows.
     pub(crate) fn report_status(self: &Arc<Self>, terminal_id: &str, report: AgentStatusReport) {
-        let mut entries = lock(&self.entries);
-        let Some(entry) = entries.get_mut(terminal_id) else {
-            tracing::debug!("a status report for a gone terminal");
-            return;
+        let mode = self.footer(terminal_id);
+        let reader = {
+            let mut entries = lock(&self.entries);
+            let Some(entry) = entries.get_mut(terminal_id) else {
+                tracing::debug!("a status report for a gone terminal");
+                return;
+            };
+            let before = entry.agent.clone();
+            let status = &mut entry.agent.status;
+            status.model = report.model;
+            status.effort = report.effort;
+            status.context = report.context;
+            if let Some(mode) = mode {
+                status.permission_mode = Some(mode.to_string());
+            }
+            self.publish(entry, terminal_id, &before);
+            let live = entry.footer_watch.is_some();
+            entry.footer_watch = Some(Instant::now() + FOOTER_FOLLOW);
+            if live || entry.screen.is_none() {
+                return;
+            }
+            entry.session.subscribe()
         };
-        let before = entry.agent.clone();
-        let status = &mut entry.agent.status;
-        status.model = report.model;
-        status.effort = report.effort;
-        status.context = report.context;
-        // A typed shift+tab fires no hook; the footer redraw is the only sign of it.
-        if let Some(mode) = footer_mode(&entry.session.tail_bytes(FOOTER_TAIL_BYTES)) {
-            status.permission_mode = Some(mode.to_string());
+        let agents = self.clone();
+        let id = terminal_id.to_string();
+        tokio::spawn(async move { agents.follow_footer(reader, &id).await });
+    }
+
+    /// Rereads the footer on each output until the watch lapses.
+    async fn follow_footer(self: Arc<Self>, mut reader: RingReader, terminal_id: &str) {
+        loop {
+            let left = match lock(&self.entries)
+                .get(terminal_id)
+                .and_then(|e| e.footer_watch)
+            {
+                Some(until) => until.saturating_duration_since(Instant::now()),
+                None => return,
+            };
+            let output = tokio::time::timeout(left, reader.skip()).await;
+            if matches!(output, Ok(true)) {
+                tokio::time::sleep(FOOTER_COALESCE).await;
+                if let Some(mode) = self.footer(terminal_id) {
+                    self.set_permission_mode(terminal_id, mode);
+                }
+            }
+            let mut entries = lock(&self.entries);
+            let Some(entry) = entries.get_mut(terminal_id) else {
+                return;
+            };
+            let lapsed = entry
+                .footer_watch
+                .is_none_or(|until| Instant::now() >= until);
+            if matches!(output, Ok(false)) || lapsed {
+                entry.footer_watch = None;
+                return;
+            }
         }
-        self.publish(entry, terminal_id, &before);
+    }
+
+    /// The footer is the only sign of a typed shift+tab; `None` while a picker hides it. Read off the lock.
+    fn footer(&self, terminal_id: &str) -> Option<&'static str> {
+        let screen = lock(&self.entries).get(terminal_id)?.screen.clone()?;
+        screen.rows().as_deref().and_then(footer_mode)
     }
 
     /// Off the async runtime: a first read walks the whole rollout.
@@ -761,15 +802,6 @@ fn prune_app_servers(dir: &Path) {
             tracing::warn!("could not prune {}: {e}", socket.display());
         }
     }
-}
-
-/// The mode of the newest footer in `tail`.
-fn footer_mode(tail: &[u8]) -> Option<&'static str> {
-    FOOTERS
-        .iter()
-        .filter_map(|(footer, mode)| Some((memmem::rfind(tail, footer.as_bytes())?, *mode)))
-        .max_by_key(|(at, _)| *at)
-        .map(|(_, mode)| mode)
 }
 
 /// Only xterm's own answers to the TUI's queries: they are not a human at the keyboard.

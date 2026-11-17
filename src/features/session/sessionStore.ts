@@ -40,12 +40,14 @@ import {
   invalidateWorkstreamPr,
   invalidateWorktreeGit,
   useActiveSessions,
+  useWorkstreamDocList,
 } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
 import { currentAppLocation } from "@/lib/appNav";
 import type { DocType } from "@/lib/domain/docs";
-import { docTitle, sessionDocs } from "./toolDisplay";
+import { basename, dirname } from "@/lib/path";
+import { docKindForPath, docTitle, sessionDocs } from "./toolDisplay";
 import { artifactsFromItems, type SessionArtifact } from "./artifacts";
 import { forgetWorkstreamDocs, useWrittenDocs } from "./writtenDocs";
 import {
@@ -2185,8 +2187,15 @@ export function useSession(sessionId: string | undefined): SessionEntry | undefi
 
 export type CreatedDoc = { path: string; kind: DocType; title: string };
 
+// `plans/x.md`: a plan and its research often share a file name.
+function docKey(path: string): string {
+  return `${basename(dirname(path))}/${basename(path)}`;
+}
+
+// Transcript docs first; the server's list adds what a PTY agent or a shell redirect wrote.
 export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
   const written = useWrittenDocs(workstreamId);
+  const listed = useWorkstreamDocList(workstreamId).data;
   const keys = useSessionStore(
     useShallow((s) => {
       if (!workstreamId) return [] as string[];
@@ -2203,16 +2212,23 @@ export function useWorkstreamDocs(workstreamId: string | null): CreatedDoc[] {
       return out;
     }),
   );
-  return useMemo(
-    () =>
-      keys.map((k) => {
-        const tab = k.indexOf("\t");
-        const kind = k.slice(0, tab) as DocType;
-        const path = k.slice(tab + 1);
-        return { kind, path, title: docTitle(path) };
-      }),
-    [keys],
-  );
+  return useMemo(() => {
+    const docs: CreatedDoc[] = keys.map((k) => {
+      const tab = k.indexOf("\t");
+      const kind = k.slice(0, tab) as DocType;
+      const path = k.slice(tab + 1);
+      return { kind, path, title: docTitle(path) };
+    });
+    // A transcript path may run through the worktree's thoughts symlink; the server's is canonical.
+    const seen = new Set(docs.map((d) => docKey(d.path)));
+    for (const { docPath } of listed ?? []) {
+      const kind = docKindForPath(docPath);
+      if (!kind || seen.has(docKey(docPath))) continue;
+      seen.add(docKey(docPath));
+      docs.push({ kind, path: docPath, title: docTitle(docPath) });
+    }
+    return docs;
+  }, [keys, listed]);
 }
 
 export function useMostRecentDoc(

@@ -14,7 +14,7 @@ verbs:
   agents                                  live sessions and PTY agents in this project
   turns <session> [--limit n]             a session's latest user and assistant turns
   read-terminal <terminal> [--lines n]    a PTY agent's screen as plain text
-  docs [--workstream id]                  documents attached to a workstream
+  docs [--workstream id]                  a workstream's attached, written and branch documents
   doc <id>                                a document's content
   pr [--workstream id]                    the workstream's pull request status
   git [--workstream id]                   the workstream's git status

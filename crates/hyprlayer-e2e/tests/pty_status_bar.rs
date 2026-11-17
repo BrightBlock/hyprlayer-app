@@ -2,8 +2,8 @@
 //! context while the user's own statusLine still prints, a typed shift+tab read from the footer, a
 //! model switch, the title a first prompt earns once, titles off, codex's status from its hooks and
 //! rollout, and the bar changing a claude's model, effort and mode in its running TUI: a route
-//! round the `/model` picker that never lands on "More models", a switch plan mode follows with
-//! its own, and a relaunch that keeps the session's mode and effort.
+//! round the `/model` picker that never lands on "More models", footers a narrow terminal wraps, a
+//! switch plan mode follows with its own, and a relaunch that keeps the session's mode and effort.
 //!
 //! The harnesses are `agent_stub`'s PTY claude (as a raw-mode TUI for the changes) and codex; the
 //! title model is a claude stand-in that logs each prompt it names. Nothing here covers the real
@@ -239,7 +239,7 @@ async fn pty_status_bar() {
     let modes =
         [&first, &second].map(|s| s.as_ref().and_then(|s| s.status.permission_mode.clone()));
     j.guard(
-        "each shift+tab's footer, read after the statusLine report, moves the mode along the ring",
+        "each shift+tab's footer, painted after its statusLine report, moves the mode along the ring",
         modes == [Some("acceptEdits".into()), Some("plan".into())],
         json!({ "modes": modes }),
     );
@@ -371,7 +371,14 @@ async fn pty_status_bar() {
         )
         .await;
     type_line(&c, &tui.term, "status").await;
-    until(&mut rx, &tui.term, |s| s.status.model.is_some()).await;
+    let footed = until(&mut rx, &tui.term, |s| s.status.permission_mode.is_some()).await;
+    j.guard(
+        "the mode reads off a footer whose words claude places with column moves",
+        footed
+            .as_ref()
+            .is_some_and(|s| s.status.permission_mode.as_deref() == Some("default")),
+        json!({ "mode": footed.and_then(|s| s.status.permission_mode) }),
+    );
     let outcome = control(
         &mut j,
         &c,
@@ -538,7 +545,13 @@ async fn pty_status_bar() {
 
     j.step("a model route never lands on More models");
     let route = tui_stub
-        .launch(&mut j, &c, &mut rx, &["--stub-tui"], "$ROUTE")
+        .launch(
+            &mut j,
+            &c,
+            &mut rx,
+            &["--stub-tui", "--stub-narrow"],
+            "$ROUTE",
+        )
         .await;
     type_line(&c, &route.term, "status").await;
     until(&mut rx, &route.term, |s| s.status.model.is_some()).await;
@@ -562,6 +575,26 @@ async fn pty_status_bar() {
             && opus.is_some()
             && !path.iter().any(|line| line == "more highlighted"),
         json!({ "outcome": outcome, "switched": opus.is_some(), "switchPath": path }),
+    );
+
+    j.step("a narrow terminal's wrapped picker footers still drive the change");
+    let narrow = control(
+        &mut j,
+        &c,
+        Request::PtyAgentSetEffort {
+            terminal_id: route.term.clone(),
+            effort: "max".into(),
+        },
+    )
+    .await;
+    let maxed = until(&mut rx, &route.term, |s| {
+        s.status.effort.as_deref() == Some("max")
+    })
+    .await;
+    j.guard(
+        "with /model's and /effort's footers wrapped onto a second row, the switch above and an effort change both apply",
+        narrow == "ok" && maxed.is_some(),
+        json!({ "outcome": narrow, "reported": maxed.and_then(|s| s.status.effort) }),
     );
 
     j.step("a switch in plan mode confirms though claude's own switch follows it");

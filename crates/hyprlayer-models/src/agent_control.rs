@@ -198,6 +198,8 @@ pub struct AgentSignal {
     pub to_model: Option<String>,
     /// codex's rollout file, which holds the effort and token counts no hook carries.
     pub transcript_path: Option<String>,
+    /// A write tool's targets, absolute, uncut: `tool_target` is cut for display.
+    pub written_paths: Vec<String>,
 }
 
 /// What `announce_agent` tells an agent about itself.

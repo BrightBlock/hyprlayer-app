@@ -168,7 +168,7 @@ const TOOLS: [Tool; 31] = [
     },
     Tool {
         name: READ_TOOLS[4],
-        description: "The thoughts documents attached to a workstream.",
+        description: "A workstream's thoughts documents: those attached to it (by role), those its agents wrote last (`written`), and those whose frontmatter names its branch (`branch`).",
         read_only: true,
         schema: workstream_arg,
     },

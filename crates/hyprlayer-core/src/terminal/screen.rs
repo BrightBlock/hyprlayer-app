@@ -48,7 +48,12 @@ impl ScreenMirror {
 
     /// Each row's text, top to bottom, trailing blanks trimmed; `None` once the mirror is `lost`.
     pub fn rows(&self) -> Option<Vec<String>> {
-        self.rows_and_bright().map(|(rows, _)| rows)
+        let state = self.lock();
+        if state.lost {
+            return None;
+        }
+        let screen = state.parser.screen();
+        Some(screen.rows(0, screen.size().1).collect())
     }
 
     /// `rows`, and the same rows from one read with dim cells blanked: claude's placeholder is dim.

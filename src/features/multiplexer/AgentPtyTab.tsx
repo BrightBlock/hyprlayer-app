@@ -29,7 +29,7 @@ import {
 } from "./agentRuntime";
 import { engineMintsViaExec, engineResumesById, type ResolvedEngine } from "./engines";
 import { markAgentStarted, useAgentState } from "./multiplexerStore";
-import { PtySessionControls } from "./PtySessionControls";
+import { PtySessionControls, type RelaunchKeep } from "./PtySessionControls";
 
 const CAPTURE_INTERVAL_MS = 1500;
 const CAPTURE_TRIES = 20;
@@ -338,9 +338,9 @@ export function AgentPtyTab({
   }, [engine.id, hooked, sessionId, started, workstreamId]);
 
   // Restart and the bypass toggle resume the conversation when one exists.
-  const relaunch = async (bypass: boolean) => {
+  const relaunch = async (bypass: boolean, keep: RelaunchKeep) => {
     const resume = await resolveResume(engine.id, sessionIdRef.current, workstreamId, started);
-    restartRef.current?.({ resume, bypass });
+    restartRef.current?.({ resume, bypass, ...keep });
   };
   // A relaunch kills the terminal, which an adopted agent shares with its parent and every desktop.
   const refuseShared = (what: string): boolean => {
@@ -358,9 +358,9 @@ export function AgentPtyTab({
         shellId={shellId}
         engineId={engine.id}
         agent={agent}
-        onRestart={() => void relaunch(bypassOn)}
-        onBypass={(on) => {
-          if (!refuseShared("Permission mode")) void relaunch(on);
+        onRestart={(keep) => void relaunch(bypassOn, keep)}
+        onBypass={(on, keep) => {
+          if (!refuseShared("Permission mode")) void relaunch(on, keep);
         }}
         onModelRelaunch={(relaunch) => {
           if (!refuseShared("Model")) restartRef.current?.({ resume: true, bypass: bypassOn, ...relaunch });

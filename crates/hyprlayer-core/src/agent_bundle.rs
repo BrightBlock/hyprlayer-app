@@ -104,16 +104,7 @@ pub(crate) fn expand_tilde(path: &str, home: Option<&Path>) -> std::path::PathBu
 /// `YYYYMMDD-HHMMSS` in UTC, for naming a backup the user can read at a glance.
 pub fn backup_stamp(epoch_secs: u64) -> String {
     let (days, rem) = (epoch_secs / 86_400, epoch_secs % 86_400);
-    // Howard Hinnant's civil_from_days, shifted to an era starting 0000-03-01
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = era * 400 + yoe + i64::from(month <= 2);
+    let (year, month, day) = crate::store::civil_from_days(days as i64);
     format!(
         "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
         rem / 3600,

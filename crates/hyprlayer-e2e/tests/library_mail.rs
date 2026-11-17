@@ -1,6 +1,7 @@
 //! The mail-style Library's index contract: excerpts computed at index time,
 //! paging, project spread, ticket search, the facet counts that label each
-//! mailbox, server-side read state, and agent attribution from tool calls.
+//! mailbox, server-side read state, agent attribution from tool calls and PTY hooks, and the docs
+//! a workstream lists.
 #![cfg(unix)]
 
 use std::path::{Path, PathBuf};
@@ -10,6 +11,9 @@ use hyprlayer_core::docs::frontmatter::FmPatch;
 use hyprlayer_core::index::indexer::{DocMeta, SortKey, ThoughtQuery};
 use hyprlayer_core::runtime::library::{CreateDocumentRequest, FrontmatterEdit};
 use hyprlayer_core::{Harness, SessionEvent, Stage};
+use hyprlayer_e2e::agent_stub::{
+    appears, install, launch_log, launch_pty, set_engine, type_line, PTY_CLAUDE,
+};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_server::client::{EventStream, RpcClient};
@@ -1249,6 +1253,111 @@ async fn library_mail() {
             "rows": rerun.len(),
             "unchanged": rerun == rows,
         }),
+    );
+
+    j.step("a PTY agent's docs reach its workstream");
+    let pty_claude = install(&sandbox, "pty-claude", PTY_CLAUDE);
+    set_engine(&mut j, &client, "claude-code", &pty_claude, &[]).await;
+    let pty_view = create_workstream(&mut j, &client, &project, "PTY writes").await;
+    let pty_ws = text(&pty_view, "/item/id");
+    let branch = text(&pty_view, "/item/branch");
+    j.alias(&branch, "$PTY_BRANCH");
+    let (launched, _pty_events) = launch_pty(&client, &pty_ws, "claude-code").await;
+    let term = launched.terminal_id.clone();
+    j.alias(&term, "$PTY");
+    let pty_session = launched.provider_session_id.clone().unwrap_or_default();
+    j.alias(&pty_session, "$PTY_SESSION");
+    appears(&launch_log(&sandbox, &term).join("hooks.log")).await;
+    let written_id = demo_shared.join("plans/pty-plan.md").display().to_string();
+    let shell_id = demo_shared
+        .join("plans/shell-plan.md")
+        .display()
+        .to_string();
+    let stale_id = demo_shared
+        .join("plans/stale-plan.md")
+        .display()
+        .to_string();
+    j.alias(&written_id, "$PTY_PLAN");
+    j.alias(&shell_id, "$SHELL_PLAN");
+    j.alias(&stale_id, "$STALE_PLAN");
+    // Through the worktree's thoughts symlink, as claude writes a plan.
+    type_line(&client, &term, "write thoughts/shared/plans/pty-plan.md").await;
+    type_line(&client, &term, &format!("shell {shell_id} {branch}")).await;
+    // Dated before the workstream existed: a workstream that earlier used this branch name wrote it.
+    type_line(
+        &client,
+        &term,
+        &format!("shell {stale_id} {branch} 2020-01-01"),
+    )
+    .await;
+    assert!(
+        await_doc(&client, &written_id, IO, |d| d.agent.is_some()).await,
+        "pty-plan.md was not attributed in time"
+    );
+    assert!(
+        await_doc(&client, &shell_id, IO, |_| true).await
+            && await_doc(&client, &stale_id, IO, |_| true).await,
+        "the shell-written plans did not get indexed in time"
+    );
+    let listed = query(&mut j, &client, ThoughtQuery::default()).await;
+    let pty_plan = item(&listed, &written_id);
+    let documents = j
+        .call(&client, Request::ListWorkstreamDocs { id: pty_ws.clone() })
+        .await
+        .expect("list_workstream_docs");
+    let roles: Vec<Value> = documents
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|d| json!([d["docPath"], d["role"]]))
+        .collect();
+    j.guard(
+        "a PTY Write credits the plan to its claude session and workstream; a plan written through a shell redirect joins by its branch, unless it predates the workstream",
+        agent(&pty_plan)
+            == json!({
+                "harness": "claude",
+                "sessionId": pty_session,
+                "workstreamId": pty_ws,
+                "projectPath": project,
+            })
+            && roles == [json!([written_id, "written"]), json!([shell_id, "branch"])],
+        json!({ "agent": agent(&pty_plan), "documents": roles }),
+    );
+
+    j.step("a doc belongs to the workstream that wrote it last");
+    let (later, _later_events) = launch_pty(&client, &ws, "claude-code").await;
+    j.alias(&later.terminal_id, "$LATER_PTY");
+    if let Some(sid) = &later.provider_session_id {
+        j.alias(sid, "$LATER_SESSION");
+    }
+    appears(&launch_log(&sandbox, &later.terminal_id).join("hooks.log")).await;
+    type_line(&client, &later.terminal_id, &format!("write {written_id}")).await;
+    assert!(
+        await_doc(&client, &written_id, IO, |d| {
+            d.agent.as_ref().is_some_and(|a| a.workstream_id == ws)
+        })
+        .await,
+        "the later write to pty-plan.md was not attributed in time"
+    );
+    let mut lists = Vec::new();
+    for id in [&pty_ws, &ws] {
+        let docs = j
+            .call(&client, Request::ListWorkstreamDocs { id: id.clone() })
+            .await
+            .expect("list_workstream_docs");
+        let pairs: Vec<Value> = docs
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|d| json!([d["docPath"], d["role"]]))
+            .collect();
+        lists.push(pairs);
+    }
+    let moved = json!([written_id, "written"]);
+    j.guard(
+        "a later Write from another workstream's agent moves pty-plan to that workstream, out of the first one's list",
+        lists[0] == [json!([shell_id, "branch"])] && lists[1].contains(&moved),
+        json!({ "firstWorkstream": lists[0], "laterWorkstreamListsIt": lists[1].contains(&moved) }),
     );
 
     j.step("archiving the workstream unlinks the session");

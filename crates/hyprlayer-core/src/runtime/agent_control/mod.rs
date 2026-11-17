@@ -19,6 +19,7 @@ use hyprlayer_models::{
     PermissionMode, RevealTarget, RuntimeEvent, Session, SessionOrigin, UiRequest,
 };
 
+use super::attribution::DocWriter;
 use super::HyprlayerRuntime;
 use crate::error::{CoreError, Result};
 use pty_agents::PtySnapshot;
@@ -527,6 +528,9 @@ impl AgentControlService<'_> {
         match self.runtime.agent_tokens.lookup(token).map(|i| i.caller) {
             Some(AgentCaller::Terminal { terminal_id }) => {
                 self.runtime.pty_agents.apply(&terminal_id, signal);
+                if signal.event == "PostToolUse" && !signal.written_paths.is_empty() {
+                    self.credit_writes(&terminal_id, signal.written_paths.clone());
+                }
                 if let Some(prompt) = signal.prompt.as_ref().filter(|p| !p.trim().is_empty()) {
                     self.title_terminal(&terminal_id, prompt);
                 }
@@ -542,6 +546,36 @@ impl AgentControlService<'_> {
                 signal.event
             ),
         }
+    }
+
+    /// Credits the docs a PTY agent wrote to its harness session; before claude names one, to no one,
+    /// since a terminal id matches no session the Library could open.
+    fn credit_writes(&self, terminal_id: &str, paths: Vec<String>) {
+        let Some(agent) = self
+            .runtime
+            .pty_agents
+            .snapshot(terminal_id)
+            .map(|s| s.agent)
+        else {
+            return;
+        };
+        let Some(harness) = crate::terminal::engines::harness_of(&agent.engine_id) else {
+            return;
+        };
+        let Some(session_id) = agent.provider_session_id else {
+            return;
+        };
+        let writer = DocWriter {
+            session_id,
+            harness,
+            workstream_id: agent.workstream_id,
+        };
+        tokio::spawn(
+            self.runtime
+                .attribution
+                .clone()
+                .record_writer(writer, paths),
+        );
     }
 
     /// A claude statusLine run for its PTY agent; an unknown or revoked token is ignored.

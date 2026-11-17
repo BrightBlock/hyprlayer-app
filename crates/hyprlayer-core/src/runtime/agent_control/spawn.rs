@@ -571,7 +571,8 @@ impl AgentControlService<'_> {
     ) -> Result<String> {
         let target = self.pty_target(identity, terminal_id).await?;
         let lines = lines.clamp(1, READ_LINES_CAP) as usize;
-        Ok(text::tail(&target.session.scrollback_bytes(), lines))
+        let cols = target.session.size().1.into();
+        Ok(text::tail(&target.session.scrollback_bytes(), cols, lines))
     }
 
     /// `wait_session` over a hooked PTY agent's folded state.

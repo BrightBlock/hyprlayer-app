@@ -202,6 +202,15 @@ export function useDocs(query: ThoughtQuery, enabled = true) {
   });
 }
 
+// Attached, agent-written and branch-named docs; under ["docs"] so index changes refetch it.
+export function useWorkstreamDocList(workstreamId: string | null) {
+  return useQuery({
+    queryKey: ["docs", "workstream", workstreamId],
+    queryFn: () => unwrap(commands.listWorkstreamDocs(workstreamId ?? "")),
+    enabled: workstreamId !== null,
+  });
+}
+
 // Under the ["docs"] prefix so every doc-list invalidation refetches its pages.
 export function useDocPages(query: ThoughtQuery) {
   return useInfiniteQuery({

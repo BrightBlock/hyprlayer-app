@@ -447,10 +447,54 @@ impl WorkstreamService<'_> {
         .await
     }
 
+    /// Attached docs, then those its agents wrote last (`written`), then those whose frontmatter names
+    /// its branch (`branch`): a doc written through a shell redirect fires no write tool.
     pub async fn documents(&self, req: WorkstreamDocumentsRequest) -> Result<Vec<WorkstreamDoc>> {
         ensure_running(self.runtime)?;
+        let item = match self.find(&req.id).await {
+            Ok(item) => item,
+            Err(CoreError::WorkstreamNotFound { .. }) => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let project = match self.effective_for(&item.project_path).await {
+            Ok(effective) => effective.mapped_name,
+            Err(_) => None,
+        };
         let db = self.runtime.db.clone();
-        blocking(move || db.workstream_docs(&req.id)).await
+        let index = self.runtime.index.clone();
+        blocking(move || {
+            let mut docs = db.workstream_docs(&item.id)?;
+            // A doc another workstream wrote since is that one's.
+            let written = db
+                .docs_last_written_by(&item.id)?
+                .into_iter()
+                .filter(|p| index.doc_path(p).is_some())
+                .map(|p| (p, "written"));
+            // A branch another workstream works on or builds from leaves a doc's owner unknown.
+            let shared = item.branch == item.base_branch
+                || db.list_active_workstreams()?.iter().any(|w| {
+                    w.id != item.id
+                        && w.project_path == item.project_path
+                        && (w.branch == item.branch || w.base_branch == item.branch)
+                });
+            let on_branch = project
+                .filter(|_| !shared)
+                .map(|p| index.on_branch(&p, &item.branch, &created_day(item.created_at)))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|p| (p, "branch"));
+            for (doc_path, role) in written.chain(on_branch) {
+                if !docs.iter().any(|d| d.doc_path == doc_path) {
+                    docs.push(WorkstreamDoc {
+                        workstream_id: item.id.clone(),
+                        doc_path,
+                        role: role.to_string(),
+                    });
+                }
+            }
+            Ok(docs)
+        })
+        .await
     }
 
     pub async fn attach_doc(
@@ -2185,6 +2229,11 @@ async fn logged<T>(what: &str, work: impl std::future::Future<Output = Result<T>
         Err(e) => tracing::warn!("{what} failed after {:?}: {e}", started.elapsed()),
     }
     result
+}
+
+/// The day before a workstream's creation, `YYYY-MM-DD` in UTC: a doc's date is its author's local day.
+fn created_day(created_at_ms: f64) -> String {
+    crate::store::utc_date(((created_at_ms / 1000.0) as u64).saturating_sub(86_400))
 }
 
 #[cfg(test)]
