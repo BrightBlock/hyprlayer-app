@@ -1,6 +1,18 @@
 {
   "versions": [
     {
+      "version": "0.8.24",
+      "date": "2026-11-17",
+      "summary": "Agents can now spawn, message and drive other agents and terminals in Hyprlayer.",
+      "notes": [
+        "New Agent control setting (Settings > Agent control) lets a running agent spawn background sessions, message them, drive terminal (PTY) agents, run goals and scripts, and approve or validate plans — with off, read, and full permission levels.",
+        "Terminal agent tabs now show the same status bar as chat tabs: model, effort, context and permission, and you can change a terminal agent's model, effort, or permission mode right from the bar instead of the TUI.",
+        "An expired Claude or Codex sign-in now shows a sign-in card instead of a bare error, and resumes your session automatically once you sign back in.",
+        "Fixed terminal agent footer detection and picker wrapping on narrow panes, and doc attribution for docs written by terminal agents.",
+        "This version works with hyprlayer-server 0.8.20 and later."
+      ]
+    },
+    {
       "version": "0.8.23",
       "date": "2026-11-05",
       "summary": "Board cards follow their real PR and branch, and Windows archive no longer fails.",
