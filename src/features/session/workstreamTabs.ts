@@ -1,9 +1,12 @@
 
+import { useLayoutEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { scopedKey } from "@/lib/hostScope";
-import type { PermissionMode, Session } from "@/lib/bindings";
+import type { Bootstrap, PermissionMode, Session } from "@/lib/bindings";
+import { queryClient } from "@/lib/queryClient";
+import { actionEngine, resolveMultiplexer } from "@/features/multiplexer/engines";
 
 import type { Attachment } from "./attachments";
 import { debouncedJSONStorage } from "@/lib/persistedStorage";
@@ -392,9 +395,32 @@ export function updateWorkstreamTabs(
   if (byWs !== prev) useWorkstreamTabsStore.setState({ byWs });
 }
 
-export function seedWorkstreamMode(workstreamId: string, mode: StageKey): void {
+/** The tabs a workstream starts with: its first agent opens where app actions do. */
+export function initialTabState(): WsTabState {
   const base = defaultTabState();
-  updateWorkstreamTabs((all) => ({ ...all, [workstreamId]: { ...base, shells: base.shells.map((s) => ({ ...s, mode })) } }));
+  const cfg = resolveMultiplexer(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
+  const engineId = actionEngine(cfg)?.id;
+  if (!engineId) return base;
+  return { ...base, shells: base.shells.map((s) => ({ ...s, ptyAgent: { engineId, started: false } })) };
+}
+
+/** For an update that brings the workstream's first agent tab itself, so no seeded one runs beside it. */
+export const blankTabState = (): WsTabState => ({ ...defaultTabState(), shells: [], panes: { p1: { activeId: 0 } } });
+
+/** Stores a workstream's first tabs; `mode` applies only to a native chat. */
+export function seedWorkstreamTabs(workstreamId: string, mode?: StageKey): void {
+  const base = initialTabState();
+  const shells = base.shells.map((s) => (mode && !s.ptyAgent ? { ...s, mode } : s));
+  updateWorkstreamTabs((all) => ({ ...all, [workstreamId]: { ...base, shells } }));
+}
+
+/** Stores a viewed workstream's first tabs once settings are known, before paint, so no chat flashes first. */
+export function useSeedWorkstreamTabs(workstreamId: string | null, settingsLoaded: boolean): void {
+  useLayoutEffect(() => {
+    if (settingsLoaded && workstreamId && !useWorkstreamTabsStore.getState().byWs[workstreamId]) {
+      seedWorkstreamTabs(workstreamId);
+    }
+  }, [workstreamId, settingsLoaded]);
 }
 
 export const useComposerFocusStore =create<{ pendingShellId: number | null }>(() => ({
@@ -417,7 +443,7 @@ export function bindSessionToShell(
   sessionId: string,
 ): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? initialTabState();
     if (!current.shells.some((s) => s.id === shellId)) return all;
     const bound = {
       ...current,
@@ -452,10 +478,9 @@ export function openSessionTab(
   opts?: { frozen?: boolean; background?: boolean; permissionMode?: string; launched?: LaunchedAgent },
 ): void {
   if (session.title != null) markTitleSeen(session.id, session.title);
-  if (session.origin === "agent") markAgentTabSeen(workstreamId, session.id);
   const background = opts?.background === true;
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     const open = current.shells.find((s) => s.sessionId === session.id);
     if (open) return background ? all : { ...all, [workstreamId]: focusShell(current, open.id) };
     const parked = current.archived?.find((a) => a.shell.sessionId === session.id);
@@ -494,6 +519,7 @@ export function openSessionTab(
         : appendShell(current, shell),
     };
   });
+  if (session.origin === "agent") markAgentTabSeen(workstreamId, session.id);
 }
 
 const AGENT_TABS_SEEN_CAP = 200;
@@ -503,7 +529,7 @@ const agentTabSeen = (workstreamId: string, id: string): boolean =>
 
 function markAgentTabSeen(workstreamId: string, id: string): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? initialTabState();
     if (current.agentTabsSeen?.includes(id)) return all;
     const agentTabsSeen = [...(current.agentTabsSeen ?? []), id].slice(-AGENT_TABS_SEEN_CAP);
     return { ...all, [workstreamId]: { ...current, agentTabsSeen } };
@@ -550,7 +576,7 @@ export function openAgentTerminalTab(
   const focus = opts?.focus === true;
   if (!focus && agentTabSeen(workstreamId, pty.terminalId)) return;
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     const open = current.shells.find((s) => s.ptyAgent?.terminalId === pty.terminalId);
     if (open) return focus ? { ...all, [workstreamId]: focusShell(current, open.id) } : all;
     const parked = focus && current.archived?.find((a) => a.shell.ptyAgent?.terminalId === pty.terminalId);
@@ -642,7 +668,7 @@ type ViewerPatch = Pick<ShellTab, "docPreviewPath" | "filePath" | "diffView">;
 /** An agent's Reveal: opens the viewer without taking focus; an open one is left as it is. */
 export function openViewerTabInBackground(workstreamId: string, patch: ViewerPatch, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? initialTabState();
     const open = current.shells.some(
       (s) =>
         (patch.docPreviewPath !== undefined && s.docPreviewPath === patch.docPreviewPath) ||
@@ -669,7 +695,7 @@ export function openViewerTabInBackground(workstreamId: string, patch: ViewerPat
 
 export function openPromptTab(workstreamId: string, sessionId: string, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     return {
       ...all,
       [workstreamId]: appendShell(current, {
@@ -689,7 +715,7 @@ export function openPromptTab(workstreamId: string, sessionId: string, title: st
 
 export function openDocPreviewTab(workstreamId: string, path: string, title: string): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? initialTabState();
     const existing = current.shells.find((s) => s.docPreviewPath === path);
     return {
       ...all,
@@ -762,7 +788,7 @@ function openDedicatedTab(
 ): void {
   const seed = shellSeedFromDefaults(defaults);
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     const existing = current.shells.find((s) => s.mode === mode);
     if (existing) {
       const reseeded = {
@@ -798,7 +824,7 @@ export function openPlanStageTab(
   from: ShellTab | undefined,
 ): void {
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     return {
       ...all,
       [workstreamId]: appendShell(current, {

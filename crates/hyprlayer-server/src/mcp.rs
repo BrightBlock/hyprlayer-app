@@ -12,8 +12,9 @@ use hyprlayer_core::runtime::reviews::AddReviewCommentRequest;
 use hyprlayer_core::settings::GoalSettings;
 use hyprlayer_core::{ScriptKind, Stage, WorktreeMode};
 use hyprlayer_models::{
-    AgentCaller, AgentControlLevel, AgentWhoami, GoalLimits, GoalSource, GoalSpec, RevealTarget,
-    ReviewSide, SessionEvent, SpawnPtyAgentRequest, SpawnSessionRequest, WaitUntil,
+    AgentCaller, AgentControlLevel, AgentWhoami, GoalLimits, GoalSource, GoalSpec, PtyAgent,
+    RevealTarget, ReviewSide, SessionEvent, SpawnPtyAgentRequest, SpawnSessionRequest,
+    SpawnedAgent, WaitUntil,
 };
 use hyprlayer_proto::WireError;
 use serde_json::{json, Value};
@@ -111,7 +112,7 @@ fn plan_args() -> Value {
     json!({ "type": "object", "required": ["plan"], "properties": {
         "plan": { "type": "string", "description": "The plan document's path, as list_docs returns it." },
         "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream." },
-        "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Defaults to this agent's own." },
+        "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Keeps it a composer session in that harness. Unset, it is this agent's own, or the default engine when the user runs app actions in a CLI." },
         "model": { "type": "string" },
         "effort": { "type": "string" },
         "title": { "type": "string" },
@@ -239,7 +240,7 @@ const TOOLS: [Tool; 31] = [
     },
     Tool {
         name: "spawn_agent",
-        description: "Starts a background agent in this project: a composer session, or a PTY agent when terminal_engine is set. It runs no higher than this agent's own permission mode.",
+        description: "Starts a background agent in this project: a composer session, or a PTY agent when terminal_engine is set or the user runs app actions in a CLI (a harness keeps it a session). The result names a sessionId or a terminalId. It runs no higher than this agent's own permission mode.",
         read_only: false,
         schema: || {
             json!({ "type": "object", "properties": {
@@ -248,7 +249,7 @@ const TOOLS: [Tool; 31] = [
                 "bypass": { "type": "boolean", "description": "PTY agents only; needs this agent to be in bypass mode." },
                 "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream." },
                 "stage": { "type": "string", "enum": ["general", "research", "plan", "implement", "validate", "commit", "ship", "revise"] },
-                "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Defaults to this agent's own." },
+                "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Keeps it a composer session in that harness. Unset, it is this agent's own, or the default engine when the user runs app actions in a CLI." },
                 "model": { "type": "string" },
                 "effort": { "type": "string" },
                 "permission_mode": { "type": "string", "enum": ["plan", "default", "acceptEdits", "bypassPermissions"], "description": "Defaults to this agent's own." },
@@ -344,7 +345,7 @@ const TOOLS: [Tool; 31] = [
     },
     Tool {
         name: "approve_plan",
-        description: "Approves a plan and starts a background implement session that builds it.",
+        description: "Approves a plan and starts a background implement agent that builds it; the result names a sessionId or a terminalId.",
         read_only: false,
         schema: || {
             with_props(
@@ -355,7 +356,7 @@ const TOOLS: [Tool; 31] = [
     },
     Tool {
         name: "validate_plan",
-        description: "Starts a background validate session against a plan.",
+        description: "Starts a background validate agent against a plan; the result names a sessionId or a terminalId.",
         read_only: false,
         schema: plan_args,
     },
@@ -546,6 +547,22 @@ fn session_summary(session: &hyprlayer_core::Session) -> Value {
     })
 }
 
+fn pty_summary(agent: &PtyAgent) -> Value {
+    json!({
+        "terminalId": agent.terminal_id,
+        "workstreamId": agent.workstream_id,
+        "engineId": agent.engine_id,
+        "state": agent.state,
+    })
+}
+
+fn spawned_summary(spawned: &SpawnedAgent) -> Value {
+    match spawned {
+        SpawnedAgent::Session { session } => session_summary(session),
+        SpawnedAgent::Pty { agent } => pty_summary(agent),
+    }
+}
+
 fn encode<T: serde::Serialize>(value: T) -> Result<Value, WireError> {
     serde_json::to_value(value).map_err(|e| WireError::internal(e.to_string()))
 }
@@ -656,7 +673,7 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
         }
         "spawn_agent" => {
             if let Some(engine_id) = arg(args, "terminal_engine") {
-                let agent = client
+                let agent: PtyAgent = client
                     .spawn_pty_agent(SpawnPtyAgentRequest {
                         workstream_id: workstream(),
                         engine_id: engine_id.to_string(),
@@ -666,16 +683,11 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
                         title: arg(args, "title").map(str::to_string),
                     })
                     .await?;
-                return Ok(json!({
-                    "terminalId": agent.terminal_id,
-                    "workstreamId": agent.workstream_id,
-                    "engineId": agent.engine_id,
-                    "state": agent.state,
-                }));
+                return Ok(pty_summary(&agent));
             }
             let attached_docs = parsed(args, "attached_docs")?.unwrap_or_default();
-            let session = client
-                .spawn_session(SpawnSessionRequest {
+            let spawned = client
+                .spawn_agent(SpawnSessionRequest {
                     workstream_id: workstream(),
                     stage: parsed(args, "stage")?,
                     prompt: required(args, "prompt")?.to_string(),
@@ -687,7 +699,7 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
                     title: arg(args, "title").map(str::to_string),
                 })
                 .await?;
-            Ok(session_summary(&session))
+            Ok(spawned_summary(&spawned))
         }
         "wait_agent" => {
             let (until, timeout_ms) = wait_args(args)?;
@@ -792,12 +804,12 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
         // Implement activates the attached plan as it starts, as Approve & build does.
         "approve_plan" => {
             let request = plan_session(me, args, Stage::Implement)?;
-            Ok(session_summary(&client.spawn_session(request).await?))
+            Ok(spawned_summary(&client.spawn_agent(request).await?))
         }
         "validate_plan" => {
             let mut request = plan_session(me, args, Stage::Validate)?;
             request.permission_mode = None;
-            Ok(session_summary(&client.spawn_session(request).await?))
+            Ok(spawned_summary(&client.spawn_agent(request).await?))
         }
         "start_goal" => {
             let spec = GoalSpec {

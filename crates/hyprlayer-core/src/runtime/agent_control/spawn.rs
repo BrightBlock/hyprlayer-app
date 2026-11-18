@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hyprlayer_models::{
-    AgentCaller, ClientRef, Goal, Harness, PermissionMode, PtyAgent, PtyAgentState,
+    AgentCaller, ClientRef, Goal, Harness, PermissionMode, PtyAgent, PtyAgentState, PtyFirstPrompt,
     PtyLaunchSession, RuntimeEvent, SessionEvent, SessionOrigin, SpawnPtyAgentRequest,
-    SpawnSessionRequest, UiRequest, WaitOutcome, WaitUntil,
+    SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil,
 };
 use tokio::sync::OwnedMutexGuard;
 use tokio::time::Instant;
@@ -14,6 +14,7 @@ use tokio::time::Instant;
 use super::pty_agents::{asking, PtyAgents, PtySnapshot};
 use super::pty_controls::{self, composing};
 use super::{blocking, denied, in_project, AgentControlService, AgentIdentity};
+use crate::claude::driver::permission_mode_flag;
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 use crate::runtime::goals::{GoalTarget, StartGoalRequest};
@@ -78,6 +79,22 @@ impl Observed {
             WaitUntil::Exited => self == Observed::Exited,
         }
     }
+}
+
+struct PtyChild {
+    workstream_id: String,
+    engine_id: String,
+    /// Set when the child runs a stage: its prompt is composed and sent with the launch.
+    stage: Option<Stage>,
+    attached_docs: Vec<String>,
+    prompt: Option<String>,
+    /// `None` takes the caller's own.
+    permission_mode: Option<PermissionMode>,
+    model: Option<String>,
+    effort: Option<String>,
+    title: Option<String>,
+    /// An unhooked TUI the caller may not type into yields no agent rather than a refusal.
+    session_fallback: bool,
 }
 
 struct LastTurn {
@@ -378,6 +395,91 @@ impl AgentControlService<'_> {
         )))
     }
 
+    /// A composer session, or a PTY agent in the default engine when app actions open there.
+    pub async fn spawn_agent(
+        &self,
+        identity: &AgentIdentity,
+        request: SpawnSessionRequest,
+    ) -> Result<SpawnedAgent> {
+        let Some(engine_id) = self.action_engine(identity, &request).await else {
+            let session = self.spawn_session(identity, request).await?;
+            return Ok(SpawnedAgent::Session { session });
+        };
+        let SpawnSessionRequest {
+            workstream_id,
+            stage,
+            prompt,
+            model,
+            effort,
+            permission_mode,
+            attached_docs,
+            title,
+            harness: _,
+        } = request;
+        let child = PtyChild {
+            workstream_id: workstream_id.clone(),
+            engine_id,
+            stage: Some(stage.unwrap_or(Stage::General)),
+            attached_docs: attached_docs.clone(),
+            prompt: Some(prompt.clone()),
+            permission_mode,
+            model: model.clone(),
+            effort: effort.clone(),
+            title: title.clone(),
+            session_fallback: true,
+        };
+        if let Some(agent) = self.launch_pty_child(identity, child).await? {
+            return Ok(SpawnedAgent::Pty { agent });
+        }
+        let session = self
+            .spawn_session(
+                identity,
+                SpawnSessionRequest {
+                    workstream_id,
+                    stage,
+                    prompt,
+                    harness: None,
+                    model,
+                    effort,
+                    permission_mode,
+                    attached_docs,
+                    title,
+                },
+            )
+            .await?;
+        Ok(SpawnedAgent::Session { session })
+    }
+
+    /// The engine a spawn reroutes to; a pinned harness, or a model only the caller's harness takes, keeps it a session.
+    async fn action_engine(
+        &self,
+        identity: &AgentIdentity,
+        request: &SpawnSessionRequest,
+    ) -> Option<String> {
+        if request.harness.is_some() {
+            return None;
+        }
+        let engine_id = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .multiplexer
+            .action_engine()?;
+        // Only claude's launch applies a stage's guardrails; codex's sandbox posture is the session's.
+        if request.stage.is_some_and(|s| s != Stage::General) && engine_id != "claude-code" {
+            return None;
+        }
+        let harness = engines::harness_of(&engine_id);
+        if (request.model.is_some() || request.effort.is_some()) && harness != identity.harness {
+            return None;
+        }
+        if harness.is_none() && self.check_unhooked_input(identity, false).await.is_err() {
+            return None;
+        }
+        Some(engine_id)
+    }
+
     /// Launches a PTY agent for the caller; every attached desktop adopts it in a background tab.
     pub async fn spawn_pty_agent(
         &self,
@@ -397,26 +499,80 @@ impl AgentControlService<'_> {
         } else {
             PermissionMode::Default
         };
+        self.launch_pty_child(
+            identity,
+            PtyChild {
+                workstream_id,
+                engine_id,
+                stage: None,
+                attached_docs: Vec::new(),
+                prompt,
+                permission_mode: Some(mode),
+                model,
+                effort: None,
+                title,
+                session_fallback: false,
+            },
+        )
+        .await
+        .map(|agent| agent.expect("only a session fallback yields no agent"))
+    }
+
+    /// `None` when the TUI came up unhooked for a caller that may not type into it, and the child falls back.
+    async fn launch_pty_child(
+        &self,
+        identity: &AgentIdentity,
+        child: PtyChild,
+    ) -> Result<Option<PtyAgent>> {
+        let PtyChild {
+            workstream_id,
+            engine_id,
+            stage,
+            attached_docs,
+            prompt,
+            permission_mode,
+            model,
+            effort,
+            title,
+            session_fallback,
+        } = child;
         let configured = self.runtime.settings.get().await.multiplexer.engines;
         // An unknown id would launch as a bare command, a shell the agent could then type into.
         if !engines::is_known(&configured, &engine_id) {
             return Err(denied(&format!("{engine_id} is not a configured engine")));
         }
-        let prompted = prompt.as_ref().is_some_and(|p| !p.trim().is_empty());
+        let prompted = stage.is_some() || prompt.as_ref().is_some_and(|p| !p.trim().is_empty());
         if prompted && !matches!(engine_id.as_str(), "claude-code" | "codex") {
             self.check_unhooked_input(identity, false).await?;
         }
-        // Asking for `mode` makes the spawn check refuse a bypass PTY from a caller that isn't one.
+        // Asking for a mode makes the spawn check refuse one above the caller's.
         let check = self
             .check_spawn(
                 identity,
                 &workstream_id,
-                Stage::General,
+                stage.unwrap_or(Stage::General),
                 None,
-                Some(mode),
-                &[],
+                permission_mode,
+                &attached_docs,
             )
             .await?;
+        let mode = check.permission_mode;
+        let bypass = mode == PermissionMode::BypassPermissions;
+        let label = self.caller_label(identity).await;
+        let (stage_prompt, prompt) = match stage {
+            Some(stage) => {
+                let input = prompt.unwrap_or_default();
+                (
+                    Some(PtyFirstPrompt {
+                        stage,
+                        input,
+                        attached_docs,
+                    }),
+                    None,
+                )
+            }
+            None => (None, prompt),
+        };
         let (_, launched) = self
             .runtime
             .terminals()
@@ -428,9 +584,12 @@ impl AgentControlService<'_> {
                     resume: false,
                     bypass,
                     model,
-                    permission_mode: None,
-                    effort: None,
-                    first_prompt: None,
+                    // Always set for a stage, so its own default mode cannot outrank the caller.
+                    permission_mode: stage_prompt
+                        .as_ref()
+                        .map(|_| permission_mode_flag(mode).to_string()),
+                    effort,
+                    first_prompt: stage_prompt.clone(),
                 },
                 cols: SPAWN_COLS,
                 rows: SPAWN_ROWS,
@@ -451,7 +610,7 @@ impl AgentControlService<'_> {
                         terminal_id: launched.terminal_id.clone(),
                     })
                     .await;
-                return Err(e);
+                return if session_fallback { Ok(None) } else { Err(e) };
             }
         }
         let snapshot = self.runtime.pty_agents.snapshot(&launched.terminal_id);
@@ -487,9 +646,18 @@ impl AgentControlService<'_> {
                 .set_title(&agent.terminal_id, title.clone());
             agent.title = Some(title);
         }
-        if let (Some(prompt), Some(snapshot)) = (prompt.filter(|p| !p.trim().is_empty()), snapshot)
+        // After the hooked check, so a refused spawn activates no plan; the header trails a leading `/skill`.
+        if let Some(fp) = stage_prompt {
+            let text = self
+                .runtime
+                .sessions()
+                .pty_first_prompt(&check.workstream, engines::harness_of(&agent.engine_id), fp)
+                .await;
+            let text = format!("{text}\n\n{}", header(identity, &label));
+            send_first_prompt(self.runtime.pty_agents.clone(), &agent.terminal_id, text);
+        } else if let (Some(prompt), Some(snapshot)) =
+            (prompt.filter(|p| !p.trim().is_empty()), snapshot)
         {
-            let label = self.caller_label(identity).await;
             let text = format!("{}\n\n{prompt}", header(identity, &label));
             // A wait right after the spawn must not see the pre-prompt idle as the agent's answer.
             self.runtime
@@ -501,7 +669,7 @@ impl AgentControlService<'_> {
                 text,
             ));
         }
-        Ok(agent)
+        Ok(Some(agent))
     }
 
     /// A headed, hop-counted paste into a PTY agent the caller spawned.

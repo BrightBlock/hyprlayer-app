@@ -462,6 +462,7 @@ impl TerminalService<'_> {
             .await;
         // Before the exit watcher starts, so a fast exit cannot leave the link behind.
         let spawned_by = req.lineage.as_ref().map(|l| l.parent.clone());
+        let agent_spawned = req.lineage.is_some();
         if let Some(lineage) = req.lineage {
             self.runtime
                 .agent_links
@@ -486,7 +487,8 @@ impl TerminalService<'_> {
             remote: remote.clone(),
         });
         // After the spawn, so a launch that fails activates no plan.
-        if let Some(fp) = first_prompt {
+        // An agent's spawn sends its own, once it has ruled out an unhooked TUI.
+        if let Some(fp) = first_prompt.filter(|_| !agent_spawned) {
             let text = self
                 .runtime
                 .sessions()

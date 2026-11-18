@@ -1,6 +1,7 @@
 //! Stand-ins for PTY claude and codex that run the hooks their launch injected, and drivers for
 //! the agent-side faces (`hook`, `ctl`, `mcp`) under an agent's identity.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -741,4 +742,35 @@ pub fn tool_text(result: &Value) -> String {
 
 pub fn tool_failed(result: &Value) -> bool {
     result["isError"] == json!(true)
+}
+
+/// The bracketed paste the stub reads, line by line, as it logs them.
+pub fn pasted(prompt: &str) -> Vec<String> {
+    let text = format!("\x1b[200~{prompt}\x1b[201~");
+    od_rows(&text.split('\n').map(str::to_string).collect::<Vec<_>>())
+}
+
+/// What the stub's `stdin.log` holds for `lines` read in order: each through `od -An -c`.
+pub fn od_rows(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .flat_map(|line| {
+            let mut od = std::process::Command::new("od")
+                .args(["-An", "-c"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("spawn od");
+            od.stdin
+                .take()
+                .expect("od stdin")
+                .write_all(format!("{line}\n").as_bytes())
+                .expect("feed od");
+            let out = od.wait_with_output().expect("run od");
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }

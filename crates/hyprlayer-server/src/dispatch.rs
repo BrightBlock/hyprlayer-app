@@ -92,7 +92,7 @@ use hyprlayer_core::{
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClientRef, PtyAgent,
     PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
-    SpawnSessionRequest, WaitOutcome, WaitUntil,
+    SpawnSessionRequest, SpawnedAgent, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -2211,6 +2211,15 @@ impl Dispatch for Server {
         self.runtime
             .agent_control()
             .spawn_session(&identity, request)
+            .await
+            .wire()
+    }
+
+    async fn spawn_agent(&self, request: SpawnSessionRequest) -> Result<SpawnedAgent, WireError> {
+        let identity = self.agent_identity("spawn_agent")?;
+        self.runtime
+            .agent_control()
+            .spawn_agent(&identity, request)
             .await
             .wire()
     }

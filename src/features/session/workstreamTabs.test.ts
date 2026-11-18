@@ -6,6 +6,7 @@ import { leaf, leaves, type LayoutNode, type PaneId } from "./paneTree";
 import { takeSeenTitle } from "./titleSeen";
 import {
   activeShellIn,
+  defaultTabState,
   archiveShellState,
   closePaneState,
   consumeComposerFocus,
@@ -738,6 +739,7 @@ describe("openSessionTab", () => {
   });
 
   it("unarchives a session parked in this device's archive instead of appending a second tab", () => {
+    useWorkstreamTabsStore.setState({ byWs: { [WS]: defaultTabState() } });
     openSessionTab(WS, session());
     const shellId = useWorkstreamTabsStore.getState().byWs[WS].shells.find((s) => s.sessionId === "sess-1")!.id;
     const parked = archiveShellState(useWorkstreamTabsStore.getState().byWs[WS], shellId, "done", 1);

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::agent::{Harness, PermissionMode, Stage};
+use crate::session::Session;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -341,6 +342,15 @@ pub struct SpawnSessionRequest {
     pub attached_docs: Vec<String>,
     #[serde(default)]
     pub title: Option<String>,
+}
+
+/// What an agent's spawn started: a composer session, or a PTY agent where app actions open.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SpawnedAgent {
+    Session { session: Session },
+    Pty { agent: PtyAgent },
 }
 
 /// An agent's ask for a PTY agent; `bypass` only from a bypass caller.

@@ -674,6 +674,14 @@ hop once it is delivered; past `max_agent_hops` without a human turn it refuses 
 mode than the caller is refused unless the caller spawned it. `note_human_turn(&str)` resets a target's hops; the server calls
 it for a desktop's `send_user_message`, and `TerminalService::write` for typed input.
 The `agent_spawn_and_message` E2E scenario is the headless test of these.
+`spawn_agent(&AgentIdentity, SpawnSessionRequest) -> SpawnedAgent` is what the MCP
+`spawn_agent`, `approve_plan` and `validate_plan` tools call. When
+`MultiplexerSettings::action_engine` names an engine (multiplexer on, `actions_in_cli` on), it
+starts a PTY agent there instead of a session, unless the caller pinned a `harness`, asked for
+a model or effort that only its own harness takes, or the engine is unhooked and the caller
+isn't in bypass. The PTY agent's first turn is the stage prompt the desktop's app actions get
+(`pty_first_prompt`), with the header after it and the caller's mode passed explicitly so the
+stage's default mode can't outrank it. `agent_spawn_in_cli` is its E2E scenario.
 
 PTY agents: `spawn_pty_agent(&AgentIdentity, SpawnPtyAgentRequest) -> PtyAgent` refuses an
 engine id that is neither configured nor builtin, runs the

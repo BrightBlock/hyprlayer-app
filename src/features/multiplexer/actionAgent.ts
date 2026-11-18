@@ -5,7 +5,7 @@ import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/lib/toast";
 import {
   appendShell,
-  defaultTabState,
+  blankTabState,
   focusShell,
   focusedPaneId,
   nextShellId,
@@ -15,7 +15,7 @@ import {
   type ShellTab,
 } from "@/features/session/workstreamTabs";
 import { closeAgent, ensureAgent } from "./agentRuntime";
-import { defaultEngine, resolveMultiplexer } from "./engines";
+import { actionEngine, resolveMultiplexer } from "./engines";
 import { agentKey, useMultiplexerStore } from "./multiplexerStore";
 
 export type ActionAgent = { stage: StageKey; input?: string; attachedDocs?: string[]; title: string };
@@ -36,8 +36,7 @@ function busy(workstreamId: string, shell: ShellTab): boolean {
 /** Runs an app action in a new default-engine tab, resolving to whether it launched; null leaves it to a native chat. */
 export function launchActionInCli(workstreamId: string, action: ActionAgent): Promise<boolean> | null {
   const cfg = resolveMultiplexer(queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings);
-  if (!cfg.enabled || !cfg.actionsInCli) return null;
-  const engine = defaultEngine(cfg);
+  const engine = actionEngine(cfg, action.stage);
   const ws = findWorkstreamForNotify(workstreamId);
   if (!engine || !ws) return null;
   const keyed = action.stage !== "general";
@@ -55,7 +54,7 @@ export function launchActionInCli(workstreamId: string, action: ActionAgent): Pr
   }
   let shellId = 0;
   updateWorkstreamTabs((all) => {
-    const current = all[workstreamId] ?? defaultTabState();
+    const current = all[workstreamId] ?? blankTabState();
     shellId = nextShellId(current.shells, current.archived);
     const shell: ShellTab = {
       id: shellId,

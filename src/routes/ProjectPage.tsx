@@ -100,6 +100,7 @@ import {
   closePaneState,
   cycleActiveTab,
   defaultTabState,
+  initialTabState,
   focusedPaneId,
   focusShell,
   isLastTab,
@@ -110,7 +111,8 @@ import {
   paneShells,
   removeShellState,
   requestComposerFocus,
-  seedWorkstreamMode,
+  seedWorkstreamTabs,
+  useSeedWorkstreamTabs,
   selectLastTab,
   selectTabAt,
   setFocusedPane,
@@ -457,6 +459,8 @@ export function ProjectPage() {
     return () => setActiveWorkstream(null);
   }, [wsId]);
 
+  useSeedWorkstreamTabs(wsId, bootstrap.isSuccess);
+
   useEffect(() => {
     if (!wsId) return;
     const tabs = tabsByWs[wsId] ?? defaultTabState();
@@ -476,7 +480,7 @@ export function ProjectPage() {
     (updater: (current: WsTabState) => WsTabState) => {
       if (!wsId) return;
       updateWorkstreamTabs((all) => {
-        const current = all[wsId] ?? defaultTabState();
+        const current = all[wsId] ?? initialTabState();
         return { ...all, [wsId]: updater(current) };
       });
     },
@@ -862,10 +866,8 @@ export function ProjectPage() {
   };
   // The dialog calls onClose() before onCreated(); this closure keeps the render's pendingStage, so a ref would lose it.
   const onCreated = (view: WorkstreamView, created?: boolean) => {
-    if (created && pendingStage) {
-      seedWorkstreamMode(view.item.id, pendingStage);
-      void setNewWorkstreamStage(view.item.id, pendingStage);
-    }
+    if (created) seedWorkstreamTabs(view.item.id, pendingStage);
+    if (created && pendingStage) void setNewWorkstreamStage(view.item.id, pendingStage);
     selectItem(view.item.id);
   };
   const closeCreate = () => {

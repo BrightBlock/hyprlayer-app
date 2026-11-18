@@ -470,6 +470,28 @@ impl Default for MultiplexerSettings {
     }
 }
 
+impl MultiplexerSettings {
+    /// The engine app actions open in, as the desktop's `resolveMultiplexer` + `defaultEngine` pick it; `None` opens a chat.
+    pub fn action_engine(&self) -> Option<String> {
+        if !self.enabled || !self.actions_in_cli {
+            return None;
+        }
+        let builtins = Engine::builtins();
+        let mut engines: Vec<&Engine> = self.engines.iter().filter(|e| !e.id.is_empty()).collect();
+        engines.extend(
+            builtins
+                .iter()
+                .filter(|b| !self.engines.iter().any(|e| e.id == b.id)),
+        );
+        engines
+            .iter()
+            .find(|e| e.id == self.default_engine_id && e.enabled)
+            .or_else(|| engines.iter().find(|e| e.enabled))
+            .or_else(|| engines.first())
+            .map(|e| e.id.clone())
+    }
+}
+
 pub const DEFAULT_ENGINE_ID: &str = "claude-code";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

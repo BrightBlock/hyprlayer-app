@@ -2,6 +2,7 @@
 import { useMemo } from "react";
 
 import type { AppSettings, Engine, MultiplexerSettings } from "@/lib/bindings";
+import type { StageKey } from "@/lib/domain/stages";
 import { useBootstrap } from "@/lib/queries";
 
 export type ResolvedEngine = {
@@ -83,6 +84,14 @@ export function defaultEngine(cfg: ResolvedMultiplexer): ResolvedEngine | undefi
   const byId = engineById(cfg, cfg.defaultEngineId);
   if (byId?.enabled) return byId;
   return enabledEngines(cfg)[0] ?? cfg.engines[0];
+}
+
+/** Where app actions, and a workstream's first agent, open; `undefined` is a native chat. */
+export function actionEngine(cfg: ResolvedMultiplexer, stage: StageKey = "general"): ResolvedEngine | undefined {
+  const engine = cfg.enabled && cfg.actionsInCli ? defaultEngine(cfg) : undefined;
+  // Only claude's launch applies a stage's guardrails; codex's sandbox posture is a native session's.
+  if (stage !== "general" && engine?.id !== DEFAULT_ENGINE_ID) return undefined;
+  return engine;
 }
 
 export type SessionMode = "assign" | "exec-mint" | "capture" | "none";

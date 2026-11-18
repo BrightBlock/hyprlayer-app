@@ -58,7 +58,7 @@ These need Full. You get it when the user sets agent control to Full, or when yo
 | `resolve_comment` | `ctl resolve-comment <comment>` |
 | `reveal` | `ctl reveal doc <path>` (or `file`, `diff`) |
 
-`--terminal <id>` in place of `<session>` targets a PTY agent. `"$HYPRLAYER_CTL" ctl --help` lists every flag; `--json` prints the raw result. ctl exits 0 on success, 1 on a refusal or no server, and 2 on a usage error.
+`--terminal <id>` in place of `<session>` targets a PTY agent. When the user runs app actions in a CLI, `spawn_agent`, `approve_plan` and `validate_plan` start one in the default engine and return its `terminalId`; pass `--harness` to keep a session. `"$HYPRLAYER_CTL" ctl --help` lists every flag; `--json` prints the raw result. ctl exits 0 on success, 1 on a refusal or no server, and 2 on a usage error.
 
 ## Refusals
 

@@ -77,7 +77,7 @@ use hyprlayer_core::{
 use hyprlayer_models::{
     AgentSignal, AgentStatusReport, AgentWhoami, PtyAgent, PtyControlOutcome, RevealTarget,
     ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
-    WaitOutcome, WaitUntil,
+    SpawnedAgent, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -337,6 +337,7 @@ hyprlayer_proto::commands! {
     NotifyUser: notify_user(title: String, body: String) -> ();
     RequestAttention: request_attention(reason: String) -> ();
     SpawnSession: spawn_session(request: SpawnSessionRequest) -> Session;
+    SpawnAgent: spawn_agent(request: SpawnSessionRequest) -> SpawnedAgent;
     WaitSession: wait_session(session_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     SendAgentMessage: send_agent_message(session_id: String, text: String) -> ();
     SpawnPtyAgent: spawn_pty_agent(request: SpawnPtyAgentRequest) -> PtyAgent;

@@ -129,7 +129,7 @@ pub(crate) fn access(request: &Request) -> Access {
         Request::AnnounceAgent { .. } => Access::Read(Scope::Caller),
         Request::NotifyUser { .. } => Access::Read(Scope::Caller),
         Request::RequestAttention { .. } => Access::Read(Scope::Caller),
-        Request::SpawnSession { request } => {
+        Request::SpawnSession { request } | Request::SpawnAgent { request } => {
             Access::Full(Scope::Workstream(request.workstream_id.clone()))
         }
         Request::WaitSession { session_id, .. } => Access::Full(Scope::Session(session_id.clone())),

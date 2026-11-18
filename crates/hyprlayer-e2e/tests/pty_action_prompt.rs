@@ -5,7 +5,6 @@
 //! The engines are `agent_stub`'s PTY claude; nothing here covers the real binaries.
 #![cfg(unix)]
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,7 +12,9 @@ use hyprlayer_core::models::{PtyFirstPrompt, PtyLaunchSession};
 use hyprlayer_core::pipeline;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::Stage;
-use hyprlayer_e2e::agent_stub::{install, launch_log, lines, set_engine, PTY_CLAUDE};
+use hyprlayer_e2e::agent_stub::{
+    install, launch_log, lines, od_rows, pasted, set_engine, PTY_CLAUDE,
+};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::RpcClient;
@@ -238,41 +239,10 @@ fn first_line(text: &str) -> &str {
     text.lines().next().unwrap_or_default()
 }
 
-/// The bracketed paste the stub reads, line by line, as it logs them.
-fn pasted(prompt: &str) -> Vec<String> {
-    let text = format!("\x1b[200~{prompt}\x1b[201~");
-    od_rows(&text.split('\n').map(str::to_string).collect::<Vec<_>>())
-}
-
 /// True once `stdin.log` holds exactly the paste: nothing before it, and nothing sent twice.
 async fn typed_once(log: &std::path::Path, expected: &[String]) -> bool {
     let stdin = log.join("stdin.log");
     eventually(IO, || lines(&stdin) == expected).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     lines(&stdin) == expected
-}
-
-/// What the stub's `stdin.log` holds for `lines` read in order: each through `od -An -c`.
-fn od_rows(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .flat_map(|line| {
-            let mut od = std::process::Command::new("od")
-                .args(["-An", "-c"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .expect("spawn od");
-            od.stdin
-                .take()
-                .expect("od stdin")
-                .write_all(format!("{line}\n").as_bytes())
-                .expect("feed od");
-            let out = od.wait_with_output().expect("run od");
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .collect()
 }

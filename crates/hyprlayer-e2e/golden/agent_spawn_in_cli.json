@@ -1,0 +1,88 @@
+{
+  "scenario": "agent_spawn_in_cli",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "engineId": "claude-code",
+            "hasSessionId": false,
+            "matchesThePaste": true
+          },
+          "guard": "a PTY agent, not a session, typed the prompt with the caller's header after it",
+          "ok": true
+        }
+      ],
+      "step": "spawn_agent opens the default engine"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "error": null,
+            "livePtys": 1,
+            "result": "session"
+          },
+          "guard": "a claude that came up unhooked is closed, and the spawn becomes a session instead of a refusal",
+          "ok": true
+        }
+      ],
+      "step": "an unhooked engine falls back to a session for a non-bypass caller"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "bypasses": true,
+            "deniesPush": true,
+            "opensWithTheSkill": true,
+            "planActive": true
+          },
+          "guard": "the paste opens with /implement_plan under Implement's deny list, in the bypass caller's mode, and the plan turns active",
+          "ok": true
+        }
+      ],
+      "step": "approve_plan builds the plan in the default engine"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "error": null,
+            "hasSessionId": true,
+            "stage": "validate"
+          },
+          "guard": "validate_plan with codex as the default engine starts a validate session, whose posture is read-only",
+          "ok": true
+        }
+      ],
+      "step": "a stage on an engine that can't apply its guardrails keeps a session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hasSessionId": true,
+            "hasTerminalId": false
+          },
+          "guard": "the caller's harness choice outranks the engine",
+          "ok": true
+        }
+      ],
+      "step": "a pinned harness keeps a session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "hasSessionId": true,
+            "hasTerminalId": false
+          },
+          "guard": "spawn_agent starts a composer session",
+          "ok": true
+        }
+      ],
+      "step": "with app actions in a chat, spawns stay sessions"
+    }
+  ]
+}
