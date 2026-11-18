@@ -6,7 +6,6 @@
 //! children are `agent_stub`'s PTY claude. Nothing here covers the real binaries.
 #![cfg(unix)]
 
-use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
@@ -166,12 +165,12 @@ async fn agent_breadth() {
         )
         .await;
     let header = format!("[from agent \"Lead\" · {lead}]");
-    let expected = od_rows(&[
+    let expected = vec![
         format!("\x1b[200~{header}"),
         String::new(),
         "work".into(),
         "E2E_END\x1b[201~".into(),
-    ]);
+    ];
     eventually(IO, || lines(&log.join("stdin.log")) == expected).await;
     let logged = lines(&log.join("stdin.log"));
     j.guard(
@@ -180,8 +179,8 @@ async fn agent_breadth() {
         json!({
             "sent": !tool_failed(&answered),
             "matchesThePaste": logged == expected,
-            "firstRow": logged.first().map(|r| squeeze(r)),
-            "lastRow": logged.iter().rev().map(|r| squeeze(r)).find(|r| !r.is_empty()),
+            "opensWithHeader": logged.first().is_some_and(|l| l.starts_with("\x1b[200~[from agent")),
+            "closesOnText": logged.last().is_some_and(|l| l == "E2E_END\x1b[201~"),
         }),
     );
 
@@ -1047,36 +1046,6 @@ async fn session_tab(rx: &mut UnboundedReceiver<RuntimeEvent>, session_id: &str)
 
 fn drain(rx: &mut UnboundedReceiver<RuntimeEvent>) {
     while rx.try_recv().is_ok() {}
-}
-
-/// What the stub's `stdin.log` holds for `lines` read in order: each through `od -An -c`, as it logs them.
-fn od_rows(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .flat_map(|line| {
-            let mut od = std::process::Command::new("od")
-                .args(["-An", "-c"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .expect("spawn od");
-            od.stdin
-                .take()
-                .expect("od stdin")
-                .write_all(format!("{line}\n").as_bytes())
-                .expect("feed od");
-            let out = od.wait_with_output().expect("run od");
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
-/// An `od` row with its column padding collapsed, for evidence.
-fn squeeze(row: &str) -> String {
-    row.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 async fn pty_agent(j: &mut Journey, c: &RpcClient, ws: &str, terminal: &str) -> Value {

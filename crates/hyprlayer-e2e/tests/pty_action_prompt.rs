@@ -12,9 +12,7 @@ use hyprlayer_core::models::{PtyFirstPrompt, PtyLaunchSession};
 use hyprlayer_core::pipeline;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::Stage;
-use hyprlayer_e2e::agent_stub::{
-    install, launch_log, lines, od_rows, pasted, set_engine, PTY_CLAUDE,
-};
+use hyprlayer_e2e::agent_stub::{install, launch_log, lines, pasted, set_engine, PTY_CLAUDE};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::RpcClient;
@@ -101,7 +99,7 @@ async fn pty_action_prompt() {
     )
     .await;
     // The review-notes line outruns the stub's cooked-mode line limit; claude reads raw.
-    let opening = od_rows(&["\x1b[200~/implement_plan".to_string(), String::new()]);
+    let opening = ["\x1b[200~/implement_plan".to_string(), String::new()];
     let stdin = log.join("stdin.log");
     let opened = eventually(IO, || lines(&stdin).starts_with(&opening)).await;
     let argv = lines(&log.join("argv"));

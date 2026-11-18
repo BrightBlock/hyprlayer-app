@@ -1,7 +1,6 @@
 //! Stand-ins for PTY claude and codex that run the hooks their launch injected, and drivers for
 //! the agent-side faces (`hook`, `ctl`, `mcp`) under an agent's identity.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -21,7 +20,7 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 
 /// PTY claude. Logs to `agent-control/<$HYPRLAYER_TERMINAL_ID, else session-<id>>/`: `argv` (one
 /// per line), `env` (`HYPRLAYER_*`), copies of the `--settings`/`--mcp-config` files, `hooks.log`
-/// (`<Event> exit=<code>`) and `stdin.log` (each line as `od -An -c`). Each hook runs the command
+/// (`<Event> exit=<code>`) and `stdin.log` (each line as read). Each hook runs the command
 /// `--settings` names for its event, so a launch without injected hooks fires none. `SessionStart`
 /// fires at launch; stdin lines: `work` (prompt, Bash tool, `Stop` replying `done: work`), `hold`
 /// (`UserPromptSubmit` alone, so it stays working), `ask` (`PermissionRequest` for `rm -rf build`),
@@ -167,7 +166,7 @@ if [ -z "$tui" ]; then
   box
   hook SessionStart "$(ev SessionStart ',"source":"startup"')"
   while IFS= read -r line; do
-    printf '%s\n' "$line" | od -An -c >> "$dir/stdin.log"
+    printf '%s\n' "$line" >> "$dir/stdin.log"
     run_line "$line"
     case "$line" in
       ask) printf '\033[2J\033[H Bash command\n   rm -rf build\n\n Do you want to proceed?\n \342\235\257 1. Yes\n   2. No\n\n Esc to cancel \302\267 Tab to amend\n' ;;
@@ -439,7 +438,7 @@ hook() {
 ev() { printf '{"session_id":"%s","turn_id":"turn-1","hook_event_name":"%s"%s}' "$sid" "$1" "$2"; }
 hook SessionStart "$(ev SessionStart ',"source":"startup"')"
 while IFS= read -r line; do
-  printf '%s\n' "$line" | od -An -c >> "$dir/stdin.log"
+  printf '%s\n' "$line" >> "$dir/stdin.log"
   case "$line" in
     work)
       hook UserPromptSubmit "$(ev UserPromptSubmit ',"prompt":"work"')"
@@ -746,31 +745,8 @@ pub fn tool_failed(result: &Value) -> bool {
 
 /// The bracketed paste the stub reads, line by line, as it logs them.
 pub fn pasted(prompt: &str) -> Vec<String> {
-    let text = format!("\x1b[200~{prompt}\x1b[201~");
-    od_rows(&text.split('\n').map(str::to_string).collect::<Vec<_>>())
-}
-
-/// What the stub's `stdin.log` holds for `lines` read in order: each through `od -An -c`.
-pub fn od_rows(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .flat_map(|line| {
-            let mut od = std::process::Command::new("od")
-                .args(["-An", "-c"])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-                .expect("spawn od");
-            od.stdin
-                .take()
-                .expect("od stdin")
-                .write_all(format!("{line}\n").as_bytes())
-                .expect("feed od");
-            let out = od.wait_with_output().expect("run od");
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
+    format!("\x1b[200~{prompt}\x1b[201~")
+        .split('\n')
+        .map(str::to_string)
         .collect()
 }

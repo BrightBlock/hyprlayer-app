@@ -49,9 +49,9 @@
       "guards": [
         {
           "evidence": {
-            "firstRow": "033 [ 2 0 0 ~ [ f r o m a g e n",
-            "lastRow": "E 2 E _ E N D 033 [ 2 0 1 ~ \\n",
+            "closesOnText": true,
             "matchesThePaste": true,
+            "opensWithHeader": true,
             "sent": true
           },
           "guard": "the TUI reads ESC[200~ and the header, a blank line, the text, then ESC[201~ and the line's end",

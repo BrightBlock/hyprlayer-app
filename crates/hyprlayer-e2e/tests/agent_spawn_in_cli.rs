@@ -13,8 +13,8 @@ use hyprlayer_core::models::{AgentControlLevel, PermissionMode};
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::agent_stub::{
-    agent_env, env_var, install, launch_log, lines, od_rows, pasted, set_engine, set_level,
-    tool_failed, tool_text, update_settings, McpDriver, PTY_CLAUDE,
+    agent_env, env_var, install, launch_log, lines, pasted, set_engine, set_level, tool_failed,
+    tool_text, update_settings, McpDriver, PTY_CLAUDE,
 };
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::goal_stub::GOAL_CLAUDE;
@@ -108,7 +108,7 @@ async fn agent_spawn_in_cli() {
         .to_string();
     j.alias(&implement, "$IMPLEMENT");
     let log = launch_log(&sandbox, &implement);
-    let opening = od_rows(&["\x1b[200~/implement_plan".to_string(), String::new()]);
+    let opening = ["\x1b[200~/implement_plan".to_string(), String::new()];
     let stdin = log.join("stdin.log");
     let opened = eventually(IO, || lines(&stdin).starts_with(&opening)).await;
     let argv = lines(&log.join("argv"));
