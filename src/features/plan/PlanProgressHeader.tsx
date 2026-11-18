@@ -1,8 +1,11 @@
+import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
 import type { RunningSubagent } from "@/features/session/subagent";
 
 import type { StageBadge } from "./lifecycleSlot";
-import { phaseLine, type CurrentItem, type PlanTracker } from "./planTracker";
+import { TaskBox } from "./PhaseSection";
+import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
+import { phaseLine, progressLabel, type CurrentItem, type OpenManualCheck, type PlanTracker, type TrackedTask } from "./planTracker";
 
 function subagentLine(s: RunningSubagent): string {
   const parts = [s.agent];
@@ -54,14 +57,77 @@ export function CurrentTaskCard({
   );
 }
 
+// Capped so a plan mid-build, with most checks open, doesn't push the lifecycle and phases off screen.
+function OpenManualChecks({
+  open,
+  collapseKey,
+  onCheckOff,
+}: {
+  open: OpenManualCheck[];
+  collapseKey: string;
+  onCheckOff?: (task: TrackedTask) => void;
+}) {
+  const collapsed = usePhaseCollapsed(collapseKey, false);
+  return (
+    <section aria-label="Open manual checks" className="mt-3 rounded-card border border-edge px-3 py-2.5">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => setPhaseCollapsed(collapseKey, !collapsed)}
+        className="lbl flex w-full items-center gap-1.5 text-left"
+      >
+        <Icon
+          name="chevronDown"
+          size="xs"
+          className={cx("shrink-0 transition-transform", collapsed && "-rotate-90")}
+        />
+        Open manual checks <span className="tabular-nums">· {open.length}</span>
+      </button>
+      {!collapsed && (
+        <ul className="mt-2 max-h-[220px] space-y-2 overflow-y-auto">
+          {open.map(({ phaseLabel, phaseName, task }) => (
+            <li key={task.key} className="flex items-start gap-[9px] text-body">
+              {onCheckOff ? (
+                <button
+                  type="button"
+                  aria-label={`Mark done: ${task.title}`}
+                  onClick={() => onCheckOff(task)}
+                  className="flex min-w-0 flex-1 items-start gap-[9px] text-left"
+                >
+                  <TaskBox state="pending" pulse={false} />
+                  <span className="min-w-0 flex-1 break-words text-ink-2">{task.title}</span>
+                </button>
+              ) : (
+                <>
+                  <TaskBox state="pending" pulse={false} />
+                  <span className="min-w-0 flex-1 break-words text-ink-2">{task.title}</span>
+                </>
+              )}
+              <span
+                title={phaseName}
+                className="shrink-0 rounded-control border border-edge px-1 text-meta tabular-nums text-ink-4"
+              >
+                Phase {phaseLabel}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function PlanProgressHeader({
   tracker,
   reduceMotion,
   badge,
+  onCheckOff,
 }: {
   tracker: PlanTracker;
   reduceMotion: boolean;
   badge?: StageBadge;
+  // Absent for plans the app can't write to (Claude's and inline plans).
+  onCheckOff?: (task: TrackedTask) => void;
 }) {
   const pct = Math.round(tracker.progress * 100);
   const shown = badge ?? {
@@ -99,8 +165,18 @@ export function PlanProgressHeader({
           }}
         />
       </div>
+      {tracker.total > 0 && (
+        <div className="mt-2 text-meta tabular-nums text-ink-4">{progressLabel(tracker)}</div>
+      )}
       {tracker.current && (
         <CurrentTaskCard current={tracker.current} pulse={tracker.pulsing && !reduceMotion} />
+      )}
+      {tracker.openManual.length > 0 && (
+        <OpenManualChecks
+          open={tracker.openManual}
+          collapseKey={`${tracker.title}\0open-manual`}
+          onCheckOff={onCheckOff}
+        />
       )}
     </div>
   );

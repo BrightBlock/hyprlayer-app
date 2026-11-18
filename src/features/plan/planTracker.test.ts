@@ -136,7 +136,31 @@ describe("checks", () => {
       ["Looks right", true, "manual", "pending"],
     ]);
     expect([t.done, t.total]).toEqual([2, 4]);
-    expect(t.checks).toEqual({ done: 2, total: 3 });
+    expect(t.checks).toEqual({
+      done: 2,
+      total: 3,
+      automated: { done: 2, total: 2 },
+      manual: { done: 0, total: 1 },
+    });
+  });
+
+  it("rolls up open manual checks across phases, dropping finished ones", () => {
+    const two = parsePlanDoc(
+      "## Phase 1: A\n- [x] Write it\n### Success Criteria:\n#### Manual Verification:\n- [ ] Looks right\n- [x] Reads well\n\n## Phase 2b: B\n- [ ] Build it\n### Success Criteria:\n#### Automated Verification:\n- [ ] tests\n#### Manual Verification:\n- [ ] Feels fast\n- [ ] Scrolls\n",
+      PATH,
+    );
+    const open = (t: PlanTracker) => t.openManual.map((m) => [m.phaseLabel, m.phaseName, m.task.title]);
+    expect(open(trackPlan(two, [], building))).toEqual([
+      ["1", "A", "Looks right"],
+      ["2b", "B", "Feels fast"],
+      ["2b", "B", "Scrolls"],
+    ]);
+    const t = trackPlan(two, [todo("Feels fast", "completed")], building);
+    expect(open(t)).toEqual([
+      ["1", "A", "Looks right"],
+      ["2b", "B", "Scrolls"],
+    ]);
+    expect(t.checks.manual).toEqual({ done: 2, total: 4 });
   });
 });
 

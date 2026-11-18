@@ -70,7 +70,7 @@ export function taskAriaLabel(task: TrackedTask): string {
   return `${task.title}, ${state}${task.added ? ", added by the agent" : ""}`;
 }
 
-function TaskBox({ state, pulse }: { state: TaskState; pulse: boolean }) {
+export function TaskBox({ state, pulse }: { state: TaskState; pulse: boolean }) {
   return (
     <span
       data-box

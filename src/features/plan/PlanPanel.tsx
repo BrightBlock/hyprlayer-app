@@ -11,7 +11,7 @@ import { PhaseSection, type CheckStatus } from "./PhaseSection";
 import { PlanPreviewDraft } from "./PlanPreviewDraft";
 import { PlanProgressHeader } from "./PlanProgressHeader";
 import { setPhaseCollapsed, usePhaseCollapsed } from "./planPreviewStore";
-import type { JumpTarget, PlanTracker, TrackedPhase } from "./planTracker";
+import { progressLabel, type JumpTarget, type PlanTracker, type TrackedPhase, type TrackedTask } from "./planTracker";
 
 const MANUAL_SCROLL_HOLD_MS = 10_000;
 
@@ -35,20 +35,13 @@ type Props = {
   goalAction?: { label: string; onClick: () => void } | null;
   phaseAction?: (phase: TrackedPhase) => ReactNode;
   checkStatus?: CheckStatus;
+  onCheckOff?: (task: TrackedTask) => void;
 };
 
 const NO_CHANGES: ReadonlySet<string> = new Set();
 
 export const HEADER_BUTTON =
   "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-control border border-edge px-2 text-ui-sm font-semibold text-ink-2 hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink";
-
-function progressLabel(tracker: PlanTracker): string {
-  const checks = tracker.checks;
-  const tasks = { done: tracker.done - checks.done, total: tracker.total - checks.total };
-  if (checks.total === 0) return `${tasks.done} of ${plural(tasks.total, "task")} done`;
-  if (tasks.total === 0) return `${checks.done} of ${plural(checks.total, "check")} passed`;
-  return `${tasks.done} of ${plural(tasks.total, "task")} · ${checks.done} of ${plural(checks.total, "check")}`;
-}
 
 // Announces completions only; an aria-live list would read out every status tick.
 function useCompletionAnnouncement(tracker: PlanTracker): string {
@@ -160,6 +153,7 @@ export function PlanPanel({
   goalAction,
   phaseAction,
   checkStatus,
+  onCheckOff,
 }: Props) {
   const reduceMotion = useReducedMotion();
   const [buildMode, setBuildMode] = useState<"once" | "until">("once");
@@ -184,7 +178,7 @@ export function PlanPanel({
     <>
       {tracker.phases.length > 0 && (
         <span className="text-meta tabular-nums text-ink-4">
-          {plural(tracker.phases.length, "phase")} · {progressLabel(tracker)}
+          {[plural(tracker.phases.length, "phase"), progressLabel(tracker)].filter(Boolean).join(" · ")}
         </span>
       )}
       <span className="flex-1" />
@@ -270,12 +264,14 @@ export function PlanPanel({
         {tracking ? (
           lifecycle ? (
             lifecycle({
-              header: (badge) => <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} badge={badge} />,
+              header: (badge) => (
+                <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} badge={badge} onCheckOff={onCheckOff} />
+              ),
               phases,
             })
           ) : (
             <>
-              <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} />
+              <PlanProgressHeader tracker={tracker} reduceMotion={reduceMotion} onCheckOff={onCheckOff} />
               {phases}
             </>
           )
@@ -287,48 +283,47 @@ export function PlanPanel({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 border-t border-edge-2 px-[18px] py-2.5">
-        {tracking ? (
-          <>
-            {tracker.total > 0 && (
-              <span className="text-meta tabular-nums text-ink-4">{progressLabel(tracker)}</span>
-            )}
-            <span className="flex-1" />
-            {lifecycle ? null : tracker.allDone ? (
-              <Button variant="primary" size="sm" onClick={onReviewChanges}>
-                Review changes
-              </Button>
-            ) : (
-              diff && (
-                <span className="flex items-center gap-1.5 text-meta tabular-nums">
-                  <span className="text-diff-add">+{diff.additions}</span>
-                  <span className="text-diff-del">−{diff.deletions}</span>
-                </span>
-              )
-            )}
-          </>
-        ) : buildGoal ? (
-          <div className="flex w-full flex-col gap-2.5">
-            <SegmentedControl
-              aria-label="Build mode"
-              value={buildMode}
-              options={[
-                { value: "once", label: "Build once" },
-                { value: "until", label: "Build until met" },
-              ]}
-              onChange={setBuildMode}
-              className="self-start"
-            />
-            {buildMode === "until" ? (
-              buildGoal.render()
-            ) : (
-              <div className="flex items-center gap-2">{draftRow}</div>
-            )}
-          </div>
-        ) : (
-          draftRow
-        )}
-      </div>
+      {(!tracking || (!lifecycle && (tracker.allDone || diff))) && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-edge-2 px-[18px] py-2.5">
+          {tracking ? (
+            <>
+              <span className="flex-1" />
+              {tracker.allDone ? (
+                <Button variant="primary" size="sm" onClick={onReviewChanges}>
+                  Review changes
+                </Button>
+              ) : (
+                diff && (
+                  <span className="flex items-center gap-1.5 text-meta tabular-nums">
+                    <span className="text-diff-add">+{diff.additions}</span>
+                    <span className="text-diff-del">−{diff.deletions}</span>
+                  </span>
+                )
+              )}
+            </>
+          ) : buildGoal ? (
+            <div className="flex w-full flex-col gap-2.5">
+              <SegmentedControl
+                aria-label="Build mode"
+                value={buildMode}
+                options={[
+                  { value: "once", label: "Build once" },
+                  { value: "until", label: "Build until met" },
+                ]}
+                onChange={setBuildMode}
+                className="self-start"
+              />
+              {buildMode === "until" ? (
+                buildGoal.render()
+              ) : (
+                <div className="flex items-center gap-2">{draftRow}</div>
+              )}
+            </div>
+          ) : (
+            draftRow
+          )}
+        </div>
+      )}
     </div>
   );
 }

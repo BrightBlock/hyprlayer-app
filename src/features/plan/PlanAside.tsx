@@ -25,11 +25,11 @@ import { approvalFor, runApproval } from "./planApproval";
 import { checkOffTasks } from "./planDocActions";
 import { closePlanPreview } from "./planPreviewStore";
 import { lifecycleStepsComponent } from "./lifecycleSlot";
-import type { PlanTracker, TrackedPhase, TrackedTask } from "./planTracker";
+import { isManualCheck, type PlanTracker, type TrackedPhase, type TrackedTask } from "./planTracker";
 import { usePlanTracker } from "./usePlanTracker";
 
 function manualCriteria(phases: TrackedPhase[]): string[] {
-  return phases.flatMap((p) => p.tasks.filter((t) => t.check && t.group === "manual").map((t) => t.title));
+  return phases.flatMap((p) => p.tasks.filter(isManualCheck).map((t) => t.title));
 }
 
 // One goal list and one goal detail per plan aside, shared with the Goal view's cache keys.
@@ -206,6 +206,7 @@ export function PlanAside({
       onClose={closePlanPreview}
       headerAction={headerAction}
       onReviewChanges={onReviewChanges}
+      onCheckOff={planFile ? (task) => void checkOffTasks(planFile, [task]).catch(setApproveError) : undefined}
       onJump={(target) => sessionId && requestTranscriptJump(sessionId, target)}
       onApprove={() => {
         if (!action || !sessionId) return;

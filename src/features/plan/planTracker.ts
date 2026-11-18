@@ -1,6 +1,7 @@
 import { todoPhaseLabel, type TimelineTask } from "@/features/session/planTasks";
 import type { RunningSubagent } from "@/features/session/subagent";
 import type { TranscriptJump } from "@/features/session/transcriptJump";
+import { plural } from "@/lib/format";
 
 import {
   phaseRows,
@@ -27,6 +28,14 @@ export type TrackedTask = {
 };
 
 export type TrackedPhase = { label: string; name: string; state: PhaseState; tasks: TrackedTask[] };
+
+export type Count = { done: number; total: number };
+
+export type OpenManualCheck = { phaseLabel: string; phaseName: string; task: TrackedTask };
+
+export function isManualCheck(t: TrackedTask): boolean {
+  return t.check && t.group === "manual";
+}
 
 export type CurrentItem = {
   title: string;
@@ -56,7 +65,9 @@ export type PlanTracker = {
   currentPhase: number | null;
   done: number;
   total: number;
-  checks: { done: number; total: number };
+  // All checks, ungrouped ones included.
+  checks: Count & { automated: Count; manual: Count };
+  openManual: OpenManualCheck[];
   progress: number;
   allDone: boolean;
   // Every phase built; unlike `allDone`, criteria and added rows don't count.
@@ -352,7 +363,16 @@ export function trackPlan(
     currentPhase,
     done,
     total,
-    checks: { done: checks.filter((t) => t.state === "done").length, total: checks.length },
+    checks: {
+      ...count(checks),
+      automated: count(checks.filter((t) => t.group === "automated")),
+      manual: count(checks.filter(isManualCheck)),
+    },
+    openManual: tracked.flatMap((p) =>
+      p.tasks
+        .filter((t) => isManualCheck(t) && t.state !== "done")
+        .map((task) => ({ phaseLabel: p.label, phaseName: p.name, task })),
+    ),
     progress: units.length > 0 ? (unitsDone + 0.5 * half) / units.length : 0,
     allDone,
     tasksDone,
@@ -361,6 +381,30 @@ export function trackPlan(
       .filter((s) => !s.checked && s.todo?.status === "completed")
       .map((s) => ({ key: s.key, title: s.title })),
   };
+}
+
+function count(tasks: TrackedTask[]): Count {
+  return { done: tasks.filter((t) => t.state === "done").length, total: tasks.length };
+}
+
+export function progressLabel(tracker: PlanTracker): string {
+  const { checks } = tracker;
+  const { automated, manual } = checks;
+  const tasks = { done: tracker.done - checks.done, total: tracker.total - checks.total };
+  const ungrouped = {
+    done: checks.done - automated.done - manual.done,
+    total: checks.total - automated.total - manual.total,
+  };
+  const parts: [Count, string][] = [
+    [tasks, plural(tasks.total, "task")],
+    [automated, `${automated.total} automated`],
+    [manual, `${manual.total} manual`],
+    [ungrouped, plural(ungrouped.total, "check")],
+  ];
+  return parts
+    .filter(([c]) => c.total > 0)
+    .map(([c, of]) => `${c.done} of ${of}`)
+    .join(" · ");
 }
 
 // Labels can start at 0 or carry a letter (5b), so a phase's label and position can differ.

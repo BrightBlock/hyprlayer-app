@@ -274,11 +274,17 @@ function Stages({
             : "review";
 
   const tracker = plan.tracker;
+  const openManual = tracker?.openManual.length ?? 0;
+  const manualOpenLabel = `${plural(openManual, "manual check")} open`;
   const badge = {
     implement: { ...IMPLEMENT_BADGE, detail: tracker ? phaseLine(tracker) : null },
     validate: { label: "Validate", className: "bg-validate", detail: validateDetail(flow) },
     review: { label: "Review", className: "bg-accent", detail: review && s ? reviewStatusLabel(review, s) : null },
-    ship: { label: "Ship", className: "bg-commit", detail: livePr ? `PR #${livePr.number} open` : null },
+    ship: {
+      label: "Ship",
+      className: "bg-commit",
+      detail: livePr ? `PR #${livePr.number} open` : openManual > 0 ? manualOpenLabel : null,
+    },
     shipped: { label: "Shipped", className: "bg-ok", detail: livePr ? `PR #${livePr.number} merged` : null },
   }[stage];
   const shown = goal
@@ -308,6 +314,7 @@ function Stages({
     ) : stage === "ship" || stage === "shipped" ? (
       <>
         <ValidationLine workstreamId={wsId} flow={flow} />
+        {stage === "ship" && openManual > 0 && <ResultRow done={false} label={manualOpenLabel} />}
         {livePr ? (
           <>
             {approved && <ResultRow done label="Review approved" />}

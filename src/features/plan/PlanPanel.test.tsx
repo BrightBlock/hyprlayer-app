@@ -145,28 +145,72 @@ describe("PlanPanel checks", () => {
 
   it("labels automated and manual checks under their phase", () => {
     renderPanel(trackPlan(CHECKS("active", ""), [], working));
-    const automated = screen.getByText("Automated checks");
-    const manual = screen.getByText("Manual checks");
-    expect(follows(automated, screen.getByText("clippy"))).toBe(true);
-    expect(follows(screen.getByText("clippy"), manual)).toBe(true);
-    expect(follows(manual, screen.getByText("Looks right"))).toBe(true);
+    const phase = within(screen.getByText("Phase 1 — Diff").closest("section")!);
+    const automated = phase.getByText("Automated checks");
+    const manual = phase.getByText("Manual checks");
+    expect(follows(automated, phase.getByText("clippy"))).toBe(true);
+    expect(follows(phase.getByText("clippy"), manual)).toBe(true);
+    expect(follows(manual, phase.getByText("Looks right"))).toBe(true);
   });
 
   it("counts a criteria-only phase by its checks alone", () => {
     renderPanel(trackPlan(CHECKS("active", ""), [], working));
     expect(screen.queryByText("Implementation")).toBeNull();
-    expect(screen.getByText("1 of 3 checks passed")).toBeTruthy();
+    expect(screen.getByText("1 of 2 automated · 0 of 1 manual")).toBeTruthy();
   });
 
   it("counts tasks and checks apart when a plan has both", () => {
     renderPanel(trackPlan(CHECKS("active", "- [ ] Write it\n"), [], working));
-    expect(screen.getByText("0 of 1 task · 1 of 3 checks")).toBeTruthy();
+    expect(screen.getByText("0 of 1 task · 1 of 2 automated · 0 of 1 manual")).toBeTruthy();
+  });
+
+  it("counts checks outside a verification group as checks", () => {
+    const doc = parsePlanDoc("---\nstatus: active\n---\n# U\n\n## Phase 1: A\n### Success Criteria:\n- [x] fmt\n- [ ] clippy\n", "/t/plans/u.md");
+    renderPanel(trackPlan(doc, [], working));
+    expect(screen.getByText("1 of 2 checks")).toBeTruthy();
+  });
+
+  it("rolls up open manual checks from every phase with their phase", () => {
+    const doc = parsePlanDoc(
+      "---\nstatus: active\n---\n# Roll\n\n## Phase 1: Diff\n- [x] Write it\n### Success Criteria:\n#### Manual Verification:\n- [ ] Looks right\n- [x] Reads well\n\n## Phase 2: Polish\n- [ ] Tune it\n### Success Criteria:\n#### Manual Verification:\n- [ ] Feels fast\n",
+      "/t/plans/roll.md",
+    );
+    renderPanel(trackPlan(doc, [], working));
+    const rollup = screen.getByRole("region", { name: "Open manual checks" });
+    const rows = within(rollup).getAllByRole("listitem");
+    expect(rows.map((r) => r.textContent)).toEqual(["Looks rightPhase 1", "Feels fastPhase 2"]);
+    expect(within(rows[0]).getByText("Phase 1").getAttribute("title")).toBe("Diff");
+    expect(within(rollup).queryByText("Reads well")).toBeNull();
+  });
+
+  it("checks off a rolled-up manual check it can write to", () => {
+    const doc = parsePlanDoc(
+      "---\nstatus: active\n---\n# Roll\n\n## Phase 1: Diff\n- [x] Write it\n### Success Criteria:\n#### Manual Verification:\n- [ ] Looks right\n",
+      "/t/plans/roll.md",
+    );
+    const onCheckOff = vi.fn();
+    renderPanel(trackPlan(doc, [], working), { onCheckOff });
+    fireEvent.click(screen.getByRole("button", { name: "Mark done: Looks right" }));
+    expect(onCheckOff).toHaveBeenCalledWith(expect.objectContaining({ title: "Looks right" }));
+    cleanup();
+    renderPanel(trackPlan(doc, [], working));
+    expect(screen.queryByRole("button", { name: "Mark done: Looks right" })).toBeNull();
+  });
+
+  it("shows no roll-up once every manual check is ticked", () => {
+    const doc = parsePlanDoc(
+      "---\nstatus: active\n---\n# Roll\n\n## Phase 1: Diff\n- [ ] Write it\n### Success Criteria:\n#### Manual Verification:\n- [x] Looks right\n",
+      "/t/plans/roll.md",
+    );
+    renderPanel(trackPlan(doc, [], working));
+    expect(screen.queryByRole("region", { name: "Open manual checks" })).toBeNull();
+    expect(screen.getByText("0 of 1 task · 1 of 1 manual")).toBeTruthy();
   });
 
   it("uses the same wording in a draft", () => {
     renderPanel(trackPlan(CHECKS("draft", ""), [], null));
     expect(screen.getByText("Automated checks")).toBeTruthy();
-    expect(screen.getByText("1 phase · 1 of 3 checks passed")).toBeTruthy();
+    expect(screen.getByText("1 phase · 1 of 2 automated · 0 of 1 manual")).toBeTruthy();
   });
 });
 
@@ -224,14 +268,14 @@ describe("PlanPanel tracking", () => {
     expect(screen.getByText("Phase 2 — Build").closest("[data-phase-label]")!.textContent).toContain("· in progress");
   });
 
-  it("shows the header, current task and footer", () => {
+  it("shows the header, counts, current task and diff", () => {
     renderPanel(tracker());
     expect(screen.getByText("OG images")).toBeTruthy();
     expect(screen.getByText("Build")).toBeTruthy();
     expect(screen.getByText("Phase 2 of 2")).toBeTruthy();
     expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe("63");
     expect(screen.getByText("Current task")).toBeTruthy();
-    expect(screen.getByText("2 of 4 tasks done")).toBeTruthy();
+    expect(screen.getByText("2 of 4 tasks")).toBeTruthy();
     expect(screen.getByText("+412")).toBeTruthy();
     expect(screen.getByText("−18")).toBeTruthy();
   });
@@ -290,7 +334,7 @@ describe("PlanPanel draft", () => {
     expect(screen.getByText("Plan")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
     expect(screen.getByText("jt")).toBeTruthy();
-    expect(screen.getByText("2 phases · 0 of 4 tasks done")).toBeTruthy();
+    expect(screen.getByText("2 phases · 0 of 4 tasks")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Approve & build" }));
     expect(props.onApprove).toHaveBeenCalled();
