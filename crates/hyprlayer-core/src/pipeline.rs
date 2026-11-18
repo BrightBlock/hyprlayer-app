@@ -408,6 +408,71 @@ pub fn compose_prompt(
     }
 }
 
+pub const PTY_SHIP_DESCRIBE: &str = "Once the pull request is open, run /describe_pr to write \
+its description.";
+
+pub const PTY_SHIP_PROMPT_TEMPLATE: &str = "/commit\n\nOnce the commit lands, push the branch to \
+its remote. Only after the commit and push succeed, open a pull request against \
+`{{base_branch}}` with a clear title and a short placeholder body.";
+
+/// A stage's first turn for a PTY agent: one turn, so ship describes the PR itself and codex
+/// skips its two-phase plan; `harness` is `None` for an engine the app doesn't drive natively.
+pub fn pty_prompt(
+    stage: Stage,
+    input: &str,
+    base_branch: &str,
+    bodies: &ActionPromptBodies,
+    harness: Option<Harness>,
+    workstream_id: &str,
+) -> String {
+    let prompt = match stage {
+        Stage::Ship => {
+            let body = bodies.ship.clone().unwrap_or_else(|| {
+                let base = base_branch.strip_prefix("origin/").unwrap_or(base_branch);
+                PTY_SHIP_PROMPT_TEMPLATE.replace("{{base_branch}}", base)
+            });
+            let prompt = action_prompt(&body, input.trim());
+            if body.contains("/describe_pr") {
+                prompt
+            } else {
+                format!("{prompt}\n\n{PTY_SHIP_DESCRIBE}")
+            }
+        }
+        Stage::Commit if bodies.commit.is_none() => {
+            let body = match harness {
+                Some(Harness::Claude) => COMMIT_PROMPT_DEFAULT,
+                _ => COMMIT_PROMPT_NO_ASK_TOOL,
+            };
+            action_prompt(body, input.trim())
+        }
+        Stage::Implement => format!(
+            "{}\n\n{}",
+            compose_prompt(stage, input, base_branch, bodies, Harness::Claude),
+            review_notes_instruction(workstream_id)
+        ),
+        _ => compose_prompt(stage, input, base_branch, bodies, Harness::Claude),
+    };
+    // General is the user's own text, which may be a real command of that CLI.
+    if harness == Some(Harness::Claude) || stage == Stage::General {
+        prompt
+    } else {
+        skill_in_prose(&prompt)
+    }
+}
+
+/// Codex and Gemini read a leading unknown `/name` as a TUI command and refuse it.
+fn skill_in_prose(prompt: &str) -> String {
+    let Some(rest) = prompt.strip_prefix('/') else {
+        return prompt.to_string();
+    };
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let (name, tail) = rest.split_at(end);
+    match tail.strip_prefix(' ') {
+        Some(args) => format!("Use the `{name}` skill on: {args}"),
+        None => format!("Use the `{name}` skill.{tail}"),
+    }
+}
+
 /// The user's own text inside a first turn `compose_prompt` + `append_docs`
 /// wrapped, for rows that predate `first_input`. Action-body stages are not
 /// recoverable.

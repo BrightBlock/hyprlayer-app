@@ -694,6 +694,7 @@ async fn pty_status_bar() {
                 model: Some("claude-sonnet-5-5".into()),
                 permission_mode: Some("plan".into()),
                 effort: Some("high".into()),
+                first_prompt: None,
             },
             80,
             24,

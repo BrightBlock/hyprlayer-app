@@ -46,7 +46,7 @@ function HandoffButtons({ sessionId, goal, view }: { sessionId: string; goal: Go
     try {
       const session = await validatePlanInNewSession(view.item.id, path, sessionId);
       // Links the validate tab to this implement session, as the validate card's own start does.
-      useValidateStepStore.getState().setStep(sessionId, { kind: "agent", sessionId: session.id });
+      if (session) useValidateStepStore.getState().setStep(sessionId, { kind: "agent", sessionId: session.id });
     } catch (e) {
       useToast.getState().show("Validation didn't start", errorMessage(e), { tone: "bad" });
     } finally {

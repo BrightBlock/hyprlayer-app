@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::agent::Stage;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -25,6 +27,21 @@ pub struct PtyLaunchSession {
     /// A session-only effort for engines that take one at launch.
     #[serde(default)]
     pub effort: Option<String>,
+    /// An app action's first turn; the server composes it and types it in once the TUI is ready.
+    #[serde(default)]
+    pub first_prompt: Option<PtyFirstPrompt>,
+}
+
+/// The stage prompt a native session would open with, for a PTY agent to run instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct PtyFirstPrompt {
+    pub stage: Stage,
+    #[serde(default)]
+    pub input: String,
+    #[serde(default)]
+    pub attached_docs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

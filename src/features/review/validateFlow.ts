@@ -174,7 +174,7 @@ export function useValidateFlow(
         setStep(implementId, { kind: "inline", sentAt: Date.now() });
       } else {
         const session = await validatePlanInNewSession(workstreamId, planPath, implementId);
-        setStep(implementId, { kind: "agent", sessionId: session.id });
+        if (session) setStep(implementId, { kind: "agent", sessionId: session.id });
       }
     });
 

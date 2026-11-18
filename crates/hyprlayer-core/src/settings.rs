@@ -452,6 +452,8 @@ pub struct MultiplexerSettings {
     pub default_engine_id: String,
     pub notify_on_blocked: bool,
     pub persist_across_restarts: bool,
+    /// App actions (Commit, Ship, plan builds, prompts) open the default engine instead of a chat.
+    pub actions_in_cli: bool,
     pub engines: Vec<Engine>,
 }
 
@@ -462,6 +464,7 @@ impl Default for MultiplexerSettings {
             default_engine_id: DEFAULT_ENGINE_ID.to_string(),
             notify_on_blocked: true,
             persist_across_restarts: true,
+            actions_in_cli: true,
             engines: Engine::builtins(),
         }
     }

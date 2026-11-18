@@ -430,6 +430,7 @@ impl AgentControlService<'_> {
                     model,
                     permission_mode: None,
                     effort: None,
+                    first_prompt: None,
                 },
                 cols: SPAWN_COLS,
                 rows: SPAWN_ROWS,
@@ -828,6 +829,16 @@ async fn paste(agents: &PtyAgents, terminal_id: &str, pty: &PtySession, text: &s
     }
     pty.write_input(b"\r")?;
     Ok(())
+}
+
+/// Types an app action's prompt into a just-launched PTY agent once its TUI is ready.
+pub(crate) fn send_first_prompt(agents: Arc<PtyAgents>, terminal_id: &str, text: String) {
+    let Some(snapshot) = agents.snapshot(terminal_id) else {
+        tracing::warn!("terminal {terminal_id}: gone before its first prompt");
+        return;
+    };
+    agents.owe_prompt(terminal_id, PROMPT_WAIT);
+    tokio::spawn(first_prompt(agents, snapshot, text));
 }
 
 /// Waits for the TUI to be ready, then pastes under the input lock: hooked, idle with nothing

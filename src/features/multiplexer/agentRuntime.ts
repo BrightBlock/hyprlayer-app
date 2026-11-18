@@ -1,7 +1,7 @@
 
 import { Channel } from "@tauri-apps/api/core";
 
-import { commands, type TerminalEvent } from "@/lib/bindings";
+import { commands, type PtyFirstPrompt, type TerminalEvent } from "@/lib/bindings";
 import type { PtyLaunched } from "@/lib/domain/agentControl";
 import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
@@ -176,6 +176,8 @@ export type AgentLaunchSession = {
   model?: string;
   permissionMode?: string;
   effort?: string;
+  /** Only on a fresh launch from an app action; never persisted, so a relaunch can't resend it. */
+  firstPrompt?: PtyFirstPrompt;
 };
 
 export type EnsureAgentOpts = {
@@ -289,7 +291,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<AgentLaunch | null> 
     beginPtyLaunch(r.workstreamId);
     try {
       const ch = makeDetect();
-      const { sessionId, resume, bypass, model, permissionMode, effort } = opts.session;
+      const { sessionId, resume, bypass, model, permissionMode, effort, firstPrompt } = opts.session;
       const launched = await unwrap(
         commands.ptyLaunch(
           r.workstreamId,
@@ -301,6 +303,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<AgentLaunch | null> 
             model: model ?? null,
             permissionMode: permissionMode ?? null,
             effort: effort ?? null,
+            firstPrompt: firstPrompt ?? null,
           },
           cols,
           rows,

@@ -66,6 +66,7 @@ import {
   effectiveBuiltinBody,
   substitutePromptVars,
 } from "@/features/prompts/prompts";
+import { launchActionInCli } from "@/features/multiplexer/actionAgent";
 import {
   actionAgentDefaults,
   actionLaunchArgs,
@@ -1724,6 +1725,13 @@ export async function runPromptTextInWorkstream(
   if (promptStartsInFlight.has(workstreamId)) return;
   promptStartsInFlight.add(workstreamId);
   try {
+    // A prompt run from a chat's own menu stays in that chat.
+    const nativeTarget = targetShellId !== undefined && !!active && !active.ptyAgent;
+    const cli = nativeTarget ? null : launchActionInCli(workstreamId, { stage: "general", input: text, title });
+    if (cli) {
+      await cli;
+      return;
+    }
     const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
     const reuseShell =
       active &&
@@ -1789,6 +1797,11 @@ export async function deliverReview(
       return outcome;
     }
   }
+  const cli = launchActionInCli(workstreamId, { stage: "general", input: text, title: "Review" });
+  if (cli) {
+    if (!(await cli)) throw new Error("The review agent didn't start.");
+    return "sent";
+  }
   const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
   const session = await startSession({
     workstreamId,
@@ -1812,6 +1825,11 @@ export async function commitWorkstream(workstreamId: string): Promise<void> {
       return;
     }
   }
+  const cli = launchActionInCli(workstreamId, { stage: "commit", title: "Commit" });
+  if (cli) {
+    await cli;
+    return;
+  }
   const defaults = commitShipDefaults();
   const session = await startSession({
     workstreamId,
@@ -1827,6 +1845,11 @@ export async function approvePlanAndBuild(
   planPath: string,
   from: ShellTab,
 ): Promise<void> {
+  const cli = launchActionInCli(workstreamId, { stage: "implement", attachedDocs: [planPath], title: "Implement" });
+  if (cli) {
+    await cli;
+    return;
+  }
   const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
   const session = await startSession({
     workstreamId,
@@ -1839,11 +1862,17 @@ export async function approvePlanAndBuild(
 }
 
 // Carries the implement tab's harness and model, but not its permission mode: validate's policy owns that.
+// Null when it ran in a CLI tab, which has no session to pair with the implement one.
 export async function validatePlanInNewSession(
   workstreamId: string,
   planPath: string,
   implementSessionId: string,
-): Promise<Session> {
+): Promise<Session | null> {
+  const cli = launchActionInCli(workstreamId, { stage: "validate", attachedDocs: [planPath], title: "Validate" });
+  if (cli) {
+    await cli;
+    return null;
+  }
   const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
   const shell = useWorkstreamTabsStore
     .getState()
@@ -1892,6 +1921,11 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
       return;
     }
   }
+  const cli = launchActionInCli(workstreamId, { stage: "ship", title: "Ship" });
+  if (cli) {
+    await cli;
+    return;
+  }
   const defaults = commitShipDefaults();
   const session = await startSession({
     workstreamId,
@@ -1925,6 +1959,12 @@ export async function addressPrFeedback(
       await sendMessage(shipTab.sessionId, instruction);
       return;
     }
+  }
+  const title = kind === "ci" ? "Fix CI" : "Address comments";
+  const cli = launchActionInCli(workstreamId, { stage: "revise", input: instruction, title });
+  if (cli) {
+    await cli;
+    return;
   }
   const defaults = commitShipDefaults();
   const session = await startSession({

@@ -175,6 +175,22 @@ export function AdvancedSettings({ settings }: { settings: AppSettings }) {
             </SettingRow>
 
             <SettingRow
+              title="Commit, Ship and other app actions open in"
+              control={
+                <DropdownSelect
+                  aria-label="App actions open in"
+                  className="min-w-44"
+                  value={cfg.actionsInCli ? "cli" : "chat"}
+                  onChange={(v) => patchMux({ actionsInCli: v === "cli" })}
+                  options={[
+                    { value: "cli", label: "Default engine" },
+                    { value: "chat", label: "Native chat" },
+                  ]}
+                />
+              }
+            />
+
+            <SettingRow
               title="Notify when an agent is blocked"
               control={
                 <Toggle

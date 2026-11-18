@@ -9,7 +9,9 @@ use hyprlayer_models::{
 };
 use tokio::sync::mpsc;
 
+use crate::claude::driver::permission_mode_flag;
 use crate::error::{CoreError, Result};
+use crate::pipeline::{self, Stage};
 use crate::process::binaries::{parse_semver, BinaryKind};
 use crate::process::Exec;
 use crate::settings::Engine;
@@ -23,7 +25,7 @@ use crate::terminal::{PtySession, SpawnTerminal, TerminalEvent};
 use super::agent_control::codex_remote;
 use super::agent_control::codex_remote::CodexRemote;
 use super::agent_control::pty_agents::{is_terminal_reply, CodexGate, PtyLaunchEntry};
-use super::agent_control::{inject, AgentIdentity};
+use super::agent_control::{inject, spawn, AgentIdentity};
 use super::terminal_registry::TerminalRegistry;
 use super::HyprlayerRuntime;
 
@@ -365,6 +367,18 @@ impl TerminalService<'_> {
         let hooked_codex = hooked && engine.id == "codex";
 
         let mut session = req.session;
+        let first_prompt = session.first_prompt.take();
+        let claude_stage = first_prompt
+            .as_ref()
+            .filter(|_| engine.id == "claude-code")
+            .map(|fp| fp.stage);
+        // A claude stage turn opens in its stage's mode, as a native start does (Implement accepts edits).
+        if let Some(stage) = claude_stage.filter(|_| session.permission_mode.is_none()) {
+            let mode = pipeline::policy_for(stage).permission_mode;
+            if mode != PermissionMode::Default {
+                session.permission_mode = Some(permission_mode_flag(mode).into());
+            }
+        }
         if !hooked
             && engines::mints_via_exec(&engine.id)
             && !session.resume
@@ -418,6 +432,9 @@ impl TerminalService<'_> {
             }
         };
         argv.extend(engine_argv);
+        if let Some(deny) = claude_stage.and_then(Self::pty_disallowed_tools) {
+            argv.extend(["--disallowedTools".to_string(), deny]);
+        }
 
         let pty = match PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
@@ -453,8 +470,8 @@ impl TerminalService<'_> {
         self.runtime.pty_agents.register(PtyLaunchEntry {
             agent: PtyAgent {
                 terminal_id: terminal_id.clone(),
-                workstream_id: ws.id,
-                engine_id: engine.id,
+                workstream_id: ws.id.clone(),
+                engine_id: engine.id.clone(),
                 state: PtyAgentState::Starting,
                 provider_session_id: provider_session_id.clone(),
                 activity: None,
@@ -468,6 +485,15 @@ impl TerminalService<'_> {
             token,
             remote: remote.clone(),
         });
+        // After the spawn, so a launch that fails activates no plan.
+        if let Some(fp) = first_prompt {
+            let text = self
+                .runtime
+                .sessions()
+                .pty_first_prompt(&ws, engines::harness_of(&engine.id), fp)
+                .await;
+            spawn::send_first_prompt(self.runtime.pty_agents.clone(), &terminal_id, text);
+        }
         #[cfg(unix)]
         if let Some(remote) = remote {
             // It may have died before the entry existed to hear of it.
@@ -497,6 +523,16 @@ impl TerminalService<'_> {
                 hooked,
             },
         ))
+    }
+
+    /// A stage's claude deny list, less `Skill`: a PTY ship runs `/describe_pr` itself.
+    fn pty_disallowed_tools(stage: Stage) -> Option<String> {
+        let deny: Vec<String> = pipeline::policy_for(stage)
+            .disallowed_tools
+            .into_iter()
+            .filter(|t| t != "Skill")
+            .collect();
+        (!deny.is_empty()).then(|| deny.join(","))
     }
 
     /// Hooks plus the MCP server, ahead of the engine's own args; `None` leaves it on the regex detector.

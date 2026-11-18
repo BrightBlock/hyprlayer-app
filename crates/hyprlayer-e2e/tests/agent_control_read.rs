@@ -464,6 +464,7 @@ async fn agent_control_read() {
                 model: None,
                 permission_mode: None,
                 effort: None,
+                first_prompt: None,
             },
             80,
             24,

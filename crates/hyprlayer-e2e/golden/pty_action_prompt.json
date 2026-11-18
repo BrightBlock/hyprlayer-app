@@ -1,0 +1,102 @@
+{
+  "scenario": "pty_action_prompt",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstLine": "/commit",
+            "matchesThePaste": true
+          },
+          "guard": "the TUI reads the commit prompt as one bracketed paste, then Enter",
+          "ok": true
+        }
+      ],
+      "step": "commit in claude opens with its slash command"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lastLine": "Once the pull request is open, run /describe_pr to write its description.",
+            "matchesThePaste": true
+          },
+          "guard": "ship's prompt ends by asking for /describe_pr, since no follow-up turn comes",
+          "ok": true
+        }
+      ],
+      "step": "ship asks for the description in the same turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "matchesThePaste": true
+          },
+          "guard": "the plan rides after the skill, as a native start lists it",
+          "ok": true
+        }
+      ],
+      "step": "validate carries the plan as an attached document"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "acceptsEdits": true,
+            "deniesPush": true,
+            "opensWithTheSkill": true
+          },
+          "guard": "the paste opens with /implement_plan, in the mode and deny list a native Implement starts with",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "planActive": true,
+            "reviewDirExcluded": true
+          },
+          "guard": "as a native start does, the draft plan turns active and the review dir is git-excluded",
+          "ok": true
+        }
+      ],
+      "step": "implement opens with its skill, accepting edits, and starts the plan"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "passesAMode": false
+          },
+          "guard": "a stage whose native mode is the default passes no --permission-mode",
+          "ok": true
+        }
+      ],
+      "step": "commit's argv keeps the CLI's own mode"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "matchesThePaste": true
+          },
+          "guard": "the instruction follows the revise prompt, unchanged for an engine without slash skills",
+          "ok": true
+        }
+      ],
+      "step": "revise carries the PR instruction"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "firstLine": "Use the `commit` skill.",
+            "matchesThePaste": true
+          },
+          "guard": "no leading /commit for a TUI that would refuse it, and no AskUserQuestion it may lack",
+          "ok": true
+        }
+      ],
+      "step": "another engine gets the skill in prose"
+    }
+  ]
+}

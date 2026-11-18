@@ -65,6 +65,8 @@ export type ShellTab = {
     started?: boolean;
     /** Spawned by an agent and shared by every desktop: closing the tab detaches, the agent keeps running. */
     adopted?: boolean;
+    /** The app action it runs, so a second click focuses it rather than racing it. */
+    action?: StageKey;
   };
   paneId: PaneId;
 };

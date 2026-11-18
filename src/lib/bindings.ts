@@ -1340,6 +1340,8 @@ export type MultiplexerSettings = {
 	defaultEngineId?: string,
 	notifyOnBlocked?: boolean,
 	persistAcrossRestarts?: boolean,
+	/**  App actions (Commit, Ship, plan builds, prompts) open the default engine instead of a chat. */
+	actionsInCli?: boolean,
 	engines?: Engine[],
 };
 
@@ -1634,6 +1636,13 @@ export type PtyAgentStatus = {
 /**  A model change from the bar: applied in the running TUI, or unconfirmed while idle, so the desktop relaunches with `--resume` and `--model`. */
 export type PtyControlOutcome = "applied" | "relaunch";
 
+/**  The stage prompt a native session would open with, for a PTY agent to run instead. */
+export type PtyFirstPrompt = {
+	stage: Stage,
+	input?: string,
+	attachedDocs?: string[],
+};
+
 /**  Which provider session a PTY agent launch starts or resumes. */
 export type PtyLaunchSession = {
 	sessionId: string | null,
@@ -1645,6 +1654,8 @@ export type PtyLaunchSession = {
 	permissionMode?: string | null,
 	/**  A session-only effort for engines that take one at launch. */
 	effort?: string | null,
+	/**  An app action's first turn; the server composes it and types it in once the TUI is ready. */
+	firstPrompt?: PtyFirstPrompt | null,
 };
 
 export type PtyLaunched = {

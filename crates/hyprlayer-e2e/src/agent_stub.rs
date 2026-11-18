@@ -551,6 +551,7 @@ pub async fn launch_pty(
                 model: None,
                 permission_mode: None,
                 effort: None,
+                first_prompt: None,
             },
             80,
             24,

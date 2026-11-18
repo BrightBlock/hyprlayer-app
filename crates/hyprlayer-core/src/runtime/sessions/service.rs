@@ -1044,6 +1044,62 @@ impl SessionService<'_> {
         }
     }
 
+    /// A PTY agent's first turn for an app action, with the side effects its native start has.
+    pub(crate) async fn pty_first_prompt(
+        &self,
+        ws: &Workstream,
+        harness: Option<Harness>,
+        req: hyprlayer_models::PtyFirstPrompt,
+    ) -> String {
+        let bodies = self.action_prompt_bodies(req.stage, ws).await;
+        let prompt = pipeline::pty_prompt(
+            req.stage,
+            &req.input,
+            &ws.base_branch,
+            &bodies,
+            harness,
+            &ws.id,
+        );
+        self.stage_start_effects(ws, req.stage, &req.attached_docs, &req.input)
+            .await;
+        pipeline::append_docs(prompt, &req.attached_docs)
+    }
+
+    /// What starting a stage does besides its prompt, for a native session and a PTY agent alike.
+    async fn stage_start_effects(
+        &self,
+        ws: &Workstream,
+        stage: Stage,
+        attached_docs: &[String],
+        input: &str,
+    ) {
+        if stage == Stage::Implement {
+            let worktree = ws.worktree_path.clone();
+            let excluded = blocking(move || {
+                Ok(sidecar::ensure_review_dir_excluded(std::path::Path::new(
+                    &worktree,
+                ))?)
+            })
+            .await;
+            if let Err(e) = excluded {
+                tracing::warn!(
+                    "workstream {}: could not exclude the review dir: {e}",
+                    ws.id
+                );
+            }
+        }
+        // Any route into building a plan activates it, not only the Approve & build button.
+        if matches!(stage, Stage::Implement | Stage::Validate) {
+            doc_status::activate_plans(
+                &self.runtime.config,
+                &ws.worktree_path,
+                attached_docs,
+                input,
+            )
+            .await;
+        }
+    }
+
     pub async fn prepare_start(
         &self,
         mut request: StartStageSessionRequest,
@@ -1093,31 +1149,8 @@ impl SessionService<'_> {
         if let Some(suffix) = pipeline::implement_notes_suffix(harness, stage, &workstream.id) {
             prompt.push_str(&suffix);
         }
-        if stage == Stage::Implement {
-            let worktree = workstream.worktree_path.clone();
-            let excluded = blocking(move || {
-                Ok(sidecar::ensure_review_dir_excluded(std::path::Path::new(
-                    &worktree,
-                ))?)
-            })
+        self.stage_start_effects(&workstream, stage, &attached_docs, &input)
             .await;
-            if let Err(e) = excluded {
-                tracing::warn!(
-                    "workstream {}: could not exclude the review dir: {e}",
-                    workstream.id
-                );
-            }
-        }
-        // Any route into building a plan activates it, not only the Approve & build button.
-        if matches!(stage, Stage::Implement | Stage::Validate) {
-            doc_status::activate_plans(
-                &self.runtime.config,
-                &workstream.worktree_path,
-                &attached_docs,
-                &input,
-            )
-            .await;
-        }
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
 
         let parent_terminal = lineage.parent_terminal.clone();

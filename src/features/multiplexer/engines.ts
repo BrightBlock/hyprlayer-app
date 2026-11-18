@@ -20,6 +20,7 @@ export type ResolvedMultiplexer = {
   defaultEngineId: string;
   notifyOnBlocked: boolean;
   persistAcrossRestarts: boolean;
+  actionsInCli: boolean;
   engines: ResolvedEngine[];
 };
 
@@ -58,6 +59,7 @@ export function resolveMultiplexer(settings?: AppSettings | null): ResolvedMulti
     defaultEngineId: m.defaultEngineId ?? DEFAULT_ENGINE_ID,
     notifyOnBlocked: m.notifyOnBlocked ?? true,
     persistAcrossRestarts: m.persistAcrossRestarts ?? true,
+    actionsInCli: m.actionsInCli ?? true,
     engines,
   };
 }

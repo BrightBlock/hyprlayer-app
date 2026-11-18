@@ -19,7 +19,7 @@ use hyprlayer_models::session::QuestionAnswers;
 
 pub use hyprlayer_models::agent::PermissionMode;
 
-fn permission_mode_flag(mode: PermissionMode) -> &'static str {
+pub(crate) fn permission_mode_flag(mode: PermissionMode) -> &'static str {
     match mode {
         PermissionMode::Default => "default",
         PermissionMode::AcceptEdits => "acceptEdits",
