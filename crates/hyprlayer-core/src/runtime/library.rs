@@ -141,6 +141,11 @@ impl LibraryService<'_> {
         let id = blocking(move || {
             let tmp = abs.with_extension("md.tmp");
             std::fs::write(&tmp, &content).map_err(|e| io_context("write doc", e))?;
+            // The rename replaces the inode, so the file would otherwise take the umask's mode.
+            if let Ok(meta) = std::fs::metadata(&abs) {
+                std::fs::set_permissions(&tmp, meta.permissions())
+                    .map_err(|e| io_context("write doc", e))?;
+            }
             std::fs::rename(&tmp, &abs).map_err(|e| io_context("write doc", e))?;
             let written = index.upsert_path(&root, &abs);
             Ok(written.or_else(|| index.resolve_id(&abs.to_string_lossy())))

@@ -229,6 +229,18 @@
       "guards": [
         {
           "evidence": {
+            "mode_after_save": "755"
+          },
+          "guard": "saving a doc leaves its file mode alone",
+          "ok": true
+        }
+      ],
+      "step": "a save keeps the file's permissions"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "afterKeys": [
               "title",
               "type",

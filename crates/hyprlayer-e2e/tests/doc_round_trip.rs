@@ -3,6 +3,7 @@
 //! matches `related:` values by stem, path, URL and title.
 #![cfg(unix)]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -429,6 +430,36 @@ async fn doc_round_trip() {
         "editing and reverting a body leaves the file byte-identical (mixed-eol excepted)",
         revert_ok,
         Value::Object(revert_evidence),
+    );
+
+    j.step("a save keeps the file's permissions");
+    let f = &fixtures[0];
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    let original_mode = mode(&f.path);
+    std::fs::set_permissions(&f.path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let fresh = j
+        .call(&client, Request::GetDoc { id: f.id.clone() })
+        .await
+        .expect("get_doc");
+    let body = text(&fresh, "/body").replace("\r\n", "\n");
+    j.call(
+        &client,
+        Request::SaveDocParts {
+            id: f.id.clone(),
+            body: format!("{body}\nE2E_MODE\n"),
+            frontmatter: no_op_patch(),
+            base_mtime_ms: f64_at(&fresh, "/mtime_ms"),
+        },
+    )
+    .await
+    .expect("save_doc_parts");
+    let kept = mode(&f.path);
+    std::fs::write(&f.path, &f.content).unwrap();
+    std::fs::set_permissions(&f.path, std::fs::Permissions::from_mode(original_mode)).unwrap();
+    j.guard(
+        "saving a doc leaves its file mode alone",
+        kept == 0o755,
+        json!({ "mode_after_save": format!("{kept:o}") }),
     );
 
     j.step("property edits write YAML and keep unknown keys");
