@@ -198,7 +198,8 @@ export function useDocs(query: ThoughtQuery, enabled = true) {
     queryKey: ["docs", query],
     queryFn: () => unwrap(commands.queryDocs(query)),
     enabled,
-    placeholderData: keepPreviousData,
+    // A disabled query fetches nothing, so carrying data over would show a stale search.
+    placeholderData: enabled ? keepPreviousData : undefined,
   });
 }
 
