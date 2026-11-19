@@ -367,8 +367,10 @@ function settleAnsweredPrompt(
   let nextItems = items;
   let pendingPermission = view.pendingPermission;
   let pendingQuestion = view.pendingQuestion;
+  let answered = false;
 
   if (toolName === "AskUserQuestion") {
+    answered = pendingQuestion !== null;
     pendingQuestion = null;
   } else {
     for (let i = nextItems.length - 1; i >= 0; i -= 1) {
@@ -379,6 +381,7 @@ function settleAnsweredPrompt(
       nextItems = nextItems.slice();
       nextItems[i] = { ...it, decision: "allow" };
       if (pendingPermission?.requestId === it.requestId) pendingPermission = null;
+      answered = true;
       break;
     }
   }
@@ -388,7 +391,8 @@ function settleAnsweredPrompt(
     items: nextItems,
     pendingPermission,
     pendingQuestion,
-    streaming: true,
+    // A result after turnDone is a stopped call settling; only an answered prompt resumes the turn.
+    streaming: view.streaming || answered,
   };
   return { ...next, state: parkedState(next) };
 }

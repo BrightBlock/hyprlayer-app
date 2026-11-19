@@ -43,6 +43,42 @@ function reduceAll(events: SessionEvent[], start = initialSessionView("starting"
   return events.reduce(reduceEvent, start);
 }
 
+describe("a stopped turn", () => {
+  const interrupted = (): SessionView =>
+    reduceAll([
+      { kind: "init", claudeSessionId: "s-1", model: "opencode/beam-free" },
+      { kind: "userMessage", text: "sleep then reply", stage: null },
+      { kind: "toolUse", id: "sleep", name: "Bash", input: '{"command":"sleep 40"}', parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus: "interrupted" },
+    ]);
+
+  it("stays settled when the aborted call's result lands after turnDone", () => {
+    const view = reduceEvent(interrupted(), {
+      kind: "toolResult",
+      toolUseId: "sleep",
+      content: "aborted",
+      isError: true,
+      parentId: null,
+    });
+    expect(isWorking(view)).toBe(false);
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("resumes when the result answers a permission parked across a restore", () => {
+    const parked = restoredView(
+      reduceAll([
+        { kind: "init", claudeSessionId: "s-1", model: null },
+        { kind: "userMessage", text: "write it", stage: null },
+        { kind: "toolUse", id: "w", name: "Write", input: "{}", parentId: null },
+        { kind: "permissionAsk", requestId: "s-1:w", toolName: "Write", input: "{}", toolUseId: "w" },
+      ]),
+      true,
+    );
+    const view = reduceEvent(parked, { kind: "toolResult", toolUseId: "w", content: "ok", isError: false, parentId: null });
+    expect(isWorking(view)).toBe(true);
+  });
+});
+
 function kinds(view: SessionView): TranscriptItem["kind"][] {
   return view.items.map((i) => i.kind);
 }
