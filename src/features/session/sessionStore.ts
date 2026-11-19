@@ -740,11 +740,15 @@ async function readLog(sessionId: string): Promise<LogRead> {
   throw new Error(`${sessionId} kept rewinding while its log was read`);
 }
 
-// Null when a rewind between pages rewrote rows already read.
-async function readTurns(sessionId: string): Promise<LogRead | null> {
+// Null when a rewind between pages rewrote rows already read, or `resetRev` moved off the one held.
+async function readTurns(
+  sessionId: string,
+  from: LogCursorDto = { kind: "empty" },
+  heldResetRev: number | null = null,
+): Promise<LogRead | null> {
   const entries: SessionLogEntryDto[] = [];
-  let cursor: LogCursorDto = { kind: "empty" };
-  let resetRev: number | null = null;
+  let cursor = from;
+  let resetRev = heldResetRev;
   for (;;) {
     const page: SessionTurnsDto = await unwrap(commands.listSessionTurns(sessionId, cursor, FOLD_PAGE));
     if (resetRev !== null && rev(page.resetRev) !== resetRev) return null;
@@ -752,6 +756,19 @@ async function readTurns(sessionId: string): Promise<LogRead | null> {
     for (const entry of page.entries) entries.push(entry);
     cursor = page.nextCursor;
     if (page.remaining === 0) return { entries, cursor, revs: { rev: rev(page.rev), resetRev } };
+  }
+}
+
+// Rows after the held cursor; null when none is held or a rewind since needs the whole log.
+async function readAfterCursor(sessionId: string): Promise<LogRead | null> {
+  const cursor = entryOf(sessionId)?.cursor;
+  const resetRev = syncOf(sessionId)?.resetRev;
+  if (!cursor || resetRev === undefined || !(await syncSupport())) return null;
+  try {
+    return await readTurns(sessionId, cursor, resetRev);
+  } catch (e) {
+    if (isSessionEpochAdvanced(e)) return null;
+    throw e;
   }
 }
 
@@ -776,10 +793,9 @@ function turnOpeners(
   return { turnAuthor, device };
 }
 
-function foldLog(
-  read: LogRead,
-  previousItems: TranscriptItem[] = [],
-): { view: SessionView; cursor: LogCursorDto; appliedSeq: number; turnAuthor: TurnAuthor } {
+type Folded = { view: SessionView; cursor: LogCursorDto; appliedSeq: number; turnAuthor: TurnAuthor };
+
+function foldLog(read: LogRead, previousItems: TranscriptItem[] = []): Folded {
   // The log stores no attachments; recover them from the optimistic item this
   // device already rendered, matched by the nonce both share.
   const attachmentsById = new Map(
@@ -809,7 +825,41 @@ function foldLog(
   return { view, cursor: read.cursor, appliedSeq, turnAuthor };
 }
 
-// A full fold replaces everything held: those rows are in it, or the reload discarded them.
+// The held view plus the rows after its cursor; null when they cross a rewind.
+function foldOnto(current: SessionEntry, read: LogRead): Folded | null {
+  const before = current.appliedSeq ?? -1;
+  // An attach seeds a live turn's text again, and a dead turn's never reaches the log.
+  const items = current.items.filter((it) => !(it.kind === "assistant" && it.streaming && !it.parentId));
+  const merged = mergeEntries({ ...current, items }, before, { entries: read.entries, nextCursor: read.cursor });
+  if (merged.reset) return null;
+  const opened = turnOpeners(read.entries, before).turnAuthor;
+  return {
+    view: merged.view,
+    cursor: merged.cursor,
+    appliedSeq: merged.appliedSeq,
+    turnAuthor: opened === undefined ? (current.turnAuthor ?? null) : opened,
+  };
+}
+
+// `catchUp` reads only past the held cursor, falling back to the whole log. Null if the entry left meanwhile.
+async function readAndFold(
+  sessionId: string,
+  catchUp: boolean,
+): Promise<{ current: SessionEntry; read: LogRead; folded: Folded } | null> {
+  const tail = catchUp ? await readAfterCursor(sessionId) : null;
+  if (tail) {
+    const current = entryOf(sessionId);
+    if (!current) return null;
+    const folded = foldOnto(current, tail);
+    if (folded) return { current, read: tail, folded };
+  }
+  const read = await readLog(sessionId);
+  const current = entryOf(sessionId);
+  if (!current) return null;
+  return { current, read, folded: foldLog(read, current.items) };
+}
+
+// A fold to the log's end replaces everything held: those rows are in it, or the reload discarded them.
 function foldLoaded(sessionId: string, read: LogRead): void {
   held.delete(sessionId);
   if (read.revs) syncInput(sessionId, { kind: "loaded", ...read.revs });
@@ -819,13 +869,12 @@ function foldLoaded(sessionId: string, read: LogRead): void {
 // dropSession, so a mounted SessionChat's restore effect does not refire).
 // Returns the cursor the fold ended at, or null if the entry disappeared
 // while the log was in flight.
-async function foldAndWriteEntry(sessionId: string): Promise<LogCursorDto | null> {
-  const read = await readLog(sessionId);
-  const current = entryOf(sessionId);
-  if (!current) return null;
-  const { view, ...position } = foldLog(read, current.items);
-  setEntry(sessionId, { ...current, ...view, ...position, live: true, state: "starting" });
-  foldLoaded(sessionId, read);
+async function foldAndWriteEntry(sessionId: string, catchUp = false): Promise<LogCursorDto | null> {
+  const fold = await readAndFold(sessionId, catchUp);
+  if (!fold) return null;
+  const { view, ...position } = fold.folded;
+  setEntry(sessionId, { ...fold.current, ...view, ...position, live: true, state: "starting" });
+  foldLoaded(sessionId, fold.read);
   return position.cursor;
 }
 
@@ -839,7 +888,7 @@ const resuming = new Map<string, Promise<void>>();
 // event would land in the transcript twice.
 export function resumeSession(
   sessionId: string,
-  opts: { cursor?: LogCursorDto; flush?: boolean } = {},
+  opts: { cursor?: LogCursorDto; catchUp?: boolean; flush?: boolean } = {},
 ): Promise<void> {
   const inFlight = resuming.get(sessionId);
   if (inFlight) return inFlight;
@@ -850,7 +899,7 @@ export function resumeSession(
 
 async function resumeOnce(
   sessionId: string,
-  opts: { cursor?: LogCursorDto; flush?: boolean },
+  opts: { cursor?: LogCursorDto; catchUp?: boolean; flush?: boolean },
 ): Promise<void> {
   if (!entryOf(sessionId) || channels.has(sessionId)) return;
 
@@ -862,7 +911,7 @@ async function resumeOnce(
     const current = entryOf(sessionId);
     if (current) setEntry(sessionId, { ...current, live: true, state: "starting" });
   } else {
-    cursor = await foldAndWriteEntry(sessionId);
+    cursor = await foldAndWriteEntry(sessionId, opts.catchUp);
     if (!cursor || !entryOf(sessionId)) return;
   }
 
@@ -2037,19 +2086,18 @@ function retireChannel(sessionId: string): void {
   releaseChannels([old]);
 }
 
-async function resync(sessionId: string, live: boolean): Promise<void> {
+async function resync(sessionId: string, live: boolean, catchUp = false): Promise<void> {
   const inFlight = resuming.get(sessionId);
   if (inFlight) return inFlight;
   if (entryOf(sessionId)?.reloading) return;
   retireChannel(sessionId);
   channels.delete(sessionId);
-  if (live) return resumeSession(sessionId);
-  const read = await readLog(sessionId);
-  const current = entryOf(sessionId);
-  if (!current || channels.has(sessionId)) return;
-  const { view, ...position } = foldLog(read, current.items);
-  setEntry(sessionId, { ...current, ...restoredView(view, false), ...position, live: false, drifted: false });
-  foldLoaded(sessionId, read);
+  if (live) return resumeSession(sessionId, { catchUp });
+  const fold = await readAndFold(sessionId, catchUp);
+  if (!fold || channels.has(sessionId)) return;
+  const { view, ...position } = fold.folded;
+  setEntry(sessionId, { ...fold.current, ...restoredView(view, false), ...position, live: false, drifted: false });
+  foldLoaded(sessionId, fold.read);
   settleFolded(sessionId);
 }
 
@@ -2072,7 +2120,7 @@ export async function reattachSessions(): Promise<void> {
   for (const a of active) setSessionGoal(a.session.id, a.session.goal ?? null);
   await Promise.all(
     Object.keys(useSessionStore.getState().sessions).map((id) =>
-      resync(id, live.has(id)).catch((e) =>
+      resync(id, live.has(id), true).catch((e) =>
         log.warn("session", `reattaching ${id} after a reconnect failed`, e),
       ),
     ),

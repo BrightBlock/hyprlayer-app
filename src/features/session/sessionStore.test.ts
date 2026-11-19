@@ -2,7 +2,7 @@
 import { cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { GoalBrief, SessionEvent } from "@/lib/bindings";
+import type { GoalBrief, LogCursorDto, SessionEvent } from "@/lib/bindings";
 
 const h = vi.hoisted(() => {
   class FakeChannel {
@@ -102,6 +102,7 @@ const {
   allowForSession,
   answerQuestion,
   endSession,
+  reattachSessions,
   restoreSessionIfNeeded,
   startSession,
   sendMessage,
@@ -1602,6 +1603,158 @@ describe("transcript sync: queue and reload", () => {
     expect(texts).not.toContain("b");
     h.resumeSession.mockReset();
     h.resumeSession.mockImplementation(async () => ({ status: "ok", data: h.RESUMED }));
+  });
+});
+
+describe("reconnecting from the held cursor", () => {
+  const SELF = { clientId: "me", device: "my-mac" };
+  const reply = (text: string): SessionEvent => ({ kind: "assistantText", text, parentId: null });
+  const partial = (text: string): SessionEvent => ({ kind: "partialText", text, parentId: null });
+  type Row = { seq: number; kind: string; event: SessionEvent; createdAt: number };
+  const at = (seq: number, event: SessionEvent, createdAt = 1_700_000_000_000 + seq): Row => ({
+    seq,
+    kind: event.kind,
+    event,
+    createdAt,
+  });
+  const history = (n: number): Row[] => [at(0, INIT), ...Array.from({ length: n - 1 }, (_, i) => at(i + 1, reply(`r${i + 1}`)))];
+
+  // The server as it is: rows after the cursor it is handed, refusing one a rewind rewrote.
+  const server = new Map<string, { rows: Row[]; resetRev: number }>();
+  const reads: { sessionId: string; cursor: LogCursorDto; rows: number }[] = [];
+  const streams = new Map<string, InstanceType<typeof h.FakeChannel>>();
+  let nextId = 0;
+
+  function listTurns(sessionId: string, cursor: LogCursorDto, limit: number) {
+    const log = server.get(sessionId)!;
+    if (cursor.kind === "after" && log.rows[cursor.seq ?? -1]?.createdAt !== cursor.createdAt) {
+      return { status: "error", error: { code: "session_epoch_advanced", message: "stale cursor" } };
+    }
+    const from = cursor.kind === "after" ? (cursor.seq ?? -1) + 1 : 0;
+    const entries = log.rows.slice(from, from + limit);
+    reads.push({ sessionId, cursor, rows: entries.length });
+    const last = entries[entries.length - 1];
+    return {
+      status: "ok",
+      data: {
+        entries,
+        nextCursor: last ? { kind: "after", seq: last.seq, createdAt: last.createdAt } : cursor,
+        remaining: Math.max(0, log.rows.length - from - entries.length),
+        rev: log.rows.length,
+        resetRev: log.resetRev,
+        working: false,
+        inFlight: 0,
+      },
+    };
+  }
+
+  const tail = (id: string): LogCursorDto => {
+    const { rows } = server.get(id)!;
+    const last = rows[rows.length - 1];
+    return { kind: "after", seq: last.seq, createdAt: last.createdAt };
+  };
+  const texts = (id: string) => entryOf(id).items.flatMap((it) => (it.kind === "assistant" ? [it.text] : []));
+  const resumedFrom = () => (h.resumeSession.mock.calls as unknown[][]).map((c) => [c[0], c[4]]);
+
+  async function restore(rows: Row[], live: boolean): Promise<string> {
+    const id = `reconnect-${(nextId += 1)}`;
+    server.set(id, { rows, resetRev: 0 });
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live ? [{ session: { id } }] : [] });
+    await restoreSessionIfNeeded(id, "ws1", "general");
+    return id;
+  }
+
+  async function reconnect(live: string[]): Promise<void> {
+    reads.length = 0;
+    h.resumeSession.mockClear();
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live.map((id) => ({ session: { id } })) });
+    await reattachSessions();
+  }
+
+  beforeEach(() => {
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: true } });
+    h.listSessionTurns.mockImplementation(async (id: string, cursor: LogCursorDto, limit: number) =>
+      listTurns(id, cursor, limit),
+    );
+    h.resumeSession.mockImplementation(async (...args: unknown[]) => {
+      streams.set(args[0] as string, args[args.length - 1] as InstanceType<typeof h.FakeChannel>);
+      return { status: "ok", data: h.RESUMED };
+    });
+    useTranscriptSync.setState({ self: SELF });
+  });
+
+  afterEach(() => {
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: false } });
+    h.resumeSession.mockImplementation(async () => ({ status: "ok", data: h.RESUMED }));
+    h.listActiveSessions.mockResolvedValue({ status: "ok", data: [] });
+    useTranscriptSync.setState({ self: null });
+  });
+
+  it("re-reads no rows for live or exited sessions when nothing changed while disconnected", async () => {
+    const live = await restore(history(600), true);
+    const exited = await restore(history(600), false);
+
+    await reconnect([live]);
+
+    expect(reads).toHaveLength(2);
+    expect(reads).toEqual(
+      expect.arrayContaining([
+        { sessionId: live, cursor: tail(live), rows: 0 },
+        { sessionId: exited, cursor: tail(exited), rows: 0 },
+      ]),
+    );
+    expect(resumedFrom()).toEqual([[live, tail(live)]]);
+    expect(texts(live)).toHaveLength(599);
+    expect(texts(exited)).toHaveLength(599);
+  });
+
+  it("reads only the rows after its last read, and shows each once", async () => {
+    const rows = history(600);
+    const live = await restore(rows, true);
+    const exited = await restore(history(600), false);
+    // Applied live before the drop: a stream item moves appliedSeq but carries no cursor.
+    for (const seq of [600, 601]) {
+      rows.push(at(seq, reply(`live ${seq}`)));
+      streams.get(live)!.onmessage?.({ seq, rev: seq + 1, author: SELF, event: reply(`live ${seq}`) });
+    }
+    rows.push(at(602, reply("missed")), at(603, TURN_DONE));
+    server.get(exited)!.rows.push(at(600, reply("missed")), at(601, TURN_DONE));
+
+    await reconnect([live]);
+
+    expect(reads).toEqual(
+      expect.arrayContaining([
+        { sessionId: live, cursor: { kind: "after", seq: 599, createdAt: rows[599].createdAt }, rows: 4 },
+        { sessionId: exited, cursor: { kind: "after", seq: 599, createdAt: rows[599].createdAt }, rows: 2 },
+      ]),
+    );
+    expect(resumedFrom()).toEqual([[live, tail(live)]]);
+    expect(texts(live).slice(-3)).toEqual(["live 600", "live 601", "missed"]);
+    expect(texts(exited).slice(-2)).toEqual(["r599", "missed"]);
+  });
+
+  it("reads the whole log again when a rewind moved it while disconnected", async () => {
+    const moved = await restore(history(600), false);
+    const rewritten = await restore(history(600), false);
+    server.get(moved)!.resetRev = 7;
+    server.set(rewritten, { rows: [...history(300), at(300, reply("after the rewind"), 1_800_000_000_000)], resetRev: 7 });
+
+    await reconnect([]);
+
+    expect(reads.filter((r) => r.cursor.kind === "empty").map((r) => r.sessionId).sort()).toEqual([moved, rewritten]);
+    expect(texts(rewritten).slice(-2)).toEqual(["r299", "after the rewind"]);
+    expect(syncOf(moved)?.resetRev).toBe(7);
+    expect(syncOf(rewritten)?.resetRev).toBe(7);
+  });
+
+  it("does not double a live turn's streamed text when the server seeds it again", async () => {
+    const live = await restore(history(10), true);
+    streams.get(live)!.onmessage?.({ seq: null, rev: 10, author: SELF, event: partial("Hel") });
+
+    await reconnect([live]);
+    streams.get(live)!.onmessage?.({ seq: null, rev: 10, author: SELF, event: partial("Hello") });
+
+    expect(texts(live).slice(-2)).toEqual(["r9", "Hello"]);
   });
 });
 
