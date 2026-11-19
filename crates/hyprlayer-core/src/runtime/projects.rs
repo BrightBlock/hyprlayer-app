@@ -1199,6 +1199,12 @@ impl ProjectService<'_> {
             return Err(CoreError::ActiveWorkstreams { count: active });
         }
 
+        // Before the files go: a git archive is purged from inside the repo.
+        self.runtime
+            .workstreams()
+            .purge_project_archives(path)
+            .await?;
+
         let git_backed = self.source_of(path).await.is_git();
 
         if git_backed && repo.is_dir() {

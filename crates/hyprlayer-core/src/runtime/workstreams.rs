@@ -1893,6 +1893,27 @@ impl WorkstreamService<'_> {
         Ok(ArchiveCleanupReport { deleted, failed })
     }
 
+    /// A removed project's archives, purged as the expiry sweep does: never the remote, local branches only with `-d`.
+    pub(crate) async fn purge_project_archives(&self, project_path: &str) -> Result<()> {
+        let items = self.list_archived().await?;
+        for item in items.into_iter().filter(|w| w.project_path == project_path) {
+            let _guard = self
+                .runtime
+                .workstream_locks
+                .lock_pair(&item.project_path, &item.id)
+                .await;
+            let Ok(item) = self.find(&item.id).await else {
+                continue;
+            };
+            if item.status != WorkstreamStatus::Archived {
+                continue;
+            }
+            let cleanup = self.branch_cleanup(&item, BranchCleanup::SafeLocal).await;
+            self.purge_locked(&item, cleanup).await?;
+        }
+        Ok(())
+    }
+
     pub async fn purge_archived(&self, ids: Vec<String>) -> Result<ArchiveCleanupReport> {
         ensure_running(self.runtime)?;
         let mut report = ArchiveCleanupReport {

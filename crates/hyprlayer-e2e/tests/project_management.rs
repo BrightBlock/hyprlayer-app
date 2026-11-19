@@ -325,6 +325,21 @@ async fn project_management() {
     );
 
     j.step("remove one");
+    let parked = create_workstream(&mut j, &client, &other_path, "Parked").await;
+    let parked_id = text(&parked, "/item/id");
+    j.call(
+        &client,
+        Request::ArchiveWorkstream {
+            id: parked_id.clone(),
+            skip_scripts: false,
+        },
+    )
+    .await
+    .expect("archive_workstream");
+    let archive_dir = std::path::Path::new(&other_path)
+        .join(hyprlayer_core::worktree::ARCHIVE_SUBDIR)
+        .join(text(&parked, "/item/slug"));
+    let parked_on_disk = archive_dir.is_dir();
     j.call(
         &client,
         Request::RemoveProject {
@@ -342,6 +357,18 @@ async fn project_management() {
         "removing deregisters it without touching the files",
         !project_paths(&left).contains(&other_path) && second.is_dir(),
         json!({ "still_registered": project_paths(&left).contains(&other_path), "files_kept": second.is_dir() }),
+    );
+    let archived = j
+        .call(&client, Request::ListArchivedWorkstreams {})
+        .await
+        .expect("list_archived_workstreams");
+    let orphaned = archived
+        .as_array()
+        .is_some_and(|items| items.iter().any(|w| text(w, "/item/id") == parked_id));
+    j.guard(
+        "its archived workstreams go with it, archive and all",
+        parked_on_disk && !orphaned && !archive_dir.exists(),
+        json!({ "archived_first": parked_on_disk, "still_listed": orphaned, "archive_left": archive_dir.exists() }),
     );
 
     j.step("shutdown");

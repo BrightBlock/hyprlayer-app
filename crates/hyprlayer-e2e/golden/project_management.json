@@ -166,6 +166,15 @@
           },
           "guard": "removing deregisters it without touching the files",
           "ok": true
+        },
+        {
+          "evidence": {
+            "archive_left": false,
+            "archived_first": true,
+            "still_listed": false
+          },
+          "guard": "its archived workstreams go with it, archive and all",
+          "ok": true
         }
       ],
       "step": "remove one"
