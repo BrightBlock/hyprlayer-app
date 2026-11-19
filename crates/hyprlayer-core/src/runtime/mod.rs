@@ -840,15 +840,6 @@ impl HyprlayerRuntime {
         self.opencode.install_child_for_test(child).await;
     }
 
-    /// Test-only access to the terminal registry, for asserting that
-    /// `WorkstreamService::archive` stops live terminals before moving the
-    /// worktree. Not part of the supported facade; production callers use
-    /// `HyprlayerRuntime::terminals()` instead.
-    #[doc(hidden)]
-    pub fn test_terminals(&self) -> Arc<TerminalRegistry> {
-        self.terminals.clone()
-    }
-
     /// Test-only view of which workstream the worktree watcher is armed on.
     /// Not part of the supported facade.
     #[doc(hidden)]

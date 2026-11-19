@@ -94,51 +94,36 @@ export function actionEngine(cfg: ResolvedMultiplexer, stage: StageKey = "genera
   return engine;
 }
 
-export type SessionMode = "assign" | "exec-mint" | "capture" | "none";
+type SessionMode = "assign" | "exec-mint" | "capture" | "none";
 
 type EngineSession = {
   mode: SessionMode;
-  fresh: (id?: string) => string[];
-  resumeById?: (id: string) => string[];
-  resumeLatest: string[];
   bypass: string[];
 };
 
 const ENGINE_SESSIONS: Record<string, EngineSession> = {
   "claude-code": {
     mode: "assign",
-    fresh: (id) => (id ? ["--session-id", id] : []),
-    resumeById: (id) => ["--resume", id],
-    resumeLatest: ["--continue"],
     bypass: ["--dangerously-skip-permissions"],
   },
   gemini: {
     mode: "assign",
-    fresh: (id) => (id ? ["--session-id", id] : []),
-    resumeById: (id) => ["--resume", id],
-    resumeLatest: ["--resume", "latest"],
     bypass: ["--yolo"],
   },
   codex: {
     mode: "exec-mint",
-    fresh: (id) => (id ? ["resume", id] : []),
-    resumeById: (id) => ["resume", id],
-    resumeLatest: ["resume", "--last"],
     bypass: ["--dangerously-bypass-approvals-and-sandbox"],
   },
   antigravity: {
     mode: "capture",
-    fresh: () => [],
-    resumeById: (id) => ["--conversation", id],
-    resumeLatest: ["--continue"],
     bypass: ["--dangerously-skip-permissions"],
   },
 };
 
-const NO_SESSION: EngineSession = { mode: "none", fresh: () => [], resumeLatest: [], bypass: [] };
+const NO_SESSION: EngineSession = { mode: "none", bypass: [] };
 
 export function engineSession(engineId: string): EngineSession {
-  return ENGINE_SESSIONS[engineId] ?? NO_SESSION;
+  return Object.prototype.hasOwnProperty.call(ENGINE_SESSIONS, engineId) ? ENGINE_SESSIONS[engineId] : NO_SESSION;
 }
 
 export const engineBypassArgs = (engineId: string): string[] => engineSession(engineId).bypass;
@@ -146,8 +131,7 @@ export const engineBypassArgs = (engineId: string): string[] => engineSession(en
 export const engineMintsViaExec = (engineId: string): boolean =>
   engineSession(engineId).mode === "exec-mint";
 
-export const engineResumesById = (engineId: string): boolean =>
-  engineSession(engineId).resumeById != null;
+export const engineResumesById = (engineId: string): boolean => engineSession(engineId) !== NO_SESSION;
 
 export const engineChecksSessionOnDisk = (engineId: string): boolean =>
   engineId === "claude-code" || engineId === "codex" || engineId === "antigravity";

@@ -475,10 +475,8 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   const isNeedsYou = classifyEntry(nextEntry) === "needs-you";
   const autoApproved =
     event.kind === "permissionAsk" && current.autoAllow.includes(event.toolName);
-  // Another device is driving this turn; its user answers the prompt there. A running goal's
-  // asks are announced by the goal bridge, on every device.
-  const goalOwnsNotices = nextEntry.goal?.status === "running";
-  if (!wasNeedsYou && isNeedsYou && !autoApproved && nextEntry.turnAuthor !== "other" && !goalOwnsNotices) {
+  // Another device is driving this turn; its user answers the prompt there.
+  if (!wasNeedsYou && isNeedsYou && !autoApproved && nextEntry.turnAuthor !== "other") {
     void maybeNotifyTransition(sessionId, current.workstreamId, current.stage);
   }
 
