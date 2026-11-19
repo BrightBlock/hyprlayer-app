@@ -1,0 +1,31 @@
+{
+  "scenario": "attachment_wire",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "len": 1048576
+          },
+          "guard": "the bytes read back are the bytes saved",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ratio": 1.33
+          },
+          "guard": "saving costs at most base64's overhead on the wire",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ratio": 1.33
+          },
+          "guard": "reading costs at most base64's overhead on the wire",
+          "ok": true
+        }
+      ],
+      "step": "a 1 MiB attachment saves and reads back"
+    }
+  ]
+}

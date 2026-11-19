@@ -17,6 +17,7 @@ name = "hyprlayer-server"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 hyprlayer-core.workspace = true
 hyprlayer-models.workspace = true
 hyprlayer-proto.workspace = true
@@ -32,4 +33,3 @@ tracing-appender = "0.2.5"
 [dev-dependencies]
 hyprlayer-core = { workspace = true, features = ["test-support"] }
 tempfile = "3"
-base64 = "0.22"

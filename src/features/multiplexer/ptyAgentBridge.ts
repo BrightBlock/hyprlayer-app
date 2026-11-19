@@ -9,7 +9,7 @@ import type { PtyAgent } from "@/lib/domain/agentControl";
 import type { EventBridge } from "@/lib/events";
 import { unwrap } from "@/lib/ipc";
 import { queryClient } from "@/lib/queryClient";
-import { maybeNotifyBlocked } from "./agentRuntime";
+import { maybeNotifyBlocked, onPtyAgentChanged } from "./agentRuntime";
 import { applyPtyAgent, applyPtyAgentSnapshot, type PtyAgentApplied } from "./multiplexerStore";
 
 function notifyOnBlock(applied: PtyAgentApplied | undefined): void {
@@ -81,5 +81,6 @@ export const ptyAgentBridge: EventBridge = () => [
     persistTab(payload);
     patchListed(payload);
     notifyOnBlock(applyPtyAgent(payload));
+    onPtyAgentChanged(payload);
   }),
 ];

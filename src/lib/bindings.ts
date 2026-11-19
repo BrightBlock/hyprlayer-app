@@ -174,15 +174,16 @@ export const commands = {
 	setSessionArchived: (sessionId: string, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_session_archived", { sessionId, archived })),
 	deleteSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_session", { sessionId })),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
-	saveAttachment: (workstreamId: string, fileName: string, data: number[]) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
+	/**  `data` is base64; the server decodes it. */
+	saveAttachment: (workstreamId: string, fileName: string, data: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
 	/**
-	 *  The read half of `save_attachment` — carries an attachment's bytes back
+	 *  The read half of `save_attachment`, as base64 — carries an attachment's bytes back
 	 *  across the wire, so the client can render one that lives on a remote
 	 *  server. Works identically whether the server is local or remote, since it
 	 *  always goes through `state.client()`; the frontend decides when to call it
 	 *  based on connection state. No remote guard.
 	 */
-	readAttachment: (path: string) => typedError<number[], AppError>(__TAURI_INVOKE("read_attachment", { path })),
+	readAttachment: (path: string) => typedError<string, AppError>(__TAURI_INVOKE("read_attachment", { path })),
 	setBinaryOverride: (kind: BinaryKind, path: string | null) => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("set_binary_override", { kind, path })),
 	setTrafficLightInset: (x: number | null, y: number | null) => typedError<null, AppError>(__TAURI_INVOKE("set_traffic_light_inset", { x, y })),
 	redetectBinaries: () => typedError<BinaryStatus[], AppError>(__TAURI_INVOKE("redetect_binaries")),

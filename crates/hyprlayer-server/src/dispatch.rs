@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use hyprlayer_core::agents::{
     AgentContextFile, AgentFile, AgentMcpServer, AgentOverlay, HarnessCounts,
 };
@@ -1707,8 +1709,11 @@ impl Dispatch for Server {
         &self,
         workstream_id: String,
         file_name: String,
-        data: Vec<u8>,
+        data: String,
     ) -> Result<String, WireError> {
+        let data = B64
+            .decode(data)
+            .map_err(|e| WireError::protocol(format!("save_attachment data is not base64: {e}")))?;
         self.runtime
             .attachments()
             .save(SaveAttachmentRequest {
@@ -1721,8 +1726,9 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn read_attachment(&self, path: String) -> Result<Vec<u8>, WireError> {
-        self.runtime.attachments().read(path).await.wire()
+    async fn read_attachment(&self, path: String) -> Result<String, WireError> {
+        let bytes = self.runtime.attachments().read(path).await.wire()?;
+        Ok(B64.encode(bytes))
     }
 
     async fn set_binary_override(

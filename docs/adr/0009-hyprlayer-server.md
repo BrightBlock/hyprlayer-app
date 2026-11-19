@@ -282,7 +282,8 @@ kind: it is the byte-carrying fix for attachment *rendering*, mirroring
 `save_attachment`'s existing byte-carrying write, and it is an ordinary RPC call that
 works identically whether the server is local or remote — it needs no guard either,
 but for the opposite reason: it always crosses the wire, so there is no client-only
-path to distinguish.)*
+path to distinguish. Both carry the bytes as one base64 string, 1.33× the payload on
+the wire; a JSON number array cost 3.57×.)*
 
 ### The memory baseline
 

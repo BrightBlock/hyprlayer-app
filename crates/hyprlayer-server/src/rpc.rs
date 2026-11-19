@@ -273,8 +273,9 @@ hyprlayer_proto::commands! {
     LaunchAndConverse: launch_and_converse(session_id: String) -> ();
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;
-    SaveAttachment: save_attachment(workstream_id: String, file_name: String, data: Vec<u8>) -> String;
-    ReadAttachment: read_attachment(path: String) -> Vec<u8>;
+    // Attachment bytes are base64: a JSON number array costs 3.6x on the wire.
+    SaveAttachment: save_attachment(workstream_id: String, file_name: String, data: String) -> String;
+    ReadAttachment: read_attachment(path: String) -> String;
 
     SetBinaryOverride: set_binary_override(kind: BinaryKind, path: Option<String>) -> Vec<BinaryStatus>;
     RedetectBinaries: redetect_binaries() -> Vec<BinaryStatus>;

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { commands } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { useConnectionStatus } from "@/lib/queries";
+import { b64ToBytes, bytesToB64 } from "@/lib/terminal/terminalCodec";
 import { baseName } from "./toolDisplay";
 
 export type AttachmentKind = "image" | "file";
@@ -78,10 +79,10 @@ export function useAttachmentSrc(path: string): { src?: string; error?: string }
     let url: string | undefined;
     setState({});
     unwrap(commands.readAttachment(path))
-      .then((bytes) => {
+      .then((data) => {
         if (cancelled) return;
         const type = MIME_FOR_EXT[extOf(path)] ?? "";
-        url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type }));
+        url = URL.createObjectURL(new Blob([b64ToBytes(data)], { type }));
         setState({ src: url });
       })
       .catch((e: unknown) => {
@@ -146,8 +147,8 @@ export async function saveClipboardImage(
 ): Promise<Attachment | null> {
   try {
     const name = clipboardImageName(file);
-    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-    const stored = await unwrap(commands.saveAttachment(workstreamId, name, bytes));
+    const data = bytesToB64(new Uint8Array(await file.arrayBuffer()));
+    const stored = await unwrap(commands.saveAttachment(workstreamId, name, data));
     return { path: stored, name, kind: "image" };
   } catch {
     return null;
@@ -176,8 +177,8 @@ export async function saveClipboardImageFromOs(
     if (!blob) return null;
 
     const name = "pasted-image.png";
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    const stored = await unwrap(commands.saveAttachment(workstreamId, name, bytes));
+    const data = bytesToB64(new Uint8Array(await blob.arrayBuffer()));
+    const stored = await unwrap(commands.saveAttachment(workstreamId, name, data));
     return { path: stored, name, kind: "image" };
   } catch {
     return null;

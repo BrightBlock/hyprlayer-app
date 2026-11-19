@@ -2,7 +2,7 @@
 import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type PtyFirstPrompt, type TerminalEvent } from "@/lib/bindings";
-import type { PtyLaunched } from "@/lib/domain/agentControl";
+import type { PtyAgent, PtyLaunched } from "@/lib/domain/agentControl";
 import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { notifyNeedsAttention } from "@/lib/notifications";
@@ -87,9 +87,18 @@ function isHooked(rt: Runtime): boolean {
   return rt.hooked;
 }
 
+// A hooked agent's state comes from its hooks, so its output would cross the wire for nothing.
+function releaseOutput(rt: Runtime): void {
+  if (rt.detect) releaseChannels([rt.detect]);
+  rt.detect = undefined;
+}
+
 function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
   if (ev.kind === "output") {
-    if (isHooked(rt)) return;
+    if (isHooked(rt)) {
+      releaseOutput(rt);
+      return;
+    }
     rt.tail = (rt.tail + stripAnsi(rt.decoder.decode(b64ToBytes(ev.data), { stream: true }))).slice(
       -TAIL_CAP,
     );
@@ -127,29 +136,54 @@ export function onAgentTerminalGone(
   };
 }
 
+/** A hooked agent holds no stream, so its exit arrives as a state; `/clear` reports `exited`, then a live one. */
+export function onPtyAgentChanged(a: PtyAgent): void {
+  for (const rt of runtimes.values()) {
+    if (rt.terminalId !== a.terminalId || !isHooked(rt)) continue;
+    releaseOutput(rt);
+    if (a.state === "exited") onDetectEvent(rt, { kind: "exited", code: null });
+    else rt.exited = false;
+  }
+}
+
 /**
- * After a reconnect: a failed attach is the server's own terminal registry saying the PTY is gone,
- * for hooked and unhooked agents alike. A live one keeps the new stream, since the old one died with the connection.
+ * After a reconnect: the server's terminal registry says which PTYs are gone, through a failed attach,
+ * or for a hooked agent, its absence from the server's list. A live unhooked one keeps the new stream,
+ * since the old one died with the connection.
  */
 export async function reconcileAgentTerminals(): Promise<void> {
+  const candidates = [...runtimes.values()].filter((rt) => rt.terminalId && !rt.exited && !rt.starting);
+  const hooked = new Set(candidates.filter(isHooked));
+  const listed = hooked.size
+    ? await unwrap(commands.listPtyAgents(null)).then(
+        (list) => new Set(list.map((a) => a.terminalId)),
+        () => undefined,
+      )
+    : undefined;
   await Promise.all(
-    [...runtimes.values()].map(async (rt) => {
-      const id = rt.terminalId;
-      if (!id || rt.exited || rt.starting) return;
+    candidates.map(async (rt) => {
+      const id = rt.terminalId!;
+      const isCurrent = () => runtimes.get(rt.key) === rt && rt.terminalId === id && !rt.exited;
+      const gone = () => {
+        onDetectEvent(rt, { kind: "exited", code: null });
+        goneListeners.get(rt.key)?.forEach((fn) => fn(id));
+      };
+      if (hooked.has(rt)) {
+        if (listed && !listed.has(id) && isCurrent()) gone();
+        return;
+      }
       const ch = new Channel<TerminalEvent>();
       ch.onmessage = (ev) => onDetectEvent(rt, ev);
       const alive = await unwrap(commands.terminalAttach(id, ch)).catch(() => undefined);
-      const current = runtimes.get(rt.key) === rt && rt.terminalId === id && !rt.exited;
+      const current = isCurrent();
       if (alive && current) {
         if (rt.detect) releaseChannels([rt.detect]);
         rt.detect = ch;
+        if (isHooked(rt)) releaseOutput(rt);
         return;
       }
       releaseChannels([ch]);
-      if (alive === false && current) {
-        onDetectEvent(rt, { kind: "exited", code: null });
-        goneListeners.get(rt.key)?.forEach((fn) => fn(id));
-      }
+      if (alive === false && current) gone();
     }),
   );
 }
@@ -263,6 +297,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<AgentLaunch | null> 
       if (launched && prev?.terminalId && prev.terminalId !== id && !prev.adopted) {
         void commands.terminalClose(prev.terminalId);
       }
+      if (isHooked(r)) releaseOutput(r);
       return { terminalId: id, providerSessionId };
     };
 

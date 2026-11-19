@@ -4,6 +4,8 @@
 //! other writer.
 #![cfg(unix)]
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use hyprlayer_core::docs::frontmatter::{FmPatch, FmValue};
 use hyprlayer_core::index::indexer::ThoughtQuery;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
@@ -262,7 +264,7 @@ async fn doc_concurrency() {
             Request::SaveAttachment {
                 workstream_id: ws_id.clone(),
                 file_name: "pasted.png".into(),
-                data: vec![0x89, 0x50, 0x4e, 0x47],
+                data: B64.encode([0x89, 0x50, 0x4e, 0x47]),
             },
         )
         .await
@@ -307,13 +309,8 @@ async fn doc_concurrency() {
 
 fn bytes(value: &Value) -> Vec<u8> {
     value
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(Value::as_u64)
-                .map(|b| b as u8)
-                .collect()
-        })
+        .as_str()
+        .and_then(|s| B64.decode(s).ok())
         .unwrap_or_default()
 }
 
