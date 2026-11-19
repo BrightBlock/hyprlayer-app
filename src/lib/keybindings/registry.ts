@@ -43,7 +43,3 @@ export function runCommand(id: string): boolean {
   handler();
   return true;
 }
-
-export function isRegistered(id: string): boolean {
-  return (useRegistry.getState().handlers[id]?.length ?? 0) > 0;
-}

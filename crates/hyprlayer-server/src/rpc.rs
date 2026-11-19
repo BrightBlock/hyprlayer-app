@@ -198,7 +198,6 @@ hyprlayer_proto::commands! {
     FetchWorkstreamRemote: fetch_workstream_remote(id: String) -> ();
     SetWorkstreamStage: set_workstream_stage(id: String, stage: Stage) -> ();
     AttachWorkstreamDoc: attach_workstream_doc(id: String, doc_path: String, role: String) -> Vec<WorkstreamDoc>;
-    DetachWorkstreamDoc: detach_workstream_doc(id: String, doc_path: String) -> Vec<WorkstreamDoc>;
     ListWorkstreamDocs: list_workstream_docs(id: String) -> Vec<WorkstreamDoc>;
     ListProjectMemory: list_project_memory(id: String) -> ProjectMemory;
     SaveProjectMemoryFile: save_project_memory_file(id: String, name: String, content: String, base_mtime_ms: f64) -> ();
@@ -206,7 +205,6 @@ hyprlayer_proto::commands! {
     ListArchivedWorkstreams: list_archived_workstreams() -> Vec<ArchivedWorkstreamView>;
     RestoreWorkstream: restore_workstream(id: String, target: Option<String>) -> WorkstreamView;
     DeleteArchivedWorkstream: delete_archived_workstream(id: String) -> ();
-    CleanupArchivedWorkstreams: cleanup_archived_workstreams(before_ms: Option<f64>) -> ArchiveCleanupReport;
     RefreshArchivedWorkstreams: refresh_archived_workstreams() -> u32;
     KeepArchivedWorkstream: keep_archived_workstream(id: String) -> ();
     PurgeArchivedWorkstreams: purge_archived_workstreams(ids: Vec<String>) -> ArchiveCleanupReport;

@@ -65,31 +65,6 @@
       "guards": [
         {
           "evidence": {
-            "report": {
-              "deleted": 0,
-              "failed": 0
-            }
-          },
-          "guard": "a cutoff before every archive deletes nothing",
-          "ok": true
-        },
-        {
-          "evidence": {
-            "report": {
-              "deleted": 1,
-              "failed": 0
-            }
-          },
-          "guard": "no cutoff reaps the archive without failures",
-          "ok": true
-        }
-      ],
-      "step": "reap an archived worktree"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "exit": 0,
             "listening": false
           },

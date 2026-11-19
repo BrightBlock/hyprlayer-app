@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ESCAPE_COMMAND_ID, isRegistered, runCommand } from "@/lib/keybindings/registry";
+import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import {
   Button,
   Card,
@@ -359,10 +359,12 @@ describe("Popover", () => {
   });
 
   it("unregisters its Escape handler once closed", () => {
-    const { rerender } = render(<PopoverHarness open onClose={vi.fn()} />);
-    expect(isRegistered(ESCAPE_COMMAND_ID)).toBe(true);
-    rerender(<PopoverHarness open={false} onClose={vi.fn()} />);
-    expect(isRegistered(ESCAPE_COMMAND_ID)).toBe(false);
+    const onClose = vi.fn();
+    const { rerender } = render(<PopoverHarness open onClose={onClose} />);
+    expect(runCommand(ESCAPE_COMMAND_ID)).toBe(true);
+    rerender(<PopoverHarness open={false} onClose={onClose} />);
+    expect(runCommand(ESCAPE_COMMAND_ID)).toBe(false);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("nested inside a Dialog, closes only itself and leaves the dialog open", () => {

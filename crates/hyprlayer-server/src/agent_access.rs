@@ -237,12 +237,10 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::SetWorkstreamBaseBranch { .. }
         | Request::UpdateWorkstreamFromBase { .. }
         | Request::FetchWorkstreamRemote { .. }
-        | Request::DetachWorkstreamDoc { .. }
         | Request::ListProjectMemory { .. }
         | Request::SaveProjectMemoryFile { .. }
         | Request::ListArchivedWorkstreams { .. }
         | Request::RestoreWorkstream { .. }
-        | Request::CleanupArchivedWorkstreams { .. }
         | Request::RefreshArchivedWorkstreams { .. }
         | Request::KeepArchivedWorkstream { .. }
         | Request::PurgeArchivedWorkstreams { .. }

@@ -152,23 +152,6 @@ export const engineResumesById = (engineId: string): boolean =>
 export const engineChecksSessionOnDisk = (engineId: string): boolean =>
   engineId === "claude-code" || engineId === "codex" || engineId === "antigravity";
 
-export function mintPtySessionId(engineId: string): string | undefined {
-  return engineSession(engineId).mode === "assign" ? globalThis.crypto?.randomUUID?.() : undefined;
-}
-
-export function relaunchArgs(
-  engine: ResolvedEngine,
-  opts: { sessionId?: string; resume: boolean; bypass: boolean },
-): string[] {
-  const s = engineSession(engine.id);
-  const sessionArgs = opts.resume
-    ? opts.sessionId && s.resumeById
-      ? s.resumeById(opts.sessionId)
-      : s.resumeLatest
-    : s.fresh(opts.sessionId);
-  return [...engine.args, ...sessionArgs, ...(opts.bypass ? s.bypass : [])];
-}
-
 export function useMultiplexer(): ResolvedMultiplexer {
   const { data } = useBootstrap();
   return useMemo(() => resolveMultiplexer(data?.settings), [data?.settings]);

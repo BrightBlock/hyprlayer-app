@@ -144,21 +144,6 @@ async fn workstream_mutations() {
         listed_docs.as_array().map(|d| d.len()).unwrap_or(0) == 1,
         json!({ "docs": listed_docs.as_array().map(|d| d.len()) }),
     );
-    let detached = j
-        .call(
-            &client,
-            Request::DetachWorkstreamDoc {
-                id: id.clone(),
-                doc_path: doc.display().to_string(),
-            },
-        )
-        .await
-        .expect("detach_workstream_doc");
-    j.guard(
-        "detaching removes it again",
-        detached.as_array().map(|d| d.len()).unwrap_or(1) == 0,
-        json!({ "docs": detached.as_array().map(|d| d.len()) }),
-    );
 
     j.step("move through the stages");
     j.call(

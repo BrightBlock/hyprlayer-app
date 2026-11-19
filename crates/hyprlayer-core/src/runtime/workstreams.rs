@@ -118,10 +118,6 @@ pub struct PurgeWorkstreamRequest {
     pub id: String,
 }
 
-pub struct CleanupArchivedRequest {
-    pub before_ms: Option<f64>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArchiveCleanupReport {
     pub deleted: u32,
@@ -508,16 +504,6 @@ impl WorkstreamService<'_> {
         let db = self.runtime.db.clone();
         let (wid, doc_path, role) = (id.to_string(), doc_path.to_string(), role.to_string());
         blocking(move || db.attach_workstream_doc(&wid, &doc_path, &role)).await?;
-        self.documents(WorkstreamDocumentsRequest { id: id.to_string() })
-            .await
-    }
-
-    pub async fn detach_doc(&self, id: &str, doc_path: &str) -> Result<Vec<WorkstreamDoc>> {
-        ensure_running(self.runtime)?;
-        self.find(id).await?;
-        let db = self.runtime.db.clone();
-        let (wid, doc_path) = (id.to_string(), doc_path.to_string());
-        blocking(move || db.detach_workstream_doc(&wid, &doc_path)).await?;
         self.documents(WorkstreamDocumentsRequest { id: id.to_string() })
             .await
     }
@@ -1850,47 +1836,6 @@ impl WorkstreamService<'_> {
         let db = self.runtime.db.clone();
         let id = item.id.clone();
         blocking(move || db.delete_workstream(&id)).await
-    }
-
-    pub async fn cleanup_archived(
-        &self,
-        req: CleanupArchivedRequest,
-    ) -> Result<ArchiveCleanupReport> {
-        ensure_running(self.runtime)?;
-        let items = self.list_archived().await?;
-        let items: Vec<_> = items
-            .into_iter()
-            .filter(|w| {
-                req.before_ms
-                    .is_none_or(|cut| w.archived_at.is_some_and(|a| a < cut))
-            })
-            .collect();
-
-        let mut deleted = 0u32;
-        let mut failed = 0u32;
-        for item in items {
-            let _guard = self
-                .runtime
-                .workstream_locks
-                .lock_pair(&item.project_path, &item.id)
-                .await;
-            let Ok(item) = self.find(&item.id).await else {
-                continue;
-            };
-            let cleanup = self.branch_cleanup(&item, BranchCleanup::Force).await;
-            match self.purge_locked(&item, cleanup).await {
-                Ok(()) => deleted += 1,
-                Err(e) => {
-                    tracing::warn!(
-                        "cleanup_archived_workstreams: purge {} failed: {e}",
-                        item.id
-                    );
-                    failed += 1;
-                }
-            }
-        }
-
-        Ok(ArchiveCleanupReport { deleted, failed })
     }
 
     /// A removed project's archives, purged as the expiry sweep does: never the remote, local branches only with `-d`.

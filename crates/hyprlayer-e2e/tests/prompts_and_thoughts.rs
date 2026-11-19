@@ -1,13 +1,13 @@
-//! Exporting and re-importing the prompt library, committing the thoughts
-//! repository through the CLI, and reaping archived worktrees. What these
-//! share is a round trip: whatever comes out has to go back in.
+//! Exporting and re-importing the prompt library, and committing the thoughts
+//! repository through the CLI. What these share is a round trip: whatever
+//! comes out has to go back in.
 #![cfg(unix)]
 
 use hyprlayer_core::runtime::prompts::{
     PromptExportEntry, PromptExportRequest, PromptExportSelection, PromptImportDecision,
     PromptImportMode,
 };
-use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
+use hyprlayer_e2e::flows::onboard_and_import;
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -146,45 +146,6 @@ async fn prompts_and_thoughts() {
         "syncing the thoughts repo reports an outcome rather than failing",
         synced.is_ok(),
         evidence,
-    );
-
-    j.step("reap an archived worktree");
-    let view = create_workstream(&mut j, &client, &project, "Reapable").await;
-    let id = text(&view, "/item/id");
-    j.call(
-        &client,
-        Request::ArchiveWorkstream {
-            id: id.clone(),
-            skip_scripts: true,
-        },
-    )
-    .await
-    .expect("archive_workstream");
-    let untouched = j
-        .call(
-            &client,
-            Request::CleanupArchivedWorkstreams {
-                before_ms: Some(0.0),
-            },
-        )
-        .await
-        .expect("cleanup_archived_workstreams");
-    j.guard(
-        "a cutoff before every archive deletes nothing",
-        untouched.pointer("/deleted").and_then(Value::as_u64) == Some(0),
-        json!({ "report": untouched }),
-    );
-    let reaped = j
-        .call(
-            &client,
-            Request::CleanupArchivedWorkstreams { before_ms: None },
-        )
-        .await
-        .expect("cleanup_archived_workstreams");
-    j.guard(
-        "no cutoff reaps the archive without failures",
-        reaped.pointer("/failed").and_then(Value::as_u64) == Some(0),
-        json!({ "report": reaped }),
     );
 
     j.step("shutdown");

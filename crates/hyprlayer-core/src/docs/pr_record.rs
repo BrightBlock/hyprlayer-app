@@ -15,10 +15,6 @@ pub fn file_name(number: u32) -> String {
     format!("{number}_description.md")
 }
 
-pub fn record_path(root: &Path, repos_dir: &str, mapped_name: &str, number: u32) -> PathBuf {
-    records_dir(root, repos_dir, mapped_name).join(file_name(number))
-}
-
 /// The PR a `<number>_description.md` record describes.
 pub fn record_number(path: &Path) -> Option<u32> {
     let stem = path.file_stem()?.to_str()?;
@@ -53,15 +49,6 @@ mod tests {
              author: Jon Tsiros\ntags: [linux, aur]\nrelated: []\n---\n\n\
              ## What problem(s) was I solving?\n\nBody stays put.\n"
         )
-    }
-
-    #[test]
-    fn resolves_the_skill_s_record_path() {
-        let p = record_path(Path::new("/t/thoughts"), "repos", "hyprlayer-app", 216);
-        assert_eq!(
-            p,
-            Path::new("/t/thoughts/repos/hyprlayer-app/shared/prs/216_description.md")
-        );
     }
 
     #[test]

@@ -2,7 +2,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { isRegistered, runCommand, useCommand } from "./registry";
+import { runCommand, useCommand } from "./registry";
 
 afterEach(cleanup);
 
@@ -19,22 +19,21 @@ describe("registry", () => {
   it("registers a handler while mounted and runs it", () => {
     const fn = vi.fn();
     render(<Harness id="x.run" handler={fn} />);
-    expect(isRegistered("x.run")).toBe(true);
     expect(runCommand("x.run")).toBe(true);
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("unregisters on unmount", () => {
-    const { unmount } = render(<Harness id="x.unmount" handler={vi.fn()} />);
-    expect(isRegistered("x.unmount")).toBe(true);
+    const fn = vi.fn();
+    const { unmount } = render(<Harness id="x.unmount" handler={fn} />);
     unmount();
-    expect(isRegistered("x.unmount")).toBe(false);
     expect(runCommand("x.unmount")).toBe(false);
+    expect(fn).not.toHaveBeenCalled();
   });
 
   it("a null handler leaves the command unregistered (context gate)", () => {
     render(<Harness id="x.gated" handler={null} />);
-    expect(isRegistered("x.gated")).toBe(false);
+    expect(runCommand("x.gated")).toBe(false);
   });
 
   it("runs the latest closure without re-registering churn", () => {

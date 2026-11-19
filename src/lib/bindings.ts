@@ -57,7 +57,6 @@ export const commands = {
 	fetchWorkstreamRemote: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_workstream_remote", { id })),
 	setWorkstreamStage: (id: string, stage: Stage) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
-	detachWorkstreamDoc: (id: string, docPath: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("detach_workstream_doc", { id, docPath })),
 	listWorkstreamDocs: (id: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("list_workstream_docs", { id })),
 	listProjectMemory: (id: string) => typedError<ProjectMemory, AppError>(__TAURI_INVOKE("list_project_memory", { id })),
 	saveProjectMemoryFile: (id: string, name: string, content: string, baseMtimeMs: number | null) => typedError<null, AppError>(__TAURI_INVOKE("save_project_memory_file", { id, name, content, baseMtimeMs })),

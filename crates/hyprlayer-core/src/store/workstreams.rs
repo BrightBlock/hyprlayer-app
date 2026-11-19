@@ -557,16 +557,6 @@ impl Db {
         })
     }
 
-    pub fn detach_workstream_doc(&self, workstream_id: &str, doc_path: &str) -> Result<()> {
-        self.with(|conn| {
-            conn.execute(
-                "DELETE FROM workstream_docs WHERE workstream_id = ?1 AND doc_path = ?2",
-                params![workstream_id, doc_path],
-            )?;
-            Ok(())
-        })
-    }
-
     pub fn workstream_docs(&self, workstream_id: &str) -> Result<Vec<WorkstreamDoc>> {
         self.with(|conn| {
             let mut stmt = conn.prepare(
@@ -820,7 +810,7 @@ mod tests {
     }
 
     #[test]
-    fn docs_attach_detach_and_cascade() {
+    fn attaching_a_doc_again_updates_its_role() {
         let db = Db::open_in_memory().unwrap();
         let a = item(&db, "auth");
         db.attach_workstream_doc(&a.id, "/t/r.md", "research")
@@ -834,8 +824,5 @@ mod tests {
             docs.iter().find(|d| d.doc_path == "/t/r.md").unwrap().role,
             "other"
         );
-
-        db.detach_workstream_doc(&a.id, "/t/p.md").unwrap();
-        assert_eq!(db.workstream_docs(&a.id).unwrap().len(), 1);
     }
 }

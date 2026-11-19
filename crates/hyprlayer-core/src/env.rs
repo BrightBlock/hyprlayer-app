@@ -31,11 +31,6 @@ impl RuntimeEnvironment {
         }
     }
 
-    pub fn with_env_overlay(self, overlay: BTreeMap<String, String>) -> Self {
-        self.merge_env_overlay(overlay);
-        self
-    }
-
     /// Merges an attach's keys over the live overlay; a key is never cleared (ADR-0009).
     pub fn merge_env_overlay(&self, overlay: BTreeMap<String, String>) {
         self.env_overlay
@@ -311,19 +306,6 @@ mod tests {
         assert_eq!(
             paths.opencode_config_file,
             PathBuf::from("/tmp/xdg-config/opencode/opencode.json")
-        );
-    }
-
-    #[test]
-    fn env_overlay_is_declared_and_settable() {
-        let env = environment("/tmp/hl-home", &[]).with_env_overlay(BTreeMap::from([(
-            "SSH_AUTH_SOCK".into(),
-            "/tmp/probe".into(),
-        )]));
-        let overlay = env.env_overlay.read().unwrap();
-        assert_eq!(
-            overlay.get("SSH_AUTH_SOCK").map(String::as_str),
-            Some("/tmp/probe")
         );
     }
 }

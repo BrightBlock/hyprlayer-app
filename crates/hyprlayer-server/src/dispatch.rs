@@ -67,10 +67,10 @@ use hyprlayer_core::runtime::terminals::{
     ResizeAgentTerminalRequest, ResizeTerminalRequest, SessionExistsRequest, WriteTerminalRequest,
 };
 use hyprlayer_core::runtime::workstreams::{
-    ArchiveCleanupReport, ArchiveWorkstreamRequest, BranchRename, CleanupArchivedRequest,
-    CreateWorkstreamRequest, HeadBranchObservation, ListWorkstreamsRequest, ProjectMemory,
-    PurgeWorkstreamRequest, RenameWorkstreamRequest, ReprovisionWorkstreamRequest,
-    RestoreWorkstreamRequest, UpdateWorkstreamRequest, WorkstreamBases, WorkstreamDocumentsRequest,
+    ArchiveCleanupReport, ArchiveWorkstreamRequest, BranchRename, CreateWorkstreamRequest,
+    HeadBranchObservation, ListWorkstreamsRequest, ProjectMemory, PurgeWorkstreamRequest,
+    RenameWorkstreamRequest, ReprovisionWorkstreamRequest, RestoreWorkstreamRequest,
+    UpdateWorkstreamRequest, WorkstreamBases, WorkstreamDocumentsRequest,
     WorkstreamPrStatusRequest,
 };
 use hyprlayer_core::settings::AppSettings;
@@ -976,18 +976,6 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn detach_workstream_doc(
-        &self,
-        id: String,
-        doc_path: String,
-    ) -> Result<Vec<WorkstreamDoc>, WireError> {
-        self.runtime
-            .workstreams()
-            .detach_doc(&id, &doc_path)
-            .await
-            .wire()
-    }
-
     async fn list_workstream_docs(&self, id: String) -> Result<Vec<WorkstreamDoc>, WireError> {
         self.runtime
             .workstreams()
@@ -1065,17 +1053,6 @@ impl Dispatch for Server {
         self.runtime
             .workstreams()
             .purge(PurgeWorkstreamRequest { id })
-            .await
-            .wire()
-    }
-
-    async fn cleanup_archived_workstreams(
-        &self,
-        before_ms: Option<f64>,
-    ) -> Result<ArchiveCleanupReport, WireError> {
-        self.runtime
-            .workstreams()
-            .cleanup_archived(CleanupArchivedRequest { before_ms })
             .await
             .wire()
     }

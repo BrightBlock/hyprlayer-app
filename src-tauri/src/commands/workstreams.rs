@@ -296,20 +296,6 @@ pub async fn attach_workstream_doc(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn detach_workstream_doc(
-    state: State<'_, AppState>,
-    id: String,
-    doc_path: String,
-) -> CmdResult<Vec<WorkstreamDoc>> {
-    state
-        .client()?
-        .detach_workstream_doc(id, doc_path)
-        .await
-        .map_err(AppError::from)
-}
-
-#[tauri::command]
-#[specta::specta]
 pub async fn list_workstream_docs(
     state: State<'_, AppState>,
     id: String,

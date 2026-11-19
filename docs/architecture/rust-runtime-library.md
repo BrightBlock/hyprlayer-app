@@ -431,13 +431,13 @@ decision resolves them.
 `list_archived_details()`, `refresh_archived()`, `keep_archived(&str)`,
 `purge_archived(Vec<String>)`, `sweep_expired_archives()`,
 `documents(WorkstreamDocumentsRequest)`, `attach_doc(&str, &str, role: &str)`,
-`detach_doc(&str, &str)`, `set_base_branch(&str, &str)`,
+`set_base_branch(&str, &str)`,
 `set_pr(&str, Option<u32>)`, `adopt_head_branches(Vec<HeadBranchObservation>)`,
 `watch(Option<String>)`, `git_status(WorkstreamGitStatusRequest)`,
 `pr_status(WorkstreamPrStatusRequest)`, `rename(RenameWorkstreamRequest)`,
 `update(UpdateWorkstreamRequest)`, `create(CreateWorkstreamRequest)`,
 `archive(ArchiveWorkstreamRequest)`, `restore(RestoreWorkstreamRequest)`,
-`purge(PurgeWorkstreamRequest)`, `cleanup_archived(CleanupArchivedRequest)`,
+`purge(PurgeWorkstreamRequest)`,
 `reprovision(ReprovisionWorkstreamRequest)`, `project_memory(&str)`,
 `save_project_memory_file(&str, &str, String, base_mtime_ms: f64)`.
 

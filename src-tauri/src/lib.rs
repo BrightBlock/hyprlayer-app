@@ -82,7 +82,6 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::fetch_workstream_remote,
             commands::workstreams::set_workstream_stage,
             commands::workstreams::attach_workstream_doc,
-            commands::workstreams::detach_workstream_doc,
             commands::workstreams::list_workstream_docs,
             commands::workstreams::list_project_memory,
             commands::workstreams::save_project_memory_file,
