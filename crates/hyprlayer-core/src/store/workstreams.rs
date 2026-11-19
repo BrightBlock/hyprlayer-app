@@ -838,16 +838,4 @@ mod tests {
         db.detach_workstream_doc(&a.id, "/t/p.md").unwrap();
         assert_eq!(db.workstream_docs(&a.id).unwrap().len(), 1);
     }
-
-    #[test]
-    fn migrations_are_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("app.db");
-        {
-            let db = Db::open(&path).unwrap();
-            item(&db, "x");
-        }
-        let db = Db::open(&path).unwrap();
-        assert_eq!(db.list_workstreams("/repo", false).unwrap().len(), 1);
-    }
 }

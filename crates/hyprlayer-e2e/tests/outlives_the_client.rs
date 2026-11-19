@@ -32,11 +32,6 @@ async fn work_outlives_the_client() {
     let view = create_workstream(&mut j, &client, &project, "Long running").await;
     let id = text(&view, "/item/id");
     let worktree = PathBuf::from(text(&view, "/item/worktreePath"));
-    j.guard(
-        "the workstream exists before any disconnect",
-        worktree.is_dir(),
-        json!({ "worktree": worktree }),
-    );
 
     j.step("open a terminal from a client, then drop that client");
     let (terminal, before) = on_a_client_that_goes_away(sandbox.socket(), id.clone()).await;

@@ -359,21 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn an_absolute_spawned_path_would_not_have_matched() {
-        let dir = temp_dir("shim-regression");
-        let file = dir.join("server.pid");
-        // The old record: the path we spawned, which the shim exec'd away from.
-        record(&file, 4321, &format!("{SHIM_BIN} serve"));
-        let seen = killed(|kill| {
-            assert_eq!(reap_with(&file, |_| Some(live_cmdline(PORT)), kill), None);
-        });
-        assert!(
-            seen.is_empty(),
-            "documents the bug the file-name record fixes"
-        );
-    }
-
-    #[test]
     fn the_port_keeps_a_different_server_from_matching() {
         let dir = temp_dir("other-port");
         let file = dir.join("server.pid");

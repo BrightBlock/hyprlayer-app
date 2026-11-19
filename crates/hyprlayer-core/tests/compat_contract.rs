@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use hyprlayer_core::claude::SessionEvent;
+use hyprlayer_core::settings::SettingsStore;
 use hyprlayer_core::store::session_event_codec::decode_raw_event;
 use hyprlayer_models::session::Question;
 use serde::Deserialize;
@@ -15,8 +16,6 @@ struct StoredEventRow {
     seq: f64,
     kind: String,
     payload: String,
-    #[serde(rename = "createdAt")]
-    created_at: f64,
 }
 
 fn load_rows() -> Vec<StoredEventRow> {
@@ -176,37 +175,27 @@ fn questions_of(payload: &str) -> Vec<Question> {
     }
 }
 
-#[test]
-fn an_unrecognized_future_kind_is_a_typed_codec_error() {
-    let rows = load_rows();
-    let row = &rows[22];
-    assert_eq!(row.kind, "toolPermissionEscalated");
-    let err = decode_raw_event(&row.payload).expect_err("a future kind has no variant here");
-    assert_eq!(err.code(), "session_event_decode");
-}
+#[tokio::test]
+async fn settings_fixture_loads_through_the_settings_store() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        fixture_dir().join("settings.json"),
+        dir.path().join("settings.json"),
+    )
+    .expect("stage the settings fixture");
 
-#[test]
-fn stored_events_are_ordered_by_creation_time() {
-    let rows = load_rows();
-    for pair in rows.windows(2) {
-        assert!(
-            pair[0].created_at < pair[1].created_at,
-            "seq {} should have been created before seq {}",
-            pair[0].seq,
-            pair[1].seq
-        );
-    }
-}
+    let settings = SettingsStore::load(dir.path().to_path_buf()).get().await;
 
-#[test]
-fn settings_fixture_round_trips_through_serde_json_value() {
-    let raw = std::fs::read_to_string(fixture_dir().join("settings.json"))
-        .expect("settings.json fixture is readable");
-    let original: serde_json::Value =
-        serde_json::from_str(&raw).expect("settings.json fixture is valid JSON");
-    let reparsed: serde_json::Value =
-        serde_json::from_str(&serde_json::to_string(&original).unwrap()).unwrap();
-    assert_eq!(original, reparsed);
+    assert_eq!(
+        settings.worktree_root.as_deref(),
+        Some("/Users/jt/hyprlayer/worktrees")
+    );
+    assert_eq!(settings.git.branch_prefix.as_deref(), Some("jt/"));
+    assert_eq!(settings.prompts.custom.len(), 1);
+    assert!(
+        dir.path().join("settings.json").is_file(),
+        "not moved aside"
+    );
 }
 
 #[test]

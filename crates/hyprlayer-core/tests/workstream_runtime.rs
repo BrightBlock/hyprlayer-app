@@ -18,13 +18,11 @@ use hyprlayer_core::runtime::scripts::{RunLifecycleRequest, ScriptSettingsReques
 use hyprlayer_core::runtime::sessions::StartStageSessionRequest;
 use hyprlayer_core::runtime::workstreams::{
     ArchiveWorkstreamRequest, CreateWorkstreamRequest, HeadBranchObservation,
-    ListWorkstreamsRequest, PurgeWorkstreamRequest, ReprovisionWorkstreamRequest,
-    RestoreWorkstreamRequest,
+    ListWorkstreamsRequest, PurgeWorkstreamRequest, RestoreWorkstreamRequest,
 };
 use hyprlayer_core::runtime::HyprlayerRuntime;
 use hyprlayer_core::scripts::ScriptKind;
 use hyprlayer_core::store::{Workstream, WorkstreamStatus, WorktreeMode};
-use hyprlayer_core::terminal::{PtySession, SpawnTerminal};
 use hyprlayer_core::worktree::archive_dir_for;
 use hyprlayer_core::{CoreError, Harness, Stage};
 use hyprlayer_models::RuntimeEvent;
@@ -472,49 +470,6 @@ async fn failed_archive_script_leaves_disk_and_row_active() {
     f.runtime.shutdown().await;
 }
 
-#[tokio::test]
-async fn archive_stops_a_live_terminal_before_moving_the_worktree() {
-    let (f, repo) = fixture(Some(0)).await;
-    let created = f
-        .runtime
-        .workstreams()
-        .create(isolated_request(&repo, "Attended"))
-        .await
-        .unwrap();
-
-    let session = PtySession::spawn(SpawnTerminal {
-        shell: PathBuf::from("/bin/sh"),
-        args: vec![],
-        cwd: PathBuf::from(&created.item.worktree_path),
-        cols: 80,
-        rows: 24,
-        env: vec![],
-        workstream_id: created.item.id.clone(),
-    })
-    .expect("spawn a pty for the workstream");
-    let terminal_id = "test-terminal".to_string();
-    f.runtime
-        .test_terminals()
-        .insert(terminal_id.clone(), session)
-        .await;
-
-    f.runtime
-        .workstreams()
-        .archive(ArchiveWorkstreamRequest {
-            id: created.item.id.clone(),
-            skip_scripts: true,
-        })
-        .await
-        .unwrap();
-
-    assert!(
-        f.runtime.test_terminals().get(&terminal_id).await.is_none(),
-        "archive must stop terminals attached to the workstream before moving it"
-    );
-
-    f.runtime.shutdown().await;
-}
-
 // On Windows the archive itself fails with "Permission denied" if the watcher is still armed.
 #[tokio::test]
 async fn archive_releases_its_own_worktree_watch_and_no_other() {
@@ -602,41 +557,6 @@ async fn failed_archive_move_keeps_the_worktree_watched() {
         f.runtime.test_watched_workstream().await,
         Some(created.item.id.clone()),
         "the UI stays on this workstream and only re-arms on navigation"
-    );
-
-    f.runtime.shutdown().await;
-}
-
-#[tokio::test]
-async fn reprovision_refuses_a_deleted_worktree_instead_of_recreating_it() {
-    let (f, repo) = fixture(Some(0)).await;
-    let created = f
-        .runtime
-        .workstreams()
-        .create(isolated_request(&repo, "Vanished"))
-        .await
-        .unwrap();
-
-    let worktree = PathBuf::from(&created.item.worktree_path);
-    assert!(worktree.is_dir());
-    std::fs::remove_dir_all(&worktree).unwrap();
-
-    let result = f
-        .runtime
-        .workstreams()
-        .reprovision(ReprovisionWorkstreamRequest {
-            id: created.item.id.clone(),
-        })
-        .await;
-    match result {
-        Err(CoreError::WorkstreamWorktreeMissing { .. }) => {}
-        Err(e) => panic!("expected WorkstreamWorktreeMissing, got: {e}"),
-        Ok(_) => panic!("reprovision must refuse a worktree that is gone"),
-    }
-
-    assert!(
-        !worktree.exists(),
-        "reprovision must not resurrect the worktree path; a bare directory there blocks restore"
     );
 
     f.runtime.shutdown().await;

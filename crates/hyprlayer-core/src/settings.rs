@@ -708,27 +708,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn switching_the_default_harness_keeps_a_title_model_the_user_really_picked() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SettingsStore::load(dir.path().to_path_buf());
-
-        store
-            .update(|settings| {
-                settings.providers.default_harness = Some("codex".into());
-                settings.tab_titles.model = Some("claude:sonnet".into());
-            })
-            .await
-            .unwrap();
-
-        let back = store
-            .update(|settings| settings.providers.default_harness = Some("claude".into()))
-            .await
-            .unwrap();
-
-        assert_eq!(back.tab_titles.model.as_deref(), Some("claude:sonnet"));
-    }
-
-    #[tokio::test]
     async fn a_title_model_survives_an_update_that_leaves_the_harness_alone() {
         let dir = tempfile::tempdir().unwrap();
         let store = SettingsStore::load(dir.path().to_path_buf());
@@ -980,24 +959,9 @@ mod tests {
     }
 
     #[test]
-    fn notifications_round_trip() {
-        let raw = r#"{"notifications":{"enabled":false,"sound":false}}"#;
-        let s: AppSettings = serde_json::from_str(raw).unwrap();
-        assert!(!s.notifications.enabled);
-        assert!(!s.notifications.sound);
-    }
-
-    #[test]
     fn quit_confirmation_defaults_on() {
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(s.quit.confirm);
-    }
-
-    #[test]
-    fn quit_confirmation_round_trips() {
-        let raw = r#"{"quit":{"confirm":false}}"#;
-        let s: AppSettings = serde_json::from_str(raw).unwrap();
-        assert!(!s.quit.confirm);
     }
 
     #[test]

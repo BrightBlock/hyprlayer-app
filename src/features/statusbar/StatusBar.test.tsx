@@ -542,6 +542,8 @@ describe("StatusBar trailing items", () => {
     const sessions = screen.getByRole("button", { name: "Agent sessions" });
     expect(sessions.previousElementSibling).toBeNull();
     expect(sessions.parentElement!.previousElementSibling).toBeNull();
+    // A repo cluster would sit ahead of the spacer.
+    expect(screen.getByRole("contentinfo", { name: "Status bar" }).firstElementChild?.className).toBe("flex-1");
   });
 });
 

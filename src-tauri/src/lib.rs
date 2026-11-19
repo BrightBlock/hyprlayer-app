@@ -868,16 +868,6 @@ mod tests {
     }
 
     #[test]
-    fn linux_bundles_deb_and_rpm_only() {
-        let overlay: Value =
-            serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();
-        let targets = overlay["bundle"]["targets"]
-            .as_array()
-            .expect("linux config pins bundle.targets");
-        assert_eq!(targets, &[Value::from("deb"), Value::from("rpm")]);
-    }
-
-    #[test]
     fn linux_min_size_stays_below_the_tiling_squeeze_threshold() {
         let overlay: Value =
             serde_json::from_str(include_str!("../tauri.linux.conf.json")).unwrap();

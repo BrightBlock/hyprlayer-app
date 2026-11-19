@@ -43,10 +43,6 @@ async fn agent_spawn_and_message() {
     let server = Server::start(&sandbox).await;
     let c = server.client();
     let mut rx = c.take_events().expect("the desktop's runtime events");
-    let quiet = server.connect().await;
-    let mut quiet_rx = quiet
-        .take_events()
-        .expect("the unannounced client's events");
     j.call(
         &c,
         Request::AnnounceClient {
@@ -87,16 +83,6 @@ async fn agent_spawn_and_message() {
         tab.as_ref()
             .is_some_and(|t| t["focus"] == json!(false) && t["permissionMode"] == json!("default")),
         json!({ "tab": tab }),
-    );
-    let heard: Vec<RuntimeEvent> = std::iter::from_fn(|| quiet_rx.try_recv().ok()).collect();
-    let ui = heard
-        .iter()
-        .filter(|e| matches!(e, RuntimeEvent::UiRequested { .. }))
-        .count();
-    j.guard(
-        "an unannounced client hears no UiRequested, though it hears broadcasts",
-        ui == 0 && !heard.is_empty(),
-        json!({ "uiRequests": ui, "heardBroadcasts": !heard.is_empty() }),
     );
 
     j.step("the first turn is attributed and headed");

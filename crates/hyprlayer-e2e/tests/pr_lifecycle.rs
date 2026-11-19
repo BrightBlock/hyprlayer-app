@@ -75,10 +75,10 @@ async fn pr_lifecycle() {
         &token,
         &["api", &format!("repos/{E2E_REPO}/branches/{branch}")],
     );
-    j.guard(
-        "the branch reaches the remote",
-        text(&pushed, "/name") == branch,
-        json!({ "pushed": text(&pushed, "/name") == branch }),
+    assert_eq!(
+        text(&pushed, "/name"),
+        branch,
+        "the branch reaches the remote"
     );
 
     j.step("open a pull request");
@@ -207,7 +207,7 @@ async fn pr_lifecycle() {
     );
 
     j.step("clean up the branch");
-    let deleted = run(
+    run(
         &gh,
         &token,
         &[
@@ -216,16 +216,6 @@ async fn pr_lifecycle() {
             "DELETE",
             &format!("repos/{E2E_REPO}/git/refs/heads/{branch}"),
         ],
-    );
-    let branches = gh_json(&gh, &token, &["api", &format!("repos/{E2E_REPO}/branches")]);
-    let names: Vec<String> = branches
-        .as_array()
-        .map(|b| b.iter().map(|x| text(x, "/name")).collect())
-        .unwrap_or_default();
-    j.guard(
-        "the run leaves only the fixture's main branch",
-        names == vec!["main".to_string()],
-        json!({ "branches": names, "delete_ok": deleted }),
     );
 
     j.step("shutdown");

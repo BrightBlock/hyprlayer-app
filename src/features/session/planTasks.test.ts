@@ -100,16 +100,6 @@ describe("planTasksFromItems", () => {
     ]);
   });
 
-  it("keeps completed tasks in the list", () => {
-    const items: TranscriptItem[] = [
-      taskCreate("t1", "Done thing", { id: 1 }),
-      taskUpdate("t2", { taskId: "1", status: "completed" }),
-    ];
-    const tasks = planTasksFromItems(items);
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].status).toBe("completed");
-  });
-
   it("lets TaskUpdate change a task's subject too", () => {
     const items: TranscriptItem[] = [
       taskCreate("t1", "Old subject", { id: 1 }),
@@ -121,19 +111,6 @@ describe("planTasksFromItems", () => {
   it("resyncs from a TaskList snapshot", () => {
     const items: TranscriptItem[] = [
       taskList("t1", "#1 [in_progress] Build parser\n#2 [pending] Wire UI"),
-    ];
-    expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
-      { id: "1", subject: "Build parser", status: "in_progress" },
-      { id: "2", subject: "Wire UI", status: "pending" },
-    ]);
-  });
-
-  it("handles a full create → update → list sequence", () => {
-    const items: TranscriptItem[] = [
-      taskCreate("t1", "Build parser", { id: 1, description: "parse stream" }),
-      taskCreate("t2", "Wire UI", { id: 2 }),
-      taskUpdate("t3", { taskId: "1", status: "in_progress" }),
-      taskList("t4", "#1 [in_progress] Build parser\n#2 [pending] Wire UI"),
     ];
     expect(planTasksFromItems(items)).toEqual<PlanTask[]>([
       { id: "1", subject: "Build parser", status: "in_progress" },

@@ -583,21 +583,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn resolved_hyprlayer_without_version_reports_missing() {
-        let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
-        resolver
-            .set_override(
-                BinaryKind::Hyprlayer,
-                Some(PathBuf::from("/nonexistent/not-really-hyprlayer")),
-            )
-            .await;
-        let status = resolver.status(BinaryKind::Hyprlayer).await;
-        assert_eq!(status.state, BinaryState::Missing);
-        assert_eq!(status.path, None);
-        assert!(resolver.require(BinaryKind::Hyprlayer).await.is_err());
-    }
-
     // Every kind except `hyprlayer` returns `false` from `requires_version`, so before
     // `probe` checked the path these all reported `Ok` — "Found", with a blank version.
     #[tokio::test]
@@ -624,6 +609,7 @@ mod tests {
                     "{kind:?} with override {bogus:?} must not report healthy"
                 );
                 assert!(status.overridden, "{kind:?} keeps its manual-path flag");
+                assert_eq!(status.path, None, "{kind:?} reports no usable path");
                 assert!(resolver.require(kind).await.is_err());
             }
         }

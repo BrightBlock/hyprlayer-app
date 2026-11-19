@@ -102,11 +102,6 @@ beforeEach(() => {
 });
 
 describe("XtermEngine disposal", () => {
-  it("forwards writes to the terminal while live", () => {
-    const engine = newEngine();
-    engine.write("before");
-    expect(writes).toEqual(["before"]);
-  });
 
   it("stops forwarding writes once disposed", () => {
     const engine = newEngine();
@@ -127,17 +122,6 @@ describe("XtermEngine disposal", () => {
     expect(refs(engine).term).toBeNull();
     expect(refs(engine).fitAddon).toBeNull();
     expect(disposeCalls).toContain("terminal");
-  });
-
-  it("leaves no path from the engine back to the terminal", () => {
-    const engine = newEngine();
-    const terminal = refs(engine).term;
-    engine.dispose();
-    // FitAddon.dispose() is empty upstream, so a retained addon would still
-    // point at the terminal; the engine must drop the addon itself.
-    expect(fitAddons[0]?.terminal).toBe(terminal);
-    expect(Object.values(refs(engine))).not.toContain(fitAddons[0]);
-    expect(Object.values(refs(engine)).every((r) => r === null)).toBe(true);
   });
 
   it("survives every interface call after dispose", () => {

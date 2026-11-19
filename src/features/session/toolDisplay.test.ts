@@ -645,10 +645,12 @@ describe("sessionDocs", () => {
   });
 
   it("recomputes when `written` changes, since it resolves shell targets", () => {
-    const first = sessionDocs(items, {});
-    const second = sessionDocs(items, { "x.md": "/t/shared/plans/x.md" });
-    expect(second).not.toBe(first);
-    expect(second).toEqual(first);
+    const withShell = [...items, tool("Bash", JSON.stringify({ command: "cat > /t/shared/plans/x.md <<'EOF'\nEOF" }), "5")];
+    expect(sessionDocs(withShell, {})).toHaveLength(3);
+    expect(sessionDocs(withShell, { "x.md": "/t/shared/plans/x.md" })).toContainEqual({
+      path: "/t/shared/plans/x.md",
+      kind: "plan",
+    });
   });
 
   it("recomputes for a new items array, so an appended event is picked up", () => {

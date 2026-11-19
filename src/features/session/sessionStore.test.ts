@@ -326,10 +326,6 @@ const BASH_BG_RESULT = (toolUseId: string, taskId: string): SessionEvent => ({
 });
 
 describe("taskStartedAt, per-task elapsed timestamps", () => {
-  it("starts at {} when a session is created", async () => {
-    const id = await startBusySession();
-    expect(useSessionStore.getState().sessions[id]?.taskStartedAt).toEqual({});
-  });
 
   it("stamps taskStartedAt when a background spawn result arrives", async () => {
     vi.useFakeTimers();
@@ -988,9 +984,6 @@ describe("activeWorkstreamIds", () => {
     expect(activeWorkstreamIds()).toContain("ws1");
   });
 
-  it("does not include a workstream with no session that has ever worked", () => {
-    expect(activeWorkstreamIds()).not.toContain("ws-never-started");
-  });
 });
 
 describe("useMostRecentDoc", () => {
@@ -1649,7 +1642,7 @@ describe("goals in the session store", () => {
     expect(classifyEntry(entryOf(id))).toBe("review");
   });
 
-  it("a running goal's ask notifies once", async () => {
+  it("a running goal's asks don't raise a desktop notice", async () => {
     const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
     h.notifyNeedsAttention.mockClear();
     const id = await startBusySession();

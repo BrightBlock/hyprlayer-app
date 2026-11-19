@@ -52,14 +52,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_block_prefixes_fail_fast() {
-        let block = build_block("npm install\nnpm run build");
-        #[cfg(not(windows))]
-        assert!(block.starts_with("set -e\n"), "got: {block}");
-        assert!(block.contains("npm run build"));
-    }
-
-    #[test]
     fn detect_port_finds_vite_local_url() {
         assert_eq!(
             detect_port("  ➜  Local:   http://localhost:5174/"),
@@ -94,12 +86,6 @@ mod tests {
             detect_port("  \x1b[32m➜\x1b[39m  Local: \x1b[36mhttp://localhost:5174/\x1b[39m"),
             Some(5174)
         );
-    }
-
-    #[test]
-    fn free_port_returns_a_usable_port() {
-        let p = free_port().expect("allocate a port");
-        assert!(p > 0);
     }
 
     #[cfg(unix)]

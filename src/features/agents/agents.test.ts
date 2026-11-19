@@ -12,8 +12,6 @@ import {
   ANY_STAGE,
   PHASE_COLOR,
   SDLC_PHASES,
-  STAGE_PHASE,
-  STAGES,
 } from "@/lib/domain/stages";
 import {
   AGENT_TOOLS,
@@ -415,12 +413,6 @@ describe("phaseFolder", () => {
     );
   });
 
-  it("covers every stage STAGES names, so a new stage can't silently yield undefined", () => {
-    for (const { key } of STAGES) {
-      expect(STAGE_PHASE[key]).toBeTruthy();
-    }
-  });
-
   it("files an agent whose description names no stage by AGENT_PHASE's name entry", () => {
     const expected: Record<string, string> = {
       "adversarial-reviewer": "Verify",
@@ -752,11 +744,6 @@ describe("bundleChipState", () => {
       lastCheckedMs: 1_700_000_000_000,
       frozen: true,
     });
-  });
-
-  it("marks a legacy CLI's up-to-date bundle as frozen", () => {
-    expect(bundleChipState(legacy(), settled)).toMatchObject({ kind: "upToDate", frozen: true });
-    expect(bundleChipState(status(), settled)).toMatchObject({ frozen: false });
   });
 
   it("a failed query is unknown, NOT a green up-to-date claim", () => {

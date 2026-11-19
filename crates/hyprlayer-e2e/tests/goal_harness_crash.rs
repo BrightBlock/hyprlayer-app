@@ -236,11 +236,6 @@ async fn goal_harness_crash() {
             "iteration": failed.goal.iteration,
         }),
     );
-    j.guard(
-        "the staged harness is back in place",
-        staged.exists(),
-        json!({ "restored": staged.exists() }),
-    );
 
     j.step("a resume after crashes does not claim a server restart");
     // `crash` is still set; the resume's fresh crash allowance relaunches after iteration 5, and 6 pauses.

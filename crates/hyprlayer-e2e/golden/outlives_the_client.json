@@ -2,15 +2,7 @@
   "scenario": "outlives_the_client",
   "steps": [
     {
-      "guards": [
-        {
-          "evidence": {
-            "worktree": "$SANDBOX/home/hyprlayer/worktrees/demo/long-running-$SUFFIX"
-          },
-          "guard": "the workstream exists before any disconnect",
-          "ok": true
-        }
-      ],
+      "guards": [],
       "step": "set up a workstream"
     },
     {

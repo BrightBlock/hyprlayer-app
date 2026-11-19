@@ -455,20 +455,6 @@
       "guards": [
         {
           "evidence": {
-            "archive": "agent_control_denied: agent control refused this: archive_workstream is never open to agents: it ends a workstream",
-            "merge": "agent_control_denied: agent control refused this: merge_workstream_pr is never open to agents: merging is the user's call",
-            "workstreamOpen": true
-          },
-          "guard": "a full agent's merge and archive are refused as never open to agents, and the workstream stays",
-          "ok": true
-        }
-      ],
-      "step": "merge and archive stay excluded"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "exit": 0,
             "listening": false
           },

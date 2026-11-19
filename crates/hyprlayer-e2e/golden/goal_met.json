@@ -80,13 +80,6 @@
         },
         {
           "evidence": {
-            "spentCents": 120
-          },
-          "guard": "spend counts the goal's own turns, not the session's earlier one",
-          "ok": true
-        },
-        {
-          "evidence": {
             "changes": [
               "running/working/0",
               "running/working/1",

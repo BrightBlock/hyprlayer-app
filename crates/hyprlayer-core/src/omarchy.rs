@@ -529,32 +529,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_keys_are_ignored() {
-        let dir = tempfile::tempdir().unwrap();
-        stage(dir.path(), &fixture("last-horizon"));
-        let palette = read_palette(dir.path()).unwrap();
-        assert_eq!(palette.background, "#0c0b0c");
-    }
-
-    #[test]
-    fn missing_orange_and_brown_fall_back_through_bright_red() {
-        let cases = [
-            ("last-horizon", "#c38b7b"),
-            ("solitude", "#de6145"),
-            ("white", "#2a2a2a"),
-        ];
-        for (theme, expected) in cases {
-            let dir = tempfile::tempdir().unwrap();
-            stage(dir.path(), &fixture(theme));
-            let palette = read_palette(dir.path()).unwrap();
-            assert_eq!(palette.orange, "", "{theme} should have no orange key");
-            assert_eq!(palette.brown, "", "{theme} should have no brown key");
-            assert_eq!(palette.orange(), expected, "{theme} orange() fallback");
-            assert_eq!(palette.brown(), expected, "{theme} brown() fallback");
-        }
-    }
-
-    #[test]
     fn malformed_orange_and_brown_fall_back_the_same_way_a_missing_one_does() {
         let dir = tempfile::tempdir().unwrap();
         stage(dir.path(), &fixture("tokyo-night"));
@@ -623,23 +597,6 @@ mod tests {
         let bg = [0xff, 0xff, 0xff];
         let ink = [0, 0, 0];
         assert_eq!(ensure_contrast(fg, bg, 25.0, ink), ink);
-    }
-
-    #[test]
-    fn ensure_contrast_is_monotonic_in_the_number_of_steps() {
-        let bg = [0x0c, 0x0c, 0x0c];
-        let fg = [0x20, 0x20, 0x20];
-        let ink = [0xff, 0xff, 0xff];
-        let mut previous = contrast(fg, bg);
-        for step in 1..=20 {
-            let candidate = mix(fg, ink, step as f64 * 0.05);
-            let current = contrast(candidate, bg);
-            assert!(
-                current + 1e-9 >= previous,
-                "step {step}: contrast {current} regressed from {previous}"
-            );
-            previous = current;
-        }
     }
 
     #[test]

@@ -36,18 +36,6 @@
       "guards": [
         {
           "evidence": {
-            "watching": true
-          },
-          "guard": "watching a worktree is accepted",
-          "ok": true
-        }
-      ],
-      "step": "watch the worktree"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "wrote": true
           },
           "guard": "writing reports a new mtime",

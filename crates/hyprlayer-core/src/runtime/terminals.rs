@@ -1111,6 +1111,7 @@ mod tests {
         assert_eq!(resolve_shell(None), PathBuf::from("/bin/sh"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn login_shell_args_wraps_the_command_for_a_login_shell() {
         assert_eq!(

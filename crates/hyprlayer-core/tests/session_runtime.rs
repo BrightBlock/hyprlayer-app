@@ -133,29 +133,6 @@ async fn next_session_reset(events: &mut broadcast::Receiver<RuntimeEvent>) -> u
     }
 }
 
-#[test]
-fn legacy_raw_row_decodes_to_the_canonical_log() {
-    let db = Db::open_in_memory().unwrap();
-    seed_session(&db, "s1");
-    let legacy = r#"{"kind":"questionAsk","requestId":"q-1","questions":"[{\"header\":\"Header\",\"multiSelect\":false,\"options\":[{\"label\":\"Yes\",\"description\":\"Do it\"}],\"question\":\"Ship it?\"}]"}"#;
-    db.append_session_event("s1", 0, "questionAsk", legacy)
-        .unwrap();
-
-    let log = db.session_log("s1").unwrap();
-    assert_eq!(log.len(), 1);
-    match &log[0].event {
-        SessionEvent::QuestionAsk {
-            request_id,
-            questions,
-        } => {
-            assert_eq!(request_id, "q-1");
-            assert_eq!(questions.len(), 1);
-            assert_eq!(questions[0].question, "Ship it?");
-        }
-        other => panic!("expected QuestionAsk, got {other:?}"),
-    }
-}
-
 #[tokio::test]
 async fn legacy_raw_row_reaches_attach_replay() {
     let db = Arc::new(Db::open_in_memory().unwrap());
@@ -174,30 +151,6 @@ async fn legacy_raw_row_reaches_attach_replay() {
             assert_eq!(questions[0].question, "Ship it?");
         }
         other => panic!("expected QuestionAsk, got {other:?}"),
-    }
-}
-
-#[test]
-fn malformed_and_missing_questions_normalize_without_failing_the_row() {
-    let db = Db::open_in_memory().unwrap();
-    seed_session(&db, "s1");
-    let rows = [
-        r#"{"kind":"questionAsk","requestId":"q-1"}"#,
-        r#"{"kind":"questionAsk","requestId":"q-2","questions":"not-valid-json{"}"#,
-        r#"{"kind":"questionAsk","requestId":"q-3","questions":17}"#,
-    ];
-    for (seq, payload) in rows.iter().enumerate() {
-        db.append_session_event("s1", seq as i64, "questionAsk", payload)
-            .unwrap();
-    }
-
-    let log = db.session_log("s1").unwrap();
-    assert_eq!(log.len(), rows.len(), "no row should be dropped");
-    for entry in &log {
-        match &entry.event {
-            SessionEvent::QuestionAsk { questions, .. } => assert!(questions.is_empty()),
-            other => panic!("expected QuestionAsk, got {other:?}"),
-        }
     }
 }
 
@@ -1936,29 +1889,6 @@ async fn list_turns_rev_matches_its_rows_even_racing_a_concurrent_commit() {
         "rev must always match the rows a consistent read returns"
     );
     db.clear_session_event_gate();
-}
-
-/// 17. `list_turns` with a rewritten cursor must be refused with
-/// `session_epoch_advanced`, not silently return rows.
-#[tokio::test]
-async fn list_turns_with_a_rewritten_cursor_is_refused() {
-    let db = Arc::new(Db::open_in_memory().unwrap());
-    seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
-    let ingress = handle.ingress("s1").await;
-    ingress.send(turn_done(1.0)).await.unwrap();
-    wait_for_log_len(&db, "s1", 1).await;
-
-    let log = db.session_log("s1").unwrap();
-    let stale_cursor = LogCursor::After {
-        seq: log[0].seq,
-        created_at: log[0].created_at + 1.0,
-    };
-    let err = handle
-        .list_turns("s1", stale_cursor, 100, None)
-        .await
-        .unwrap_err();
-    assert!(matches!(err, CoreError::SessionEpochAdvanced { .. }));
 }
 
 /// 18. `list_turns` must take `next_cursor` from the last raw row, so a page

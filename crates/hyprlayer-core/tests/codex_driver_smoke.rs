@@ -401,12 +401,7 @@ async fn interrupt_status_is_recorded() {
     println!("turn_status after interrupt: {turn_status:?}");
     driver.kill();
 
-    assert_ne!(
-        turn_status.as_deref(),
-        Some("completed"),
-        "an interrupted turn must not read as a clean completion, or Phase 2's followup \
-         could fire after a Stop"
-    );
+    assert_eq!(turn_status.as_deref(), Some("interrupted"));
 }
 
 #[tokio::test]

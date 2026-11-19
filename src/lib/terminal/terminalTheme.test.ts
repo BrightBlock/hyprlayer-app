@@ -26,21 +26,6 @@ describe("xtermThemeFromCss", () => {
     document.documentElement.removeAttribute("style");
   });
 
-  it("returns fallback values when CSS vars are absent (jsdom has no real palette)", () => {
-    const theme = xtermThemeFromCss();
-    expect(theme.foreground).toBe("#e8e6e2");
-    expect(theme.background).toBe("#0c0c0c");
-    expect(theme.cursor).toBe("#d97757");
-    expect(theme.red).toBe("#ef5350");
-    expect(theme.green).toBe("#4caf50");
-    expect(theme.yellow).toBe("#f0b13a");
-    expect(theme.blue).toBe("#60a5fa");
-    expect(theme.cyan).toBe("#7dd3fc");
-    expect(theme.magenta).toBe("#d97757");
-    expect(theme.white).toBe("#e8e6e2");
-    expect(theme.brightBlack).toBe("#a8a6a2");
-  });
-
   it("reads CSS custom properties when explicitly set on documentElement", () => {
     document.documentElement.style.setProperty("--color-ink", "#aabbcc");
     document.documentElement.style.setProperty("--color-surface", "#112233");
@@ -52,8 +37,11 @@ describe("xtermThemeFromCss", () => {
     expect(theme.white).toBe("#aabbcc");
   });
 
-  it("fills all 16 ANSI slots with their documented fallback when no vars are set", () => {
+  it("fills the base colors and all 16 ANSI slots with their documented fallback when no vars are set", () => {
     const theme = xtermThemeFromCss();
+    expect(theme.foreground).toBe("#e8e6e2");
+    expect(theme.background).toBe("#0c0c0c");
+    expect(theme.cursor).toBe("#d97757");
     expect(theme.black).toBe("#2e3436");
     expect(theme.brightRed).toBe("#ef2929");
     expect(theme.brightGreen).toBe("#8ae234");

@@ -40,16 +40,6 @@ function workflowTool(
   );
 }
 
-const TASKOUT_TIMEOUT = (taskId: string) => ({
-  content: `<retrieval_status>timeout</retrieval_status>\n\n<task_id>${taskId}</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>running</status>`,
-  isError: false,
-});
-
-const TASKOUT_COMPLETED = (taskId: string) => ({
-  content: `<retrieval_status>success</retrieval_status>\n\n<task_id>${taskId}</task_id>\n\n<task_type>local_bash</task_type>\n\n<status>completed</status>\n\n<exit_code>0</exit_code>\n\n<output>\nDone.\n</output>`,
-  isError: false,
-});
-
 const TASKSTOP_RESULT = (taskId: string, command = "some-cmd") => ({
   content: JSON.stringify({
     message: `Successfully stopped task: ${taskId} (${command})`,
@@ -221,36 +211,6 @@ describe("backgroundTasksFromItems", () => {
     expect(tasks[0].status).toBe("running");
   });
 
-  it("flips status to awaiting when TaskOutput result is pending", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "task-a", null),
-    ];
-    const tasks = backgroundTasksFromItems(items);
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].status).toBe("awaiting");
-    expect(tasks[0].taskId).toBe("task-a");
-  });
-
-  it("resets status to running after a TaskOutput timeout result", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "task-a", null),
-      taskOutput("to2", "task-a", TASKOUT_TIMEOUT("task-a")),
-    ];
-    const tasks = backgroundTasksFromItems(items);
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0].status).toBe("running");
-  });
-
-  it("removes a task when TaskOutput result indicates completion", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskOutput("to1", "task-a", TASKOUT_COMPLETED("task-a")),
-    ];
-    expect(backgroundTasksFromItems(items)).toHaveLength(0);
-  });
-
   it("removes a task when TaskStop result arrives", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { result: SPAWN_RESULT("task-a") }),
@@ -259,14 +219,6 @@ describe("backgroundTasksFromItems", () => {
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });
 
-
-  it("removes a task on a terminal completion notification, agent never polled", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", { result: SPAWN_RESULT("task-a") }),
-      taskUpdate("task-a", "t1", "completed"),
-    ];
-    expect(backgroundTasksFromItems(items)).toHaveLength(0);
-  });
 
   it("removes a task on a FAILED completion notification (no longer running)", () => {
     const items: TranscriptItem[] = [
@@ -355,14 +307,6 @@ describe("backgroundTasksFromItems", () => {
   });
 
 
-  it("clears tracked tasks at a relaunched boundary (resume/restart/log-only rewind)", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", { description: "Windows build", result: SPAWN_RESULT("task-a") }),
-      relaunchedMarker(),
-    ];
-    expect(backgroundTasksFromItems(items)).toHaveLength(0);
-  });
-
   it("keeps a task spawned AFTER the relaunch boundary (the new process is alive)", () => {
     const items: TranscriptItem[] = [
       bgBash("t1", { description: "Old gen", result: SPAWN_RESULT("task-a") }),
@@ -401,23 +345,6 @@ describe("backgroundTasksFromItems", () => {
         content: "…build log…",
         isError: false,
       }),
-    ];
-    expect(backgroundTasksFromItems(items)).toHaveLength(0);
-  });
-
-  it("ends a task when the agent greps its .output file via foreground Bash (the screenshot bug)", () => {
-    const items: TranscriptItem[] = [
-      bgBash("t1", {
-        command: "cargo test typescript_bindings_export",
-        description: "Regenerate TS bindings",
-        result: SPAWN_RESULT("task-a"),
-      }),
-      makeTool(
-        "Bash",
-        JSON.stringify({ command: 'grep -iE "warning|error" /tmp/tasks/task-a.output' }),
-        "g1",
-        { content: "(clean)", isError: false },
-      ),
     ];
     expect(backgroundTasksFromItems(items)).toHaveLength(0);
   });

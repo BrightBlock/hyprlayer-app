@@ -1,7 +1,7 @@
 //! A person stays in charge of a goal: pausing waits for the running iteration,
 //! a message or a client restart takes the session back, stopping interrupts and
-//! kills only a harness that ignores it, and archiving or killing what a goal
-//! runs on ends the goal instead of leaving it to run on nothing.
+//! kills only a harness that ignores it, and archiving what a goal runs on ends
+//! the goal instead of leaving it to run on nothing (a killed session: goal_budget).
 //!
 //! The harness is `goal_stub`'s claude stand-in; nothing here covers the real binary.
 #![cfg(unix)]
@@ -678,45 +678,6 @@ async fn goal_user_stop() {
         json!({
             "interrupts": interrupts(&deaf_dir.join("stdin.log")),
             "interruptWasLast": last_line_is_interrupt(&deaf_dir.join("stdin.log")),
-        }),
-    );
-
-    j.step("a user kill ends the goal");
-    let killed = new_session(
-        &mut j,
-        &client,
-        &sandbox,
-        &ws,
-        "$SESSION_KILL",
-        &[("slow", "2")],
-        true,
-    )
-    .await;
-    let goal = start(
-        &mut j,
-        &client,
-        &killed,
-        spec("E2E_GOAL_KILL", NEVER, 20),
-        "$GOAL_KILL",
-    )
-    .await;
-    wait_sent(&client, &goal.id, 1).await;
-    j.call(
-        &client,
-        Request::KillSession {
-            session_id: killed.clone(),
-        },
-    )
-    .await
-    .expect("kill_session");
-    let ended = wait_ended(&client, &goal.id).await;
-    j.guard(
-        "killing the session ends the goal with the session",
-        ended.goal.status == GoalStatus::Stopped
-            && ended.goal.end_reason == Some(GoalEndReason::SessionEnded),
-        json!({
-            "status": ended.goal.status.as_str(),
-            "endReason": ended.goal.end_reason.map(GoalEndReason::as_str),
         }),
     );
 

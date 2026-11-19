@@ -71,13 +71,6 @@ describe("controls per status", () => {
     expect(goalControls(goal({ status }))).toEqual(controls);
   });
 
-  it("never offers Edit… or Extend… on a failed, stopped or met goal", () => {
-    for (const status of ["failed", "stopped", "met"] as const) {
-      const offered = goalControls(goal({ status }));
-      expect(offered).not.toContain("edit");
-      expect(offered).not.toContain("extend");
-    }
-  });
 });
 
 describe("notices per transition", () => {

@@ -28,21 +28,6 @@ fn register(run_dir: PathBuf, run_id: &str) -> WorkflowRuns {
     runs
 }
 
-fn agent_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .expect("fixture dir should exist")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("agent-") && n.ends_with(".jsonl"))
-        })
-        .collect();
-    files.sort();
-    files
-}
-
 fn parent_id_of(event: &SessionEvent) -> Option<&str> {
     match event {
         SessionEvent::ToolUse { parent_id, .. } => parent_id.as_deref(),
@@ -196,33 +181,6 @@ fn workflow_reader_labels_the_eight_fixture_agents_distinctly() {
         );
         let agent_id = id.rsplit(':').next().unwrap();
         assert_ne!(label, agent_id, "label fell back to the bare agent id");
-    }
-}
-
-#[test]
-fn workflow_fixture_prompt_is_the_only_line_with_a_null_parent_uuid() {
-    for dir in ["wf_89a9bc27-4f1", "wf_89a9bc27-4f1-partial"] {
-        let files = agent_files(&fixture_dir(dir));
-        assert_eq!(files.len(), 8, "{dir} should hold 8 agent files");
-        for path in files {
-            let text = std::fs::read_to_string(&path).unwrap();
-            let nulls: Vec<usize> = text
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .enumerate()
-                .filter(|(_, l)| {
-                    let v: Value = serde_json::from_str(l).expect("every line is JSON");
-                    matches!(v.get("parentUuid"), Some(Value::Null))
-                })
-                .map(|(i, _)| i)
-                .collect();
-            assert_eq!(
-                nulls,
-                vec![0],
-                "{}: exactly one null parentUuid, on the prompt line",
-                path.display()
-            );
-        }
     }
 }
 

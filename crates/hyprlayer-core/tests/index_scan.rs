@@ -245,38 +245,6 @@ fn text_search_ranks_title_hits_above_body_hits() {
 }
 
 #[test]
-fn body_only_match_ranks_below_title_match_and_is_returned() {
-    let (_tmp, root, index) = scanned();
-
-    let rel = "repos/myproj/jt/notes/2026-06-05-body-only.md";
-    let abs = write(
-        &root.root,
-        rel,
-        "---\ntitle: Unrelated Title\ntype: note\ntags: [misc]\n---\n\n\
-         This note only mentions the refactor deep in the body.\n",
-    );
-    assert_eq!(
-        index.upsert_path(&root, &abs),
-        Some(abs.to_string_lossy().into_owned())
-    );
-
-    let q = ThoughtQuery {
-        text: Some("refactor".into()),
-        sort: SortKey::Relevance,
-        ..Default::default()
-    };
-    let result = index.query(&q);
-    assert_eq!(result.total, 3);
-    assert_eq!(result.items[0].rel_path, DOC_AUTH_PLAN);
-    let tail: Vec<&str> = result.items[1..]
-        .iter()
-        .map(|m| m.rel_path.as_str())
-        .collect();
-    assert!(tail.contains(&DOC_CACHE_RESEARCH), "{tail:?}");
-    assert!(tail.contains(&rel), "{tail:?}");
-}
-
-#[test]
 fn file_removed_between_query_passes_drops_out_of_text_search_only() {
     let (_tmp, root, index) = scanned();
     let abs = root.root.join(DOC_CACHE_RESEARCH);

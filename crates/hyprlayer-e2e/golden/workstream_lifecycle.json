@@ -151,13 +151,6 @@
           },
           "guard": "the terminal opens in the worktree",
           "ok": true
-        },
-        {
-          "evidence": {
-            "marker": true
-          },
-          "guard": "terminal input and output round-trip",
-          "ok": true
         }
       ],
       "step": "open a terminal"

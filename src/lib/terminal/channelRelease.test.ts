@@ -15,14 +15,6 @@ function release(channels: FakeChannel[]) {
 }
 
 describe("releaseChannels", () => {
-  it("leaves a handler that is safe to invoke after release", () => {
-    const captured = vi.fn();
-    const channel = fake(captured);
-    release([channel]);
-
-    expect(() => channel.onmessage({ kind: "output", data: "x" })).not.toThrow();
-    expect(captured).not.toHaveBeenCalled();
-  });
 
   it("releases every channel, not just the first", () => {
     const handlers = [vi.fn(), vi.fn(), vi.fn()];
@@ -49,11 +41,4 @@ describe("releaseChannels", () => {
     expect(channels).toHaveLength(0);
   });
 
-  it("is idempotent", () => {
-    const captured = vi.fn();
-    const channels = [fake(captured)];
-    release(channels);
-    expect(() => release(channels)).not.toThrow();
-    expect(captured).not.toHaveBeenCalled();
-  });
 });

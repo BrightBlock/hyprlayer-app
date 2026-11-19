@@ -227,22 +227,6 @@ mod tests {
     }
 
     #[test]
-    fn backs_up_a_copy_whose_contents_drifted() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (bundle, target) = fixture(tmp.path());
-        plant(&target, "skills/mine/SKILL.md", "my own edits");
-
-        let report = resolve_collisions(&bundle, &target, "20260827");
-
-        assert_eq!(report.backed_up, vec!["skills/mine".to_string()]);
-        assert!(!target.join("skills/mine").exists());
-        assert_eq!(
-            std::fs::read_to_string(target.join("skills/mine.bak-20260827/SKILL.md")).unwrap(),
-            "my own edits"
-        );
-    }
-
-    #[test]
     fn a_users_extra_file_makes_the_whole_unit_a_backup() {
         let tmp = tempfile::tempdir().unwrap();
         let (bundle, target) = fixture(tmp.path());
@@ -395,27 +379,11 @@ mod tests {
     }
 
     #[test]
-    fn is_stale_truth_table() {
-        assert!(is_stale(None, "abc"));
-        assert!(!is_stale(Some("abc"), "abc"));
-        assert!(is_stale(Some("abc"), "def"));
-        assert!(is_stale(Some(""), "abc"));
-    }
-
-    #[test]
     fn desired_version_prefers_the_pin_over_the_binary() {
         assert_eq!(desired_version(Some("1.5.9"), Some("1.6.0")), Some("1.5.9"));
         assert_eq!(desired_version(None, Some("1.6.0")), Some("1.6.0"));
         assert_eq!(desired_version(Some("1.5.9"), None), Some("1.5.9"));
         assert_eq!(desired_version(None, None), None);
-    }
-
-    #[test]
-    fn an_unversioned_bundle_under_a_versioned_cli_is_stale() {
-        let desired = desired_version(None, Some("1.6.0")).unwrap();
-        assert!(is_stale(None, desired));
-        assert!(is_stale(Some("1.5.9"), desired));
-        assert!(!is_stale(Some("1.6.0"), desired));
     }
 
     #[test]

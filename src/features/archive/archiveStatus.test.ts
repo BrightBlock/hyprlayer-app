@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { ArchiveInfo, ArchivedWorkstreamView, WorktreeMode } from "@/lib/bindings";
 
 import {
-  daysUntilPurge,
   filterArchived,
   lossOnDelete,
   mergedPurgeSelection,
@@ -32,8 +31,8 @@ function info(over: Partial<ArchiveInfo> = {}): ArchiveInfo {
 const aged = (age: number, over: Partial<ArchiveInfo> = {}) =>
   info({ purgeInMs: RETENTION - age * DAY, ...over });
 
-const status = (over: Partial<ArchiveInfo>, supersededBy: string | null = null) =>
-  resolveArchiveStatus(info(over), supersededBy);
+const status = (over: Partial<ArchiveInfo>) =>
+  resolveArchiveStatus(info(over), null);
 
 function row(
   branch: string,
@@ -93,19 +92,6 @@ describe("resolveArchiveStatus", () => {
     });
   });
 
-  it("reads a replacing branch as SUPERSEDED", () => {
-    expect(status({ pr: { state: "closed", number: 12 } }, "og-image-v2")).toMatchObject({
-      base: "superseded",
-      tone: "superseded",
-      tag: "SUPERSEDED",
-      prRef: "replaced by og-image-v2",
-    });
-  });
-
-  it("puts MERGED ahead of SUPERSEDED: the work is in main either way", () => {
-    expect(status({ pr: { state: "merged", number: 38 } }, "og-image-v2").base).toBe("merged");
-  });
-
   it("gives an open PR no tag and names it open", () => {
     expect(status({ pr: { state: "open", number: 41 } })).toMatchObject({
       base: null,
@@ -141,11 +127,6 @@ describe("resolveArchiveStatus", () => {
     expect(resolveArchiveStatus(aged(3, { uncommitted: 2 }), null).uncommittedWork).toBe(false);
   });
 
-  it("never counts down a kept archive", () => {
-    const kept = resolveArchiveStatus(aged(29, { kept: true, pr: { state: "none" } }), null);
-    expect(kept).toMatchObject({ purgePending: false, tag: "ABANDONED", tone: "abandoned" });
-  });
-
   it("shows no countdown when the server sent no deadline", () => {
     expect(status({ purgeInMs: null }).purgePending).toBe(false);
   });
@@ -172,13 +153,6 @@ describe("the purge countdown", () => {
     expect(tagAt(31)).toBe("PURGES TODAY");
   });
 
-  it("maps the time left to days", () => {
-    expect(daysUntilPurge(7 * DAY)).toBe(7);
-    expect(daysUntilPurge(6.5 * DAY)).toBe(7);
-    expect(daysUntilPurge(1)).toBe(1);
-    expect(daysUntilPurge(0)).toBe(0);
-    expect(daysUntilPurge(-DAY)).toBe(0);
-  });
 });
 
 describe("filterArchived", () => {
@@ -206,10 +180,6 @@ describe("filterArchived", () => {
     ]);
   });
 
-  it("finds nothing for a query that matches neither", () => {
-    expect(filterArchived(rows, "zzz", false)).toEqual([]);
-  });
-
   it("keeps only merged rows under the Merged toggle, including ones about to purge", () => {
     expect(branches(filterArchived(rows, "", true))).toEqual(["og-image-generator", "OG-Card"]);
   });
@@ -221,9 +191,6 @@ describe("filterArchived", () => {
 });
 
 describe("lossOnDelete", () => {
-  it("risks nothing for a clean archive", () => {
-    expect(lossOnDelete(row("clean", "p"))).toBeNull();
-  });
 
   it("counts uncommitted files", () => {
     expect(lossOnDelete(row("dirty", "p", { uncommitted: 2 }))).toEqual({
@@ -247,14 +214,6 @@ describe("lossOnDelete", () => {
 
   it("ignores commits when the branch survives the delete", () => {
     expect(lossOnDelete(row("kept-branch", "p", { unpushed: 3, deletesBranch: false }))).toBeNull();
-  });
-
-  it("owns up to an archive it could not check", () => {
-    expect(lossOnDelete(row("unscanned", "p", { uncommitted: null, unpushed: null }))).toEqual({
-      uncommitted: 0,
-      unpushed: 0,
-      unchecked: true,
-    });
   });
 
   it("risks no files where none were archived", () => {

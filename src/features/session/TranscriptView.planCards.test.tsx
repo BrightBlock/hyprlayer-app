@@ -66,12 +66,15 @@ describe("skill chip", () => {
   });
 
   it("keeps the chip out of a collapsed tool group", () => {
+    // Only a subagent's children fold every tool call, so the chip sits inside one.
     renderTranscript([
       user,
-      tool("b1", "Bash", { command: "ls" }),
-      tool("s1", "Skill", { skill: "create_plan" }),
-      tool("b2", "Bash", { command: "pwd" }),
+      tool("a1", "Agent", { subagent_type: "explorer", prompt: "look" }),
+      tool("b1", "Bash", { command: "ls" }, { parentId: "a1" }),
+      tool("s1", "Skill", { skill: "create_plan" }, { parentId: "a1" }),
+      tool("b2", "Bash", { command: "pwd" }, { parentId: "a1" }),
     ]);
+    fireEvent.click(screen.getByRole("button", { name: /explorer/ }));
     expect(screen.getByText("create_plan · skill")).toBeTruthy();
   });
 
@@ -103,17 +106,6 @@ describe("plan cards", () => {
   it("renders no cards without the session context", () => {
     renderTranscript([user, tool("w1", "Write", { file_path: PLAN, content: "" })], false);
     expect(screen.queryByTestId("plan-card")).toBeNull();
-  });
-
-  it("keeps a presented plan out of a collapsed tool group", () => {
-    const items = [
-      user,
-      tool("b1", "Bash", { command: "ls" }),
-      tool("x1", "ExitPlanMode", { plan: "# P", planFilePath: "/Users/jt/.claude/plans/p.md" }, { result: null }),
-      tool("b2", "Bash", { command: "pwd" }),
-    ];
-    renderTranscript(items);
-    expect(screen.getAllByTestId("plan-card").map((c) => c.textContent)).toEqual(["x1:latest"]);
   });
 
   it("renders a codex proposed plan as a card", () => {

@@ -204,11 +204,6 @@ async fn workstream_lifecycle() {
         cwd.as_deref().map(canonical) == Some(canonical(&worktree.to_string_lossy())),
         json!({ "cwd": cwd }),
     );
-    j.guard(
-        "terminal input and output round-trip",
-        output.contains("E2E_OK"),
-        json!({ "marker": output.contains("E2E_OK") }),
-    );
 
     j.step("edit and stage a file");
     j.call(

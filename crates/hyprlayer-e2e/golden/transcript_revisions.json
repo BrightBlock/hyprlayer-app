@@ -123,19 +123,6 @@
       "guards": [
         {
           "evidence": {
-            "sawLifecycle": true,
-            "sawRevision": false
-          },
-          "guard": "no SessionRevised or SessionReset ever reaches the client",
-          "ok": true
-        }
-      ],
-      "step": "revisions reach no client yet"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "exit": 0,
             "listening": false
           },

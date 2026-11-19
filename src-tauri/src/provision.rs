@@ -659,14 +659,27 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_server_that_keeps_answering_fails_the_stop() {
-        let script = stop_script("0.8.3");
-        // Only "nothing is running" short-circuits to success.
-        assert!(script.starts_with("\"$HOME/.hyprlayer/server/0.8.3/hyprlayer-server\" status"));
-        assert!(script.contains("|| exit 0;"));
-        assert!(!script.contains("stop >/dev/null 2>&1 || exit 0"));
-        assert!(script.contains("exit 1"));
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        let server = home.path().join(".hyprlayer/server/0.8.3/hyprlayer-server");
+        // `status` always succeeds; a no-op `sleep` keeps the 10s wait instant.
+        for (path, body) in [(&server, "exit 0"), (&bin.join("sleep"), "exit 0")] {
+            write(path, &format!("#!/bin/sh\n{body}\n"));
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let out = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(stop_script("0.8.3"))
+            .env("HOME", home.path())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("did not stop within 10s"));
     }
 
     #[test]

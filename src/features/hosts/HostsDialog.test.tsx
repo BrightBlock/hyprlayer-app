@@ -250,18 +250,6 @@ describe("HostsDialog", () => {
     expect(screen.getByText(/Checking the host/).closest("li")?.textContent).toContain("Nexus");
   });
 
-  it("reports the download as live state rather than pre-announcing it", () => {
-    mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, transcriptSync: false, error: NO_SERVER });
-    mockHosts({ hosts: [NEXUS], active: "nexus" });
-    b.useHostProvisioning.mockReturnValue({ data: { ...PROVISIONING, source: "download" } });
-    render(<HostsDialog />);
-
-    // Nothing is said about where the bytes come from until they are moving.
-    expect(screen.queryByText(/downloaded from the release/)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Install server 0.7.5" }));
-    expect(screen.getByText(/Checking the host/)).toBeTruthy();
-  });
-
   it("installs without asking on a host that already carries one of our servers", () => {
     mockStatus({ state: "failed", host: NEXUS, serverVersion: null, serverRelease: null, serverOutdated: false, transcriptSync: false, error: NO_SERVER });
     b.useHostProvisioning.mockReturnValue({

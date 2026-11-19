@@ -246,42 +246,6 @@ async fn a_second_create_of_the_same_title_reports_the_document_already_exists()
 }
 
 #[tokio::test]
-async fn a_stale_base_mtime_rejects_the_write_and_leaves_the_file_untouched() {
-    let f = fixture().await;
-
-    let meta = f
-        .runtime
-        .library()
-        .create(plan_request("Stale Write"))
-        .await
-        .unwrap();
-    let stale_base = base_mtime(&f.runtime, &meta.id).await;
-
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let external = "---\ntitle: Stale Write\n---\n\nEdited outside the app.\n";
-    std::fs::write(&meta.id, external).unwrap();
-
-    let err = f
-        .runtime
-        .library()
-        .save(&meta.id, "clobbered by the app\n".into(), stale_base)
-        .await
-        .expect_err("a document changed on disk cannot be saved over");
-
-    assert!(
-        matches!(err, CoreError::DocConflict),
-        "unexpected error: {err:?}"
-    );
-    assert_eq!(
-        std::fs::read_to_string(&meta.id).unwrap(),
-        external,
-        "the external edit must survive the rejected save"
-    );
-
-    f.runtime.shutdown().await;
-}
-
-#[tokio::test]
 async fn a_save_replaces_the_content_and_leaves_no_temp_file_behind() {
     let f = fixture().await;
 

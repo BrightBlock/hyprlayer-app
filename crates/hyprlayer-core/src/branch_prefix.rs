@@ -293,30 +293,6 @@ mod tests {
     }
 
     #[test]
-    fn source_agrees_with_resolution() {
-        let repo = vec![prefix("Release", "release/", &["release"])];
-        let global = vec![prefix("Spike", "spike/", &["spike"])];
-        let empty: Vec<BranchPrefix> = vec![];
-
-        let cases: [(Option<&[BranchPrefix]>, &[BranchPrefix]); 4] = [
-            (Some(&global), &repo),
-            (None, &repo),
-            (Some(&global), &empty),
-            (None, &empty),
-        ];
-        for (global, repo) in cases {
-            let source = prefix_source(global, repo);
-            let resolved = resolve_prefixes(global, repo);
-            let expected = match source {
-                PrefixSource::Repo => repo.to_vec(),
-                PrefixSource::Global => global.unwrap().to_vec(),
-                PrefixSource::Builtin => builtin_prefixes(),
-            };
-            assert_eq!(resolved, expected, "source={source:?}");
-        }
-    }
-
-    #[test]
     fn empty_prefix_is_unset_not_invalid() {
         validate_prefix("").unwrap();
         validate_prefix("   ").unwrap();

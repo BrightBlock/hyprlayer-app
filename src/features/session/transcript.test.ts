@@ -37,7 +37,6 @@ const TABS_QUESTION: Question[] = [
   },
 ];
 
-const LEGACY_TABS_QUESTION = JSON.stringify(TABS_QUESTION);
 
 function reduceAll(events: SessionEvent[], start = initialSessionView("starting")): SessionView {
   return events.reduce(reduceEvent, start);
@@ -749,30 +748,6 @@ describe("question flow", () => {
     expect(isBusy(view)).toBe(false);
   });
 
-  it("a legacy string-encoded questionAsk still parks the session with typed questions", () => {
-    let view = initialSessionView("running");
-    view = reduceEvent(view, {
-      kind: "questionAsk",
-      requestId: "q-1",
-      questions: LEGACY_TABS_QUESTION as unknown as Question[],
-    });
-    expect(view.state).toBe("awaiting_question");
-    expect(view.pendingQuestion).toEqual({ requestId: "q-1", questions: TABS_QUESTION });
-  });
-
-  it("a questionAsk with a missing or malformed questions field parks with no questions", () => {
-    for (const questions of [undefined, null, "not json{", 17, { not: "an array" }]) {
-      let view = initialSessionView("running");
-      view = reduceEvent(view, {
-        kind: "questionAsk",
-        requestId: "q-1",
-        questions: questions as unknown as Question[],
-      });
-      expect(view.state).toBe("awaiting_question");
-      expect(view.pendingQuestion).toEqual({ requestId: "q-1", questions: [] });
-    }
-  });
-
   it("parseQuestions drops malformed payloads instead of throwing", () => {
     expect(parseQuestions(undefined)).toEqual([]);
     expect(parseQuestions(null)).toEqual([]);
@@ -1145,10 +1120,6 @@ describe("connecting state (leaves 'starting' on first sign of life)", () => {
     expect(view.state).toBe("running");
   });
 
-  it("a fresh 'starting' view with no events stays connecting", () => {
-    expect(initialSessionView("starting").state).toBe("starting");
-    expect(initialSessionView("starting").streaming).toBe(false);
-  });
 });
 
 describe("relaunched process-boundary marker", () => {

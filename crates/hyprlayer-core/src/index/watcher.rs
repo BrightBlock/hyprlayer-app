@@ -91,19 +91,7 @@ pub fn watch_worktree(
     .map_err(notify_to_core)?;
     let repo = git2::Repository::open(worktree).ok();
     let tracked = repo.as_ref().map(tracked_dirs).unwrap_or_default();
-    let prune = |dir: &Path| {
-        if dir.file_name().is_some_and(|n| n == ".git") {
-            return false;
-        }
-        let rel = dir.strip_prefix(worktree).unwrap_or(dir);
-        if tracked.contains(rel) {
-            return false;
-        }
-        is_build_noise(rel)
-            || repo
-                .as_ref()
-                .is_some_and(|r| r.is_path_ignored(dir).unwrap_or(false))
-    };
+    let prune = |dir: &Path| prunes_worktree_dir(worktree, repo.as_ref(), &tracked, dir);
     apply_plan(&mut debouncer, watch_plan(worktree, &prune))?;
     if worktree.join(".git").is_file() && git_dir.is_dir() {
         debouncer
@@ -177,6 +165,22 @@ fn apply_plan(
         debouncer.watch(&path, mode).map_err(notify_to_core)?;
     }
     Ok(())
+}
+
+fn prunes_worktree_dir(
+    worktree: &Path,
+    repo: Option<&git2::Repository>,
+    tracked: &HashSet<PathBuf>,
+    dir: &Path,
+) -> bool {
+    if dir.file_name().is_some_and(|n| n == ".git") {
+        return false;
+    }
+    let rel = dir.strip_prefix(worktree).unwrap_or(dir);
+    if tracked.contains(rel) {
+        return false;
+    }
+    is_build_noise(rel) || repo.is_some_and(|r| r.is_path_ignored(dir).unwrap_or(false))
 }
 
 fn tracked_dirs(repo: &git2::Repository) -> HashSet<PathBuf> {
@@ -327,28 +331,6 @@ pub(crate) fn notify_to_core(err: notify::Error) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::BackendKind;
-
-    fn root_at(path: &str) -> ThoughtsRoot {
-        ThoughtsRoot {
-            root: PathBuf::from(path),
-            repos_dir: "repos".into(),
-            global_dir: "global".into(),
-            backend: BackendKind::Git,
-            profile: None,
-        }
-    }
-
-    #[test]
-    fn watch_skips_missing_roots() {
-        let index = Arc::new(ThoughtsIndex::new());
-        let handle = watch_roots(
-            index,
-            vec![root_at("/definitely/does/not/exist/hyprlayer-test")],
-            Box::new(|_| {}),
-        );
-        assert!(handle.is_ok());
-    }
 
     #[test]
     #[ignore = "fs-watcher timing; run explicitly with --ignored"]
@@ -520,10 +502,7 @@ mod tests {
         assert!(tracked.contains(Path::new("vendor")));
         assert!(!tracked.contains(Path::new("node_modules")));
 
-        let prune = |dir: &Path| {
-            let rel = dir.strip_prefix(&wt).unwrap_or(dir);
-            !tracked.contains(rel) && repo.is_path_ignored(dir).unwrap_or(false)
-        };
+        let prune = |dir: &Path| prunes_worktree_dir(&wt, Some(&repo), &tracked, dir);
         let plan = plan_of(&wt, &prune);
         assert!(plan.contains(&("vendor".to_string(), true)), "{plan:?}");
         assert!(
@@ -545,7 +524,8 @@ mod tests {
         assert!(!is_build_noise(Path::new("vendor")));
         assert!(!is_build_noise(Path::new(".venv")));
 
-        let prune = |dir: &Path| repo.is_path_ignored(dir).unwrap_or(false);
+        let tracked = tracked_dirs(&repo);
+        let prune = |dir: &Path| prunes_worktree_dir(&wt, Some(&repo), &tracked, dir);
         let plan = plan_of(&wt, &prune);
         assert!(plan.contains(&("src".to_string(), true)), "{plan:?}");
         assert!(

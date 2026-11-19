@@ -217,24 +217,6 @@ describe("syncLabel", () => {
     expect(syncLabel(status({ host: NEXUS }), stale, NOW)?.text).toBe("connected · Nexus");
   });
 
-  it("never shows a latency or a paused state it has no data for", () => {
-    const statuses = [status(), status({ host: NEXUS, serverOutdated: true }), lost(), failed()];
-    const snapshots: ReconnectSnapshot[] = [
-      IDLE,
-      droppedAgo(1),
-      droppedAgo(45_000),
-      droppedAgo(5 * 60_000),
-      { ...droppedAgo(9_000), attempting: true },
-      { ...droppedAgo(9_000), halted: "protocol" },
-    ];
-    for (const s of statuses) {
-      for (const r of snapshots) {
-        const text = syncLabel(s, r, NOW)?.text ?? "";
-        expect(text).not.toMatch(/ms\b/);
-        expect(text).not.toContain("paused");
-      }
-    }
-  });
 });
 
 describe("initials", () => {

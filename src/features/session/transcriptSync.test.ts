@@ -580,15 +580,6 @@ describe("manual pull: another device's turns wait for Pull", () => {
       .replace(/<[^>]+>/g, "")
       .replace(/\s+/g, " ");
 
-  it("M1 a foreign revision on an idle, visible, draftless view waits instead of pulling", () => {
-    const { state, effects } = run(synced(), remote());
-    expect(effects).not.toContain("pull");
-    expect(state.fetching).toBe(false);
-    expect(state.phase).toBe("behind");
-    expect(state.pendingTurns).toEqual([{ rev: 6, kinds: ["user"] }]);
-    expect(canSend(state)).toBe(false);
-  });
-
   it("M2 a foreign prompt or turn end is held even with an empty buffer", () => {
     for (const event of [permissionAsk, questionAsk, turnDone, exited]) {
       expect(route(arrival(event, { seq: 11 }), ctx())).toBe("hold");

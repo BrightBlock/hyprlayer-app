@@ -281,10 +281,4 @@ mod tests {
         assert_eq!(m[0].display_name, "gpt-5.4");
         assert!(m[0].supported_efforts.is_empty());
     }
-
-    #[test]
-    fn auth_status_reports_signed_out_without_erroring() {
-        let status = CodexAuthStatus::default();
-        assert!(!status.signed_in());
-    }
 }

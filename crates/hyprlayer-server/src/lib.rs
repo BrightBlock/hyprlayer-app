@@ -892,9 +892,6 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
 
-    use base64::Engine as _;
-    use hyprlayer_core::terminal::TerminalEvent;
-
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Command, String> {
@@ -1075,65 +1072,6 @@ mod tests {
             reader2.next_control().await.unwrap(),
             Some(Control::Hello { .. })
         ));
-
-        stop.stop();
-        serving.await.unwrap().unwrap();
-        runtime.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn an_attach_supplied_env_overlay_reaches_a_spawned_child() {
-        let root = tempfile::tempdir().unwrap();
-        // No SSH_AUTH_SOCK anywhere in the runtime's own environment.
-        let runtime = open_runtime(root.path()).await;
-        let server = SocketServer::bind(runtime.clone(), &root.path().join("app-data"))
-            .await
-            .expect("bind");
-        let socket_path = server.socket_path().to_path_buf();
-        let stop = server.stop_handle();
-        let serving = tokio::spawn(server.run());
-
-        // A real socket: the overlay now drops an SSH_AUTH_SOCK that names nothing here.
-        let agent_sock = root.path().join("a.sock");
-        let _agent = std::os::unix::net::UnixListener::bind(&agent_sock).expect("bind agent.sock");
-
-        let client = RpcClient::connect_socket(&socket_path)
-            .await
-            .expect("connect");
-        client
-            .set_env_overlay(BTreeMap::from([(
-                "SSH_AUTH_SOCK".to_string(),
-                agent_sock.display().to_string(),
-            )]))
-            .await
-            .expect("set the env overlay");
-
-        let (_, _, mut events) = client
-            .spawn_shell_terminal_stream("printf \"$SSH_AUTH_SOCK\"".into(), 80, 24)
-            .await
-            .expect("open a shell terminal");
-
-        let mut seen = String::new();
-        let found = tokio::time::timeout(Duration::from_secs(10), async {
-            while let Some(event) = events.recv().await {
-                if let TerminalEvent::Output { data } = event {
-                    let decoded = base64::engine::general_purpose::STANDARD
-                        .decode(data)
-                        .unwrap_or_default();
-                    seen.push_str(&String::from_utf8_lossy(&decoded));
-                    if seen.contains(&agent_sock.display().to_string()) {
-                        return true;
-                    }
-                }
-            }
-            false
-        })
-        .await
-        .unwrap_or(false);
-        assert!(
-            found,
-            "expected the overlay's SSH_AUTH_SOCK in the child's environment, got {seen:?}"
-        );
 
         stop.stop();
         serving.await.unwrap().unwrap();

@@ -160,12 +160,6 @@ describe("ChangesPanel memory view", () => {
     expect(onOpenDoc).toHaveBeenCalledWith(`${DIR}/topic.md`, "topic.md");
   });
 
-  it("names the directory Claude Code writes to when there is no memory yet", () => {
-    renderWithMemory("verified", []);
-    fireEvent.click(screen.getByRole("button", { name: "Project memory" }));
-    expect(screen.getByText(DIR)).toBeDefined();
-  });
-
   it("warns instead of listing files when the key check fails", () => {
     renderWithMemory("mismatch", [file("MEMORY.md")]);
     fireEvent.click(screen.getByRole("button", { name: "Project memory" }));

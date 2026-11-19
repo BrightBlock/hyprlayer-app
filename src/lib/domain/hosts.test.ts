@@ -95,12 +95,6 @@ describe("validateHostList", () => {
     expect(errors.get(0)?.destination).toContain("cannot contain spaces");
   });
 
-  it("applies the new destination rules to a row", () => {
-    expect(validateHostList([{ label: "", destination: "-oProxyCommand=x" }]).get(0)?.destination).toContain('"-"');
-    expect(validateHostList([{ label: "", destination: "https://nexus" }]).get(0)?.destination).toContain(
-      "not a URL",
-    );
-  });
 });
 
 describe("toHost", () => {

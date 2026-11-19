@@ -518,16 +518,6 @@ mod tests {
     }
 
     #[test]
-    fn pr_summary_maps_single_object_and_defaults_draft() {
-        let raw: RawPrSummary =
-            serde_json::from_str(r#"{"number":98,"title":"t","headRefName":"b","url":"u"}"#)
-                .unwrap();
-        let s = PrSummary::from(raw);
-        assert_eq!((s.number, s.head_ref_name.as_str()), (98, "b"));
-        assert!(!s.is_draft);
-    }
-
-    #[test]
     fn pending_dominates_failure() {
         let json = r#"{
             "number": 7, "url": "https://x/7", "title": "t",

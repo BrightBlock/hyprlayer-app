@@ -26,14 +26,6 @@
           },
           "guard": "announced desktops get an unfocused tab carrying the mode the child launched in",
           "ok": true
-        },
-        {
-          "evidence": {
-            "heardBroadcasts": true,
-            "uiRequests": 0
-          },
-          "guard": "an unannounced client hears no UiRequested, though it hears broadcasts",
-          "ok": true
         }
       ],
       "step": "spawn starts a background child"

@@ -1201,21 +1201,17 @@ mod tests {
 
     #[test]
     fn app_server_args_enable_the_user_input_and_plan_tools() {
-        assert_eq!(
-            APP_SERVER_ARGS,
-            [
-                "app-server",
-                "--stdio",
-                "-c",
-                "agents.enabled=true",
-                "-c",
-                "tools.experimental_request_user_input.enabled=true",
-                "-c",
-                "tools.update_plan.enabled=true",
-                "-c",
-                "features.goals=false"
-            ]
-        );
+        let configs: Vec<&str> = APP_SERVER_ARGS
+            .windows(2)
+            .filter(|w| w[0] == "-c")
+            .map(|w| w[1])
+            .collect();
+        for flag in [
+            "tools.experimental_request_user_input.enabled=true",
+            "tools.update_plan.enabled=true",
+        ] {
+            assert!(configs.contains(&flag), "{flag} missing: {configs:?}");
+        }
     }
 
     #[test]

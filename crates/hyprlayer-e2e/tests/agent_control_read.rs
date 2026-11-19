@@ -446,6 +446,31 @@ async fn agent_control_read() {
         kept["agentControl"]["level"] == json!("full"),
         json!({ "level": kept["agentControl"]["level"] }),
     );
+    let archive = j
+        .call(
+            &agent,
+            Request::ArchiveWorkstream {
+                id: ws.clone(),
+                skip_scripts: true,
+            },
+        )
+        .await
+        .err();
+    let still_open = c
+        .list_workstreams(project.clone(), false)
+        .await
+        .expect("list_workstreams")
+        .iter()
+        .any(|w| w.item.id == ws);
+    j.guard(
+        "archive_workstream is never open to agents either, and the workstream stays",
+        never(&archive)
+            && archive
+                .as_ref()
+                .is_some_and(|e| e.message.contains("it ends a workstream"))
+            && still_open,
+        json!({ "archive": wire(&archive), "workstreamOpen": still_open }),
+    );
 
     j.step("agent connections cannot open streams");
     let ptys_before = c

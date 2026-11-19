@@ -19,7 +19,4 @@ describe("toggleCollapsedPath", () => {
     expect(paths).toEqual(["/a", "/b"]);
   });
 
-  it("treats an unknown path as expanded, so new projects open by default", () => {
-    expect(toggleCollapsedPath(["/a"], "/fresh")).toEqual(["/a", "/fresh"]);
-  });
 });

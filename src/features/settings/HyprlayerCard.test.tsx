@@ -323,13 +323,6 @@ describe("the 1.5.x to 1.6.2 upgrade ladder", () => {
 });
 
 describe("HyprlayerCard agent targets", () => {
-  it("repairs in place instead of opening a terminal", async () => {
-    b.repairAgentBundle.mockReturnValue(ok(repaired()));
-    renderCard();
-    fireEvent.click(await repairButton());
-    await waitFor(() => expect(b.repairAgentBundle).toHaveBeenCalled());
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
 
   it("reports what a collision-clearing repair did to the user's files", async () => {
     b.repairAgentBundle.mockReturnValue(

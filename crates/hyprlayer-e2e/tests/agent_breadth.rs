@@ -1,6 +1,6 @@
 //! The breadth verbs an agent at `full` drives: PTY agents it spawns, messages, reads and waits
 //! on, and the workflow around them (workstreams, plans, goals, scripts, review comments,
-//! reveals), with merge and archive still refused.
+//! reveals). Merge and archive refusals live in `agent_control_read`.
 //!
 //! The caller is `goal_stub`'s claude stand-in driven through `hyprlayer-server mcp`; its PTY
 //! children are `agent_stub`'s PTY claude. Nothing here covers the real binaries.
@@ -11,7 +11,6 @@ use std::time::Duration;
 
 use hyprlayer_core::models::goal::GoalCheck;
 use hyprlayer_core::models::{AgentControlLevel, PermissionMode, UiRequest};
-use hyprlayer_core::pr::MergeMethod;
 use hyprlayer_core::runtime::goals::GoalPatch;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, ScriptKind, SessionEvent, Stage};
@@ -889,35 +888,6 @@ async fn agent_breadth() {
                 .collect::<Vec<_>>()
                 == ["doc", "file", "diff"],
         json!({ "reveals": reveals }),
-    );
-
-    j.step("merge and archive stay excluded");
-    let merge = agent
-        .merge_workstream_pr(ws.clone(), MergeMethod::Squash)
-        .await
-        .err()
-        .map(|e| format!("{}: {}", e.code, e.message))
-        .unwrap_or_else(|| "ok".into());
-    let archive = agent
-        .archive_workstream(ws.clone(), true)
-        .await
-        .err()
-        .map(|e| format!("{}: {}", e.code, e.message))
-        .unwrap_or_else(|| "ok".into());
-    let still_open = c
-        .list_workstreams(project.clone(), false)
-        .await
-        .expect("list_workstreams")
-        .iter()
-        .any(|w| w.item.id == ws);
-    j.guard(
-        "a full agent's merge and archive are refused as never open to agents, and the workstream stays",
-        merge.starts_with("agent_control_denied: ")
-            && merge.contains("merging is the user's call")
-            && archive.starts_with("agent_control_denied: ")
-            && archive.contains("it ends a workstream")
-            && still_open,
-        json!({ "merge": merge, "archive": archive, "workstreamOpen": still_open }),
     );
 
     j.step("shutdown");

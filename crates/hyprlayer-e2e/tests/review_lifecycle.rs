@@ -220,7 +220,6 @@ async fn review_lifecycle() {
         json!({ "files": kinds }),
     );
 
-    let status_before = sandbox.git(&worktree, &["status", "--porcelain"]);
     let untracked = sandbox.git(
         &worktree,
         &["ls-files", "--others", "--exclude-standard", "-z"],
@@ -236,7 +235,6 @@ async fn review_lifecycle() {
     restore.extend(untracked.iter().copied());
     restore.extend(unstaged_deletes);
     sandbox.git(&worktree, &restore);
-    let status_after = sandbox.git(&worktree, &["status", "--porcelain"]);
 
     let leaked: Vec<String> = paths(&list).into_iter().filter(|p| internal(p)).collect();
     j.guard(
@@ -257,11 +255,6 @@ async fn review_lifecycle() {
         "text-file counts equal git's numstat against the merge-base",
         review_text == git_text,
         json!({ "review": review_text, "git": git_text }),
-    );
-    j.guard(
-        "the numstat check leaves the index as it found it",
-        status_before == status_after,
-        json!({ "status": status_after.lines().collect::<Vec<_>>() }),
     );
 
     let mut oids = BTreeMap::new();

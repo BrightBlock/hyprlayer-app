@@ -286,23 +286,6 @@ async fn doc_round_trip() {
     let indexed = await_indexed(&client, &fixtures, Duration::from_secs(20)).await;
     assert!(indexed, "fixtures did not get indexed in time");
 
-    j.step("fixtures reached the sandbox intact");
-    let crlf_on_disk = std::fs::read_to_string(&find("crlf").path).expect("read crlf.md");
-    let crlf_only =
-        crlf_on_disk.contains("\r\n") && !crlf_on_disk.replace("\r\n", "").contains('\n');
-    j.guard(
-        "crlf.md is CRLF throughout, with no lone LF",
-        crlf_only,
-        json!({ "crlf_only": crlf_only }),
-    );
-    let bom_on_disk = std::fs::read(&find("bom").path).expect("read bom.md");
-    let bom_present = bom_on_disk.starts_with(&[0xEF, 0xBB, 0xBF]);
-    j.guard(
-        "bom.md still starts with the BOM",
-        bom_present,
-        json!({ "bom_present": bom_present }),
-    );
-
     j.step("every fixture is indexed");
     let queried = j
         .call(

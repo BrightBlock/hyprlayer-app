@@ -81,22 +81,15 @@ async fn worktree_files() {
         json!({ "hits": strings(&found) }),
     );
 
-    j.step("watch the worktree");
-    let watched = j
-        .call(
-            &client,
-            Request::WatchWorktree {
-                workstream_id: Some(id.clone()),
-            },
-        )
-        .await;
-    j.guard(
-        "watching a worktree is accepted",
-        watched.is_ok(),
-        json!({ "watching": watched.is_ok() }),
-    );
-
     j.step("edit, stage, and see both sides");
+    j.call(
+        &client,
+        Request::WatchWorktree {
+            workstream_id: Some(id.clone()),
+        },
+    )
+    .await
+    .expect("watch_worktree");
     let mtime = j
         .call(
             &client,

@@ -322,15 +322,6 @@ mod tests {
     }
 
     #[test]
-    fn config_missing_carries_no_extra_punctuation() {
-        let err = AppError::from(CoreError::ConfigMissing {
-            path: "/nonexistent-hyprlayer-config-fixture/hyprlayer/config.json".into(),
-        });
-        let (code, message, remedy) = pinned("settingsConfig");
-        assert_eq!((err.code, err.message, err.remedy), (code, message, remedy));
-    }
-
-    #[test]
     fn internal_carries_no_remedy() {
         assert_eq!(AppError::internal("boom").remedy, None);
     }

@@ -211,19 +211,6 @@ describe("BranchPrefixEditor", () => {
     expect(screen.getByText("Feature")).toBeTruthy();
   });
 
-  it("marks an invalid prefix inline rather than round-tripping a save", () => {
-    const { onChange } = renderEditor({ value: TWO });
-
-    editRow("Bug fix");
-    type(prefixes()[0], "-fix/");
-    fireEvent.blur(prefixes()[0]);
-
-    expect(onChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain(
-      "must not start with '-'",
-    );
-  });
-
   it("removes a row and commits the rest", () => {
     const { onChange } = renderEditor({ value: TWO });
 

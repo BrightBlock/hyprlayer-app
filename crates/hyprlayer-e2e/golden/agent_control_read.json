@@ -304,6 +304,17 @@
           },
           "guard": "the level the agent tried to change is still full",
           "ok": true
+        },
+        {
+          "evidence": {
+            "archive": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: archive_workstream is never open to agents: it ends a workstream"
+            },
+            "workstreamOpen": true
+          },
+          "guard": "archive_workstream is never open to agents either, and the workstream stays",
+          "ok": true
         }
       ],
       "step": "excluded commands are refused at full"

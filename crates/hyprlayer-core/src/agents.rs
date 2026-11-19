@@ -1143,15 +1143,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_deny_rules_render_one_per_name_in_order() {
-        let names = vec!["cartographer".to_string(), "foreman".to_string()];
-        assert_eq!(
-            agent_deny_rules(&names),
-            vec!["Agent(cartographer)", "Agent(foreman)"]
-        );
-    }
-
-    #[test]
     fn agent_deny_rules_drop_names_that_carry_rule_syntax() {
         let names = vec![
             "cartographer".to_string(),

@@ -7,6 +7,7 @@ import { useState } from "react";
 import { PromptLibrary } from "./PromptLibrary";
 import type { WorkshopChrome } from "@/components/workshop";
 import type { AppSettings } from "@/lib/bindings";
+import { useToast } from "@/lib/toast";
 
 const chrome: WorkshopChrome = {
   sections: [],
@@ -306,6 +307,7 @@ describe("PromptLibrary", () => {
   });
 
   it("surfaces a client-side read failure instead of previewing nothing", async () => {
+    useToast.setState({ title: "", message: "" });
     ipc.readPromptImport.mockResolvedValue({
       status: "error",
       error: { code: "prompts_file_too_large", message: "That file is too large.", remedy: null },
@@ -314,7 +316,8 @@ describe("PromptLibrary", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Import prompts" }));
 
-    await vi.waitFor(() => expect(ipc.readPromptImport).toHaveBeenCalled());
+    await vi.waitFor(() => expect(useToast.getState().title).toBe("Import failed"));
+    expect(useToast.getState()).toMatchObject({ message: "That file is too large.", tone: "bad" });
     expect(ipc.previewPromptImport).not.toHaveBeenCalled();
   });
 });

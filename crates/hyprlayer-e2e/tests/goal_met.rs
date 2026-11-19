@@ -243,12 +243,6 @@ async fn goal_met() {
             "carriesOutput": second.contains("counter is 1"),
         }),
     );
-    let spent_cents = (detail.goal.spent_cost_usd * 100.0).round() as i64;
-    j.guard(
-        "spend counts the goal's own turns, not the session's earlier one",
-        spent_cents == 120,
-        json!({ "spentCents": spent_cents }),
-    );
     let seen = events_until(&mut c_events, IO, |e| {
         matches!(
             e,

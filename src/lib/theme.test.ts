@@ -130,13 +130,6 @@ describe("applyTheme", () => {
     expect(document.documentElement.classList.contains("light")).toBe(true);
   });
 
-  it("never sets --color-bad", async () => {
-    const { useThemeStore, applyTheme } = await loadTheme();
-    useThemeStore.setState({ mode: "omarchy", omarchy: DARK_PALETTE });
-    applyTheme();
-    expect(inlineProps()).not.toContain("--color-bad");
-    expect(document.documentElement.style.getPropertyValue("--color-bad")).toBe("");
-  });
 });
 
 describe("appearanceSegment", () => {

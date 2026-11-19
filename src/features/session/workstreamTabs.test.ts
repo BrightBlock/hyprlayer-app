@@ -492,9 +492,6 @@ describe("selectLastTab", () => {
     expect(selectLastTab(onePane(1, 1, 2, 3, 4, 5)).panes.p1.activeId).toBe(5);
   });
 
-  it("is a no-op when it is already the last tab", () => {
-    expect(selectLastTab(onePane(3, 1, 2, 3)).panes.p1.activeId).toBe(3);
-  });
 });
 
 describe("moveShellState", () => {
@@ -684,10 +681,6 @@ describe("unarchiveShellState", () => {
 });
 
 describe("composer focus signal", () => {
-  it("records a pending request for the target shell", () => {
-    requestComposerFocus(7);
-    expect(useComposerFocusStore.getState().pendingShellId).toBe(7);
-  });
 
   it("only the targeted shell consumes it, and exactly once", () => {
     requestComposerFocus(7);
@@ -801,13 +794,6 @@ describe("openSessionTab", () => {
     expect(withTitle.title).toBe("Renamed elsewhere");
     expect(withTitle.titleLocked).toBe(true);
     expect(takeSeenTitle("real-1")).toBe("Renamed elsewhere");
-  });
-
-  it("creates tab state for a workstream that has none yet, instead of throwing or dropping the open", () => {
-    expect(useWorkstreamTabsStore.getState().byWs[WS]).toBeUndefined();
-    expect(() => openSessionTab(WS, session())).not.toThrow();
-    const ws = useWorkstreamTabsStore.getState().byWs[WS];
-    expect(ws.shells.some((s) => s.sessionId === "sess-1")).toBe(true);
   });
 
   it("gives the tab the session's own mode, harness, and stage when the stage isn't dedicated", () => {

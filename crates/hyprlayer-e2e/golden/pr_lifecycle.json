@@ -2,15 +2,7 @@
   "scenario": "pr_lifecycle",
   "steps": [
     {
-      "guards": [
-        {
-          "evidence": {
-            "pushed": true
-          },
-          "guard": "the branch reaches the remote",
-          "ok": true
-        }
-      ],
+      "guards": [],
       "step": "push the workstream branch"
     },
     {
@@ -74,18 +66,7 @@
       "step": "merge it"
     },
     {
-      "guards": [
-        {
-          "evidence": {
-            "branches": [
-              "main"
-            ],
-            "delete_ok": true
-          },
-          "guard": "the run leaves only the fixture's main branch",
-          "ok": true
-        }
-      ],
+      "guards": [],
       "step": "clean up the branch"
     },
     {

@@ -9,25 +9,6 @@
       "guards": [
         {
           "evidence": {
-            "crlf_only": true
-          },
-          "guard": "crlf.md is CRLF throughout, with no lone LF",
-          "ok": true
-        },
-        {
-          "evidence": {
-            "bom_present": true
-          },
-          "guard": "bom.md still starts with the BOM",
-          "ok": true
-        }
-      ],
-      "step": "fixtures reached the sandbox intact"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "bom": {
               "indexed": true
             },

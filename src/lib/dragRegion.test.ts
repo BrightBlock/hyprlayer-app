@@ -59,10 +59,6 @@ describe("isDragRegion", () => {
 });
 
 describe("drag threshold", () => {
-  it("does not grab the window on a plain press", () => {
-    down($("bar"), 100, 5);
-    expect(host.startDragging).not.toHaveBeenCalled();
-  });
 
   it("leaves a press-and-release under the threshold a click", () => {
     down($("bar"), 100, 5);

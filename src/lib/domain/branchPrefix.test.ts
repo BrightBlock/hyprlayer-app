@@ -133,7 +133,10 @@ describe("validatePrefixList", () => {
   });
 
   it("reports the character rule rather than the duplicate rule", () => {
-    const errors = validatePrefixList([{ label: "Bad", prefix: "-fix/" }]);
-    expect(errors.get(0)?.prefix).toBe("Prefix must not start with '-'.");
+    const errors = validatePrefixList([
+      { label: "Fix", prefix: "-fix/" },
+      { label: "Also fix", prefix: "-fix/" },
+    ]);
+    expect(errors.get(1)?.prefix).toBe("Prefix must not start with '-'.");
   });
 });

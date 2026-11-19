@@ -459,29 +459,6 @@ async fn config_and_index_changes_are_mapped_to_runtime_events() {
 }
 
 #[tokio::test]
-async fn foreground_toggles_the_pr_watcher_without_touching_binaries() {
-    let root = tempfile::tempdir().unwrap();
-    let home = tempfile::tempdir().unwrap();
-    let paths = test_paths(root.path());
-
-    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths)
-        .open()
-        .await
-        .expect("open");
-    runtime.start().await.expect("start");
-
-    // No panic, no deadlock, from either direction of the transition; the pr
-    // watcher's own cadence tests (`runtime::pr_watcher::tests`) cover the
-    // duration math this flag feeds.
-    runtime.set_foreground(false);
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    runtime.set_foreground(true);
-    tokio::time::sleep(Duration::from_millis(20)).await;
-
-    runtime.shutdown().await;
-}
-
-#[tokio::test]
 async fn shutdown_is_idempotent_under_repeated_calls() {
     let root = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -495,8 +472,11 @@ async fn shutdown_is_idempotent_under_repeated_calls() {
     let second = runtime.shutdown().await;
     let third = runtime.shutdown().await;
 
-    assert_eq!(first.forced_process_count, second.forced_process_count);
-    assert_eq!(second.forced_process_count, third.forced_process_count);
+    // A rerun teardown, or a lost cached report, would measure a different elapsed.
+    for later in [&second, &third] {
+        assert_eq!(later.elapsed, first.elapsed);
+        assert_eq!(later.forced_process_count, first.forced_process_count);
+    }
 }
 
 #[tokio::test]
@@ -510,8 +490,10 @@ async fn concurrent_shutdown_callers_all_observe_the_same_report() {
     runtime.start().await.expect("start");
 
     let (a, b, c) = tokio::join!(runtime.shutdown(), runtime.shutdown(), runtime.shutdown());
-    assert_eq!(a.forced_process_count, b.forced_process_count);
-    assert_eq!(b.forced_process_count, c.forced_process_count);
+    for other in [&b, &c] {
+        assert_eq!(other.elapsed, a.elapsed);
+        assert_eq!(other.forced_process_count, a.forced_process_count);
+    }
 }
 
 struct CapturingLogger {

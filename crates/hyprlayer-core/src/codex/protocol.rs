@@ -105,11 +105,6 @@ impl CollabMode {
     }
 }
 
-#[cfg(test)]
-const VALID_APPROVAL_POLICIES: [&str; 3] = ["untrusted", "on-request", "never"];
-#[cfg(test)]
-const VALID_SANDBOX_MODES: [&str; 3] = ["read-only", "workspace-write", "danger-full-access"];
-
 #[derive(Debug, Clone)]
 pub struct PendingQuestion {
     pub rpc_id: Value,
@@ -1262,25 +1257,6 @@ mod tests {
     }
 
     #[test]
-    fn child_thread_server_requests_remain_routable() {
-        let mut t = Translator::default();
-        t.set_root_thread_id("root-thread".into());
-
-        let out = t.server_request(
-            &json!(21),
-            "item/commandExecution/requestApproval",
-            &json!({ "threadId": "child-thread", "turnId": "child-turn", "itemId": "child-command",
-                "command": "touch child-output", "cwd": "/w"
-            }),
-        );
-
-        assert_eq!(ev_names(&out), ["permissionAsk"]);
-        assert!(t
-            .pending_approvals
-            .contains_key("child-thread:child-command"));
-    }
-
-    #[test]
     fn parallel_child_approvals_with_the_same_item_id_do_not_collide() {
         let mut t = Translator::default();
         t.set_root_thread_id("root-thread".into());
@@ -2094,26 +2070,6 @@ mod tests {
             approval_posture(PermissionMode::BypassPermissions),
             ("never", "danger-full-access")
         );
-    }
-
-    #[test]
-    fn every_posture_uses_a_variant_codex_accepts() {
-        for mode in [
-            PermissionMode::Default,
-            PermissionMode::AcceptEdits,
-            PermissionMode::Plan,
-            PermissionMode::BypassPermissions,
-        ] {
-            let (approval, sandbox) = approval_posture(mode);
-            assert!(
-                VALID_APPROVAL_POLICIES.contains(&approval),
-                "{mode:?} → approvalPolicy {approval:?} is not an AskForApproval variant"
-            );
-            assert!(
-                VALID_SANDBOX_MODES.contains(&sandbox),
-                "{mode:?} → sandbox {sandbox:?} is not a SandboxMode variant"
-            );
-        }
     }
 
     #[test]

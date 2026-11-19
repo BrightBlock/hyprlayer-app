@@ -185,14 +185,17 @@ describe("AddProjectDialog disk import", () => {
   });
 
   it("drops the folder offer if the path turns out to be a git repo", () => {
-    const { importFolder } = setupDisk("nonGit");
-    q.useRepoPathInfo.mockReturnValue({ data: "ready" });
-    cleanup();
-    render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
+    const { importFolder } = setupHooks();
+    q.useRepoPathInfo.mockReturnValue({ data: "nonGit" });
+    const { rerender } = render(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Open from disk" }));
     fireEvent.change(screen.getByPlaceholderText("/path/to/repo-or-folder"), {
       target: { value: "/my/folder" },
     });
+    expect(screen.getByRole("switch", { name: /Set up a git repository/ })).toBeDefined();
+
+    q.useRepoPathInfo.mockReturnValue({ data: "ready" });
+    rerender(<AddProjectDialog open onClose={vi.fn()} onAdded={vi.fn()} />);
     expect(screen.queryByRole("switch", { name: /Set up a git repository/ })).toBeNull();
     next();
     expect(screen.getByText("Step 2 of 2 · Thoughts")).toBeDefined();

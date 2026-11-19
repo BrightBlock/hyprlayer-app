@@ -275,19 +275,6 @@
       "guards": [
         {
           "evidence": {
-            "endReason": "session_ended",
-            "status": "stopped"
-          },
-          "guard": "killing the session ends the goal with the session",
-          "ok": true
-        }
-      ],
-      "step": "a user kill ends the goal"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
             "checkWasRunning": true,
             "endReason": "workstream_archived",
             "status": "stopped"

@@ -105,13 +105,6 @@
           },
           "guard": "the resume cannot relaunch the session and pauses with the error",
           "ok": true
-        },
-        {
-          "evidence": {
-            "restored": true
-          },
-          "guard": "the staged harness is back in place",
-          "ok": true
         }
       ],
       "step": "a failed relaunch pauses"

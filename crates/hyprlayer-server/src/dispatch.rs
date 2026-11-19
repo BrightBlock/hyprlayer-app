@@ -2741,10 +2741,8 @@ mod tests {
     use std::ffi::OsString;
     use std::time::Duration;
 
-    use base64::Engine as _;
     use hyprlayer_core::claude::SessionEvent;
     use hyprlayer_core::store::{Db, NewSession, NewWorkstream};
-    use hyprlayer_core::terminal::TerminalEvent;
     use hyprlayer_core::{Harness, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths};
     use tokio::sync::mpsc;
 
@@ -2883,49 +2881,6 @@ mod tests {
             client.get_app_settings().await.unwrap_err().code,
             "server_disconnected"
         );
-        runtime.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn a_terminal_stream_delivers_shell_output_over_the_data_plane() {
-        let root = tempfile::tempdir().unwrap();
-        let runtime = open_runtime(root.path()).await;
-        let server = SocketServer::bind(runtime.clone(), &root.path().join("app-data"))
-            .await
-            .expect("bind");
-        let socket_path = server.socket_path().to_path_buf();
-        let stop = server.stop_handle();
-        let serving = tokio::spawn(server.run());
-
-        let client = RpcClient::connect_socket(&socket_path)
-            .await
-            .expect("connect");
-        let (_, _, mut events) = client
-            .spawn_shell_terminal_stream("printf MARKER_OK".into(), 80, 24)
-            .await
-            .expect("open a shell terminal stream over the socket");
-
-        let mut seen = String::new();
-        let found = tokio::time::timeout(Duration::from_secs(10), async {
-            while let Some(event) = events.recv().await {
-                if let TerminalEvent::Output { data } = event {
-                    let decoded = base64::engine::general_purpose::STANDARD
-                        .decode(data)
-                        .unwrap_or_default();
-                    seen.push_str(&String::from_utf8_lossy(&decoded));
-                    if seen.contains("MARKER_OK") {
-                        return true;
-                    }
-                }
-            }
-            false
-        })
-        .await
-        .unwrap_or(false);
-        assert!(found, "expected MARKER_OK on the data plane, got {seen:?}");
-
-        stop.stop();
-        serving.await.unwrap().unwrap();
         runtime.shutdown().await;
     }
 

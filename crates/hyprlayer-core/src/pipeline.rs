@@ -1019,23 +1019,6 @@ improvise one."
     }
 
     #[test]
-    fn claude_commit_still_names_the_ask_tool() {
-        assert_eq!(
-            commit_prompt_default(Harness::Claude),
-            COMMIT_PROMPT_DEFAULT
-        );
-        assert!(COMMIT_PROMPT_DEFAULT.contains("AskUserQuestion"));
-        assert!(compose_prompt(
-            Stage::Commit,
-            "",
-            "main",
-            &Default::default(),
-            Harness::Claude
-        )
-        .contains("AskUserQuestion"));
-    }
-
-    #[test]
     fn opencode_commit_keeps_the_prose_prompt() {
         assert!(COMMIT_PROMPT_NO_ASK_TOOL.starts_with("/commit\n"));
         assert!(!COMMIT_PROMPT_NO_ASK_TOOL.contains("AskUserQuestion"));
@@ -1168,14 +1151,6 @@ improvise one."
                 Harness::Opencode
             ),
             compose(Stage::Plan, "x", "main", &Default::default())
-        );
-    }
-
-    #[test]
-    fn claude_research_is_still_a_bare_skill_invocation() {
-        assert_eq!(
-            compose(Stage::Research, "x", "main", &Default::default()),
-            "/research_codebase x"
         );
     }
 

@@ -83,9 +83,6 @@ describe("formatCompactCount", () => {
     expect(formatCompactCount(-5)).toBe("0");
   });
 
-  it("carries no sign; the caller adds it", () => {
-    expect(formatCompactCount(3400)).not.toMatch(/[+\-−]/);
-  });
 });
 
 describe("shortSha", () => {

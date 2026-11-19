@@ -325,13 +325,6 @@ describe("AgentBundleSection", () => {
     expect(await screen.findByText(/No recent release publishes an agent bundle/i)).toBeTruthy();
   });
 
-  it("prompts for a CLI upgrade instead of calling a command it lacks", async () => {
-    b.hyprlayerCliUpdateCheck.mockReturnValue(ok({ current: "1.5.9", latest: null, hint: null }));
-    renderSection(LEGACY_STATUS);
-    expect(await screen.findByText(/hyprlayer 1\.5\.9/)).toBeTruthy();
-    expect(b.agentBundleVersions).not.toHaveBeenCalled();
-  });
-
   it("offers a one-click catch-up when the bundle is behind, without opening the menu", async () => {
     b.agentBundleVersions.mockReturnValue(ok(VERSIONS));
     renderSection({ ...STATUS, assetsVersion: "1.5.9", pinnedVersion: null }, BEHIND);

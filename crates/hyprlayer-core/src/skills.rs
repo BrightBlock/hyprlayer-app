@@ -838,38 +838,6 @@ fn skill_assets(dir: &Path) -> Vec<SkillAsset> {
 mod tests {
     use super::*;
 
-    static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct TmpHome {
-        dir: tempfile::TempDir,
-        prev: Option<std::ffi::OsString>,
-        _guard: std::sync::MutexGuard<'static, ()>,
-    }
-    impl TmpHome {
-        fn new() -> Self {
-            let guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let dir = tempfile::tempdir().unwrap();
-            let prev = std::env::var_os("HOME");
-            std::env::set_var("HOME", dir.path());
-            Self {
-                dir,
-                prev,
-                _guard: guard,
-            }
-        }
-        fn path(&self) -> &Path {
-            self.dir.path()
-        }
-    }
-    impl Drop for TmpHome {
-        fn drop(&mut self) {
-            match &self.prev {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-    }
-
     #[test]
     fn parses_skill_frontmatter() {
         let text = "---\nname: research_codebase\ndescription: Document the codebase.\nmodel: sonnet\n---\n\n# Research\n";
@@ -888,19 +856,23 @@ mod tests {
 
     #[test]
     fn discovers_project_skill_over_user() {
+        let home = tempfile::tempdir().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let wt = dir.path();
-        let skill_dir = wt.join(".claude/skills/demo");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: demo\ndescription: A demo skill.\n---\n",
-        )
-        .unwrap();
-        let cmds = list_slash_commands(wt, &SkillHome::default(), None);
-        assert!(cmds
-            .iter()
-            .any(|c| c.name == "demo" && c.source == "project"));
+        for (root, desc) in [(wt, "Project demo."), (home.path(), "User demo.")] {
+            let skill_dir = root.join(".claude/skills/demo");
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: demo\ndescription: {desc}\n---\n"),
+            )
+            .unwrap();
+        }
+        let cmds = list_slash_commands(wt, &SkillHome::under(home.path()), None);
+        let demo: Vec<_> = cmds.iter().filter(|c| c.name == "demo").collect();
+        assert_eq!(demo.len(), 1, "{demo:?}");
+        assert_eq!(demo[0].source, "project");
+        assert_eq!(demo[0].description, "Project demo.");
     }
 
     #[cfg(unix)]
@@ -942,7 +914,7 @@ mod tests {
 
     #[test]
     fn list_skills_project_and_user_same_name_yields_one_project_entry() {
-        let home = TmpHome::new();
+        let home = tempfile::tempdir().unwrap();
         let user_skill = home.path().join(".claude/skills/demo");
         std::fs::create_dir_all(&user_skill).unwrap();
         std::fs::write(
@@ -1021,7 +993,7 @@ mod tests {
 
     #[test]
     fn plugin_skills_appear_only_once_the_plugin_is_enabled() {
-        let home = TmpHome::new();
+        let home = tempfile::tempdir().unwrap();
         let project = install_plugin(home.path());
         let wt = project.path();
 
@@ -1050,7 +1022,7 @@ mod tests {
 
     #[test]
     fn local_settings_can_disable_a_user_enabled_plugin() {
-        let home = TmpHome::new();
+        let home = tempfile::tempdir().unwrap();
         let project = install_plugin(home.path());
         let wt = project.path();
 
@@ -1075,12 +1047,6 @@ mod tests {
                 .any(|s| s.name == "demoplug:greet"),
             "local settings should win over the user-level enable",
         );
-    }
-
-    #[test]
-    fn list_skills_without_worktree_never_panics() {
-        let skills = list_skills(None, &SkillHome::default());
-        assert!(skills.iter().all(|s| s.source != "project"));
     }
 
     #[test]

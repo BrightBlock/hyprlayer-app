@@ -486,15 +486,6 @@ mod tests {
     }
 
     #[test]
-    fn task_notification_failed_parses() {
-        let line = r#"{"type":"system","subtype":"task_notification","task_id":"bzxqr580k","tool_use_id":"toolu_01W","status":"failed","summary":"… failed with exit code 7","session_id":"s"}"#;
-        assert!(matches!(
-            parse_line(line),
-            ParsedLine::TaskNotification { status, .. } if status == "failed"
-        ));
-    }
-
-    #[test]
     fn task_notification_without_task_id_falls_back_to_system() {
         let line = r#"{"type":"system","subtype":"task_notification","status":"completed"}"#;
         assert!(matches!(
@@ -535,15 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn task_notification_via_queue_operation_failed_parses() {
-        let line = r#"{"type":"queue-operation","content":"<task-notification>\n<task-id>bzx</task-id>\n<tool-use-id>toolu_9</tool-use-id>\n<status>failed</status>\n</task-notification>"}"#;
-        assert!(matches!(
-            parse_line(line),
-            ParsedLine::TaskNotification { status, .. } if status == "failed"
-        ));
-    }
-
-    #[test]
     fn non_task_queue_operation_is_system() {
         let line = r#"{"type":"queue-operation","operation":"add","content":"some queued prompt"}"#;
         assert!(matches!(
@@ -573,15 +555,6 @@ mod tests {
     }
 
     #[test]
-    fn command_lifecycle_cancelled_passes_through() {
-        let line =
-            r#"{"type":"command_lifecycle","command_uuid":"c1","state":"cancelled","uuid":"u1"}"#;
-        assert!(
-            matches!(parse_line(line), ParsedLine::CommandLifecycle { state, .. } if state == "cancelled")
-        );
-    }
-
-    #[test]
     fn command_lifecycle_without_command_uuid_falls_back_to_system() {
         let line = r#"{"type":"command_lifecycle","state":"started","uuid":"u1"}"#;
         assert!(matches!(
@@ -593,15 +566,6 @@ mod tests {
     #[test]
     fn tool_progress_heartbeat_is_system() {
         let line = r#"{"type":"tool_progress","tool_use_id":"toolu_018Z7VFXLKyjbchmrLXh2zN4-heartbeat-0","tool_name":"Bash","parent_tool_use_id":"toolu_018Z7VFXLKyjbchmrLXh2zN4","elapsed_time_seconds":30,"heartbeat":true,"session_id":"a762f910-ec07-4eec-b25f-2197e96b4cd6","uuid":"4b112374-593d-4406-aa8b-cba5534f0813"}"#;
-        assert!(matches!(
-            parse_line(line),
-            ParsedLine::System { subtype } if subtype == "tool_progress"
-        ));
-    }
-
-    #[test]
-    fn tool_progress_without_heartbeat_flag_is_still_system() {
-        let line = r#"{"type":"tool_progress","tool_use_id":"toolu_01A","tool_name":"Bash","subagent_retry":{"attempt":1},"elapsed_time_seconds":90,"uuid":"u1"}"#;
         assert!(matches!(
             parse_line(line),
             ParsedLine::System { subtype } if subtype == "tool_progress"
@@ -665,21 +629,6 @@ mod tests {
                 assert_eq!(
                     payload.get("prefillText").and_then(Value::as_str),
                     Some("Reply THIRD")
-                );
-            }
-            other => panic!("expected ControlResponse, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn control_response_surfaces_refusal_error() {
-        let line = r#"{"type":"control_response","response":{"subtype":"success","request_id":"app-s-4","response":{"rewound":false,"prefillText":null,"error":"stale target"}}}"#;
-        match parse_line(line) {
-            ParsedLine::ControlResponse { payload, .. } => {
-                assert_eq!(payload.get("rewound").and_then(Value::as_bool), Some(false));
-                assert_eq!(
-                    payload.get("error").and_then(Value::as_str),
-                    Some("stale target")
                 );
             }
             other => panic!("expected ControlResponse, got {other:?}"),

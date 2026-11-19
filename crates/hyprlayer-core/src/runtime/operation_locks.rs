@@ -178,21 +178,20 @@ mod tests {
 
     #[tokio::test]
     async fn lock_pair_orders_project_then_workstream() {
-        let locks = WorkstreamLocks::new();
-        let _guard = locks.lock_pair("proj-a", "ws-1").await;
-        assert!(locks
-            .projects
-            .lock()
-            .unwrap()
-            .get("proj-a")
-            .and_then(Weak::upgrade)
-            .is_some());
-        assert!(locks
-            .workstreams
-            .lock()
-            .unwrap()
-            .get("ws-1")
-            .and_then(Weak::upgrade)
-            .is_some());
+        let locks = Arc::new(WorkstreamLocks::new());
+        let held = checkout(&locks.workstreams, "ws-1").lock_owned().await;
+        let pair = tokio::spawn({
+            let locks = locks.clone();
+            async move {
+                let _g = locks.lock_pair("proj-a", "ws-1").await;
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            checkout(&locks.projects, "proj-a").try_lock().is_err(),
+            "the project lock is taken before waiting on the workstream"
+        );
+        drop(held);
+        pair.await.unwrap();
     }
 }

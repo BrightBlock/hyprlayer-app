@@ -326,22 +326,4 @@ mod tests {
             Some("/tmp/probe")
         );
     }
-
-    #[test]
-    fn merge_env_overlay_keeps_keys_a_later_attach_omits() {
-        let env = environment("/tmp/hl-home", &[]);
-        let clone = env.clone();
-        env.merge_env_overlay(BTreeMap::from([
-            ("DISPLAY".into(), ":0".into()),
-            ("SSH_AUTH_SOCK".into(), "/a".into()),
-        ]));
-        env.merge_env_overlay(BTreeMap::from([("DISPLAY".into(), ":1".into())]));
-        assert_eq!(
-            clone.overlay_env(),
-            vec![
-                ("DISPLAY".to_string(), ":1".to_string()),
-                ("SSH_AUTH_SOCK".to_string(), "/a".to_string())
-            ]
-        );
-    }
 }

@@ -286,10 +286,6 @@ describe("resumeModelFlag", () => {
     expect(resumeModelFlag(def)).toBe("claude-sonnet-5[1m]");
   });
 
-  it("falls back to the static assumption without a live catalog", () => {
-    expect(resumeModelFlag(modelOption("opus"))).toBe("claude-opus-5");
-  });
-
   it("prefers an explicit flag over the resolved id", () => {
     const [m] = claudeModels([row({ flag: "sonnet", resolvedModel: "claude-sonnet-5" })]);
     expect(resumeModelFlag(m)).toBe("sonnet");

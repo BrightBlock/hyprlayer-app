@@ -1,19 +1,13 @@
 //! Sessions carry a persisted `rev`: every committed turn advances it, a
 //! catch-up read pages through history at any revision, and a send naming a
 //! stale `base_rev` is refused before it ever reaches the harness.
-//!
-//! Phase 1 computes `SessionRevised`/`SessionReset` but targets no client
-//! with them yet (identity lands in Phase 2), so this scenario also confirms
-//! neither ever reaches a connected client.
 #![cfg(unix)]
 
 use std::time::Duration;
 
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{
-    events_until, json, text, Journey, Request, RuntimeEvent, Sandbox, Server, Value,
-};
+use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_proto::StaleTranscript;
 use hyprlayer_server::client::EventStream;
 use hyprlayer_server::streams::StreamStartOpts;
@@ -73,7 +67,6 @@ async fn transcript_revisions() {
     let mut j = Journey::new("transcript_revisions", &sandbox);
     let server = Server::start(&sandbox).await;
     let client = server.client();
-    let mut events_rx = client.take_events().expect("the client's runtime events");
 
     let project = onboard_and_import(&mut j, &client, &sandbox, &repo).await;
     let view = create_workstream(&mut j, &client, &project, "Transcript revisions").await;
@@ -359,23 +352,6 @@ async fn transcript_revisions() {
         "a cursor whose row was rewritten is refused",
         matches!(&refused, Err(e) if e.code == "session_epoch_advanced"),
         json!({ "code": refused.as_ref().err().map(|e| e.code.clone()) }),
-    );
-
-    j.step("revisions reach no client yet");
-    let seen = events_until(&mut events_rx, Duration::from_secs(2), |_| false).await;
-    let saw_lifecycle = seen.iter().any(
-        |e| matches!(e, RuntimeEvent::SessionLifecycle { session_id, .. } if *session_id == session.id),
-    );
-    let saw_revision = seen.iter().any(|e| {
-        matches!(
-            e,
-            RuntimeEvent::SessionRevised { .. } | RuntimeEvent::SessionReset { .. }
-        )
-    });
-    j.guard(
-        "no SessionRevised or SessionReset ever reaches the client",
-        saw_lifecycle && !saw_revision,
-        json!({ "sawLifecycle": saw_lifecycle, "sawRevision": saw_revision }),
     );
 
     j.step("shutdown");

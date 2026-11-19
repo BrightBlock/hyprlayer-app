@@ -1531,47 +1531,6 @@ mod tests {
     }
 
     #[test]
-    fn commit_files_reports_a_rename_as_one_entry() {
-        let dir = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(dir.path()).unwrap();
-
-        let content = "same content, long enough to be detected as similar\n";
-        std::fs::write(dir.path().join("a.md"), content).unwrap();
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("a.md")).unwrap();
-        index.write().unwrap();
-        let tree0 = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let c0_oid = repo
-            .commit(Some("HEAD"), &sig_at(0), &sig_at(0), "init", &tree0, &[])
-            .unwrap();
-        let c0 = repo.find_commit(c0_oid).unwrap();
-
-        std::fs::remove_file(dir.path().join("a.md")).unwrap();
-        std::fs::write(dir.path().join("b.md"), content).unwrap();
-        let mut index = repo.index().unwrap();
-        index.remove_path(Path::new("a.md")).unwrap();
-        index.add_path(Path::new("b.md")).unwrap();
-        index.write().unwrap();
-        let tree1 = repo.find_tree(index.write_tree().unwrap()).unwrap();
-        let c1_oid = repo
-            .commit(
-                Some("HEAD"),
-                &sig_at(1),
-                &sig_at(1),
-                "rename",
-                &tree1,
-                &[&c0],
-            )
-            .unwrap();
-
-        let files = commit_files(dir.path(), &c1_oid.to_string()).unwrap();
-        assert_eq!(files.len(), 1, "{files:?}");
-        assert_eq!(files[0].path, "b.md");
-        assert_eq!(files[0].change, "renamed");
-        assert_eq!(files[0].old_path.as_deref(), Some("a.md"));
-    }
-
-    #[test]
     fn commit_file_sides_diffs_a_rename_against_its_old_path() {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
@@ -1610,6 +1569,7 @@ mod tests {
 
         let files = commit_files(dir.path(), &c1_sha).unwrap();
         assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].path, "b.md");
         assert_eq!(files[0].change, "renamed");
         assert_eq!(files[0].old_path.as_deref(), Some("a.md"));
 

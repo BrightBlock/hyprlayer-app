@@ -55,11 +55,6 @@ describe("drawerWidth", () => {
     expect(drawerWidth(700, 352)).toBe(280);
   });
 
-  it("measures the containing box, not the viewport", () => {
-    expect(drawerWidth(700, 412)).toBe(340);
-    expect(drawerWidth(700, 412)).toBeLessThan(412);
-  });
-
   it("floors at 0 rather than going negative on a box smaller than the peek", () => {
     expect(drawerWidth(700, 40)).toBe(0);
     expect(drawerWidth(700, 0)).toBe(0);

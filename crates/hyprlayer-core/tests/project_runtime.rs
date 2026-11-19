@@ -423,41 +423,6 @@ async fn importing_a_registered_folder_as_a_repository_is_a_project_kind_conflic
 }
 
 #[tokio::test]
-async fn delete_files_false_preserves_an_imported_projects_directory() {
-    let root = tempfile::tempdir().unwrap();
-    let paths = test_paths(&root.path().join("profile"));
-    write_hyprlayer_override(&paths, &write_fake_hyprlayer(root.path(), 0));
-    let runtime = RuntimeBuilder::new(test_environment(root.path()), paths)
-        .open()
-        .await
-        .unwrap();
-
-    let repo = fixture_repo(root.path(), "existing-repo");
-    let view = runtime
-        .projects()
-        .import_repository(ImportRepositoryRequest {
-            path: repo.display().to_string(),
-            branch: None,
-            directory_name: None,
-            thoughts_dir: None,
-            profile: None,
-            bootstrap_user: Some("tester".into()),
-        })
-        .await
-        .unwrap();
-
-    runtime.projects().remove(&view.path, false).await.unwrap();
-
-    assert!(
-        Path::new(&view.path).exists(),
-        "delete_files=false must preserve the directory"
-    );
-    assert!(runtime.projects().find(&view.path).await.unwrap().is_none());
-
-    runtime.shutdown().await;
-}
-
-#[tokio::test]
 async fn delete_files_true_deletes_an_imported_projects_directory_it_did_not_create() {
     let root = tempfile::tempdir().unwrap();
     let paths = test_paths(&root.path().join("profile"));

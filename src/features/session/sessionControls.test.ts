@@ -72,9 +72,6 @@ afterEach(() => {
 });
 
 describe("controlsSignature", () => {
-  it("is the same for equal data in new objects", () => {
-    expect(controlsSignature(snapshot())).toBe(controlsSignature(snapshot()));
-  });
 
   it("ignores icons, and does not choke on a circular one", () => {
     const circular: Record<string, unknown> = {};

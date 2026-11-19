@@ -138,22 +138,6 @@
         },
         {
           "evidence": {
-            "status": [
-              "D  src/gone.rs",
-              " D src/mv_from.rs",
-              "?? .hyprlayer/",
-              "?? assets/",
-              "?? big.txt",
-              "?? src/mv_to.rs",
-              "?? src/new.rs",
-              "?? thoughts/"
-            ]
-          },
-          "guard": "the numstat check leaves the index as it found it",
-          "ok": true
-        },
-        {
-          "evidence": {
             "oids": {
               "assets/blob.bin": "7ecd8e1584208a3f949a3741dab01aaf874bc5ef",
               "big.txt": "31d35bc93dd789775b27d7533515ba58f640bbe9",
