@@ -38,7 +38,8 @@ const RECORDS_PER_SWEEP: usize = 12;
 static GH_MISSING_REPORTED: AtomicBool = AtomicBool::new(false);
 static SIGNED_OUT_REPORTED: AtomicBool = AtomicBool::new(false);
 
-pub type WorktreeWatch = Arc<AsyncMutex<Option<(String, WatchHandle)>>>;
+/// Every workstream a client watches; `None` where there was nothing to watch.
+pub type WorktreeWatch = Arc<AsyncMutex<HashMap<String, Option<WatchHandle>>>>;
 
 pub struct PrWatcherContext {
     pub binaries: Arc<BinaryResolver>,
@@ -62,7 +63,7 @@ struct Tracked {
 #[derive(Default)]
 struct WatchState {
     tracked: HashMap<String, Tracked>,
-    active: Option<String>,
+    active: HashSet<String>,
     backoff_until: Option<Instant>,
     swept_at: Option<Instant>,
     /// Records whose number names no PR in their project's repository.
@@ -125,12 +126,7 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
         }
     };
 
-    let active = ctx
-        .worktree_watch
-        .lock()
-        .await
-        .as_ref()
-        .map(|(id, _)| id.clone());
+    let active: HashSet<String> = ctx.worktree_watch.lock().await.keys().cloned().collect();
 
     let mut alive: std::collections::HashSet<&str> =
         std::collections::HashSet::with_capacity(items.len());
@@ -139,12 +135,12 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
     }
     st.tracked.retain(|id, _| alive.contains(id.as_str()));
 
-    if active != st.active {
-        if let Some(t) = active.as_deref().and_then(|id| st.tracked.get_mut(id)) {
+    for id in active.difference(&st.active) {
+        if let Some(t) = st.tracked.get_mut(id) {
             t.due = now;
         }
-        st.active.clone_from(&active);
     }
+    st.active.clone_from(&active);
 
     let projects: HashMap<String, String> = items
         .iter()
@@ -225,7 +221,7 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
                     .observed_ref
                     .as_deref()
                     .is_some_and(|seen| seen != pr_ref);
-                let is_active = active.as_deref() == Some(id.as_str());
+                let is_active = active.contains(&id);
                 let wait = if moved {
                     MEDIUM
                 } else {
@@ -278,7 +274,7 @@ async fn tick(ctx: &PrWatcherContext, st: &mut WatchState) -> Duration {
                 state: s.state,
             });
         let recorded = record_observed(ctx.db.clone(), &id, observed, &pr_ref).await;
-        let due = polled_at + cadence(&status, active.as_deref() == Some(id.as_str()));
+        let due = polled_at + cadence(&status, active.contains(&id));
         st.tracked.insert(
             id.clone(),
             Tracked {

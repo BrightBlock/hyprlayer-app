@@ -110,6 +110,8 @@ pub struct Server {
     runtime: Arc<HyprlayerRuntime>,
     streams: StreamState,
     clients: Clients,
+    /// Requests run concurrently; without this a stale union of watches could land last.
+    worktree_watch: tokio::sync::Mutex<()>,
 }
 
 impl Server {
@@ -118,6 +120,7 @@ impl Server {
             runtime,
             streams: StreamState::default(),
             clients,
+            worktree_watch: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -127,6 +130,13 @@ impl Server {
 
     pub(crate) fn streams(&self) -> &StreamState {
         &self.streams
+    }
+
+    /// Runs a worktree watcher on exactly the workstreams some connection watches.
+    pub(crate) async fn sync_worktree_watch(&self) -> Result<(), WireError> {
+        let _serial = self.worktree_watch.lock().await;
+        let wanted = self.clients.watched_worktrees();
+        self.runtime.workstreams().watch(wanted).await.wire()
     }
 
     /// The one entry point for requests: an agent connection is checked against its allowlist first.
@@ -1421,7 +1431,9 @@ impl Dispatch for Server {
     }
 
     async fn watch_worktree(&self, workstream_id: Option<String>) -> Result<(), WireError> {
-        self.runtime.workstreams().watch(workstream_id).await.wire()
+        let conn = connection("watch_worktree")?;
+        self.clients.watch_worktree(conn, workstream_id);
+        self.sync_worktree_watch().await
     }
 
     async fn workstream_pr_status(&self, id: String) -> Result<Option<PrStatus>, WireError> {

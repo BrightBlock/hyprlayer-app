@@ -37,6 +37,8 @@ struct Conn {
     dropped: u64,
     announced: Option<Announced>,
     watching: HashSet<String>,
+    /// The workstream whose worktree changes this connection hears.
+    worktree: Option<String>,
     /// The token an agent connection announced; such a connection hears no events.
     agent: Option<String>,
 }
@@ -57,6 +59,7 @@ impl Conn {
                 self.watching.contains(session_id) && announced(kind)
             }
             Audience::Announced(kind) => announced(kind),
+            Audience::Worktree(id) => self.worktree.as_deref() == Some(id),
         }
     }
 }
@@ -67,6 +70,8 @@ enum Audience {
     Watchers(&'static str, String),
     /// Announced connections, whatever they watch.
     Announced(&'static str),
+    /// Connections watching this workstream's worktree, announced or not: every desktop decodes it.
+    Worktree(String),
 }
 
 /// The outbound queues of every connected client, keyed by connection id.
@@ -85,6 +90,7 @@ impl Clients {
                 dropped: 0,
                 announced: None,
                 watching: HashSet::new(),
+                worktree: None,
                 agent: None,
             },
         );
@@ -149,6 +155,19 @@ impl Clients {
         previous
             .symmetric_difference(&outbound.watching)
             .cloned()
+            .collect()
+    }
+
+    pub fn watch_worktree(&self, conn: u64, workstream_id: Option<String>) {
+        if let Some(outbound) = self.lock().get_mut(&conn) {
+            outbound.worktree = workstream_id;
+        }
+    }
+
+    pub fn watched_worktrees(&self) -> HashSet<String> {
+        self.lock()
+            .values()
+            .filter_map(|o| o.worktree.clone())
             .collect()
     }
 
@@ -282,6 +301,9 @@ fn audience(event: &RuntimeEvent) -> Audience {
         RuntimeEvent::GoalChanged { .. } => Audience::Announced("GoalChanged"),
         RuntimeEvent::PtyAgentChanged { .. } => Audience::Announced("PtyAgentChanged"),
         RuntimeEvent::UiRequested { .. } => Audience::Announced("UiRequested"),
+        RuntimeEvent::WorktreeChanged { workstream_id } => {
+            Audience::Worktree(workstream_id.clone())
+        }
         _ => Audience::Everyone,
     }
 }

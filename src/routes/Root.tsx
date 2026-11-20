@@ -34,6 +34,7 @@ import {
   useWorktreeFilesCheck,
 } from "@/lib/queries";
 import { errorMessage } from "@/lib/ipc";
+import { onServerReconnected } from "@/lib/events";
 import { log } from "@/lib/log";
 import { basename } from "@/lib/path";
 import { copyDiagnostics } from "@/lib/diagnostics";
@@ -730,7 +731,10 @@ export function Root() {
   };
 
   useEffect(() => {
-    void commands.watchWorktree(activeWorkstreamId ?? null);
+    const arm = () => void commands.watchWorktree(activeWorkstreamId ?? null);
+    arm();
+    // The server keeps a watch per connection; a new one starts with none.
+    return onServerReconnected(arm);
   }, [activeWorkstreamId]);
 
   const gitActions = useWorkstreamGitActions(activeWorkstream ?? null);

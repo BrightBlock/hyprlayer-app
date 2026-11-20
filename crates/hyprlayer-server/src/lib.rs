@@ -598,6 +598,8 @@ where
     streams::fail_abandoned_launches(&server, conn).await;
     let left = clients.unregister(conn);
     clients.send_viewers(&left);
+    // Read from who is left, not from `unregister`: a send may already have pruned this one.
+    let _ = server.sync_worktree_watch().await;
     result.map(Some)
 }
 

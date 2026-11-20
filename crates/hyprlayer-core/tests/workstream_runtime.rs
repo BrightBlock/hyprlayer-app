@@ -1,6 +1,6 @@
 #![cfg(feature = "test-support")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -433,7 +433,7 @@ async fn failed_archive_script_leaves_disk_and_row_active() {
     assert!(worktree_path.is_dir());
     f.runtime
         .workstreams()
-        .watch(Some(created.item.id.clone()))
+        .watch(HashSet::from([created.item.id.clone()]))
         .await
         .unwrap();
 
@@ -452,8 +452,8 @@ async fn failed_archive_script_leaves_disk_and_row_active() {
 
     assert!(worktree_path.is_dir(), "the worktree must not have moved");
     assert_eq!(
-        f.runtime.test_watched_workstream().await,
-        Some(created.item.id.clone()),
+        f.runtime.test_watched_workstreams().await,
+        vec![created.item.id.clone()],
         "the UI stays on this workstream and only re-arms on navigation"
     );
     let row = f
@@ -488,7 +488,10 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
         .unwrap();
     f.runtime
         .workstreams()
-        .watch(Some(watched.item.id.clone()))
+        .watch(HashSet::from([
+            watched.item.id.clone(),
+            other.item.id.clone(),
+        ]))
         .await
         .unwrap();
 
@@ -501,8 +504,8 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
         .await
         .unwrap();
     assert_eq!(
-        f.runtime.test_watched_workstream().await,
-        Some(watched.item.id.clone()),
+        f.runtime.test_watched_workstreams().await,
+        vec![watched.item.id.clone()],
         "archiving another workstream must leave the watch alone"
     );
 
@@ -517,8 +520,8 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
         .unwrap();
     assert!(!worktree.exists(), "the worktree must have moved");
     assert_eq!(
-        f.runtime.test_watched_workstream().await,
-        None,
+        f.runtime.test_watched_workstreams().await,
+        Vec::<String>::new(),
         "nothing may hold the moved worktree open"
     );
 
@@ -536,7 +539,7 @@ async fn failed_archive_move_keeps_the_worktree_watched() {
         .unwrap();
     f.runtime
         .workstreams()
-        .watch(Some(created.item.id.clone()))
+        .watch(HashSet::from([created.item.id.clone()]))
         .await
         .unwrap();
     std::fs::create_dir_all(archive_dir_for(&repo, &created.item.slug)).unwrap();
@@ -554,8 +557,8 @@ async fn failed_archive_move_keeps_the_worktree_watched() {
         "an occupied destination must fail the move"
     );
     assert_eq!(
-        f.runtime.test_watched_workstream().await,
-        Some(created.item.id.clone()),
+        f.runtime.test_watched_workstreams().await,
+        vec![created.item.id.clone()],
         "the UI stays on this workstream and only re-arms on navigation"
     );
 

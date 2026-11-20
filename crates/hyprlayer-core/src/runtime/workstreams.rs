@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -598,23 +599,28 @@ impl WorkstreamService<'_> {
         Ok(adoptions)
     }
 
-    /// Arms the single worktree watcher on one workstream, or disarms it when
-    /// `workstream_id` is `None`. The handle is shared with the PR watcher,
-    /// which polls the watched workstream more eagerly than the rest.
-    pub async fn watch(&self, workstream_id: Option<String>) -> Result<()> {
+    /// Runs one worktree watcher per workstream in `workstream_ids` and drops
+    /// the rest. The PR watcher polls these more eagerly than the others.
+    pub async fn watch(&self, workstream_ids: HashSet<String>) -> Result<()> {
         ensure_running(self.runtime)?;
-        let mut guard = self.runtime.watchers.worktree_watch.lock().await;
-        let Some(workstream_id) = workstream_id else {
-            *guard = None;
-            return Ok(());
-        };
-        if guard.as_ref().is_some_and(|(id, _)| id == &workstream_id) {
-            return Ok(());
-        }
-        *guard = None;
-
-        if let Some(handle) = self.open_worktree_watch(&workstream_id).await? {
-            *guard = Some((workstream_id, handle));
+        let mut watched = self.runtime.watchers.worktree_watch.lock().await;
+        watched.retain(|id, handle| {
+            let keep = workstream_ids.contains(id);
+            if !keep && handle.is_some() {
+                tracing::debug!("worktree watch on {id}: released");
+            }
+            keep
+        });
+        for id in workstream_ids {
+            if watched.contains_key(&id) {
+                continue;
+            }
+            // Not fatal: one client's unwatchable workstream must not fail another's watch.
+            let handle = self.open_worktree_watch(&id).await.unwrap_or_else(|e| {
+                tracing::warn!("worktree watch on {id} stays off: {e}");
+                None
+            });
+            watched.insert(id, handle);
         }
         Ok(())
     }
@@ -1507,7 +1513,7 @@ impl WorkstreamService<'_> {
         // Windows refuses to move a directory a watcher holds open. Holding the lock through
         // the move stops `watch` re-arming; the UI itself only re-arms on navigation.
         let mut watch = self.runtime.watchers.worktree_watch.lock().await;
-        let disarmed = watch.take_if(|(watched, _)| *watched == id).is_some();
+        let disarmed = watch.get_mut(&id).and_then(Option::take).is_some();
         let moved = match self
             .runtime
             .worktrees
@@ -1518,7 +1524,9 @@ impl WorkstreamService<'_> {
             Err(e) => {
                 if disarmed {
                     match self.open_worktree_watch(&id).await {
-                        Ok(handle) => *watch = handle.map(|h| (id.clone(), h)),
+                        Ok(handle) => {
+                            watch.insert(id.clone(), handle);
+                        }
                         Err(rearm) => tracing::warn!("worktree watch on {id} stays off: {rearm}"),
                     }
                 }

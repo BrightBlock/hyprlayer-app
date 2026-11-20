@@ -1,0 +1,103 @@
+{
+  "scenario": "worktree_watch_per_connection",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "desktop_heard_a": true
+          },
+          "guard": "the desktop still hears A after the phone watches B",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "phone_heard_b": true
+          },
+          "guard": "the phone hears B, which it watches",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "desktop_heard_b": false,
+            "phone_heard_a": false
+          },
+          "guard": "neither device hears the workstream only the other watches",
+          "ok": true
+        }
+      ],
+      "step": "each device hears the workstream it watches, and only that one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "both_heard_a": true
+          },
+          "guard": "both devices hear A while both watch it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "desktop_heard_a": true
+          },
+          "guard": "the desktop still hears A after the phone moves to B",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "phone_heard_a": false
+          },
+          "guard": "the phone stops hearing A once it moves off it",
+          "ok": true
+        }
+      ],
+      "step": "a shared watch survives one device moving off it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "phone_gone": true
+          },
+          "guard": "the phone sees its connection end",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "b_released": true
+          },
+          "guard": "the server releases B, which only the phone watched",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "desktop_heard_a": true
+          },
+          "guard": "the desktop still hears A after the phone disconnects",
+          "ok": true
+        }
+      ],
+      "step": "a device leaving releases only its own watches"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "laptop_heard_a": true
+          },
+          "guard": "a fresh connection watching A hears it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "desktop_heard": 0
+          },
+          "guard": "the desktop hears nothing once it unwatches",
+          "ok": true
+        }
+      ],
+      "step": "a device that stops watching hears nothing"
+    }
+  ]
+}

@@ -314,7 +314,7 @@ impl HyprlayerRuntime {
             opencode: Arc::new(OpenCodeManager::new()),
             watchers: Watchers {
                 index_watch: AsyncMutex::new(None),
-                worktree_watch: Arc::new(AsyncMutex::new(None)),
+                worktree_watch: Arc::default(),
             },
             focused: Arc::new(AtomicBool::new(true)),
             indexed_docs: AtomicU32::new(u32::MAX),
@@ -847,16 +847,18 @@ impl HyprlayerRuntime {
         self.opencode.install_child_for_test(child).await;
     }
 
-    /// Test-only view of which workstream the worktree watcher is armed on.
+    /// Test-only view of the workstreams a worktree watcher is open on, sorted.
     /// Not part of the supported facade.
     #[doc(hidden)]
-    pub async fn test_watched_workstream(&self) -> Option<String> {
-        self.watchers
-            .worktree_watch
-            .lock()
-            .await
-            .as_ref()
+    pub async fn test_watched_workstreams(&self) -> Vec<String> {
+        let watched = self.watchers.worktree_watch.lock().await;
+        let mut ids: Vec<String> = watched
+            .iter()
+            .filter(|(_, handle)| handle.is_some())
             .map(|(id, _)| id.clone())
+            .collect();
+        ids.sort();
+        ids
     }
 
     /// Test-only raw ingress into a session's actor, for forcing an
