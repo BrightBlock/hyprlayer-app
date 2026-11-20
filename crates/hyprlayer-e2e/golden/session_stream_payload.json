@@ -1,0 +1,117 @@
+{
+  "scenario": "session_stream_payload",
+  "steps": [
+    {
+      "guards": [],
+      "step": "the desktop runs a turn that reads many large files"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "fits": true
+          },
+          "guard": "each page fits 256 KiB or is a single row",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "alone": true,
+            "reachedEnd": true
+          },
+          "guard": "a row larger than a page comes back alone, and the read moves past it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "matches": true
+          },
+          "guard": "the pages add up to the whole log",
+          "ok": true
+        }
+      ],
+      "step": "the phone catches up in pages capped by size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "foreignPartials": 0
+          },
+          "guard": "the phone is sent none of the desktop's typing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "reply": true,
+            "turnDone": true
+          },
+          "guard": "the phone still gets the desktop's reply and the turn's end",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "resumes": true,
+            "stamped": true
+          },
+          "guard": "each live row carries the createdAt that makes it a resume cursor",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "matches": true
+          },
+          "guard": "the desktop's own deltas add up to its reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "subagentPartials": 0
+          },
+          "guard": "the desktop is sent no subagent typing, which it never renders",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "withinTick": true
+          },
+          "guard": "deltas share frames: at most one per 50 ms tick",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "nullFree": true
+          },
+          "guard": "a partial frame carries no null field",
+          "ok": true
+        }
+      ],
+      "step": "the desktop streams a reply while the phone watches"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "main": true,
+            "subagent": true
+          },
+          "guard": "the desktop's typing and its subagent's reach the opted-in stream",
+          "ok": true
+        }
+      ],
+      "step": "a stream that asks for every partial still gets them"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "typed": true
+          },
+          "guard": "the phone gets an unattributed turn's typing, as it would an agent's",
+          "ok": true
+        }
+      ],
+      "step": "a turn no device sent still types live on the phone"
+    }
+  ]
+}

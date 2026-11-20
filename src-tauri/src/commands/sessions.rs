@@ -64,6 +64,9 @@ pub struct ResumedSession {
 #[serde(rename_all = "camelCase")]
 pub struct SessionStreamItemDto {
     pub seq: Option<f64>,
+    /// With `seq`, the row's resume cursor; null where `seq` is, or from a server before 0.8.21.
+    #[serde(default)]
+    pub created_at: Option<f64>,
     pub rev: Option<f64>,
     pub author: Option<ClientRef>,
     pub event: SessionEvent,
@@ -74,12 +77,14 @@ impl From<SessionFrame> for SessionStreamItemDto {
         match frame {
             SessionFrame::Item(item) => Self {
                 seq: item.seq.map(|seq| seq as f64),
+                created_at: item.created_at,
                 rev: Some(item.rev as f64),
                 author: item.author,
                 event: item.event,
             },
             SessionFrame::Bare(event) => Self {
                 seq: None,
+                created_at: None,
                 rev: None,
                 author: None,
                 event,
@@ -150,6 +155,7 @@ pub async fn start_stage_session(
             opts: opts.into(),
             echo_user_messages: true,
             with_meta: state.transcript_sync(),
+            all_partials: false,
         })
         .await
         .map_err(AppError::from)?;
@@ -258,6 +264,7 @@ pub async fn resume_session(
             cursor: cursor.map(LogCursor::from),
             echo_user_messages: true,
             with_meta: state.transcript_sync(),
+            all_partials: false,
         })
         .await
         .map_err(AppError::from)?;
@@ -295,6 +302,7 @@ pub async fn restart_session(
             permission_mode,
             echo_user_messages: true,
             with_meta: state.transcript_sync(),
+            all_partials: false,
         })
         .await
         .map_err(AppError::from)?;
@@ -329,6 +337,7 @@ pub async fn rewind_session(
             permission_mode,
             echo_user_messages: true,
             with_meta: state.transcript_sync(),
+            all_partials: false,
         })
         .await
         .map_err(AppError::from)?;
@@ -697,6 +706,7 @@ pub async fn attach_session(
             session_id,
             echo_user_messages: true,
             with_meta: state.transcript_sync(),
+            all_partials: false,
         })
         .await
         .map_err(AppError::from)?;

@@ -171,7 +171,7 @@ impl Server {
     }
 
     /// The announced identity of the connection this request came on.
-    fn caller(&self) -> Option<ClientRef> {
+    pub(crate) fn caller(&self) -> Option<ClientRef> {
         crate::CONN
             .try_with(|conn| self.clients.client_ref(*conn))
             .ok()
@@ -2934,6 +2934,7 @@ mod tests {
                 live: attachment.live,
                 echo_user_messages: false,
                 with_meta: false,
+                partials: streams::Partials::All,
                 rev: attachment.rev,
             },
             tx,

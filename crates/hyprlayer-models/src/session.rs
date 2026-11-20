@@ -427,6 +427,15 @@ pub struct ClientRef {
     pub device: String,
 }
 
+impl ClientRef {
+    /// The prefix the server gives an agent's turns; desktops apply them like their own.
+    pub const AGENT_PREFIX: &'static str = "agent:";
+
+    pub fn is_agent(&self) -> bool {
+        self.client_id.starts_with(Self::AGENT_PREFIX)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
@@ -464,8 +473,13 @@ pub struct SessionTurns {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionStreamItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seq: Option<i64>,
+    /// Set with `seq`: the row's cursor is `{ seq, created_at }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<f64>,
     pub rev: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<ClientRef>,
     pub event: SessionEvent,
 }

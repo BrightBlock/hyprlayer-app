@@ -660,8 +660,9 @@ impl ActorState {
                 Ok(applied) => {
                     self.seq = seq + 1;
                     self.ordinal += 1;
+                    let created_at = applied.created_at();
                     let rev = match applied {
-                        ApplySessionEventOutcome::Applied { rev: Some(rev) } => rev,
+                        ApplySessionEventOutcome::Applied { rev: Some(rev), .. } => rev,
                         // Already applied, or the session row was missing: bump directly.
                         _ => self.bump_reset_rev().await,
                     };
@@ -669,6 +670,7 @@ impl ActorState {
                         epoch: self.epoch,
                         delivery_ordinal: self.ordinal,
                         persisted_seq: Some(seq),
+                        created_at: Some(created_at),
                         rev,
                         author: None,
                         event: boundary,
@@ -725,7 +727,9 @@ impl ActorState {
         let after_seq = self.verify_cursor(cursor).await?;
         let (sid, db) = (self.session_id.clone(), self.db.clone());
         let limit = limit.clamp(1, TURNS_PAGE_MAX);
-        let page = blocking(move || db.session_log_page(&sid, after_seq, limit)).await?;
+        let page =
+            blocking(move || db.session_log_page(&sid, after_seq, limit, TURNS_PAGE_MAX_BYTES))
+                .await?;
         Ok(SessionTurns {
             entries: page.entries,
             next_cursor: page
@@ -857,8 +861,8 @@ impl ActorState {
             self.close_turn(exited);
         }
 
-        let (persisted_seq, committed_rev) = if ephemeral {
-            (None, None)
+        let (persisted_seq, created_at, committed_rev) = if ephemeral {
+            (None, None, None)
         } else {
             let seq = self.seq;
             let kind = event.kind();
@@ -880,13 +884,13 @@ impl ActorState {
             })
             .await;
             match outcome {
-                Ok(ApplySessionEventOutcome::Applied { rev }) => {
+                Ok(ApplySessionEventOutcome::Applied { rev, created_at }) => {
                     self.seq = seq + 1;
-                    (Some(seq), rev)
+                    (Some(seq), Some(created_at), rev)
                 }
-                Ok(ApplySessionEventOutcome::AlreadyApplied) => {
+                Ok(ApplySessionEventOutcome::AlreadyApplied { created_at }) => {
                     self.seq = seq + 1;
-                    (Some(seq), None)
+                    (Some(seq), Some(created_at), None)
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -931,6 +935,7 @@ impl ActorState {
             epoch: self.epoch,
             delivery_ordinal: ordinal,
             persisted_seq,
+            created_at,
             rev: self.rev,
             author,
             event,
@@ -1079,6 +1084,7 @@ impl ActorState {
             epoch: self.epoch,
             delivery_ordinal: self.ordinal,
             persisted_seq: None,
+            created_at: None,
             rev: self.rev,
             author: self.in_flight.author.clone(),
             event: SessionEvent::PartialText {
@@ -1118,6 +1124,8 @@ const RESERVATION_TTL: Duration = Duration::from_secs(30);
 const LAPSED_KEPT: usize = 32;
 
 const TURNS_PAGE_MAX: u32 = 2000;
+// About a second of a 256 KiB/s link, so a call queued behind a page waits no longer.
+const TURNS_PAGE_MAX_BYTES: usize = 256 * 1024;
 
 fn client_id(author: &Option<ClientRef>) -> Option<&str> {
     author.as_ref().map(|a| a.client_id.as_str())

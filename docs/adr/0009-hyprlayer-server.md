@@ -129,6 +129,16 @@ Three consequences follow, accepted rather than designed around:
   every connection that announced it, watching a session or not.)*
   *(Amended 2026-10-16 — `GoalChanged` is targeted the same way, so a goal's notices reach
   every announced device and a released desktop never receives a kind it cannot decode.)*
+- **A session stream sends what its client keeps.** *(Added 2026-11-19.)* A `with_meta`
+  stream on an announced connection gets only the partial text that client renders:
+  main-thread text from its own turns, an agent's, or an unattributed one. Another
+  device's typing and subagent typing stay on the server unless the stream sets
+  `all_partials`. Partials are coalesced per stream: the first goes out at once, then at
+  most one frame per 50 ms. A live row carries `createdAt`, so it is a resume cursor. A
+  `list_session_turns` page stops before the row that would pass 256 KiB of payload and
+  always holds one. The frame decoder has no size cap, because one row, one attachment
+  upload or one doc read is a single frame of any size. A cap low enough to protect a
+  phone would drop the connection on real data.
 
 *(Amended 2026-11-11 — agents spawned by the runtime carry `HYPRLAYER_CTL`,
 `HYPRLAYER_SOCKET` and a per-spawn `HYPRLAYER_AGENT_TOKEN`. The `hook`, `ctl` and `mcp`

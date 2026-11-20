@@ -13,6 +13,8 @@ pub(crate) struct SessionDelivery {
     pub epoch: u64,
     pub delivery_ordinal: u64,
     pub persisted_seq: Option<i64>,
+    /// The persisted row's; with `persisted_seq` it is a client's resume cursor.
+    pub created_at: Option<f64>,
     pub rev: u64,
     pub author: Option<ClientRef>,
     pub event: SessionEvent,
@@ -22,6 +24,7 @@ impl SessionDelivery {
     fn item(&self) -> SessionStreamItem {
         SessionStreamItem {
             seq: self.persisted_seq,
+            created_at: self.created_at,
             rev: self.rev,
             author: self.author.clone(),
             event: self.event.clone(),
@@ -197,6 +200,7 @@ mod tests {
             epoch: 0,
             delivery_ordinal: 0,
             persisted_seq: None,
+            created_at: None,
             rev: 0,
             author: None,
             event: SessionEvent::TurnDone {

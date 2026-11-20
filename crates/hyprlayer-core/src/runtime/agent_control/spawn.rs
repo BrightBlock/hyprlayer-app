@@ -941,7 +941,7 @@ fn header(identity: &AgentIdentity, label: &str) -> String {
 /// The `agent:` prefix is how desktops tell an agent's turn from a person's.
 fn author(identity: &AgentIdentity, label: String) -> ClientRef {
     ClientRef {
-        client_id: format!("agent:{}", identity.caller.id()),
+        client_id: format!("{}{}", ClientRef::AGENT_PREFIX, identity.caller.id()),
         device: label,
     }
 }

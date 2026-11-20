@@ -1972,6 +1972,8 @@ export type SessionState = "idle" | "starting" | "running" | "awaiting_permissio
 /**  `seq`/`rev`/`author` are null for an ephemeral event and for a server without transcript sync. */
 export type SessionStreamItemDto = {
 	seq: number | null,
+	/**  With `seq`, the row's resume cursor; null where `seq` is, or from a server before 0.8.21. */
+	createdAt?: number | null,
 	rev: number | null,
 	author: ClientRef | null,
 	event: SessionEvent,

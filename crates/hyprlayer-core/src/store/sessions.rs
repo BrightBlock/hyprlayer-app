@@ -1,3 +1,4 @@
+use rusqlite::types::ValueRef;
 use rusqlite::{params, OptionalExtension, Row, ToSql, Transaction};
 use serde::{Deserialize, Serialize};
 
@@ -91,13 +92,25 @@ pub(crate) struct SessionRowMutation {
 /// Kinds whose commit advances `sessions.rev`; migration 11 backfills the same set.
 pub(crate) const REV_KINDS: [&str; 4] = ["userMessage", "assistantText", "toolResult", "rewound"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ApplySessionEventOutcome {
     /// `rev` is the session's new rev when this row advanced it.
     Applied {
         rev: Option<u64>,
+        created_at: f64,
     },
-    AlreadyApplied,
+    AlreadyApplied {
+        created_at: f64,
+    },
+}
+
+impl ApplySessionEventOutcome {
+    /// The row's `created_at`, which a client's cursor names it by.
+    pub(crate) fn created_at(&self) -> f64 {
+        match self {
+            Self::Applied { created_at, .. } | Self::AlreadyApplied { created_at } => *created_at,
+        }
+    }
 }
 
 /// One page of raw rows; `last` is the final row read, decodable or not.
@@ -611,28 +624,40 @@ impl Db {
         })
     }
 
-    /// A page of raw rows after `after_seq`, decoded as `session_log_after` does.
+    /// A page of raw rows after `after_seq`, decoded as `session_log_after` does. It
+    /// stops before the row that would pass `max_bytes` of payload, but always holds one.
     pub(crate) fn session_log_page(
         &self,
         session_id: &str,
         after_seq: Option<i64>,
         limit: u32,
+        max_bytes: usize,
     ) -> Result<SessionLogPage> {
         let rows: Vec<StoredEvent> = self.with(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT seq, kind, payload, created_at FROM session_events
                  WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
             )?;
-            let rows =
-                stmt.query_map(params![session_id, after_seq.unwrap_or(-1), limit], |row| {
-                    Ok(StoredEvent {
-                        seq: row.get::<_, i64>("seq")? as f64,
-                        kind: row.get("kind")?,
-                        payload: row.get("payload")?,
-                        created_at: row.get("created_at")?,
-                    })
-                })?;
-            rows.collect()
+            let mut rows = stmt.query(params![session_id, after_seq.unwrap_or(-1), limit])?;
+            let mut page = Vec::new();
+            let mut bytes = 0;
+            while let Some(row) = rows.next()? {
+                let size = match row.get_ref("payload")? {
+                    ValueRef::Text(payload) | ValueRef::Blob(payload) => payload.len(),
+                    _ => 0,
+                };
+                if !page.is_empty() && bytes + size > max_bytes {
+                    break;
+                }
+                bytes += size;
+                page.push(StoredEvent {
+                    seq: row.get::<_, i64>("seq")? as f64,
+                    kind: row.get("kind")?,
+                    payload: row.get("payload")?,
+                    created_at: row.get("created_at")?,
+                });
+            }
+            Ok(page)
         })?;
 
         let last = rows.last().map(|r| (r.seq as i64, r.created_at));
@@ -804,20 +829,22 @@ impl Db {
         self.with_core(|conn| {
             let tx = conn.unchecked_transaction()?;
 
-            let existing: Option<(String, String)> = tx
+            let existing: Option<(String, String, f64)> = tx
                 .query_row(
-                    "SELECT kind, payload FROM session_events WHERE session_id = ?1 AND seq = ?2",
+                    "SELECT kind, payload, created_at FROM session_events
+                     WHERE session_id = ?1 AND seq = ?2",
                     params![session_id, seq],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .optional()?;
 
             let outcome = match existing {
                 None => {
+                    let created_at = now_ms();
                     tx.execute(
                         "INSERT INTO session_events (session_id, seq, kind, payload, created_at)
                          VALUES (?1,?2,?3,?4,?5)",
-                        params![session_id, seq, kind, raw_payload, now_ms()],
+                        params![session_id, seq, kind, raw_payload, created_at],
                     )?;
                     let rev = if REV_KINDS.contains(&kind) {
                         tx.query_row(
@@ -833,11 +860,11 @@ impl Db {
                     } else {
                         None
                     };
-                    ApplySessionEventOutcome::Applied { rev }
+                    ApplySessionEventOutcome::Applied { rev, created_at }
                 }
-                Some((existing_kind, existing_payload)) => {
+                Some((existing_kind, existing_payload, created_at)) => {
                     if existing_kind == kind && existing_payload == raw_payload {
-                        ApplySessionEventOutcome::AlreadyApplied
+                        ApplySessionEventOutcome::AlreadyApplied { created_at }
                     } else {
                         return Err(CoreError::SessionSequenceConflict {
                             session_id: session_id.to_string(),

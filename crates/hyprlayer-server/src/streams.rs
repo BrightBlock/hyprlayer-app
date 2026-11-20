@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use hyprlayer_core::runtime::scripts as core_scripts;
 use hyprlayer_core::runtime::sessions::{
@@ -20,11 +21,12 @@ use hyprlayer_core::{
     CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
     SessionEvent, SessionLogEntry, Stage,
 };
-use hyprlayer_models::{PtyLaunchSession, PtyLaunched, SessionStreamItem};
+use hyprlayer_models::{ClientRef, PtyLaunchSession, PtyLaunched, SessionStreamItem};
 use hyprlayer_proto::{frame, WireError};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
+use tokio::time::Instant;
 
 use crate::client::{EventStream, RpcClient};
 use crate::dispatch::{wire_error, Server, Wire};
@@ -94,6 +96,9 @@ pub enum StreamRequest {
         echo_user_messages: bool,
         #[serde(default)]
         with_meta: bool,
+        /// Also forward partial text this client does not render.
+        #[serde(default)]
+        all_partials: bool,
     },
     ResumeSession {
         session_id: String,
@@ -105,6 +110,8 @@ pub enum StreamRequest {
         echo_user_messages: bool,
         #[serde(default)]
         with_meta: bool,
+        #[serde(default)]
+        all_partials: bool,
     },
     RestartSession {
         session_id: String,
@@ -115,6 +122,8 @@ pub enum StreamRequest {
         echo_user_messages: bool,
         #[serde(default)]
         with_meta: bool,
+        #[serde(default)]
+        all_partials: bool,
     },
     RewindSession {
         session_id: String,
@@ -124,6 +133,8 @@ pub enum StreamRequest {
         echo_user_messages: bool,
         #[serde(default)]
         with_meta: bool,
+        #[serde(default)]
+        all_partials: bool,
     },
     AttachSession {
         session_id: String,
@@ -131,6 +142,8 @@ pub enum StreamRequest {
         echo_user_messages: bool,
         #[serde(default)]
         with_meta: bool,
+        #[serde(default)]
+        all_partials: bool,
     },
 }
 
@@ -328,9 +341,37 @@ pub(crate) enum StreamSource {
         /// Carried into a lag recovery's re-attach, so it keeps this stream's opt-in.
         echo_user_messages: bool,
         with_meta: bool,
+        partials: Partials,
         /// The session's rev once `replay` is applied.
         rev: u64,
     },
+}
+
+/// Which partial text a session stream forwards.
+pub(crate) enum Partials {
+    All,
+    /// Only what this announced client renders; its route drops the rest on arrival.
+    RenderedBy(String),
+}
+
+impl Partials {
+    /// A bare stream carries no author, so its client renders every main-thread partial.
+    fn for_stream(server: &Server, with_meta: bool, all_partials: bool) -> Self {
+        match server.caller() {
+            Some(me) if with_meta && !all_partials => Partials::RenderedBy(me.client_id),
+            _ => Partials::All,
+        }
+    }
+
+    /// Mirrors the desktop: subagent text is never shown, an agent's turn applies like its own.
+    fn forwards(&self, author: Option<&ClientRef>, parent_id: Option<&str>) -> bool {
+        match self {
+            Partials::All => true,
+            Partials::RenderedBy(me) => {
+                parent_id.is_none() && author.is_none_or(|a| a.is_agent() || a.client_id == *me)
+            }
+        }
+    }
 }
 
 async fn load_session(runtime: &HyprlayerRuntime, id: &str) -> Result<Session, CoreError> {
@@ -537,6 +578,7 @@ pub(crate) async fn prepare_stream(
             opts,
             echo_user_messages,
             with_meta,
+            all_partials,
         } => {
             let workstream = runtime.workstreams().find(&workstream_id).await.wire()?;
             let StreamStartOpts {
@@ -587,6 +629,7 @@ pub(crate) async fn prepare_stream(
                     live: attachment.live,
                     echo_user_messages,
                     with_meta,
+                    partials: Partials::for_stream(server, with_meta, all_partials),
                     rev: attachment.rev,
                 }),
             ))
@@ -599,6 +642,7 @@ pub(crate) async fn prepare_stream(
             cursor,
             echo_user_messages,
             with_meta,
+            all_partials,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -641,6 +685,7 @@ pub(crate) async fn prepare_stream(
                         live,
                         echo_user_messages,
                         with_meta,
+                        partials: Partials::for_stream(server, with_meta, all_partials),
                         rev,
                     }),
                 ));
@@ -700,6 +745,7 @@ pub(crate) async fn prepare_stream(
                     live,
                     echo_user_messages,
                     with_meta,
+                    partials: Partials::for_stream(server, with_meta, all_partials),
                     rev,
                 }),
             ))
@@ -711,6 +757,7 @@ pub(crate) async fn prepare_stream(
             permission_mode,
             echo_user_messages,
             with_meta,
+            all_partials,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -757,6 +804,7 @@ pub(crate) async fn prepare_stream(
                     live: attachment.live,
                     echo_user_messages,
                     with_meta,
+                    partials: Partials::for_stream(server, with_meta, all_partials),
                     rev: attachment.rev,
                 }),
             ))
@@ -767,6 +815,7 @@ pub(crate) async fn prepare_stream(
             permission_mode,
             echo_user_messages,
             with_meta,
+            all_partials,
         } => {
             let session = load_session(&runtime, &session_id)
                 .await
@@ -803,6 +852,7 @@ pub(crate) async fn prepare_stream(
                     live: attachment.live,
                     echo_user_messages,
                     with_meta,
+                    partials: Partials::for_stream(server, with_meta, all_partials),
                     rev: attachment.rev,
                 }),
             ))
@@ -811,6 +861,7 @@ pub(crate) async fn prepare_stream(
             session_id,
             echo_user_messages,
             with_meta,
+            all_partials,
         } => {
             let attachment = runtime
                 .sessions()
@@ -826,6 +877,7 @@ pub(crate) async fn prepare_stream(
                     live: attachment.live,
                     echo_user_messages,
                     with_meta,
+                    partials: Partials::for_stream(server, with_meta, all_partials),
                     rev: attachment.rev,
                 }),
             ))
@@ -863,19 +915,12 @@ async fn run_stream(
             live,
             echo_user_messages,
             with_meta,
+            partials,
             rev,
         } => {
             if send_replay(&tx, stream_id, replay, rev, with_meta).await {
-                forward_session(
-                    &runtime,
-                    stream_id,
-                    &session_id,
-                    live,
-                    echo_user_messages,
-                    with_meta,
-                    &tx,
-                )
-                .await
+                let sink = SessionSink::new(&tx, stream_id, with_meta, partials);
+                forward_session(&runtime, &session_id, live, echo_user_messages, sink).await
             } else {
                 "the client stopped reading during the replay"
             }
@@ -902,23 +947,29 @@ async fn forward_terminal(
 /// Returns why the stream ended.
 async fn forward_session(
     runtime: &HyprlayerRuntime,
-    stream_id: u64,
     session_id: &str,
     mut live: LiveReceiver,
     echo_user_messages: bool,
-    with_meta: bool,
-    tx: &mpsc::Sender<Vec<u8>>,
+    mut sink: SessionSink<'_>,
 ) -> &'static str {
+    let (tx, stream_id, with_meta) = (sink.tx, sink.stream_id, sink.with_meta);
     loop {
-        match live.recv_item().await {
+        let next = match sink.flush_at() {
+            Some(at) => tokio::select! {
+                next = live.recv_item() => next,
+                () = tokio::time::sleep_until(at) => {
+                    if !sink.flush().await {
+                        return "the client stopped reading";
+                    }
+                    continue;
+                }
+            },
+            None => live.recv_item().await,
+        };
+        match next {
             Some(Ok(item)) => {
                 let exited = matches!(item.event, SessionEvent::Exited { .. });
-                let sent = if with_meta {
-                    send_event(tx, stream_id, &item).await
-                } else {
-                    send_event(tx, stream_id, &item.event).await
-                };
-                if !sent {
+                if !sink.send(item).await {
                     return "the client stopped reading";
                 }
                 if exited {
@@ -929,6 +980,10 @@ async fn forward_session(
                 epoch,
                 last_persisted_seq,
             })) => {
+                // The re-attach seeds nothing, so held text not sent now is lost.
+                if !sink.flush().await {
+                    return "the client stopped reading";
+                }
                 match runtime
                     .sessions()
                     .attach_after(session_id, epoch, last_persisted_seq, echo_user_messages)
@@ -964,7 +1019,137 @@ async fn forward_session(
                     }
                 }
             }
-            None => return "the session's event source closed",
+            None => {
+                sink.flush().await;
+                return "the session's event source closed";
+            }
+        }
+    }
+}
+
+// Under the ~100 ms a delay starts to read as lag, and a harness that sends a delta per
+// token (codex, opencode) is held to 20 frames a second.
+const PARTIAL_TICK: Duration = Duration::from_millis(50);
+
+/// A session stream's outbound side. Partial text its client renders is coalesced: the
+/// first delta goes out at once, later ones at most one frame per `PARTIAL_TICK`.
+struct SessionSink<'a> {
+    tx: &'a mpsc::Sender<Vec<u8>>,
+    stream_id: u64,
+    with_meta: bool,
+    partials: Partials,
+    held: Option<HeldPartial>,
+    open_at: Instant,
+}
+
+struct HeldPartial {
+    rev: u64,
+    author: Option<ClientRef>,
+    text: String,
+    parent_id: Option<String>,
+}
+
+/// `SessionEvent` keeps its null fields for specta; a partial is sent often enough to drop them.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename = "partialText", rename_all = "camelCase")]
+struct PartialEvent<'a> {
+    text: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct PartialItem<'a> {
+    rev: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    author: Option<&'a ClientRef>,
+    event: PartialEvent<'a>,
+}
+
+impl<'a> SessionSink<'a> {
+    fn new(
+        tx: &'a mpsc::Sender<Vec<u8>>,
+        stream_id: u64,
+        with_meta: bool,
+        partials: Partials,
+    ) -> Self {
+        Self {
+            tx,
+            stream_id,
+            with_meta,
+            partials,
+            held: None,
+            open_at: Instant::now(),
+        }
+    }
+
+    fn flush_at(&self) -> Option<Instant> {
+        self.held.as_ref().map(|_| self.open_at)
+    }
+
+    async fn send(&mut self, item: SessionStreamItem) -> bool {
+        let SessionEvent::PartialText { text, parent_id } = item.event else {
+            return self.flush().await && self.write(&item).await;
+        };
+        if !self
+            .partials
+            .forwards(item.author.as_ref(), parent_id.as_deref())
+        {
+            return true;
+        }
+        if let Some(held) = &mut self.held {
+            if held.parent_id == parent_id && held.author == item.author {
+                held.text.push_str(&text);
+                held.rev = item.rev;
+                return true;
+            }
+            if !self.flush().await {
+                return false;
+            }
+        }
+        let partial = HeldPartial {
+            rev: item.rev,
+            author: item.author,
+            text,
+            parent_id,
+        };
+        if Instant::now() >= self.open_at {
+            return self.emit(partial).await;
+        }
+        self.held = Some(partial);
+        true
+    }
+
+    async fn flush(&mut self) -> bool {
+        match self.held.take() {
+            Some(partial) => self.emit(partial).await,
+            None => true,
+        }
+    }
+
+    async fn emit(&mut self, partial: HeldPartial) -> bool {
+        self.open_at = Instant::now() + PARTIAL_TICK;
+        let event = PartialEvent {
+            text: &partial.text,
+            parent_id: partial.parent_id.as_deref(),
+        };
+        if self.with_meta {
+            let item = PartialItem {
+                rev: partial.rev,
+                author: partial.author.as_ref(),
+                event,
+            };
+            send_event(self.tx, self.stream_id, &item).await
+        } else {
+            send_event(self.tx, self.stream_id, &event).await
+        }
+    }
+
+    async fn write(&self, item: &SessionStreamItem) -> bool {
+        if self.with_meta {
+            send_event(self.tx, self.stream_id, item).await
+        } else {
+            send_event(self.tx, self.stream_id, &item.event).await
         }
     }
 }
@@ -984,6 +1169,7 @@ async fn send_replay(
                 stream_id,
                 &SessionStreamItem {
                     seq: Some(entry.seq),
+                    created_at: Some(entry.created_at),
                     rev,
                     author: None,
                     event: entry.event,
@@ -1264,6 +1450,7 @@ impl RpcClient {
                 // Only this branch's client sets this; a released 0.8.4 desktop never does.
                 echo_user_messages: true,
                 with_meta: false,
+                all_partials: false,
             })
             .await?;
         match response {
@@ -1306,6 +1493,7 @@ impl RpcClient {
                 cursor,
                 echo_user_messages: true,
                 with_meta: false,
+                all_partials: false,
             })
             .await?;
         match response {
@@ -1346,6 +1534,7 @@ impl RpcClient {
                 permission_mode,
                 echo_user_messages: true,
                 with_meta: false,
+                all_partials: false,
             })
             .await?;
         match response {
@@ -1376,6 +1565,7 @@ impl RpcClient {
                 permission_mode,
                 echo_user_messages: true,
                 with_meta: false,
+                all_partials: false,
             })
             .await?;
         match response {
@@ -1421,6 +1611,7 @@ impl RpcClient {
                 session_id,
                 echo_user_messages: true,
                 with_meta: false,
+                all_partials: false,
             })
             .await?;
         match response {

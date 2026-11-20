@@ -165,6 +165,7 @@ async fn transcript_sync() {
             },
             echo_user_messages: true,
             with_meta: true,
+            all_partials: false,
         })
         .await
         .expect("start_stage_session");
@@ -245,6 +246,7 @@ async fn transcript_sync() {
             cursor: Some(b_cursor),
             echo_user_messages: true,
             with_meta: true,
+            all_partials: false,
         })
         .await
         .expect("B resumes");
