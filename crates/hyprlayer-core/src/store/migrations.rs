@@ -280,6 +280,9 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE sessions ADD COLUMN parent_session_id TEXT;
     ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'user';
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN effort TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

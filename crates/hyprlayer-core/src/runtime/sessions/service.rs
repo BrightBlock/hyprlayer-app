@@ -414,6 +414,13 @@ impl SessionService<'_> {
                 }
             }
         }
+        // opencode and codex report a model only at spawn, so a relaunch reads the switch from the row.
+        let (db, id, stored) = (
+            self.runtime.db.clone(),
+            session_id.to_string(),
+            model.clone(),
+        );
+        blocking(move || db.set_session_model(&id, stored.as_deref())).await?;
         if let Some(driver) = self.live_driver(session_id).await {
             driver.set_model(model);
         }
@@ -421,6 +428,12 @@ impl SessionService<'_> {
     }
 
     pub async fn set_effort(&self, session_id: &str, effort: Option<String>) -> Result<()> {
+        let (db, id, stored) = (
+            self.runtime.db.clone(),
+            session_id.to_string(),
+            effort.clone(),
+        );
+        blocking(move || db.set_session_effort(&id, stored.as_deref())).await?;
         if let Some(driver) = self.live_driver(session_id).await {
             driver.set_effort(effort);
         }
@@ -894,14 +907,13 @@ impl SessionService<'_> {
                 return;
             }
         };
-        // The started model and a mode the user switched to live both survive the relaunch.
+        // A mode the user switched to live survives the relaunch.
         let permission_mode = self.permission_mode(session_id).await;
         self.kill_for_relaunch(session_id).await;
-        let model = session.model.clone();
         let params = LaunchSessionParams {
             session,
             project_path,
-            model,
+            model: None,
             effort: None,
             permission_mode,
             resume: true,
@@ -1348,8 +1360,16 @@ impl SessionService<'_> {
 
     pub(crate) async fn launch_driver(
         &self,
-        params: LaunchSessionParams,
+        mut params: LaunchSessionParams,
     ) -> Result<Arc<dyn AgentDriver>> {
+        // A relaunch that names no model keeps the session's model and effort, not the harness defaults.
+        if params.resume && params.model.is_none() {
+            params.model = params.session.model.clone();
+            if params.effort.is_none() {
+                let (db, id) = (self.runtime.db.clone(), params.session.id.clone());
+                params.effort = blocking(move || db.session_effort(&id)).await?;
+            }
+        }
         let session = &params.session;
         let session_id = session.id.clone();
         let resume = params.resume;
@@ -1421,6 +1441,16 @@ impl SessionService<'_> {
             if let Err(e) = blocking(move || db.record_orphan(pid as i64, &sid)).await {
                 tracing::warn!("session {session_id}: could not record pid {pid}: {e}");
             }
+        }
+
+        // No harness reports its effort, so the row keeps the one it launched with.
+        let (db, sid, effort) = (
+            self.runtime.db.clone(),
+            session_id.clone(),
+            params.effort.clone(),
+        );
+        if let Err(e) = blocking(move || db.set_session_effort(&sid, effort.as_deref())).await {
+            tracing::warn!("session {session_id}: could not record its effort: {e}");
         }
 
         self.runtime

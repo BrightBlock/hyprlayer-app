@@ -1,0 +1,165 @@
+{
+  "scenario": "resume_keeps_model",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "effort": "high",
+            "launches": 1,
+            "model": "claude-e2e-picked",
+            "resumed": false
+          },
+          "guard": "the first launch runs the picked model and effort",
+          "ok": true
+        }
+      ],
+      "step": "start a session on a picked model and effort"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "launch": {
+              "effort": "high",
+              "launches": 2,
+              "model": "claude-e2e-picked",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "the relaunch resumes the conversation on the picked model and effort",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "model": "claude-e2e-picked"
+          },
+          "guard": "list_sessions still shows the picked model",
+          "ok": true
+        }
+      ],
+      "step": "a resume after a server restart keeps them"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "launch": {
+              "effort": "low",
+              "launches": 3,
+              "model": "claude-e2e-switched",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "the resume runs the switched model and effort",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "model": "claude-e2e-switched"
+          },
+          "guard": "list_sessions shows the switched model",
+          "ok": true
+        }
+      ],
+      "step": "a model and effort switched in place survive the next resume"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "launch": {
+              "effort": "low",
+              "launches": 4,
+              "model": "claude-e2e-switched",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "the restart names no model and runs the session's",
+          "ok": true
+        }
+      ],
+      "step": "a permission-mode restart keeps them"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "launch": {
+              "effort": null,
+              "launches": 5,
+              "model": "claude-e2e-other",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "the named model runs with no effort",
+          "ok": true
+        }
+      ],
+      "step": "a restart that names a model sets both"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "launch": {
+              "effort": "medium",
+              "launches": 6,
+              "model": "claude-e2e-exited-pick",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "the resume runs the model and effort picked while exited",
+          "ok": true
+        }
+      ],
+      "step": "a model and effort picked while the session is exited persist"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "errorShown": true,
+            "live": true,
+            "turnFailed": true
+          },
+          "guard": "the turn fails with claude's model error, and the session stays live",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launch": {
+              "effort": null,
+              "launches": 8,
+              "model": "claude-e2e-other",
+              "resumed": true
+            },
+            "replied": true
+          },
+          "guard": "picking a model restarts the live session on it",
+          "ok": true
+        }
+      ],
+      "step": "a session stored on a retired model fails visibly and a pick recovers it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

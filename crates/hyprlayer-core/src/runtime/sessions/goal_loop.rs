@@ -886,12 +886,10 @@ impl Run {
             .map(|max| max - goal.spent_cost_usd)
             // Spent already: the boundary ends the goal before any send, so no cap is needed.
             .filter(|remaining| *remaining > 0.0);
-        // The model the harness last started on, so a relaunch keeps the user's choice.
-        let model = session.model.clone();
         let params = LaunchSessionParams {
             session,
             project_path: self.workstream.project_path.clone(),
-            model,
+            model: None,
             effort: None,
             permission_mode: self.mode,
             resume: true,

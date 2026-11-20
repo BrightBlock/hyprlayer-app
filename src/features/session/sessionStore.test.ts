@@ -45,7 +45,11 @@ const h = vi.hoisted(() => {
   }));
   const watchSessions = vi.fn(async () => ({ status: "ok", data: [] as unknown[] }));
   const notifyNeedsAttention = vi.fn(async () => {});
+  const setSessionModel = vi.fn(async () => ({ status: "ok", data: null }));
+  const setSessionEffort = vi.fn(async () => ({ status: "ok", data: null }));
   return {
+    setSessionModel,
+    setSessionEffort,
     notifyNeedsAttention,
     connectionStatus,
     listSessionTurns,
@@ -93,6 +97,8 @@ vi.mock("../../lib/bindings", () => ({
     listSessionTurns: h.listSessionTurns,
     getClientIdentity: h.getClientIdentity,
     watchSessions: h.watchSessions,
+    setSessionModel: h.setSessionModel,
+    setSessionEffort: h.setSessionEffort,
   },
 }));
 
@@ -110,6 +116,7 @@ const {
   stopSession,
   resumeSession,
   applyModel,
+  applyEffort,
   applyPermissionMode,
   classifyEntry,
   workstreamShipBusy,
@@ -460,6 +467,32 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
       "default",
       expect.anything(),
     );
+  });
+
+  it("a model pick on an exited tab waits on the session for its next resume", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(EXITED);
+    h.setSessionModel.mockClear();
+    h.setSessionEffort.mockClear();
+
+    await applyModel(id, "sonnet", "high", "default");
+
+    expect(h.restartSession).not.toHaveBeenCalled();
+    expect(h.setSessionModel.mock.calls).toEqual([[id, "sonnet"]]);
+    expect(h.setSessionEffort.mock.calls).toEqual([[id, "high"]]);
+  });
+
+  it("an effort pick waits on the session for its next launch", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(EXITED);
+    h.setSessionEffort.mockClear();
+
+    await applyEffort(id, "low");
+
+    expect(h.restartSession).not.toHaveBeenCalled();
+    expect(h.setSessionEffort.mock.calls).toEqual([[id, "low"]]);
   });
 
   it("stop while parked on a permission declines the live ask, interrupts, and unlocks", async () => {
@@ -1835,6 +1868,34 @@ describe("reconnecting from the held cursor", () => {
     expect(texts(moved)).toEqual([...replies(300), "after the rewind"]);
     expect(syncOf(cut)?.resetRev).toBe(7);
     expect(syncOf(moved)?.resetRev).toBe(7);
+  });
+
+  it("resumes an exited session for a send after a reconnect from the held cursor", async () => {
+    const exited = await restore(turn(300), false);
+    await reconnect([]);
+    reads.length = 0;
+    h.resumeSession.mockClear();
+
+    await sendMessage(exited, "after the reconnect");
+
+    expect(reads).toEqual([{ sessionId: exited, cursor: tail(exited), rows: 0 }]);
+    expect(resumedFrom()).toEqual([[exited, tail(exited)]]);
+    expect(h.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(texts(exited)).toEqual(replies(300));
+  });
+
+  it("reads the whole log for a send when a rewind moved it after the reconnect", async () => {
+    const exited = await restore(turn(300), false);
+    await reconnect([]);
+    // The held row still matches; only resetRev says the log was rewritten.
+    server.set(exited, { rows: [...turn(300), at(301, reply("after the rewind"), 1_800_000_000_000)], resetRev: 7 });
+    h.listSessionTurns.mockClear();
+
+    await sendMessage(exited, "after the rewind");
+
+    expect(asked()).toContainEqual([exited, { kind: "empty" }]);
+    expect(texts(exited)).toEqual([...replies(300), "after the rewind"]);
+    expect(syncOf(exited)?.resetRev).toBe(7);
   });
 
   it("keeps the cursor before another device's held turn, so a reconnect reads that turn once", async () => {

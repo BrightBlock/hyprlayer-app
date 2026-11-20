@@ -907,13 +907,14 @@ async function resumeOnce(
   if (!entryOf(sessionId) || channels.has(sessionId)) return;
 
   // Every channel-less resume folds the log first, so the stream attaches where the view ends.
+  // It reads only past the held cursor unless the caller wants the whole log.
   let cursor: LogCursorDto | null;
   if (opts.cursor) {
     cursor = opts.cursor;
     const current = entryOf(sessionId);
     if (current) setEntry(sessionId, { ...current, live: true, state: "starting" });
   } else {
-    cursor = await foldAndWriteEntry(sessionId, opts.catchUp);
+    cursor = await foldAndWriteEntry(sessionId, opts.catchUp ?? true);
     if (!cursor || !entryOf(sessionId)) return;
   }
 
@@ -1141,9 +1142,18 @@ export async function applyModel(
   effort: string | null,
   mode: PermissionMode | null,
 ): Promise<void> {
-  const current = entryOf(sessionId);
-  if (!current || !channels.has(sessionId)) return;
+  // With no harness live, the session row carries the pick to its next resume.
+  if (!channels.has(sessionId)) {
+    await unwrap(commands.setSessionModel(sessionId, modelFlag));
+    await unwrap(commands.setSessionEffort(sessionId, effort));
+    return;
+  }
   await restartSession(sessionId, mode, modelFlag, effort);
+}
+
+/** Claude reads effort only at launch, so the session row holds it for the next one. */
+export async function applyEffort(sessionId: string, effort: string | null): Promise<void> {
+  await unwrap(commands.setSessionEffort(sessionId, effort));
 }
 
 /** Mid-turn, waits for the turn's end unless `steer` hands it to the harness's next step. */
@@ -2088,7 +2098,7 @@ function retireChannel(sessionId: string): void {
   releaseChannels([old]);
 }
 
-async function resync(sessionId: string, live: boolean, catchUp = false): Promise<void> {
+async function resync(sessionId: string, live: boolean, catchUp = true): Promise<void> {
   const inFlight = resuming.get(sessionId);
   if (inFlight) return inFlight;
   if (entryOf(sessionId)?.reloading) return;
@@ -2109,8 +2119,9 @@ export function dismissDrift(sessionId: string): void {
   if (entry?.drifted) setEntry(sessionId, { ...entry, drifted: false });
 }
 
+// The recovery read, for Refresh and another device's rewind: the whole log.
 export async function refreshSession(sessionId: string): Promise<void> {
-  await resync(sessionId, (await liveSessionIds()).has(sessionId));
+  await resync(sessionId, (await liveSessionIds()).has(sessionId), false);
 }
 
 // A dropped connection ends every stream without an `Exited`, so the channels
@@ -2122,7 +2133,7 @@ export async function reattachSessions(): Promise<void> {
   for (const a of active) setSessionGoal(a.session.id, a.session.goal ?? null);
   await Promise.all(
     Object.keys(useSessionStore.getState().sessions).map((id) =>
-      resync(id, live.has(id), true).catch((e) =>
+      resync(id, live.has(id)).catch((e) =>
         log.warn("session", `reattaching ${id} after a reconnect failed`, e),
       ),
     ),

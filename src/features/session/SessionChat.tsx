@@ -100,6 +100,7 @@ import { clearTranscriptJump, useTranscriptJumpStore } from "./transcriptJump";
 import {
   allowForSession,
   answerQuestion,
+  applyEffort,
   applyModel,
   applyPermissionMode,
   cancelQueuedMessage,
@@ -810,13 +811,18 @@ export function SessionChat({
       if (!ok) return;
     }
     onModelChange(key);
-    if (live && sid) {
+    if (sid) {
       const nextEffort = effectiveEffort(
         shell.effort ?? claudeDefaults?.defaultEffort ?? undefined,
         next,
       );
       await applyModel(sid, resumeModelFlag(next), nextEffort?.key ?? null, permissionMode.flag);
     }
+  };
+
+  const applyClaudeEffort = (key: string) => {
+    onEffortChange(key);
+    if (sid) void applyEffort(sid, effectiveEffort(key, model)?.key ?? null).catch((e) => setError(errorMessage(e)));
   };
 
   const onPickModel = (namespaced: string) => {
@@ -1520,7 +1526,7 @@ export function SessionChat({
     },
     {
       pickModel: onPickModel,
-      pickEffort: usingCodex ? onCodexEffortChange : onEffortChange,
+      pickEffort: usingCodex ? onCodexEffortChange : applyClaudeEffort,
       setPermissionMode: (key) => void handlePermissionModeChange(key),
       openHarnessSettings: onOpenHarnessSettings,
     },

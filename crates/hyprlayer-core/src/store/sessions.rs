@@ -427,6 +427,40 @@ impl Db {
         })
     }
 
+    pub fn set_session_model(&self, id: &str, model: Option<&str>) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET model = ?2 WHERE id = ?1",
+                params![id, model],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn session_effort(&self, id: &str) -> Result<Option<String>> {
+        self.with(|conn| {
+            conn.query_row(
+                "SELECT effort FROM sessions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+        })
+    }
+
+    pub fn set_session_effort(&self, id: &str, effort: Option<&str>) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET effort = ?2 WHERE id = ?1",
+                params![id, effort],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn set_session_lineage(
         &self,
         id: &str,
