@@ -120,8 +120,9 @@ cmd_cleanup() {
   kill -KILL $tree 2>/dev/null || true
   if [ "$mode" = isolated ]; then
     # The server outlives the app by design; stop it on this profile only.
-    HYPRLAYER_APP_DATA_DIR="$SUPPORT/$identifier" HYPRLAYER_APP_CONFIG_DIR="$SUPPORT/$identifier" \
-      HYPRLAYER_APP_LOG_DIR="$LOGS/$identifier" clean_env "$REPO/target/debug/hyprlayer-server" stop 2>/dev/null || true
+    # Set after clean_env's `-u`s, or they're unset and `stop` falls back to the release profile.
+    clean_env HYPRLAYER_APP_DATA_DIR="$SUPPORT/$identifier" HYPRLAYER_APP_CONFIG_DIR="$SUPPORT/$identifier" \
+      HYPRLAYER_APP_LOG_DIR="$LOGS/$identifier" "$REPO/target/debug/hyprlayer-server" stop 2>/dev/null || true
     case "$identifier" in ai.brightblock.hyprlayer.verify-*) rm -rf "$SUPPORT/$identifier" "$LOGS/$identifier" ;; esac
   fi
   cp "$run/dev.log" "$evidence/dev.log" 2>/dev/null || true

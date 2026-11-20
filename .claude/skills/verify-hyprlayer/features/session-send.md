@@ -28,7 +28,7 @@ Preconditions:
   ```js
   const inv = window.__TAURI__.core.invoke;
   const s = await inv('get_app_settings');
-  const cat = await inv('opencode_catalog', { force: false });
+  const cat = await inv('opencode_catalog', { force: true });
   const free = (cat.providers.find(p => p.id === 'opencode' && p.available !== false)?.models ?? [])
     .map(m => `opencode/${m.id}`).filter(id => id.endsWith('-free'));
   s.providers = { ...(s.providers ?? {}), defaultHarness: 'opencode',

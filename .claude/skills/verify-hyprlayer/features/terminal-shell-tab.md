@@ -28,12 +28,12 @@ Preconditions:
 Helpers (paste into `webview_execute_js`):
 
 - Live dock store: `const u = performance.getEntriesByType('resource').map(e => e.name).filter(n => n.includes('/features/session/scriptsStore')).pop(); const { useScriptsStore } = await import(u); useScriptsStore.getState().dock['<wsId>']`. `termIds` maps tab number to terminal id. <!-- src: src/features/session/scriptsStore.ts:11 -->
-- Output read-back. A second attach replays the server's ring from its start. Release the channel afterwards; the PTY keeps running. <!-- src: crates/hyprlayer-core/src/terminal/mod.rs:134 --> <!-- src: src/lib/bindings.ts:240 -->
+- Output read-back. An attach with `offset: null` replays the server's ring from its start; a number resumes from that absolute offset. Release the channel afterwards; the PTY keeps running. <!-- src: crates/hyprlayer-core/src/terminal/mod.rs:134 --> <!-- src: src/lib/bindings.ts:240 -->
   ```js
   const { Channel, invoke } = window.__TAURI__.core;
   const ch = new Channel(); let out = '';
   ch.onmessage = (e) => { if (e.kind === 'output') out += new TextDecoder().decode(Uint8Array.from(atob(e.data), c => c.charCodeAt(0))); };
-  const alive = await invoke('terminal_attach', { terminalId: '<id>', onEvent: ch });
+  const alive = await invoke('terminal_attach', { terminalId: '<id>', offset: null, onEvent: ch });
   await new Promise(r => setTimeout(r, 1500));
   ch.onmessage = () => {}; await invoke('terminal_release', { channelIds: [ch.id] });
   ({ alive, tail: out.slice(-1500) })
