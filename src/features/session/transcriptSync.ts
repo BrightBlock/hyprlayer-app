@@ -240,6 +240,8 @@ export function deviceLabel(state: SyncState): string {
 
 export type Arrival = {
   seq: number | null;
+  /** With `seq`, the row's resume cursor; a server before 0.8.21 sends none. */
+  createdAt?: number | null;
   rev: number | null;
   author: ClientRef | null;
   event: SessionEvent;

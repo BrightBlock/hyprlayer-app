@@ -1655,6 +1655,23 @@ describe("reconnecting from the held cursor", () => {
   };
   const texts = (id: string) => entryOf(id).items.flatMap((it) => (it.kind === "assistant" ? [it.text] : []));
   const resumedFrom = () => (h.resumeSession.mock.calls as unknown[][]).map((c) => [c[0], c[4]]);
+  const asked = () => (h.listSessionTurns.mock.calls as unknown[][]).map((c) => [c[0], c[1]]);
+  const cursorAt = (row: Row): LogCursorDto => ({ kind: "after", seq: row.seq, createdAt: row.createdAt });
+  const replies = (n: number) => Array.from({ length: n - 1 }, (_, i) => `r${i + 1}`);
+  const turn = (n: number): Row[] => [...history(n), at(n, TURN_DONE)];
+
+  // As a server from 0.8.21 streams a logged row: with the createdAt that makes it a cursor.
+  const stream = (id: string, row: Row, author: typeof SELF = SELF) =>
+    streams.get(id)!.onmessage?.({ seq: row.seq, createdAt: row.createdAt, rev: row.seq + 1, author, event: row.event });
+
+  // Started in this window, so it holds no folded cursor: every row arrived live.
+  async function startStreaming(rows: Row[]): Promise<string> {
+    const { id } = await startSession({ workstreamId: "ws1", stage: "general", input: "kick off" });
+    server.set(id, { rows, resetRev: 0 });
+    streams.set(id, h.state.lastChannel!);
+    for (const row of rows) stream(id, row);
+    return id;
+  }
 
   async function restore(rows: Row[], live: boolean): Promise<string> {
     const id = `reconnect-${(nextId += 1)}`;
@@ -1667,6 +1684,7 @@ describe("reconnecting from the held cursor", () => {
   async function reconnect(live: string[]): Promise<void> {
     reads.length = 0;
     h.resumeSession.mockClear();
+    h.listSessionTurns.mockClear();
     h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live.map((id) => ({ session: { id } })) });
     await reattachSessions();
   }
@@ -1712,7 +1730,7 @@ describe("reconnecting from the held cursor", () => {
     const rows = history(600);
     const live = await restore(rows, true);
     const exited = await restore(history(600), false);
-    // Applied live before the drop: a stream item moves appliedSeq but carries no cursor.
+    // Applied live before the drop by a server before 0.8.21: it moves appliedSeq but carries no cursor.
     for (const seq of [600, 601]) {
       rows.push(at(seq, reply(`live ${seq}`)));
       streams.get(live)!.onmessage?.({ seq, rev: seq + 1, author: SELF, event: reply(`live ${seq}`) });
@@ -1755,6 +1773,87 @@ describe("reconnecting from the held cursor", () => {
     streams.get(live)!.onmessage?.({ seq: null, rev: 10, author: SELF, event: partial("Hello") });
 
     expect(texts(live).slice(-2)).toEqual(["r9", "Hello"]);
+  });
+
+  it("reconnects sessions started in this window from their last live row", async () => {
+    const live = await startStreaming(turn(300));
+    const exited = await startStreaming(turn(300));
+    const lastLive = cursorAt(server.get(live)!.rows[300]);
+    server.get(live)!.rows.push(at(301, reply("missed")), at(302, TURN_DONE));
+
+    await reconnect([live]);
+
+    expect(reads).toHaveLength(2);
+    expect(reads).toEqual(
+      expect.arrayContaining([
+        { sessionId: live, cursor: lastLive, rows: 2 },
+        { sessionId: exited, cursor: tail(exited), rows: 0 },
+      ]),
+    );
+    expect(resumedFrom()).toEqual([[live, tail(live)]]);
+    expect(texts(live)).toEqual([...replies(300), "missed"]);
+    expect(texts(exited)).toEqual(replies(300));
+  });
+
+  it("reads only past the last live row of a restored session that kept streaming", async () => {
+    const rows = history(600);
+    const live = await restore(rows, true);
+    for (const seq of [600, 601]) {
+      rows.push(at(seq, reply(`live ${seq}`)));
+      stream(live, rows[seq]);
+    }
+    rows.push(at(602, reply("missed")), at(603, TURN_DONE));
+
+    await reconnect([live]);
+
+    expect(reads).toEqual([{ sessionId: live, cursor: cursorAt(rows[601]), rows: 2 }]);
+    expect(resumedFrom()).toEqual([[live, tail(live)]]);
+    expect(texts(live)).toEqual([...replies(600), "live 600", "live 601", "missed"]);
+  });
+
+  it("reads the whole log again when a rewind moved its live rows while disconnected", async () => {
+    const cut = await startStreaming(turn(300));
+    const moved = await startStreaming(turn(300));
+    const lastLive = cursorAt(server.get(cut)!.rows[300]);
+    // Cut below the last live row, so that row no longer matches.
+    server.set(cut, { rows: [...history(150), at(150, reply("after the rewind"), 1_800_000_000_000)], resetRev: 7 });
+    // Cut only rows this window never saw: the last live row still matches, resetRev does not.
+    server.set(moved, { rows: [...turn(300), at(301, reply("after the rewind"), 1_800_000_000_000)], resetRev: 7 });
+
+    await reconnect([]);
+
+    expect(asked()).toHaveLength(4);
+    expect(asked()).toEqual(
+      expect.arrayContaining([
+        [cut, lastLive],
+        [cut, { kind: "empty" }],
+        [moved, lastLive],
+        [moved, { kind: "empty" }],
+      ]),
+    );
+    expect(texts(cut)).toEqual([...replies(150), "after the rewind"]);
+    expect(texts(moved)).toEqual([...replies(300), "after the rewind"]);
+    expect(syncOf(cut)?.resetRev).toBe(7);
+    expect(syncOf(moved)?.resetRev).toBe(7);
+  });
+
+  it("keeps the cursor before another device's held turn, so a reconnect reads that turn once", async () => {
+    const OTHER = { clientId: "them", device: "jons-macbook-pro" };
+    const id = await startStreaming(turn(10));
+    const theirs = [
+      at(11, { kind: "userMessage", text: "theirs", stage: null, author: OTHER }),
+      at(12, reply("theirs done")),
+      at(13, TURN_DONE),
+    ];
+    server.get(id)!.rows.push(...theirs);
+    for (const row of theirs) stream(id, row, OTHER);
+    expect(texts(id)).toEqual(replies(10));
+
+    await reconnect([id]);
+
+    expect(reads).toEqual([{ sessionId: id, cursor: cursorAt(server.get(id)!.rows[10]), rows: 3 }]);
+    expect(resumedFrom()).toEqual([[id, tail(id)]]);
+    expect(texts(id)).toEqual([...replies(10), "theirs done"]);
   });
 });
 

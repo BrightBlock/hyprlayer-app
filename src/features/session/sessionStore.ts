@@ -160,7 +160,7 @@ export type SessionEntry = SessionView & {
   taskStartedAt: Record<string, number>;
   /** Highest log seq in the view; a rewind's reload lowers it, since the rewind reuses seqs. */
   appliedSeq?: number;
-  /** Where a catch-up read resumes: the last fold's or page's final raw row. */
+  /** Where a catch-up read resumes: the last raw row folded, pulled or applied live. */
   cursor?: LogCursorDto | null;
   turnAuthor?: TurnAuthor;
   /** A running or paused goal, from the session row and then each `GoalChanged`. */
@@ -463,7 +463,10 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   const handedBack = handedBackBy(event);
   if (handedBack) nextEntry = undeliver(nextEntry, handedBack);
   if (synced) {
-    if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) nextEntry.appliedSeq = seq;
+    if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) {
+      nextEntry.appliedSeq = seq;
+      if (synced.createdAt != null) nextEntry.cursor = { kind: "after", seq, createdAt: synced.createdAt };
+    }
     nextEntry.turnAuthor = turnAuthorAfter(current.turnAuthor ?? null, synced, selfClientId(), current.streaming);
   }
   setEntry(sessionId, nextEntry);
@@ -903,8 +906,7 @@ async function resumeOnce(
 ): Promise<void> {
   if (!entryOf(sessionId) || channels.has(sessionId)) return;
 
-  // Every channel-less resume folds the log first: the cursor it produces is
-  // the only valid one, since live events carry no seq.
+  // Every channel-less resume folds the log first, so the stream attaches where the view ends.
   let cursor: LogCursorDto | null;
   if (opts.cursor) {
     cursor = opts.cursor;
