@@ -1,0 +1,169 @@
+{
+  "scenario": "opencode_resume",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "harnessSession": "$OPENCODE_SESSION",
+            "reply": "model=stub-free earlier=[]"
+          },
+          "guard": "the first turn runs in a new OpenCode session",
+          "ok": true
+        }
+      ],
+      "step": "start an OpenCode session and tell it a nonce"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "harnessSession": "$OPENCODE_SESSION",
+            "reply": "model=stub-free earlier=[Remember NONCE-7Q2X.]"
+          },
+          "guard": "the resumed turn sees the first turn's nonce in the same OpenCode session",
+          "ok": true
+        }
+      ],
+      "step": "a resume after a server restart continues the same OpenCode session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "harnessSession": "$OPENCODE_SESSION",
+            "reply": "model=stub-other-free earlier=[Remember NONCE-7Q2X. | What was the nonce?]"
+          },
+          "guard": "the turn runs on the new model and still sees the nonce",
+          "ok": true
+        }
+      ],
+      "step": "a restart on another model continues it on that model"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "laterTurnEnds": 0,
+            "reply": "model=stub-other-free earlier=[Remember NONCE-7Q2X. | What was the nonce? | Repeat the nonce. | One more before the relaunch.]"
+          },
+          "guard": "the first turn after the relaunch ends once, with its own reply",
+          "ok": true
+        }
+      ],
+      "step": "a relaunch right after a turn ignores the echo and the abort that trail it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "laterTurnEnds": 0,
+            "reply": "model=stub-other-free earlier=[Remember NONCE-7Q2X. | What was the nonce? | Repeat the nonce. | One more before the relaunch. | First after the relaunch. | A long turn.]"
+          },
+          "guard": "the turn ends once, with its own reply",
+          "ok": true
+        }
+      ],
+      "step": "a send right after a mid-turn restart outlasts the aborted turn's late idle"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true,
+            "turnStatus": "completed"
+          },
+          "guard": "the denied turn ends as completed",
+          "ok": true
+        }
+      ],
+      "step": "a turn whose permission the user denies ends"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "replied": true,
+            "turnStatus": "completed"
+          },
+          "guard": "its reply ends the turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "laterTurnEnds": 0,
+            "said": "⚠ OpenCode error: model gone",
+            "turnStatus": "failed"
+          },
+          "guard": "a turn that fails before any reply ends once, as failed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "notice": [
+              "OpenCode reported no message matching this prompt, so its turn ended on the next idle or error"
+            ],
+            "replied": true,
+            "turnStatus": "completed"
+          },
+          "guard": "the turn still ends, and the transcript says why",
+          "ok": true
+        }
+      ],
+      "step": "an OpenCode that ignores the prompt's messageID still ends each turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "notice": [
+              "OpenCode no longer has this conversation; it continues without the earlier turns"
+            ],
+            "replacedSession": true,
+            "reply": "model=stub-other-free earlier=[]"
+          },
+          "guard": "the turn runs in a new OpenCode session, and the transcript says the context is gone",
+          "ok": true
+        }
+      ],
+      "step": "a resume after OpenCode's data is wiped starts a new session and says so"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exited": true,
+            "launchFailed": true,
+            "reply": "model=stub-free earlier=[]",
+            "sessionAfter": true,
+            "sessionBefore": ""
+          },
+          "guard": "the retry replays the stored prompt into a new OpenCode session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSession": "$RETRIED_SESSION",
+            "reply": "model=stub-other-free earlier=[Start on a model OpenCode lacks.]"
+          },
+          "guard": "a restart continues that OpenCode session",
+          "ok": true
+        }
+      ],
+      "step": "a retried start that never got an OpenCode session creates one, and a restart reuses it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

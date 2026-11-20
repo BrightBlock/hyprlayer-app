@@ -89,6 +89,9 @@ async fn free_model(server: &OpenCodeServer) -> String {
 /// One OpenCode session on the profile's shared server.
 struct Live {
     runtime: Arc<HyprlayerRuntime>,
+    server: Arc<OpenCodeServer>,
+    cwd: String,
+    model: String,
     driver: Arc<OpenCodeDriver>,
     events: broadcast::Receiver<SessionEvent>,
     _root: tempfile::TempDir,
@@ -96,6 +99,11 @@ struct Live {
 
 impl Live {
     async fn open() -> Self {
+        Self::open_with(None).await
+    }
+
+    /// `project_config` becomes the work dir's `opencode.json`.
+    async fn open_with(project_config: Option<&str>) -> Self {
         let root = tempfile::tempdir().expect("temp profile");
         let paths = paths(root.path());
         write_inputs(&paths);
@@ -103,6 +111,9 @@ impl Live {
         let cwd = root.path().join("work");
         for dir in [&home, &cwd] {
             std::fs::create_dir_all(dir).unwrap();
+        }
+        if let Some(config) = project_config {
+            std::fs::write(cwd.join("opencode.json"), config).unwrap();
         }
         let runtime = HyprlayerRuntime::open(RuntimeOptions::new(environment(&home), paths))
             .await
@@ -115,15 +126,35 @@ impl Live {
             .expect("start opencode serve");
         let model = free_model(&server).await;
         println!("model: {model}");
-        let (driver, events) = OpenCodeDriver::spawn(server, &cwd.to_string_lossy(), Some(model))
-            .await
-            .expect("open an opencode session");
+        let cwd = cwd.to_string_lossy().into_owned();
+        let (driver, events) =
+            OpenCodeDriver::spawn(server.clone(), &cwd, Some(model.clone()), None)
+                .await
+                .expect("open an opencode session");
         Self {
             runtime,
+            server,
+            cwd,
+            model,
             driver,
             events,
             _root: root,
         }
+    }
+
+    /// Kills the driver and launches another on the same server, as a relaunch in place does.
+    async fn relaunch(&mut self, resume: Option<&str>) {
+        self.driver.kill();
+        let (driver, events) = OpenCodeDriver::spawn(
+            self.server.clone(),
+            &self.cwd,
+            Some(self.model.clone()),
+            resume,
+        )
+        .await
+        .expect("relaunch the opencode session");
+        self.driver = driver;
+        self.events = events;
     }
 
     async fn close(self) {
@@ -268,4 +299,112 @@ async fn a_prompt_after_idle_runs_as_its_own_turn() {
         trailing.is_empty(),
         "each prompt ends in one TurnDone: {trailing:?}"
     );
+}
+
+/// The id the driver's `Init` reports.
+async fn opened_session(events: &mut broadcast::Receiver<SessionEvent>) -> String {
+    loop {
+        if let SessionEvent::Init {
+            provider_session_id,
+            ..
+        } = events.recv().await.expect("the driver reports its session")
+        {
+            return provider_session_id;
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires opencode; runs an opencode/*-free model (or HYPRLAYER_OPENCODE_FREE_MODEL)"]
+async fn a_resumed_session_keeps_its_earlier_turns() {
+    const NONCE: &str = "NONCE-5H8M";
+    let mut live = Live::open().await;
+    let opened = opened_session(&mut live.events).await;
+    let told = live
+        .turn(&format!("Remember the nonce {NONCE}. Reply with just: OK."))
+        .await;
+    live.relaunch(Some(&opened)).await;
+    let resumed = opened_session(&mut live.events).await;
+    let asked = live
+        .turn("What was the nonce I asked you to remember? Reply with just the nonce.")
+        .await;
+    let trailing = trailing_turn_ends(&mut live.events, Duration::from_secs(3)).await;
+    println!("{opened} -> {resumed}\n{told:?}\n{asked:?}\nthen {trailing:?}");
+    live.close().await;
+    assert_eq!(resumed, opened, "the relaunch continues the same session");
+    assert_eq!(asked.status.as_deref(), Some("completed"));
+    assert!(
+        asked.text.contains(NONCE),
+        "the model kept the first turn: {asked:?}"
+    );
+    assert!(trailing.is_empty(), "one TurnDone per turn: {trailing:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires opencode; runs an opencode/*-free model (or HYPRLAYER_OPENCODE_FREE_MODEL)"]
+async fn a_send_right_after_a_mid_turn_restart_gets_its_own_reply() {
+    const NONCE: &str = "NONCE-3K9W";
+    let mut live = Live::open().await;
+    let opened = opened_session(&mut live.events).await;
+    live.turn(&format!("Remember the nonce {NONCE}. Reply with just: OK."))
+        .await;
+    live.driver
+        .send_user_turn(
+            "Without using any tool, count from 1 to 500, one number per line.",
+            None,
+            None,
+            None,
+        )
+        .expect("send turn");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    while !matches!(
+        tokio::time::timeout_at(deadline, live.events.recv()).await,
+        Ok(Ok(SessionEvent::PartialText { .. }))
+    ) {
+        assert!(tokio::time::Instant::now() < deadline, "nothing streamed");
+    }
+    // The aborted turn's late idle lands while this one runs.
+    live.relaunch(Some(&opened)).await;
+    let asked = live
+        .turn("What was the nonce I asked you to remember? Reply with just the nonce.")
+        .await;
+    let trailing = trailing_turn_ends(&mut live.events, Duration::from_secs(3)).await;
+    println!("{asked:?}\nthen {trailing:?}");
+    live.close().await;
+    assert_eq!(asked.status.as_deref(), Some("completed"));
+    assert!(asked.text.contains(NONCE), "its own reply: {asked:?}");
+    assert!(trailing.is_empty(), "one TurnDone per turn: {trailing:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires opencode; runs an opencode/*-free model (or HYPRLAYER_OPENCODE_FREE_MODEL)"]
+async fn a_turn_whose_permission_is_denied_ends() {
+    let mut live = Live::open_with(Some(r#"{"permission":{"bash":"ask"}}"#)).await;
+    live.driver
+        .send_user_turn(
+            "Run the bash command `echo denied-probe` and tell me its output.",
+            None,
+            None,
+            None,
+        )
+        .expect("send turn");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let request_id = loop {
+        match tokio::time::timeout_at(deadline, live.events.recv()).await {
+            Ok(Ok(SessionEvent::PermissionAsk { request_id, .. })) => break request_id,
+            Ok(Ok(SessionEvent::TurnDone { .. })) => panic!("the turn ended before it asked"),
+            Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {}
+            Ok(Err(_)) => panic!("event channel closed"),
+            Err(_) => panic!("no permission ask within 120s"),
+        }
+    };
+    live.driver
+        .respond_permission(&request_id, false, None)
+        .expect("deny");
+    let denied = next_turn(&mut live.events).await;
+    let trailing = trailing_turn_ends(&mut live.events, Duration::from_secs(3)).await;
+    println!("{denied:?}\nthen {trailing:?}");
+    live.close().await;
+    assert_eq!(denied.status.as_deref(), Some("completed"));
+    assert!(trailing.is_empty(), "one TurnDone per turn: {trailing:?}");
 }

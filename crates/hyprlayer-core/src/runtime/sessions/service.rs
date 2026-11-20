@@ -1766,9 +1766,19 @@ impl SessionService<'_> {
                         });
                     }
                 }
-                let (driver, rx) = OpenCodeDriver::spawn(server, &session.cwd, model)
-                    .await
-                    .map_err(|detail| CoreError::Opencode { detail })?;
+                let resume_session = resume
+                    .then_some(session.provider_session_id.as_deref())
+                    .flatten();
+                if resume && resume_session.is_none() {
+                    tracing::warn!(
+                        "opencode session {} has no recorded OpenCode session; starting a new one",
+                        session.id
+                    );
+                }
+                let (driver, rx) =
+                    OpenCodeDriver::spawn(server, &session.cwd, model, resume_session)
+                        .await
+                        .map_err(|detail| CoreError::Opencode { detail })?;
                 let driver: Arc<dyn AgentDriver> = driver;
                 Ok((driver, rx, None))
             }

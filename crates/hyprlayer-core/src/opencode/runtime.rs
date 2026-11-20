@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -320,6 +320,51 @@ impl OpenCodeServer {
         parse_provider_model_names(&body)
     }
 
+    async fn create_session(&self, cwd: &str) -> Result<String, String> {
+        let created: Value = self
+            .client
+            .post(format!("{}/session", self.base_url))
+            .query(&[("directory", cwd)])
+            .json(&json!({ "title": "Hyprlayer session" }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        created
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| "OpenCode session create returned no id".into())
+    }
+
+    /// The client error OpenCode answers once it lost `id`, as a reset of its data dir does.
+    async fn missing_session(
+        &self,
+        id: &str,
+        cwd: &str,
+    ) -> Result<Option<reqwest::StatusCode>, String> {
+        let status = self
+            .client
+            .get(format!("{}/session/{id}", self.base_url))
+            .query(&[("directory", cwd)])
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .status();
+        if status.is_client_error() {
+            return Ok(Some(status));
+        }
+        if !status.is_success() {
+            return Err(format!("OpenCode answered {status} for session {id}"));
+        }
+        Ok(None)
+    }
+
     async fn is_healthy(&self) -> bool {
         self.client
             .get(format!("{}/global/health", self.base_url))
@@ -582,6 +627,44 @@ pub struct OpenCodeDriver {
     pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>>,
     /// The translator's running `cost_total`, published after every event it handles.
     cost_so_far: Arc<std::sync::Mutex<Option<f64>>>,
+    sent: SharedTurn,
+}
+
+/// The user message id this driver gave its latest turn; OpenCode 1.0.224 to 1.18.32 keep it.
+#[derive(Clone, Default)]
+struct SentTurn {
+    id: String,
+    /// Unix ms; OpenCode creates the turn's user message no earlier.
+    sent_at: u64,
+    interrupted: bool,
+    /// Denied a permission or question; 1.18.32 then stops on a `tool-calls` step.
+    refused: bool,
+}
+
+type SharedTurn = Arc<StdMutex<Option<SentTurn>>>;
+
+fn begin_turn(turn: &SharedTurn) -> String {
+    let sent_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    let id = message_id(sent_at);
+    *turn.lock().unwrap_or_else(PoisonError::into_inner) = Some(SentTurn {
+        id: id.clone(),
+        sent_at,
+        ..SentTurn::default()
+    });
+    id
+}
+
+/// An id in OpenCode's ascending format, which orders a session's messages: the low 48 bits of
+/// `ms * 0x1000 + counter`. Counter 0 sorts before any id OpenCode mints that millisecond.
+fn message_id(ms: u64) -> String {
+    static LAST: StdMutex<u64> = StdMutex::new(0);
+    let now = ms.wrapping_mul(0x1000);
+    let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
+    *last = now.max(*last + 1);
+    let suffix = uuid::Uuid::new_v4().simple().to_string();
+    format!("msg_{:012x}{}", *last & 0xffff_ffff_ffff, &suffix[..14])
 }
 
 impl OpenCodeDriver {
@@ -589,25 +672,15 @@ impl OpenCodeDriver {
         server: Arc<OpenCodeServer>,
         cwd: &str,
         model: Option<String>,
+        resume: Option<&str>,
     ) -> Result<(Arc<Self>, broadcast::Receiver<SessionEvent>), String> {
-        let created: Value = server
-            .client
-            .post(format!("{}/session", server.base_url))
-            .query(&[("directory", cwd)])
-            .json(&json!({ "title": "Hyprlayer session" }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .error_for_status()
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let session_id = created
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("OpenCode session create returned no id")?
-            .to_string();
+        let (session_id, lost) = match resume {
+            Some(id) => match server.missing_session(id, cwd).await? {
+                None => (id.to_string(), None),
+                Some(status) => (server.create_session(cwd).await?, Some((id, status))),
+            },
+            None => (server.create_session(cwd).await?, None),
+        };
 
         let model = model.as_deref().and_then(parse_model);
         // OpenCode's HTTP prompt endpoint does not parse slash commands, so typed
@@ -652,6 +725,16 @@ impl OpenCodeDriver {
             mcp_servers: None,
         });
 
+        if let Some((lost, status)) = lost {
+            tracing::warn!(
+                "opencode no longer has session {lost} ({status}); continuing in {session_id} without its earlier turns"
+            );
+            let _ = events.send(SessionEvent::ProtocolError {
+                detail: "OpenCode no longer has this conversation; it continues without the earlier turns".into(),
+                raw: format!("OpenCode answered {status} for session {lost}; started {session_id}"),
+            });
+        }
+
         if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
             let id = format!("{p}/{m}");
             crate::opencode::config::opencode_model_context_window(&id)
@@ -668,10 +751,27 @@ impl OpenCodeDriver {
         let pq = pending_questions.clone();
         let cost_so_far = Arc::new(std::sync::Mutex::new(None));
         let published_cost = cost_so_far.clone();
+        let sent = SharedTurn::default();
+        let xlate_sent = sent.clone();
         let task = server.tasks.spawn(async move {
-            let mut xlate = Translator::default();
+            let mut xlate = Translator {
+                sent: xlate_sent,
+                ..Translator::default()
+            };
             loop {
-                match sse_rx.recv().await {
+                let received = match xlate.deadline() {
+                    Some(at) => match tokio::time::timeout_at(at.into(), sse_rx.recv()).await {
+                        Ok(received) => received,
+                        Err(_) => {
+                            for se in xlate.expire() {
+                                let _ = tx.send(se);
+                            }
+                            continue;
+                        }
+                    },
+                    None => sse_rx.recv().await,
+                };
+                match received {
                     Ok(ev) => {
                         if event_session_id(&ev).as_deref() != Some(sid.as_str()) {
                             continue;
@@ -715,6 +815,7 @@ impl OpenCodeDriver {
             filter_task: Mutex::new(Some(task)),
             pending_questions,
             cost_so_far,
+            sent,
         });
         Ok((driver, primary_rx))
     }
@@ -765,7 +866,11 @@ impl OpenCodeDriver {
         } else {
             arguments.to_string()
         };
-        let mut body = json!({ "command": command, "arguments": arguments });
+        let mut body = json!({
+            "command": command,
+            "arguments": arguments,
+            "messageID": begin_turn(&self.sent),
+        });
         let mut fallback = json!({ "parts": [{ "type": "text", "text": original_text }] });
         if let Some((provider, model)) = &model {
             body["model"] = json!(format!("{provider}/{model}"));
@@ -783,6 +888,7 @@ impl OpenCodeDriver {
             self.server.base_url, self.session_id
         );
         let directory = self.cwd.clone();
+        let turn = self.sent.clone();
         self.server.tasks.spawn(async move {
             let sent = client
                 .post(command_url)
@@ -795,6 +901,7 @@ impl OpenCodeDriver {
             tracing::warn!(
                 "opencode command failed; delivering the turn as a plain prompt: {command_error}"
             );
+            fallback["messageID"] = json!(begin_turn(&turn));
             let delivered = client
                 .post(prompt_url)
                 .json(&fallback)
@@ -851,6 +958,17 @@ impl OpenCodeDriver {
         });
     }
 
+    fn mark_turn(&self, mark: impl FnOnce(&mut SentTurn)) {
+        if let Some(turn) = self
+            .sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_mut()
+        {
+            mark(turn);
+        }
+    }
+
     pub async fn delete_session(&self) {
         let url = format!("{}/session/{}", self.server.base_url, self.session_id);
         if let Err(e) = self
@@ -889,7 +1007,10 @@ impl AgentDriver for OpenCodeDriver {
             self.command_async(invocation.name, invocation.arguments, text);
             return Ok(());
         }
-        let mut body = json!({ "parts": [{ "type": "text", "text": text }] });
+        let mut body = json!({
+            "parts": [{ "type": "text", "text": text }],
+            "messageID": begin_turn(&self.sent),
+        });
         if let Some((provider, model)) = self.model.lock().ok().and_then(|m| m.clone()) {
             body["model"] = json!({ "providerID": provider, "modelID": model });
         }
@@ -909,6 +1030,9 @@ impl AgentDriver for OpenCodeDriver {
         allow: bool,
         _message: Option<&str>,
     ) -> CoreResult<()> {
+        if !allow {
+            self.mark_turn(|turn| turn.refused = true);
+        }
         let response = if allow { "once" } else { "reject" };
         self.post_async(
             format!("/session/{}/permissions/{}", self.session_id, request_id),
@@ -924,6 +1048,7 @@ impl AgentDriver for OpenCodeDriver {
             .ok()
             .and_then(|mut m| m.remove(request_id));
         if answers.is_empty() {
+            self.mark_turn(|turn| turn.refused = true);
             self.post_async(format!("/question/{request_id}/reject"), json!({}));
             return Ok(());
         }
@@ -954,6 +1079,7 @@ impl AgentDriver for OpenCodeDriver {
     }
 
     fn interrupt(&self) -> CoreResult<()> {
+        self.mark_turn(|turn| turn.interrupted = true);
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         Ok(())
     }
@@ -1076,13 +1202,140 @@ struct Translator {
     cost_total: f64,
     context_tokens: Option<u32>,
     planning: bool,
-    /// An error or abort already ended the turn; the `session.idle` that follows is the same turn.
-    turn_ended: bool,
+    /// `session.idle` and `session.error` name no turn, so only the driver's own turn ends.
+    sent: SharedTurn,
+    /// The sent turn's id, and the id OpenCode gave its user message.
+    anchor: Option<(String, String)>,
+    /// The sent turn OpenCode finished answering, and the one that ended.
+    answered: Option<String>,
+    ended: Option<String>,
+    /// An idle or error that came before the anchor, when, and the sent turn it waits on.
+    unplaced: Option<(std::time::Instant, String, OcEvent)>,
+}
+
+/// How long an unplaced idle or error waits for the anchor before it ends the turn anyway.
+const UNPLACED_WAIT: Duration = Duration::from_secs(5);
+
+/// A step's message completes with `finish: tool-calls` while the turn goes on.
+fn reply_finished(info: &Value) -> bool {
+    let set = |v: Option<&Value>| v.is_some_and(|v| !v.is_null());
+    set(info.get("error"))
+        || (set(info.pointer("/time/completed"))
+            && info.get("finish").and_then(Value::as_str) != Some("tool-calls"))
+}
+
+fn is_abort(p: &Value) -> bool {
+    p.pointer("/error/name").and_then(Value::as_str) == Some("MessageAbortedError")
+        || p.pointer("/error/data/message").and_then(Value::as_str) == Some("Aborted")
+}
+
+fn error_events(p: &Value) -> Vec<SessionEvent> {
+    let err = p.get("error");
+    let name = err
+        .and_then(|e| e.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let msg = err
+        .and_then(|e| e.get("data"))
+        .and_then(|d| d.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("OpenCode reported an error")
+        .to_string();
+    if is_abort(p) {
+        return vec![SessionEvent::TurnDone {
+            cost_usd: None,
+            num_turns: None,
+            context_tokens: None,
+            turn_status: Some("interrupted".into()),
+            thread_tokens: None,
+        }];
+    }
+    let auth_failed = name == "ProviderAuthError"
+        || (name == "APIError"
+            && err
+                .and_then(|e| e.pointer("/data/statusCode"))
+                .and_then(Value::as_u64)
+                == Some(401));
+    vec![
+        SessionEvent::AssistantText {
+            text: format!("⚠ OpenCode error: {msg}"),
+            parent_id: None,
+            injected: false,
+            auth_required: auth_failed,
+        },
+        SessionEvent::TurnDone {
+            cost_usd: None,
+            num_turns: None,
+            context_tokens: None,
+            turn_status: Some("failed".into()),
+            thread_tokens: None,
+        },
+    ]
 }
 
 impl Translator {
+    fn open_turn(&self) -> Option<SentTurn> {
+        self.sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .filter(|turn| self.ended.as_ref() != Some(&turn.id))
+    }
+
+    fn anchor_of(&self, turn: &SentTurn) -> Option<&str> {
+        self.anchor
+            .as_ref()
+            .filter(|(sent, _)| *sent == turn.id)
+            .map(|(_, anchor)| anchor.as_str())
+    }
+
+    fn completed(&self) -> SessionEvent {
+        SessionEvent::TurnDone {
+            cost_usd: Some(self.cost_total),
+            num_turns: None,
+            context_tokens: self.context_tokens,
+            turn_status: Some("completed".into()),
+            thread_tokens: None,
+        }
+    }
+
+    fn deadline(&self) -> Option<std::time::Instant> {
+        self.unplaced.as_ref().map(|(at, _, _)| *at + UNPLACED_WAIT)
+    }
+
+    /// No user message matched the prompt, so the held event ends the turn as any
+    /// idle or error did before turns were bound to their reply.
+    fn expire(&mut self) -> Vec<SessionEvent> {
+        let Some((_, waited_on, held)) = self.unplaced.take() else {
+            return Vec::new();
+        };
+        let Some(turn) = self
+            .open_turn()
+            .filter(|turn| turn.id == waited_on && self.anchor_of(turn).is_none())
+        else {
+            return Vec::new();
+        };
+        tracing::warn!(
+            "no opencode user message matched prompt {}; ending its turn on {}",
+            turn.id,
+            held.kind
+        );
+        self.ended = Some(turn.id.clone());
+        let mut out = vec![SessionEvent::ProtocolError {
+            detail: "OpenCode reported no message matching this prompt, so its turn ended on the next idle or error".into(),
+            raw: format!("prompt {}; ended on {}", turn.id, held.kind),
+        }];
+        if held.kind == "session.error" {
+            out.extend(error_events(&held.properties));
+        } else {
+            out.push(self.completed());
+        }
+        out
+    }
+
     fn handle(&mut self, ev: &OcEvent) -> Vec<SessionEvent> {
         let p = &ev.properties;
+        let open = self.open_turn();
         match ev.kind.as_str() {
             "message.updated" => {
                 let Some(info) = p.get("info") else {
@@ -1092,8 +1345,18 @@ impl Translator {
                     info.get("id").and_then(Value::as_str),
                     info.get("role").and_then(Value::as_str),
                 ) {
-                    if role == "user" && !self.roles.contains_key(id) {
-                        self.turn_ended = false;
+                    if let Some(turn) = &open {
+                        let created = info.pointer("/time/created").and_then(Value::as_u64);
+                        let ours = id == turn.id || created.is_some_and(|at| at >= turn.sent_at);
+                        if role == "user" && ours && self.anchor_of(turn).is_none() {
+                            self.anchor = Some((turn.id.clone(), id.to_string()));
+                            self.unplaced = None;
+                        }
+                        // Ids ascend, and a step after compaction answers compaction's message.
+                        let newer = id > self.anchor_of(turn).unwrap_or(&turn.id);
+                        if role == "assistant" && newer && reply_finished(info) {
+                            self.answered = Some(turn.id.clone());
+                        }
                     }
                     self.roles.insert(id.to_string(), role.to_string());
                 }
@@ -1156,59 +1419,53 @@ impl Translator {
                 request_id: str_field(p, "id"),
                 questions: questions_from_value(p.get("questions")),
             }],
-            "session.idle" if self.turn_ended => Vec::new(),
-            "session.idle" => vec![SessionEvent::TurnDone {
-                cost_usd: Some(self.cost_total),
-                num_turns: None,
-                context_tokens: self.context_tokens,
-                turn_status: Some("completed".into()),
-                thread_tokens: None,
-            }],
-            "session.error" => {
-                let err = p.get("error");
-                let name = err
-                    .and_then(|e| e.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let msg = err
-                    .and_then(|e| e.get("data"))
-                    .and_then(|d| d.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("OpenCode reported an error")
-                    .to_string();
-                self.turn_ended = true;
-                if name == "MessageAbortedError" || msg == "Aborted" {
+            "session.idle" => {
+                let Some(turn) = open else {
+                    return Vec::new();
+                };
+                let answered = self.answered.as_ref() == Some(&turn.id) || turn.refused;
+                if answered {
+                    self.ended = Some(turn.id);
+                    return vec![self.completed()];
+                }
+                if turn.interrupted {
+                    self.ended = Some(turn.id);
                     return vec![SessionEvent::TurnDone {
-                        cost_usd: None,
+                        cost_usd: Some(self.cost_total),
                         num_turns: None,
-                        context_tokens: None,
+                        context_tokens: self.context_tokens,
                         turn_status: Some("interrupted".into()),
                         thread_tokens: None,
                     }];
                 }
-                let auth_failed = name == "ProviderAuthError"
-                    || (name == "APIError"
-                        && err
-                            .and_then(|e| e.pointer("/data/statusCode"))
-                            .and_then(Value::as_u64)
-                            == Some(401));
-                vec![
-                    SessionEvent::AssistantText {
-                        text: format!("⚠ OpenCode error: {msg}"),
-                        parent_id: None,
-                        injected: false,
-                        auth_required: auth_failed,
-                    },
-                    SessionEvent::TurnDone {
-                        cost_usd: None,
-                        num_turns: None,
-                        context_tokens: None,
-                        turn_status: Some("failed".into()),
-                        thread_tokens: None,
-                    },
-                ]
+                self.hold_unplaced(&turn, ev);
+                Vec::new()
+            }
+            "session.error" => {
+                let Some(turn) = open else {
+                    return Vec::new();
+                };
+                // An abort is this turn's only if this driver asked; any other error once anchored.
+                let ours = if is_abort(p) {
+                    turn.interrupted
+                } else {
+                    self.anchor_of(&turn).is_some()
+                };
+                if !ours {
+                    self.hold_unplaced(&turn, ev);
+                    return Vec::new();
+                }
+                self.ended = Some(turn.id);
+                error_events(p)
             }
             _ => Vec::new(),
+        }
+    }
+
+    fn hold_unplaced(&mut self, turn: &SentTurn, ev: &OcEvent) {
+        let held_for_it = matches!(&self.unplaced, Some((_, id, _)) if *id == turn.id);
+        if self.anchor_of(turn).is_none() && !held_for_it {
+            self.unplaced = Some((std::time::Instant::now(), turn.id.clone(), ev.clone()));
         }
     }
 
@@ -1579,49 +1836,161 @@ mod tests {
         }
     }
 
+    fn statuses(events: Vec<SessionEvent>) -> Vec<String> {
+        events
+            .into_iter()
+            .filter_map(|e| match e {
+                SessionEvent::TurnDone { turn_status, .. } => turn_status,
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn user(id: &str) -> OcEvent {
+        oc(
+            "message.updated",
+            json!({ "info": { "id": id, "role": "user" } }),
+        )
+    }
+
+    fn reply(id: &str, finish: Option<&str>) -> OcEvent {
+        oc(
+            "message.updated",
+            json!({ "info": {
+                "id": id, "role": "assistant", "finish": finish,
+                "time": { "completed": finish.map(|_| 1) },
+            } }),
+        )
+    }
+
+    fn idle() -> OcEvent {
+        oc("session.idle", json!({}))
+    }
+
+    fn error(name: &str) -> OcEvent {
+        oc(
+            "session.error",
+            json!({ "error": { "name": name, "data": { "message": "boom" } } }),
+        )
+    }
+
+    fn send(x: &Translator, id: &str) {
+        *x.sent.lock().unwrap() = Some(SentTurn {
+            id: id.into(),
+            ..SentTurn::default()
+        });
+    }
+
+    fn interrupt(x: &Translator) {
+        x.sent.lock().unwrap().as_mut().unwrap().interrupted = true;
+    }
+
     #[test]
-    fn an_ended_turn_ignores_the_idle_events_that_trail_it() {
-        let statuses = |events: Vec<SessionEvent>| -> Vec<Option<String>> {
-            events
-                .into_iter()
-                .filter_map(|e| match e {
-                    SessionEvent::TurnDone { turn_status, .. } => Some(turn_status),
-                    _ => None,
-                })
-                .collect()
-        };
-        let user = |id: &str| {
+    fn a_turn_ends_once_on_its_own_reply() {
+        // Before this driver sends, an earlier turn's echo, reply, abort and idle end nothing.
+        let mut x = Translator::default();
+        let mut early = x.handle(&user("msg_1"));
+        early.extend(x.handle(&reply("msg_2", Some("stop"))));
+        early.extend(x.handle(&error("MessageAbortedError")));
+        early.extend(x.handle(&idle()));
+        assert_eq!(statuses(early), [] as [String; 0]);
+
+        send(&x, "msg_3");
+        let mut own = x.handle(&user("msg_1"));
+        own.extend(x.handle(&idle()));
+        own.extend(x.handle(&reply("msg_2", Some("stop"))));
+        own.extend(x.handle(&idle()));
+        own.extend(x.handle(&user("msg_3")));
+        own.extend(x.handle(&reply("msg_4", Some("tool-calls"))));
+        own.extend(x.handle(&idle()));
+        own.extend(x.handle(&reply("msg_5", None)));
+        own.extend(x.handle(&idle()));
+        assert_eq!(
+            statuses(own),
+            [] as [String; 0],
+            "only its final reply ends it"
+        );
+        let mut done = x.handle(&reply("msg_5", Some("stop")));
+        done.extend(x.handle(&idle()));
+        done.extend(x.handle(&user("msg_3")));
+        done.extend(x.handle(&idle()));
+        done.extend(x.handle(&error("ProviderError")));
+        assert_eq!(statuses(done), ["completed"]);
+
+        // A turn that fails before any reply ends on its error, once.
+        send(&x, "msg_6");
+        let mut failed = x.handle(&user("msg_6"));
+        failed.extend(x.handle(&error("ProviderError")));
+        failed.extend(x.handle(&idle()));
+        failed.extend(x.handle(&error("ProviderError")));
+        assert_eq!(statuses(failed), ["failed"]);
+
+        // An abort ends a turn only when this driver asked for it.
+        send(&x, "msg_7");
+        let unasked = [user("msg_7"), error("MessageAbortedError")];
+        let unasked: Vec<_> = unasked.iter().flat_map(|e| x.handle(e)).collect();
+        assert_eq!(statuses(unasked), [] as [String; 0]);
+        interrupt(&x);
+        let mut stopped = x.handle(&error("MessageAbortedError"));
+        stopped.extend(x.handle(&idle()));
+        stopped.extend(x.handle(&reply("msg_8", None)));
+        stopped.extend(x.handle(&idle()));
+        assert_eq!(statuses(stopped), ["interrupted"]);
+
+        // Stopped before OpenCode took the prompt, it ends on the idle alone.
+        send(&x, "msg_9");
+        interrupt(&x);
+        assert_eq!(statuses(x.handle(&idle())), ["interrupted"]);
+
+        // A denied permission ends the turn on its last step, though that step called a tool.
+        send(&x, "msg_a");
+        let mut denied = x.handle(&user("msg_a"));
+        denied.extend(x.handle(&reply("msg_b", Some("tool-calls"))));
+        x.sent.lock().unwrap().as_mut().unwrap().refused = true;
+        denied.extend(x.handle(&idle()));
+        assert_eq!(statuses(denied), ["completed"]);
+
+        // OpenCode's own id anchors the turn: the user message it created after the send.
+        let user_at = |id: &str, created: u64| {
             oc(
                 "message.updated",
-                json!({ "info": { "id": id, "role": "user" } }),
+                json!({ "info": { "id": id, "role": "user", "time": { "created": created } } }),
             )
         };
-        for (error, status) in [
-            (json!({ "name": "MessageAbortedError" }), "interrupted"),
-            (
-                json!({ "name": "ProviderError", "data": { "message": "boom" } }),
-                "failed",
-            ),
-        ] {
-            let mut x = Translator::default();
-            let mut events = x.handle(&user("u1"));
-            events.extend(x.handle(&oc("session.error", json!({ "error": error }))));
-            events.extend(x.handle(&oc("session.idle", json!({}))));
-            events.extend(x.handle(&oc("session.idle", json!({}))));
-            // Seen again, the same user message starts nothing.
-            events.extend(x.handle(&user("u1")));
-            events.extend(x.handle(&oc("session.idle", json!({}))));
-            assert_eq!(statuses(events), [Some(status.to_string())]);
+        *x.sent.lock().unwrap() = Some(SentTurn {
+            id: "msg_c".into(),
+            sent_at: 100,
+            ..SentTurn::default()
+        });
+        let mut own = x.handle(&user_at("msg_0old", 50));
+        own.extend(x.handle(&error("ProviderError")));
+        assert_eq!(statuses(own), [] as [String; 0], "an echo anchors nothing");
+        assert!(x.deadline().is_some());
+        own = x.handle(&user_at("msg_d", 100));
+        own.extend(x.handle(&error("ProviderError")));
+        assert_eq!(statuses(own), ["failed"]);
+        assert!(x.deadline().is_none(), "the anchor drops the held error");
 
-            let mut next = x.handle(&user("u2"));
-            next.extend(x.handle(&oc("session.idle", json!({}))));
-            assert_eq!(statuses(next), [Some("completed".to_string())]);
-        }
+        // With nothing to anchor on, the held idle ends the turn after the wait, and says so.
+        send(&x, "msg_e");
+        let mut held = x.handle(&user("msg_0bare"));
+        held.extend(x.handle(&idle()));
+        assert_eq!(statuses(held), [] as [String; 0]);
+        let expired = x.expire();
+        assert!(matches!(expired[0], SessionEvent::ProtocolError { .. }));
+        assert_eq!(statuses(expired), ["completed"]);
+
+        // A held event belongs to its own turn, never to one sent after it.
+        send(&x, "msg_g");
+        x.handle(&idle());
+        send(&x, "msg_h");
+        assert_eq!(statuses(x.expire()), [] as [String; 0]);
     }
 
     #[test]
     fn a_multi_step_turn_emits_exactly_one_turn_done_carrying_summed_usage() {
         let mut x = Translator::default();
+        send(&x, "m0");
         x.handle(&oc(
             "message.updated",
             json!({ "info": { "id": "m1", "role": "assistant" } }),
@@ -1644,7 +2013,8 @@ mod tests {
             "step-finish is a per-step boundary and must not end the turn: {events:?}"
         );
 
-        events.extend(x.handle(&oc("session.idle", json!({}))));
+        events.extend(x.handle(&reply("m1", Some("stop"))));
+        events.extend(x.handle(&idle()));
         let done: Vec<_> = events
             .iter()
             .filter(|e| matches!(e, SessionEvent::TurnDone { .. }))

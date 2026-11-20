@@ -736,7 +736,7 @@ impl ProviderService<'_> {
         ensure_running(self.runtime)?;
         let server = self.opencode_server().await?;
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
-        let (driver, mut rx) = OpenCodeDriver::spawn(server, &cwd, Some(model.to_string()))
+        let (driver, mut rx) = OpenCodeDriver::spawn(server, &cwd, Some(model.to_string()), None)
             .await
             .map_err(|detail| CoreError::Opencode { detail })?;
 
