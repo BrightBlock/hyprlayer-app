@@ -39,6 +39,8 @@ async fn unsupported_command() {
             protocol_version: PROTOCOL_VERSION,
             build: None,
             version: None,
+            features: Vec::new(),
+            stream_window: None,
         })
         .await
         .expect("hello");
@@ -162,6 +164,8 @@ async fn unsupported_command() {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
+                features: Vec::new(),
+                stream_window: None,
             })
             .await
             .expect("greet");

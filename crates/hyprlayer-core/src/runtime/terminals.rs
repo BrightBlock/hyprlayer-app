@@ -26,7 +26,6 @@ use super::agent_control::codex_remote;
 use super::agent_control::codex_remote::CodexRemote;
 use super::agent_control::pty_agents::{is_terminal_reply, CodexGate, PtyLaunchEntry};
 use super::agent_control::{inject, spawn, AgentIdentity};
-use super::terminal_registry::TerminalRegistry;
 use super::HyprlayerRuntime;
 
 type CodexGateCell = tokio::sync::OnceCell<CodexGate>;
@@ -34,7 +33,8 @@ type CodexGateCell = tokio::sync::OnceCell<CodexGate>;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 const CAPTURE_SKEW_MS: f64 = 2000.0;
-const ATTACH_CHANNEL_CAPACITY: usize = 256;
+/// One: a slow reader leaves output in the ring, which coalesces it and drops the oldest.
+const ATTACH_CHANNEL_CAPACITY: usize = 1;
 const MINT_TIMEOUT: Duration = Duration::from_secs(90);
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -193,7 +193,7 @@ impl TerminalService<'_> {
             .terminals
             .insert(terminal_id.clone(), session.clone())
             .await;
-        let live = spawn_forward(session, terminal_id.clone(), self.runtime.terminals.clone());
+        let live = spawn_forward(&session);
         TerminalAttachment { terminal_id, live }
     }
 
@@ -219,11 +219,7 @@ impl TerminalService<'_> {
         let Some(session) = self.runtime.terminals.get(&req.terminal_id).await else {
             return Ok(None);
         };
-        let live = spawn_forward(
-            session,
-            req.terminal_id.clone(),
-            self.runtime.terminals.clone(),
-        );
+        let live = spawn_forward(&session);
         Ok(Some(TerminalAttachment {
             terminal_id: req.terminal_id,
             live,
@@ -843,22 +839,12 @@ impl TerminalService<'_> {
     }
 }
 
-fn spawn_forward(
-    session: Arc<PtySession>,
-    terminal_id: String,
-    registry: Arc<TerminalRegistry>,
-) -> mpsc::Receiver<TerminalEvent> {
+fn spawn_forward(session: &PtySession) -> mpsc::Receiver<TerminalEvent> {
     let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
     let mut live = session.subscribe();
     tokio::spawn(async move {
         while let Some(ev) = live.recv().await {
-            let exited = matches!(ev, TerminalEvent::Exited { .. });
-            let closed = tx.send(ev).await.is_err();
-            if exited {
-                registry.remove(&terminal_id).await;
-                break;
-            }
-            if closed {
+            if tx.send(ev).await.is_err() {
                 break;
             }
         }
@@ -1117,6 +1103,33 @@ mod tests {
         assert_eq!(
             login_shell_args("echo hi"),
             vec!["-lc".to_string(), "echo hi".to_string()]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_exited_terminal_leaves_the_registry_while_its_reader_stalls() {
+        let registry = Arc::new(crate::runtime::terminal_registry::TerminalRegistry::new());
+        let session = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "seq 1 20000; exit 0".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "ws".into(),
+        })
+        .expect("spawn pty");
+        registry.insert("t".into(), session.clone()).await;
+        let _unread = spawn_forward(&session);
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while registry.get("t").await.is_some() && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            registry.get("t").await.is_none(),
+            "an exited terminal must not wait on its reader to leave the registry"
         );
     }
 

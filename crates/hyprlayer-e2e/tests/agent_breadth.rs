@@ -27,7 +27,7 @@ use hyprlayer_proto::WireError;
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 const IO: Duration = Duration::from_secs(30);
 const GOAL_WAIT: Duration = Duration::from_secs(90);
@@ -995,7 +995,7 @@ fn is_terminal_tab(event: &RuntimeEvent, terminal: &str) -> bool {
     )
 }
 
-async fn session_tab(rx: &mut UnboundedReceiver<RuntimeEvent>, session_id: &str) -> Option<Value> {
+async fn session_tab(rx: &mut Receiver<RuntimeEvent>, session_id: &str) -> Option<Value> {
     let is_tab = |e: &RuntimeEvent| {
         matches!(
             e,
@@ -1014,7 +1014,7 @@ async fn session_tab(rx: &mut UnboundedReceiver<RuntimeEvent>, session_id: &str)
         })
 }
 
-fn drain(rx: &mut UnboundedReceiver<RuntimeEvent>) {
+fn drain(rx: &mut Receiver<RuntimeEvent>) {
     while rx.try_recv().is_ok() {}
 }
 

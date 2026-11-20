@@ -295,6 +295,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ScriptRunChanged,
             events::QuitRequested,
             events::ServerDisconnected,
+            events::EventsMissed,
             events::AccountChanged,
             events::SshPromptsChanged,
             events::GoalChanged,

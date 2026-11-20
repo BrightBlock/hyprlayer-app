@@ -361,6 +361,7 @@ export const events = {
 	binariesChanged: makeEvent<BinariesChanged>("binaries-changed"),
 	configChanged: makeEvent<ConfigChanged>("config-changed"),
 	docStateChanged: makeEvent<DocStateChanged>("doc-state-changed"),
+	eventsMissed: makeEvent<EventsMissed>("events-missed"),
 	goalChanged: makeEvent<GoalChanged>("goal-changed"),
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
@@ -991,6 +992,9 @@ export type Engine = {
 	enabled?: boolean,
 	builtin?: boolean,
 };
+
+/**  The connection lost runtime events; re-read what they would have changed. */
+export type EventsMissed = null;
 
 export type ExitOutcome = "completed" | "interrupted" | "crashed" | "killed" | "detached" | "spawn_failed";
 

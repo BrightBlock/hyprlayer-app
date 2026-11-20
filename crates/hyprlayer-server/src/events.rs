@@ -7,10 +7,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use hyprlayer_core::{HyprlayerRuntime, RuntimeEvent};
 use hyprlayer_models::ClientRef;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::transport::{encode_control, Control};
+use crate::outbound::{EventPush, Outbound};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
 pub const TARGETED_EVENTS: [&str; 7] = [
@@ -31,8 +31,8 @@ struct Announced {
     capabilities: HashSet<String>,
 }
 
-struct Outbound {
-    sender: mpsc::Sender<Vec<u8>>,
+struct Conn {
+    outbound: Outbound,
     /// Events lost in the current episode of not draining.
     dropped: u64,
     announced: Option<Announced>,
@@ -41,7 +41,7 @@ struct Outbound {
     agent: Option<String>,
 }
 
-impl Outbound {
+impl Conn {
     fn receives(&self, audience: &Audience) -> bool {
         if self.agent.is_some() {
             return false;
@@ -72,16 +72,16 @@ enum Audience {
 /// The outbound queues of every connected client, keyed by connection id.
 #[derive(Clone, Default)]
 pub struct Clients {
-    inner: Arc<Mutex<HashMap<u64, Outbound>>>,
+    inner: Arc<Mutex<HashMap<u64, Conn>>>,
     unattended: Arc<Notify>,
 }
 
 impl Clients {
-    pub fn register(&self, conn: u64, sender: mpsc::Sender<Vec<u8>>) {
+    pub fn register(&self, conn: u64, outbound: Outbound) {
         self.lock().insert(
             conn,
-            Outbound {
-                sender,
+            Conn {
+                outbound,
                 dropped: 0,
                 announced: None,
                 watching: HashSet::new(),
@@ -177,51 +177,62 @@ impl Clients {
     }
 
     /// Non-blocking on purpose: a client that has stopped draining loses the
-    /// event, the same outcome a lagged broadcast subscriber had in-process.
-    /// A dropped session event is recovered by the client's next `watch_sessions`.
+    /// event, and a client that reads `EventsMissed` is told so in order.
     pub fn send_event(&self, event: RuntimeEvent) {
         let kind = event_kind(&event);
         let audience = audience(&event);
-        let bytes = match encode_control(&Control::Event { event }) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                tracing::warn!("{kind} runtime event is not serializable: {e}");
-                return;
-            }
-        };
+        // Serialized once, and only if some queue has room for it.
+        let event = &event;
+        let mut json: Option<Option<String>> = None;
         let mut clients = self.lock();
         let mut lost_announced = false;
-        clients.retain(|conn, outbound| {
-            if !outbound.receives(&audience) {
+        clients.retain(|conn, client| {
+            if !client.receives(&audience) {
                 return true;
             }
-            match outbound.sender.try_send(bytes.clone()) {
-                Ok(()) => {
-                    if outbound.dropped > 0 {
+            let slot = &mut json;
+            let pushed = client.outbound.push_event(move || {
+                cached(slot, || {
+                    serde_json::to_string(event)
+                        .inspect_err(|e| {
+                            tracing::warn!("{kind} runtime event is not serializable: {e}")
+                        })
+                        .ok()
+                })
+            });
+            match pushed {
+                EventPush::Queued => {
+                    if client.dropped > 0 {
                         tracing::info!(
                             "conn {conn}: draining again after dropping {} runtime event(s)",
-                            outbound.dropped
+                            client.dropped
                         );
-                        outbound.dropped = 0;
+                        client.dropped = 0;
                     }
                     true
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => {
-                    lost_announced |= outbound.announced.is_some();
+                EventPush::Closed => {
+                    lost_announced |= client.announced.is_some();
                     false
                 }
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    // The queue is shared with responses and stream frames, so a busy
-                    // terminal can fill it for a client that is still reading.
-                    if outbound.dropped == 0 {
-                        tracing::warn!("conn {conn}: outbound queue full; dropping runtime events, starting with {kind}");
+                EventPush::Dropped => {
+                    if client.dropped == 0 {
+                        tracing::warn!("conn {conn}: event queue full; dropping runtime events, starting with {kind}");
                     }
-                    outbound.dropped += 1;
+                    client.dropped += 1;
                     true
                 }
             }
         });
         self.note_departure(&clients, lost_announced);
+    }
+
+    /// The forwarder fell behind the runtime. A lag carries only a count, so
+    /// every connection that hears events is told: one may have needed them.
+    pub fn missed(&self, count: u64) {
+        for client in self.lock().values().filter(|c| c.agent.is_none()) {
+            client.outbound.missed(count);
+        }
     }
 
     /// Resolves once the last announced client has gone; a client that never
@@ -234,18 +245,25 @@ impl Clients {
         no_announced(&self.lock())
     }
 
-    fn note_departure(&self, clients: &HashMap<u64, Outbound>, was_announced: bool) {
+    fn note_departure(&self, clients: &HashMap<u64, Conn>, was_announced: bool) {
         if was_announced && no_announced(clients) {
             self.unattended.notify_one();
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Outbound>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Conn>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-fn no_announced(clients: &HashMap<u64, Outbound>) -> bool {
+fn cached(
+    slot: &mut Option<Option<String>>,
+    encode: impl FnOnce() -> Option<String>,
+) -> Option<&str> {
+    slot.get_or_insert_with(encode).as_deref()
+}
+
+fn no_announced(clients: &HashMap<u64, Conn>) -> bool {
     clients.values().all(|o| o.announced.is_none())
 }
 
@@ -278,7 +296,7 @@ pub fn spawn_forwarder(runtime: &HyprlayerRuntime, clients: Clients) -> JoinHand
                 Ok(event) => clients.send_event(event),
                 Err(RecvError::Lagged(n)) => {
                     tracing::warn!("event forwarder fell {n} runtime events behind");
-                    continue;
+                    clients.missed(n);
                 }
                 Err(RecvError::Closed) => break,
             }
@@ -318,9 +336,9 @@ mod tests {
 
     use super::*;
 
-    fn connect(clients: &Clients, conn: u64, announce: bool) -> mpsc::Receiver<Vec<u8>> {
-        let (tx, rx) = mpsc::channel(8);
-        clients.register(conn, tx);
+    fn connect(clients: &Clients, conn: u64, announce: bool) -> Outbound {
+        let outbound = Outbound::new(true);
+        clients.register(conn, outbound.clone());
         if announce {
             let client = ClientRef {
                 client_id: format!("client-{conn}"),
@@ -328,7 +346,7 @@ mod tests {
             };
             clients.announce(conn, client, Vec::new());
         }
-        rx
+        outbound
     }
 
     async fn unattended(clients: &Clients) -> bool {
@@ -360,7 +378,7 @@ mod tests {
     #[tokio::test]
     async fn an_announced_client_pruned_by_a_send_is_unattended() {
         let clients = Clients::default();
-        drop(connect(&clients, 1, true));
+        connect(&clients, 1, true).close();
         let _probe = connect(&clients, 2, false);
 
         clients.send_event(RuntimeEvent::BinariesChanged);

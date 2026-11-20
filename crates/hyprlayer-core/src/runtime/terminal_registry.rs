@@ -15,8 +15,23 @@ impl TerminalRegistry {
         Self::default()
     }
 
-    pub async fn insert(&self, id: String, s: Arc<PtySession>) {
-        self.live.lock().await.insert(id, s);
+    /// Registered until the session exits, whether or not anyone reads it.
+    pub async fn insert(self: &Arc<Self>, id: String, s: Arc<PtySession>) {
+        let mut exit = s.subscribe();
+        let session = Arc::downgrade(&s);
+        self.live.lock().await.insert(id.clone(), s);
+        let registry = self.clone();
+        tokio::spawn(async move {
+            while exit.skip().await {}
+            let mut live = registry.live.lock().await;
+            // A relaunch may have reused the id.
+            if live
+                .get(&id)
+                .is_some_and(|current| std::ptr::eq(Arc::as_ptr(current), session.as_ptr()))
+            {
+                live.remove(&id);
+            }
+        });
     }
 
     pub async fn get(&self, id: &str) -> Option<Arc<PtySession>> {

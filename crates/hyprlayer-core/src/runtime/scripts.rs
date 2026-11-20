@@ -16,7 +16,6 @@ use crate::store::Workstream;
 use crate::terminal::{PtySession, SpawnTerminal, TerminalEvent};
 
 use super::script_registry::{RunPhase, ScriptRegistry, ScriptRuntime};
-use super::terminal_registry::TerminalRegistry;
 use super::terminals::{default_shell, login_shell_args};
 use super::HyprlayerRuntime;
 
@@ -24,7 +23,8 @@ const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 const SETUP_TIMEOUT_SECS: u64 = 600;
 const ARCHIVE_TIMEOUT_SECS: u64 = 300;
-const ATTACH_CHANNEL_CAPACITY: usize = 256;
+/// One: a slow reader leaves output in the ring, which coalesces it and drops the oldest.
+const ATTACH_CHANNEL_CAPACITY: usize = 1;
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -210,8 +210,7 @@ impl ScriptService<'_> {
             terminal_id.clone(),
         );
 
-        let live =
-            spawn_output_forward(session, terminal_id.clone(), self.runtime.terminals.clone());
+        let live = spawn_output_forward(&session);
         Ok(ScriptRun { terminal_id, live })
     }
 
@@ -412,28 +411,16 @@ fn emit_changed(
 /// Forwards a running script's PTY output to whichever client attached to
 /// `run()`'s result, mirroring `TerminalService`'s own forwarder. Kept
 /// separate from `spawn_monitor` below because they are two independent
-/// readers on the same output ring: this one exists purely to
-/// bridge to the caller and cleans up the shared `TerminalRegistry` entry
-/// once the session actually exits (never gated on the forward send
-/// succeeding, so a client that already detached can't leak the entry);
-/// `spawn_monitor` exists to update script-domain state (port, status,
-/// output) regardless of whether anyone is still attached.
-fn spawn_output_forward(
-    session: Arc<PtySession>,
-    terminal_id: String,
-    registry: Arc<TerminalRegistry>,
-) -> mpsc::Receiver<TerminalEvent> {
+/// readers on the same output ring: this one exists purely to bridge to the
+/// caller; `spawn_monitor` updates script-domain state (port, status, output)
+/// regardless of whether anyone is still attached. The registry drops the
+/// entry on exit itself.
+fn spawn_output_forward(session: &PtySession) -> mpsc::Receiver<TerminalEvent> {
     let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
     let mut live = session.subscribe();
     tokio::spawn(async move {
         while let Some(ev) = live.recv().await {
-            let exited = matches!(ev, TerminalEvent::Exited { .. });
-            let closed = tx.send(ev).await.is_err();
-            if exited {
-                registry.remove(&terminal_id).await;
-                break;
-            }
-            if closed {
+            if tx.send(ev).await.is_err() {
                 break;
             }
         }

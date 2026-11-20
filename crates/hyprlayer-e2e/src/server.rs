@@ -79,6 +79,12 @@ impl Server {
         &self.socket
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child
+            .id()
+            .expect("a listening server has not been reaped")
+    }
+
     /// The connection the server was first reached on.
     pub fn client(&self) -> Arc<RpcClient> {
         self.client

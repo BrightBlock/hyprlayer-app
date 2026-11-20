@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use hyprlayer_core::models::RuntimeEvent;
 use hyprlayer_server::client::RpcClient;
 use tokio::process::Child;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::sandbox::Sandbox;
 
@@ -109,7 +109,7 @@ pub struct RemoteHost {
 /// One SSH connection carrying the relay, and the client speaking over it.
 pub struct Relay {
     pub client: Arc<RpcClient>,
-    pub events: UnboundedReceiver<RuntimeEvent>,
+    pub events: Receiver<RuntimeEvent>,
     child: Child,
 }
 

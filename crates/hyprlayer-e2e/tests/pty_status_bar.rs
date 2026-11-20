@@ -24,7 +24,7 @@ use hyprlayer_e2e::{
 };
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::events::TARGETED_EVENTS;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 const IO: Duration = Duration::from_secs(30);
 /// Long enough for a second title call, were one made, to land.
@@ -798,7 +798,7 @@ fn seen_of(event: &RuntimeEvent, terminal: &str) -> Option<Seen> {
 
 /// The first change for `terminal` that `stop` matches, within `IO`.
 async fn until(
-    rx: &mut UnboundedReceiver<RuntimeEvent>,
+    rx: &mut Receiver<RuntimeEvent>,
     terminal: &str,
     stop: impl Fn(&Seen) -> bool,
 ) -> Option<Seen> {
@@ -810,7 +810,7 @@ async fn until(
 }
 
 /// Every change for `terminal` through one turn: up to working, then up to idle.
-async fn turn(rx: &mut UnboundedReceiver<RuntimeEvent>, terminal: &str) -> Vec<Seen> {
+async fn turn(rx: &mut Receiver<RuntimeEvent>, terminal: &str) -> Vec<Seen> {
     let mut seen = Vec::new();
     for state in [PtyAgentState::Working, PtyAgentState::Idle] {
         seen.extend(
@@ -826,7 +826,7 @@ async fn turn(rx: &mut UnboundedReceiver<RuntimeEvent>, terminal: &str) -> Vec<S
 }
 
 async fn changes_within(
-    rx: &mut UnboundedReceiver<RuntimeEvent>,
+    rx: &mut Receiver<RuntimeEvent>,
     terminal: &str,
     within: Duration,
 ) -> Vec<Seen> {
@@ -857,7 +857,7 @@ impl TuiStub<'_> {
         &self,
         j: &mut Journey,
         c: &RpcClient,
-        rx: &mut UnboundedReceiver<RuntimeEvent>,
+        rx: &mut Receiver<RuntimeEvent>,
         args: &[&str],
         alias: &str,
     ) -> TuiLaunch {

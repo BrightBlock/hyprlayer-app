@@ -1,9 +1,12 @@
 //! Two planes on one connection, split by a one-byte tag: a control frame is
 //! one JSON line, a data frame a `u32` little-endian length then the payload.
-//! Pure bytes in, frames out; the async I/O lives beside the socket.
+//! A part frame carries a slice of a larger frame, so smaller ones can go
+//! between its slices. Pure bytes in, frames out; the async I/O lives beside
+//! the socket.
 
 pub const TAG_CONTROL: u8 = b'C';
 pub const TAG_DATA: u8 = b'D';
+pub const TAG_PART: u8 = b'P';
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Frame {
@@ -46,6 +49,19 @@ pub fn encode_data(payload: &[u8]) -> Vec<u8> {
     out
 }
 
+/// One slice of a whole frame's encoding. A lane carries one frame at a time, so
+/// its slices concatenate to that frame; `last` closes it. Payload: lane byte,
+/// `last` byte, slice.
+pub fn encode_part(lane: u8, last: bool, slice: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(slice.len() + 7);
+    out.push(TAG_PART);
+    out.extend_from_slice(&(slice.len() as u32 + 2).to_le_bytes());
+    out.push(lane);
+    out.push(u8::from(last));
+    out.extend_from_slice(slice);
+    out
+}
+
 /// A data frame carrying one client-facing stream's event: the payload is an
 /// 8-byte little-endian stream id followed by the encoded event. One data
 /// plane serves every open stream on the connection; this is the sub-framing
@@ -72,6 +88,8 @@ pub fn decode_stream_frame(payload: &[u8]) -> Option<(u64, &[u8])> {
 pub enum DecodeError {
     UnknownTag(u8),
     ControlNotUtf8,
+    /// A lane's parts did not reassemble into exactly one control or data frame.
+    BadPart,
 }
 
 impl std::fmt::Display for DecodeError {
@@ -79,6 +97,7 @@ impl std::fmt::Display for DecodeError {
         match self {
             DecodeError::UnknownTag(tag) => write!(f, "unknown frame tag 0x{tag:02x}"),
             DecodeError::ControlNotUtf8 => write!(f, "control frame is not UTF-8"),
+            DecodeError::BadPart => write!(f, "part frames did not reassemble into one frame"),
         }
     }
 }
@@ -93,6 +112,8 @@ pub struct Decoder {
     // Where the newline search resumes, so a partially delivered control line
     // is not rescanned from its first byte on every feed.
     scanned: usize,
+    /// Each lane's frame so far, while its parts arrive.
+    partial: Vec<(u8, Vec<u8>)>,
 }
 
 impl Decoder {
@@ -106,7 +127,7 @@ impl Decoder {
 
     /// True when no partial frame is buffered, so an EOF here is a clean one.
     pub fn is_empty(&self) -> bool {
-        self.start == self.buf.len()
+        self.start == self.buf.len() && self.partial.is_empty()
     }
 
     /// Bytes fed but not yet taken as a frame: what arrived instead of a hello.
@@ -115,38 +136,72 @@ impl Decoder {
     }
 
     pub fn next_frame(&mut self) -> Result<Option<Frame>, DecodeError> {
-        let pending = &self.buf[self.start..];
-        let Some(&tag) = pending.first() else {
-            return Ok(None);
+        loop {
+            let pending = &self.buf[self.start..];
+            let Some(&tag) = pending.first() else {
+                return Ok(None);
+            };
+            match tag {
+                TAG_CONTROL => {
+                    let from = self.scanned.max(1);
+                    let Some(offset) = pending[from..].iter().position(|&b| b == b'\n') else {
+                        self.scanned = pending.len();
+                        return Ok(None);
+                    };
+                    let end = from + offset;
+                    let line = std::str::from_utf8(&pending[1..end])
+                        .map_err(|_| DecodeError::ControlNotUtf8)?
+                        .to_owned();
+                    self.consume(end + 1);
+                    return Ok(Some(Frame::Control(line)));
+                }
+                TAG_DATA | TAG_PART => {
+                    if pending.len() < 5 {
+                        return Ok(None);
+                    }
+                    let len = u32::from_le_bytes([pending[1], pending[2], pending[3], pending[4]])
+                        as usize;
+                    if pending.len() < 5 + len {
+                        return Ok(None);
+                    }
+                    let payload = pending[5..5 + len].to_vec();
+                    self.consume(5 + len);
+                    if tag == TAG_DATA {
+                        return Ok(Some(Frame::Data(payload)));
+                    }
+                    if let Some(frame) = self.take_part(&payload)? {
+                        return Ok(Some(frame));
+                    }
+                }
+                other => return Err(DecodeError::UnknownTag(other)),
+            }
+        }
+    }
+
+    fn take_part(&mut self, payload: &[u8]) -> Result<Option<Frame>, DecodeError> {
+        let [lane, last, slice @ ..] = payload else {
+            return Err(DecodeError::BadPart);
         };
-        match tag {
-            TAG_CONTROL => {
-                let from = self.scanned.max(1);
-                let Some(offset) = pending[from..].iter().position(|&b| b == b'\n') else {
-                    self.scanned = pending.len();
-                    return Ok(None);
-                };
-                let end = from + offset;
-                let line = std::str::from_utf8(&pending[1..end])
-                    .map_err(|_| DecodeError::ControlNotUtf8)?
-                    .to_owned();
-                self.consume(end + 1);
-                Ok(Some(Frame::Control(line)))
+        let index = match self.partial.iter().position(|(l, _)| l == lane) {
+            Some(index) => index,
+            None => {
+                self.partial.push((*lane, Vec::new()));
+                self.partial.len() - 1
             }
-            TAG_DATA => {
-                if pending.len() < 5 {
-                    return Ok(None);
-                }
-                let len =
-                    u32::from_le_bytes([pending[1], pending[2], pending[3], pending[4]]) as usize;
-                if pending.len() < 5 + len {
-                    return Ok(None);
-                }
-                let payload = pending[5..5 + len].to_vec();
-                self.consume(5 + len);
-                Ok(Some(Frame::Data(payload)))
-            }
-            other => Err(DecodeError::UnknownTag(other)),
+        };
+        self.partial[index].1.extend_from_slice(slice);
+        if *last == 0 {
+            return Ok(None);
+        }
+        let (_, whole) = self.partial.swap_remove(index);
+        if whole.first() == Some(&TAG_PART) {
+            return Err(DecodeError::BadPart);
+        }
+        let mut inner = Decoder::new();
+        inner.feed(&whole);
+        match inner.next_frame() {
+            Ok(Some(frame)) if inner.is_empty() => Ok(Some(frame)),
+            _ => Err(DecodeError::BadPart),
         }
     }
 
@@ -240,5 +295,77 @@ mod tests {
     #[test]
     fn a_payload_too_short_for_a_stream_id_decodes_to_none() {
         assert_eq!(decode_stream_frame(&[1, 2, 3]), None);
+    }
+
+    fn parts(lane: u8, frame: &[u8], size: usize) -> Vec<Vec<u8>> {
+        let chunks: Vec<&[u8]> = frame.chunks(size).collect();
+        let last = chunks.len() - 1;
+        chunks
+            .iter()
+            .enumerate()
+            .map(|(i, chunk)| encode_part(lane, i == last, chunk))
+            .collect()
+    }
+
+    #[test]
+    fn two_lanes_of_parts_and_a_whole_frame_interleave_one_byte_at_a_time() {
+        let big_control = format!("{{\"response\":\"{}\"}}", "x".repeat(300));
+        let big_data = encode_stream_frame(7, &[9; 500]);
+        let control_parts = parts(0, &encode_control(&big_control), 64);
+        let data_parts = parts(1, &big_data, 100);
+        let mut wire = Vec::new();
+        for i in 0..control_parts.len().max(data_parts.len()) {
+            if let Some(part) = control_parts.get(i) {
+                wire.extend(part);
+            }
+            wire.extend(encode_control("small"));
+            if let Some(part) = data_parts.get(i) {
+                wire.extend(part);
+            }
+        }
+
+        let mut decoder = Decoder::new();
+        let mut decoded = Vec::new();
+        for byte in wire {
+            decoder.feed(&[byte]);
+            while let Some(frame) = decoder.next_frame().unwrap() {
+                decoded.push(frame);
+            }
+        }
+        let whole: Vec<_> = decoded
+            .iter()
+            .filter(|f| **f != Frame::Control("small".into()))
+            .collect();
+        assert_eq!(
+            whole,
+            vec![
+                &Frame::Control(big_control),
+                &Frame::Data(big_data[5..].to_vec())
+            ]
+        );
+        assert_eq!(
+            decoded.len() - whole.len(),
+            control_parts.len().max(data_parts.len())
+        );
+        assert!(decoder.is_empty());
+    }
+
+    #[test]
+    fn parts_that_are_not_exactly_one_frame_are_an_error() {
+        let mut two = encode_control("a");
+        two.extend(encode_control("b"));
+        for inner in [two, b"Cno newline".to_vec(), encode_part(0, true, b"Cx\n")] {
+            let mut decoder = Decoder::new();
+            decoder.feed(&encode_part(0, true, &inner));
+            assert_eq!(decoder.next_frame(), Err(DecodeError::BadPart));
+        }
+    }
+
+    #[test]
+    fn a_half_assembled_frame_is_not_a_clean_end() {
+        let mut decoder = Decoder::new();
+        decoder.feed(&encode_part(1, false, b"Cpartial"));
+        assert_eq!(decoder.next_frame(), Ok(None));
+        assert!(!decoder.is_empty());
     }
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use hyprlayer_core::models::runtime::ThoughtsIndexUpdateKind;
 use hyprlayer_core::models::RuntimeEvent;
+use hyprlayer_server::client::GapPacer;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
@@ -15,6 +16,14 @@ pub fn spawn(handle: AppHandle, client: Arc<RpcClient>) {
     let mut events = client
         .take_events()
         .expect("a fresh client still holds its event stream");
+    let mut gaps = GapPacer::new(client.events_missed());
+    let paced = handle.clone();
+    tauri::async_runtime::spawn(async move {
+        while gaps.next().await {
+            log::warn!("runtime events were missed; the window re-reads");
+            let _ = events::EventsMissed.emit(&paced);
+        }
+    });
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             map(&handle, event);

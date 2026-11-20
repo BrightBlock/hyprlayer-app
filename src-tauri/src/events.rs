@@ -171,3 +171,7 @@ pub struct QuitRequested;
 /// (ADR-0009), so the frontend offers a relaunch.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct ServerDisconnected;
+
+/// The connection lost runtime events; re-read what they would have changed.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct EventsMissed;

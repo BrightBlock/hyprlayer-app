@@ -37,7 +37,7 @@ pub async fn eventually(within: std::time::Duration, mut check: impl FnMut() -> 
 /// returns everything seen. The server pushes these; nothing else in the
 /// harness observes them, so a scenario that wants one has to wait for it.
 pub async fn events_until(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>,
+    rx: &mut tokio::sync::mpsc::Receiver<RuntimeEvent>,
     within: std::time::Duration,
     stop: impl Fn(&RuntimeEvent) -> bool,
 ) -> Vec<RuntimeEvent> {

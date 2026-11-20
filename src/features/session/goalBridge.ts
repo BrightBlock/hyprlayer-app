@@ -1,6 +1,7 @@
-import { events, type GoalChanged } from "@/lib/bindings";
+import { commands, events, type GoalChanged } from "@/lib/bindings";
 import { goalNotice } from "@/lib/domain/goals";
 import type { EventBridge } from "@/lib/events";
+import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { findWorkstreamForNotify, notifyGoal } from "@/lib/notifications";
 import { isAutoAllowed, isSessionVisible, reattachRunningGoal, setSessionGoal } from "./sessionStore";
@@ -36,6 +37,12 @@ async function announce(
   } catch (e) {
     log.warn("goal", "a goal notification failed", e);
   }
+}
+
+/** The briefs a missed `GoalChanged` would have moved. */
+export async function reconcileGoalBriefs(): Promise<void> {
+  const active = await unwrap(commands.listActiveSessions());
+  for (const { session } of active) setSessionGoal(session.id, session.goal ?? null);
 }
 
 /** Goal notices fire on every device, unlike a session's own asks. */

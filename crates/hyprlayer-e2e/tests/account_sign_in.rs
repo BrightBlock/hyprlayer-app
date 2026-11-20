@@ -692,12 +692,12 @@ fn age(account_file: &Path) {
 }
 
 /// Waits out the `AccountChanged` a sign-in sends, then any stragglers.
-async fn drain_until_changed(events: &mut tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>) {
+async fn drain_until_changed(events: &mut tokio::sync::mpsc::Receiver<RuntimeEvent>) {
     events_until(events, IO, is_account_changed).await;
     events_until(events, QUIET, |_| false).await;
 }
 
-async fn quiet_changes(events: &mut tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>) -> usize {
+async fn quiet_changes(events: &mut tokio::sync::mpsc::Receiver<RuntimeEvent>) -> usize {
     account_changes(&events_until(events, QUIET, |_| false).await)
 }
 

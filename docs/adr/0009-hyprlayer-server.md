@@ -315,6 +315,16 @@ coalescer to fix a cosmetic defect that only appears at the head of a replay aft
 size, which is what the old ring's own comment asked for; the cost is that a slow
 reader's slack is now 256 KiB, not up to ~178 MiB.
 
+*(Amended 2026-11-19 — over the socket that promise did not hold. The terminal's
+forwarder kept draining the ring into a 256-frame attach channel and a 1,024-frame
+connection queue, so the ring never dropped anything: a stalled reader with `yes`
+running grew the server by 82 to 161 MiB in 8 s. It holds now because nothing reads the ring
+until the connection has room (see *The connection* below). A stalled reader costs the
+ring plus at most three frames in flight per terminal: the core forwarder's hand, its
+one-slot attach channel, and the stream's one slot in the writer. A blocked forwarder
+can no longer see its terminal exit, so `TerminalRegistry::insert` watches for the exit
+itself and drops the entry whether or not anyone reads.)*
+
 **Method** — the protocol from
 `thoughts/shared/plans/2026-09-02-backend-owned-vt-state-libghostty.md` Phase 1, not a
 second one: release build (`pnpm tauri build`); main process and web-content process
@@ -353,6 +363,73 @@ shell, which is the input every later memory decision needs. Not the cost of a
 terminal holding a full 256 KiB of scrollback, and not a backend/webview
 decomposition — `src/lib/terminal/channelRelease.ts`'s ~20.5 MB per dock remount is a
 frontend leak figure and is not comparable.
+
+### The connection: priority, credit and gaps
+
+One socket carries responses, runtime events and every stream's data, so a reader on a
+slow or stalled link must not make any of them wait on, or grow behind, the others. The
+2026-11-19 measurements on a 256 KiB/s link: a small call answered 7.1 s late behind one
+1,222-row `list_session_turns`, 237 MB of terminal output queued ahead of a small RPC,
+events dropped with nothing telling the client, and an unread stream growing the client
+by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
+
+- **The hello's `features`.** Both sides list `flow_control`. A side sends part frames,
+  `credit` or `events_missed` only to a peer that listed it, so a released desktop keeps
+  the base protocol.
+- **One writer, in priority order** (`hyprlayer-server/src/outbound.rs`): responses up
+  to 16 KiB, then runtime events, then larger responses and stream data taking turns.
+  A frame over 16 KiB goes out as **part frames** — `P`, a `u32` length, a lane byte, a
+  `last` byte, then a slice of the whole frame's encoding — so a small frame waits behind
+  at most one part. Priority alone was the smaller change, but a large frame already on
+  the wire would still hold everything for its full length; parts are what keep that
+  wait to one slice. The decoder reassembles parts per lane, so callers see only
+  control and data frames.
+- **Stream credit.** Each stream may have `STREAM_WINDOW` (512 KiB) of event bytes
+  unread at the client. The server's hello names that window (`stream_window`), and the
+  client returns credit (`credit { stream_id, bytes }`) as its consumer reads, in batches
+  of a quarter of the named window, so either side's constant can change alone. Each
+  stream also has one frame in flight
+  in the writer, and the terminal forwarder waits for both before it reads the ring
+  again, so output piles up in the ring, which coalesces it and drops the oldest. A
+  session stream that waits instead lags its broadcast and recovers from the log, as
+  before. The client queues a stream's frames without waiting, so one unread stream
+  never stalls the read loop; a stream past 64 MiB unread is closed.
+- **A stream ends with its connection.** Closing a connection wakes a stream waiting
+  for credit. A connection task aborted at shutdown still aborts its streams. A stream
+  id is reserved before the response that names it is written, so a `cancel` that
+  arrives first still cancels it. A dropped client receiver sends its `cancel` even
+  behind a full queue.
+- **Events carry a per-connection `seq`.** The server holds at most 256 events or
+  64 KiB per connection, and an empty queue takes one event of any size. Each event is
+  serialized once per broadcast, and only once some queue has room. Past the cap, and
+  whenever the forwarder lags the runtime's broadcast, events are dropped and the
+  connection gets `events_missed { first_seq, count }` in their place. A lag carries
+  only a count, so every connection that hears events is told. The client counts the
+  markers, any `seq` jump, and its own 1,024-event queue overflowing in
+  `RpcClient::events_missed`.
+- **Re-reads are paced.** The desktop's `GapPacer` emits `EventsMissed` once a burst of
+  gaps has been quiet for 500 ms, and never twice within 5 s, so a refetch can't feed a
+  flood more gaps. The window then re-reads what a reconnect re-reads, minus the session
+  stream reattach, since those streams are intact.
+- **Responses push back.** Past 4 MiB of unwritten responses the server stops reading
+  that connection's requests until they drain. That pause also delays `credit`, which
+  only data needs, and data goes after responses anyway; the responses drain as the
+  client reads, so the pause always ends.
+
+What it does not cover: bytes already below the socket. Over `ssh … relay`, the SSH
+channel window holds up to ~2 MB that no priority can reorder.
+
+The guard is `crates/hyprlayer-e2e/tests/connection_backpressure.rs`, on a proxy that
+stalls the link and then throttles it to 256 KiB/s:
+
+| Measure | Before | After |
+|---|---|---|
+| Server RSS growth, stalled reader with `yes`, 8 s | +82 to +161 MiB | +1 MiB |
+| Small call after the stall ends | > 15 s (timed out) | 55 to 77 ms |
+| `SessionRevised` during the stall: sent / delivered / reported missed | 484 / 0 / 0 | 484 / 210 / 276 |
+| Small call behind a large response that takes ~13 s | > 30 s (timed out) | 40 to 95 ms |
+| Client RSS growth, one stream unread for 6 s | +313 to +325 MiB | +0 MiB |
+| Re-reads during a 12 s event flood at 32 KiB/s | 6, 2.3 s apart | 4, 5.0 s apart |
 
 ## What we're not doing
 

@@ -13,13 +13,26 @@ use crate::streams::{StreamRequest, StreamResponse};
 
 pub type Control = ControlFrame<Request, Response, StreamRequest, StreamResponse, RuntimeEvent>;
 
-/// Frames queued to one peer before its writer applies backpressure.
+/// Requests a client queues before its callers wait.
 pub const OUTBOUND_QUEUE_FRAMES: usize = 1024;
 
 const READ_CHUNK: usize = 64 * 1024;
 
 pub fn encode_control(control: &Control) -> Result<Vec<u8>, serde_json::Error> {
     Ok(frame::encode_control(&serde_json::to_string(control)?))
+}
+
+/// `Control::Event` around an event serialized once for every connection; only `seq` differs.
+pub fn encode_event(event_json: &str, seq: u64) -> Vec<u8> {
+    let seq = seq.to_string();
+    let mut out = Vec::with_capacity(event_json.len() + seq.len() + 30);
+    out.push(frame::TAG_CONTROL);
+    out.extend_from_slice(br#"{"event":{"event":"#);
+    out.extend_from_slice(event_json.as_bytes());
+    out.extend_from_slice(br#","seq":"#);
+    out.extend_from_slice(seq.as_bytes());
+    out.extend_from_slice(b"}}\n");
+    out
 }
 
 pub fn parse_control(line: &str) -> io::Result<Control> {
@@ -60,14 +73,19 @@ pub fn undecodable_id(line: &str) -> Option<(String, u64)> {
     Some((kind.clone(), envelope.get("id")?.as_u64()?))
 }
 
-/// The kind of an event this build cannot decode, so the reader can skip it.
-pub fn undecodable_event(line: &str) -> Option<String> {
+/// The kind and seq of an event this build cannot decode, so the reader can skip it.
+pub fn undecodable_event(line: &str) -> Option<(String, Option<u64>)> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    match value.get("event")?.get("event")? {
-        serde_json::Value::String(unit) => Some(unit.clone()),
-        serde_json::Value::Object(tagged) => tagged.keys().next().cloned(),
-        _ => None,
-    }
+    let envelope = value.get("event")?;
+    let kind = match envelope.get("event")? {
+        serde_json::Value::String(unit) => unit.clone(),
+        serde_json::Value::Object(tagged) => tagged.keys().next()?.clone(),
+        _ => return None,
+    };
+    Some((
+        kind,
+        envelope.get("seq").and_then(serde_json::Value::as_u64),
+    ))
 }
 
 pub fn label(control: &Control) -> &'static str {
@@ -79,7 +97,9 @@ pub fn label(control: &Control) -> &'static str {
         Control::StreamRequest { .. } => "stream_request",
         Control::StreamResponse { .. } => "stream_response",
         Control::Event { .. } => "event",
+        Control::EventsMissed { .. } => "events_missed",
         Control::Cancel { .. } => "cancel",
+        Control::Credit { .. } => "credit",
         Control::Shutdown => "shutdown",
     }
 }
@@ -156,5 +176,28 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         let bytes =
             encode_control(control).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         self.write_bytes(&bytes).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spliced_event_line_is_the_one_serde_writes() {
+        for event in [
+            RuntimeEvent::BinariesChanged,
+            RuntimeEvent::WorktreeChanged {
+                workstream_id: "ws \"quoted\"\n".into(),
+            },
+        ] {
+            let json = serde_json::to_string(&event).unwrap();
+            let seq = 18_446_744_073_709_551_615;
+            let control = Control::Event {
+                event,
+                seq: Some(seq),
+            };
+            assert_eq!(encode_event(&json, seq), encode_control(&control).unwrap());
+        }
     }
 }

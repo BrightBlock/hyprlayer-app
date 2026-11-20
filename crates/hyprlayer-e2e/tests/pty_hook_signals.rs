@@ -28,7 +28,7 @@ use hyprlayer_e2e::{
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 const IO: Duration = Duration::from_secs(30);
 /// The settle needs 2 s of quiet; the plan allows it 4.
@@ -836,7 +836,7 @@ async fn pty_hook_signals() {
 
 /// `PtyAgentChanged`s for `terminal` until `stop` matches one, or `IO` passes.
 async fn changes_until(
-    rx: &mut UnboundedReceiver<RuntimeEvent>,
+    rx: &mut Receiver<RuntimeEvent>,
     terminal: &str,
     stop: impl Fn(&Change) -> bool,
 ) -> Vec<Change> {
@@ -849,7 +849,7 @@ async fn changes_until(
 
 /// Every `PtyAgentChanged` for `terminal` over `within`.
 async fn changes_within(
-    rx: &mut UnboundedReceiver<RuntimeEvent>,
+    rx: &mut Receiver<RuntimeEvent>,
     terminal: &str,
     within: Duration,
 ) -> Vec<Change> {

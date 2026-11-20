@@ -341,6 +341,8 @@ mod tests {
                     protocol_version: PROTOCOL_VERSION,
                     build: None,
                     version: None,
+                    features: Vec::new(),
+                    stream_window: None,
                 })
                 .await;
             // The connection must outlive the handshake; reading to EOF parks

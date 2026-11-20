@@ -149,10 +149,13 @@ export function onPtyAgentChanged(a: PtyAgent): void {
 /**
  * After a reconnect: the server's terminal registry says which PTYs are gone, through a failed attach,
  * or for a hooked agent, its absence from the server's list. A live unhooked one keeps the new stream,
- * since the old one died with the connection.
+ * since the old one died with the connection. `hookedOnly` after missed events: the unhooked ones'
+ * streams are intact and report their own exits.
  */
-export async function reconcileAgentTerminals(): Promise<void> {
-  const candidates = [...runtimes.values()].filter((rt) => rt.terminalId && !rt.exited && !rt.starting);
+export async function reconcileAgentTerminals({ hookedOnly = false } = {}): Promise<void> {
+  const candidates = [...runtimes.values()].filter(
+    (rt) => rt.terminalId && !rt.exited && !rt.starting && (!hookedOnly || isHooked(rt)),
+  );
   const hooked = new Set(candidates.filter(isHooked));
   const listed = hooked.size
     ? await unwrap(commands.listPtyAgents(null)).then(

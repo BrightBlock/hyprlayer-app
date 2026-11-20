@@ -195,10 +195,7 @@ async fn let_watcher_tick(client: &RpcClient, id: &str) {
 }
 
 /// Whether the next status event for `id` says the row's observed PR changed.
-async fn next_status_event(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<RuntimeEvent>,
-    id: &str,
-) -> Value {
+async fn next_status_event(rx: &mut tokio::sync::mpsc::Receiver<RuntimeEvent>, id: &str) -> Value {
     let is_status = |e: &RuntimeEvent| matches!(e, RuntimeEvent::PrStatusChanged { workstream_id, .. } if workstream_id == id);
     events_until(rx, WATCHER, is_status)
         .await

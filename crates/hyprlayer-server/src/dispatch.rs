@@ -2727,11 +2727,13 @@ mod tests {
     use hyprlayer_core::claude::SessionEvent;
     use hyprlayer_core::store::{Db, NewSession, NewWorkstream};
     use hyprlayer_core::{Harness, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths};
-    use tokio::sync::mpsc;
+    use hyprlayer_proto::frame::Frame;
 
     use super::*;
     use crate::client::RpcClient;
+    use crate::outbound::{self, Outbound};
     use crate::streams::{self, StreamRegistry, StreamSource};
+    use crate::transport::{FrameReader, FrameWriter};
     use crate::SocketServer;
 
     // The same hermetic shape as crates/hyprlayer-core/tests/headless_runtime.rs:
@@ -2921,9 +2923,11 @@ mod tests {
             .expect("attach");
         let ingress = runtime.test_session_ingress(&session_id).await;
 
-        // Capacity 1 and undrained: `run_stream` stalls on its own second
-        // send, so nothing keeps reading `live` while the burst below lands.
-        let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
+        // A tiny pipe nobody reads yet: `run_stream` stalls behind its first
+        // frame, so nothing keeps reading `live` while the burst below lands.
+        let (ours, theirs) = tokio::io::duplex(64);
+        let tx = Outbound::new(false);
+        tokio::spawn(outbound::write(tx.clone(), FrameWriter::new(ours)));
         let registry = StreamRegistry::default();
         streams::spawn_stream(
             runtime.clone(),
@@ -2949,17 +2953,14 @@ mod tests {
         // before this test ever drains a single frame.
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        let mut decoder = hyprlayer_proto::frame::Decoder::new();
+        let mut reader = FrameReader::new(theirs);
         let mut costs = Vec::with_capacity(TOTAL);
         let ok = tokio::time::timeout(Duration::from_secs(10), async {
             while costs.len() < TOTAL {
-                let Some(bytes) = rx.recv().await else {
+                let Ok(Some(frame)) = reader.next_frame().await else {
                     return false;
                 };
-                decoder.feed(&bytes);
-                let Some(hyprlayer_proto::frame::Frame::Data(payload)) =
-                    decoder.next_frame().unwrap()
-                else {
+                let Frame::Data(payload) = frame else {
                     panic!("a stream event is always a data frame");
                 };
                 let (_, event_bytes) = hyprlayer_proto::frame::decode_stream_frame(&payload)

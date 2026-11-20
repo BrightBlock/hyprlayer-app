@@ -1,0 +1,111 @@
+{
+  "scenario": "connection_backpressure",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the terminal was printing before the stall",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_mib": 48.0
+          },
+          "guard": "server memory stays bounded while one reader stalls",
+          "ok": true
+        }
+      ],
+      "step": "a stalled reader with a printing terminal holds the server's memory"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "the call is answered promptly once the link moves again",
+          "ok": true
+        }
+      ],
+      "step": "a small call issued during the stall overtakes the terminal's backlog"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "sent_some": true
+          },
+          "guard": "no event is lost silently",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "the client hears the gap, so it can re-read what the events would have changed",
+          "ok": true
+        }
+      ],
+      "step": "events sent during the stall are delivered or reported missed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the large response is slow on this link",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "the small call issued after it is answered first",
+          "ok": true
+        }
+      ],
+      "step": "a small call is not held behind a large response"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the flood is lossy",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "at_least_s": 4.5
+          },
+          "guard": "re-reads stay apart however many gaps arrive",
+          "ok": true
+        }
+      ],
+      "step": "a flood of events on a slow link re-reads at a bounded rate"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the unread stream had output waiting",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_mib": 64.0
+          },
+          "guard": "client memory stays bounded while a stream goes unread",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a call on the same connection still answers",
+          "ok": true
+        }
+      ],
+      "step": "a stream nobody reads holds the client's memory"
+    }
+  ]
+}

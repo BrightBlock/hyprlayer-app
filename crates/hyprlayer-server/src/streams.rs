@@ -22,14 +22,15 @@ use hyprlayer_core::{
     SessionEvent, SessionLogEntry, Stage,
 };
 use hyprlayer_models::{ClientRef, PtyLaunchSession, PtyLaunched, SessionStreamItem};
-use hyprlayer_proto::{frame, WireError};
+use hyprlayer_proto::{frame, WireError, STREAM_WINDOW};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
-use crate::client::{EventStream, RpcClient};
+use crate::client::{EventStream, RpcClient, StreamReceiver};
 use crate::dispatch::{wire_error, Server, Wire};
+use crate::outbound::Outbound;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamStartOpts {
@@ -297,12 +298,20 @@ fn stash_pending_launch(server: &Server, session_id: String, params: LaunchAndCo
 /// whole connections.
 #[derive(Clone, Default)]
 pub(crate) struct StreamRegistry {
-    inner: Arc<Mutex<HashMap<u64, AbortHandle>>>,
+    inner: Arc<Mutex<HashMap<u64, Entry>>>,
+}
+
+enum Entry {
+    /// Named in a response the client may already hold, not yet forwarding.
+    Reserved {
+        cancelled: bool,
+    },
+    Open(AbortHandle, Arc<Credit>),
 }
 
 impl StreamRegistry {
-    fn insert(&self, id: u64, handle: AbortHandle) {
-        self.lock().insert(id, handle);
+    pub(crate) fn reserve(&self, id: u64) {
+        self.lock().insert(id, Entry::Reserved { cancelled: false });
     }
 
     pub(crate) fn remove(&self, id: u64) {
@@ -310,8 +319,20 @@ impl StreamRegistry {
     }
 
     pub(crate) fn abort(&self, id: u64) {
-        if let Some(handle) = self.lock().remove(&id) {
-            handle.abort();
+        let mut open = self.lock();
+        match open.get_mut(&id) {
+            Some(Entry::Reserved { cancelled }) => *cancelled = true,
+            Some(Entry::Open(handle, _)) => {
+                handle.abort();
+                open.remove(&id);
+            }
+            None => {}
+        }
+    }
+
+    pub(crate) fn grant(&self, id: u64, bytes: u64) {
+        if let Some(Entry::Open(_, credit)) = self.lock().get(&id) {
+            credit.grant(bytes);
         }
     }
 
@@ -320,13 +341,84 @@ impl StreamRegistry {
         if !open.is_empty() {
             tracing::debug!("aborting {} stream(s) with their connection", open.len());
         }
-        for (_, handle) in open {
-            handle.abort();
+        for (_, entry) in open {
+            if let Entry::Open(handle, _) = entry {
+                handle.abort();
+            }
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, AbortHandle>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Entry>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Event bytes the client still has room for; may go negative by one frame.
+pub(crate) struct Credit(watch::Sender<i64>);
+
+impl Credit {
+    fn new(bytes: i64) -> Self {
+        Self(watch::Sender::new(bytes))
+    }
+
+    fn grant(&self, bytes: u64) {
+        let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);
+        self.0
+            .send_modify(|left| *left = left.saturating_add(bytes));
+    }
+
+    fn take(&self, bytes: usize) {
+        self.0.send_modify(|left| *left -= bytes as i64);
+    }
+
+    async fn available(&self) {
+        let _ = self.0.subscribe().wait_for(|left| *left > 0).await;
+    }
+}
+
+/// One stream's way onto its connection: one frame in flight, and no more
+/// unread at the client than its credit.
+pub(crate) struct StreamTx {
+    outbound: Outbound,
+    slot: Arc<Semaphore>,
+    credit: Arc<Credit>,
+}
+
+pub(crate) struct Ready<'a> {
+    tx: &'a StreamTx,
+    slot: OwnedSemaphorePermit,
+}
+
+impl StreamTx {
+    /// Waits until this stream's last frame is written and the client has room for more.
+    async fn ready(&self) -> Option<Ready<'_>> {
+        let room = async {
+            let slot = self.slot.clone().acquire_owned().await.ok()?;
+            self.credit.available().await;
+            Some(slot)
+        };
+        let slot = tokio::select! {
+            slot = room => slot?,
+            () = self.outbound.closed() => return None,
+        };
+        (!self.outbound.is_closed()).then_some(Ready { tx: self, slot })
+    }
+}
+
+impl Ready<'_> {
+    fn send(self, stream_id: u64, event: &impl Serialize) -> bool {
+        match serde_json::to_vec(event) {
+            Ok(bytes) => {
+                self.tx.credit.take(bytes.len());
+                self.tx
+                    .outbound
+                    .push_data(frame::encode_stream_frame(stream_id, &bytes), self.slot)
+            }
+            Err(e) => {
+                tracing::error!("stream {stream_id}: event did not encode: {e}");
+                false
+            }
+        }
     }
 }
 
@@ -886,25 +978,43 @@ pub(crate) async fn prepare_stream(
 }
 
 /// Starts forwarding a prepared source and registers its abort handle. Must
-/// only be called after the response naming `stream_id` is already enqueued
-/// on `tx` (see `prepare_stream`'s doc comment).
+/// only be called after the response naming `stream_id` is written
+/// (see `prepare_stream`'s doc comment).
 pub(crate) fn spawn_stream(
     runtime: Arc<HyprlayerRuntime>,
     stream_id: u64,
     source: StreamSource,
-    tx: mpsc::Sender<Vec<u8>>,
+    outbound: Outbound,
     registry: StreamRegistry,
 ) {
+    // A client without credit gets the old unbounded window; its slot still bounds the server.
+    let window = if outbound.flow_control() {
+        STREAM_WINDOW as i64
+    } else {
+        i64::MAX
+    };
+    let credit = Arc::new(Credit::new(window));
+    let tx = StreamTx {
+        outbound,
+        slot: Arc::new(Semaphore::new(1)),
+        credit: credit.clone(),
+    };
     let for_task = registry.clone();
+    // One lock across the check and the insert, so a cancel lands on one side of it.
+    let mut open = registry.lock();
+    if let Some(Entry::Reserved { cancelled: true }) = open.get(&stream_id) {
+        open.remove(&stream_id);
+        return;
+    }
     let handle = tokio::spawn(run_stream(runtime, stream_id, source, tx, for_task)).abort_handle();
-    registry.insert(stream_id, handle);
+    open.insert(stream_id, Entry::Open(handle, credit));
 }
 
 async fn run_stream(
     runtime: Arc<HyprlayerRuntime>,
     stream_id: u64,
     source: StreamSource,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: StreamTx,
     registry: StreamRegistry,
 ) {
     let ended = match source {
@@ -930,18 +1040,24 @@ async fn run_stream(
     registry.remove(stream_id);
 }
 
-/// Returns why the stream ended.
+/// Returns why the stream ended. Waits for room before reading, so output piles
+/// up in the terminal's ring, which coalesces it and drops the oldest.
 async fn forward_terminal(
     stream_id: u64,
     mut live: mpsc::Receiver<TerminalEvent>,
-    tx: &mpsc::Sender<Vec<u8>>,
+    tx: &StreamTx,
 ) -> &'static str {
-    while let Some(event) = live.recv().await {
-        if !send_event(tx, stream_id, &event).await {
+    loop {
+        let Some(ready) = tx.ready().await else {
+            return "the client stopped reading";
+        };
+        let Some(event) = live.recv().await else {
+            return "the terminal closed";
+        };
+        if !ready.send(stream_id, &event) {
             return "the client stopped reading";
         }
     }
-    "the terminal closed"
 }
 
 /// Returns why the stream ended.
@@ -1034,7 +1150,7 @@ const PARTIAL_TICK: Duration = Duration::from_millis(50);
 /// A session stream's outbound side. Partial text its client renders is coalesced: the
 /// first delta goes out at once, later ones at most one frame per `PARTIAL_TICK`.
 struct SessionSink<'a> {
-    tx: &'a mpsc::Sender<Vec<u8>>,
+    tx: &'a StreamTx,
     stream_id: u64,
     with_meta: bool,
     partials: Partials,
@@ -1067,12 +1183,7 @@ struct PartialItem<'a> {
 }
 
 impl<'a> SessionSink<'a> {
-    fn new(
-        tx: &'a mpsc::Sender<Vec<u8>>,
-        stream_id: u64,
-        with_meta: bool,
-        partials: Partials,
-    ) -> Self {
+    fn new(tx: &'a StreamTx, stream_id: u64, with_meta: bool, partials: Partials) -> Self {
         Self {
             tx,
             stream_id,
@@ -1156,7 +1267,7 @@ impl<'a> SessionSink<'a> {
 
 /// Replayed rows are committed: each carries the rev the session has once the replay is applied.
 async fn send_replay(
-    tx: &mpsc::Sender<Vec<u8>>,
+    tx: &StreamTx,
     stream_id: u64,
     replay: Vec<SessionLogEntry>,
     rev: u64,
@@ -1186,23 +1297,14 @@ async fn send_replay(
     true
 }
 
-async fn send_event(tx: &mpsc::Sender<Vec<u8>>, stream_id: u64, event: &impl Serialize) -> bool {
-    match serde_json::to_vec(event) {
-        Ok(bytes) => tx
-            .send(frame::encode_stream_frame(stream_id, &bytes))
-            .await
-            .is_ok(),
-        Err(e) => {
-            tracing::error!("stream {stream_id}: event did not encode: {e}");
-            false
-        }
+async fn send_event(tx: &StreamTx, stream_id: u64, event: &impl Serialize) -> bool {
+    match tx.ready().await {
+        Some(ready) => ready.send(stream_id, event),
+        None => false,
     }
 }
 
-fn expect_stream(
-    rx: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
-    command: &str,
-) -> Result<mpsc::UnboundedReceiver<Vec<u8>>, WireError> {
+fn expect_stream(rx: Option<StreamReceiver>, command: &str) -> Result<StreamReceiver, WireError> {
     rx.ok_or_else(|| WireError::protocol(format!("{command}: server opened no stream")))
 }
 
@@ -1218,7 +1320,7 @@ pub enum SessionFrame {
 }
 
 pub struct SessionEvents {
-    rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    rx: StreamReceiver,
     with_meta: bool,
 }
 
@@ -1621,5 +1723,31 @@ impl RpcClient {
             )),
             other => Err(unexpected("attach_session", &other)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn closing_the_connection_wakes_a_stream_waiting_for_credit() {
+        let outbound = Outbound::new(true);
+        let tx = StreamTx {
+            outbound: outbound.clone(),
+            slot: Arc::new(Semaphore::new(1)),
+            credit: Arc::new(Credit::new(0)),
+        };
+        let closing = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            outbound.close();
+        };
+        let woke = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(tx.ready(), closing).0.is_none()
+        })
+        .await;
+        assert_eq!(woke, Ok(true), "a closed connection must end the wait");
     }
 }

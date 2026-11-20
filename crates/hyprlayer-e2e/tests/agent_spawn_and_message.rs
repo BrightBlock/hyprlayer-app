@@ -25,7 +25,7 @@ use hyprlayer_e2e::{
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 const IO: Duration = Duration::from_secs(30);
 const GOAL_WAIT: Duration = Duration::from_secs(90);
@@ -990,7 +990,7 @@ async fn wait_idle(mcp: &mut McpDriver, target: &str) {
 }
 
 /// The `OpenSessionTab` for `session_id`, as its wire JSON.
-async fn open_tab(rx: &mut UnboundedReceiver<RuntimeEvent>, session_id: &str) -> Option<Value> {
+async fn open_tab(rx: &mut Receiver<RuntimeEvent>, session_id: &str) -> Option<Value> {
     let is_tab = |e: &RuntimeEvent| {
         matches!(
             e,
@@ -1009,7 +1009,7 @@ async fn open_tab(rx: &mut UnboundedReceiver<RuntimeEvent>, session_id: &str) ->
         })
 }
 
-async fn open_tabs(rx: &mut UnboundedReceiver<RuntimeEvent>, within: Duration) -> usize {
+async fn open_tabs(rx: &mut Receiver<RuntimeEvent>, within: Duration) -> usize {
     events_until(rx, within, |_| false)
         .await
         .iter()
@@ -1025,7 +1025,7 @@ async fn open_tabs(rx: &mut UnboundedReceiver<RuntimeEvent>, within: Duration) -
 }
 
 /// `Notify` requests heard over `within`, as wire JSON with the body cut to its sender.
-async fn notifies(rx: &mut UnboundedReceiver<RuntimeEvent>, within: Duration) -> Vec<Value> {
+async fn notifies(rx: &mut Receiver<RuntimeEvent>, within: Duration) -> Vec<Value> {
     events_until(rx, within, |_| false)
         .await
         .into_iter()
@@ -1038,7 +1038,7 @@ async fn notifies(rx: &mut UnboundedReceiver<RuntimeEvent>, within: Duration) ->
         .collect()
 }
 
-fn drain(rx: &mut UnboundedReceiver<RuntimeEvent>) {
+fn drain(rx: &mut Receiver<RuntimeEvent>) {
     while rx.try_recv().is_ok() {}
 }
 

@@ -13,6 +13,12 @@ use serde::{Deserialize, Serialize};
 /// version instead (ADR-0009).
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// A hello feature: part frames, stream credit and event gaps. A side uses them only once its peer announced it.
+pub const FLOW_CONTROL: &str = "flow_control";
+
+/// Event bytes a stream may have unread at the client before the server waits for `Credit`.
+pub const STREAM_WINDOW: u64 = 512 * 1024;
+
 /// The v0.7 `AppError` envelope, pinned by
 /// `src-tauri/tests/fixtures/compat/v0_7/app-errors.json`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +150,12 @@ pub enum ControlFrame<Req, Resp, StreamReq, StreamResp, Ev> {
         /// minimum. Absent from servers up to 0.8.2.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         version: Option<String>,
+        /// What this side can read beyond the base protocol, such as `FLOW_CONTROL`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        features: Vec<String>,
+        /// The server's per-stream credit window; the client returns credit in step with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stream_window: Option<u64>,
     },
     Refused {
         error: WireError,
@@ -166,10 +178,23 @@ pub enum ControlFrame<Req, Resp, StreamReq, StreamResp, Ev> {
     },
     Event {
         event: Ev,
+        /// Per connection and contiguous, so a jump is a gap. Absent from older servers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
+    },
+    /// The server dropped `count` events from `first_seq` for a client that stopped reading.
+    EventsMissed {
+        first_seq: u64,
+        count: u64,
     },
     /// Client-side cancellation of a stream opened over the data plane.
     Cancel {
         stream_id: u64,
+    },
+    /// The client consumed `bytes` of a stream's events; the server may send that many more.
+    Credit {
+        stream_id: u64,
+        bytes: u64,
     },
     Shutdown,
 }
@@ -232,6 +257,8 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
+                features: Vec::new(),
+                stream_window: None,
             })
             .unwrap(),
             format!(r#"{{"hello":{{"protocol_version":{}}}}}"#, PROTOCOL_VERSION)
@@ -253,7 +280,13 @@ mod tests {
             r#""shutdown""#
         );
         let back: Envelope = serde_json::from_str(r#"{"event":{"event":9}}"#).unwrap();
-        assert!(matches!(back, ControlFrame::Event { event: 9 }));
+        assert!(matches!(
+            back,
+            ControlFrame::Event {
+                event: 9,
+                seq: None
+            }
+        ));
     }
 
     #[test]
@@ -266,6 +299,8 @@ mod tests {
             protocol_version: 1,
             build: None,
             version: Some("0.8.3".into()),
+            features: Vec::new(),
+            stream_window: None,
         })
         .unwrap();
         assert_eq!(
@@ -280,6 +315,8 @@ mod tests {
             protocol_version: PROTOCOL_VERSION + 1,
             build: None,
             version: None,
+            features: Vec::new(),
+            stream_window: None,
         })
         .unwrap();
         let mut decoder = Decoder::new();

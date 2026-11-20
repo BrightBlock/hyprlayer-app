@@ -33,7 +33,7 @@ use hyprlayer_proto::WireError;
 use hyprlayer_server::client::{EventStream, RpcClient};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 const IO: Duration = Duration::from_secs(30);
 
@@ -1213,7 +1213,7 @@ async fn shared_note(j: &mut Journey, c: &RpcClient, project: &str, title: &str)
 }
 
 /// The first `Notify` titled `title`, shaped as `notice` shapes one; `Null` if none comes.
-async fn notify(rx: &mut UnboundedReceiver<RuntimeEvent>, title: &str) -> Value {
+async fn notify(rx: &mut Receiver<RuntimeEvent>, title: &str) -> Value {
     let matching = |e: &RuntimeEvent| match e {
         RuntimeEvent::UiRequested {
             request:
@@ -1244,7 +1244,7 @@ fn notice(ws: &str, body: &str) -> Value {
 }
 
 /// The terminal's state sequence, repeats collapsed, until it reads idle.
-async fn pty_states(rx: &mut UnboundedReceiver<RuntimeEvent>, terminal: &str) -> Vec<String> {
+async fn pty_states(rx: &mut Receiver<RuntimeEvent>, terminal: &str) -> Vec<String> {
     let state_of = |e: &RuntimeEvent| match e {
         RuntimeEvent::PtyAgentChanged {
             terminal_id, state, ..
@@ -1265,7 +1265,7 @@ async fn pty_states(rx: &mut UnboundedReceiver<RuntimeEvent>, terminal: &str) ->
     out
 }
 
-fn drain(rx: &mut UnboundedReceiver<RuntimeEvent>) -> Vec<RuntimeEvent> {
+fn drain(rx: &mut Receiver<RuntimeEvent>) -> Vec<RuntimeEvent> {
     std::iter::from_fn(|| rx.try_recv().ok()).collect()
 }
 

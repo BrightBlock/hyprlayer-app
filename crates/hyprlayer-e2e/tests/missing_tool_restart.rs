@@ -147,6 +147,8 @@ async fn announce_and_leave(socket: &Path) {
             protocol_version: PROTOCOL_VERSION,
             build: None,
             version: None,
+            features: Vec::new(),
+            stream_window: None,
         })
         .await
         .expect("hello");

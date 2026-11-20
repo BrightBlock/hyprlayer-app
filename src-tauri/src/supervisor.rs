@@ -310,6 +310,8 @@ async fn peer_version(socket_path: &Path) -> Option<u32> {
             protocol_version: PROTOCOL_VERSION,
             build: None,
             version: None,
+            features: Vec::new(),
+            stream_window: None,
         })
         .await
         .ok()?;
@@ -1155,6 +1157,8 @@ async fn request_shutdown_of_refusing_server(socket_path: &Path) -> std::io::Res
             protocol_version: PROTOCOL_VERSION,
             build: None,
             version: None,
+            features: Vec::new(),
+            stream_window: None,
         })
         .await?;
     let _ = reader.next_control().await?;

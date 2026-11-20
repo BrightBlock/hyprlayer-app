@@ -10,6 +10,7 @@ pub mod events;
 pub mod hook;
 pub mod logging;
 mod mcp;
+pub mod outbound;
 mod relay;
 pub mod rpc;
 pub mod socket;
@@ -28,9 +29,11 @@ use hyprlayer_core::{
     RuntimePaths,
 };
 use hyprlayer_proto::frame::Frame;
-use hyprlayer_proto::{check_version, Outcome, WireError, PROTOCOL_VERSION};
+use hyprlayer_proto::{
+    check_version, Outcome, WireError, FLOW_CONTROL, PROTOCOL_VERSION, STREAM_WINDOW,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::Notify;
 use tokio::task::{JoinHandle, JoinSet};
 
 use client::{ConnectError, RpcClient};
@@ -38,10 +41,11 @@ use dispatch::Server;
 use events::Clients;
 use hook::HookEngine;
 use logging::RepeatGate;
+use outbound::Outbound;
 use streams::StreamRegistry;
 use transport::{
     encode_control, label, parse_control, reject_undecodable, undecodable_id, Control, FrameReader,
-    FrameWriter, OUTBOUND_QUEUE_FRAMES,
+    FrameWriter,
 };
 
 /// The bundle identifier Tauri derives the desktop's app dirs from; a
@@ -562,44 +566,62 @@ where
     let mut reader = FrameReader::new(rd);
     let mut writer = FrameWriter::new(wr);
 
-    match handshake(conn, &mut reader, &mut writer, &stop).await {
-        Ok(true) => {}
-        Ok(false) => return Ok(None),
+    let flow_control = match handshake(conn, &mut reader, &mut writer, &stop).await {
+        Ok(Some(flow_control)) => flow_control,
+        Ok(None) => return Ok(None),
         Err(e) => {
             tracing::debug!("conn {conn}: closed during the handshake: {e}");
             return Ok(None);
         }
-    }
+    };
     tracing::debug!("conn {conn}: client connected ({peer})");
 
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_FRAMES);
-    clients.register(conn, tx.clone());
-    let writer_task = tokio::spawn(async move {
-        while let Some(bytes) = rx.recv().await {
-            if let Err(e) = writer.write_bytes(&bytes).await {
+    let out = Outbound::new(flow_control);
+    clients.register(conn, out.clone());
+    let writer_task = tokio::spawn({
+        let out = out.clone();
+        async move {
+            if let Err(e) = outbound::write(out, writer).await {
                 tracing::debug!("conn {conn}: write failed: {e}");
-                break;
             }
         }
     });
-
     let streams = StreamRegistry::default();
-    let result = read_requests(conn, peer, &mut reader, &server, &tx, &stop, &streams).await;
-    // A dropped connection cancels every stream it owned.
-    streams.abort_all();
+    let _ending = ConnectionGuard {
+        out: out.clone(),
+        writer: writer_task.abort_handle(),
+        streams: streams.clone(),
+    };
+
+    let result = read_requests(conn, peer, &mut reader, &server, &out, &stop, &streams).await;
     let left = clients.unregister(conn);
     clients.send_viewers(&left);
-    writer_task.abort();
     result.map(Some)
 }
 
-/// `Ok(true)` once the peer's hello is accepted.
+/// Ends a connection's writer and streams however its task ends, an abort at
+/// shutdown included, so the socket closes and the client sees the disconnect.
+struct ConnectionGuard {
+    out: Outbound,
+    writer: tokio::task::AbortHandle,
+    streams: StreamRegistry,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.streams.abort_all();
+        self.out.close();
+        self.writer.abort();
+    }
+}
+
+/// Once the peer's hello is accepted, whether it reads `FLOW_CONTROL` frames.
 async fn handshake<R, W>(
     conn: u64,
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
     stop: &Notify,
-) -> io::Result<bool>
+) -> io::Result<Option<bool>>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -609,14 +631,18 @@ where
             protocol_version: PROTOCOL_VERSION,
             build: BUILD.get().cloned(),
             version: Some(VERSION.to_string()),
+            features: vec![FLOW_CONTROL.to_string()],
+            stream_window: Some(STREAM_WINDOW),
         })
         .await?;
     match reader.next_control().await? {
         Some(Control::Hello {
-            protocol_version, ..
+            protocol_version,
+            features,
+            ..
         }) => {
             let Err(error) = check_version(protocol_version) else {
-                return Ok(true);
+                return Ok(Some(features.iter().any(|f| f == FLOW_CONTROL)));
             };
             tracing::warn!(
                 "conn {conn}: refused a client speaking protocol {protocol_version}; \
@@ -637,15 +663,15 @@ where
                     stop.notify_one();
                 }
             }
-            Ok(false)
+            Ok(None)
         }
         Some(other) => {
             tracing::warn!("conn {conn}: expected hello, got {}", label(&other));
             let error = WireError::protocol(format!("expected hello, got {}", label(&other)));
             writer.write_control(&Control::Refused { error }).await?;
-            Ok(false)
+            Ok(None)
         }
-        None => Ok(false),
+        None => Ok(None),
     }
 }
 
@@ -663,7 +689,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
     peer: &str,
     reader: &mut FrameReader<R>,
     server: &Arc<Server>,
-    tx: &mpsc::Sender<Vec<u8>>,
+    tx: &Outbound,
     stop: &Arc<Notify>,
     streams: &StreamRegistry,
 ) -> io::Result<(u64, bool)> {
@@ -675,7 +701,12 @@ async fn read_requests<R: AsyncRead + Unpin>(
             tracing::info!("conn {conn}: client connected ({peer})");
         }
     };
-    while let Some(frame) = reader.next_frame().await? {
+    loop {
+        // A client that stopped reading stops being read, rather than queueing answers without end.
+        tx.response_room().await;
+        let Some(frame) = reader.next_frame().await? else {
+            break;
+        };
         let line = match frame {
             Frame::Control(line) => line,
             Frame::Data(_) => {
@@ -718,7 +749,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 };
                 if let Some(reply) = reply {
                     let bytes = encode_control(&reply).expect("an error outcome always serializes");
-                    let _ = tx.send(bytes).await;
+                    tx.push_response(bytes);
                 }
                 continue;
             }
@@ -756,7 +787,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             encode_control(&Control::Response { id, outcome })
                                 .expect("an error outcome always serializes")
                         });
-                    if tx.send(bytes).await.is_err() {
+                    if !tx.push_response(bytes) {
                         tracing::debug!("conn {conn}: {command} finished after the client left");
                     }
                 });
@@ -804,10 +835,17 @@ async fn read_requests<R: AsyncRead + Unpin>(
                                 })
                                 .expect("an error outcome always serializes")
                             });
+                            // Held before the client can see the id, so its cancel can't arrive first.
+                            if let Some(stream_id) = stream_id {
+                                streams.reserve(stream_id);
+                            }
                             // The response must reach the wire before a byte of
                             // the stream it names does, or a fast source could
                             // race a data frame ahead of the id that explains it.
-                            if tx.send(bytes).await.is_err() {
+                            if !tx.push_response_written(bytes).await {
+                                if let Some(stream_id) = stream_id {
+                                    streams.remove(stream_id);
+                                }
                                 return;
                             }
                             if let (Some(stream_id), Some(source)) = (stream_id, source) {
@@ -827,7 +865,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                                 outcome: Outcome::Err(error),
                             })
                             .expect("a WireError outcome always serializes");
-                            let _ = tx.send(bytes).await;
+                            tx.push_response(bytes);
                         }
                     }
                 });
@@ -836,6 +874,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 tracing::debug!("conn {conn}: cancelled stream {stream_id}");
                 streams.abort(stream_id)
             }
+            Control::Credit { stream_id, bytes } => streams.grant(stream_id, bytes),
             Control::Shutdown if server.is_agent(conn) => {
                 tracing::warn!("conn {conn}: refused an agent connection's shutdown");
             }
@@ -976,6 +1015,61 @@ mod tests {
         open_runtime_with(root, environment(&root.join("home"))).await
     }
 
+    /// A terminal stream whose source never sends: its forwarder parks reading it.
+    fn parked_stream(
+        runtime: &Arc<HyprlayerRuntime>,
+        out: &Outbound,
+        streams: &StreamRegistry,
+        stream_id: u64,
+    ) -> tokio::sync::mpsc::Sender<hyprlayer_core::terminal::TerminalEvent> {
+        let (source, live) = tokio::sync::mpsc::channel(1);
+        streams::spawn_stream(
+            runtime.clone(),
+            stream_id,
+            streams::StreamSource::Terminal(live),
+            out.clone(),
+            streams.clone(),
+        );
+        source
+    }
+
+    #[tokio::test]
+    async fn an_aborted_connection_ends_the_streams_it_owned() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = open_runtime(root.path()).await;
+        let out = Outbound::new(true);
+        let streams = StreamRegistry::default();
+        let source = parked_stream(&runtime, &out, &streams, 1);
+        // Parked on its source, where a closed queue alone never reaches it.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let writer = tokio::spawn(std::future::pending::<()>());
+        drop(ConnectionGuard {
+            out,
+            writer: writer.abort_handle(),
+            streams,
+        });
+        let ended = tokio::time::timeout(Duration::from_secs(2), source.closed()).await;
+        assert!(ended.is_ok(), "the stream outlived its connection");
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_cancel_that_beats_the_stream_open_still_cancels_it() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = open_runtime(root.path()).await;
+        let out = Outbound::new(true);
+        let streams = StreamRegistry::default();
+        streams.reserve(7);
+        streams.abort(7);
+        let source = parked_stream(&runtime, &out, &streams, 7);
+        let ended = tokio::time::timeout(Duration::from_secs(2), source.closed()).await;
+        assert!(
+            ended.is_ok(),
+            "a stream cancelled before it opened still ran"
+        );
+        runtime.shutdown().await;
+    }
+
     #[tokio::test]
     async fn a_strictly_newer_client_can_still_shut_down_a_refusing_server() {
         let root = tempfile::tempdir().unwrap();
@@ -996,6 +1090,8 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION + 1,
                 build: None,
                 version: None,
+                features: Vec::new(),
+                stream_window: None,
             })
             .await
             .unwrap();
@@ -1044,6 +1140,8 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION.saturating_sub(1),
                 build: None,
                 version: None,
+                features: Vec::new(),
+                stream_window: None,
             })
             .await
             .unwrap();
@@ -1065,6 +1163,8 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
+                features: Vec::new(),
+                stream_window: None,
             })
             .await
             .unwrap();

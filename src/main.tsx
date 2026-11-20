@@ -5,7 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands } from "./lib/bindings";
-import { attachEventListeners, onServerReconnected, registerEventBridge } from "./lib/events";
+import { attachEventListeners, onEventsMissed, onServerReconnected, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
 import { reconnectBridge } from "./features/hosts/reconnect";
 import { sshPromptBridge } from "./features/hosts/sshPrompts";
@@ -18,11 +18,12 @@ import {
   removeSessionsForWorkstream,
   sessionBridge,
 } from "./features/session/sessionStore";
-import { goalBridge } from "./features/session/goalBridge";
+import { goalBridge, reconcileGoalBriefs } from "./features/session/goalBridge";
 import { agentControlBridge, reconcileAgentTabs } from "./features/session/agentControlBridge";
 import { ptyAgentBridge, reconcilePtyAgents } from "./features/multiplexer/ptyAgentBridge";
 import { reconcileAgentTerminals } from "./features/multiplexer/agentRuntime";
 import {
+  scheduleWatch,
   setupTranscriptSync,
   transcriptSyncBridge,
   transcriptSyncReconnected,
@@ -94,6 +95,21 @@ onServerReconnected(() => {
 });
 onServerReconnected(() => {
   reconcileAgentTabs().catch((e) => log.warn("reconnect", "agent-spawned tabs did not load", e));
+});
+// What a reconnect re-reads, minus the session reattach: those streams are intact.
+onEventsMissed(scheduleWatch);
+onEventsMissed(() => {
+  reconcileGoalBriefs().catch((e) => log.warn("events", "goal briefs did not reload", e));
+});
+onEventsMissed(() => {
+  reconcilePtyAgents().catch((e) => log.warn("events", "PTY agent states did not load", e));
+});
+// A hooked agent's exit arrives only as `PtyAgentChanged`.
+onEventsMissed(() => {
+  reconcileAgentTerminals({ hookedOnly: true }).catch((e) => log.warn("events", "PTY terminals were not checked", e));
+});
+onEventsMissed(() => {
+  reconcileAgentTabs().catch((e) => log.warn("events", "agent-spawned tabs did not load", e));
 });
 registerActiveWorkstreams(activeWorkstreamIds);
 registerPlanCard(PlanCard);

@@ -28,6 +28,7 @@ vi.mock("./bindings", () => ({
     thoughtsIndexUpdated: stub("thoughtsIndexUpdated"),
     docStateChanged: stub("docStateChanged"),
     serverDisconnected: stub("serverDisconnected"),
+    eventsMissed: stub("eventsMissed"),
     accountChanged: stub("accountChanged"),
     goalChanged: stub("goalChanged"),
   },
@@ -35,7 +36,7 @@ vi.mock("./bindings", () => ({
 
 vi.mock("./theme", () => ({ refreshOmarchyTheme: vi.fn() }));
 
-const { attachEventListeners } = await import("./events");
+const { attachEventListeners, onEventsMissed } = await import("./events");
 
 describe("binariesChanged", () => {
   beforeEach(() => {
@@ -74,6 +75,24 @@ describe("serverDisconnected", () => {
 
     const keys = invalidate.mock.calls.map(([arg]) => (arg?.queryKey as string[])?.[0]);
     expect(keys).toContain("connection-status");
+  });
+});
+
+describe("eventsMissed", () => {
+  beforeEach(() => {
+    listeners.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("re-reads every query and runs the registered re-syncs", () => {
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+    const resync = vi.fn();
+    onEventsMissed(resync);
+    attachEventListeners();
+    listeners.get("eventsMissed")?.({});
+
+    expect(invalidate).toHaveBeenCalledWith();
+    expect(resync).toHaveBeenCalledOnce();
   });
 });
 

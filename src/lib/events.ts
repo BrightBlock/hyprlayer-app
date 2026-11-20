@@ -38,6 +38,13 @@ export function notifyServerReconnected(): void {
   for (const handler of reconnectHandlers) handler();
 }
 
+const missedHandlers: Array<() => void> = [];
+
+/** Runs when the connection lost runtime events: re-read what they would have changed. */
+export function onEventsMissed(handler: () => void): void {
+  missedHandlers.push(handler);
+}
+
 // The payload carries no `activeMs`/`updatedAt`, so a flip into or out of `waiting` re-reads the clock.
 function goalMoved(goal: Goal, p: GoalChanged): boolean {
   return (
@@ -101,6 +108,10 @@ export function attachEventListeners(): () => void {
     // The edge event tells the UI to re-read the level state.
     events.serverDisconnected.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["connection-status"] });
+    }),
+    events.eventsMissed.listen(() => {
+      for (const handler of missedHandlers) handler();
+      void queryClient.invalidateQueries();
     }),
     events.accountChanged.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["account"] });
