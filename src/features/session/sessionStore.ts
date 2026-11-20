@@ -2197,7 +2197,6 @@ function onRevised(event: SessionRevised): void {
   const queue = held.get(sessionId);
   const selfId = selfClientId();
   const at = rev(event.rev);
-  const committed = syncOf(sessionId)?.committedRev ?? 0;
   syncInput(sessionId, {
     kind: "remote",
     rev: at,
@@ -2209,12 +2208,16 @@ function onRevised(event: SessionRevised): void {
     attached: channels.has(sessionId),
     own: selfId !== null && attributed(event.author)?.clientId === selfId,
   });
-  // An ended view shows no strip to load from. A new rev with no turns is an exit; a turn end repeats its rev.
+  catchUpEnded(sessionId);
+}
+
+// An ended view shows no strip to pull from, so it reads the revisions it was not told were turns.
+function catchUpEnded(sessionId: string): void {
   const entry = entryOf(sessionId);
-  const exit = event.turns.length === 0 && at > committed;
-  if (exit && entry && isTerminal(entry.state) && !channels.has(sessionId)) {
-    void pullNow(sessionId);
-  }
+  const sync = syncOf(sessionId);
+  if (!entry || !sync || !isTerminal(entry.state) || channels.has(sessionId)) return;
+  const told = sync.pendingTurns[sync.pendingTurns.length - 1]?.rev ?? 0;
+  if (sync.committedRev > Math.max(sync.localRev, told)) void pullNow(sessionId);
 }
 
 function onReset(event: SessionReset): void {
@@ -2231,6 +2234,7 @@ setSyncHandlers({
     flushQueuedMessage(sessionId);
   },
   watched: () => Object.keys(useSessionStore.getState().sessions),
+  polled: catchUpEnded,
   revised: onRevised,
   reset: onReset,
 });

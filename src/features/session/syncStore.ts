@@ -39,6 +39,7 @@ export type SyncHandlers = {
   reload: (sessionId: string) => void;
   flush: (sessionId: string) => void;
   watched: () => string[];
+  polled: (sessionId: string) => void;
   revised: (event: SessionRevised) => void;
   reset: (event: SessionReset) => void;
 };
@@ -250,6 +251,8 @@ async function sendWatch(): Promise<void> {
       inFlight: reply.inFlight,
       working: reply.working,
     });
+    // A running turn is read once it ends; an exit leaves the session not working.
+    if (!reply.working) handlers.polled(reply.sessionId);
   }
   // A watched session the server no longer has was deleted.
   for (const sessionId of ids) {
