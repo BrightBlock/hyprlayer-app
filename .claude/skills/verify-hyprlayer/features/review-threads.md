@@ -21,8 +21,8 @@ Inside the review workspace, the agent's review notes render inline at their lin
 
 Preconditions:
 
-- **Seed.** Use the `review_lifecycle` sandbox from [review-workspace.md](./review-workspace.md), which is isolated. Save `get_review` as `00-review.json` first.
-- **No model turns.** `Request changes` delivers to the sandbox's stub `claude`, so it costs no tokens. <!-- src: crates/hyprlayer-e2e/tests/review_lifecycle.rs:133 --> On a real profile, the same click starts a real implement turn. <!-- src: src/features/session/sessionStore.ts:1794 -->
+- **Seed.** Use the `review_lifecycle` sandbox from [review-workspace.md](./review-workspace.md), which is isolated. Save `get_review` as `00-review.json` first. A freshly kept sandbox's comments are all `sent`, so no `Edit comment`/`Delete comment` shows until you add one.
+- **No model turns.** `Request changes` delivers to the sandbox's stub `claude`, so it costs no tokens. <!-- src: crates/hyprlayer-e2e/tests/review_lifecycle.rs:133 --> On a real profile, the same click starts a real implement turn. <!-- src: src/features/session/sessionStore.ts:1885 -->
 - **Nothing here touches GitHub.**
 - **No undo for verdicts.** Every verdict appends a round, and rounds can't be deleted. Treat the sandbox as disposable, and re-keep it for a clean rerun.
 
@@ -38,7 +38,7 @@ Steps:
   - The toast reads `1 comment sent to <agent>`. <!-- src: src/features/review/useReviewDelivery.ts:30 -->
   - The header chip reads `Changes requested`. <!-- src: src/features/review/ReviewHeader.tsx:54 -->
   - The implement chat shows a card `Review · Changes requested · V / T viewed · N comments`, whose rows reopen the review at `path:line`. <!-- src: src/features/review/ReviewCard.tsx:35 -->
-  - Read back: the last round has `verdict` `request_changes` and `delivered: true`, the comments are `sent`, and `status` is `changes_requested`. `$SB/harness.log` should end with the message line; that's from the stub's logger and not yet observed.
+  - Read back: the last round has `verdict` `request_changes` and `delivered: true`, the comments are `sent`, and `status` is `changes_requested`. `$SB/harness.log` holds the delivered message (`Address each comment, then stop. …`).
 - **Submit: Approve.** It's the default verdict when nothing is unsent. <!-- src: src/features/review/SubmitReviewPopover.tsx:92 --> The toast reads `Approved`, `Nothing is pushed until you click Ship`, and the chip reads `Approved`. <!-- src: src/features/review/SubmitReviewPopover.tsx:127 --> Read back: `status` is `approved`.
 - **Not delivered.** If delivery throws, a `Not delivered` toast offers `Resend`, and the header chip becomes `Not delivered · Resend`, which disables `Submit review`. <!-- src: src/features/review/useReviewDelivery.ts:23 --> <!-- src: src/features/review/ReviewHeader.tsx:47 --> <!-- src: src/features/review/ReviewHeader.tsx:161 -->
 - **Proof.** Save screenshots of the note, the composer, each popover state and the chat card, plus `get_review` after every submit.
@@ -47,7 +47,7 @@ Steps:
 
 - Enter doesn't submit under the bridge. Click `Add to review`, `Save` and the popover's primary button. ⌘Enter is wired, but keyboard chords are unreliable over the bridge. <!-- src: src/features/review/CommentComposer.tsx:41 -->
 - `Request changes` is disabled while the implement agent is busy (`<agent> is still working`), and the default verdict then becomes `Comment`. <!-- src: src/features/review/SubmitReviewPopover.tsx:103 -->
-- The agent label is `the agent` when the workstream has no implement session, so match composer labels by prefix. <!-- src: src/lib/domain/harnessing.ts:55 -->
-- With no live implement session, delivery starts a new `general` session titled `Review`. In the sandbox that's the stub; on a real profile it's a real turn. <!-- src: src/features/session/sessionStore.ts:1806 -->
+- The agent label is the implement session's harness, `Claude Code` in the sandbox (its stub), and `the agent` only when the workstream has no implement session. Match composer labels by prefix. <!-- src: src/lib/domain/harnessing.ts:55 -->
+- With no live implement session, delivery starts a new `general` session titled `Review`. In the sandbox that's the stub; on a real profile it's a real turn. <!-- src: src/features/session/sessionStore.ts:1897 -->
 - Agent notes come from `.hyprlayer/review/<workstream-id>.jsonl` in the worktree and are ingested on the next `get_review`. Append a JSON line there to add a case without rerunning the scenario. <!-- src: crates/hyprlayer-core/src/pipeline.rs:237 -->
 - An outdated item sits at the nearest surviving line, and in unified view a base-side thread lists above the diff. Don't read its position as a bug. <!-- src: src/features/review/DiffPane.tsx:142 -->

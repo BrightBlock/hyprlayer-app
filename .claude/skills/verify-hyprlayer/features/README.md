@@ -55,6 +55,8 @@ Mode is the cheapest one each feature works in. **Cost** marks anything that spe
 - [Permissions and questions](./session-permissions.md) covers the permission card and the question card. Costs Claude Haiku turns.
 - [Session tabs](./session-tabs.md) covers New agent, per-tab drafts, rename, archive and the Stop agent confirm. Costs model turns once a tab starts.
 - [Attach context](./session-attach.md) covers `@` file autocomplete, chips and sending with attachments. Costs model turns.
+- [Failed start and Resume](./session-failed-start.md) covers the `Failed to start session` view, a refused Resume and a Resume that replays the first turn. Isolated; the retry costs one Haiku turn.
+- [Sync notices across clients](./session-sync.md) covers the `N new turns` strip, `Load`, and the draft guard's `Pull N turns`. Needs a second debug app on the same server; costs Haiku turns.
 
 **Terminals and PTY agents**
 - [Dock terminals](./terminal-shell-tab.md) covers the dock's login shells: open, close, reattach with replay, and dock position. Isolated, free.
@@ -75,3 +77,50 @@ Mode is the cheapest one each feature works in. **Cost** marks anything that spe
 - [Review notes, threads and verdicts](./review-threads.md) covers notes, comments, replies, resolve, Submit review and delivery to the agent. Sandbox, free.
 - [Review lifecycle steps](./review-lifecycle.md) covers the Plan tab's Implement/Validate/Review/Ship stages and the chat's validate and Ready for review cards. Shared; anything that starts an agent runs only in `jtsiros/hyprlayer-live-tests`.
 - [Ship and pull requests](./ship-pr.md) covers the Ship check, PR bar, merge, archive, attach PR, CI checks, target branch and update from base. Sandbox for the offline tier; the live tier is gated by ADR-0012.
+
+## Not yet mapped
+
+User-facing surfaces with no recipe yet. Each names its entry point in source.
+
+- Terminal resume after a dropped connection (#410): `src/features/session/TerminalTab.tsx:112`. A local server kill only reaches the `[process exited]` branch, because the PTY dies with the server; resuming needs a relay drop with the server still up (a remote host, or the `crates/hyprlayer-e2e` container tier).
+- Archive Keep, Purge merged and expiry: `src/features/archive/ArchivedWorktreesPopover.tsx:272`, `src/features/archive/archiveStatus.ts:32`
+- Workstream docs panel: `src/features/workstreams/WorkstreamDocsPanel.tsx:23`
+- File viewer tab and ⌘S save: `src/features/workstreams/FileViewerTab.tsx:29`, `src/lib/fileSave.ts:14`
+- Sidebar collapse and project drag: `src/routes/Root.tsx:695`, `src/features/projects/useProjectDrag.ts:34`
+- Add project `Create new` fields: `src/features/projects/CreateProjectFields.tsx:64`
+- Agent bundle `Update agents to <v>`: `src/features/workshop/BundleFooter.tsx:32`
+- Skill install (`Add skill`, skills.sh): `src/features/workshop/AddSkillDialog.tsx:19`
+- Live goal chip controls (Pause, Stop, Edit): `src/features/statusbar/SessionControlsCluster.tsx:101`
+- Agent-spawned PTY tabs: `src/features/multiplexer/ptyAgentBridge.ts:39`
+- Onboarding setup terminal: `src/features/onboarding/SetupTerminal.tsx:26`
+- Dock maximize: `src/features/session/scriptsStore.ts:102`
+- Terminal font zoom keys: `src/lib/terminal/terminalFontSize.ts:18`
+- Multiplexer persist and notify toggles: `src/features/settings/AdvancedSettings.tsx:194`
+- PTY bypass-permissions relaunch: `src/features/multiplexer/PtySessionControls.tsx:50`
+- Archive script run and `Skip script & archive`: `src/features/workstreams/ArchiveWorkstreamDialog.tsx:13`
+- Harness sign-in card: `src/features/settings/harnesses/AuthCard.tsx:3`
+- Handoff banner: `src/features/session/SessionChat.tsx:273`
+- Rewind: `src/features/session/TranscriptView.tsx:121`
+- Prompt history: `src/features/session/promptHistory.ts:20`
+- Steering (⌘Enter mid-turn): `src/features/session/SessionChat.tsx:1334`
+- Background tasks: `src/features/session/BackgroundTasksIndicator.tsx:8`
+- Agent sessions popover and archived sessions: `src/features/session/AgentSessionsPopover.tsx:63`
+- Doc preview tab and split panes: `src/features/session/DocPreviewTab.tsx:26`
+- Plan approval and build until met: `src/features/plan/BuildUntilMet.tsx:110`
+- Draft plan preview: `src/features/plan/PlanPreviewDraft.tsx:30`
+- Plan aside header actions: `src/features/plan/PlanAside.tsx:163`
+- Review plan coverage: `src/features/review/PlanCoverage.tsx:141`
+- Goal handoff: `src/features/review/GoalHandoff.tsx:23`
+- Commit flow (`Commit · N`): `src/features/workstreams/GitPanel.tsx:230`
+- Settings sections Git, Notifications, Goals, Binaries: `src/features/settings/GitSettings.tsx:23`, `src/features/settings/NotificationsSettings.tsx:14`, `src/features/settings/GoalsSettings.tsx:13`, `src/features/settings/BinariesSettings.tsx:7`
+- Server update flow: `src/features/hosts/ServerUpdateConfirm.tsx:12`
+- Disconnected notice and reconnect: `src/features/system/ServerDisconnectedNotice.tsx:20`, `src/features/hosts/reconnect.ts:148`
+- SSH prompt dialog: `src/features/hosts/SshPromptDialog.tsx:22`
+- App updater: `src/features/settings/updates.tsx:14`
+- Usage meter: `src/features/statusbar/UsageMeter.tsx:4`
+- Status bar thoughts sync: `src/features/library/ThoughtsSyncButton.tsx:165`
+- Pinned prompt chips and prompt hotkeys: `src/features/prompts/PromptChips.tsx:17`, `src/features/prompts/usePromptHotkeys.ts:15`
+- Per-project prompt overrides: `src/features/prompts/PromptLibrary.tsx:277`
+- Doc Properties related picker and raw YAML: `src/features/library/DocProperties.tsx:23`
+- View on GitHub: `src/routes/Root.tsx:1002`
+- Plan `[x]` write-back: `src/features/plan/PlanAside.tsx:241`

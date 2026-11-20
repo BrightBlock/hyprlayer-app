@@ -23,7 +23,7 @@ Preconditions:
 
 - **Isolated** works for `create-global`, `create-gate` and `create-cancel`. The dialog lists only git projects, so the non-git `verify-demo` gives `No projects mapped`. <!-- src: src/features/library/CreateDocDialog.tsx:26 --> <!-- src: src/features/library/CreateDocDialog.tsx:100 -->
 - **`create-project` needs shared** (a mapped git project in the app DB). In isolated mode, importing a git repo runs `thoughts init`, which writes the shared CLI config (SKILL.md).
-- **Cost and risk:** every create writes a real file under `~/thoughts`, and auto-sync commits and pushes it within seconds. Get the user's OK, name it `zz-verify-scratch`, and delete it through the `thoughts/` symlink when done. The deletion syncs too.
+- **Cost and risk:** every create writes a real file under `~/thoughts`, and auto-sync commits and pushes it (SKILL.md Evidence). Get the user's OK, name it `zz-verify-scratch`, and delete it through the `thoughts/` symlink when done. The deletion syncs too.
 
 Steps:
 
@@ -33,7 +33,7 @@ Steps:
 - **Type and scope.** Click `button[aria-label="Type"]`, then `[role="option"]` text `research`. Click `button[aria-label="Scope"]`, then `global`. The Project field disappears, and `Create` enables. <!-- src: src/features/library/CreateDocDialog.tsx:78 --> <!-- src: src/features/library/CreateDocDialog.tsx:86 --> <!-- src: src/features/library/CreateDocDialog.tsx:93 -->
 - **Create.** Click `form button[type="submit"]`. The dialog closes, and the route becomes `/library?doc=<id>`, showing the new doc with Contents `Question`, `Findings`. <!-- src: src/features/library/CreateDocDialog.tsx:133 --> <!-- src: src/features/library/CreateDocDialog.tsx:58 -->
 - **Read back.** `ls thoughts/global/shared/research/ | grep zz-verify-scratch` shows `<UTC date>-zz-verify-scratch.md`. Its frontmatter has `type: research`, `status: draft`, `scope: global`, and `author: <thoughts user>`. `invoke('query_docs', { query: { text: 'zz verify scratch', limit: 5 } })` lists it first. The slug `zz-verify-scratch` matches nothing (`total: 0`) even while the file exists. <!-- src: crates/hyprlayer-core/src/runtime/library.rs:426 --> <!-- src: crates/hyprlayer-core/src/docs/templates.rs:59 -->
-- **Exists.** Repeat with the same title, type and scope. An `ErrorNote` reads `<absolute path> already exists` and `Pick a different title.`, and no second file is written. <!-- src: crates/hyprlayer-core/src/runtime/library.rs:456 --> <!-- src: src/features/library/CreateDocDialog.tsx:127 -->
+- **Exists.** Repeat with the same title, type and scope. An `ErrorNote` reads `<absolute path> already exists` and `Pick a different title.`, and no second file is written. <!-- src: crates/hyprlayer-core/src/runtime/library.rs:462 --> <!-- src: src/features/library/CreateDocDialog.tsx:127 -->
 - **Cancel.** Open the dialog, type `Discard me`, and click `Cancel`. No `[role="dialog"]` remains, and no `discard-me` file exists. <!-- src: src/features/library/CreateDocDialog.tsx:130 -->
 - **Cleanup.** `rm thoughts/global/shared/research/*-zz-verify-scratch.md`, unless library-doc is using the file next. Create makes the type dir when it's missing, so `rmdir` it if it's now empty.
 - **Proof.** Save screenshots of the gated dialog, the filled dialog and the opened doc, plus the `ls` output, the file head and the `query_docs` JSON.

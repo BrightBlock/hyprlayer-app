@@ -40,6 +40,7 @@ It is read-only. It checks that `tauri dev` is alive, that the app binary is thi
 ## Drive
 
 1. `driver_session start` with `port` set to the bridge port doctor printed (9223 unless another debug app took it). When two apps share a bundle id, pass the numeric port as `appIdentifier`.
+   - A session left from an earlier run answers `Already connected` while pointing at a dead identifier. Run `driver_session status` and check its `identifier` against `IDENTIFIER` in `run.env`; if they differ, `stop` and `start` again.
    - Then wait for the page to render: doctor passing doesn't mean Vite has served the page. A first load took about 2 minutes. Poll `webview_execute_js` with `document.readyState === 'complete' && document.getElementById('root').childElementCount > 0` every ~10s.
    - `webview_wait_for` gives up after about 5s whatever its `timeout`, so it's no good for this wait. `webview_execute_js` has the same ~5s cap, so poll with one call per check (an in-script wait of ≤4s), not a loop.
 2. Resize to ≤1800 logical px wide before screenshotting (`manage_window resize`, e.g. 1400×860). Wider windows time out.
@@ -68,6 +69,8 @@ Write everything to the `EVIDENCE` dir from `<run-dir>/run.env`, which is `targe
 - Capture the action and the resulting state, not just the final screen.
 - Read side effects back through a second view: a list RPC's JSON, the file on disk, `git` refs. Save them as `.json`/`.txt` beside the screenshots.
 - A file you edit in the shared thoughts tree is committed and pushed by auto-sync within seconds. Copy it into the evidence dir first, revert it right after, and use the `thoughts/` symlink path, never `~/thoughts`. An app write can reset the file mode, and `cp` over it keeps the new mode, so check `git -C thoughts/shared diff --summary` after the revert.
+  - An isolated profile with no mapped git project doesn't sync: a scratch doc it created stayed uncommitted for two minutes. <!-- src: src/features/library/useThoughtsSync.ts:65 -->
+  - A Library save keeps the mode: a `755` doc stayed `755` (#403). A plan tick once reset one to `644` (plan-tab.md); that write hasn't been re-checked.
 - `localStorage` in the shared profile holds the user's routes and scopes. Snapshot it into `sessionStorage` at attach (it survives a reload) and restore any changed keys before cleanup.
 
 ## Cleanup

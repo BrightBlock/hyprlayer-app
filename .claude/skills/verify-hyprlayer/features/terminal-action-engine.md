@@ -44,7 +44,7 @@ Preconditions:
 
 - Default engine `Claude Code` plus any stage action submits a real prompt in the user's claude account. Never run Commit or Ship this way outside the live test repo (ADR-0012).
 - Built-in Commit and Ship rows are hidden in folder workstreams, so only custom prompts show in `verify-demo`'s palette. <!-- src: src/features/prompts/PromptPalette.tsx:64 -->
-- A prompt aimed at a tab with a live native session goes into that chat instead. Run it with a PTY or empty tab focused. <!-- src: src/features/session/sessionStore.ts:1709 -->
+- A prompt aimed at a tab with a live native session goes into that chat instead. Run it with a PTY or empty tab focused. <!-- src: src/features/session/sessionStore.ts:1800 -->
 - The server waits up to 60s for the TUI. A stub that keeps printing never goes quiet, so the prompt is dropped and only logged (`its first prompt was dropped`). <!-- src: crates/hyprlayer-core/src/runtime/agent_control/spawn.rs:35 -->
 - A general prompt goes in as typed. Non-claude engines get a leading `/skill` rewritten into prose for stage prompts only. <!-- src: crates/hyprlayer-core/src/pipeline.rs:456 -->
 - A launch failure closes the tab and toasts `<title> didn't start`. A missing stub path shows as that toast, not as an exited tab. <!-- src: src/features/multiplexer/actionAgent.ts:103 -->

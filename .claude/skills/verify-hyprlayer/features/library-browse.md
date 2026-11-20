@@ -23,8 +23,8 @@ The Library (`/library`) is a mail-style reader over every thoughts doc the serv
 
 Preconditions:
 
-- **Isolated is enough for everything except `lib-sync`.** Every profile reads the one CLI config, `~/Library/Application Support/hyprlayer/config.json`, and the server indexes its thoughts roots. So an isolated instance shows the real `~/thoughts` tree. Read state lives in the profile's own DB, so read/unread toggles there don't touch the user's state. <!-- src: crates/hyprlayer-core/src/env.rs:123 --> <!-- src: crates/hyprlayer-core/src/runtime/mod.rs:689 --> <!-- src: crates/hyprlayer-core/src/runtime/library.rs:220 -->
-- "Thoughts are not configured yet" (`config_missing`) in isolated mode comes from per-project calls on the unmapped `verify-demo` seed, not from the Library. `get_thoughts_git_status` raises it for any repo with no mapping, and the sync button hides that code. <!-- src: crates/hyprlayer-core/src/runtime/library.rs:482 --> <!-- src: src/features/library/useThoughtsSync.ts:24 -->
+- **Isolated is enough for everything except `lib-sync`.** Every profile reads the one CLI config, `~/Library/Application Support/hyprlayer/config.json`, and the server indexes its thoughts roots. So an isolated instance shows the real `~/thoughts` tree. Read state lives in the profile's own DB, so read/unread toggles there don't touch the user's state. <!-- src: crates/hyprlayer-core/src/env.rs:118 --> <!-- src: crates/hyprlayer-core/src/runtime/mod.rs:694 --> <!-- src: crates/hyprlayer-core/src/runtime/library.rs:225 -->
+- "Thoughts are not configured yet" (`config_missing`) in isolated mode comes from per-project calls on the unmapped `verify-demo` seed, not from the Library. `get_thoughts_git_status` raises it for any repo with no mapping, and the sync button hides that code. <!-- src: crates/hyprlayer-core/src/runtime/library.rs:488 --> <!-- src: src/features/library/useThoughtsSync.ts:24 -->
 - **`lib-sync` needs shared** (the `.dev` profile, which has mapped git projects). Cost: opening the Library there runs `sync_thoughts` (commit, pull, push of `~/thoughts`) at most once per 60s. The cooldown is module-wide and shared with the status bar's sync. <!-- src: src/features/library/useThoughtsSync.ts:65 --> <!-- src: src/features/library/thoughtsSync.ts:3 -->
 - This recipe writes no thoughts files.
 
@@ -47,4 +47,4 @@ Steps:
 - `lib-blank` only renders when thoughts aren't configured or the index holds zero docs. Neither happens on this machine, so report it as unreachable. <!-- src: src/features/library/LibraryView.tsx:76 -->
 - `count_docs` needs both keys (`project` and `filters`), and `query_docs` wraps its argument as `{ query }`. <!-- src: src/lib/bindings.ts:28 -->
 - The project rows and picker come from the index (`counts.projects`), not the app's project list. An isolated profile still lists every thoughts project, labelled by raw name. <!-- src: src/features/library/LibraryNav.tsx:42 -->
-- Raw IPC like `mark_doc_read` skips react-query invalidation. Drive the row menu, and use IPC only to read back.
+- Raw `mark_doc_read` still refreshes the list and the `New` count: the server's `DocStateChanged` event invalidates them. An open doc pane isn't re-read. Drive the row menu anyway, and use IPC only to read back. <!-- src: src/lib/events.ts:167 -->
