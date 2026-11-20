@@ -188,16 +188,25 @@ async fn opencode_resume() {
     let bare = "Answer under ids the driver cannot place.";
     send(&mut j, &client, &id, bare).await;
     let (seen, replied) = turn(&mut events, bare).await;
-    let notice: Vec<&str> = seen
-        .iter()
-        .filter_map(|e| match e {
-            SessionEvent::ProtocolError { detail, .. } => Some(detail.as_str()),
-            _ => None,
-        })
-        .collect();
+    let notice = notices(&seen);
     j.guard(
         "the turn still ends, and the transcript says why",
         replied.is_some() && status_of(&seen).as_deref() == Some("completed") && notice.len() == 1,
+        json!({ "replied": replied.is_some(), "turnStatus": status_of(&seen), "notice": notice }),
+    );
+    stub_delays(&sandbox, json!({}));
+
+    j.step(
+        "an OpenCode that names the session only inside each message ends the turn on its reply",
+    );
+    stub_delays(&sandbox, json!({ "nested": true }));
+    let nested = "Answer with the session named only inside the message.";
+    send(&mut j, &client, &id, nested).await;
+    let (seen, replied) = turn(&mut events, nested).await;
+    let notice = notices(&seen);
+    j.guard(
+        "its reply ends the turn, with no fallback notice",
+        replied.is_some() && status_of(&seen).as_deref() == Some("completed") && notice.is_empty(),
         json!({ "replied": replied.is_some(), "turnStatus": status_of(&seen), "notice": notice }),
     );
     stub_delays(&sandbox, json!({}));
@@ -213,13 +222,7 @@ async fn opencode_resume() {
     send(&mut j, &client, &id, lost).await;
     let (seen, after_wipe) = turn(&mut events, lost).await;
     let replaced = harness_session(&mut j, &client, &ws, &id).await;
-    let notice: Vec<&str> = seen
-        .iter()
-        .filter_map(|e| match e {
-            SessionEvent::ProtocolError { detail, .. } => Some(detail.as_str()),
-            _ => None,
-        })
-        .collect();
+    let notice = notices(&seen);
     j.guard(
         "the turn runs in a new OpenCode session, and the transcript says the context is gone",
         stopped.status.success()
@@ -464,6 +467,15 @@ async fn turn_status(events: &mut EventStream<SessionEvent>) -> Option<String> {
     .await
     .ok()
     .flatten()
+}
+
+fn notices(seen: &[SessionEvent]) -> Vec<&str> {
+    seen.iter()
+        .filter_map(|e| match e {
+            SessionEvent::ProtocolError { detail, .. } => Some(detail.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn status_of(seen: &[SessionEvent]) -> Option<String> {

@@ -116,6 +116,20 @@
       "guards": [
         {
           "evidence": {
+            "notice": [],
+            "replied": true,
+            "turnStatus": "completed"
+          },
+          "guard": "its reply ends the turn, with no fallback notice",
+          "ok": true
+        }
+      ],
+      "step": "an OpenCode that names the session only inside each message ends the turn on its reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "notice": [
               "OpenCode no longer has this conversation; it continues without the earlier turns"
             ],

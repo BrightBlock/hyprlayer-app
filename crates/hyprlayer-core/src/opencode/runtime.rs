@@ -773,7 +773,7 @@ impl OpenCodeDriver {
                 };
                 match received {
                     Ok(ev) => {
-                        if event_session_id(&ev).as_deref() != Some(sid.as_str()) {
+                        if event_session_id(&ev) != Some(sid.as_str()) {
                             continue;
                         }
                         if ev.kind == "question.asked" {
@@ -1183,11 +1183,17 @@ fn parse_model(id: &str) -> Option<(String, String)> {
         .filter(|(p, m)| !p.is_empty() && !m.is_empty())
 }
 
-fn event_session_id(ev: &OcEvent) -> Option<String> {
-    ev.properties
-        .get("sessionID")
-        .and_then(Value::as_str)
-        .map(str::to_string)
+// 1.0.x names a message event's session only on its `info` or `part`.
+fn event_session_id(ev: &OcEvent) -> Option<&str> {
+    let p = &ev.properties;
+    [
+        p.get("sessionID"),
+        p.pointer("/info/sessionID"),
+        p.pointer("/part/sessionID"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(Value::as_str)
 }
 
 #[derive(Default)]

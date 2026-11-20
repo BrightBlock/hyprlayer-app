@@ -50,7 +50,8 @@ impl BinaryKind {
     fn min_version(self) -> Option<(&'static str, [u64; 3])> {
         match self {
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
-            BinaryKind::OpenCode => Some(("1.0.0", [1, 0, 0])),
+            // First release sending `permission.asked`; the routes the driver needs are older.
+            BinaryKind::OpenCode => Some(("1.0.224", [1, 0, 224])),
             BinaryKind::Codex => Some(("0.155.1", [0, 155, 1])),
             _ => None,
         }
@@ -580,6 +581,32 @@ mod tests {
         assert_eq!(
             state_for(BinaryKind::Codex, Some("0.155.1")),
             BinaryState::Ok
+        );
+    }
+
+    #[test]
+    fn opencode_below_the_first_release_the_driver_can_run_is_too_old() {
+        let min = "1.0.224".to_string();
+        assert_eq!(
+            state_for(BinaryKind::OpenCode, Some("1.0.223")),
+            BinaryState::TooOld { min: min.clone() }
+        );
+        assert_eq!(
+            state_for(BinaryKind::OpenCode, Some("1.0.224")),
+            BinaryState::Ok
+        );
+        let error = crate::CoreError::BinaryTooOld {
+            name: "opencode".into(),
+            found: "1.0.223".into(),
+            min,
+        };
+        assert_eq!(
+            error.to_string(),
+            "`opencode` 1.0.223 is older than the minimum supported 1.0.224"
+        );
+        assert_eq!(
+            error.remedy().as_deref(),
+            Some("Update `opencode` to version 1.0.224 or newer.")
         );
     }
 

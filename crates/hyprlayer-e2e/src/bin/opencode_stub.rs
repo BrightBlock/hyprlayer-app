@@ -7,7 +7,8 @@
 //! `abortIdle` (an idle session's abort) and `late` (an aborted turn's reply and second idle).
 //! `"ask": true` makes each turn ask permission for bash first. `"ownIds": true` ignores the
 //! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
-//! `time.created`; `"fail": "<message>"` fails each turn before any reply.
+//! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
+//! names the session only inside each message and part, as 1.0.224 does.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -256,7 +257,14 @@ impl Stub {
         self.emit("session.idle", json!({ "sessionID": id }));
     }
 
-    fn emit(&self, kind: &str, properties: Value) {
+    fn emit(&self, kind: &str, mut properties: Value) {
+        let message = matches!(kind, "message.updated" | "message.part.updated");
+        if let Some(p) = properties
+            .as_object_mut()
+            .filter(|_| message && self.delays().nested)
+        {
+            p.remove("sessionID");
+        }
         let record = format!(
             "data: {}\n\n",
             json!({ "type": kind, "properties": properties })
@@ -303,6 +311,7 @@ impl Stub {
             ask: control["ask"].as_bool().unwrap_or(false),
             own_ids: control["ownIds"].as_bool().unwrap_or(false),
             bare: control["bare"].as_bool().unwrap_or(false),
+            nested: control["nested"].as_bool().unwrap_or(false),
             fail: control["fail"].as_str().map(str::to_string),
         }
     }
@@ -329,6 +338,7 @@ struct Delays {
     ask: bool,
     own_ids: bool,
     bare: bool,
+    nested: bool,
     fail: Option<String>,
 }
 
