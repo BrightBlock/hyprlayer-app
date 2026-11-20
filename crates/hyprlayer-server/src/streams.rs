@@ -5,7 +5,7 @@
 //! registry, which `lib.rs::read_requests` has and a plain `Dispatch` method
 //! never sees.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -270,8 +270,19 @@ impl StreamResponse {
 #[derive(Default)]
 pub(crate) struct StreamState {
     next_id: AtomicU64,
-    pending_launches: Mutex<HashMap<String, LaunchAndConverseParams>>,
+    pending_launches: Mutex<PendingLaunches>,
 }
+
+/// One lock, so a stash and a connection's close can't miss each other.
+#[derive(Default)]
+struct PendingLaunches {
+    /// Connections whose starts can still be launched.
+    open: HashSet<u64>,
+    /// Keyed by session; the owner is `None` once its launch call has arrived.
+    launches: HashMap<String, (Option<u64>, LaunchAndConverseParams)>,
+}
+
+const ABANDONED: &str = "The app disconnected before it launched the agent.";
 
 impl StreamState {
     fn next_id(&self) -> u64 {
@@ -279,25 +290,71 @@ impl StreamState {
     }
 }
 
+fn pending(server: &Server) -> std::sync::MutexGuard<'_, PendingLaunches> {
+    server
+        .streams()
+        .pending_launches
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
 pub(crate) fn take_pending_launch(
     server: &Server,
     session_id: &str,
 ) -> Option<LaunchAndConverseParams> {
-    server
-        .streams()
-        .pending_launches
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+    pending(server)
+        .launches
         .remove(session_id)
+        .map(|(_, params)| params)
 }
 
-fn stash_pending_launch(server: &Server, session_id: String, params: LaunchAndConverseParams) {
-    server
-        .streams()
-        .pending_launches
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .insert(session_id, params);
+/// The launch call has arrived, so its connection closing must not fail the start.
+pub(crate) fn claim_pending_launch(server: &Server, session_id: &str) {
+    if let Some((owner, _)) = pending(server).launches.get_mut(session_id) {
+        *owner = None;
+    }
+}
+
+pub(crate) fn open_connection(server: &Server, conn: u64) {
+    pending(server).open.insert(conn);
+}
+
+/// `Some` hands the start back when its connection has already closed.
+fn stash_pending_launch(
+    server: &Server,
+    session_id: String,
+    params: LaunchAndConverseParams,
+) -> Option<LaunchAndConverseParams> {
+    let conn = crate::CONN.try_with(|conn| *conn).ok();
+    let mut pending = pending(server);
+    if conn.is_some_and(|conn| !pending.open.contains(&conn)) {
+        return Some(params);
+    }
+    pending.launches.insert(session_id, (conn, params));
+    None
+}
+
+/// Starts a closed connection prepared but never launched end as failed starts, not `starting` rows.
+pub(crate) async fn fail_abandoned_launches(server: &Server, conn: u64) {
+    let abandoned: Vec<(String, LaunchAndConverseParams)> = {
+        let mut pending = pending(server);
+        pending.open.remove(&conn);
+        let ids: Vec<String> = pending
+            .launches
+            .iter()
+            .filter(|(_, (owner, _))| *owner == Some(conn))
+            .map(|(id, _)| id.clone())
+            .collect();
+        ids.into_iter()
+            .filter_map(|id| pending.launches.remove(&id).map(|(_, params)| (id, params)))
+            .collect()
+    };
+    let runtime = server.runtime();
+    let sessions = runtime.sessions();
+    for (session_id, params) in abandoned {
+        tracing::warn!("session {session_id}: its client left before launching it");
+        sessions.fail_unlaunched(params, ABANDONED).await;
+    }
 }
 
 /// The abort handles of one connection's open streams. A dropped connection
@@ -734,7 +791,11 @@ pub(crate) async fn prepare_stream(
                 .attach(&session_id, echo_user_messages)
                 .await
                 .wire()?;
-            stash_pending_launch(server, session_id.clone(), prepared.launch);
+            if let Some(launch) = stash_pending_launch(server, session_id.clone(), prepared.launch)
+            {
+                tracing::warn!("session {session_id}: its client left while it was prepared");
+                runtime.sessions().fail_unlaunched(launch, ABANDONED).await;
+            }
             let stream_id = server.streams().next_id();
             Ok((
                 StreamResponse::StartStageSession {

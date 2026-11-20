@@ -283,6 +283,9 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN effort TEXT;
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN first_turn TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

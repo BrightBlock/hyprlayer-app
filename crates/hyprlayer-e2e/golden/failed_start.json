@@ -1,0 +1,380 @@
+{
+  "scenario": "failed_start",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "code": "opencode_provider_unsupported"
+          },
+          "guard": "the caller still hears why the launch failed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "exited"
+            ]
+          },
+          "guard": "the stream echoes the prompt it could not send",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "exited"
+            ]
+          },
+          "guard": "the stream ends with a failed start",
+          "ok": true
+        }
+      ],
+      "step": "start a session whose harness cannot launch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "state": "spawn_failed"
+          },
+          "guard": "the row ends spawn_failed, not starting",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kinds": [
+              "userMessage",
+              "exited"
+            ]
+          },
+          "guard": "the log keeps the prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": [
+              "spawn_failed",
+              "GitHub Copilot models are no longer supported"
+            ]
+          },
+          "guard": "the log ends with the failed start and its reason",
+          "ok": true
+        }
+      ],
+      "step": "a reader that never saw the stream sees the failure"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ended": true,
+            "exits": 1,
+            "failed": true,
+            "prompt": true,
+            "state": "spawn_failed",
+            "summary": true
+          },
+          "guard": "the missing tool ends the start as a failure, with an end time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after": {
+              "ended": true,
+              "exits": 2,
+              "failed": true,
+              "prompt": true,
+              "state": "spawn_failed",
+              "summary": true
+            },
+            "later_end": true,
+            "refused": true
+          },
+          "guard": "a retry that fails again is recorded like the start: another failed exit and a later end time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawns": [
+              "new"
+            ]
+          },
+          "guard": "the retry starts claude fresh instead of resuming a conversation it never had",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launched": [
+              "claude-e2e-picked high"
+            ]
+          },
+          "guard": "the retry launches the model and effort the user picked",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "full_prompt_sent": 1
+          },
+          "guard": "the retry sends the full stage prompt once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "turns": 2
+          },
+          "guard": "the stage's follow-up runs after the retried turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "replied": true
+          },
+          "guard": "claude's reply reaches the client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "logged": 3,
+            "read": 3
+          },
+          "guard": "the log holds one user row per turn claude read, so rewind and turn counts line up",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": false,
+            "state": "running",
+            "summary": false
+          },
+          "guard": "the retried row is running again with no end time or failure summary",
+          "ok": true
+        }
+      ],
+      "step": "retry a claude start that failed before claude was installed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ended": true
+          },
+          "guard": "the stream ends with a failure and its reason",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": true,
+            "exits": 1,
+            "failed": true,
+            "prompt": true,
+            "state": "crashed",
+            "summary": true
+          },
+          "guard": "the log keeps the prompt and one failed exit with its reason",
+          "ok": true
+        }
+      ],
+      "step": "claude dies at its first turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "same_id": true
+          },
+          "guard": "the echo carries the id of the row the desktop already shows",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "user_rows": 1
+          },
+          "guard": "the replay adds no user row",
+          "ok": true
+        }
+      ],
+      "step": "a replayed turn echoes under its stored row's id"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "kept": true,
+            "rewound_prompt": false
+          },
+          "guard": "the replay is the kept turn, not the start's rewound prompt",
+          "ok": true
+        }
+      ],
+      "step": "a retry after a rewind replays the turn the rewind kept"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "sent": 1
+          },
+          "guard": "the prompt reaches claude once across the restart",
+          "ok": true
+        }
+      ],
+      "step": "a mode switch before claude's init does not resend the prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refused": true
+          },
+          "guard": "the second call is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": false,
+            "exits": 0,
+            "failed": false,
+            "prompt": true,
+            "state": "running",
+            "summary": false
+          },
+          "guard": "the session stays live with no exit recorded",
+          "ok": true
+        }
+      ],
+      "step": "a second launch call leaves a healthy session running"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ended": true,
+            "exits": 1,
+            "failed": true,
+            "prompt": true,
+            "state": "spawn_failed",
+            "summary": true
+          },
+          "guard": "the server records the start its client left behind",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "full_prompt": true
+          },
+          "guard": "it keeps the full stage prompt",
+          "ok": true
+        }
+      ],
+      "step": "the app disconnects between the start and the launch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ended": true,
+            "exits": 1,
+            "failed": true,
+            "prompt": true,
+            "state": "spawn_failed",
+            "summary": true
+          },
+          "guard": "the start is recorded as failed, not left starting",
+          "ok": true
+        }
+      ],
+      "step": "the app drops while its start is still being prepared"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answered": true,
+            "state": "running"
+          },
+          "guard": "the harness answers and the start is not recorded as abandoned",
+          "ok": true
+        }
+      ],
+      "step": "a launch call the app sent just before it dropped still runs"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the server stops",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "kept": false
+          },
+          "guard": "a goal start it never ran is discarded, not left for a capless retry",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": true,
+            "exits": 1,
+            "failed": true,
+            "prompt": true,
+            "state": "spawn_failed",
+            "summary": true
+          },
+          "guard": "the next server records the start that never ran, with its prompt",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "after": {
+              "ended": true,
+              "exits": 1,
+              "failed": true,
+              "prompt": true,
+              "state": "spawn_failed",
+              "summary": true
+            },
+            "refused": true
+          },
+          "guard": "a late launch call on the new server changes nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "full_prompt": true,
+            "picked_model": true
+          },
+          "guard": "its retry sends the full stage prompt on the picked model",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": false,
+            "state": "running",
+            "summary": false
+          },
+          "guard": "the retried row is running again with no end time or failure summary",
+          "ok": true
+        }
+      ],
+      "step": "the server stops between the start and the launch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

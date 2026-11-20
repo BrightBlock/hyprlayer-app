@@ -18,6 +18,7 @@ import {
   resolvePermission,
   resolveQuestion,
   restoredView,
+  resumesOnSight,
   splitInlineThinking,
   viewToText,
   type Question,
@@ -41,6 +42,24 @@ const TABS_QUESTION: Question[] = [
 function reduceAll(events: SessionEvent[], start = initialSessionView("starting")): SessionView {
   return events.reduce(reduceEvent, start);
 }
+
+describe("relaunching an ended session when its tab first sees it", () => {
+  it("relaunches one that ran and ended", () => {
+    for (const state of ["completed", "interrupted", "crashed", "killed"] as const) {
+      expect(resumesOnSight(state)).toBe(true);
+    }
+  });
+
+  it("leaves a failed start for the user, since a retry resends its prompt", () => {
+    expect(resumesOnSight("spawn_failed")).toBe(false);
+  });
+
+  it("never relaunches one that hasn't ended", () => {
+    for (const state of ["idle", "starting", "running", "awaiting_permission", "awaiting_question"] as const) {
+      expect(resumesOnSight(state)).toBe(false);
+    }
+  });
+});
 
 describe("a stopped turn", () => {
   const interrupted = (): SessionView =>

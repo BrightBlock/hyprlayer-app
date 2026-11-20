@@ -107,6 +107,8 @@ async fn mid_turn_messages() {
             vec![],
             StreamStartOpts {
                 harness: Some(Harness::Claude),
+                // A start without one gets a minted id, which would make the report differ per run.
+                client_message_id: Some("first-turn".into()),
                 ..Default::default()
             },
         )
@@ -124,7 +126,7 @@ async fn mid_turn_messages() {
     let hello = recv_until(&mut events, is_turn_done).await;
     j.guard(
         "the first message echoes and its turn completes",
-        echo_index(&hello, None).is_some() && hello.iter().any(is_turn_done),
+        echo_index(&hello, Some("first-turn")).is_some() && hello.iter().any(is_turn_done),
         json!({ "events": shape(&hello) }),
     );
     j.guard(

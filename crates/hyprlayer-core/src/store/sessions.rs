@@ -2,10 +2,10 @@ use rusqlite::types::ValueRef;
 use rusqlite::{params, OptionalExtension, Row, ToSql, Transaction};
 use serde::{Deserialize, Serialize};
 
-use super::session_event_codec::decode_raw_event;
+use super::session_event_codec::{decode_raw_event, encode_raw_event};
 use super::{now_ms, Db};
 use crate::agent::Harness;
-use crate::claude::{SessionEvent, SessionState};
+use crate::claude::{ExitOutcome, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 
@@ -62,6 +62,17 @@ pub struct NewSession {
     pub cwd: String,
     /// The user's text before `compose_prompt` wrapped it.
     pub first_input: Option<String>,
+}
+
+/// id, stage, origin, first_turn and first_input of a start no harness ever ran.
+type UnlaunchedRow = (String, String, String, Option<String>, Option<String>);
+
+/// A start's first turn as it was composed, so a failure can record it and a retry resend it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FirstTurnRecord {
+    pub text: String,
+    pub prompt_name: Option<String>,
+    pub client_message_id: String,
 }
 
 /// What a session's title is generated from.
@@ -220,7 +231,7 @@ fn apply_row_mutation(
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
                     cost_usd, started_at, ended_at, exit_summary, title, archived_at, \
-                    origin, parent_session_id, \
+                    origin, parent_session_id, effort, \
                     (SELECT e.kind FROM session_events e
                       WHERE e.session_id = sessions.id AND e.kind IN ('userMessage', 'turnDone')
                       ORDER BY e.seq DESC LIMIT 1) AS last_turn_kind, \
@@ -271,6 +282,7 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
             .and_then(|json| serde_json::from_str(json).ok()),
         origin: SessionOrigin::parse(&row.get::<_, String>("origin")?),
         parent_session_id: row.get("parent_session_id")?,
+        effort: row.get("effort")?,
     })
 }
 
@@ -333,6 +345,7 @@ impl Db {
             goal: None,
             origin: SessionOrigin::User,
             parent_session_id: None,
+            effort: None,
         };
         self.with(|conn| {
             conn.execute(
@@ -545,6 +558,108 @@ impl Db {
                 ],
             )
         })
+    }
+
+    /// A start the previous run never launched ends failed, keeping its first turn, as a failed launch does.
+    pub fn fail_unlaunched_sessions(&self, reason: &str) -> Result<usize> {
+        let unlaunched: Vec<UnlaunchedRow> = self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, stage, origin, first_turn, first_input FROM sessions s WHERE state = ?1
+                     AND NOT EXISTS (SELECT 1 FROM session_events e WHERE e.session_id = s.id)",
+            )?;
+            let rows = stmt.query_map(params![SessionState::Starting.as_str()], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })?;
+            rows.collect()
+        })?;
+        for (id, stage, origin, first_turn, input) in &unlaunched {
+            // A goal's or an agent's start is discarded when it fails, as `start_detached` and goals do.
+            if SessionOrigin::parse(origin) != SessionOrigin::User {
+                self.delete_session(id)?;
+                continue;
+            }
+            // Rows from before `first_turn` existed keep only the raw input.
+            let turn = first_turn
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<FirstTurnRecord>(json).ok())
+                .or_else(|| {
+                    input.clone().map(|text| FirstTurnRecord {
+                        text,
+                        prompt_name: None,
+                        client_message_id: uuid::Uuid::new_v4().to_string(),
+                    })
+                });
+            let prompt = turn.map(|turn| SessionEvent::UserMessage {
+                text: turn.text,
+                stage: Some(stage.clone()),
+                prompt_name: turn.prompt_name,
+                client_message_id: Some(turn.client_message_id),
+                author: None,
+            });
+            self.append_failed_start(id, prompt, reason)?;
+        }
+        Ok(unlaunched.len())
+    }
+
+    /// The prompt and a `spawn_failed` exit after the session's last row, with the row ended to match.
+    pub fn append_failed_start(
+        &self,
+        id: &str,
+        prompt: Option<SessionEvent>,
+        reason: &str,
+    ) -> Result<()> {
+        let exit = SessionEvent::Exited {
+            outcome: ExitOutcome::SpawnFailed,
+            code: None,
+            stderr_tail: reason.to_string(),
+        };
+        let failed = SessionRowMutation {
+            state: FieldOp::Set(SessionState::SpawnFailed),
+            ended_at: FieldOp::Set(now_ms()),
+            exit_summary: FieldOp::Set(reason.to_string()),
+            ..Default::default()
+        };
+        let rows = prompt
+            .into_iter()
+            .map(|e| (e, SessionRowMutation::default()))
+            .chain([(exit, failed)]);
+        let first = self.next_session_seq(id)?;
+        for (offset, (event, mutation)) in rows.enumerate() {
+            let payload = encode_raw_event(&event)?;
+            self.apply_session_event(id, first + offset as i64, event.kind(), &payload, mutation)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_session_first_turn(&self, id: &str, turn: &FirstTurnRecord) -> Result<()> {
+        let json =
+            serde_json::to_string(turn).map_err(|e| CoreError::Io(std::io::Error::other(e)))?;
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET first_turn = ?2 WHERE id = ?1",
+                params![id, json],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn session_first_turn(&self, id: &str) -> Result<Option<FirstTurnRecord>> {
+        let json: Option<String> = self.with(|conn| {
+            conn.query_row(
+                "SELECT first_turn FROM sessions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
+        })?;
+        Ok(json.and_then(|json| serde_json::from_str(&json).ok()))
     }
 
     pub fn append_session_event(

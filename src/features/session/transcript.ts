@@ -263,6 +263,11 @@ export function isTerminal(state: SessionState): boolean {
   return TERMINAL.has(state);
 }
 
+/** A failed start waits for the user's Resume, since a retry resends its prompt. */
+export function resumesOnSight(state: SessionState): boolean {
+  return isTerminal(state) && state !== "spawn_failed";
+}
+
 export function hasPendingPermission(view: SessionView): boolean {
   return view.items.some((it) => it.kind === "permission" && it.decision === null);
 }

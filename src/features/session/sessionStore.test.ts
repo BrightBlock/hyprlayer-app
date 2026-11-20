@@ -110,6 +110,7 @@ const {
   endSession,
   reattachSessions,
   restoreSessionIfNeeded,
+  retryFailedStart,
   startSession,
   sendMessage,
   cancelQueuedMessage,
@@ -2011,5 +2012,68 @@ describe("goals in the session store", () => {
     armResumeAfterSend("s-armed", "g1");
     expect(takeArmedResume("s-armed")).toBe("g1");
     expect(takeArmedResume("s-armed")).toBeNull();
+  });
+});
+
+describe("retrying a start that failed", () => {
+  const SPAWN_FAILED: SessionEvent = {
+    kind: "exited",
+    outcome: "spawn_failed",
+    code: null,
+    stderrTail: "OpenCode does not currently offer `opencode/stale`",
+  };
+
+  it("relaunches on the model and effort the tab shows, not the one that failed", async () => {
+    const id = await startBusySession();
+    emit(SPAWN_FAILED);
+    const order: string[] = [];
+    h.setSessionModel.mockImplementationOnce(async () => {
+      order.push("model");
+      return { status: "ok", data: null };
+    });
+    h.setSessionEffort.mockImplementationOnce(async () => {
+      order.push("effort");
+      return { status: "ok", data: null };
+    });
+    h.resumeSession.mockImplementationOnce(async () => {
+      order.push("resume");
+      return { status: "ok", data: h.RESUMED };
+    });
+
+    await retryFailedStart(id, "opencode/mimo-free", "high");
+
+    expect(h.setSessionModel).toHaveBeenCalledWith(id, "opencode/mimo-free");
+    expect(h.setSessionEffort).toHaveBeenCalledWith(id, "high");
+    expect(order).toEqual(["model", "effort", "resume"]);
+  });
+
+  it("leaves a retry the server refuses in the failed-start view, not an idle composer", async () => {
+    const id = await startBusySession();
+    emit(SPAWN_FAILED);
+    const refused = {
+      code: "opencode_model_unavailable",
+      message: "OpenCode does not currently offer `opencode/stale`",
+      remedy: null,
+    };
+    h.resumeSession.mockResolvedValueOnce({ status: "error", error: refused } as never);
+
+    await expect(retryFailedStart(id, null, null)).rejects.toMatchObject({ code: "opencode_model_unavailable" });
+
+    const entry = useSessionStore.getState().sessions[id];
+    expect(entry?.state).toBe("spawn_failed");
+    expect(entry?.live).toBe(false);
+  });
+
+  it("keeps the stored model when the tab shows none, so the harness default never runs", async () => {
+    const id = await startBusySession();
+    emit(SPAWN_FAILED);
+    h.setSessionModel.mockClear();
+    h.setSessionEffort.mockClear();
+
+    await retryFailedStart(id, null, null);
+
+    expect(h.setSessionModel).not.toHaveBeenCalled();
+    expect(h.setSessionEffort).not.toHaveBeenCalled();
+    expect(h.resumeSession).toHaveBeenCalled();
   });
 });

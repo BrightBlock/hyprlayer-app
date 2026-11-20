@@ -216,6 +216,13 @@ impl HyprlayerRuntime {
             }
         }
 
+        match db.fail_unlaunched_sessions("The server stopped before the agent started.") {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} session(s) a previous run never launched are now failed"),
+            Err(e) => {
+                tracing::warn!("could not record sessions a previous run never launched: {e}")
+            }
+        }
         // Nothing is live before this runtime spawns it, so no row may claim to be.
         match db.settle_stale_sessions() {
             Ok(0) => {}

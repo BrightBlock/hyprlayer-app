@@ -6,7 +6,7 @@
         {
           "evidence": {
             "events": [
-              "userMessage:-",
+              "userMessage:first-turn",
               "init",
               "assistantText:E2E_REPLY",
               "turnDone"
@@ -18,7 +18,7 @@
         {
           "evidence": {
             "events": [
-              "userMessage:-",
+              "userMessage:first-turn",
               "init",
               "assistantText:E2E_REPLY",
               "turnDone"
@@ -107,7 +107,7 @@
         {
           "evidence": {
             "order": [
-              "userMessage:-",
+              "userMessage:first-turn",
               "init",
               "assistantText:E2E_REPLY",
               "turnDone",
@@ -126,7 +126,7 @@
         {
           "evidence": {
             "order": [
-              "userMessage:-",
+              "userMessage:first-turn",
               "init",
               "assistantText:E2E_REPLY",
               "turnDone",

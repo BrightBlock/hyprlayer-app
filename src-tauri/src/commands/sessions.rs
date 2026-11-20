@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use hyprlayer_core::agent::Harness;
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
@@ -6,6 +8,7 @@ use hyprlayer_core::models::session::{LogCursor, QuestionAnswers, SessionLogEntr
 use hyprlayer_core::models::{ClientRef, SessionRev, SessionTurns};
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::store::Session;
+use hyprlayer_proto::WireError;
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::rpc::WatchedSession;
 use hyprlayer_server::streams::{
@@ -103,6 +106,7 @@ fn spawn_live_pump(
     stream_id: u64,
     mut events: SessionEvents,
     on_event: Channel<SessionStreamItemDto>,
+    exit_seen: Option<Arc<AtomicBool>>,
 ) {
     let cancel = client.clone();
     state
@@ -111,6 +115,11 @@ fn spawn_live_pump(
             while let Some(frame) = events.recv().await {
                 let item = SessionStreamItemDto::from(frame);
                 let terminal = matches!(item.event, SessionEvent::Exited { .. });
+                if terminal {
+                    if let Some(seen) = &exit_seen {
+                        seen.store(true, Ordering::Release);
+                    }
+                }
                 if on_event.send(item).is_err() {
                     log::debug!("session stream {stream_id}: the window stopped listening");
                     let _ = cancel.cancel_stream(stream_id).await;
@@ -166,13 +175,17 @@ pub async fn start_stage_session(
         return Err(unexpected_response(&client, stream_id, "start_stage_session").await);
     };
     let session_id = session.id.clone();
-    spawn_live_pump(&state, client.clone(), stream_id, events, on_event.clone());
+    let exit_seen = Arc::new(AtomicBool::new(false));
+    spawn_live_pump(
+        &state,
+        client.clone(),
+        stream_id,
+        events,
+        on_event.clone(),
+        Some(exit_seen.clone()),
+    );
 
-    // The launch is fire-and-forget, exactly as before: the command returns
-    // as soon as the stream is open, and this task's only job is to surface
-    // a launch failure onto that same channel. Unlike the streaming commands
-    // above, this has no server-side counterpart — the server ran
-    // `prepare_start` synchronously; only `launch_and_converse` is deferred.
+    // The server records a failed launch in the session, and the stream above carries it.
     tauri::async_runtime::spawn(async move {
         if let Err(e) = client.launch_and_converse(session_id.clone()).await {
             log::warn!(
@@ -180,30 +193,29 @@ pub async fn start_stage_session(
                 e.code,
                 e.message
             );
-            emit_start_failure(&on_event, &AppError::from(e).message);
+            // The server's own record reaches the stream within moments when there is one.
+            let deadline = tokio::time::Instant::now() + RECORD_GRACE;
+            while !exit_seen.load(Ordering::Acquire) && tokio::time::Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            if let Some(event) = start_failure_fallback(&e, exit_seen.load(Ordering::Acquire)) {
+                let _ = on_event.send(SessionFrame::Bare(event).into());
+            }
         }
     });
 
     Ok(StartedSession { session, prompt })
 }
 
-fn emit_start_failure(channel: &Channel<SessionStreamItemDto>, reason: &str) {
-    let failure = [
-        SessionEvent::AssistantText {
-            text: format!("⚠ Failed to start the agent: {reason}"),
-            parent_id: None,
-            injected: false,
-            auth_required: false,
-        },
-        SessionEvent::Exited {
-            outcome: ExitOutcome::SpawnFailed,
-            code: None,
-            stderr_tail: String::new(),
-        },
-    ];
-    for event in failure {
-        let _ = channel.send(SessionFrame::Bare(event).into());
-    }
+const RECORD_GRACE: Duration = Duration::from_secs(2);
+
+/// Any failed launch whose exit the stream never carried, so no start error leaves the tab starting.
+fn start_failure_fallback(error: &WireError, exit_seen: bool) -> Option<SessionEvent> {
+    (!exit_seen).then(|| SessionEvent::Exited {
+        outcome: ExitOutcome::SpawnFailed,
+        code: None,
+        stderr_tail: error.message.clone(),
+    })
 }
 
 /// A cursor crossing the Tauri boundary: `seq` is `f64` because a specta `i64`
@@ -276,7 +288,7 @@ pub async fn resume_session(
     else {
         return Err(unexpected_response(&client, stream_id, "resume_session").await);
     };
-    spawn_live_pump(&state, client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event, None);
     Ok(ResumedSession {
         session,
         permission_mode,
@@ -309,7 +321,7 @@ pub async fn restart_session(
     let StreamResponse::Session { session, .. } = response else {
         return Err(unexpected_response(&client, stream_id, "restart_session").await);
     };
-    spawn_live_pump(&state, client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event, None);
     Ok(session)
 }
 
@@ -349,7 +361,7 @@ pub async fn rewind_session(
     else {
         return Err(unexpected_response(&client, stream_id, "rewind_session").await);
     };
-    spawn_live_pump(&state, client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event, None);
     Ok(RewindResult {
         session,
         live_rewound,
@@ -713,7 +725,7 @@ pub async fn attach_session(
     let StreamResponse::AttachSession { .. } = response else {
         return Err(unexpected_response(&client, stream_id, "attach_session").await);
     };
-    spawn_live_pump(&state, client, stream_id, events, on_event);
+    spawn_live_pump(&state, client, stream_id, events, on_event, None);
     Ok(())
 }
 
@@ -741,4 +753,54 @@ pub async fn list_active_sessions(state: State<'_, AppState>) -> CmdResult<Vec<A
             session: a.session,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn painted(error: &WireError, exit_seen: bool) -> Option<(ExitOutcome, String)> {
+        match start_failure_fallback(error, exit_seen) {
+            Some(SessionEvent::Exited {
+                outcome,
+                stderr_tail,
+                ..
+            }) => Some((outcome, stderr_tail)),
+            _ => None,
+        }
+    }
+
+    fn server_error(code: &str) -> WireError {
+        WireError {
+            code: code.into(),
+            message: format!("{code} happened"),
+            remedy: None,
+            stale_transcript: None,
+        }
+    }
+
+    #[test]
+    fn any_failed_launch_the_stream_never_ended_ends_the_tab_as_a_failed_start() {
+        for error in [
+            WireError::disconnected(),
+            WireError::protocol("launch_and_converse: broken pipe"),
+            server_error("internal"),
+            server_error("opencode_model_unavailable"),
+        ] {
+            let (outcome, reason) =
+                painted(&error, false).expect("the tab is told the start failed");
+            assert_eq!(outcome, ExitOutcome::SpawnFailed);
+            assert_eq!(reason, error.message);
+        }
+    }
+
+    #[test]
+    fn a_failure_the_stream_already_ended_is_not_painted_twice() {
+        for error in [
+            WireError::disconnected(),
+            server_error("opencode_model_unavailable"),
+        ] {
+            assert_eq!(painted(&error, true), None);
+        }
+    }
 }

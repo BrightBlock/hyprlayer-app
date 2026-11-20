@@ -5,7 +5,7 @@ use crate::claude::{SessionEvent, TurnStatus};
 use crate::codex::CollabMode;
 use crate::pipeline::{self, Stage};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Followup {
     ShipDescribe,
     CodexExecute(&'static str),

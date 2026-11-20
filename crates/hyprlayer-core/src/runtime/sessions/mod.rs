@@ -200,6 +200,7 @@ impl SessionActors {
         client_message_id: String,
         base_rev: Option<u64>,
         author: Option<ClientRef>,
+        replay: bool,
     ) -> Result<()> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
@@ -207,7 +208,7 @@ impl SessionActors {
         }
         let handle = handles.get(session_id).expect("just inserted above");
         handle
-            .reserve_user_turn(client_message_id, base_rev, author)
+            .reserve_user_turn(client_message_id, base_rev, author, replay)
             .await
     }
 
@@ -290,7 +291,7 @@ impl SessionRuntimeHandle {
         author: Option<ClientRef>,
     ) -> Result<()> {
         self.actors
-            .reserve_user_turn(session_id, client_message_id, base_rev, author)
+            .reserve_user_turn(session_id, client_message_id, base_rev, author, false)
             .await
     }
 

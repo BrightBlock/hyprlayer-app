@@ -11,7 +11,7 @@ use crate::agent::{AgentDriver, Harness};
 use crate::agents;
 use crate::capability::{launch_policy, LaunchPolicy};
 use crate::claude::{
-    memory, ClaudeDriver, PermissionMode, SessionEvent, SessionState, SpawnConfig,
+    memory, ClaudeDriver, ExitOutcome, PermissionMode, SessionEvent, SessionState, SpawnConfig,
 };
 use crate::codex::{
     config_sets_developer_instructions, CodexDriver, CollabMode, SpawnConfig as CodexSpawnConfig,
@@ -26,7 +26,7 @@ use crate::runtime::agent_control::{inject, AgentIdentity, TokenGuard};
 use crate::runtime::doc_status;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
-use crate::store::{LogCursor, NewSession, Session, SessionLogEntry, Workstream};
+use crate::store::{FirstTurnRecord, LogCursor, NewSession, Session, SessionLogEntry, Workstream};
 use hyprlayer_models::{ClientRef, RuntimeEvent, SessionRev, SessionTurns};
 use serde::{Deserialize, Serialize};
 
@@ -109,7 +109,8 @@ pub struct LaunchAndConverseParams {
     wire_prompt: String,
     stage: Stage,
     prompt_name: Option<String>,
-    client_message_id: Option<String>,
+    /// The client's id, or one minted for it: the first send, its failure record and a replay share it.
+    client_message_id: String,
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<PermissionMode>,
@@ -168,12 +169,13 @@ impl LaunchAndConverseParams {
 }
 
 /// A new session's first send and the follow-up its stage asks for after it.
+#[derive(Clone)]
 struct FirstTurn {
     session_id: String,
     wire_prompt: String,
     stage: Stage,
     prompt_name: Option<String>,
-    client_message_id: Option<String>,
+    client_message_id: String,
     followup: Option<Followup>,
 }
 
@@ -267,7 +269,7 @@ impl SessionService<'_> {
         let driver = self.require_live(session_id).await?;
 
         let nonce = self
-            .reserve_turn(session_id, client_message_id, &ctx)
+            .reserve_turn(session_id, client_message_id, &ctx, false)
             .await?;
         // A session someone is still talking to belongs back in the list.
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
@@ -307,7 +309,7 @@ impl SessionService<'_> {
         let driver = self.require_live(session_id).await?;
         self.runtime
             .session_actors
-            .reserve_user_turn(session_id, turn.nonce.clone(), None, turn.author)
+            .reserve_user_turn(session_id, turn.nonce.clone(), None, turn.author, false)
             .await?;
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
         if let Err(e) = blocking(move || db.set_session_archived(&id, false)).await {
@@ -330,15 +332,22 @@ impl SessionService<'_> {
         session_id: &str,
         client_message_id: Option<&str>,
         ctx: &SendContext,
+        replay: bool,
     ) -> Result<Option<String>> {
-        if ctx.base_rev.is_none() && ctx.author.is_none() {
+        if ctx.base_rev.is_none() && ctx.author.is_none() && !replay {
             return Ok(None);
         }
         let nonce =
             client_message_id.map_or_else(|| uuid::Uuid::new_v4().to_string(), str::to_string);
         self.runtime
             .session_actors
-            .reserve_user_turn(session_id, nonce.clone(), ctx.base_rev, ctx.author.clone())
+            .reserve_user_turn(
+                session_id,
+                nonce.clone(),
+                ctx.base_rev,
+                ctx.author.clone(),
+                replay,
+            )
             .await?;
         Ok(Some(nonce))
     }
@@ -1183,6 +1192,14 @@ impl SessionService<'_> {
         self.stage_start_effects(&workstream, stage, &attached_docs, &input)
             .await;
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
+        let client_message_id =
+            client_message_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let first_turn = FirstTurnRecord {
+            text: wire_prompt.clone(),
+            prompt_name: prompt_name.clone(),
+            client_message_id: client_message_id.clone(),
+        };
+        let requested = (model.clone(), effort.clone());
 
         let parent_terminal = lineage.parent_terminal.clone();
         let session = {
@@ -1197,6 +1214,10 @@ impl SessionService<'_> {
             let db = self.runtime.db.clone();
             blocking(move || {
                 let mut session = db.insert_session(new)?;
+                // A retry of a start that never launched runs what was asked for, not the harness default.
+                db.set_session_model(&session.id, requested.0.as_deref())?;
+                db.set_session_effort(&session.id, requested.1.as_deref())?;
+                db.set_session_first_turn(&session.id, &first_turn)?;
                 if lineage.origin != SessionOrigin::User || lineage.parent_session_id.is_some() {
                     db.set_session_lineage(
                         &session.id,
@@ -1255,9 +1276,35 @@ impl SessionService<'_> {
         author: Option<ClientRef>,
     ) -> Result<()> {
         let (launch, first) = params.into_parts();
+        let driver = match self.launch_driver(launch).await {
+            Ok(driver) => driver,
+            Err(e) => {
+                self.record_failed_start(&first, &e.to_string()).await;
+                return Err(e);
+            }
+        };
         let session_id = first.session_id.clone();
-        let driver = self.launch_driver(launch).await?;
-        let Some((mut rx, followup)) = self.send_first_turn(&driver, first, &author).await? else {
+        let record = first.clone();
+        let conversed = self.converse(&driver, first, author, false).await;
+        if let Err(e) = &conversed {
+            // A harness left without its first turn would sit idle under a failed row.
+            self.kill_for_relaunch(&session_id).await;
+            self.record_failed_start(&record, &e.to_string()).await;
+        }
+        conversed
+    }
+
+    /// Sends the first turn, then the follow-up its stage asks for once that turn ends.
+    async fn converse(
+        &self,
+        driver: &Arc<dyn AgentDriver>,
+        first: FirstTurn,
+        author: Option<ClientRef>,
+        replay: bool,
+    ) -> Result<()> {
+        let session_id = first.session_id.clone();
+        let Some((mut rx, followup)) = self.send_first_turn(driver, first, &author, replay).await?
+        else {
             return Ok(());
         };
         if let Some(turn) =
@@ -1266,6 +1313,17 @@ impl SessionService<'_> {
             self.send_followup(&session_id, turn, author).await;
         }
         Ok(())
+    }
+
+    /// A prepared start whose client left before asking for the launch.
+    pub async fn fail_unlaunched(&self, params: LaunchAndConverseParams, reason: &str) {
+        let (launch, first) = params.into_parts();
+        // A goal's or an agent's start is discarded when it fails, as `start_detached` and goals do.
+        if launch.session.origin != SessionOrigin::User {
+            self.discard_unlaunched(&launch.session).await;
+            return;
+        }
+        self.record_failed_start(&first, reason).await;
     }
 
     /// Launches and sends the first turn before returning, so a waiter never sees the session idle before it; only the follow-up runs on.
@@ -1283,7 +1341,8 @@ impl SessionService<'_> {
                 return Err(e);
             }
         };
-        let Some((mut rx, followup)) = self.send_first_turn(&driver, first, &author).await? else {
+        let Some((mut rx, followup)) = self.send_first_turn(&driver, first, &author, false).await?
+        else {
             return Ok(());
         };
         let runtime = self.runtime.handle.clone();
@@ -1309,6 +1368,7 @@ impl SessionService<'_> {
         driver: &Arc<dyn AgentDriver>,
         first: FirstTurn,
         author: &Option<ClientRef>,
+        replay: bool,
     ) -> Result<Option<(broadcast::Receiver<SessionEvent>, Followup)>> {
         let FirstTurn {
             session_id,
@@ -1317,6 +1377,7 @@ impl SessionService<'_> {
             prompt_name,
             client_message_id,
             followup,
+            ..
         } = first;
         let op_lock = self.op_lock(&session_id).await;
         let turns = followup.as_ref().map(|_| driver.subscribe());
@@ -1327,7 +1388,7 @@ impl SessionService<'_> {
                 author: author.clone(),
             };
             let nonce = self
-                .reserve_turn(&session_id, client_message_id.as_deref(), &ctx)
+                .reserve_turn(&session_id, Some(&client_message_id), &ctx, replay)
                 .await?;
             if matches!(followup, Some(Followup::CodexExecute(_))) {
                 driver.set_collab_mode(Some(CollabMode::Plan));
@@ -1336,11 +1397,57 @@ impl SessionService<'_> {
                 &wire_prompt,
                 Some(stage.as_str()),
                 prompt_name.as_deref(),
-                nonce.as_deref().or(client_message_id.as_deref()),
+                nonce.as_deref().or(Some(&client_message_id)),
             )
         };
         first_send?;
         Ok(turns.zip(followup))
+    }
+
+    /// No harness ran to echo the prompt or report the exit, so both are stored here.
+    async fn record_failed_start(&self, first: &FirstTurn, reason: &str) {
+        let prompt = SessionEvent::UserMessage {
+            text: first.wire_prompt.clone(),
+            stage: Some(first.stage.as_str().to_string()),
+            prompt_name: first.prompt_name.clone(),
+            client_message_id: Some(first.client_message_id.clone()),
+            author: None,
+        };
+        let ingress = self.runtime.session_actors.ingress(&first.session_id).await;
+        let mut sent = ingress.send(prompt.clone()).await.is_ok();
+        if sent {
+            sent = ingress.send(failed_start(reason)).await.is_ok();
+        }
+        if sent {
+            return;
+        }
+        // No actor to store it: the row and log still have to say the start failed.
+        let (db, id, reason) = (
+            self.runtime.db.clone(),
+            first.session_id.clone(),
+            reason.to_string(),
+        );
+        if let Err(e) = blocking(move || db.append_failed_start(&id, Some(prompt), &reason)).await {
+            tracing::warn!(
+                "session {}: its failed start was not recorded: {e}",
+                first.session_id
+            );
+        }
+    }
+
+    async fn record_failed_exit(&self, session_id: &str, reason: &str) {
+        let ingress = self.runtime.session_actors.ingress(session_id).await;
+        if ingress.send(failed_start(reason)).await.is_ok() {
+            return;
+        }
+        let (db, id, why) = (
+            self.runtime.db.clone(),
+            session_id.to_string(),
+            reason.to_string(),
+        );
+        if let Err(e) = blocking(move || db.append_failed_start(&id, None, &why)).await {
+            tracing::warn!("session {session_id}: its failed retry was not recorded: {e}");
+        }
     }
 
     async fn send_followup(&self, session_id: &str, turn: FollowupTurn, author: Option<ClientRef>) {
@@ -1362,7 +1469,101 @@ impl SessionService<'_> {
     }
 
     pub async fn launch(&self, params: LaunchSessionParams) -> Result<()> {
-        self.launch_driver(params).await.map(|_| ())
+        let unsent = if params.resume && params.session.provider_session_id.is_none() {
+            self.unsent_first_turn(&params.session).await
+        } else {
+            None
+        };
+        let session_id = params.session.id.clone();
+        let driver = match self.launch_driver(params).await {
+            Ok(driver) => driver,
+            Err(e) => {
+                // A failed start's retry failing too is recorded like the start, so it survives a reload.
+                if unsent.is_some() {
+                    self.record_failed_exit(&session_id, &e.to_string()).await;
+                }
+                return Err(e);
+            }
+        };
+        if let Some(first) = unsent {
+            // Callers hold the op lock across the launch, and the first send takes it.
+            let runtime = self.runtime.handle.clone();
+            tokio::spawn(async move {
+                let Some(runtime) = runtime.upgrade() else {
+                    return;
+                };
+                let session_id = first.session_id.clone();
+                let replayed = runtime
+                    .sessions()
+                    .converse(&driver, first, None, true)
+                    .await;
+                if let Err(e) = replayed {
+                    tracing::warn!(
+                        "session {session_id}: its unsent first turn was not replayed: {e}"
+                    );
+                }
+            });
+        }
+        Ok(())
+    }
+
+    /// The first turn a start that failed before any init still owes its harness, follow-up included.
+    async fn unsent_first_turn(&self, session: &Session) -> Option<FirstTurn> {
+        let (db, id) = (self.runtime.db.clone(), session.id.clone());
+        let (log, stored) =
+            blocking(move || Ok((db.session_log(&id)?, db.session_first_turn(&id)?)))
+                .await
+                .ok()?;
+        if log
+            .iter()
+            .any(|e| matches!(e.event, SessionEvent::Init { .. }))
+        {
+            return None;
+        }
+        // No failed exit means a harness is still coming up with the prompt, as in a restart before its init.
+        let failed = log.iter().rev().find_map(|e| match &e.event {
+            SessionEvent::Exited { outcome, .. } => Some(*outcome),
+            _ => None,
+        });
+        if !matches!(
+            failed,
+            Some(ExitOutcome::SpawnFailed | ExitOutcome::Crashed)
+        ) {
+            return None;
+        }
+        // The log's turn, not the one stored at start: a rewind may have replaced it.
+        let turn = log
+            .into_iter()
+            .find_map(|e| match e.event {
+                SessionEvent::UserMessage {
+                    text,
+                    prompt_name,
+                    client_message_id,
+                    ..
+                } => Some(FirstTurnRecord {
+                    text,
+                    prompt_name,
+                    client_message_id: client_message_id
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                }),
+                _ => None,
+            })
+            .or(stored)?;
+        let workstream = self
+            .runtime
+            .workstreams()
+            .find(&session.workstream_id)
+            .await
+            .ok()?;
+        let bodies = self.action_prompt_bodies(session.stage, &workstream).await;
+        Some(FirstTurn {
+            session_id: session.id.clone(),
+            wire_prompt: turn.text,
+            stage: session.stage,
+            prompt_name: turn.prompt_name,
+            client_message_id: turn.client_message_id,
+            followup: followup::followup_for(session.harness, session.stage, &bodies),
+        })
     }
 
     /// For a caller holding the op lock: launches only when no harness is live, as `ResumeSession` does; `None` means one was.
@@ -1491,10 +1692,17 @@ impl SessionService<'_> {
         };
 
         let workflow = WorkflowChannel::new();
-        self.runtime
+        if let Err(e) = self
+            .runtime
             .session_actors
             .set_workflow(&session_id, workflow.clone())
-            .await?;
+            .await
+        {
+            // No relay runs yet, so nothing else would take the harness out of the registry.
+            self.runtime.session_registry.remove(&session_id).await;
+            driver.kill();
+            return Err(e);
+        }
 
         if has_history {
             if params.boundary_on_relaunch {
@@ -1702,7 +1910,9 @@ impl SessionService<'_> {
                     allowed_tools,
                     disallowed_tools,
                     add_dirs,
-                    resume: resume.then(|| session.id.clone()),
+                    // Without an init claude never wrote the conversation, and `--resume` would fail.
+                    resume: (resume && session.provider_session_id.is_some())
+                        .then(|| session.id.clone()),
                     fork: false,
                     max_budget_usd: *max_budget_usd,
                     model,
@@ -1854,4 +2064,12 @@ fn spawn_relay(
             }
         }
     });
+}
+
+fn failed_start(reason: &str) -> SessionEvent {
+    SessionEvent::Exited {
+        outcome: ExitOutcome::SpawnFailed,
+        code: None,
+        stderr_tail: reason.to_string(),
+    }
 }

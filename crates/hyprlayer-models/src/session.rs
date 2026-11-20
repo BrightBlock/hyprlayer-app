@@ -350,6 +350,9 @@ pub struct Session {
     /// The session this one came from: its spawning agent, or the implement session a validation checks.
     #[serde(default)]
     pub parent_session_id: Option<String>,
+    /// What it launched with, or was asked to start on; a retry of a failed start shows it.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 impl Session {
@@ -562,6 +565,7 @@ mod tests {
             goal: None,
             origin: SessionOrigin::User,
             parent_session_id: None,
+            effort: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

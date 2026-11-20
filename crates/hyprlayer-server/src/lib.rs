@@ -578,6 +578,7 @@ where
 
     let out = Outbound::new(features);
     clients.register(conn, out.clone());
+    streams::open_connection(&server, conn);
     let writer_task = tokio::spawn({
         let out = out.clone();
         async move {
@@ -594,6 +595,7 @@ where
     };
 
     let result = read_requests(conn, peer, &mut reader, &server, &out, &stop, &streams).await;
+    streams::fail_abandoned_launches(&server, conn).await;
     let left = clients.unregister(conn);
     clients.send_viewers(&left);
     result.map(Some)
@@ -758,6 +760,10 @@ async fn read_requests<R: AsyncRead + Unpin>(
             Control::Request { id, body } => {
                 requests += 1;
                 announce(body.command());
+                // Before the read loop can see this connection close and fail the start.
+                if let crate::rpc::Request::LaunchAndConverse { session_id } = &body {
+                    streams::claim_pending_launch(server, session_id);
+                }
                 let server = server.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {

@@ -493,6 +493,10 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   }
   // A decline can land after the turn it missed has ended.
   if (event.kind === "commandLifecycle" && handedBack) flushQueuedMessage(sessionId);
+  // The launch usually started OpenCode, so a refetch drops the ids its registry no longer serves.
+  if (event.kind === "exited" && event.outcome === "spawn_failed" && current.harness === "opencode") {
+    void queryClient.invalidateQueries({ queryKey: ["opencode-catalog"] });
+  }
   if (event.kind === "exited") endStream(sessionId, current.workstreamId);
 }
 
@@ -1133,6 +1137,24 @@ export async function retryAfterSignIn(sessionId: string): Promise<void> {
   // The goal loop owns its prompts; resuming the goal sends the next one.
   if (stopped && stopped.promptName !== GOAL_PROMPT) {
     await sendMessage(sessionId, stopped.text, stopped.attachments, stopped.promptName);
+  }
+}
+
+/** The retry runs on the model the tab shows; the stored one may be the stale id the start failed on. */
+export async function retryFailedStart(
+  sessionId: string,
+  model: string | null,
+  effort: string | null,
+): Promise<void> {
+  if (model) await unwrap(commands.setSessionModel(sessionId, model));
+  if (effort) await unwrap(commands.setSessionEffort(sessionId, effort));
+  try {
+    await resumeSession(sessionId);
+  } catch (e) {
+    // A refused retry leaves the start failed, as the server records it; idle would offer Send.
+    const latest = entryOf(sessionId);
+    if (latest) setEntry(sessionId, { ...latest, live: false, state: "spawn_failed" });
+    throw e;
   }
 }
 

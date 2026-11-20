@@ -77,6 +77,7 @@ pub(crate) enum Control {
         client_message_id: String,
         base_rev: Option<u64>,
         author: Option<ClientRef>,
+        replay: bool,
         reply: oneshot::Sender<Result<()>>,
     },
     ReleaseUserTurn {
@@ -245,6 +246,7 @@ impl ActorHandle {
         client_message_id: String,
         base_rev: Option<u64>,
         author: Option<ClientRef>,
+        replay: bool,
     ) -> Result<()> {
         let (reply, reply_rx) = oneshot::channel();
         self.control
@@ -252,6 +254,7 @@ impl ActorHandle {
                 client_message_id,
                 base_rev,
                 author,
+                replay,
                 reply,
             })
             .map_err(|_| actor_gone())?;
@@ -390,8 +393,8 @@ async fn run(
                         state.end_kept_streams().await;
                         let _ = reply.send(());
                     }
-                    Some(Control::ReserveUserTurn { client_message_id, base_rev, author, reply }) => {
-                        let _ = reply.send(state.reserve(client_message_id, base_rev, author));
+                    Some(Control::ReserveUserTurn { client_message_id, base_rev, author, replay, reply }) => {
+                        let _ = reply.send(state.reserve(client_message_id, base_rev, author, replay));
                     }
                     Some(Control::ReleaseUserTurn { client_message_id }) => {
                         state.release_reservation(&client_message_id);
@@ -872,6 +875,9 @@ impl ActorState {
             }
         }
 
+        let replayed = matches!(&event, SessionEvent::UserMessage { client_message_id: Some(id), .. }
+            if self.reservations.get(id).is_some_and(|r| r.replay));
+        let ephemeral = ephemeral || replayed;
         let author = self.author_for(&event);
         if let SessionEvent::UserMessage {
             author: stamped, ..
@@ -1144,6 +1150,8 @@ impl ActorState {
 struct Reservation {
     author: Option<ClientRef>,
     at: tokio::time::Instant,
+    /// Resends a user row the log already holds, which its echo must not store again.
+    replay: bool,
 }
 
 // A UserMessage the relay dropped on lag never releases its slot.
@@ -1186,6 +1194,7 @@ impl ActorState {
         id: String,
         base_rev: Option<u64>,
         author: Option<ClientRef>,
+        replay: bool,
     ) -> Result<()> {
         let foreign = self.foreign_rev(client_id(&author));
         if let Some(base_rev) = base_rev.filter(|base| *base < foreign) {
@@ -1201,6 +1210,7 @@ impl ActorState {
             Reservation {
                 author,
                 at: tokio::time::Instant::now(),
+                replay,
             },
         );
         Ok(())
@@ -1343,8 +1353,9 @@ fn row_mutation_for(event: &SessionEvent) -> SessionRowMutation {
             provider_session_id: FieldOp::Set(provider_session_id.clone()),
             model: model.clone().map(FieldOp::Set).unwrap_or(FieldOp::Clear),
             state: FieldOp::Set(SessionState::Running),
-            // A resumed harness is live again, so an earlier end no longer holds.
+            // A resumed harness is live again, so an earlier end and its reason no longer hold.
             ended_at: FieldOp::Clear,
+            exit_summary: FieldOp::Clear,
             ..Default::default()
         },
         SessionEvent::PermissionAsk { .. } => SessionRowMutation {

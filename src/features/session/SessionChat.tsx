@@ -31,7 +31,7 @@ import {
   useSyncClaudeModels,
   useWorkstreamSessions,
 } from "@/lib/queries";
-import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
+import type { CustomPrompt, Harness, WorkstreamView } from "@/lib/bindings";
 import { chipLabel, WorkstreamDocChips } from "@/features/workstreams/WorkstreamDocChips";
 import { PromptChips, usePinnedPrompts } from "@/features/prompts/PromptChips";
 import {
@@ -53,6 +53,7 @@ import { consumeComposerFocus, useComposerFocusStore } from "./workstreamTabs";
 import type { ShellTab } from "./workstreamTabs";
 import { MODE_STYLES, asStageKey, nextModeStage, suggestedDocKind, type StageKey } from "@/lib/domain/stages";
 import {
+  claudeModelKey,
   claudeModels,
   codexEfforts,
   effectiveEffort,
@@ -113,6 +114,7 @@ import {
   restoreSessionIfNeeded,
   resumeSession,
   retryAfterSignIn,
+  retryFailedStart,
   rewindToMessage,
   sendMessage,
   startSession,
@@ -128,6 +130,7 @@ import { dismissHeld, noteComposerInput, setDivider, syncOf, useTranscriptSync }
 import { canSend } from "./transcriptSync";
 import { pendingCount, sentenceDevice, SyncComposerNotice, syncNotice } from "./SyncComposerNotice";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
+import { retryWrites } from "./retryPick";
 import {
   buildQuestionAnswers,
   describeState,
@@ -135,6 +138,7 @@ import {
   isTerminal,
   isWorking,
   openAuthPrompt,
+  resumesOnSight,
   type PendingQuestion,
 } from "./transcript";
 import {
@@ -617,6 +621,14 @@ export function SessionChat({
 
   const started = Boolean(shell.sessionId);
   const hasEntry = Boolean(session);
+  const startedRow = useWorkstreamSessions(workstreamId, Boolean(shell.sessionId)).data?.find(
+    (s) => s.id === shell.sessionId,
+  );
+  // Its model can still change: the retry runs on what the picker shows.
+  const failedStart = session?.state === "spawn_failed";
+  // Without a pick on this tab, a failed start shows the model and effort its row will retry on.
+  const failedRow = failedStart ? startedRow : undefined;
+  const rowFor = (h: Harness) => (failedRow?.harness === h ? failedRow : undefined);
   const mode = asStageKey(shell.mode);
   const cycleStageChord = effectiveChord(
     useBootstrap().data?.settings.keybindings?.overrides ?? {},
@@ -632,8 +644,18 @@ export function SessionChat({
     !claudeProbe.isPending || claudeProbe.fetchStatus === "paused",
     Boolean(claudeProbe.data?.models.length),
   );
-  const model = modelOption(shell.model ?? claudeDefaults?.defaultModel ?? undefined, claudeCatalog);
-  const effort = effectiveEffort(shell.effort ?? claudeDefaults?.defaultEffort ?? undefined, model);
+  const claudeRowModel = rowFor("claude")?.model;
+  const model = modelOption(
+    shell.model ??
+      (claudeRowModel ? claudeModelKey(claudeRowModel, claudeCatalog) : undefined) ??
+      claudeDefaults?.defaultModel ??
+      undefined,
+    claudeCatalog,
+  );
+  const effort = effectiveEffort(
+    shell.effort ?? rowFor("claude")?.effort ?? claudeDefaults?.defaultEffort ?? undefined,
+    model,
+  );
   const claudeEffortItems = effortsForModel(model);
   const permissionMode = permissionModeOption(
     shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
@@ -648,9 +670,7 @@ export function SessionChat({
   const codexInstalled = (bootstrap?.binaries ?? []).some(
     (b) => b.kind === "codex" && b.state.state === "ok",
   );
-  const startedHarness = useWorkstreamSessions(workstreamId, Boolean(shell.sessionId)).data?.find(
-    (s) => s.id === shell.sessionId,
-  )?.harness;
+  const startedHarness = startedRow?.harness;
   const harness = harnessOption(
     startedHarness ??
       shell.harness ??
@@ -671,7 +691,8 @@ export function SessionChat({
   const ocUsable = (id: string | null | undefined) =>
     id != null && ocKnown != null && !ocKnown.has(id) ? null : id;
   const ocModels = ocKnown ? ocSelected.filter((id) => ocKnown.has(id)) : ocSelected;
-  const ocModel = firstSupportedOpencodeModel(
+  const ocRowModel = shell.opencodeModel == null ? rowFor("opencode")?.model : null;
+  const ocModel = ocRowModel ?? firstSupportedOpencodeModel(
     ocUsable(shell.opencodeModel),
     ocUsable(opencodeDefaults?.defaultModel),
     ollamaDefaults?.defaultModel,
@@ -683,14 +704,15 @@ export function SessionChat({
     codexDefaults?.selectedModels,
     codexCatalog.data?.models ?? [],
   );
-  const codexModel = shell.codexModel ?? codexDefaults?.defaultModel ?? codexModels[0] ?? null;
+  const codexModel =
+    shell.codexModel ?? rowFor("codex")?.model ?? codexDefaults?.defaultModel ?? codexModels[0] ?? null;
   const codexSupportedEfforts = useMemo(
     () => codexCatalog.data?.models.find((m) => m.id === codexModel)?.supportedEfforts,
     [codexCatalog.data, codexModel],
   );
   const codexEffortItems = codexEfforts(codexSupportedEfforts);
   const codexEffort = resolveCodexEffort(
-    shell.codexEffort ?? codexDefaults?.defaultEffort,
+    shell.codexEffort ?? rowFor("codex")?.effort ?? codexDefaults?.defaultEffort,
     codexSupportedEfforts,
   );
   const startModelFlag = usingOpencode ? ocModel : usingCodex ? codexModel : model.flag;
@@ -867,7 +889,7 @@ export function SessionChat({
     // open was stopped on purpose (here or on another device), and every open
     // window relaunching it would race to spawn duplicate harnesses.
     autoResumeDecidedRef.current = shell.sessionId;
-    if (!isTerminal(session.state) || shell.frozen) return;
+    if (!resumesOnSight(session.state) || shell.frozen) return;
     setError(null);
     setResuming(true);
     void resumeSession(shell.sessionId)
@@ -1487,7 +1509,7 @@ export function SessionChat({
     controlsKey(workstreamId, shell.id),
     {
       harness: harness.key,
-      interactive: !terminal,
+      interactive: !terminal || failedStart,
       model: {
         // The live catalog labels its default model "Default"; name the model it resolves to.
         label:
@@ -1636,7 +1658,15 @@ export function SessionChat({
                       setError(null);
                       setResuming(true);
                       try {
-                        await resumeSession(sid);
+                        if (failedStart) {
+                          const writes = retryWrites(harness.key, shell, {
+                            model: startModelFlag,
+                            effort: startEffort,
+                          });
+                          await retryFailedStart(sid, writes.model, writes.effort);
+                        } else {
+                          await resumeSession(sid);
+                        }
                       } catch (e) {
                         setError(errorMessage(e));
                       } finally {
