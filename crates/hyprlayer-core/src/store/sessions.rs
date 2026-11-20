@@ -520,6 +520,17 @@ impl Db {
         })
     }
 
+    /// A row whose harness the app detached for good: idle like a settled one, with an end time.
+    pub fn settle_session(&self, id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET state = ?2, ended_at = ?3 WHERE id = ?1",
+                params![id, SessionState::Idle.as_str(), now_ms()],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Rows a previous server left mid-turn; their harnesses died with it.
     pub fn settle_stale_sessions(&self) -> Result<usize> {
         self.with(|conn| {

@@ -1,0 +1,98 @@
+{
+  "scenario": "archive_ends_sessions",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "live": true,
+            "state": "running"
+          },
+          "guard": "the turn completes and the harness stays up",
+          "ok": true
+        }
+      ],
+      "step": "run a session to the end of its turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "live": false,
+            "outcome": "detached"
+          },
+          "guard": "archive stops the harness",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": true,
+            "state": "idle",
+            "working": false
+          },
+          "guard": "the row rests idle, with an end time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rows": 3,
+            "unchanged": true
+          },
+          "guard": "archive adds nothing to the log",
+          "ok": true
+        }
+      ],
+      "step": "archive the workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "status": "active"
+          },
+          "guard": "the workstream comes back active",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "live": false,
+            "log_unchanged": true
+          },
+          "guard": "the restored session rests idle until the next send",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launches": 2,
+            "resumes_own": true
+          },
+          "guard": "the relaunch resumes the archived conversation",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": false,
+            "live": true,
+            "state": "running"
+          },
+          "guard": "the resumed session answers and is no longer ended",
+          "ok": true
+        }
+      ],
+      "step": "restore and resume"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "listening": false
+          },
+          "guard": "shutdown stops the server cleanly",
+          "ok": true
+        }
+      ],
+      "step": "shutdown"
+    }
+  ]
+}

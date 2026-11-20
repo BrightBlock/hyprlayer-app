@@ -770,23 +770,42 @@ impl SessionService<'_> {
         if let Some(driver) = self.runtime.session_registry.get(session_id).await {
             tracing::info!("session {session_id}: stopping its harness to relaunch it");
             driver.kill_detached();
-            let mut waited_ms = 0u64;
-            while self
+            self.await_exit(session_id).await;
+        }
+    }
+
+    /// Detached so the log stays clean; the actor then settles the row idle with an end time.
+    pub(crate) async fn end_quietly_and_await_exit(&self, session_id: &str) {
+        if let Some(driver) = self.runtime.session_registry.get(session_id).await {
+            tracing::info!("session {session_id}: ending its harness");
+            if let Err(e) = self
                 .runtime
-                .session_registry
-                .get(session_id)
+                .session_actors
+                .settle_on_detach(session_id)
                 .await
-                .is_some()
-                && waited_ms < 10_000
             {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                waited_ms += 50;
+                tracing::warn!("session {session_id}: its row keeps the harness's last state: {e}");
             }
-            if waited_ms >= 10_000 {
-                tracing::warn!(
-                    "session {session_id}: the harness had not exited after 10s; relaunching anyway"
-                );
-            }
+            driver.kill_detached();
+            self.await_exit(session_id).await;
+        }
+    }
+
+    async fn await_exit(&self, session_id: &str) {
+        let mut waited_ms = 0u64;
+        while self
+            .runtime
+            .session_registry
+            .get(session_id)
+            .await
+            .is_some()
+            && waited_ms < 10_000
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            waited_ms += 50;
+        }
+        if waited_ms >= 10_000 {
+            tracing::warn!("session {session_id}: the harness had not exited after 10s");
         }
     }
 

@@ -67,6 +67,9 @@ pub(crate) enum Control {
     KeepStreamsAcrossExit {
         reply: oneshot::Sender<()>,
     },
+    SettleOnDetach {
+        reply: oneshot::Sender<()>,
+    },
     EndKeptStreams {
         reply: oneshot::Sender<()>,
     },
@@ -221,6 +224,14 @@ impl ActorHandle {
         reply_rx.await.map_err(|_| actor_gone())
     }
 
+    pub(crate) async fn settle_on_detach(&self) -> Result<()> {
+        let (reply, reply_rx) = oneshot::channel();
+        self.control
+            .send(Control::SettleOnDetach { reply })
+            .map_err(|_| actor_gone())?;
+        reply_rx.await.map_err(|_| actor_gone())
+    }
+
     pub(crate) async fn end_kept_streams(&self) -> Result<()> {
         let (reply, reply_rx) = oneshot::channel();
         self.control
@@ -371,6 +382,10 @@ async fn run(
                         state.keep_streams = true;
                         let _ = reply.send(());
                     }
+                    Some(Control::SettleOnDetach { reply }) => {
+                        state.settle_on_detach = true;
+                        let _ = reply.send(());
+                    }
                     Some(Control::EndKeptStreams { reply }) => {
                         state.end_kept_streams().await;
                         let _ = reply.send(());
@@ -444,6 +459,8 @@ struct ActorState {
     keep_streams: bool,
     /// A detach was kept from the streams, which now wait on the relaunch.
     streams_kept: bool,
+    /// The next detach relaunches nothing, so its row must stop claiming a live harness.
+    settle_on_detach: bool,
 }
 
 #[derive(Default)]
@@ -501,6 +518,7 @@ impl ActorState {
             in_flight: InFlightText::default(),
             keep_streams: false,
             streams_kept: false,
+            settle_on_detach: false,
         }
     }
 
@@ -830,6 +848,7 @@ impl ActorState {
         let exited = matches!(event, SessionEvent::Exited { .. });
         let kept_streams = exited && std::mem::take(&mut self.keep_streams) && unreportable_exit;
         self.streams_kept = kept_streams;
+        let settle = exited && std::mem::take(&mut self.settle_on_detach) && unreportable_exit;
         log_lifecycle(&self.session_id, &event);
 
         // Nothing is persisted for a detach, so the row mutation that clears
@@ -837,9 +856,17 @@ impl ActorState {
         if unreportable_exit {
             let db = self.db.clone();
             let sid = self.session_id.clone();
-            if let Err(e) = blocking(move || db.clear_orphans_for(&sid)).await {
+            let written = blocking(move || {
+                db.clear_orphans_for(&sid)?;
+                if settle {
+                    db.settle_session(&sid)?;
+                }
+                Ok(())
+            })
+            .await;
+            if let Err(e) = written {
                 tracing::warn!(
-                    "session {}: could not clear its orphan record: {e}",
+                    "session {}: its detach was not recorded: {e}",
                     self.session_id
                 );
             }
@@ -1316,6 +1343,8 @@ fn row_mutation_for(event: &SessionEvent) -> SessionRowMutation {
             provider_session_id: FieldOp::Set(provider_session_id.clone()),
             model: model.clone().map(FieldOp::Set).unwrap_or(FieldOp::Clear),
             state: FieldOp::Set(SessionState::Running),
+            // A resumed harness is live again, so an earlier end no longer holds.
+            ended_at: FieldOp::Clear,
             ..Default::default()
         },
         SessionEvent::PermissionAsk { .. } => SessionRowMutation {

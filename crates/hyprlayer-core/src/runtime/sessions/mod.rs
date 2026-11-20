@@ -167,6 +167,13 @@ impl SessionActors {
         }
     }
 
+    pub(crate) async fn settle_on_detach(&self, session_id: &str) -> Result<()> {
+        match self.handles.lock().await.get(session_id) {
+            Some(handle) => handle.settle_on_detach().await,
+            None => Ok(()),
+        }
+    }
+
     pub(crate) async fn end_kept_streams(&self, session_id: &str) -> Result<()> {
         match self.handles.lock().await.get(session_id) {
             Some(handle) => handle.end_kept_streams().await,

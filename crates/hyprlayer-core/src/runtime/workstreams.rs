@@ -1392,7 +1392,7 @@ impl WorkstreamService<'_> {
         for session in &sessions {
             self.runtime
                 .sessions()
-                .kill_and_await_exit(&session.id)
+                .end_quietly_and_await_exit(&session.id)
                 .await;
         }
         self.runtime.terminals.remove_for_workstream(&id).await;
