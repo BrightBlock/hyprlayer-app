@@ -79,6 +79,7 @@ It kills only the process tree under the recorded pnpm pid. For isolated runs it
 
 ## Gotchas
 
+- An isolated profile does not isolate OpenCode's own config. Setting OpenCode's default model in Settings writes the user's global `~/.config/opencode/opencode.json` (`model`), and a run of an older `opencode` binary with the real `HOME` re-pins `~/.config/opencode/package.json`. Copy both into the evidence dir before touching OpenCode settings and restore them before cleanup; pick the model per session in the status bar instead of changing the default where you can.
 - Plain `tauri dev` uses the release identifier, so single-instance forwards to the user's app and the dev build exits 0 with an empty log. Always pass a config; the helper does.
 - `tauri dev` doesn't rebuild the externalBin sidecar. After a server change, run `node scripts/build-server-sidecar.mjs --debug` first, or the stale sidecar overwrites `target/debug/hyprlayer-server` (symptom: `unsupported_command`).
 - The shell exports the release profile's `HYPRLAYER_APP_*` dirs. A hand-run `hyprlayer-server stop` without overriding all three stops the release server. The helper's cleanup sets them.
