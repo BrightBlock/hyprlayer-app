@@ -1696,6 +1696,36 @@ async fn exited_clears_any_reservations_left_in_flight() {
         .expect("Exited must clear any reservations left in flight");
 }
 
+/// An exit is news to every viewer, so it advances rev; it is no turn a send could be stale against.
+#[tokio::test]
+async fn an_exit_bumps_rev_without_making_a_send_stale() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+
+    ingress
+        .send(SessionEvent::Exited {
+            outcome: ExitOutcome::SpawnFailed,
+            code: None,
+            stderr_tail: "no such model".into(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(next_session_revised(&mut events).await.rev, 1);
+    let turns = handle
+        .list_turns("s1", LogCursor::Empty, 100, None)
+        .await
+        .unwrap();
+    assert_eq!(turns.rev, 1);
+    handle
+        .reserve_user_turn("s1", "b1".into(), Some(0), Some(client_ref("client-b")))
+        .await
+        .expect("an exit must not refuse a send from before it");
+}
+
 /// 14a. A rewind must bump rev, set reset_rev, raise the foreign floor, and
 /// emit `SessionReset`. (`restore_after_failed_relaunch`'s half of case 14 is
 /// covered by the extended `cold_rewind_relaunch_failure_restores_the_removed_rows`.)

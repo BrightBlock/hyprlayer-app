@@ -1154,6 +1154,16 @@ export async function retryFailedStart(
     // A refused retry leaves the start failed, as the server records it; idle would offer Send.
     const latest = entryOf(sessionId);
     if (latest) setEntry(sessionId, { ...latest, live: false, state: "spawn_failed" });
+    // The server logs the refusal's exit, but no stream carries it here and an exit moves no rev.
+    const fold = await readAndFold(sessionId, true).catch((read) => {
+      log.warn("session", `reading ${sessionId}'s refused retry failed`, read);
+      return null;
+    });
+    if (fold) {
+      const { view, ...position } = fold.folded;
+      setEntry(sessionId, { ...fold.current, ...view, ...position, live: false, state: "spawn_failed" });
+      foldLoaded(sessionId, fold.read);
+    }
     throw e;
   }
 }
@@ -2187,6 +2197,7 @@ function onRevised(event: SessionRevised): void {
   const queue = held.get(sessionId);
   const selfId = selfClientId();
   const at = rev(event.rev);
+  const committed = syncOf(sessionId)?.committedRev ?? 0;
   syncInput(sessionId, {
     kind: "remote",
     rev: at,
@@ -2198,6 +2209,12 @@ function onRevised(event: SessionRevised): void {
     attached: channels.has(sessionId),
     own: selfId !== null && attributed(event.author)?.clientId === selfId,
   });
+  // An ended view shows no strip to load from. A new rev with no turns is an exit; a turn end repeats its rev.
+  const entry = entryOf(sessionId);
+  const exit = event.turns.length === 0 && at > committed;
+  if (exit && entry && isTerminal(entry.state) && !channels.has(sessionId)) {
+    void pullNow(sessionId);
+  }
 }
 
 function onReset(event: SessionReset): void {

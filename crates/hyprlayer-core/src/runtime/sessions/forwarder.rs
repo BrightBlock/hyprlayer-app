@@ -942,6 +942,11 @@ impl ActorState {
             self.riders.push(RevisedTurn { seq, kind });
         }
         match committed_rev {
+            // An exit tells viewers the session ended; a send is never stale against it.
+            Some(rev) if exited => {
+                self.rev = rev;
+                self.announce_revision(author.clone());
+            }
             Some(rev) => {
                 self.record_commit(rev, &author);
                 self.announce_revision(author.clone());

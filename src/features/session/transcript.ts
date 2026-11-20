@@ -272,6 +272,15 @@ export function hasPendingPermission(view: SessionView): boolean {
   return view.items.some((it) => it.kind === "permission" && it.decision === null);
 }
 
+/** The latest exit card already shows this reason, so a banner would repeat it; a sign-in card shows its remedy instead. */
+export function repeatsLatestExit(items: TranscriptItem[], message: string): boolean {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "exit") return !isAuthExit(it.stderrTail) && it.stderrTail.trim() === message.trim();
+  }
+  return false;
+}
+
 export function isBusy(view: SessionView): boolean {
   if (isTerminal(view.state)) return false;
   return (
@@ -543,7 +552,10 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     case "userMessage": {
       // The sender already shows this turn optimistically; only its own echo is dropped.
       const id = event.clientMessageId;
-      if (id && view.items.some((it) => it.kind === "user" && it.clientMessageId === id)) return view;
+      if (id && view.items.some((it) => it.kind === "user" && it.clientMessageId === id)) {
+        // A retry replays its stored first turn with no optimistic add; the echo is when it starts.
+        return view.streaming ? view : { ...view, streaming: true };
+      }
       return {
         ...view,
         ...appended(

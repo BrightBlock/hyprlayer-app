@@ -15,6 +15,7 @@ import {
   parkedState,
   parseQuestions,
   reduceEvent,
+  repeatsLatestExit,
   resolvePermission,
   resolveQuestion,
   restoredView,
@@ -1463,6 +1464,22 @@ describe("userMessage echo dedupe (clientMessageId)", () => {
     expect(after).toBe(before);
   });
 
+  it("an echo of a row already shown still opens its turn, as a retry's replayed first turn does", () => {
+    const prompt: SessionEvent = { kind: "userMessage", text: "hello", stage: null, clientMessageId: "cmid-1" };
+    let view = reduceAll([
+      prompt,
+      { kind: "exited", outcome: "spawn_failed", code: null, stderrTail: "no such model" },
+      { kind: "relaunched", quiet: true },
+      { kind: "init", claudeSessionId: "c1", model: "m" },
+    ]);
+    expect(isWorking(view)).toBe(false);
+
+    view = reduceEvent(view, prompt);
+
+    expect(isWorking(view)).toBe(true);
+    expect(kinds(view).filter((k) => k === "user")).toHaveLength(1);
+  });
+
   it("replaying a persisted log whose rows all carry ids drops nothing", () => {
     const events: SessionEvent[] = [
       { kind: "userMessage", text: "first", stage: null, clientMessageId: "cmid-a" },
@@ -1472,6 +1489,25 @@ describe("userMessage echo dedupe (clientMessageId)", () => {
     ];
     const view = reduceAll(events, initialSessionView("starting"));
     expect(kinds(view).filter((k) => k === "user")).toHaveLength(2);
+  });
+});
+
+describe("repeatsLatestExit", () => {
+  const exit = (stderrTail: string): SessionEvent => ({ kind: "exited", outcome: "spawn_failed", code: null, stderrTail });
+
+  it("is true when the latest failure card already shows the reason", () => {
+    const view = reduceAll([exit("no such model"), exit("no such model")]);
+    expect(repeatsLatestExit(view.items, "no such model")).toBe(true);
+  });
+
+  it("is false when only an older card shows it, or there is no card", () => {
+    expect(repeatsLatestExit(reduceAll([exit("no such model"), exit("rate limited")]).items, "no such model")).toBe(false);
+    expect(repeatsLatestExit(initialSessionView("idle").items, "no such model")).toBe(false);
+  });
+
+  it("is false for a sign-in failure, whose card shows the remedy instead of the reason", () => {
+    const tail = "Invalid API key · Please run /login";
+    expect(repeatsLatestExit(reduceAll([exit(tail)]).items, tail)).toBe(false);
   });
 });
 

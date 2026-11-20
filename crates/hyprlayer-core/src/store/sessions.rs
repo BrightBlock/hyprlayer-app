@@ -100,8 +100,15 @@ pub(crate) struct SessionRowMutation {
     pub clear_orphans: bool,
 }
 
-/// Kinds whose commit advances `sessions.rev`; migration 11 backfills the same set.
-pub(crate) const REV_KINDS: [&str; 4] = ["userMessage", "assistantText", "toolResult", "rewound"];
+/// Kinds whose commit advances `sessions.rev`. Migration 11 backfilled all but `exited`, which a
+/// viewer with no stream would otherwise never be told of.
+pub(crate) const REV_KINDS: [&str; 5] = [
+    "userMessage",
+    "assistantText",
+    "toolResult",
+    "rewound",
+    "exited",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ApplySessionEventOutcome {

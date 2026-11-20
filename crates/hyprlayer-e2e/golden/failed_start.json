@@ -97,6 +97,20 @@
         },
         {
           "evidence": {
+            "new_rows": [
+              [
+                "exited",
+                "spawn_failed"
+              ]
+            ],
+            "told": true,
+            "watch_moved": true
+          },
+          "guard": "a viewer is told of the refusal's exit and pulls exactly that row",
+          "ok": true
+        },
+        {
+          "evidence": {
             "spawns": [
               "new"
             ]

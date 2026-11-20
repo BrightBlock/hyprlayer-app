@@ -47,7 +47,9 @@ const h = vi.hoisted(() => {
   const notifyNeedsAttention = vi.fn(async () => {});
   const setSessionModel = vi.fn(async () => ({ status: "ok", data: null }));
   const setSessionEffort = vi.fn(async () => ({ status: "ok", data: null }));
+  const listenRevised = vi.fn(async (_cb: (e: { payload: unknown }) => void) => () => {});
   return {
+    listenRevised,
     setSessionModel,
     setSessionEffort,
     notifyNeedsAttention,
@@ -100,6 +102,12 @@ vi.mock("../../lib/bindings", () => ({
     setSessionModel: h.setSessionModel,
     setSessionEffort: h.setSessionEffort,
   },
+  events: {
+    sessionRevised: { listen: h.listenRevised },
+    sessionReset: { listen: async () => () => {} },
+    sessionViewers: { listen: async () => () => {} },
+    serverDisconnected: { listen: async () => () => {} },
+  },
 }));
 
 const {
@@ -132,7 +140,8 @@ const {
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
 const { pullNow } = await import("./sessionStore");
-const { forgetSyncSupport, noteComposerInput, syncInput, syncOf, useTranscriptSync } = await import("./syncStore");
+const { forgetSyncSupport, noteComposerInput, syncInput, syncOf, transcriptSyncBridge, useTranscriptSync } =
+  await import("./syncStore");
 const { log } = await import("@/lib/log");
 
 const INIT: SessionEvent = { kind: "init", claudeSessionId: "c1", model: "m" };
@@ -1316,6 +1325,46 @@ describe("transcript sync: queue and reload", () => {
     vi.restoreAllMocks();
   });
 
+  it("an ended view reads a refused retry's exit as soon as it is told, once", async () => {
+    let revised: ((e: { payload: unknown }) => void) | null = null;
+    h.listenRevised.mockImplementationOnce(async (cb) => {
+      revised = cb;
+      return () => {};
+    });
+    transcriptSyncBridge();
+    const id = await startBusySession();
+    const failed: SessionEvent = { kind: "exited", outcome: "spawn_failed", code: null, stderrTail: "stale" };
+    emitAt(failed, 1, 1, null);
+    h.listSessionTurns.mockResolvedValueOnce(page([row(1, failed), row(2, failed)], 2));
+
+    revised!({ payload: { sessionId: id, workstreamId: "ws1", rev: 2, turns: [], author: null, working: false, at: 0 } });
+
+    await vi.waitFor(() => expect(entryOf(id).items.filter((it) => it.kind === "exit")).toHaveLength(2));
+    await settle();
+    expect(entryOf(id).items.filter((it) => it.kind === "exit")).toHaveLength(2);
+    expect(syncOf(id)?.phase).toBe("inSync");
+  });
+
+  it("an ended view leaves another device's finished turn for a pull it asks for", async () => {
+    let revised: ((e: { payload: unknown }) => void) | null = null;
+    h.listenRevised.mockImplementationOnce(async (cb) => {
+      revised = cb;
+      return () => {};
+    });
+    transcriptSyncBridge();
+    const id = await startBusySession();
+    emitAt({ kind: "exited", outcome: "crashed", code: 1, stderrTail: "boom" }, 1, 1, null);
+    h.listSessionTurns.mockResolvedValue(page([], 2));
+    const told = (rev: number, turns: { seq: number; kind: string }[]) =>
+      revised!({ payload: { sessionId: id, workstreamId: "ws1", rev, turns, author: OTHER, working: false, at: 0 } });
+
+    told(2, [{ seq: 3, kind: "assistant" }]);
+    told(2, []);
+    await settle();
+
+    expect(h.listSessionTurns).not.toHaveBeenCalled();
+  });
+
   it("holds another device's turn on an idle attached view until Pull", async () => {
     const id = await startBusySession();
     emitAt(INIT, 0, 0);
@@ -2062,6 +2111,60 @@ describe("retrying a start that failed", () => {
     const entry = useSessionStore.getState().sessions[id];
     expect(entry?.state).toBe("spawn_failed");
     expect(entry?.live).toBe(false);
+  });
+
+  const PROMPT: SessionEvent = { kind: "userMessage", text: "kick off", stage: "general", clientMessageId: "cm-1" };
+  const row = (seq: number, event: SessionEvent) => ({ seq, kind: event.kind, event, createdAt: 1_700_000_000_000 + seq });
+
+  it("shows the failed exit a refused retry records, without a reload", async () => {
+    const id = await startBusySession();
+    emit(SPAWN_FAILED);
+    let readBack: (log: { status: "ok"; data: unknown[] }) => void = () => {};
+    h.getSessionLog
+      .mockResolvedValueOnce({ status: "ok", data: [row(0, PROMPT), row(1, SPAWN_FAILED)] })
+      .mockImplementationOnce(() => new Promise((resolve) => (readBack = resolve)));
+    const refused = { code: "opencode_model_unavailable", message: "stale", remedy: null };
+    h.resumeSession.mockResolvedValueOnce({ status: "error", error: refused } as never);
+
+    const retry = expect(retryFailedStart(id, null, null)).rejects.toMatchObject({ code: "opencode_model_unavailable" });
+    await vi.waitFor(() => expect(h.getSessionLog).toHaveBeenCalledTimes(2));
+    // The read is in flight: the tab must not offer an idle composer meanwhile.
+    expect(entryOf(id).state).toBe("spawn_failed");
+    readBack({ status: "ok", data: [row(0, PROMPT), row(1, SPAWN_FAILED), row(2, SPAWN_FAILED)] });
+    await retry;
+
+    const entry = entryOf(id);
+    expect(entry.items.filter((it) => it.kind === "exit")).toHaveLength(2);
+    expect(entry.state).toBe("spawn_failed");
+    expect(entry.live).toBe(false);
+  });
+
+  it("times a retry's replayed first turn from its echo, not its first reply", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await startBusySession();
+      emit(SPAWN_FAILED);
+      h.getSessionLog.mockResolvedValueOnce({ status: "ok", data: [row(0, PROMPT), row(1, SPAWN_FAILED)] });
+      let channel: InstanceType<typeof h.FakeChannel> | null = null;
+      h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+        channel = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+        return { status: "ok", data: h.RESUMED };
+      });
+      await retryFailedStart(id, null, null);
+      const send = (event: SessionEvent) => channel?.onmessage?.(item(event));
+
+      send({ kind: "relaunched", quiet: true });
+      send(INIT);
+      send(PROMPT);
+      vi.advanceTimersByTime(3_200);
+      send({ kind: "thinking", text: "an exact reply", parentId: null });
+      send({ kind: "assistantText", text: "VERIFY", parentId: null });
+      send(TURN_DONE);
+
+      expect(entryOf(id).lastTurn?.ms).toBe(3_200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the stored model when the tab shows none, so the harness default never runs", async () => {

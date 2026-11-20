@@ -138,6 +138,7 @@ import {
   isTerminal,
   isWorking,
   openAuthPrompt,
+  repeatsLatestExit,
   resumesOnSight,
   type PendingQuestion,
 } from "./transcript";
@@ -1630,7 +1631,7 @@ export function SessionChat({
 
       <div className="px-4 pb-4 pt-2">
         <div className="mx-auto w-[90%]">
-          {error && (
+          {error && !repeatsLatestExit(session?.items ?? [], error) && (
             <div className="mb-2">
               <ErrorNote error={{ code: "session", message: error, remedy: null }} />
             </div>

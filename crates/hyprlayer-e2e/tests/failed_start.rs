@@ -8,11 +8,15 @@ use std::time::Duration;
 use hyprlayer_core::models::{ExitOutcome, SessionOrigin};
 use hyprlayer_core::pipeline;
 use hyprlayer_core::store::{Db, NewSession};
-use hyprlayer_core::{Harness, SessionEvent, Stage};
+use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
+use hyprlayer_e2e::{
+    events_until, json, text, Journey, Request, RuntimeEvent, Sandbox, Server, Value,
+};
 use hyprlayer_proto::{Outcome, PROTOCOL_VERSION};
 use hyprlayer_server::client::{EventStream, RpcClient};
+use hyprlayer_server::events::TARGETED_EVENTS;
+use hyprlayer_server::rpc::WatchedSession;
 use hyprlayer_server::streams::{StreamRequest, StreamResponse, StreamStartOpts};
 use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
 use tokio::net::UnixStream;
@@ -213,6 +217,31 @@ async fn failed_start() {
         failed.clone(),
     );
     let first_end = ended_at(&mut j, &client, &ws, &missing).await;
+    let viewer = server.connect().await;
+    let mut viewer_events = viewer.take_events().expect("the viewer's runtime events");
+    j.call(
+        &viewer,
+        Request::AnnounceClient {
+            client_id: "e2e-viewer".into(),
+            device: "viewer".into(),
+            capabilities: TARGETED_EVENTS.map(str::to_string).to_vec(),
+        },
+    )
+    .await
+    .expect("announce_client (viewer)");
+    let seen = j
+        .call(&viewer, list_turns(&missing, LogCursor::Empty))
+        .await
+        .expect("list_session_turns (viewer)");
+    let seen_rev = rev_of(&seen);
+    let viewer_cursor: LogCursor = seen
+        .pointer("/nextCursor")
+        .cloned()
+        .and_then(|c| serde_json::from_value(c).ok())
+        .expect("the viewer's cursor");
+    j.call(&viewer, watch(&missing, seen_rev))
+        .await
+        .expect("watch_sessions (viewer)");
     let refused = client
         .resume_session_stream(missing.clone(), None, None, None, None)
         .await
@@ -232,6 +261,47 @@ async fn failed_start() {
             && again["failed"] == true
             && later,
         json!({ "refused": refused, "after": again, "later_end": later }),
+    );
+
+    let revised_past = |e: &RuntimeEvent| {
+        matches!(e, RuntimeEvent::SessionRevised { session_id, rev, .. }
+            if *session_id == missing && *rev > seen_rev)
+    };
+    let told = events_until(&mut viewer_events, IO, revised_past)
+        .await
+        .iter()
+        .any(revised_past);
+    let polled = j
+        .call(&viewer, watch(&missing, seen_rev))
+        .await
+        .expect("watch_sessions (viewer, after)");
+    let polled_rev = polled
+        .as_array()
+        .and_then(|replies| replies.first())
+        .map_or(0, rev_of);
+    let pulled = j
+        .call(&viewer, list_turns(&missing, viewer_cursor))
+        .await
+        .expect("list_session_turns (viewer, after)");
+    let new_rows: Vec<(String, String)> = pulled
+        .pointer("/entries")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .map(|r| (text(r, "/event/kind"), text(r, "/event/outcome")))
+                .collect()
+        })
+        .unwrap_or_default();
+    j.guard(
+        "a viewer is told of the refusal's exit and pulls exactly that row",
+        told && polled_rev > seen_rev
+            && rev_of(&pulled) == polled_rev
+            && new_rows == [("exited".to_string(), "spawn_failed".to_string())],
+        json!({
+            "told": told,
+            "watch_moved": polled_rev > seen_rev,
+            "new_rows": new_rows,
+        }),
     );
     sandbox.install_absent("claude", FAKE_CLAUDE);
     j.call(&client, Request::RedetectBinaries {})
@@ -1010,6 +1080,27 @@ fn turns_with(harness_log: &std::path::Path, prompt: &str) -> usize {
         .lines()
         .filter(|l| l.contains(r#""type":"user""#) && l.contains(prompt))
         .count()
+}
+
+fn watch(session_id: &str, rev: u64) -> Request {
+    Request::WatchSessions {
+        sessions: vec![WatchedSession {
+            session_id: session_id.into(),
+            rev,
+        }],
+    }
+}
+
+fn list_turns(session_id: &str, cursor: LogCursor) -> Request {
+    Request::ListSessionTurns {
+        session_id: session_id.into(),
+        cursor,
+        limit: 100,
+    }
+}
+
+fn rev_of(value: &Value) -> u64 {
+    value.pointer("/rev").and_then(Value::as_u64).unwrap_or(0)
 }
 
 fn event_kinds(events: &[SessionEvent]) -> Vec<&'static str> {
