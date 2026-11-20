@@ -30,12 +30,17 @@ export function registerEventBridge(bridge: EventBridge): void {
 
 const reconnectHandlers: Array<() => void> = [];
 
-export function onServerReconnected(handler: () => void): void {
+/** Returns the unsubscribe, for a handler that lives only as long as a mounted view. */
+export function onServerReconnected(handler: () => void): () => void {
   reconnectHandlers.push(handler);
+  return () => {
+    const i = reconnectHandlers.indexOf(handler);
+    if (i >= 0) reconnectHandlers.splice(i, 1);
+  };
 }
 
 export function notifyServerReconnected(): void {
-  for (const handler of reconnectHandlers) handler();
+  for (const handler of [...reconnectHandlers]) handler();
 }
 
 const missedHandlers: Array<() => void> = [];

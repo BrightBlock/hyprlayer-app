@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use hyprlayer_proto::frame;
+use hyprlayer_proto::{frame, Features};
 use tokio::io::AsyncWrite;
 use tokio::sync::{oneshot, Notify, OwnedSemaphorePermit};
 
@@ -183,7 +183,7 @@ pub enum EventPush {
 }
 
 struct Shared {
-    flow_control: bool,
+    features: Features,
     lanes: Mutex<Lanes>,
     /// Wakes the writer.
     wake: Notify,
@@ -196,9 +196,9 @@ struct Shared {
 pub struct Outbound(Arc<Shared>);
 
 impl Outbound {
-    pub fn new(flow_control: bool) -> Self {
+    pub fn new(features: Features) -> Self {
         Self(Arc::new(Shared {
-            flow_control,
+            features,
             lanes: Mutex::default(),
             wake: Notify::new(),
             room: Notify::new(),
@@ -208,7 +208,12 @@ impl Outbound {
 
     /// Whether the client announced `FLOW_CONTROL`: parts, stream credit, gap markers.
     pub fn flow_control(&self) -> bool {
-        self.0.flow_control
+        self.0.features.flow_control
+    }
+
+    /// Whether the client announced `RAW_TERMINAL`.
+    pub fn raw_terminal(&self) -> bool {
+        self.0.features.raw_terminal
     }
 
     /// `false` once the connection is gone.
@@ -345,7 +350,7 @@ impl Outbound {
                     return None;
                 }
                 let before = lanes.response_bytes;
-                if let Some(unit) = lanes.next_unit(self.0.flow_control) {
+                if let Some(unit) = lanes.next_unit(self.0.features.flow_control) {
                     if before > RESPONSE_QUEUE_BYTES && lanes.response_bytes <= RESPONSE_QUEUE_BYTES
                     {
                         self.0.room.notify_waiters();
@@ -396,7 +401,7 @@ mod tests {
 
     #[test]
     fn an_event_larger_than_the_queue_still_goes_when_the_queue_is_empty() {
-        let out = Outbound::new(true);
+        let out = Outbound::new(Features::ALL);
         let large = index_update(4000);
         assert!(large.len() > EVENT_QUEUE_BYTES);
         for _ in 0..3 {

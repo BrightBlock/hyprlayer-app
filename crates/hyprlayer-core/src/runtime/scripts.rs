@@ -3,8 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine as _;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 use hyprlayer_models::RuntimeEvent;
 
@@ -13,18 +12,14 @@ use crate::process::Exec;
 use crate::repo_settings::{self, ScriptSettings};
 use crate::scripts::{self, ScriptKind};
 use crate::store::Workstream;
-use crate::terminal::{PtySession, SpawnTerminal, TerminalEvent};
+use crate::terminal::{PtySession, RingReader, SpawnTerminal, TerminalChunk};
 
 use super::script_registry::{RunPhase, ScriptRegistry, ScriptRuntime};
 use super::terminals::{default_shell, login_shell_args};
 use super::HyprlayerRuntime;
 
-const B64: base64::engine::general_purpose::GeneralPurpose =
-    base64::engine::general_purpose::STANDARD;
 const SETUP_TIMEOUT_SECS: u64 = 600;
 const ARCHIVE_TIMEOUT_SECS: u64 = 300;
-/// One: a slow reader leaves output in the ring, which coalesces it and drops the oldest.
-const ATTACH_CHANNEL_CAPACITY: usize = 1;
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
     if runtime.coordinator.is_stopped() {
@@ -58,7 +53,7 @@ pub struct RunScriptRequest {
 
 pub struct ScriptRun {
     pub terminal_id: String,
-    pub live: mpsc::Receiver<TerminalEvent>,
+    pub live: RingReader,
 }
 
 pub struct StopScriptRequest {
@@ -210,7 +205,7 @@ impl ScriptService<'_> {
             terminal_id.clone(),
         );
 
-        let live = spawn_output_forward(&session);
+        let live = session.subscribe();
         Ok(ScriptRun { terminal_id, live })
     }
 
@@ -408,26 +403,6 @@ fn emit_changed(
     });
 }
 
-/// Forwards a running script's PTY output to whichever client attached to
-/// `run()`'s result, mirroring `TerminalService`'s own forwarder. Kept
-/// separate from `spawn_monitor` below because they are two independent
-/// readers on the same output ring: this one exists purely to bridge to the
-/// caller; `spawn_monitor` updates script-domain state (port, status, output)
-/// regardless of whether anyone is still attached. The registry drops the
-/// entry on exit itself.
-fn spawn_output_forward(session: &PtySession) -> mpsc::Receiver<TerminalEvent> {
-    let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
-    let mut live = session.subscribe();
-    tokio::spawn(async move {
-        while let Some(ev) = live.recv().await {
-            if tx.send(ev).await.is_err() {
-                break;
-            }
-        }
-    });
-    rx
-}
-
 fn spawn_monitor(
     events: broadcast::Sender<RuntimeEvent>,
     scripts: Arc<ScriptRegistry>,
@@ -439,11 +414,11 @@ fn spawn_monitor(
     let mut rx = session.subscribe();
     tokio::spawn(async move {
         let mut port_found = false;
-        while let Some(ev) = rx.recv().await {
-            match ev {
-                TerminalEvent::Output { data } => {
+        while let Some(chunk) = rx.recv().await {
+            match chunk {
+                TerminalChunk::Output { bytes, .. } => {
                     if kind == ScriptKind::Run && !port_found {
-                        if let Some(port) = scan_for_port(&data) {
+                        if let Some(port) = scan_for_port(&bytes) {
                             port_found = true;
                             scripts
                                 .set_run_port(&workstream_id, &terminal_id, port)
@@ -459,7 +434,7 @@ fn spawn_monitor(
                         }
                     }
                 }
-                TerminalEvent::Exited { code } => {
+                TerminalChunk::Exited { code } => {
                     let phase = if code == Some(0) {
                         RunPhase::Passed
                     } else {
@@ -484,35 +459,25 @@ fn spawn_monitor(
     });
 }
 
-fn scan_for_port(b64: &str) -> Option<u16> {
-    let bytes = B64.decode(b64).ok()?;
-    let text = String::from_utf8_lossy(&bytes);
-    text.lines().find_map(scripts::detect_port)
+fn scan_for_port(bytes: &[u8]) -> Option<u16> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .find_map(scripts::detect_port)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn b64(s: &str) -> String {
-        B64.encode(s.as_bytes())
-    }
-
     #[test]
-    fn scan_for_port_decodes_base64_and_detects_the_port() {
-        let data = b64("  \x1b[32m➜\x1b[39m  Local: \x1b[36mhttp://localhost:5174/\x1b[39m");
-        assert_eq!(scan_for_port(&data), Some(5174));
+    fn scan_for_port_detects_the_port() {
+        let data = "  \x1b[32m➜\x1b[39m  Local: \x1b[36mhttp://localhost:5174/\x1b[39m";
+        assert_eq!(scan_for_port(data.as_bytes()), Some(5174));
     }
 
     #[test]
     fn scan_for_port_returns_none_when_no_url_is_present() {
-        let data = b64("installing dependencies...\n");
-        assert_eq!(scan_for_port(&data), None);
-    }
-
-    #[test]
-    fn scan_for_port_returns_none_for_invalid_base64() {
-        assert_eq!(scan_for_port("not-valid-base64!!"), None);
+        assert_eq!(scan_for_port(b"installing dependencies...\n"), None);
     }
 
     #[cfg(unix)]

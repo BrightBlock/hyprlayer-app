@@ -578,7 +578,9 @@ concern and cannot delete a file.
 ### `TerminalService`
 
 `open(OpenTerminalRequest)`, `attach(AttachTerminalRequest)` (returns
-`Option<TerminalAttachment>` — `None` when the terminal is gone),
+`Option<AttachedTerminal>` — `None` when the terminal is gone; with an `offset`
+the ring still holds, `resumed` and a reader from there, else the scrollback. The
+chunks' offsets are authoritative: a trim can land before the first read),
 `write(WriteTerminalRequest)`, `resize(ResizeTerminalRequest)`,
 `close(CloseTerminalRequest)`, `open_cli(OpenCliTerminalRequest)`,
 `open_shell(OpenShellTerminalRequest)`, `open_agent(OpenAgentTerminalRequest)`,
@@ -587,7 +589,9 @@ concern and cannot delete a file.
 `mint_codex_session(MintCodexSessionRequest)`,
 `session_exists(SessionExistsRequest)`.
 
-`TerminalAttachment { terminal_id: String, live: mpsc::Receiver<TerminalEvent> }`.
+`TerminalAttachment { terminal_id: String, live: RingReader }`. The holder reads
+the ring itself (`RingReader::recv` yields `TerminalChunk`: raw bytes at their
+absolute offset, then the exit), so a reader that waits leaves output in the ring.
 
 `launch_agent(LaunchAgentRequest)` returns `(TerminalAttachment, PtyLaunched)`. It
 resolves the engine from `settings.multiplexer.engines` (else the builtin), builds the

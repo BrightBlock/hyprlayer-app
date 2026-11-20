@@ -3,7 +3,7 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use hyprlayer_core::terminal::TerminalEvent;
-use hyprlayer_server::client::EventStream;
+use hyprlayer_server::client::TerminalStream;
 use tokio::time::Instant;
 
 /// Terminal input is base64 on the wire.
@@ -13,16 +13,12 @@ pub fn keystrokes(text: &str) -> String {
 
 /// Decoded output, without escape sequences, until `needle` appears, the
 /// terminal exits, or `within` passes. The caller asserts on what came back.
-pub async fn read_until(
-    events: &mut EventStream<TerminalEvent>,
-    needle: &str,
-    within: Duration,
-) -> String {
+pub async fn read_until(events: &mut TerminalStream, needle: &str, within: Duration) -> String {
     let deadline = Instant::now() + within;
     let mut text = String::new();
     while !text.contains(needle) {
         match tokio::time::timeout_at(deadline, events.recv()).await {
-            Ok(Some(TerminalEvent::Output { data })) => {
+            Ok(Some(TerminalEvent::Output { data, .. })) => {
                 text.push_str(&String::from_utf8_lossy(
                     &STANDARD.decode(data).unwrap_or_default(),
                 ));
@@ -69,10 +65,7 @@ fn plain(raw: &str) -> String {
 }
 
 /// The exit code once the terminal reports `Exited`; `None` if it never does.
-pub async fn wait_for_exit(
-    events: &mut EventStream<TerminalEvent>,
-    within: Duration,
-) -> Option<Option<i32>> {
+pub async fn wait_for_exit(events: &mut TerminalStream, within: Duration) -> Option<Option<i32>> {
     let deadline = Instant::now() + within;
     loop {
         match tokio::time::timeout_at(deadline, events.recv()).await {

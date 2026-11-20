@@ -232,7 +232,8 @@ export const commands = {
 	captureAgentSession: (workstreamId: string, engineId: string, afterMs: number | null, exclude: string[]) => typedError<string | null, AppError>(__TAURI_INVOKE("capture_agent_session", { workstreamId, engineId, afterMs, exclude })),
 	mintCodexSession: (workstreamId: string, command: string) => typedError<string | null, AppError>(__TAURI_INVOKE("mint_codex_session", { workstreamId, command })),
 	agentSessionExists: (workstreamId: string, engineId: string, sessionId: string) => typedError<boolean, AppError>(__TAURI_INVOKE("agent_session_exists", { workstreamId, engineId, sessionId })),
-	terminalAttach: (terminalId: string, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, onEvent })),
+	/**  From `offset` when the server still holds it; each output event says where it starts. */
+	terminalAttach: (terminalId: string, offset: number | null, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, offset, onEvent })),
 	terminalWrite: (terminalId: string, data: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_write", { terminalId, data })),
 	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
@@ -2303,7 +2304,11 @@ export type TabTitleSettings = {
 
 export type TagMode = "and" | "or";
 
-export type TerminalEvent = { kind: "output"; data: string } | { kind: "exited"; code: number | null };
+export type TerminalEvent = { kind: "output"; 
+/**  Base64. */
+data: string; 
+/**  Where `data` starts in the terminal's output; a reattach from its end replays only what follows. */
+offset?: number | null } | { kind: "exited"; code: number | null };
 
 export type ThoughtQuery = {
 	text?: string | null,

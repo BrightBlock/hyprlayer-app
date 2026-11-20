@@ -7,7 +7,6 @@ use base64::Engine as _;
 use hyprlayer_models::{
     AgentCaller, PermissionMode, PtyAgent, PtyAgentState, PtyLaunchSession, PtyLaunched,
 };
-use tokio::sync::mpsc;
 
 use crate::claude::driver::permission_mode_flag;
 use crate::error::{CoreError, Result};
@@ -19,7 +18,7 @@ use crate::store::Workstream;
 use crate::terminal::engines;
 #[cfg(unix)]
 use crate::terminal::screen::ScreenMirror;
-use crate::terminal::{PtySession, SpawnTerminal, TerminalEvent};
+use crate::terminal::{PtySession, RingReader, SpawnTerminal};
 
 #[cfg(unix)]
 use super::agent_control::codex_remote;
@@ -33,8 +32,6 @@ type CodexGateCell = tokio::sync::OnceCell<CodexGate>;
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::STANDARD;
 const CAPTURE_SKEW_MS: f64 = 2000.0;
-/// One: a slow reader leaves output in the ring, which coalesces it and drops the oldest.
-const ATTACH_CHANNEL_CAPACITY: usize = 1;
 const MINT_TIMEOUT: Duration = Duration::from_secs(90);
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -56,9 +53,16 @@ fn io_context(label: &str, err: std::io::Error) -> CoreError {
     CoreError::Io(std::io::Error::other(format!("{label}: {err}")))
 }
 
+/// `live` reads the ring only when its holder asks, so a slow one leaves output there to coalesce.
 pub struct TerminalAttachment {
     pub terminal_id: String,
-    pub live: mpsc::Receiver<TerminalEvent>,
+    pub live: RingReader,
+}
+
+pub struct AttachedTerminal {
+    pub live: RingReader,
+    /// The ring held the requested offset at open; a trim can still beat the first read, so output offsets decide.
+    pub resumed: bool,
 }
 
 pub struct OpenTerminalRequest {
@@ -69,6 +73,7 @@ pub struct OpenTerminalRequest {
 
 pub struct AttachTerminalRequest {
     pub terminal_id: String,
+    pub offset: Option<u64>,
 }
 
 pub struct WriteTerminalRequest {
@@ -193,7 +198,7 @@ impl TerminalService<'_> {
             .terminals
             .insert(terminal_id.clone(), session.clone())
             .await;
-        let live = spawn_forward(&session);
+        let live = session.subscribe();
         TerminalAttachment { terminal_id, live }
     }
 
@@ -214,16 +219,16 @@ impl TerminalService<'_> {
         Ok(self.register(session).await)
     }
 
-    pub async fn attach(&self, req: AttachTerminalRequest) -> Result<Option<TerminalAttachment>> {
+    pub async fn attach(&self, req: AttachTerminalRequest) -> Result<Option<AttachedTerminal>> {
         ensure_running(self.runtime)?;
         let Some(session) = self.runtime.terminals.get(&req.terminal_id).await else {
             return Ok(None);
         };
-        let live = spawn_forward(&session);
-        Ok(Some(TerminalAttachment {
-            terminal_id: req.terminal_id,
-            live,
-        }))
+        let (live, resumed) = match req.offset {
+            Some(offset) => session.resume(offset),
+            None => (session.subscribe(), false),
+        };
+        Ok(Some(AttachedTerminal { live, resumed }))
     }
 
     pub async fn write(&self, req: WriteTerminalRequest) -> Result<()> {
@@ -839,19 +844,6 @@ impl TerminalService<'_> {
     }
 }
 
-fn spawn_forward(session: &PtySession) -> mpsc::Receiver<TerminalEvent> {
-    let (tx, rx) = mpsc::channel(ATTACH_CHANNEL_CAPACITY);
-    let mut live = session.subscribe();
-    tokio::spawn(async move {
-        while let Some(ev) = live.recv().await {
-            if tx.send(ev).await.is_err() {
-                break;
-            }
-        }
-    });
-    rx
-}
-
 pub(crate) fn agent_command_line(command: &str, args: &[String]) -> String {
     #[cfg(not(windows))]
     {
@@ -1121,7 +1113,7 @@ mod tests {
         })
         .expect("spawn pty");
         registry.insert("t".into(), session.clone()).await;
-        let _unread = spawn_forward(&session);
+        let _unread = session.subscribe();
 
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         while registry.get("t").await.is_some() && tokio::time::Instant::now() < deadline {

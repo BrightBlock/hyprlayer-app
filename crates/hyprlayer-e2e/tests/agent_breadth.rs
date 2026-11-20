@@ -285,6 +285,18 @@ async fn agent_breadth() {
     );
 
     j.step("read_terminal returns the stripped tail");
+    // The stub repaints after it logs the line, and a repaint can reach the ring a few ms later.
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline {
+        let tail = tool_text(
+            &mcp.call("read_terminal", json!({ "terminal_id": term, "lines": 2 }))
+                .await,
+        );
+        if tail.contains("Try") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let screen = tool_text(
         &mcp.call(
             "read_terminal",

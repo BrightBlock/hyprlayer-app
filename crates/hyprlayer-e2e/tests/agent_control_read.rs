@@ -30,7 +30,7 @@ use hyprlayer_e2e::{
     Server, Value,
 };
 use hyprlayer_proto::WireError;
-use hyprlayer_server::client::{EventStream, RpcClient};
+use hyprlayer_server::client::{EventStream, RpcClient, TerminalStream};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
 use tokio::sync::mpsc::Receiver;
@@ -1058,7 +1058,7 @@ async fn launch_hooked(
     sandbox: &Sandbox,
     ws: &str,
     alias: &str,
-) -> (String, EventStream<hyprlayer_core::models::TerminalEvent>) {
+) -> (String, TerminalStream) {
     let (launched, events) = launch_pty(c, ws, "claude-code").await;
     assert!(launched.hooked, "PTY claude launches hooked at read");
     j.alias(&launched.terminal_id, alias);

@@ -30,7 +30,7 @@ use hyprlayer_core::{
 };
 use hyprlayer_proto::frame::Frame;
 use hyprlayer_proto::{
-    check_version, Outcome, WireError, FLOW_CONTROL, PROTOCOL_VERSION, STREAM_WINDOW,
+    check_version, Features, Outcome, WireError, PROTOCOL_VERSION, STREAM_WINDOW,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Notify;
@@ -566,8 +566,8 @@ where
     let mut reader = FrameReader::new(rd);
     let mut writer = FrameWriter::new(wr);
 
-    let flow_control = match handshake(conn, &mut reader, &mut writer, &stop).await {
-        Ok(Some(flow_control)) => flow_control,
+    let features = match handshake(conn, &mut reader, &mut writer, &stop).await {
+        Ok(Some(features)) => features,
         Ok(None) => return Ok(None),
         Err(e) => {
             tracing::debug!("conn {conn}: closed during the handshake: {e}");
@@ -576,7 +576,7 @@ where
     };
     tracing::debug!("conn {conn}: client connected ({peer})");
 
-    let out = Outbound::new(flow_control);
+    let out = Outbound::new(features);
     clients.register(conn, out.clone());
     let writer_task = tokio::spawn({
         let out = out.clone();
@@ -615,13 +615,13 @@ impl Drop for ConnectionGuard {
     }
 }
 
-/// Once the peer's hello is accepted, whether it reads `FLOW_CONTROL` frames.
+/// Once the peer's hello is accepted, the features it announced.
 async fn handshake<R, W>(
     conn: u64,
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
     stop: &Notify,
-) -> io::Result<Option<bool>>
+) -> io::Result<Option<Features>>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -631,7 +631,7 @@ where
             protocol_version: PROTOCOL_VERSION,
             build: BUILD.get().cloned(),
             version: Some(VERSION.to_string()),
-            features: vec![FLOW_CONTROL.to_string()],
+            features: Features::ALL.names(),
             stream_window: Some(STREAM_WINDOW),
         })
         .await?;
@@ -642,7 +642,7 @@ where
             ..
         }) => {
             let Err(error) = check_version(protocol_version) else {
-                return Ok(Some(features.iter().any(|f| f == FLOW_CONTROL)));
+                return Ok(Some(Features::parse(&features)));
             };
             tracing::warn!(
                 "conn {conn}: refused a client speaking protocol {protocol_version}; \
@@ -931,6 +931,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::ffi::OsString;
 
+    use hyprlayer_core::terminal::{PtySession, SpawnTerminal};
+
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Command, String> {
@@ -1015,31 +1017,41 @@ mod tests {
         open_runtime_with(root, environment(&root.join("home"))).await
     }
 
-    /// A terminal stream whose source never sends: its forwarder parks reading it.
+    /// A stream on a terminal that prints nothing: its forwarder parks reading the ring.
     fn parked_stream(
         runtime: &Arc<HyprlayerRuntime>,
         out: &Outbound,
         streams: &StreamRegistry,
         stream_id: u64,
-    ) -> tokio::sync::mpsc::Sender<hyprlayer_core::terminal::TerminalEvent> {
-        let (source, live) = tokio::sync::mpsc::channel(1);
-        streams::spawn_stream(
+    ) -> (Arc<PtySession>, Option<tokio::task::AbortHandle>) {
+        let pty = PtySession::spawn(SpawnTerminal {
+            shell: "/bin/sh".into(),
+            args: vec!["-c".into(), "sleep 60".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "ws".into(),
+        })
+        .expect("spawn pty");
+        let task = streams::spawn_stream(
             runtime.clone(),
             stream_id,
-            streams::StreamSource::Terminal(live),
+            streams::StreamSource::Terminal(pty.subscribe()),
             out.clone(),
             streams.clone(),
         );
-        source
+        (pty, task)
     }
 
     #[tokio::test]
     async fn an_aborted_connection_ends_the_streams_it_owned() {
         let root = tempfile::tempdir().unwrap();
         let runtime = open_runtime(root.path()).await;
-        let out = Outbound::new(true);
+        let out = Outbound::new(Features::ALL);
         let streams = StreamRegistry::default();
-        let source = parked_stream(&runtime, &out, &streams, 1);
+        let (pty, task) = parked_stream(&runtime, &out, &streams, 1);
+        let task = task.expect("the stream started");
         // Parked on its source, where a closed queue alone never reaches it.
         tokio::time::sleep(Duration::from_millis(200)).await;
         let writer = tokio::spawn(std::future::pending::<()>());
@@ -1048,8 +1060,14 @@ mod tests {
             writer: writer.abort_handle(),
             streams,
         });
-        let ended = tokio::time::timeout(Duration::from_secs(2), source.closed()).await;
+        let ended = tokio::time::timeout(Duration::from_secs(2), async {
+            while !task.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
         assert!(ended.is_ok(), "the stream outlived its connection");
+        pty.kill();
         runtime.shutdown().await;
     }
 
@@ -1057,16 +1075,16 @@ mod tests {
     async fn a_cancel_that_beats_the_stream_open_still_cancels_it() {
         let root = tempfile::tempdir().unwrap();
         let runtime = open_runtime(root.path()).await;
-        let out = Outbound::new(true);
+        let out = Outbound::new(Features::ALL);
         let streams = StreamRegistry::default();
         streams.reserve(7);
         streams.abort(7);
-        let source = parked_stream(&runtime, &out, &streams, 7);
-        let ended = tokio::time::timeout(Duration::from_secs(2), source.closed()).await;
+        let (pty, task) = parked_stream(&runtime, &out, &streams, 7);
         assert!(
-            ended.is_ok(),
+            task.is_none(),
             "a stream cancelled before it opened still ran"
         );
+        pty.kill();
         runtime.shutdown().await;
     }
 

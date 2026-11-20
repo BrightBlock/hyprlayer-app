@@ -62,15 +62,50 @@ pub fn encode_part(lane: u8, last: bool, slice: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Leads a terminal stream event that is raw output: then the output's absolute
+/// offset as a `u64` little-endian, then its bytes. Other events are JSON, which
+/// never starts with this byte.
+pub const TAG_TERMINAL_OUTPUT: u8 = b'O';
+
 /// A data frame carrying one client-facing stream's event: the payload is an
 /// 8-byte little-endian stream id followed by the encoded event. One data
 /// plane serves every open stream on the connection; this is the sub-framing
 /// that tells them apart.
 pub fn encode_stream_frame(stream_id: u64, event: &[u8]) -> Vec<u8> {
-    let mut payload = Vec::with_capacity(8 + event.len());
-    payload.extend_from_slice(&stream_id.to_le_bytes());
-    payload.extend_from_slice(event);
-    encode_data(&payload)
+    encode_stream_event(stream_id, &[event])
+}
+
+/// A stream frame whose event is raw terminal output at `offset`.
+pub fn encode_terminal_output_frame(stream_id: u64, offset: u64, output: &[u8]) -> Vec<u8> {
+    encode_stream_event(
+        stream_id,
+        &[&[TAG_TERMINAL_OUTPUT], &offset.to_le_bytes(), output],
+    )
+}
+
+/// What a whole stream frame carries ahead of its event: tag, length, stream id.
+pub const STREAM_FRAME_HEADER: usize = 13;
+
+/// A raw terminal output event's offset and bytes; `None` for any other event.
+pub fn decode_terminal_output(event: &[u8]) -> Option<(u64, &[u8])> {
+    let [TAG_TERMINAL_OUTPUT, rest @ ..] = event else {
+        return None;
+    };
+    let (offset, output) = rest.split_first_chunk::<8>()?;
+    Some((u64::from_le_bytes(*offset), output))
+}
+
+// One allocation for the whole frame, however many pieces the event comes in.
+fn encode_stream_event(stream_id: u64, event: &[&[u8]]) -> Vec<u8> {
+    let len = 8 + event.iter().map(|piece| piece.len()).sum::<usize>();
+    let mut out = Vec::with_capacity(5 + len);
+    out.push(TAG_DATA);
+    out.extend_from_slice(&(len as u32).to_le_bytes());
+    out.extend_from_slice(&stream_id.to_le_bytes());
+    for piece in event {
+        out.extend_from_slice(piece);
+    }
+    out
 }
 
 /// Splits a data frame's payload into its stream id and the event bytes.

@@ -16,6 +16,43 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// A hello feature: part frames, stream credit and event gaps. A side uses them only once its peer announced it.
 pub const FLOW_CONTROL: &str = "flow_control";
 
+/// A hello feature: terminal output as raw bytes in its stream frame (`frame::TAG_TERMINAL_OUTPUT`), not base64 in JSON.
+pub const RAW_TERMINAL: &str = "raw_terminal";
+
+/// The hello features a peer announced.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Features {
+    pub flow_control: bool,
+    pub raw_terminal: bool,
+}
+
+impl Features {
+    pub const ALL: Features = Features {
+        flow_control: true,
+        raw_terminal: true,
+    };
+
+    /// Unknown names are a newer peer's, so they are ignored.
+    pub fn parse(names: &[String]) -> Self {
+        let has = |feature: &str| names.iter().any(|name| name == feature);
+        Self {
+            flow_control: has(FLOW_CONTROL),
+            raw_terminal: has(RAW_TERMINAL),
+        }
+    }
+
+    pub fn names(self) -> Vec<String> {
+        [
+            (self.flow_control, FLOW_CONTROL),
+            (self.raw_terminal, RAW_TERMINAL),
+        ]
+        .into_iter()
+        .filter(|&(on, _)| on)
+        .map(|(_, name)| name.to_string())
+        .collect()
+    }
+}
+
 /// Event bytes a stream may have unread at the client before the server waits for `Credit`.
 pub const STREAM_WINDOW: u64 = 512 * 1024;
 

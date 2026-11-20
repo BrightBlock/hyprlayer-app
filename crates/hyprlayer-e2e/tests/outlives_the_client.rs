@@ -63,7 +63,7 @@ async fn work_outlives_the_client() {
 
     j.step("reattach from a new client");
     let attached = client
-        .terminal_attach_stream(terminal.clone())
+        .terminal_attach_stream(terminal.clone(), None)
         .await
         .expect("terminal_attach");
     j.guard(
@@ -71,7 +71,7 @@ async fn work_outlives_the_client() {
         attached.is_some(),
         json!({ "attached": attached.is_some() }),
     );
-    let (_, mut events) = attached.expect("a live terminal");
+    let mut events = attached.expect("a live terminal").events;
     let replay = read_until(&mut events, "BEFORE_DROP", IO).await;
     j.guard(
         "reattaching replays the scrollback",
@@ -144,7 +144,7 @@ async fn work_outlives_the_client() {
         json!({ "closed": closed_terminal.is_ok() }),
     );
     let gone = client
-        .terminal_attach_stream(terminal.clone())
+        .terminal_attach_stream(terminal.clone(), None)
         .await
         .expect("terminal_attach");
     j.guard(
@@ -188,7 +188,7 @@ async fn work_outlives_the_client() {
         json!({ "ids": ids, "worktree_exists": worktree.is_dir() }),
     );
     let reattach = client
-        .terminal_attach_stream(terminal.clone())
+        .terminal_attach_stream(terminal.clone(), None)
         .await
         .expect("terminal_attach");
     j.guard(

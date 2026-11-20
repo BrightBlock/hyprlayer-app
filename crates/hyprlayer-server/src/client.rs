@@ -11,9 +11,12 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
+use hyprlayer_models::terminal::TerminalEvent;
 use hyprlayer_models::RuntimeEvent;
 use hyprlayer_proto::frame::{self, Frame};
-use hyprlayer_proto::{check_version, WireError, FLOW_CONTROL, PROTOCOL_VERSION, STREAM_WINDOW};
+use hyprlayer_proto::{check_version, Features, WireError, PROTOCOL_VERSION, STREAM_WINDOW};
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc::error::TrySendError;
@@ -112,7 +115,7 @@ impl RpcClient {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
-                features: vec![FLOW_CONTROL.to_string()],
+                features: Features::ALL.names(),
                 stream_window: None,
             })
             .await?;
@@ -142,9 +145,8 @@ impl RpcClient {
             }) => {
                 check_version(protocol_version).map_err(ConnectError::Refused)?;
                 // A quarter of whatever window the server keeps, so its window can change alone.
-                let credit_batch = features
-                    .iter()
-                    .any(|f| f == FLOW_CONTROL)
+                let credit_batch = Features::parse(&features)
+                    .flow_control
                     .then(|| (stream_window.unwrap_or(STREAM_WINDOW) / 4).max(1));
                 (protocol_version, build, version, credit_batch)
             }
@@ -718,16 +720,42 @@ impl<E: DeserializeOwned> EventStream<E> {
     /// `None` at a clean end of stream or an undecodable frame — the latter
     /// is a protocol bug, not a condition worth retrying past.
     pub async fn recv(&mut self) -> Option<E> {
+        decode_json(&self.rx.recv().await?)
+    }
+}
+
+fn decode_json<E: DeserializeOwned>(bytes: &[u8]) -> Option<E> {
+    match serde_json::from_slice(bytes) {
+        Ok(event) => Some(event),
+        Err(e) => {
+            tracing::error!(
+                "{} stream event did not decode: {e}",
+                std::any::type_name::<E>()
+            );
+            None
+        }
+    }
+}
+
+/// A terminal stream's events, whether the server sent raw output or base64 in JSON.
+pub struct TerminalStream {
+    rx: StreamReceiver,
+}
+
+impl TerminalStream {
+    pub(crate) fn new(rx: StreamReceiver) -> Self {
+        Self { rx }
+    }
+
+    /// `None` at a clean end of stream or an undecodable frame.
+    pub async fn recv(&mut self) -> Option<TerminalEvent> {
         let bytes = self.rx.recv().await?;
-        match serde_json::from_slice(&bytes) {
-            Ok(event) => Some(event),
-            Err(e) => {
-                tracing::error!(
-                    "{} stream event did not decode: {e}",
-                    std::any::type_name::<E>()
-                );
-                None
-            }
+        match frame::decode_terminal_output(&bytes) {
+            Some((offset, output)) => Some(TerminalEvent::Output {
+                data: B64.encode(output),
+                offset: Some(offset),
+            }),
+            None => decode_json(&bytes),
         }
     }
 }
@@ -736,7 +764,7 @@ impl<E: DeserializeOwned> EventStream<E> {
 mod tests {
     use std::io::Write;
 
-    use hyprlayer_proto::Outcome;
+    use hyprlayer_proto::{Outcome, FLOW_CONTROL};
 
     use super::*;
     use crate::transport::encode_control;

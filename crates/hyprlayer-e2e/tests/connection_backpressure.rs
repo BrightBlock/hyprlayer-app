@@ -368,7 +368,7 @@ async fn connection_backpressure() {
     {
         let printed = printed.clone();
         tokio::spawn(async move {
-            while let Some(TerminalEvent::Output { data }) = output.recv().await {
+            while let Some(TerminalEvent::Output { data, .. }) = output.recv().await {
                 printed.fetch_add(data.len() as u64, Relaxed);
             }
         });
@@ -560,7 +560,7 @@ async fn connection_backpressure() {
     let growth = peak.saturating_sub(before);
     let (answered, call_took) = held.await.expect("the call during the hold");
     let mut waiting = 0u64;
-    while let Ok(Some(TerminalEvent::Output { data })) =
+    while let Ok(Some(TerminalEvent::Output { data, .. })) =
         tokio::time::timeout(Duration::from_millis(300), unread.recv()).await
     {
         waiting += data.len() as u64;

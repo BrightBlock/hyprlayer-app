@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
-import { Channel } from "@tauri-apps/api/core";
 
 import { monoFontStack } from "@/lib/appearance";
-import { commands, type ScriptKind, type TerminalEvent } from "@/lib/bindings";
-import { releaseChannels } from "@/lib/terminal/channelRelease";
+import { commands, type ScriptKind } from "@/lib/bindings";
+import { onServerReconnected } from "@/lib/events";
 import { errorMessage, errorRemedy, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import {
@@ -11,7 +10,7 @@ import {
   useTerminalFontSync,
   useTerminalThemeSync,
 } from "@/lib/terminal/terminalChrome";
-import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { TerminalFeed } from "@/lib/terminal/terminalFeed";
 import { writeTerminal } from "@/lib/terminal/terminalInput";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -73,23 +72,18 @@ export function ScriptRunView({
     idRef.current = id;
     const reattaching = id != null;
 
-    const created: Channel<TerminalEvent>[] = [];
-    const newChannel = (): Channel<TerminalEvent> => {
-      const channel = new Channel<TerminalEvent>();
-      created.push(channel);
-      channel.onmessage = (ev) => {
-        if (ev.kind === "output") engine.write(b64ToBytes(ev.data));
-        else if (ev.kind === "exited") {
-          engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
-          onExitRef.current?.();
-        }
-      };
-      return channel;
-    };
+    // A reconnect resumes only a stream this mount opened, and not once its process ended.
+    let streaming = false;
+    let ended = false;
+    const feed = new TerminalFeed(engine, () => {
+      ended = true;
+      engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
+      onExitRef.current?.();
+    });
 
     void (async () => {
       if (id) {
-        const ok = await unwrap(commands.terminalAttach(id, newChannel())).catch((e) => {
+        const ok = await unwrap(commands.terminalAttach(id, null, feed.channel())).catch((e) => {
           log.warn("script-run", `reattaching terminal ${id} failed`, e);
           return false;
         });
@@ -110,7 +104,7 @@ export function ScriptRunView({
         lastGrid = engine.fit();
         try {
           const opened = await unwrap(
-            commands.scriptRun(workstreamId, kind, lastGrid.cols, lastGrid.rows, newChannel()),
+            commands.scriptRun(workstreamId, kind, lastGrid.cols, lastGrid.rows, feed.channel()),
           );
           if (disposed) return;
           id = opened;
@@ -130,6 +124,7 @@ export function ScriptRunView({
         }
       }
       if (id && !disposed) {
+        streaming = true;
         lastGrid = engine.fit();
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
       }
@@ -137,6 +132,15 @@ export function ScriptRunView({
 
     const unsubInput = engine.onInput((data) => {
       if (id) writeTerminal(id, data);
+    });
+
+    // The stream died with the old connection; a run that ended meanwhile shows through the refetched scripts.
+    const offReconnect = onServerReconnected(() => {
+      if (disposed || !streaming || ended || !id) return;
+      const { from, channel } = feed.resume();
+      void unwrap(commands.terminalAttach(id, from, channel)).catch((e) =>
+        log.warn("script-run", "reattaching after a reconnect failed", e),
+      );
     });
 
     let raf = 0;
@@ -157,11 +161,12 @@ export function ScriptRunView({
       disposed = true;
       if (raf) cancelAnimationFrame(raf);
       unsubInput();
+      offReconnect();
       ro.disconnect();
       engineRef.current = null;
       idRef.current = undefined;
       engine.dispose();
-      releaseChannels(created);
+      feed.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, gen]);

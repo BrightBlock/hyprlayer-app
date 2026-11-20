@@ -168,7 +168,7 @@ async fn remote_host() {
     let relay = host.relay().await;
     let attached = relay
         .client
-        .terminal_attach_stream(terminal.clone())
+        .terminal_attach_stream(terminal.clone(), None)
         .await
         .expect("terminal_attach");
     j.guard(
@@ -176,7 +176,7 @@ async fn remote_host() {
         attached.is_some(),
         json!({ "attached": attached.is_some() }),
     );
-    let (_, mut events) = attached.expect("a live terminal");
+    let mut events = attached.expect("a live terminal").events;
     let replay = read_until(&mut events, "E2E_OK", IO).await;
     j.guard(
         "reattaching replays the scrollback",
@@ -244,7 +244,7 @@ async fn remote_host() {
     );
     let reattach = relay
         .client
-        .terminal_attach_stream(terminal.clone())
+        .terminal_attach_stream(terminal.clone(), None)
         .await
         .expect("terminal_attach");
     j.guard(

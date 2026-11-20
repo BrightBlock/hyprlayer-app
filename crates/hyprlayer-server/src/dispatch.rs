@@ -2324,8 +2324,7 @@ impl Dispatch for Server {
 
     /// No stream; the output stays readable through `get_script_output`.
     async fn script_start(&self, workstream_id: String, kind: ScriptKind) -> Result<(), WireError> {
-        let mut run = self
-            .runtime
+        self.runtime
             .scripts()
             .run(RunScriptRequest {
                 workstream_id,
@@ -2335,8 +2334,6 @@ impl Dispatch for Server {
             })
             .await
             .wire()?;
-        // Drained, not dropped: the forwarder drops the terminal only once it hands over the exit.
-        tokio::spawn(async move { while run.live.recv().await.is_some() {} });
         Ok(())
     }
 
@@ -2728,6 +2725,7 @@ mod tests {
     use hyprlayer_core::store::{Db, NewSession, NewWorkstream};
     use hyprlayer_core::{Harness, RuntimeEnvironment, RuntimeEvent, RuntimeOptions, RuntimePaths};
     use hyprlayer_proto::frame::Frame;
+    use hyprlayer_proto::Features;
 
     use super::*;
     use crate::client::RpcClient;
@@ -2926,7 +2924,7 @@ mod tests {
         // A tiny pipe nobody reads yet: `run_stream` stalls behind its first
         // frame, so nothing keeps reading `live` while the burst below lands.
         let (ours, theirs) = tokio::io::duplex(64);
-        let tx = Outbound::new(false);
+        let tx = Outbound::new(Features::default());
         tokio::spawn(outbound::write(tx.clone(), FrameWriter::new(ours)));
         let registry = StreamRegistry::default();
         streams::spawn_stream(

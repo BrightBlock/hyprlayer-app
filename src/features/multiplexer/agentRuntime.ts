@@ -36,6 +36,8 @@ type Runtime = {
   workstreamTitle: string;
   terminalId?: string;
   detect?: Channel<TerminalEvent>;
+  /** Where the detect stream's output ends, so a reattach asks only for what follows. */
+  next?: number;
   decoder: TextDecoder;
   tail: string;
   state: AgentState;
@@ -99,9 +101,9 @@ function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
       releaseOutput(rt);
       return;
     }
-    rt.tail = (rt.tail + stripAnsi(rt.decoder.decode(b64ToBytes(ev.data), { stream: true }))).slice(
-      -TAIL_CAP,
-    );
+    const bytes = b64ToBytes(ev.data);
+    rt.next = ev.offset == null ? undefined : ev.offset + bytes.length;
+    rt.tail = (rt.tail + stripAnsi(rt.decoder.decode(bytes, { stream: true }))).slice(-TAIL_CAP);
     recompute(rt, false);
     if (rt.quietTimer) clearTimeout(rt.quietTimer);
     rt.quietTimer = setTimeout(() => recompute(rt, true), QUIET_MS);
@@ -177,7 +179,9 @@ export async function reconcileAgentTerminals({ hookedOnly = false } = {}): Prom
       }
       const ch = new Channel<TerminalEvent>();
       ch.onmessage = (ev) => onDetectEvent(rt, ev);
-      const alive = await unwrap(commands.terminalAttach(id, ch)).catch(() => undefined);
+      const alive = await unwrap(commands.terminalAttach(id, rt.next ?? null, ch)).catch(
+        () => undefined,
+      );
       const current = isCurrent();
       if (alive && current) {
         if (rt.detect) releaseChannels([rt.detect]);
@@ -307,7 +311,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<AgentLaunch | null> 
     const existing = r.terminalId ?? opts.persistedTerminalId;
     if (existing) {
       const ch = makeDetect();
-      const ok = await unwrap(commands.terminalAttach(existing, ch)).catch((e) => {
+      const ok = await unwrap(commands.terminalAttach(existing, r.next ?? null, ch)).catch((e) => {
         log.warn("agent", `reattaching terminal ${existing} failed`, e);
         return undefined;
       });
@@ -328,6 +332,7 @@ export function ensureAgent(opts: EnsureAgentOpts): Promise<AgentLaunch | null> 
 
     beginPtyLaunch(r.workstreamId);
     try {
+      r.next = undefined;
       const ch = makeDetect();
       const { sessionId, resume, bypass, model, permissionMode, effort, firstPrompt } = opts.session;
       const launched = await unwrap(

@@ -3,7 +3,7 @@ use std::sync::{Mutex, PoisonError};
 
 use hyprlayer_core::models::{PtyAgent, PtyControlOutcome, PtyLaunchSession, PtyLaunched};
 use hyprlayer_core::terminal::TerminalEvent;
-use hyprlayer_server::client::EventStream;
+use hyprlayer_server::client::TerminalStream;
 use tauri::ipc::Channel;
 use tauri::State;
 
@@ -62,19 +62,28 @@ pub async fn terminal_open(
 
 #[tauri::command]
 #[specta::specta]
+/// From `offset` when the server still holds it; each output event says where it starts.
+// `f64`: specta won't hand TypeScript a `u64`.
 pub async fn terminal_attach(
     state: State<'_, AppState>,
     terminal_id: String,
+    offset: Option<f64>,
     on_event: Channel<TerminalEvent>,
 ) -> CmdResult<bool> {
     match state
         .client()?
-        .terminal_attach_stream(terminal_id)
+        .terminal_attach_stream(terminal_id, offset.map(|at| at as u64))
         .await
         .map_err(AppError::from)?
     {
-        Some((stream_id, events)) => {
-            pump(&state, state.client()?, stream_id, events, on_event);
+        Some(attached) => {
+            pump(
+                &state,
+                state.client()?,
+                attached.stream_id,
+                attached.events,
+                on_event,
+            );
             Ok(true)
         }
         None => Ok(false),
@@ -319,7 +328,7 @@ pub(crate) fn pump(
     state: &AppState,
     client: std::sync::Arc<hyprlayer_server::client::RpcClient>,
     stream_id: u64,
-    mut events: EventStream<TerminalEvent>,
+    mut events: TerminalStream,
     on_event: Channel<TerminalEvent>,
 ) {
     let cancel = client.clone();

@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use hyprlayer_core::models::{AgentControlLevel, PtyLaunchSession, PtyLaunched, TerminalEvent};
+use hyprlayer_core::models::{AgentControlLevel, PtyLaunchSession, PtyLaunched};
 use hyprlayer_core::settings::AppSettings;
-use hyprlayer_server::client::{EventStream, RpcClient};
+use hyprlayer_server::client::{RpcClient, TerminalStream};
 use hyprlayer_server::rpc::Request;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
@@ -539,7 +539,7 @@ pub async fn launch_pty(
     client: &RpcClient,
     workstream_id: &str,
     engine_id: &str,
-) -> (PtyLaunched, EventStream<TerminalEvent>) {
+) -> (PtyLaunched, TerminalStream) {
     let (launched, _stream_id, events) = client
         .pty_launch_stream(
             workstream_id.to_string(),

@@ -1,13 +1,12 @@
 import { useEffect, useRef } from "react";
-import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { monoFontStack } from "@/lib/appearance";
-import { commands, type TerminalEvent } from "@/lib/bindings";
-import { releaseChannels } from "@/lib/terminal/channelRelease";
+import { commands } from "@/lib/bindings";
+import { onServerReconnected } from "@/lib/events";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
-import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { TerminalFeed } from "@/lib/terminal/terminalFeed";
 import { writeTerminal } from "@/lib/terminal/terminalInput";
 import {
   attachTerminalClipboard,
@@ -54,20 +53,15 @@ export function TerminalTab({
 
     if (autoFocus) engine.focus();
 
-    // Tauri Channels are single-use, including failed attach attempts.
-    const created: Channel<TerminalEvent>[] = [];
-    const newChannel = (): Channel<TerminalEvent> => {
-      const channel = new Channel<TerminalEvent>();
-      created.push(channel);
-      channel.onmessage = (ev) => {
-        if (ev.kind === "output") {
-          engine.write(b64ToBytes(ev.data));
-          noteActivity();
-        } else if (ev.kind === "exited")
-          engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
-      };
-      return channel;
+    // A reconnect resumes only a stream this mount opened, and not once its process ended.
+    let streaming = false;
+    let ended = false;
+    const exited = () => {
+      ended = true;
+      engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
     };
+    // Tauri Channels are single-use, including failed attach attempts.
+    const feed = new TerminalFeed(engine, exited, noteActivity);
 
     let disposed = false;
     let id = terminalId;
@@ -75,7 +69,7 @@ export function TerminalTab({
     void (async () => {
       if (id) {
         engine.bind(id);
-        const ok = await unwrap(commands.terminalAttach(id, newChannel()));
+        const ok = await unwrap(commands.terminalAttach(id, null, feed.channel()));
         if (!ok) {
           id = undefined;
           idRef.current = undefined;
@@ -88,7 +82,7 @@ export function TerminalTab({
         if (disposed) return;
         lastGrid = engine.fit();
         const opened = await unwrap(
-          commands.terminalOpen(workstreamId, lastGrid.cols, lastGrid.rows, newChannel()),
+          commands.terminalOpen(workstreamId, lastGrid.cols, lastGrid.rows, feed.channel()),
         );
         if (disposed) {
           void commands.terminalClose(opened);
@@ -100,6 +94,7 @@ export function TerminalTab({
         engine.bind(id);
       }
       if (id && !disposed) {
+        streaming = true;
         lastGrid = engine.fit();
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
       }
@@ -111,6 +106,17 @@ export function TerminalTab({
 
     const unsubInput = engine.onInput((data) => {
       if (id) writeTerminal(id, data);
+    });
+
+    // The stream died with the old connection; the new one picks up after the last byte shown.
+    const offReconnect = onServerReconnected(() => {
+      if (disposed || !streaming || ended || !id) return;
+      const { from, channel } = feed.resume();
+      void unwrap(commands.terminalAttach(id, from, channel))
+        .then((ok) => {
+          if (!ok && !disposed && !ended) exited();
+        })
+        .catch((e) => log.warn("terminal", "reattaching after a reconnect failed", e));
     });
 
     let raf = 0;
@@ -147,10 +153,11 @@ export function TerminalTab({
       unlistenFocus?.();
       if (raf) cancelAnimationFrame(raf);
       unsubInput();
+      offReconnect();
       ro.disconnect();
       engine.dispose();
       engineRef.current = null;
-      releaseChannels(created);
+      feed.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);

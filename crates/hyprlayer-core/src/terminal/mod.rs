@@ -5,15 +5,21 @@ pub mod text;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use base64::Engine as _;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::watch;
 
 const RING_CAP_BYTES: usize = 256 * 1024;
 const FLUSH_BYTES: usize = 64 * 1024;
+/// VS Code's `TerminalDataBufferer` interval: a sustained burst of line-sized writes flushes
+/// once per interval, not once per write, so each reader wakes and frames that much less.
+const FLUSH_INTERVAL: Duration = Duration::from_millis(5);
+/// Flushes less than an interval apart that still go out at once: an echo, and a repaint the
+/// pty splits across reads. A timed wait here would cost a timer tick on Windows (~15.6 ms).
+const FLUSH_BURST: u32 = 4;
 // At most one flush mark per KiB, so the marks stay under 2 KiB however small the flushes.
 const MARK_BYTES: u64 = 1024;
 
@@ -27,10 +33,15 @@ const MARK_BYTES: u64 = 1024;
 const READ_QUEUE_CHUNKS: usize = 16;
 /// How long an exited child's output may take to reach EOF before the exit is signalled anyway.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
-const B64: base64::engine::general_purpose::GeneralPurpose =
-    base64::engine::general_purpose::STANDARD;
 
 pub use hyprlayer_models::terminal::TerminalEvent;
+
+/// A terminal's output as its readers take it: raw bytes at their absolute offset, then the exit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalChunk {
+    Output { offset: u64, bytes: Vec<u8> },
+    Exited { code: Option<i32> },
+}
 
 /// Sees every flush, in order.
 type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
@@ -131,35 +142,21 @@ impl OutputRing {
     }
 
     // One lock for cursor and wakeup, so nothing lands between snapshot and stream.
-    fn attach(&self) -> (u64, watch::Receiver<u64>) {
+    // `from` resumes when the ring still holds it; otherwise the replay starts at the floor.
+    fn attach(&self, from: Option<u64>) -> (u64, bool, watch::Receiver<u64>) {
         let inner = self.inner.lock().unwrap();
-        (inner.replay_start(), self.tail_tx.subscribe())
+        let resumed = from.filter(|&offset| (inner.head..=inner.tail()).contains(&offset));
+        (
+            resumed.unwrap_or_else(|| inner.replay_start()),
+            resumed.is_some(),
+            self.tail_tx.subscribe(),
+        )
     }
 
     fn scrollback_bytes(&self) -> Vec<u8> {
         let inner = self.inner.lock().unwrap();
         let from = (inner.replay_start() - inner.head) as usize;
         inner.bytes.range(from..).copied().collect()
-    }
-
-    fn next_raw(&self, cursor: &mut u64) -> Option<RawOutput> {
-        let inner = self.inner.lock().unwrap();
-        let gap = *cursor < inner.head;
-        *cursor = (*cursor).max(inner.head);
-        let tail = inner.tail();
-        if *cursor == tail {
-            return None;
-        }
-        let from = (*cursor - inner.head) as usize;
-        *cursor = tail;
-        Some(RawOutput {
-            bytes: inner.bytes.range(from..).copied().collect(),
-            gap,
-        })
-    }
-
-    fn exited(&self) -> bool {
-        self.inner.lock().unwrap().exited.is_some()
     }
 
     fn tail_bytes(&self, max: usize) -> Vec<u8> {
@@ -173,22 +170,23 @@ impl OutputRing {
         inner.snapshot_floor = inner.tail();
     }
 
-    // A cursor below head has lagged; it resumes at head and the reader sees a gap.
-    // Encoding happens outside the lock so a slow reader never stalls the encoder.
-    fn next_event(&self, cursor: &mut u64) -> Option<TerminalEvent> {
-        let raw: Vec<u8> = {
-            let inner = self.inner.lock().unwrap();
-            *cursor = (*cursor).max(inner.head);
-            let tail = inner.tail();
-            if *cursor == tail {
-                return inner.exited.map(|code| TerminalEvent::Exited { code });
-            }
-            let from = (*cursor - inner.head) as usize;
-            *cursor = tail;
-            inner.bytes.range(from..).copied().collect()
-        };
-        Some(TerminalEvent::Output {
-            data: B64.encode(raw),
+    // A cursor below head has lagged; it resumes at head, and the chunk's offset shows the gap.
+    fn next_chunk(&self, cursor: &mut u64) -> Option<TerminalChunk> {
+        let inner = self.inner.lock().unwrap();
+        *cursor = (*cursor).max(inner.head);
+        let tail = inner.tail();
+        if *cursor == tail {
+            return inner.exited.map(|code| TerminalChunk::Exited { code });
+        }
+        let offset = *cursor;
+        *cursor = tail;
+        Some(TerminalChunk::Output {
+            offset,
+            bytes: inner
+                .bytes
+                .range((offset - inner.head) as usize..)
+                .copied()
+                .collect(),
         })
     }
 }
@@ -218,12 +216,6 @@ impl RingInner {
     }
 }
 
-/// Output past a reader's cursor, undecoded; `gap` when the ring dropped bytes before it was read.
-pub struct RawOutput {
-    pub bytes: Vec<u8>,
-    pub gap: bool,
-}
-
 /// One subscriber's cursor into a session's output ring.
 pub struct RingReader {
     ring: Arc<OutputRing>,
@@ -233,40 +225,26 @@ pub struct RingReader {
 }
 
 impl RingReader {
-    fn attach(ring: Arc<OutputRing>) -> Self {
-        let (cursor, tail_rx) = ring.attach();
-        Self {
+    fn attach(ring: Arc<OutputRing>, from: Option<u64>) -> (Self, bool) {
+        let (cursor, resumed, tail_rx) = ring.attach(from);
+        let reader = Self {
             ring,
             tail_rx,
             cursor,
             done: false,
-        }
+        };
+        (reader, resumed)
     }
 
-    /// Everything past the cursor as one base64 `Output`; `Exited` once the
-    /// ring is drained and the child is gone; `None` after that.
-    pub async fn recv(&mut self) -> Option<TerminalEvent> {
+    /// Everything past the cursor as one `Output`; `Exited` once the ring is
+    /// drained and the child is gone; `None` after that. Cancel-safe.
+    pub async fn recv(&mut self) -> Option<TerminalChunk> {
         while !self.done {
-            if let Some(ev) = self.ring.next_event(&mut self.cursor) {
-                self.done = matches!(ev, TerminalEvent::Exited { .. });
-                return Some(ev);
+            if let Some(chunk) = self.ring.next_chunk(&mut self.cursor) {
+                self.done = matches!(chunk, TerminalChunk::Exited { .. });
+                return Some(chunk);
             }
             if self.tail_rx.changed().await.is_err() {
-                break;
-            }
-        }
-        None
-    }
-
-    /// `recv` without the base64; `None` once the child is gone and the ring is drained.
-    pub async fn recv_raw(&mut self) -> Option<RawOutput> {
-        while !self.done {
-            if let Some(out) = self.ring.next_raw(&mut self.cursor) {
-                return Some(out);
-            }
-            if self.ring.exited() {
-                self.done = true;
-            } else if self.tail_rx.changed().await.is_err() {
                 break;
             }
         }
@@ -380,14 +358,22 @@ impl PtySession {
         let exit_ring = ring.clone();
         std::thread::spawn(move || {
             let mut pending: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
+            let mut last_flush: Option<Instant> = None;
+            let mut streak = 0;
             while let Ok(first) = chunk_rx.recv() {
                 pending.extend_from_slice(&first);
                 let mut disconnected = false;
+                let quick = last_flush.is_some_and(|at| at.elapsed() < FLUSH_INTERVAL);
+                streak = if quick { streak + 1 } else { 0 };
+                // Held here rather than in the ring, so a fast child is backpressured, not trimmed.
+                let hold_until = last_flush
+                    .filter(|_| streak >= FLUSH_BURST)
+                    .map(|at| at + FLUSH_INTERVAL);
                 while pending.len() < FLUSH_BYTES {
-                    match chunk_rx.try_recv() {
+                    match next_chunk_until(&chunk_rx, hold_until) {
                         Ok(c) => pending.extend_from_slice(&c),
-                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        Err(RecvTimeoutError::Timeout) => break,
+                        Err(RecvTimeoutError::Disconnected) => {
                             disconnected = true;
                             break;
                         }
@@ -398,6 +384,7 @@ impl PtySession {
                 let whole = pending.len() - torn_utf8_tail(&pending);
                 ring.push(&pending[..whole]);
                 pending.drain(..whole);
+                last_flush = Some(Instant::now());
                 if disconnected {
                     break;
                 }
@@ -431,7 +418,12 @@ impl PtySession {
     /// A reader positioned at the replay floor: its first `recv()` is the
     /// retained scrollback, and it streams from there.
     pub fn subscribe(&self) -> RingReader {
-        RingReader::attach(self.ring.clone())
+        RingReader::attach(self.ring.clone(), None).0
+    }
+
+    /// A reader from `offset` and `true` while the ring still holds it; otherwise `subscribe`'s and `false`.
+    pub fn resume(&self, offset: u64) -> (RingReader, bool) {
+        RingReader::attach(self.ring.clone(), Some(offset))
     }
 
     pub fn scrollback_bytes(&self) -> Vec<u8> {
@@ -492,6 +484,20 @@ impl PtySession {
     }
 }
 
+/// A queued chunk, waiting only while a burst is held: an echo never sits in a timed wait.
+fn next_chunk_until(
+    chunks: &Receiver<Vec<u8>>,
+    hold_until: Option<Instant>,
+) -> Result<Vec<u8>, RecvTimeoutError> {
+    match hold_until.map(|at| at.saturating_duration_since(Instant::now())) {
+        Some(wait) if !wait.is_zero() => chunks.recv_timeout(wait),
+        _ => chunks.try_recv().map_err(|e| match e {
+            TryRecvError::Empty => RecvTimeoutError::Timeout,
+            TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+        }),
+    }
+}
+
 fn to_io(e: impl std::fmt::Display) -> std::io::Error {
     std::io::Error::other(e.to_string())
 }
@@ -514,7 +520,7 @@ mod tests {
 
     async fn first_output(rx: &mut RingReader) -> Vec<u8> {
         match rx.recv().await {
-            Some(TerminalEvent::Output { data }) => B64.decode(data).unwrap(),
+            Some(TerminalChunk::Output { bytes, .. }) => bytes,
             other => panic!("expected an Output first, got {other:?}"),
         }
     }
@@ -525,8 +531,8 @@ mod tests {
         while !seen.contains(needle) {
             let left = deadline.saturating_duration_since(tokio::time::Instant::now());
             match tokio::time::timeout(left, rx.recv()).await {
-                Ok(Some(TerminalEvent::Output { data })) => {
-                    seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                Ok(Some(TerminalChunk::Output { bytes, .. })) => {
+                    seen.push_str(&String::from_utf8_lossy(&bytes));
                 }
                 other => panic!("never saw {needle:?}: {other:?}, seen: {seen:?}"),
             }
@@ -553,10 +559,10 @@ mod tests {
         let mut seen = String::new();
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {
-            if let Ok(Some(TerminalEvent::Output { data })) =
+            if let Ok(Some(TerminalChunk::Output { bytes, .. })) =
                 tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
             {
-                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                seen.push_str(&String::from_utf8_lossy(&bytes));
                 if seen.contains("MARKER_OK") {
                     break;
                 }
@@ -645,10 +651,10 @@ mod tests {
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         while tokio::time::Instant::now() < deadline {
             match tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await {
-                Ok(Some(TerminalEvent::Output { data })) => {
-                    seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                Ok(Some(TerminalChunk::Output { bytes, .. })) => {
+                    seen.push_str(&String::from_utf8_lossy(&bytes));
                 }
-                Ok(Some(TerminalEvent::Exited { code })) => {
+                Ok(Some(TerminalChunk::Exited { code })) => {
                     assert_eq!(code, Some(0), "echo should exit 0");
                     exited = true;
                     break;
@@ -781,10 +787,10 @@ mod tests {
         let mut total = 0usize;
         loop {
             match tokio::time::timeout(std::time::Duration::from_secs(30), live.recv()).await {
-                Ok(Some(TerminalEvent::Output { data })) => {
-                    total += B64.decode(data).unwrap().len();
+                Ok(Some(TerminalChunk::Output { bytes, .. })) => {
+                    total += bytes.len();
                 }
-                Ok(Some(TerminalEvent::Exited { .. })) => break,
+                Ok(Some(TerminalChunk::Exited { .. })) => break,
                 other => panic!("terminal never exited: {other:?}"),
             }
         }
@@ -835,10 +841,10 @@ mod tests {
                 tokio::time::Instant::now() < deadline,
                 "never saw pid: {seen:?}"
             );
-            if let Ok(Some(TerminalEvent::Output { data })) =
+            if let Ok(Some(TerminalChunk::Output { bytes, .. })) =
                 tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
             {
-                seen.push_str(&String::from_utf8_lossy(&B64.decode(data).unwrap()));
+                seen.push_str(&String::from_utf8_lossy(&bytes));
                 if let Some(pid) = seen
                     .lines()
                     .find_map(|l| l.strip_prefix("PID:"))

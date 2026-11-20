@@ -7,7 +7,18 @@ const h = vi.hoisted(() => {
     id = nextChannel++;
     onmessage: (event: unknown) => void = () => {};
   }
-  type Terminal = { workstreamId: string; hooked: boolean; streams: Set<FakeChannel> };
+  type Printed = { offset: number; data: string };
+  type Terminal = { workstreamId: string; hooked: boolean; streams: Set<FakeChannel>; printed: Printed[] };
+  const terminal = (workstreamId: string, hooked: boolean, streams: Set<FakeChannel>): Terminal => ({
+    workstreamId,
+    hooked,
+    streams,
+    printed: [],
+  });
+  const send = (ch: FakeChannel, p: Printed) => {
+    ch.onmessage({ kind: "output", ...p });
+    server.sent += p.data.length;
+  };
   // The server's side: live terminals, the channels each still streams to, and what it sent.
   const server = {
     terminals: new Map<string, Terminal>(),
@@ -31,12 +42,15 @@ const h = vi.hoisted(() => {
     ptyLaunch: vi.fn(async (workstreamId: string, ...rest: unknown[]) => {
       const terminalId = `t${++server.launches}`;
       const ch = rest[rest.length - 1] as FakeChannel;
-      server.terminals.set(terminalId, { workstreamId, hooked: server.nextHooked, streams: new Set([ch]) });
+      server.terminals.set(terminalId, terminal(workstreamId, server.nextHooked, new Set([ch])));
       return ok({ terminalId, hooked: server.nextHooked, providerSessionId: null });
     }),
-    terminalAttach: vi.fn(async (terminalId: string, ch: FakeChannel) => {
+    // Replays what follows `offset`, or everything without one, as the server's ring does.
+    terminalAttach: vi.fn(async (terminalId: string, ...rest: unknown[]) => {
+      const [offset, ch] = (rest.length === 1 ? [null, rest[0]] : rest) as [number | null, FakeChannel];
       server.attaches.push(terminalId);
       const t = server.terminals.get(terminalId);
+      for (const p of t?.printed ?? []) if (offset == null || p.offset >= offset) send(ch, p);
       t?.streams.add(ch);
       return ok(!!t);
     }),
@@ -62,11 +76,12 @@ const h = vi.hoisted(() => {
   const emit = (terminalId: string, state: string) =>
     server.listeners.forEach((fn) => fn({ payload: agent(terminalId, state) }));
   const output = (terminalId: string, frames: number, data: string) => {
-    for (let i = 0; i < frames; i += 1) {
-      for (const ch of server.terminals.get(terminalId)?.streams ?? []) {
-        ch.onmessage({ kind: "output", data });
-        server.sent += data.length;
-      }
+    const t = server.terminals.get(terminalId);
+    for (let i = 0; i < frames && t; i += 1) {
+      const last = t.printed[t.printed.length - 1];
+      const p = { offset: last ? last.offset + atob(last.data).length : 0, data };
+      t.printed.push(p);
+      for (const ch of t.streams) send(ch, p);
     }
   };
   // As the server ends a PTY: its open streams hear `exited`, and a hooked one's state changes.
@@ -140,7 +155,7 @@ describe("a PTY agent's output stream", () => {
   });
 
   it("is dropped by a reattached agent once the server reports it hooked", async () => {
-    h.server.terminals.set("adopt", { workstreamId: "", hooked: true, streams: new Set() });
+    h.server.terminals.set("adopt", { workstreamId: "", hooked: true, streams: new Set(), printed: [] });
     const o = opts(true, "adopt");
     h.server.terminals.get("adopt")!.workstreamId = o.workstreamId;
     await launch(o);
@@ -200,5 +215,16 @@ describe("a reconnect", () => {
     const mine = [live, gone, unhooked];
     expect(h.server.attaches.filter((id) => mine.includes(id))).toEqual([unhooked]);
     expect(sentDuring(() => h.output(live, 1, FRAME))).toBe(0);
+  });
+
+  it("reattaches a live unhooked agent from where its output stopped", async () => {
+    const id = await launch(opts(false));
+    h.output(id, 3, FRAME);
+    const before = h.server.sent;
+
+    await reconcileAgentTerminals();
+
+    expect(h.server.sent - before, "base64 bytes replayed").toBe(0);
+    expect(sentDuring(() => h.output(id, 1, FRAME)), "the new stream carries new output").toBe(FRAME.length);
   });
 });

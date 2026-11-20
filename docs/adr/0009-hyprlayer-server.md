@@ -320,8 +320,9 @@ forwarder kept draining the ring into a 256-frame attach channel and a 1,024-fra
 connection queue, so the ring never dropped anything: a stalled reader with `yes`
 running grew the server by 82 to 161 MiB in 8 s. It holds now because nothing reads the ring
 until the connection has room (see *The connection* below). A stalled reader costs the
-ring plus at most three frames in flight per terminal: the core forwarder's hand, its
-one-slot attach channel, and the stream's one slot in the writer. A blocked forwarder
+ring plus one frame in flight per terminal, the stream's one slot in the writer: the
+server's forwarder reads the ring itself, with no core forwarder or attach channel
+between them. A blocked forwarder
 can no longer see its terminal exit, so `TerminalRegistry::insert` watches for the exit
 itself and drops the entry whether or not anyone reads.)*
 
@@ -431,6 +432,56 @@ stalls the link and then throttles it to 256 KiB/s:
 | Client RSS growth, one stream unread for 6 s | +313 to +325 MiB | +0 MiB |
 | Re-reads during a 12 s event flood at 32 KiB/s | 6, 2.3 s apart | 4, 5.0 s apart |
 
+### Terminal output and resume
+
+A terminal stream used to carry each flush as `{"kind":"output","data":"<base64>"}`,
+and every attach replayed the whole ring. Measured 2026-11-19 on main over three runs:
+408,900 bytes of `seq` output crossed as 618,624 to 622,392 (1.51 to 1.52×) in 1,781 to
+1,874 frames, and each reattach with no new output sent 348,381 to 349,697 bytes.
+
+- **Raw output for a peer that reads it.** The hello's `features` gains `raw_terminal`.
+  To a peer that listed it, an output event is `O`, the output's absolute offset as a
+  `u64` little-endian, then the bytes (`frame::encode_terminal_output_frame`). The exit
+  stays JSON, and JSON never starts with `O`, so a client reads both forms without
+  tracking which it negotiated. Any other peer gets the JSON above, byte for byte.
+  Credit counts what follows the stream id in either form, on both ends.
+- **Attach from an offset.** `terminal_attach` takes an optional `offset`. While the
+  ring holds it (head to tail), the stream continues from there and the response says
+  `resumed: true`. Otherwise, or with no offset, it replays the scrollback as before,
+  with `resumed: false`, which is also what an older server's response decodes to.
+  Every output carries its start offset, and the offsets are what a client acts on:
+  `resumed` is the ring's answer when the stream opened, and a burst can trim past the
+  offset before the first read. The desktop starts a view over only when a reattach's
+  first output doesn't begin at the offset it asked for, with a full reset queued behind
+  the output already written; a gap later in a live stream keeps writing, as before.
+  `TerminalEvent::Output` hands the webview the same `offset`.
+- **Fewer, larger flushes.** Raw bytes alone gave 1.12×: a PTY delivers `seq` 14 bytes
+  per read, so frames averaged 179 bytes and the 22-byte header was the excess. The PTY
+  coalescer flushes at once, as before, until four flushes have gone out less than 5 ms
+  apart; past that a burst flushes once per 5 ms (VS Code's `TerminalDataBufferer`
+  interval) or at 64 KiB. Below the streak it never waits on a timer, which on Windows
+  rounds up to the ~15.6 ms system tick: an echo takes 0.04–0.08 ms here as on main,
+  where a 1 ms settle wait had made it 1.5 ms. The streak also lets a repaint the PTY
+  splits across reads out whole; holding from the first flush delayed the rest of one
+  32 KiB write by 7.7 ms. It holds bytes before the ring, not in it: a PTY delivers `yes`
+  at ~150 MB/s here, so a 5 ms hold in front of the ring read would trim it.
+- **Who resumes.** The desktop's agent runtime and `reconcileAgentTerminals` attach from
+  the last offset they read. A mounted `TerminalTab`, agent tab or script view now
+  reattaches from its own offset after a reconnect, where before its stream simply
+  ended. A mount still replays the ring, because its terminal emulator starts empty.
+- **The webview hop stays base64.** `TerminalStream` turns raw output into a
+  `TerminalEvent` for the Tauri channel: 1.33× the output, in process.
+
+The guard is `crates/hyprlayer-e2e/tests/terminal_resume.rs`:
+
+| Measure | Before | After |
+|---|---|---|
+| Wire bytes per output byte, `seq 1 60000`, unthrottled | 1.51–1.52× (~1,800 frames) | 1.0013–1.0016× (9–10 frames) |
+| Reattach with no new output | ~349 KB | 114 bytes (`resumed: true`) |
+| Reattach 1,000 bytes back | the scrollback | 1,136 bytes |
+| Reattach at a trimmed offset | the scrollback, unannounced | the scrollback, `resumed: false` |
+| A client without `raw_terminal` | base64 in JSON | the same bytes |
+
 ## What we're not doing
 
 - No multi-user, and no identity that grants authority: the announced client identity
@@ -441,7 +492,9 @@ stalls the link and then throttles it to 256 KiB/s:
   token to the Cloud API as a client; nothing reaches the server with one.)*
 - No browser or mobile client — there is no listener one could reach, and adding one
   means adding authentication, which this decision deliberately does not design.
-- No change to `TerminalEvent` or `SessionEvent`. `src/lib/bindings.ts` gains two
+- No change to `TerminalEvent` or `SessionEvent`. *(Amended 2026-11-19 —
+  `TerminalEvent::Output` gained `offset`, and its wire form is negotiated; see
+  "Terminal output and resume" under The connection.)* `src/lib/bindings.ts` gains two
   things, not one: `browse_directory` (Phase 5) and the `serverDisconnected` event
   with its `ServerDisconnected` type (Phase 4's follow-up, recorded below).
   *(Corrected 2026-09-15 — this said "beyond the one command" while the same
@@ -625,7 +678,8 @@ would need all of the authentication machinery this decision declines to build.
     `terminal.rs`'s and `scripts.rs`'s `pump` converged into one function in
     `terminal.rs`, now generic over nothing — it takes an `EventStream<TerminalEvent>`
     and calls `cancel_stream` on send failure, the wire equivalent of dropping a
-    local receiver.
+    local receiver. *(Amended 2026-11-19 — it takes a `TerminalStream`, which reads
+    either terminal form; see The connection.)*
 
     **Lag recovery moved into the server's own stream forwarder**
     (`streams::run_stream`): on `SessionStreamError::Lagged` it calls

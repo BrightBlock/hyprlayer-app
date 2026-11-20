@@ -10,13 +10,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use hyprlayer_core::runtime::scripts as core_scripts;
 use hyprlayer_core::runtime::sessions::{
     LaunchAndConverseParams, LaunchSessionParams, LiveReceiver, RewindSessionRequest,
     SessionStreamError, StartStageSessionRequest,
 };
 use hyprlayer_core::runtime::terminals as core_terminals;
-use hyprlayer_core::terminal::TerminalEvent;
+use hyprlayer_core::terminal::{RingReader, TerminalChunk};
 use hyprlayer_core::{
     CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
     SessionEvent, SessionLogEntry, Stage,
@@ -24,11 +26,11 @@ use hyprlayer_core::{
 use hyprlayer_models::{ClientRef, PtyLaunchSession, PtyLaunched, SessionStreamItem};
 use hyprlayer_proto::{frame, WireError, STREAM_WINDOW};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, watch, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
-use crate::client::{EventStream, RpcClient, StreamReceiver};
+use crate::client::{EventStream, RpcClient, StreamReceiver, TerminalStream};
 use crate::dispatch::{wire_error, Server, Wire};
 use crate::outbound::Outbound;
 
@@ -55,6 +57,9 @@ pub enum StreamRequest {
     },
     TerminalAttach {
         terminal_id: String,
+        /// Resume after this many bytes of output instead of replaying the scrollback.
+        #[serde(default)]
+        offset: Option<u64>,
     },
     SpawnCliTerminal {
         args: Vec<String>,
@@ -158,6 +163,9 @@ pub enum StreamResponse {
     TerminalAttach {
         attached: bool,
         stream_id: Option<u64>,
+        /// The ring held the requested offset at open; a trim can still beat the first read, so output offsets decide.
+        #[serde(default)]
+        resumed: bool,
     },
     Session {
         session: Session,
@@ -408,22 +416,33 @@ impl StreamTx {
 impl Ready<'_> {
     fn send(self, stream_id: u64, event: &impl Serialize) -> bool {
         match serde_json::to_vec(event) {
-            Ok(bytes) => {
-                self.tx.credit.take(bytes.len());
-                self.tx
-                    .outbound
-                    .push_data(frame::encode_stream_frame(stream_id, &bytes), self.slot)
-            }
+            Ok(bytes) => self.push(frame::encode_stream_frame(stream_id, &bytes)),
             Err(e) => {
                 tracing::error!("stream {stream_id}: event did not encode: {e}");
                 false
             }
         }
     }
+
+    // Credit counts the event as it goes out, everything after the stream id, as the client does.
+    fn push(self, frame: Vec<u8>) -> bool {
+        self.tx
+            .credit
+            .take(frame.len() - frame::STREAM_FRAME_HEADER);
+        self.tx.outbound.push_data(frame, self.slot)
+    }
+}
+
+/// A terminal event as a client without `RAW_TERMINAL` reads it: base64 in JSON.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum JsonTerminalEvent {
+    Output { data: String },
+    Exited { code: Option<i32> },
 }
 
 pub(crate) enum StreamSource {
-    Terminal(mpsc::Receiver<TerminalEvent>),
+    Terminal(RingReader),
     Session {
         session_id: String,
         /// Filled by `attach_session`, and by a resume that names the row
@@ -518,10 +537,16 @@ pub(crate) async fn prepare_stream(
                 Some(StreamSource::Terminal(attachment.live)),
             ))
         }
-        StreamRequest::TerminalAttach { terminal_id } => {
+        StreamRequest::TerminalAttach {
+            terminal_id,
+            offset,
+        } => {
             let attachment = runtime
                 .terminals()
-                .attach(core_terminals::AttachTerminalRequest { terminal_id })
+                .attach(core_terminals::AttachTerminalRequest {
+                    terminal_id,
+                    offset,
+                })
                 .await
                 .wire()?;
             match attachment {
@@ -531,6 +556,7 @@ pub(crate) async fn prepare_stream(
                         StreamResponse::TerminalAttach {
                             attached: true,
                             stream_id: Some(stream_id),
+                            resumed: attachment.resumed,
                         },
                         Some(StreamSource::Terminal(attachment.live)),
                     ))
@@ -539,6 +565,7 @@ pub(crate) async fn prepare_stream(
                     StreamResponse::TerminalAttach {
                         attached: false,
                         stream_id: None,
+                        resumed: false,
                     },
                     None,
                 )),
@@ -979,14 +1006,14 @@ pub(crate) async fn prepare_stream(
 
 /// Starts forwarding a prepared source and registers its abort handle. Must
 /// only be called after the response naming `stream_id` is written
-/// (see `prepare_stream`'s doc comment).
+/// (see `prepare_stream`'s doc comment). `None` when a cancel got there first.
 pub(crate) fn spawn_stream(
     runtime: Arc<HyprlayerRuntime>,
     stream_id: u64,
     source: StreamSource,
     outbound: Outbound,
     registry: StreamRegistry,
-) {
+) -> Option<AbortHandle> {
     // A client without credit gets the old unbounded window; its slot still bounds the server.
     let window = if outbound.flow_control() {
         STREAM_WINDOW as i64
@@ -1004,10 +1031,11 @@ pub(crate) fn spawn_stream(
     let mut open = registry.lock();
     if let Some(Entry::Reserved { cancelled: true }) = open.get(&stream_id) {
         open.remove(&stream_id);
-        return;
+        return None;
     }
-    let handle = tokio::spawn(run_stream(runtime, stream_id, source, tx, for_task)).abort_handle();
-    open.insert(stream_id, Entry::Open(handle, credit));
+    let task = tokio::spawn(run_stream(runtime, stream_id, source, tx, for_task));
+    open.insert(stream_id, Entry::Open(task.abort_handle(), credit));
+    Some(task.abort_handle())
 }
 
 async fn run_stream(
@@ -1042,19 +1070,30 @@ async fn run_stream(
 
 /// Returns why the stream ended. Waits for room before reading, so output piles
 /// up in the terminal's ring, which coalesces it and drops the oldest.
-async fn forward_terminal(
-    stream_id: u64,
-    mut live: mpsc::Receiver<TerminalEvent>,
-    tx: &StreamTx,
-) -> &'static str {
+async fn forward_terminal(stream_id: u64, mut live: RingReader, tx: &StreamTx) -> &'static str {
+    let raw = tx.outbound.raw_terminal();
     loop {
         let Some(ready) = tx.ready().await else {
             return "the client stopped reading";
         };
-        let Some(event) = live.recv().await else {
+        let Some(chunk) = live.recv().await else {
             return "the terminal closed";
         };
-        if !ready.send(stream_id, &event) {
+        let sent = match chunk {
+            TerminalChunk::Output { offset, bytes } if raw => ready.push(
+                frame::encode_terminal_output_frame(stream_id, offset, &bytes),
+            ),
+            TerminalChunk::Output { bytes, .. } => ready.send(
+                stream_id,
+                &JsonTerminalEvent::Output {
+                    data: B64.encode(bytes),
+                },
+            ),
+            TerminalChunk::Exited { code } => {
+                ready.send(stream_id, &JsonTerminalEvent::Exited { code })
+            }
+        };
+        if !sent {
             return "the client stopped reading";
         }
     }
@@ -1304,6 +1343,13 @@ async fn send_event(tx: &StreamTx, stream_id: u64, event: &impl Serialize) -> bo
     }
 }
 
+pub struct TerminalAttached {
+    pub stream_id: u64,
+    /// The ring held the requested offset at open; a trim can still beat the first read, so output offsets decide.
+    pub resumed: bool,
+    pub events: TerminalStream,
+}
+
 fn expect_stream(rx: Option<StreamReceiver>, command: &str) -> Result<StreamReceiver, WireError> {
     rx.ok_or_else(|| WireError::protocol(format!("{command}: server opened no stream")))
 }
@@ -1354,7 +1400,7 @@ impl RpcClient {
         workstream_id: String,
         cols: u16,
         rows: u16,
-    ) -> Result<(String, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(String, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::TerminalOpen {
                 workstream_id,
@@ -1369,27 +1415,34 @@ impl RpcClient {
             } => Ok((
                 terminal_id,
                 stream_id,
-                EventStream::new(expect_stream(rx, "terminal_open")?),
+                TerminalStream::new(expect_stream(rx, "terminal_open")?),
             )),
             other => Err(unexpected("terminal_open", &other)),
         }
     }
 
+    /// From `offset` when the terminal still holds it; `None` when the terminal is gone.
     pub async fn terminal_attach_stream(
         &self,
         terminal_id: String,
-    ) -> Result<Option<(u64, EventStream<TerminalEvent>)>, WireError> {
+        offset: Option<u64>,
+    ) -> Result<Option<TerminalAttached>, WireError> {
         let (response, rx) = self
-            .call_stream(StreamRequest::TerminalAttach { terminal_id })
+            .call_stream(StreamRequest::TerminalAttach {
+                terminal_id,
+                offset,
+            })
             .await?;
         match response {
             StreamResponse::TerminalAttach {
                 attached: true,
                 stream_id: Some(stream_id),
-            } => Ok(Some((
+                resumed,
+            } => Ok(Some(TerminalAttached {
                 stream_id,
-                EventStream::new(expect_stream(rx, "terminal_attach")?),
-            ))),
+                resumed,
+                events: TerminalStream::new(expect_stream(rx, "terminal_attach")?),
+            })),
             StreamResponse::TerminalAttach {
                 attached: false, ..
             } => Ok(None),
@@ -1402,7 +1455,7 @@ impl RpcClient {
         args: Vec<String>,
         cols: u16,
         rows: u16,
-    ) -> Result<(String, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(String, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::SpawnCliTerminal { args, cols, rows })
             .await?;
@@ -1413,7 +1466,7 @@ impl RpcClient {
             } => Ok((
                 terminal_id,
                 stream_id,
-                EventStream::new(expect_stream(rx, "spawn_cli_terminal")?),
+                TerminalStream::new(expect_stream(rx, "spawn_cli_terminal")?),
             )),
             other => Err(unexpected("spawn_cli_terminal", &other)),
         }
@@ -1424,7 +1477,7 @@ impl RpcClient {
         command: String,
         cols: u16,
         rows: u16,
-    ) -> Result<(String, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(String, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::SpawnShellTerminal {
                 command,
@@ -1439,7 +1492,7 @@ impl RpcClient {
             } => Ok((
                 terminal_id,
                 stream_id,
-                EventStream::new(expect_stream(rx, "spawn_shell_terminal")?),
+                TerminalStream::new(expect_stream(rx, "spawn_shell_terminal")?),
             )),
             other => Err(unexpected("spawn_shell_terminal", &other)),
         }
@@ -1453,7 +1506,7 @@ impl RpcClient {
         args: Vec<String>,
         cols: u16,
         rows: u16,
-    ) -> Result<(String, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(String, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::AgentOpen {
                 workstream_id,
@@ -1470,7 +1523,7 @@ impl RpcClient {
             } => Ok((
                 terminal_id,
                 stream_id,
-                EventStream::new(expect_stream(rx, "agent_open")?),
+                TerminalStream::new(expect_stream(rx, "agent_open")?),
             )),
             other => Err(unexpected("agent_open", &other)),
         }
@@ -1483,7 +1536,7 @@ impl RpcClient {
         session: PtyLaunchSession,
         cols: u16,
         rows: u16,
-    ) -> Result<(PtyLaunched, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(PtyLaunched, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::PtyLaunch {
                 workstream_id,
@@ -1500,7 +1553,7 @@ impl RpcClient {
             } => Ok((
                 launched,
                 stream_id,
-                EventStream::new(expect_stream(rx, "pty_launch")?),
+                TerminalStream::new(expect_stream(rx, "pty_launch")?),
             )),
             other => Err(unexpected("pty_launch", &other)),
         }
@@ -1512,7 +1565,7 @@ impl RpcClient {
         kind: ScriptKind,
         cols: u16,
         rows: u16,
-    ) -> Result<(String, u64, EventStream<TerminalEvent>), WireError> {
+    ) -> Result<(String, u64, TerminalStream), WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::ScriptRun {
                 workstream_id,
@@ -1528,7 +1581,7 @@ impl RpcClient {
             } => Ok((
                 terminal_id,
                 stream_id,
-                EventStream::new(expect_stream(rx, "script_run")?),
+                TerminalStream::new(expect_stream(rx, "script_run")?),
             )),
             other => Err(unexpected("script_run", &other)),
         }
@@ -1730,11 +1783,13 @@ impl RpcClient {
 mod tests {
     use std::time::Duration;
 
+    use hyprlayer_proto::Features;
+
     use super::*;
 
     #[tokio::test]
     async fn closing_the_connection_wakes_a_stream_waiting_for_credit() {
-        let outbound = Outbound::new(true);
+        let outbound = Outbound::new(Features::ALL);
         let tx = StreamTx {
             outbound: outbound.clone(),
             slot: Arc::new(Semaphore::new(1)),

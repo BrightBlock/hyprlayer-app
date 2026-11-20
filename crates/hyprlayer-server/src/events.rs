@@ -334,10 +334,12 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
 mod tests {
     use std::time::Duration;
 
+    use hyprlayer_proto::Features;
+
     use super::*;
 
     fn connect(clients: &Clients, conn: u64, announce: bool) -> Outbound {
-        let outbound = Outbound::new(true);
+        let outbound = Outbound::new(Features::ALL);
         clients.register(conn, outbound.clone());
         if announce {
             let client = ClientRef {

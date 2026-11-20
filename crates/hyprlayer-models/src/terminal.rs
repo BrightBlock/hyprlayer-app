@@ -6,8 +6,18 @@ use crate::agent::Stage;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TerminalEvent {
-    Output { data: String },
-    Exited { code: Option<i32> },
+    Output {
+        /// Base64.
+        data: String,
+        /// Where `data` starts in the terminal's output; a reattach from its end replays only what follows.
+        // A JS number is exact far past any terminal's output.
+        #[serde(default)]
+        #[cfg_attr(feature = "specta", specta(type = Option<f64>))]
+        offset: Option<u64>,
+    },
+    Exited {
+        code: Option<i32>,
+    },
 }
 
 /// Which provider session a PTY agent launch starts or resumes.

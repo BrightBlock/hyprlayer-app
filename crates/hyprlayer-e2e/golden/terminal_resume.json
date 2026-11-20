@@ -1,0 +1,81 @@
+{
+  "scenario": "terminal_resume",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the terminal printed past the ring",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit": 1.05
+          },
+          "guard": "the wire carries little more than the output",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "every output says where it starts",
+          "ok": true
+        }
+      ],
+      "step": "a printing terminal crosses the wire as raw bytes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the server resumes an offset it still holds",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_bytes": 512
+          },
+          "guard": "a resume with no new output costs about nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "tail_bytes": 1000
+          },
+          "guard": "a resume replays only what follows its offset",
+          "ok": true
+        }
+      ],
+      "step": "a reattach from where the client left off replays nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the server says it did not resume",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "it replays the scrollback it holds, from where that starts",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "an attach without an offset replays the scrollback as before",
+          "ok": true
+        }
+      ],
+      "step": "an offset the ring no longer holds is reported"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "its output is the JSON it always was",
+          "ok": true
+        }
+      ],
+      "step": "a client that never announced raw_terminal still reads base64 in JSON"
+    }
+  ]
+}

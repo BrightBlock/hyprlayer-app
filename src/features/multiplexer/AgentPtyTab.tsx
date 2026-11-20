@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { Spinner } from "@/components/ui";
 import { monoFontStack } from "@/lib/appearance";
-import { commands, type TerminalEvent } from "@/lib/bindings";
+import { commands } from "@/lib/bindings";
+import { onServerReconnected } from "@/lib/events";
 import { unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
 import { useToast } from "@/lib/toast";
-import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { TerminalFeed } from "@/lib/terminal/terminalFeed";
 import { writeTerminal } from "@/lib/terminal/terminalInput";
-import { releaseChannels } from "@/lib/terminal/channelRelease";
 import {
   attachTerminalClipboard,
   useTerminalThemeSync,
@@ -112,7 +112,6 @@ export function AgentPtyTab({
     if (autoFocus) eng.focus();
 
     let disposed = false;
-    const created: Channel<TerminalEvent>[] = [];
     // A terminal can end both ways at once (its exit races a reconnect's check); it says so once.
     let exitShownFor: string | undefined;
     const showExited = (id: string) => {
@@ -120,16 +119,12 @@ export function AgentPtyTab({
       exitShownFor = id;
       eng.write("\r\n\x1b[2m[agent exited]\x1b[0m\r\n");
     };
-    const newChannel = (id: string): Channel<TerminalEvent> => {
-      const channel = new Channel<TerminalEvent>();
-      created.push(channel);
-      channel.onmessage = (ev) => {
-        if (disposed) return;
-        if (ev.kind === "output") eng.write(b64ToBytes(ev.data));
-        else if (ev.kind === "exited") showExited(id);
-      };
-      return channel;
-    };
+    // A reconnect resumes only a stream this mount or restart opened.
+    let streaming = false;
+    // Only the current terminal's streams are live, so an exit is that terminal's.
+    const feed = new TerminalFeed(eng, () => {
+      if (idRef.current) showExited(idRef.current);
+    });
     const unsubGone = onAgentTerminalGone(workstreamId, shellId, (id) => {
       if (id === idRef.current) showExited(id);
     });
@@ -183,18 +178,30 @@ export function AgentPtyTab({
       onTerminalId(id);
       eng.bind(id);
 
-      await unwrap(commands.terminalAttach(id, newChannel(id))).catch(() => false);
+      streaming = await unwrap(commands.terminalAttach(id, null, feed.channel())).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
     })();
+
+    // The stream died with the old connection; a gone agent is reported through `onAgentTerminalGone`.
+    const offReconnect = onServerReconnected(() => {
+      const id = idRef.current;
+      if (disposed || !streaming || !id || exitShownFor === id) return;
+      const { from, channel } = feed.resume();
+      void unwrap(commands.terminalAttach(id, from, channel)).catch((e) =>
+        log.warn("agent", "reattaching after a reconnect failed", e),
+      );
+    });
 
     restartRef.current = (opts: Omit<AgentLaunchSession, "sessionId">) => {
       if (disposed) return;
       void (async () => {
         closeAgent(workstreamId, shellId);
         idRef.current = undefined;
+        streaming = false;
         eng.reset();
+        feed.restart();
         launchedAtRef.current = Date.now();
         const relaunched = await launch({
           workstreamId,
@@ -215,7 +222,9 @@ export function AgentPtyTab({
         eng.bind(newId);
         setAgentBypass(workstreamId, shellId, opts.bypass);
         onBypassChange?.(opts.bypass);
-        await unwrap(commands.terminalAttach(newId, newChannel(newId))).catch(() => false);
+        streaming = await unwrap(commands.terminalAttach(newId, null, feed.channel())).catch(
+          () => false,
+        );
         if (disposed) return;
         lastGrid = eng.fit();
         void commands.agentResize(newId, lastGrid.cols, lastGrid.rows);
@@ -278,10 +287,11 @@ export function AgentPtyTab({
       unsubInput();
       unsubKey();
       unsubGone();
+      offReconnect();
       ro.disconnect();
       eng.dispose();
       engineRef.current = null;
-      releaseChannels(created);
+      feed.release();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);
