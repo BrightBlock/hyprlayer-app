@@ -1,4 +1,6 @@
-use tauri::State;
+use base64::Engine;
+use tauri::{AppHandle, State};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
@@ -34,6 +36,43 @@ pub async fn save_attachment(
         .save_attachment(workstream_id, file_name, data)
         .await
         .map_err(AppError::from)
+}
+
+/// Saves the OS clipboard's image as an attachment, so its pixels never cross the IPC.
+/// `None` when the clipboard holds no image.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_clipboard_image(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workstream_id: String,
+    file_name: String,
+) -> CmdResult<Option<String>> {
+    let png = tauri::async_runtime::spawn_blocking(move || clipboard_png(&app))
+        .await
+        .ok()
+        .flatten();
+    let Some(png) = png else { return Ok(None) };
+    let data = base64::engine::general_purpose::STANDARD.encode(png);
+    state
+        .client()?
+        .save_attachment(workstream_id, file_name, data)
+        .await
+        .map(Some)
+        .map_err(AppError::from)
+}
+
+fn clipboard_png(app: &AppHandle) -> Option<Vec<u8>> {
+    let image = app.clipboard().read_image().ok()?;
+    let mut png = Vec::new();
+    let mut encoder = png::Encoder::new(&mut png, image.width(), image.height());
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(png::Compression::Fast);
+    let mut writer = encoder.write_header().ok()?;
+    writer.write_image_data(image.rgba()).ok()?;
+    writer.finish().ok()?;
+    Some(png)
 }
 
 /// The read half of `save_attachment`, as base64 — carries an attachment's bytes back

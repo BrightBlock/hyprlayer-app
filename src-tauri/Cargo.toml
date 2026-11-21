@@ -49,6 +49,7 @@ uuid = { version = "1.23.3", features = ["v4"] }
 # cookie 0.18.1 conflicts with time 0.3.48.
 time = { version = ">=0.3.36, <0.3.48", default-features = false, features = ["formatting", "macros"] }
 tauri-plugin-clipboard-manager = "2"
+png = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

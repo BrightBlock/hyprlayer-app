@@ -178,6 +178,11 @@ export const commands = {
 	/**  `data` is base64; the server decodes it. */
 	saveAttachment: (workstreamId: string, fileName: string, data: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
 	/**
+	 *  Saves the OS clipboard's image as an attachment, so its pixels never cross the IPC.
+	 *  `None` when the clipboard holds no image.
+	 */
+	saveClipboardImage: (workstreamId: string, fileName: string) => typedError<string | null, AppError>(__TAURI_INVOKE("save_clipboard_image", { workstreamId, fileName })),
+	/**
 	 *  The read half of `save_attachment`, as base64 — carries an attachment's bytes back
 	 *  across the wire, so the client can render one that lives on a remote
 	 *  server. Works identically whether the server is local or remote, since it

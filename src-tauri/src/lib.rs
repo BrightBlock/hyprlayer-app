@@ -161,6 +161,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::delete_session,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
+            commands::attachments::save_clipboard_image,
             commands::attachments::read_attachment,
             commands::system::set_binary_override,
             commands::system::set_traffic_light_inset,

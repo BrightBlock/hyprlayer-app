@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { commands } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { useConnectionStatus } from "@/lib/queries";
-import { b64ToBytes, bytesToB64 } from "@/lib/terminal/terminalCodec";
+import { b64ToBytes } from "@/lib/terminal/terminalCodec";
 import { baseName } from "./toolDisplay";
 
 export type AttachmentKind = "image" | "file";
@@ -57,6 +57,12 @@ const MIME_FOR_EXT: Record<string, string> = {
   avif: "image/avif",
 };
 
+// Native where the webview has it: the JS fallback blocks ~120 ms per 16 MiB in WebKit.
+function decodeB64(data: string): Uint8Array {
+  const u8 = Uint8Array as { fromBase64?: (s: string) => Uint8Array };
+  return u8.fromBase64 ? u8.fromBase64(data) : b64ToBytes(data);
+}
+
 /**
  * The image `src` for a stored attachment, resolved on the machine the
  * bytes live on. Local server: `convertFileSrc` synchronously — no copy,
@@ -82,7 +88,7 @@ export function useAttachmentSrc(path: string): { src?: string; error?: string }
       .then((data) => {
         if (cancelled) return;
         const type = MIME_FOR_EXT[extOf(path)] ?? "";
-        url = URL.createObjectURL(new Blob([b64ToBytes(data)], { type }));
+        url = URL.createObjectURL(new Blob([decodeB64(data)], { type }));
         setState({ src: url });
       })
       .catch((e: unknown) => {
@@ -123,6 +129,19 @@ export function clipboardImageName(file: File): string {
   return `pasted-image.${ext}`;
 }
 
+// FileReader encodes natively without blocking; a JS loop blocks ~130 ms per 16 MiB in WebKit.
+function blobToB64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function importDroppedPaths(
   workstreamId: string,
   paths: string[],
@@ -147,7 +166,7 @@ export async function saveClipboardImage(
 ): Promise<Attachment | null> {
   try {
     const name = clipboardImageName(file);
-    const data = bytesToB64(new Uint8Array(await file.arrayBuffer()));
+    const data = await blobToB64(file);
     const stored = await unwrap(commands.saveAttachment(workstreamId, name, data));
     return { path: stored, name, kind: "image" };
   } catch {
@@ -155,31 +174,14 @@ export async function saveClipboardImage(
   }
 }
 
+// Rust reads and encodes the image: its pixels, about 33 MB for a 4K screen, never reach the page.
 export async function saveClipboardImageFromOs(
   workstreamId: string,
 ): Promise<Attachment | null> {
   try {
-    const { readImage } = await import("@tauri-apps/plugin-clipboard-manager");
-    const image = await readImage();
-    const [{ width, height }, rgba] = await Promise.all([image.size(), image.rgba()]);
-    if (!width || !height || rgba.length < width * height * 4) return null;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
-
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/png"),
-    );
-    if (!blob) return null;
-
     const name = "pasted-image.png";
-    const data = bytesToB64(new Uint8Array(await blob.arrayBuffer()));
-    const stored = await unwrap(commands.saveAttachment(workstreamId, name, data));
-    return { path: stored, name, kind: "image" };
+    const stored = await unwrap(commands.saveClipboardImage(workstreamId, name));
+    return stored ? { path: stored, name, kind: "image" } : null;
   } catch {
     return null;
   }
