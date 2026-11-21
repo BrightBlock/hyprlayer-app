@@ -464,6 +464,21 @@ pub enum CellWide {
     SpacerHead,
 }
 
+/// A row by where it is: on the viewport, or in history counted from the oldest row held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowAt {
+    Viewport(u32),
+    History(u32),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CellRead<'a> {
+    pub wide: CellWide,
+    pub graphemes: &'a [u32],
+    pub style: CellStyle,
+    pub hyperlink: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScreenTextCell {
     pub wide: CellWide,
@@ -1348,6 +1363,146 @@ impl Terminal {
         Ok(())
     }
 
+    /// Each cell of `row` with its style and link, and whether the row continues on the next
+    /// one and continues the one before. A cell cleared with a background keeps it in `style`.
+    pub fn for_each_row_cell(
+        &self,
+        row: RowAt,
+        mut visit: impl FnMut(CellRead<'_>),
+    ) -> Result<(bool, bool), Error> {
+        let cols = self.cols()?;
+        let point = match row {
+            RowAt::Viewport(y) => ghostty_viewport_point(0, y),
+            RowAt::History(y) => ghostty_history_point(0, y),
+        };
+        let mut grid_ref = self.grid_ref(point)?;
+        let wrap = grid_ref_wrap_state(&grid_ref)?;
+        let mut graphemes = Vec::new();
+        let mut link = String::new();
+        for x in 0..cols {
+            grid_ref.x = x;
+            let mut raw = ffi::GhosttyCell::default();
+            // SAFETY: grid_ref came from this terminal and nothing has written to it since.
+            unsafe { ffi::ghostty_grid_ref_cell(&grid_ref, &mut raw).into_result()? };
+            let mut wide = ffi::GhosttyCellWide_GHOSTTY_CELL_WIDE_NARROW;
+            let mut tag = ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_CODEPOINT;
+            let mut has_text = false;
+            let mut style_id = 0u16;
+            let mut has_link = false;
+            let keys = [
+                ffi::GhosttyCellData_GHOSTTY_CELL_DATA_WIDE,
+                ffi::GhosttyCellData_GHOSTTY_CELL_DATA_CONTENT_TAG,
+                ffi::GhosttyCellData_GHOSTTY_CELL_DATA_HAS_TEXT,
+                ffi::GhosttyCellData_GHOSTTY_CELL_DATA_STYLE_ID,
+                ffi::GhosttyCellData_GHOSTTY_CELL_DATA_HAS_HYPERLINK,
+            ];
+            let mut values = [
+                (&mut wide as *mut ffi::GhosttyCellWide).cast::<c_void>(),
+                (&mut tag as *mut ffi::GhosttyCellContentTag).cast::<c_void>(),
+                (&mut has_text as *mut bool).cast::<c_void>(),
+                (&mut style_id as *mut u16).cast::<c_void>(),
+                (&mut has_link as *mut bool).cast::<c_void>(),
+            ];
+            let mut written = 0usize;
+            // SAFETY: each value points at storage of the type its key returns.
+            unsafe {
+                ffi::ghostty_cell_get_multi(
+                    raw,
+                    keys.len(),
+                    keys.as_ptr(),
+                    values.as_mut_ptr(),
+                    &mut written,
+                )
+                .into_result()?;
+            }
+            graphemes.clear();
+            if has_text {
+                grid_ref_graphemes_into(&grid_ref, &mut graphemes)?;
+            }
+            let mut style = CellStyle::default();
+            if style_id != 0 {
+                let mut raw_style = ffi::GhosttyStyle {
+                    size: mem::size_of::<ffi::GhosttyStyle>(),
+                    ..Default::default()
+                };
+                // SAFETY: as above.
+                unsafe { ffi::ghostty_grid_ref_style(&grid_ref, &mut raw_style).into_result()? };
+                style = raw_style.into();
+            }
+            match tag {
+                ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => {
+                    let mut index = 0u8;
+                    // SAFETY: a palette background cell stores its index.
+                    unsafe {
+                        ffi::ghostty_cell_get(
+                            raw,
+                            ffi::GhosttyCellData_GHOSTTY_CELL_DATA_COLOR_PALETTE,
+                            (&mut index as *mut u8).cast(),
+                        )
+                        .into_result()?;
+                    }
+                    style.bg_color = Some(CellColor::Palette(index));
+                }
+                ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
+                    let mut color = ffi::GhosttyColorRgb::default();
+                    // SAFETY: an RGB background cell stores its colour.
+                    unsafe {
+                        ffi::ghostty_cell_get(
+                            raw,
+                            ffi::GhosttyCellData_GHOSTTY_CELL_DATA_COLOR_RGB,
+                            (&mut color as *mut ffi::GhosttyColorRgb).cast(),
+                        )
+                        .into_result()?;
+                    }
+                    style.bg_color = Some(CellColor::Rgb(color.into()));
+                }
+                _ => {}
+            }
+            if has_link {
+                link = grid_ref_hyperlink_uri(&grid_ref)?.unwrap_or_default();
+            }
+            visit(CellRead {
+                wide: CellWide::from_raw(wide),
+                graphemes: &graphemes,
+                style,
+                hyperlink: has_link.then_some(link.as_str()),
+            });
+        }
+        Ok(wrap)
+    }
+
+    /// Rows scrolling has moved into the primary screen's history, ever.
+    pub fn history_pushed(&self) -> Result<u64, Error> {
+        self.get_u64(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_HISTORY_PUSHED)
+    }
+
+    /// How many times the primary screen's history was erased, ever.
+    pub fn history_cleared(&self) -> Result<u64, Error> {
+        self.get_u64(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_HISTORY_CLEARED)
+    }
+
+    /// The DECSCUSR value for the cursor's shape and blink; 0 at the defaults.
+    pub fn cursor_shape(&self) -> Result<u8, Error> {
+        let mut out = 0u8;
+        unsafe {
+            ffi::ghostty_terminal_get(
+                self.raw,
+                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_SHAPE,
+                (&mut out as *mut u8).cast(),
+            )
+            .into_result()?;
+        }
+        Ok(out)
+    }
+
+    pub fn cursor_x(&self) -> Result<u16, Error> {
+        self.get_u16(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_X)
+    }
+
+    pub fn cursor_visible(&self) -> Result<bool, Error> {
+        self.get_bool(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
+    }
+
     pub fn screen_text_rows_range(
         &self,
         start_row: usize,
@@ -1821,6 +1976,16 @@ impl Terminal {
         // SAFETY: out points to a u32 matching the requested terminal data type.
         unsafe {
             ffi::ghostty_terminal_get(self.raw, data, (&mut out as *mut u32).cast())
+                .into_result()?;
+        }
+        Ok(out)
+    }
+
+    fn get_u64(&self, data: ffi::GhosttyTerminalData) -> Result<u64, Error> {
+        let mut out = 0u64;
+        // SAFETY: out points to a u64 matching the requested terminal data type.
+        unsafe {
+            ffi::ghostty_terminal_get(self.raw, data, (&mut out as *mut u64).cast())
                 .into_result()?;
         }
         Ok(out)
@@ -2325,6 +2490,15 @@ impl Drop for Terminal {
 fn ghostty_viewport_point(x: u16, y: u32) -> ffi::GhosttyPoint {
     ffi::GhosttyPoint {
         tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_VIEWPORT,
+        value: ffi::GhosttyPointValue {
+            coordinate: ffi::GhosttyPointCoordinate { x, y },
+        },
+    }
+}
+
+fn ghostty_history_point(x: u16, y: u32) -> ffi::GhosttyPoint {
+    ffi::GhosttyPoint {
+        tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_HISTORY,
         value: ffi::GhosttyPointValue {
             coordinate: ffi::GhosttyPointCoordinate { x, y },
         },
@@ -3929,6 +4103,42 @@ mod tests {
             String::from_utf8_lossy(&responses.lock().unwrap()),
             "\x1b[?62;22c"
         );
+    }
+
+    #[test]
+    fn the_history_counter_counts_scrolled_rows_past_pruning() {
+        let mut terminal = Terminal::new(20, 5, 64 * 1024).unwrap();
+        for i in 0..5000 {
+            terminal.write(format!("line {i}\r\n").as_bytes());
+        }
+        let held = terminal.scrollback_rows().unwrap();
+        assert_eq!(terminal.history_pushed().unwrap(), 4996);
+        assert!(held < 4996, "the byte cap pruned nothing: {held} rows held");
+
+        let mut text = String::new();
+        terminal
+            .for_each_row_cell(RowAt::History(held as u32 - 1), |cell| {
+                text.extend(cell.graphemes.iter().filter_map(|&c| char::from_u32(c)));
+            })
+            .unwrap();
+        assert_eq!(text, "line 4995");
+
+        terminal.write(b"\x1b]8;;https://x.test\x1b\\\x1b[31mlink\x1b]8;;\x1b\\\x1b[3J");
+        let mut cells = Vec::new();
+        let wrap = terminal
+            .for_each_row_cell(RowAt::Viewport(4), |cell| {
+                cells.push((cell.style.fg_color, cell.hyperlink.map(str::to_string)))
+            })
+            .unwrap();
+        assert_eq!(wrap, (false, false));
+        assert_eq!(
+            cells[0],
+            (Some(CellColor::Palette(1)), Some("https://x.test".into()))
+        );
+        assert_eq!(cells[3].1.as_deref(), Some("https://x.test"));
+        assert_eq!(cells[4], (None, None));
+        assert_eq!(terminal.history_cleared().unwrap(), 1);
+        assert_eq!(terminal.history_pushed().unwrap(), 4996);
     }
 
     #[test]

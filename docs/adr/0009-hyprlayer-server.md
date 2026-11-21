@@ -724,6 +724,37 @@ The guard is `crates/hyprlayer-e2e/tests/terminal_resume.rs`:
 | Reattach at a trimmed offset | the scrollback, unannounced | the scrollback, `resumed: false` |
 | A client without `raw_terminal` | base64 in JSON | the same bytes |
 
+### Screen frames
+
+*(Added 2026-11-21.)* The server runs one libghostty screen per PTY
+(`terminal/screen.rs`). A peer whose hello lists `screen_frames` gets that screen
+instead of raw output, so every desktop on a PTY shows one interpretation of it.
+
+- **The frame.** `F`, the frame's sequence number and the history count after it, each
+  a `u64` little-endian, then ANSI that brings the client's xterm to the screen
+  (`terminal/frames.rs`): DEC 2026 around it, input modes, rows that changed against
+  that stream's baseline, the cursor. A size change still goes as `resized`, ahead of
+  the frame drawn at it; the exit stays JSON, and so does `clipboard`, a program's
+  OSC 52 copy, which only the size owner's frame stream carries.
+- **Pacing.** A frame stream renders only when it has credit and queue room, at most
+  every 16 ms, so a slow link gets fewer frames of the latest screen rather than a
+  backlog. A frame becomes the baseline once it is queued. A client that acks frames
+  with `terminal_frame_ack` (no request slot) has at most 2 unacked; one that never
+  acks is paced by credit.
+- **History.** A frame moves the rows the program scrolled into history since the last
+  one into the client's scrollback, with their true text. Vendored patch 0010 counts
+  them, because row counts can't: the byte cap prunes pages and a resize reflows. A
+  stalled client catches up by at most 5,000 rows, the desktop's scrollback, and a dim
+  `[… N lines skipped]` row stands for the rest. `ED 3` clears the client's too.
+- **Resume.** For a frame peer, `terminal_attach.offset` is the history count of the
+  last frame it wrote. While every row after it is held, the stream pushes those and a
+  full frame, with no RIS. Otherwise the first frame starts with RIS and the newest
+  1,000 history rows.
+
+The guard is `crates/hyprlayer-e2e/tests/shared_terminal_screen.rs`, whose frame
+clients C and D render frames in `@xterm/headless` 5.5 and must show the cells and
+history of a libghostty screen fed the same bytes.
+
 ## What we're not doing
 
 - No multi-user, and no identity that grants authority: the announced client identity

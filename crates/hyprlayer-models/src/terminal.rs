@@ -10,10 +10,19 @@ pub enum TerminalEvent {
         /// Base64.
         data: String,
         /// Where `data` starts in the terminal's output; a reattach from its end replays only what follows.
+        /// For a frame, the history count a reattach resumes from.
         // A JS number is exact far past any terminal's output.
         #[serde(default)]
         #[cfg_attr(feature = "specta", specta(type = Option<f64>))]
         offset: Option<u64>,
+        /// The sequence number of a frame of the server's screen, which `terminal_frame_ack` returns; absent for raw output.
+        #[serde(default)]
+        #[cfg_attr(feature = "specta", specta(type = Option<f64>))]
+        frame: Option<u64>,
+    },
+    /// Text the program copied (OSC 52), base64, sent to the frame stream of the client that owns the size.
+    Clipboard {
+        data: String,
     },
     /// The terminal's size from here on: a viewer renders at it, not at its own fit.
     Resized {

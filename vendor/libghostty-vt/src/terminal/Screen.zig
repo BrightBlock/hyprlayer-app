@@ -977,6 +977,7 @@ pub fn cursorDownScroll(self: *Screen) !void {
         // Grow our pages by one row. The PageList will handle if we need to
         // allocate, prune scrollback, whatever.
         _ = try self.pages.grow();
+        self.pages.history_pushed += 1;
 
         const new_pin = new_pin: {
             // Calculate this before cursorChangePin because that function may
@@ -1083,7 +1084,9 @@ pub fn cursorScrollAbove(self: *Screen) !void {
     //  lot cheaper in 99% of cases.
 
     const old_pin = self.cursor.page_pin.*;
-    if (try self.pages.grow()) |new_node| {
+    const grown = try self.pages.grow();
+    self.pages.history_pushed += 1;
+    if (grown) |new_node| {
         try self.cursorScrollAboveRotate(new_node);
     } else {
         // In this case, it means grow() didn't allocate a new page.

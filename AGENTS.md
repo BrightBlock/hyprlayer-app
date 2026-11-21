@@ -88,7 +88,9 @@ append-only, applied by `PRAGMA user_version`. Add a step; never edit a shipped 
 
 **Tests.** End-to-end first. `crates/hyprlayer-e2e` runs the real `hyprlayer-server`
 in a sandboxed profile (needs `git` and a released hyprlayer CLI: each sandbox is seeded
-from that release's agent bundle in `target/e2e/cli-assets/`, fetched once per CLI version). Each
+from that release's agent bundle in `target/e2e/cli-assets/`, fetched once per CLI version;
+`shared_terminal_screen` also needs `node` and a `pnpm install`, since it renders frames in
+`@xterm/headless`). Each
 scenario writes `target/e2e/<scenario>/` and compares its `report.json` with
 `crates/hyprlayer-e2e/golden/`: `HYPRLAYER_E2E_BLESS=1` rewrites a golden (review the
 diff like code), `HYPRLAYER_E2E_KEEP=1` keeps the sandbox, and `HYPRLAYER_E2E_SERVER_BIN`

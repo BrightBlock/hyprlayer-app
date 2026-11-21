@@ -101,7 +101,7 @@ struct Read {
 impl Read {
     fn take(&mut self, event: TerminalEvent) {
         self.json += serde_json::to_vec(&event).unwrap().len() as u64;
-        if let TerminalEvent::Output { data, offset } = event {
+        if let TerminalEvent::Output { data, offset, .. } = event {
             let bytes = STANDARD.decode(data).expect("output is base64");
             self.first = self.first.or(offset);
             self.next = offset.map(|at| at + bytes.len() as u64);

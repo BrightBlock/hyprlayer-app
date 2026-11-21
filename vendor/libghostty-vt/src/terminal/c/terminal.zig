@@ -1591,6 +1591,9 @@ pub const TerminalData = enum(c_int) {
     cursor_at_prompt = 39,
     clipboard_write_max_bytes = 40,
     modify_other_keys = 41,
+    history_pushed = 42,
+    history_cleared = 43,
+    cursor_shape = 44,
 
     /// Output type expected for querying the data of the given kind.
     pub fn OutType(comptime self: TerminalData) type {
@@ -1627,7 +1630,11 @@ pub const TerminalData = enum(c_int) {
             .color_cursor_default,
             => color.RGB.C,
             .color_palette, .color_palette_default => color.PaletteC,
-            .kitty_image_storage_limit => u64,
+            .kitty_image_storage_limit,
+            .history_pushed,
+            .history_cleared,
+            => u64,
+            .cursor_shape => u8,
             .kitty_image_medium_file,
             .kitty_image_medium_shared_mem,
             => bool,
@@ -1756,6 +1763,17 @@ fn getTyped(
         ),
         .viewport_active => out.* = t.screens.active.pages.viewport == .active,
         .modify_other_keys => out.* = t.flags.modify_other_keys_2,
+        .history_pushed => out.* = t.screens.get(.primary).?.pages.history_pushed,
+        .history_cleared => out.* = t.screens.get(.primary).?.pages.history_cleared,
+        .cursor_shape => out.* = if (t.cursor.is_default) 0 else blink: {
+            const blinking = t.modes.get(.cursor_blinking);
+            const steady: u8 = switch (t.screens.active.cursor.cursor_style) {
+                .block, .block_hollow => 2,
+                .underline => 4,
+                .bar => 6,
+            };
+            break :blink if (blinking) steady - 1 else steady;
+        },
         .vt_processing_error => out.* = wrapper.stream.handler.semantic_failure,
         .vt_ground => out.* = wrapper.stream.ground(),
         .scrollback_max_bytes => {
@@ -3174,6 +3192,49 @@ test "get kitty_keyboard_flags" {
 
     try testing.expectEqual(Result.success, get(t, .kitty_keyboard_flags, @ptrCast(&flags)));
     try testing.expectEqual(3, flags);
+}
+
+test "get history_pushed counts scrolled rows, not pruning or resizing" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &t, 10, 3));
+    defer free(t);
+
+    var pushed: u64 = undefined;
+    var cleared: u64 = undefined;
+    vt_write(t, "a\r\nb\r\nc\r\nd\r\ne", 13);
+    try testing.expectEqual(Result.success, get(t, .history_pushed, @ptrCast(&pushed)));
+    try testing.expectEqual(2, pushed);
+
+    try testing.expectEqual(Result.success, resize(t, 5, 2, 8, 16));
+    try testing.expectEqual(Result.success, get(t, .history_pushed, @ptrCast(&pushed)));
+    try testing.expectEqual(2, pushed);
+
+    vt_write(t, "\x1b[?1049h\r\n\r\n\r\n", 14);
+    try testing.expectEqual(Result.success, get(t, .history_pushed, @ptrCast(&pushed)));
+    try testing.expectEqual(2, pushed);
+
+    vt_write(t, "\x1b[?1049l\x1b[3J", 12);
+    try testing.expectEqual(Result.success, get(t, .history_cleared, @ptrCast(&cleared)));
+    try testing.expectEqual(1, cleared);
+}
+
+test "get cursor_shape is the DECSCUSR the program last chose" {
+    var t: Terminal = null;
+    try testing.expectEqual(Result.success, new(&lib.alloc.test_allocator, &t, 10, 3));
+    defer free(t);
+
+    var shape: u8 = undefined;
+    try testing.expectEqual(Result.success, get(t, .cursor_shape, @ptrCast(&shape)));
+    try testing.expectEqual(0, shape);
+    vt_write(t, "\x1b[5 q", 5);
+    try testing.expectEqual(Result.success, get(t, .cursor_shape, @ptrCast(&shape)));
+    try testing.expectEqual(5, shape);
+    vt_write(t, "\x1b[4 q", 5);
+    try testing.expectEqual(Result.success, get(t, .cursor_shape, @ptrCast(&shape)));
+    try testing.expectEqual(4, shape);
+    vt_write(t, "\x1b[0 q", 5);
+    try testing.expectEqual(Result.success, get(t, .cursor_shape, @ptrCast(&shape)));
+    try testing.expectEqual(0, shape);
 }
 
 test "get modify_other_keys" {

@@ -235,6 +235,11 @@ impl Server {
         }
     }
 
+    pub(crate) fn renders_frames(&self) -> bool {
+        self.viewer()
+            .is_some_and(|conn| self.clients.screen_frames(conn))
+    }
+
     pub(crate) fn decoder(&self) -> Decoder {
         Decoder::new(
             self.clients.clone(),
@@ -2142,6 +2147,12 @@ impl Dispatch for Server {
         let viewer = connection("terminal_theme")?;
         self.clients.set_terminal_theme(viewer, theme);
         self.runtime.terminals().set_theme(viewer, theme).await;
+        Ok(())
+    }
+
+    async fn terminal_frame_ack(&self, stream_id: u64, seq: u64) -> Result<(), WireError> {
+        let conn = connection("terminal_frame_ack")?;
+        self.streams().ack_frame(conn, stream_id, seq);
         Ok(())
     }
 

@@ -244,7 +244,6 @@ export const commands = {
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	defaultShellName: () => typedError<string, AppError>(__TAURI_INVOKE("default_shell_name")),
 	setTerminalColorScheme: (dark: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_terminal_color_scheme", { dark })),
-	/**  The colours a program's queries are answered with while this desktop owns its terminal's size. */
 	setTerminalTheme: (theme: TerminalTheme) => typedError<null, AppError>(__TAURI_INVOKE("set_terminal_theme", { theme })),
 	getScripts: (projectPath: string) => typedError<ScriptSettings, AppError>(__TAURI_INVOKE("get_scripts", { projectPath })),
 	setScripts: (projectPath: string, scripts: ScriptSettings) => typedError<null, AppError>(__TAURI_INVOKE("set_scripts", { projectPath, scripts })),
@@ -2337,17 +2336,22 @@ export type TagMode = "and" | "or";
 export type TerminalEvent = { kind: "output"; 
 /**  Base64. */
 data: string; 
-/**  Where `data` starts in the terminal's output; a reattach from its end replays only what follows. */
-offset?: number | null } | 
+/**
+ *  Where `data` starts in the terminal's output; a reattach from its end replays only what follows.
+ *  For a frame, the history count a reattach resumes from.
+ */
+offset?: number | null; 
+/**  The sequence number of a frame of the server's screen, which `terminal_frame_ack` returns; absent for raw output. */
+frame?: number | null } | 
+/**  Text the program copied (OSC 52), base64, sent to the frame stream of the client that owns the size. */
+{ kind: "clipboard"; data: string } | 
 /**  The terminal's size from here on: a viewer renders at it, not at its own fit. */
 { kind: "resized"; cols: number; rows: number } | { kind: "exited"; code: number | null };
 
-/**  A desktop's terminal colours: the server answers a TUI's colour queries with its size owner's. */
 export type TerminalTheme = {
 	foreground: Rgb,
 	background: Rgb,
 	cursor: Rgb,
-	/**  ANSI 0 to 15: black, red, green, yellow, blue, magenta, cyan, white, then their bright forms. */
 	ansi: [Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb, Rgb],
 	dark: boolean,
 };

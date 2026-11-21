@@ -503,7 +503,7 @@ stty -icanon -echo -icrnl min 0 time 2
 cat "$1"
 printf '\033[?2031h'
 cr=$(printf '\r')
-n=0; hl=0; winched=""; floods=0; ruled=""
+n=0; hl=0; winched=""; floods=0; ruled=""; full=""
 trap 'winched=1' WINCH
 label() { case $1 in 0) l=low ;; 1) l=medium ;; *) l=high ;; esac; }
 # Anchored to the bottom row, as claude's fullscreen renderer is, so a flood can't move it.
@@ -570,10 +570,33 @@ load() {
   paint
 }
 repaints() { i=0; while [ $i -lt 580 ]; do paint; sleep 0.016; i=$((i + 1)); done; }
+emoji() {
+  printf '\033[%s;1H\033[2K\033[44m \342\235\257 \360\237\216\211 Option one \033[0m \346\227\245\346\234\254\350\252\236 \360\237\207\272\360\237\207\270 \342\234\205 \303\251' $((rows - 10))
+  paint
+}
+url() {
+  printf '\033[%s;1H\033[J' $((rows - 6))
+  printf 'see https://example.com/%s end\r\n' "$(printf '%0150d' 0 | tr 0 a)"
+  paint
+}
+# On the main screen, where scrolled lines go into history; the fixture left the alternate one.
+lines() {
+  printf '\033[?1049l\033[%s;1H\033[J' $((rows - 6))
+  printf 'progress 10%%'; printf '\rprogress 100%% done\r\n'
+  i=1; while [ $i -le 300 ]; do printf 'history line %03d \033[3%sm%s\033[0m\r\n' $i $((i % 7 + 1)) "$(printf "%$((i % 90))s" '' | tr ' ' =)"; i=$((i + 1)); done
+  paint
+}
+copy() { printf '\033]52;c;%s\a' "$(printf 'copied by the program' | base64)"; paint; }
+# A resize redraws everything, as claude does: scrollback cleared, the transcript printed again.
+redraw() {
+  printf '\033[2J\033[3J\033[H'
+  i=1; while [ $i -le 60 ]; do printf 'transcript %02d %s\r\n' $i "$(printf "%$((i * 3))s" '' | tr ' ' '~')"; i=$((i + 1)); done
+  paint
+}
 paint
 while :; do
   k=$(dd bs=1 count=1 2>/dev/null; echo .); k=${k%.}
-  [ -z "$winched" ] || { winched=""; paint; }
+  [ -z "$winched" ] || { winched=""; if [ -n "$full" ]; then redraw; else paint; fi; }
   case $k in
     j) hl=$(( (hl + 1) % 3 )); paint ;;
     "$cr") label $hl; printf '\033[%s;1H\033[2K ⎿  Set effort level to %s' $((rows - 9)) "$l"; paint ;;
@@ -583,6 +606,12 @@ while :; do
     S) scroll ;;
     Y) load ;;
     R) repaints ;;
+    E) emoji ;;
+    U) url ;;
+    L) lines ;;
+    C) copy ;;
+    W) full=1; redraw ;;
+    w) full=""; paint ;;
   esac
 done
 "#;

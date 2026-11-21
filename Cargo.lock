@@ -2093,6 +2093,7 @@ name = "hyprlayer-e2e"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "ghostty-vt",
  "hyprlayer-core",
  "hyprlayer-proto",
  "hyprlayer-server",

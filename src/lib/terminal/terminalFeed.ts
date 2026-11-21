@@ -54,6 +54,7 @@ export class TerminalFeed {
     channel.onmessage = (ev) => {
       if (ev.kind === "exited") return this.onExited();
       if (ev.kind === "resized") return this.screen.follow(ev);
+      if (ev.kind === "clipboard") return;
       const bytes = b64ToBytes(ev.data);
       const at = ev.offset ?? undefined;
       // Only a resume's first output can be a replay; a live stream's gap keeps writing, as it always has.

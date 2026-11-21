@@ -103,6 +103,37 @@ pub fn decode_terminal_output(event: &[u8]) -> Option<(u64, &[u8])> {
     Some((u64::from_le_bytes(*offset), output))
 }
 
+/// Leads a terminal stream event that is a frame of the server's screen (`SCREEN_FRAMES`): then
+/// its sequence number and the history count a reattach resumes from after it, each a `u64`
+/// little-endian, then the ANSI that brings the client's screen to the server's.
+pub const TAG_TERMINAL_FRAME: u8 = b'F';
+
+pub fn encode_terminal_frame(stream_id: u64, seq: u64, history: u64, bytes: &[u8]) -> Vec<u8> {
+    encode_stream_event(
+        stream_id,
+        &[
+            &[TAG_TERMINAL_FRAME],
+            &seq.to_le_bytes(),
+            &history.to_le_bytes(),
+            bytes,
+        ],
+    )
+}
+
+/// A screen frame's sequence number, history count and bytes; `None` for any other event.
+pub fn decode_terminal_frame(event: &[u8]) -> Option<(u64, u64, &[u8])> {
+    let [TAG_TERMINAL_FRAME, rest @ ..] = event else {
+        return None;
+    };
+    let (seq, rest) = rest.split_first_chunk::<8>()?;
+    let (history, bytes) = rest.split_first_chunk::<8>()?;
+    Some((
+        u64::from_le_bytes(*seq),
+        u64::from_le_bytes(*history),
+        bytes,
+    ))
+}
+
 // One allocation for the whole frame, however many pieces the event comes in.
 fn encode_stream_event(stream_id: u64, event: &[&[u8]]) -> Vec<u8> {
     let len = 8 + event.iter().map(|piece| piece.len()).sum::<usize>();
@@ -283,6 +314,25 @@ fn reassembled(mut whole: Vec<u8>) -> Option<Frame> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screen_frame_round_trips_and_is_not_raw_output() {
+        let wire = encode_terminal_frame(7, 3, 1_000_001, b"\x1b[?2026h");
+        let Ok(Some(Frame::Data(payload))) = ({
+            let mut decoder = Decoder::new();
+            decoder.feed(&wire);
+            decoder.next_frame()
+        }) else {
+            panic!("one data frame");
+        };
+        let (stream, event) = decode_stream_frame(&payload).unwrap();
+        assert_eq!(stream, 7);
+        assert_eq!(
+            decode_terminal_frame(event),
+            Some((3, 1_000_001, &b"\x1b[?2026h"[..]))
+        );
+        assert_eq!(decode_terminal_output(event), None);
+    }
 
     #[test]
     fn frames_round_trip_when_delivered_one_byte_at_a_time() {

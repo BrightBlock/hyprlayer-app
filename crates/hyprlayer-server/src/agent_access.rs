@@ -322,6 +322,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::TerminalResize { .. }
         | Request::TerminalFocus { .. }
         | Request::TerminalTheme { .. }
+        | Request::TerminalFrameAck { .. }
         | Request::TerminalClose { .. }
         | Request::AgentResize { .. }
         | Request::CaptureAgentSession { .. }

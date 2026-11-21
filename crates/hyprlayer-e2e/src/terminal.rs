@@ -23,7 +23,7 @@ pub async fn read_until(events: &mut TerminalStream, needle: &str, within: Durat
                     &STANDARD.decode(data).unwrap_or_default(),
                 ));
             }
-            Ok(Some(TerminalEvent::Resized { .. })) => {}
+            Ok(Some(TerminalEvent::Resized { .. } | TerminalEvent::Clipboard { .. })) => {}
             Ok(Some(TerminalEvent::Exited { .. })) | Ok(None) | Err(_) => break,
         }
     }
@@ -35,7 +35,7 @@ pub async fn next_output(events: &mut TerminalStream) -> Option<String> {
     loop {
         match events.recv().await? {
             TerminalEvent::Output { data, .. } => return Some(data),
-            TerminalEvent::Resized { .. } => {}
+            TerminalEvent::Resized { .. } | TerminalEvent::Clipboard { .. } => {}
             TerminalEvent::Exited { .. } => return None,
         }
     }
@@ -82,7 +82,11 @@ pub async fn wait_for_exit(events: &mut TerminalStream, within: Duration) -> Opt
     loop {
         match tokio::time::timeout_at(deadline, events.recv()).await {
             Ok(Some(TerminalEvent::Exited { code })) => return Some(code),
-            Ok(Some(TerminalEvent::Output { .. } | TerminalEvent::Resized { .. })) => {}
+            Ok(Some(
+                TerminalEvent::Output { .. }
+                | TerminalEvent::Resized { .. }
+                | TerminalEvent::Clipboard { .. },
+            )) => {}
             Ok(None) | Err(_) => return None,
         }
     }

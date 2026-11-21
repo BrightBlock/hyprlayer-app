@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use hyprlayer_proto::Features;
 use hyprlayer_server::client::RpcClient;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
@@ -48,6 +49,16 @@ pub async fn far_phone(
     deep: bool,
     one_way: Duration,
     deep_up: bool,
+) -> (Arc<RpcClient>, Arc<Link>) {
+    far_phone_announcing(socket, deep, one_way, deep_up, None).await
+}
+
+pub async fn far_phone_announcing(
+    socket: &Path,
+    deep: bool,
+    one_way: Duration,
+    deep_up: bool,
+    features: Option<Features>,
 ) -> (Arc<RpcClient>, Arc<Link>) {
     let unix = tokio::net::UnixStream::connect(socket)
         .await
@@ -151,7 +162,11 @@ pub async fn far_phone(
             }
         }
     });
-    let client = RpcClient::connect(client_end).await.expect("handshake");
+    let client = match features {
+        Some(features) => RpcClient::connect_announcing(client_end, features).await,
+        None => RpcClient::connect(client_end).await,
+    }
+    .expect("handshake");
     drain_events(&client, link.events.clone());
     (client, link)
 }

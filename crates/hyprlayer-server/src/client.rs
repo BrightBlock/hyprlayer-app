@@ -130,6 +130,16 @@ impl RpcClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
+        Self::connect_announcing(stream, ANNOUNCED).await
+    }
+
+    pub async fn connect_announcing<S>(
+        stream: S,
+        features: Features,
+    ) -> Result<Arc<Self>, ConnectError>
+    where
+        S: AsyncRead + AsyncWrite + Send + 'static,
+    {
         let (rd, wr) = tokio::io::split(stream);
         let mut reader = FrameReader::new(rd);
         let mut writer = FrameWriter::new(wr);
@@ -139,7 +149,7 @@ impl RpcClient {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
-                features: ANNOUNCED.names(),
+                features: features.names(),
                 stream_window: None,
             })
             .await?;
@@ -780,13 +790,21 @@ impl TerminalStream {
     /// `None` at a clean end of stream or an undecodable frame.
     pub async fn recv(&mut self) -> Option<TerminalEvent> {
         let bytes = self.rx.recv().await?;
-        match frame::decode_terminal_output(&bytes) {
-            Some((offset, output)) => Some(TerminalEvent::Output {
+        if let Some((offset, output)) = frame::decode_terminal_output(&bytes) {
+            return Some(TerminalEvent::Output {
                 data: B64.encode(output),
                 offset: Some(offset),
-            }),
-            None => decode_json(&bytes),
+                frame: None,
+            });
         }
+        if let Some((seq, history, bytes)) = frame::decode_terminal_frame(&bytes) {
+            return Some(TerminalEvent::Output {
+                data: B64.encode(bytes),
+                offset: Some(history),
+                frame: Some(seq),
+            });
+        }
+        decode_json(&bytes)
     }
 }
 

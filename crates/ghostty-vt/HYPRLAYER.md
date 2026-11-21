@@ -27,6 +27,11 @@ What changed from herdr:
 - Patch 0009 (Hyprlayer's own) leaves kitty keyboard and XTVERSION queries
   unanswered. `lib.rs` gains `set_default_colors`, `for_each_viewport_row_cell`
   and a test for the patch.
+- Patch 0010 (Hyprlayer's own) counts rows scrolled into history and history
+  erases, and reports the cursor's DECSCUSR shape. `lib.rs` gains
+  `history_pushed`, `history_cleared`, `cursor_shape`, `cursor_x`,
+  `cursor_visible`, `for_each_row_cell` (a viewport or history row's cells
+  with style and link) and a test; `bindings.rs` gains the three data kinds.
 - The vendored tree keeps only what a lib-vt build reads: 508 of its 1,339 files
   are gone (19.6 MB down to 15.2 MB), all of them files that no cold
   `zig build -Demit-lib-vt` for x86_64-linux-gnu, aarch64-linux-gnu,

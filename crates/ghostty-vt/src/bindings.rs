@@ -3216,6 +3216,12 @@ pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES: G
     40;
 #[doc = " Whether xterm modifyOtherKeys mode 2 is enabled.\n\n Output type: bool *"]
 pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MODIFY_OTHER_KEYS: GhosttyTerminalData = 41;
+#[doc = " Rows scrolling has moved from the primary screen's active area into its\n history, ever. Pruning and resizing do not change it.\n\n Output type: uint64_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_HISTORY_PUSHED: GhosttyTerminalData = 42;
+#[doc = " How many times the primary screen's history was erased (ED 3 or a\n reset), ever.\n\n Output type: uint64_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_HISTORY_CLEARED: GhosttyTerminalData = 43;
+#[doc = " The DECSCUSR value that gives the cursor's current shape and blink, or 0\n while the program has left the cursor at its defaults.\n\n Output type: uint8_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_SHAPE: GhosttyTerminalData = 44;
 #[doc = " Whether xterm modifyOtherKeys mode 2 is enabled.\n\n Output type: bool *"]
 pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MAX_VALUE: GhosttyTerminalData = 2147483647;
 #[doc = " Terminal data types.\n\n These values specify what type of data to extract from a terminal\n using `ghostty_terminal_get`.\n\n @ingroup terminal"]

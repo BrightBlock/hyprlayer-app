@@ -11,6 +11,16 @@
           },
           "guard": "A saw every byte and both desktops drew the repaint",
           "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
         }
       ],
       "step": "A opens the program at 120x40 and B attaches at 80x24"
@@ -24,6 +34,16 @@
             "mismatched_cells": 0
           },
           "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
           "ok": true
         }
       ],
@@ -39,6 +59,16 @@
           },
           "guard": "A saw every byte and both desktops drew the repaint",
           "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
         }
       ],
       "step": "(b) B types, which gives it the size, then resizes"
@@ -52,6 +82,16 @@
             "mismatched_cells": 0
           },
           "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
           "ok": true
         }
       ],
@@ -73,6 +113,16 @@
           },
           "guard": "A saw every byte and both desktops drew the repaint",
           "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
         }
       ],
       "step": "(d) the program asks for the theme while B, the light desktop, is active"
@@ -89,6 +139,16 @@
           },
           "guard": "A saw every byte and both desktops drew the repaint",
           "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
         }
       ],
       "step": "Ctrl+F3 and a key batched with a reply reach the program"
@@ -103,6 +163,16 @@
             "mismatched_cells": 37
           },
           "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
           "ok": true
         }
       ],
@@ -119,9 +189,165 @@
           },
           "guard": "A saw every byte and both desktops drew the repaint",
           "ok": true
+        },
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
         }
       ],
       "step": "(f) B reconnects after missing more output than the terminal keeps"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0
+          },
+          "guard": "the frame client shows the server's screen, cells and history",
+          "ok": true
+        }
+      ],
+      "step": "frames: C draws a row of emoji, CJK and a flag on a coloured picker row"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0,
+            "url_rows_wrapped": true
+          },
+          "guard": "the frame client shows the screen, and xterm joins the URL's rows as the model does",
+          "ok": true
+        }
+      ],
+      "step": "frames: a URL the program wrote past the right margin stays one wrapped line"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "progress_line_finished": true,
+            "raw_output_events": 0
+          },
+          "guard": "after the stall the client's history holds every line as the model has it, the finished progress line included",
+          "ok": true
+        }
+      ],
+      "step": "frames: C's link stalls while 300 lines scroll past, a progress line finished among them"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "resizes": [
+              {
+                "cols": 60,
+                "settled": true,
+                "shows": {
+                  "grids_match": true,
+                  "history_matches": true,
+                  "mismatched_cells": 0,
+                  "raw_output_events": 0
+                }
+              },
+              {
+                "cols": 110,
+                "settled": true,
+                "shows": {
+                  "grids_match": true,
+                  "history_matches": true,
+                  "mismatched_cells": 0,
+                  "raw_output_events": 0
+                }
+              }
+            ]
+          },
+          "guard": "after each resize the client's history text is the model's",
+          "ok": true
+        }
+      ],
+      "step": "frames: C narrows to 60 columns and back, so both sides reflow that history"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "grids_match": true,
+            "history_kept": true,
+            "history_matches": true,
+            "mismatched_cells": 0,
+            "raw_output_events": 0,
+            "resumed": true
+          },
+          "guard": "the reattach resumes: the client keeps its history and shows the screen",
+          "ok": true
+        }
+      ],
+      "step": "frames: C drops its stream, the program writes, and C reattaches from its history count"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "c": {
+              "grids_match": true,
+              "history_matches": true,
+              "mismatched_cells": 0,
+              "raw_output_events": 0
+            },
+            "d": {
+              "grids_match": true,
+              "history_matches": true,
+              "mismatched_cells": 0,
+              "raw_output_events": 0
+            },
+            "other_copied": false,
+            "owner_copied": true
+          },
+          "guard": "only the size owner's frame stream carries the copy",
+          "ok": true
+        }
+      ],
+      "step": "frames: the program copies text while C owns the size and D watches"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "c": {
+              "grids_match": true,
+              "history_matches": true,
+              "mismatched_cells": 0,
+              "raw_output_events": 0
+            },
+            "d": {
+              "grids_match": true,
+              "history_matches": true,
+              "mismatched_cells": 0,
+              "raw_output_events": 0
+            },
+            "flips": 20
+          },
+          "guard": "both frame desktops show the server's screen and history after the flips",
+          "ok": true
+        }
+      ],
+      "step": "frames: focus flips between C at 124 and D at 72 columns, the program redrawing everything each time"
     },
     {
       "guards": [

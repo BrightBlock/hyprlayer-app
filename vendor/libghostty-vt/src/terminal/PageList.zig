@@ -456,6 +456,14 @@ limits: Limits,
 /// specifically for scrollbar information so we can have the total size.
 total_rows: usize,
 
+/// Rows that scrolling moved from the active area into history, ever.
+/// Pruning and resizing never change it, so a reader that last saw N
+/// knows how many of the newest history rows arrived since.
+history_pushed: u64 = 0,
+
+/// How many times history was erased (ED 3 or a reset), ever.
+history_cleared: u64 = 0,
+
 /// The list of tracked pins. These are kept up to date automatically.
 tracked_pins: PinSet,
 
@@ -983,6 +991,7 @@ pub fn deinit(self: *PageList) void {
 /// memory to fit the active area.
 pub fn reset(self: *PageList) void {
     defer self.assertIntegrity();
+    self.history_cleared += 1;
 
     // Reset discards all scrollback, so there is nothing left to compress.
     self.page_compression.reset();
@@ -3545,7 +3554,10 @@ pub fn scrollClear(self: *PageList) Allocator.Error!void {
     };
 
     // Scroll
-    for (0..non_empty) |_| _ = try self.grow();
+    for (0..non_empty) |_| {
+        _ = try self.grow();
+        self.history_pushed += 1;
+    }
 }
 
 /// Give a live node a new generation before changing its coordinate layout in
@@ -5441,6 +5453,7 @@ pub fn eraseHistory(
     bl_pt: ?point.Point,
 ) void {
     self.eraseRows(.{ .history = .{} }, bl_pt);
+    self.history_cleared += 1;
 }
 
 /// Erase active area rows, from the top of the active area to the

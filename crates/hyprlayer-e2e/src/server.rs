@@ -4,6 +4,7 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use hyprlayer_proto::Features;
 use hyprlayer_server::client::RpcClient;
 use tokio::process::{Child, Command};
 
@@ -90,6 +91,15 @@ impl Server {
         self.client
             .clone()
             .expect("a listening server has a client")
+    }
+
+    pub async fn connect_announcing(&self, features: Features) -> Arc<RpcClient> {
+        let stream = tokio::net::UnixStream::connect(&self.socket)
+            .await
+            .expect("connect to hyprlayer-server");
+        RpcClient::connect_announcing(stream, features)
+            .await
+            .expect("handshake with hyprlayer-server")
     }
 
     /// An additional, independent connection.

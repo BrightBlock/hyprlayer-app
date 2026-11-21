@@ -257,3 +257,52 @@ verification:
 ```sh
 cargo test -p ghostty-vt --lib kitty_keyboard_and_xtversion_queries_go_unanswered
 ```
+
+## 0010 count rows pushed into history, and expose the cursor shape
+
+status: active
+
+patch: `vendor/patches/libghostty-vt/0010-count-history-pushes-and-expose-cursor-shape.patch`
+
+herdr issue: none; Hyprlayer-only
+
+upstream discussion: not opened
+
+upstream pr: not opened
+
+vendored base: `44f2a44df7e8c4a0c6df3f7d872ef3d7ead88e51`
+
+local files:
+
+- `vendor/libghostty-vt/include/ghostty/vt/terminal.h`
+- `vendor/libghostty-vt/src/terminal/PageList.zig`
+- `vendor/libghostty-vt/src/terminal/Screen.zig`
+- `vendor/libghostty-vt/src/terminal/c/terminal.zig`
+
+reason: Hyprlayer's server writes its screen to each desktop as frames, and
+each frame moves the rows the program scrolled into history since the last
+one into the desktop's scrollback. Row counts can't say how many that is: the
+byte cap prunes whole pages, so `total_rows` goes down as output scrolls, and a
+resize reflows history into more or fewer rows. `GHOSTTY_TERMINAL_DATA_HISTORY_PUSHED`
+counts every row scrolling moves from the primary screen's active area into
+its history (a scroll at the bottom, a scroll above a bottom margin, and
+`ED 2`'s scroll-clear), and nothing else. `HISTORY_CLEARED` counts erases of
+that history (`ED 3`, RIS), so a frame can clear the desktop's scrollback too.
+`CURSOR_SHAPE` reports the DECSCUSR value behind the cursor's shape and blink,
+0 while the program has left them at their defaults: the render state has the
+shape, but holding one per pane only for that costs about 375 KiB.
+
+remove when: upstream exposes a monotonic history-push counter, a history
+erase signal and the cursor's DECSCUSR state through the C API, and Hyprlayer
+passes the checks below using them.
+
+verification:
+
+```sh
+cargo test -p ghostty-vt --lib the_history_counter_counts_scrolled_rows_past_pruning
+# Ghostty's own tests for the new data kinds. A native x86_64-linux-gnu test
+# build fails to link against a glibc whose crt1.o carries .sframe sections, so
+# this runs against Zig's bundled musl:
+(cd vendor/libghostty-vt && zig build test-lib-vt -Dtarget=x86_64-linux-musl -Dtest-filter='history_pushed')
+(cd vendor/libghostty-vt && zig build test-lib-vt -Dtarget=x86_64-linux-musl -Dtest-filter='cursor_shape')
+```

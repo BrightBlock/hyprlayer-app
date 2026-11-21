@@ -39,6 +39,16 @@
       "guards": [
         {
           "evidence": {},
+          "guard": "a picker redraw and a 60-line scroll arrive as frames",
+          "ok": true
+        }
+      ],
+      "step": "screen frames on a 11 ms RTT, 30 MB/s link"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
           "guard": "a picker redraw and a 60-line scroll arrive",
           "ok": true
         },
@@ -68,6 +78,16 @@
         }
       ],
       "step": "raw bytes on a 60 ms RTT, 1 Mbit/s link"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "a picker redraw and a 60-line scroll arrive as frames",
+          "ok": true
+        }
+      ],
+      "step": "screen frames on a 60 ms RTT, 1 Mbit/s link"
     }
   ]
 }

@@ -1,5 +1,6 @@
 //! A PTY's screen as a person sees it, for reading a TUI that repaints only the cells that changed.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -7,9 +8,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use ghostty_vt::{CellWide, ColorScheme, RgbColor, Terminal, TerminalCompressionResult};
 use hyprlayer_models::{Rgb, TerminalTheme};
 
+use super::frames::{Frame, Frames};
 use super::Size;
 
 const SCROLLBACK_BYTES: usize = 2 * 1024 * 1024;
+/// Clipboard writes kept for frame streams to forward; past this, ones between two of a stream's frames are lost.
+const CLIPBOARD_KEPT: usize = 4;
 
 pub struct Screen {
     state: Mutex<State>,
@@ -23,6 +27,8 @@ struct State {
     theme: TerminalTheme,
     /// The compression activity when idle compression last finished.
     compressed: Option<u64>,
+    clipboard: VecDeque<(u64, Vec<u8>)>,
+    copies: u64,
 }
 
 impl Screen {
@@ -45,6 +51,8 @@ impl Screen {
             replies,
             theme,
             compressed: None,
+            clipboard: VecDeque::new(),
+            copies: 0,
         };
         state.apply(theme);
         Ok(Self {
@@ -57,7 +65,38 @@ impl Screen {
         state.terminal.write(bytes);
         // Taken so they don't pile up: nothing reads them yet.
         state.terminal.take_pwd_changes();
-        state.terminal.take_clipboard_writes();
+        for copy in state.terminal.take_clipboard_writes() {
+            state.copies += 1;
+            let copied = (state.copies, copy);
+            state.clipboard.push_back(copied);
+            if state.clipboard.len() > CLIPBOARD_KEPT {
+                state.clipboard.pop_front();
+            }
+        }
+    }
+
+    pub fn frames(&self, resume: Option<u64>) -> (Frames, bool) {
+        Frames::new(&self.lock().terminal, resume)
+    }
+
+    pub fn render(&self, frames: &mut Frames) -> Option<Frame> {
+        frames.render(&self.lock().terminal)
+    }
+
+    pub fn copies(&self) -> u64 {
+        self.lock().copies
+    }
+
+    pub fn copies_since(&self, seen: &mut u64) -> Vec<Vec<u8>> {
+        let state = self.lock();
+        let copies = state
+            .clipboard
+            .iter()
+            .filter(|(n, _)| *n > *seen)
+            .map(|(_, copy)| copy.clone())
+            .collect();
+        *seen = state.copies;
+        copies
     }
 
     pub(crate) fn resize(&self, (rows, cols): Size) {

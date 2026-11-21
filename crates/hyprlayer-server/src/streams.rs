@@ -18,6 +18,7 @@ use hyprlayer_core::runtime::sessions::{
     SessionStreamError, StartStageSessionRequest,
 };
 use hyprlayer_core::runtime::terminals as core_terminals;
+use hyprlayer_core::terminal::frames::Frames;
 use hyprlayer_core::terminal::{RingReader, TerminalChunk};
 use hyprlayer_core::{
     CoreError, Harness, HyprlayerRuntime, LogCursor, PermissionMode, ScriptKind, Session,
@@ -26,6 +27,7 @@ use hyprlayer_core::{
 use hyprlayer_models::{ClientRef, PtyLaunchSession, PtyLaunched, SessionStreamItem};
 use hyprlayer_proto::{frame, WireError, STREAM_WINDOW};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
@@ -38,6 +40,10 @@ use crate::outbound::{Credit, Outbound, PART_BYTES};
 const STREAM_QUEUE_BYTES: i64 = 2 * PART_BYTES as i64;
 /// Raw output per terminal frame, so one fits a part and needs no lane.
 const TERMINAL_READ_BYTES: usize = PART_BYTES - frame::TERMINAL_OUTPUT_HEADER;
+/// The shortest gap between two frames of one stream: about one display refresh.
+const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Frames a client that acks may have written to its screen but not yet acked.
+const UNACKED_FRAMES: u64 = 2;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamStartOpts {
@@ -276,6 +282,25 @@ impl StreamResponse {
 pub(crate) struct StreamState {
     next_id: AtomicU64,
     pending_launches: Mutex<PendingLaunches>,
+    frame_acks: FrameAckTable,
+}
+
+/// Each frame stream's connection and the newest frame its client acked.
+type FrameAckTable = Arc<Mutex<HashMap<u64, (u64, watch::Sender<Option<u64>>)>>>;
+
+pub(crate) struct FrameAcks {
+    rx: watch::Receiver<Option<u64>>,
+    table: FrameAckTable,
+    stream_id: u64,
+}
+
+impl Drop for FrameAcks {
+    fn drop(&mut self) {
+        self.table
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.stream_id);
+    }
 }
 
 /// One lock, so a stash and a connection's close can't miss each other.
@@ -292,6 +317,38 @@ const ABANDONED: &str = "The app disconnected before it launched the agent.";
 impl StreamState {
     fn next_id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn frame_acks(&self, stream_id: u64) -> FrameAcks {
+        let (tx, rx) = watch::channel(None);
+        if let Ok(conn) = crate::CONN.try_with(|conn| *conn) {
+            self.frame_acks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(stream_id, (conn, tx));
+        }
+        FrameAcks {
+            rx,
+            table: self.frame_acks.clone(),
+            stream_id,
+        }
+    }
+
+    /// Only the stream's own connection acks it; an ack for a stream that ended is dropped.
+    pub(crate) fn ack_frame(&self, conn: u64, stream_id: u64, seq: u64) {
+        let table = self
+            .frame_acks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some((_, tx)) = table.get(&stream_id).filter(|(owner, _)| *owner == conn) {
+            tx.send_if_modified(|acked| {
+                let newer = acked.is_none_or(|acked| seq > acked);
+                if newer {
+                    *acked = Some(seq);
+                }
+                newer
+            });
+        }
     }
 }
 
@@ -463,6 +520,12 @@ impl Ready<'_> {
         }
     }
 
+    /// Events that go out together, such as a size and the frame drawn at it.
+    fn push_all(self, frames: Vec<Vec<u8>>) -> bool {
+        let tx = self.tx;
+        frames.into_iter().all(|frame| Ready { tx }.push(frame))
+    }
+
     // Credit counts the event as it goes out, everything after the stream id, as the client does.
     fn push(self, frame: Vec<u8>) -> bool {
         let tx = self.tx;
@@ -477,12 +540,18 @@ impl Ready<'_> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum JsonTerminalEvent {
     Output { data: String },
+    Clipboard { data: String },
     Resized { cols: u16, rows: u16 },
     Exited { code: Option<i32> },
 }
 
 pub(crate) enum StreamSource {
     Terminal(RingReader),
+    Frames {
+        live: RingReader,
+        frames: Frames,
+        acks: FrameAcks,
+    },
     Session {
         session_id: String,
         /// Filled by `attach_session`, and by a resume that names the row
@@ -512,6 +581,24 @@ impl StreamSource {
             _ => None,
         }
     }
+}
+
+/// A terminal's stream for this request's connection, seated as its viewer: frames of the
+/// server's screen for a client that renders them, else raw output. `resume` is a frame
+/// client's history count; the `bool` is whether its history resumes from there.
+fn terminal_source(
+    server: &Server,
+    live: RingReader,
+    stream_id: u64,
+    resume: Option<u64>,
+) -> (StreamSource, bool) {
+    let live = server.view(live);
+    if !server.renders_frames() {
+        return (StreamSource::Terminal(live), false);
+    }
+    let (frames, resumed) = live.screen().frames(resume);
+    let acks = server.streams().frame_acks(stream_id);
+    (StreamSource::Frames { live, frames, acks }, resumed)
 }
 
 /// Which partial text a session stream forwards.
@@ -590,31 +677,39 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(attachment.live))),
+                Some(terminal_source(server, attachment.live, stream_id, None).0),
             ))
         }
         StreamRequest::TerminalAttach {
             terminal_id,
             offset,
         } => {
+            // A frame client's offset is a history count, not a place in the raw output.
+            let frames = server.renders_frames();
             let attachment = runtime
                 .terminals()
                 .attach(core_terminals::AttachTerminalRequest {
                     terminal_id,
-                    offset,
+                    offset: offset.filter(|_| !frames),
                 })
                 .await
                 .wire()?;
             match attachment {
                 Some(attachment) => {
                     let stream_id = server.streams().next_id();
+                    let (source, resumed) = terminal_source(
+                        server,
+                        attachment.live,
+                        stream_id,
+                        offset.filter(|_| frames),
+                    );
                     Ok((
                         StreamResponse::TerminalAttach {
                             attached: true,
                             stream_id: Some(stream_id),
-                            resumed: attachment.resumed,
+                            resumed: resumed || attachment.resumed,
                         },
-                        Some(StreamSource::Terminal(server.view(attachment.live))),
+                        Some(source),
                     ))
                 }
                 None => Ok((
@@ -639,7 +734,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(attachment.live))),
+                Some(terminal_source(server, attachment.live, stream_id, None).0),
             ))
         }
         StreamRequest::SpawnShellTerminal {
@@ -662,7 +757,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(attachment.live))),
+                Some(terminal_source(server, attachment.live, stream_id, None).0),
             ))
         }
         StreamRequest::AgentOpen {
@@ -689,7 +784,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(attachment.live))),
+                Some(terminal_source(server, attachment.live, stream_id, None).0),
             ))
         }
         StreamRequest::PtyLaunch {
@@ -717,7 +812,7 @@ pub(crate) async fn prepare_stream(
                     launched,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(attachment.live))),
+                Some(terminal_source(server, attachment.live, stream_id, None).0),
             ))
         }
         StreamRequest::ScriptRun {
@@ -742,7 +837,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: run.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(server.view(run.live))),
+                Some(terminal_source(server, run.live, stream_id, None).0),
             ))
         }
         StreamRequest::StartStageSession {
@@ -1119,6 +1214,9 @@ async fn run_stream(
 ) {
     let ended = match source {
         StreamSource::Terminal(live) => forward_terminal(stream_id, live, &tx).await,
+        StreamSource::Frames { live, frames, acks } => {
+            forward_frames(stream_id, live, frames, acks, &tx).await
+        }
         StreamSource::Session {
             session_id,
             replay,
@@ -1173,6 +1271,87 @@ async fn forward_terminal(stream_id: u64, mut live: RingReader, tx: &StreamTx) -
             return "the client stopped reading";
         }
     }
+}
+
+/// Returns why the stream ended. Renders only once the client has room and a refresh has
+/// passed, so a slow link gets fewer frames of the latest screen rather than a backlog.
+async fn forward_frames(
+    stream_id: u64,
+    mut live: RingReader,
+    mut frames: Frames,
+    mut acks: FrameAcks,
+    tx: &StreamTx,
+) -> &'static str {
+    let screen = live.screen();
+    let mut copies = screen.copies();
+    let (mut seq, mut sent_at) = (0u64, None::<Instant>);
+    loop {
+        if let Some(at) = sent_at {
+            if !live.changed().await {
+                return "the terminal closed";
+            }
+            tokio::time::sleep_until(at + FRAME_INTERVAL).await;
+        }
+        // A client that never acks is paced by credit alone.
+        while acks
+            .rx
+            .borrow()
+            .is_some_and(|acked| seq.saturating_sub(acked) >= UNACKED_FRAMES)
+        {
+            if acks.rx.changed().await.is_err() {
+                break;
+            }
+        }
+        let Some(ready) = tx.ready().await else {
+            return "the client stopped reading";
+        };
+        let exited = live.exited();
+        let mut events = Vec::new();
+        let rendered = screen.render(&mut frames);
+        if let Some(frame) = &rendered {
+            seq += 1;
+            if let Some((cols, rows)) = frame.resized {
+                events.push(json_event(
+                    stream_id,
+                    &JsonTerminalEvent::Resized { cols, rows },
+                ));
+            }
+            events.push(frame::encode_terminal_frame(
+                stream_id,
+                seq,
+                frame.history,
+                &frame.bytes,
+            ));
+        }
+        let owner = live.owns_size();
+        for copy in screen.copies_since(&mut copies) {
+            if owner {
+                let data = B64.encode(copy);
+                events.push(json_event(
+                    stream_id,
+                    &JsonTerminalEvent::Clipboard { data },
+                ));
+            }
+        }
+        if let Some(code) = exited {
+            events.push(json_event(stream_id, &JsonTerminalEvent::Exited { code }));
+        }
+        if !events.is_empty() && !ready.push_all(events) {
+            return "the client stopped reading";
+        }
+        if rendered.is_some() {
+            frames.commit();
+        }
+        sent_at = Some(Instant::now());
+        if exited.is_some() {
+            return "the terminal exited";
+        }
+    }
+}
+
+fn json_event(stream_id: u64, event: &JsonTerminalEvent) -> Vec<u8> {
+    let bytes = serde_json::to_vec(event).expect("a terminal event serializes");
+    frame::encode_stream_frame(stream_id, &bytes)
 }
 
 /// Returns why the stream ended.

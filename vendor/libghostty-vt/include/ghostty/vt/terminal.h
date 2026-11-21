@@ -1959,6 +1959,30 @@ typedef enum GHOSTTY_ENUM_TYPED {
    */
   GHOSTTY_TERMINAL_DATA_MODIFY_OTHER_KEYS = 41,
 
+  /**
+   * Rows scrolling has moved from the primary screen's active area into its
+   * history, ever. Pruning and resizing do not change it.
+   *
+   * Output type: uint64_t *
+   */
+  GHOSTTY_TERMINAL_DATA_HISTORY_PUSHED = 42,
+
+  /**
+   * How many times the primary screen's history was erased (ED 3 or a
+   * reset), ever.
+   *
+   * Output type: uint64_t *
+   */
+  GHOSTTY_TERMINAL_DATA_HISTORY_CLEARED = 43,
+
+  /**
+   * The DECSCUSR value that gives the cursor's current shape and blink, or 0
+   * while the program has left the cursor at its defaults.
+   *
+   * Output type: uint8_t *
+   */
+  GHOSTTY_TERMINAL_DATA_CURSOR_SHAPE = 44,
+
   GHOSTTY_TERMINAL_DATA_MAX_VALUE = GHOSTTY_ENUM_MAX_VALUE,
 } GhosttyTerminalData;
 

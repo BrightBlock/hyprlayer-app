@@ -1,4 +1,5 @@
 pub mod engines;
+pub mod frames;
 pub mod screen;
 pub mod text;
 
@@ -499,6 +500,32 @@ impl RingReader {
             }
         }
         false
+    }
+
+    pub fn screen(&self) -> Arc<Screen> {
+        self.sizing.ring.screen.clone()
+    }
+
+    /// Waits for output, a size or the exit; `false` once nothing more can come.
+    pub async fn changed(&mut self) -> bool {
+        self.tail_rx.changed().await.is_ok()
+    }
+
+    /// The child's exit code, once all of its output is on the screen.
+    pub fn exited(&self) -> Option<Option<i32>> {
+        self.sizing.ring.inner.lock().unwrap().exited
+    }
+
+    pub fn owns_size(&self) -> bool {
+        let viewers = self
+            .sizing
+            .viewers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let owner = viewers.0.first().map(|seat| seat.viewer.id);
+        self.seat
+            .as_ref()
+            .is_some_and(|seat| owner == Some(seat.id))
     }
 }
 
