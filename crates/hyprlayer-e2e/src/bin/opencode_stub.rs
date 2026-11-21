@@ -5,7 +5,8 @@
 //! `$XDG_DATA_HOME/opencode-stub/control.json` delays, in ms, the events 1.18.32 sends late:
 //! `start` (the prompt's user message), `reply`, `echo` (the user message again after the idle),
 //! `abortIdle` (an idle session's abort) and `late` (an aborted turn's reply and second idle).
-//! `"ask": true` makes each turn ask permission for bash first. `"ownIds": true` ignores the
+//! `"ask": true` makes each turn ask permission for bash first, and `"question": true` a question
+//! before that; `"aside": true` follows each ask with a text part. `"ownIds": true` ignores the
 //! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
 //! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
 //! names the session only inside each message and part, as 1.0.224 does.
@@ -15,7 +16,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -39,7 +40,7 @@ struct Stub {
     root: PathBuf,
     subscribers: Mutex<Vec<TcpStream>>,
     running: Mutex<HashMap<String, Arc<Running>>>,
-    permissions: Mutex<HashMap<String, Sender<bool>>>,
+    asks: Mutex<HashMap<String, Sender<bool>>>,
     last_id: Mutex<u64>,
 }
 
@@ -62,7 +63,7 @@ fn main() {
         root,
         subscribers: Mutex::new(Vec::new()),
         running: Mutex::new(HashMap::new()),
-        permissions: Mutex::new(HashMap::new()),
+        asks: Mutex::new(HashMap::new()),
         last_id: Mutex::new(0),
     });
     for stream in listener.incoming().flatten() {
@@ -137,14 +138,11 @@ impl Stub {
                 respond_empty(stream);
                 self.turn(id, user, &reply, control);
             }
-            ("POST", ["session", _, "permissions", permission]) => {
+            ("POST", ["session", _, "permissions", ask]) => {
                 let allowed = request.body["response"] != "reject";
-                let waiting = self.permissions.lock().unwrap().remove(*permission);
-                respond(stream, 200, &json!(true));
-                if let Some(waiting) = waiting {
-                    let _ = waiting.send(allowed);
-                }
+                self.answer(stream, ask, allowed);
             }
+            ("POST", ["question", ask, verb]) => self.answer(stream, ask, *verb == "reply"),
             ("POST", ["session", id, "abort"]) => {
                 respond(stream, 200, &json!(true));
                 self.abort(id);
@@ -184,7 +182,16 @@ impl Stub {
             "message.updated",
             assistant_info(id, assistant, user, json!({})),
         );
-        if delays.ask && !self.permitted(id) {
+        let mut allowed = Some(true);
+        if delays.question {
+            allowed = self.asked(id, assistant, true, delays.aside);
+        }
+        if delays.ask && allowed == Some(true) {
+            allowed = self.asked(id, assistant, false, delays.aside);
+        }
+        // An abort cancels the ask; the abort ends the turn.
+        let Some(allowed) = allowed else { return };
+        if !allowed {
             // 1.18.32 ends a denied turn on its tool-calls step, with no error.
             self.running.lock().unwrap().remove(id);
             let step = json!({ "finish": "tool-calls", "time": { "created": 1, "completed": 2 } });
@@ -214,26 +221,54 @@ impl Stub {
         self.emit("message.updated", user_info(id, user, created));
     }
 
-    fn permitted(&self, session: &str) -> bool {
-        let permission = format!("per_{}", nanos());
+    /// `None` when an abort cancelled it, which OpenCode reports with no reply event.
+    fn asked(&self, session: &str, assistant: &str, question: bool, aside: bool) -> Option<bool> {
+        let ask = format!("{}_{}", if question { "que" } else { "per" }, nanos());
         let (answer, answered) = channel();
-        self.permissions
-            .lock()
-            .unwrap()
-            .insert(permission.clone(), answer);
-        self.emit(
-            "permission.asked",
-            json!({ "id": permission, "sessionID": session, "permission": "bash",
-                    "patterns": ["echo stub"], "metadata": {} }),
-        );
-        let allowed = answered
-            .recv_timeout(Duration::from_secs(30))
-            .unwrap_or(false);
-        self.emit(
-            "permission.replied",
-            json!({ "sessionID": session, "requestID": permission }),
-        );
-        allowed
+        self.asks.lock().unwrap().insert(ask.clone(), answer);
+        if question {
+            let questions = json!([{ "question": "Proceed?", "header": "Stub",
+                "options": [{ "label": "Yes", "description": "" }] }]);
+            self.emit(
+                "question.asked",
+                json!({ "id": ask, "sessionID": session, "questions": questions }),
+            );
+        } else {
+            self.emit(
+                "permission.asked",
+                json!({ "id": ask, "sessionID": session, "permission": "bash",
+                        "patterns": ["echo stub"], "metadata": {} }),
+            );
+        }
+        if aside {
+            self.emit(
+                "message.part.updated",
+                json!({ "sessionID": session, "part": {
+                    "id": format!("prt_{}", nanos()), "sessionID": session, "messageID": assistant,
+                    "type": "text", "text": format!("waiting on {ask}"), "time": { "start": 1, "end": 2 },
+                } }),
+            );
+        }
+        let allowed = match answered.recv_timeout(Duration::from_secs(30)) {
+            Ok(allowed) => allowed,
+            Err(RecvTimeoutError::Disconnected) => return None,
+            Err(RecvTimeoutError::Timeout) => false,
+        };
+        let replied = match (question, allowed) {
+            (true, true) => "question.replied",
+            (true, false) => "question.rejected",
+            (false, _) => "permission.replied",
+        };
+        self.emit(replied, json!({ "sessionID": session, "requestID": ask }));
+        Some(allowed)
+    }
+
+    fn answer(&self, stream: TcpStream, ask: &str, allowed: bool) {
+        let waiting = self.asks.lock().unwrap().remove(ask);
+        respond(stream, 200, &json!(true));
+        if let Some(waiting) = waiting {
+            let _ = waiting.send(allowed);
+        }
     }
 
     /// As 1.18.32: an idle session reports `session.idle`; a busy one an aborted error and an
@@ -245,6 +280,7 @@ impl Stub {
             return self.emit("session.idle", json!({ "sessionID": id }));
         };
         running.aborted.store(true, Ordering::SeqCst);
+        self.asks.lock().unwrap().clear();
         let error = json!({ "name": "MessageAbortedError", "data": { "message": "Aborted" } });
         self.emit("session.error", json!({ "sessionID": id, "error": error }));
         self.emit("session.idle", json!({ "sessionID": id }));
@@ -309,6 +345,8 @@ impl Stub {
             abort_idle: ms("abortIdle"),
             late: ms("late"),
             ask: control["ask"].as_bool().unwrap_or(false),
+            question: control["question"].as_bool().unwrap_or(false),
+            aside: control["aside"].as_bool().unwrap_or(false),
             own_ids: control["ownIds"].as_bool().unwrap_or(false),
             bare: control["bare"].as_bool().unwrap_or(false),
             nested: control["nested"].as_bool().unwrap_or(false),
@@ -336,6 +374,8 @@ struct Delays {
     abort_idle: Duration,
     late: Duration,
     ask: bool,
+    question: bool,
+    aside: bool,
     own_ids: bool,
     bare: bool,
     nested: bool,

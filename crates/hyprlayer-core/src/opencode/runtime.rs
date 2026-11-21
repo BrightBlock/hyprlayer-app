@@ -624,10 +624,44 @@ pub struct OpenCodeDriver {
     events: broadcast::Sender<SessionEvent>,
     kill_flag: Arc<KillFlag>,
     filter_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>>,
+    asks: Asks,
     /// The translator's running `cost_total`, published after every event it handles.
     cost_so_far: Arc<std::sync::Mutex<Option<f64>>>,
     sent: SharedTurn,
+}
+
+/// A request OpenCode waits on; a question keeps its questions to order the answers.
+enum Ask {
+    Permission,
+    Question(Value),
+}
+
+type Asks = Arc<StdMutex<std::collections::HashMap<String, Ask>>>;
+
+/// Mirrors OpenCode's own pending lists; a reply can also settle the session's other asks.
+fn track_ask(asks: &Asks, ev: &OcEvent) {
+    let p = &ev.properties;
+    let field = |key| p.get(key).and_then(Value::as_str).map(str::to_string);
+    let mut asks = asks.lock().unwrap_or_else(PoisonError::into_inner);
+    match ev.kind.as_str() {
+        "permission.asked" => {
+            if let Some(id) = field("id") {
+                asks.insert(id, Ask::Permission);
+            }
+        }
+        "question.asked" => {
+            if let Some(id) = field("id") {
+                let questions = p.get("questions").cloned().unwrap_or(json!([]));
+                asks.insert(id, Ask::Question(questions));
+            }
+        }
+        "permission.replied" | "question.replied" | "question.rejected" => {
+            if let Some(id) = field("requestID") {
+                asks.remove(&id);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The user message id this driver gave its latest turn; OpenCode 1.0.224 to 1.18.32 keep it.
@@ -746,9 +780,8 @@ impl OpenCodeDriver {
         let mut sse_rx = server.events.subscribe();
         let tx = events.clone();
         let sid = session_id.clone();
-        let pending_questions: Arc<std::sync::Mutex<std::collections::HashMap<String, Value>>> =
-            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-        let pq = pending_questions.clone();
+        let asks = Asks::default();
+        let tracked = asks.clone();
         let cost_so_far = Arc::new(std::sync::Mutex::new(None));
         let published_cost = cost_so_far.clone();
         let sent = SharedTurn::default();
@@ -776,19 +809,7 @@ impl OpenCodeDriver {
                         if event_session_id(&ev) != Some(sid.as_str()) {
                             continue;
                         }
-                        if ev.kind == "question.asked" {
-                            if let Some(qid) = ev.properties.get("id").and_then(Value::as_str) {
-                                if let Ok(mut m) = pq.lock() {
-                                    m.insert(
-                                        qid.to_string(),
-                                        ev.properties
-                                            .get("questions")
-                                            .cloned()
-                                            .unwrap_or(json!([])),
-                                    );
-                                }
-                            }
-                        }
+                        track_ask(&tracked, &ev);
                         let translated = xlate.handle(&ev);
                         if let Ok(mut so_far) = published_cost.lock() {
                             *so_far = Some(xlate.cost_total);
@@ -813,7 +834,7 @@ impl OpenCodeDriver {
             events,
             kill_flag: Arc::new(KillFlag::default()),
             filter_task: Mutex::new(Some(task)),
-            pending_questions,
+            asks,
             cost_so_far,
             sent,
         });
@@ -958,6 +979,13 @@ impl OpenCodeDriver {
         });
     }
 
+    fn take_ask(&self, request_id: &str) -> Option<Ask> {
+        self.asks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(request_id)
+    }
+
     fn mark_turn(&self, mark: impl FnOnce(&mut SentTurn)) {
         if let Some(turn) = self
             .sent
@@ -1030,6 +1058,7 @@ impl AgentDriver for OpenCodeDriver {
         allow: bool,
         _message: Option<&str>,
     ) -> CoreResult<()> {
+        self.take_ask(request_id);
         if !allow {
             self.mark_turn(|turn| turn.refused = true);
         }
@@ -1042,11 +1071,10 @@ impl AgentDriver for OpenCodeDriver {
     }
 
     fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> CoreResult<()> {
-        let questions = self
-            .pending_questions
-            .lock()
-            .ok()
-            .and_then(|mut m| m.remove(request_id));
+        let questions = match self.take_ask(request_id) {
+            Some(Ask::Question(questions)) => Some(questions),
+            _ => None,
+        };
         if answers.is_empty() {
             self.mark_turn(|turn| turn.refused = true);
             self.post_async(format!("/question/{request_id}/reject"), json!({}));
@@ -1078,7 +1106,17 @@ impl AgentDriver for OpenCodeDriver {
         Ok(())
     }
 
+    fn pending_requests(&self) -> Vec<String> {
+        let asks = self.asks.lock().unwrap_or_else(PoisonError::into_inner);
+        asks.keys().cloned().collect()
+    }
+
     fn interrupt(&self) -> CoreResult<()> {
+        // OpenCode's abort cancels its asks without a reply event.
+        self.asks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.mark_turn(|turn| turn.interrupted = true);
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         Ok(())

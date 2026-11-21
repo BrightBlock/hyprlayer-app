@@ -3,9 +3,11 @@
 //! no longer has it, the resume starts a new one and says so.
 #![cfg(unix)]
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
-use hyprlayer_core::{Harness, SessionEvent, Stage};
+use hyprlayer_core::models::QuestionAnswers;
+use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::{EventStream, RpcClient};
@@ -162,6 +164,74 @@ async fn opencode_resume() {
         "the denied turn ends as completed",
         request_id.is_some() && ended.as_deref() == Some("completed"),
         json!({ "asked": request_id.is_some(), "turnStatus": ended }),
+    );
+
+    j.step("a tail read carries the asks OpenCode still waits on, until they end");
+    stub_delays(
+        &sandbox,
+        json!({ "question": true, "ask": true, "aside": true }),
+    );
+    send(&mut j, &client, &id, "Ask, then run a command.").await;
+    let question = ask_behind_aside(&mut events).await;
+    let question_carried =
+        open_asks(&client, &id).await == question.iter().cloned().collect::<Vec<_>>();
+    let mut answers = BTreeMap::new();
+    answers.insert("Proceed?".to_string(), "Yes".to_string());
+    client
+        .answer_question(
+            id.clone(),
+            question.clone().unwrap_or_default(),
+            QuestionAnswers(answers),
+        )
+        .await
+        .expect("answer_question");
+    let permission = ask_behind_aside(&mut events).await;
+    let permission_carried =
+        open_asks(&client, &id).await == permission.iter().cloned().collect::<Vec<_>>();
+    client
+        .respond_permission(
+            id.clone(),
+            permission.clone().unwrap_or_default(),
+            true,
+            None,
+        )
+        .await
+        .expect("respond_permission");
+    let answered = open_asks(&client, &id).await.is_empty();
+    let ended = turn_status(&mut events).await;
+    stub_delays(&sandbox, json!({ "ask": true, "aside": true }));
+    send(&mut j, &client, &id, "Run a command you'll be stopped on.").await;
+    let cancelled = ask_behind_aside(&mut events).await;
+    let cancel_carried =
+        open_asks(&client, &id).await == cancelled.iter().cloned().collect::<Vec<_>>();
+    client
+        .interrupt_session(id.clone())
+        .await
+        .expect("interrupt_session");
+    let dropped = open_asks(&client, &id).await.is_empty();
+    let stopped = turn_status(&mut events).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "each ask is carried while it waits, and dropped once answered or cancelled",
+        question.is_some()
+            && question_carried
+            && permission.is_some()
+            && permission_carried
+            && answered
+            && ended.as_deref() == Some("completed")
+            && cancelled.is_some()
+            && cancel_carried
+            && dropped
+            && stopped.as_deref() == Some("interrupted"),
+        json!({
+            "questionCarried": question_carried,
+            "permissionCarried": permission_carried,
+            "answeredDropped": answered,
+            "turnStatus": ended,
+            "cancelCarried": cancel_carried,
+            "cancelDropped": dropped,
+            "cancelledStatus": stopped,
+        }),
     );
 
     j.step("an OpenCode that ignores the prompt's messageID still ends each turn");
@@ -453,6 +523,41 @@ async fn permission_ask(events: &mut EventStream<SessionEvent>) -> Option<String
     .await
     .ok()
     .flatten()
+}
+
+/// The request id of the next ask, once the text after it has made it older than the newest row.
+async fn ask_behind_aside(events: &mut EventStream<SessionEvent>) -> Option<String> {
+    tokio::time::timeout(IO, async {
+        let mut asked = None;
+        while let Some(event) = events.recv().await {
+            match event {
+                SessionEvent::PermissionAsk { request_id, .. }
+                | SessionEvent::QuestionAsk { request_id, .. } => asked = Some(request_id),
+                SessionEvent::AssistantText { .. } if asked.is_some() => return asked,
+                _ => {}
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The request ids a one-row tail read carries as still open.
+async fn open_asks(client: &RpcClient, id: &str) -> Vec<String> {
+    let page = client
+        .list_session_turns(id.to_string(), LogCursor::Tail, 1)
+        .await
+        .expect("list_session_turns");
+    page.open_asks
+        .iter()
+        .filter_map(|ask| match &ask.event {
+            SessionEvent::PermissionAsk { request_id, .. }
+            | SessionEvent::QuestionAsk { request_id, .. } => Some(request_id.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn turn_status(events: &mut EventStream<SessionEvent>) -> Option<String> {

@@ -890,11 +890,16 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
         ),
       };
 
-    case "relaunched":
+    case "relaunched": {
+      // A kill that a relaunch resumed from isn't the session's end.
+      const last = view.items[view.items.length - 1];
+      const superseded = last?.kind === "exit" && last.outcome === "killed";
+      const base = superseded ? { ...view, items: view.items.slice(0, -1) } : view;
       return {
-        ...view,
-        ...appended(view, (id) => ({ kind: "relaunched", id, quiet: event.quiet }), false, seq),
+        ...base,
+        ...appended(base, (id) => ({ kind: "relaunched", id, quiet: event.quiet }), false, seq),
       };
+    }
 
     case "rewound":
       return {

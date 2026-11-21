@@ -1151,6 +1151,28 @@ describe("relaunched process-boundary marker", () => {
     expect(view.items.filter((i) => i.kind === "relaunched")).toHaveLength(1);
     expect(viewToText(view).trim()).toBe("## Assistant\nbefore relaunch");
   });
+
+  it("drops a killed exit that a reopen's relaunch superseded", () => {
+    const view = reduceAll([
+      { kind: "userMessage", text: "hi", stage: null, clientMessageId: "c1" },
+      { kind: "assistantText", text: "hello", parentId: null },
+      { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null },
+      { kind: "exited", outcome: "killed", code: 143, stderrTail: "" },
+      { kind: "relaunched", quiet: true },
+      { kind: "init", claudeSessionId: "c1", model: "m" },
+    ]);
+
+    expect(kinds(view)).toEqual(["user", "assistant", "relaunched"]);
+  });
+
+  it("keeps a crash card a relaunch follows", () => {
+    const view = reduceAll([
+      { kind: "exited", outcome: "crashed", code: 1, stderrTail: "boom" },
+      { kind: "relaunched", quiet: true },
+    ]);
+
+    expect(kinds(view)).toEqual(["exit", "relaunched"]);
+  });
 });
 
 describe("replay determinism", () => {

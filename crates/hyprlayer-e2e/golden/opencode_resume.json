@@ -83,6 +83,24 @@
       "guards": [
         {
           "evidence": {
+            "answeredDropped": true,
+            "cancelCarried": true,
+            "cancelDropped": true,
+            "cancelledStatus": "interrupted",
+            "permissionCarried": true,
+            "questionCarried": true,
+            "turnStatus": "completed"
+          },
+          "guard": "each ask is carried while it waits, and dropped once answered or cancelled",
+          "ok": true
+        }
+      ],
+      "step": "a tail read carries the asks OpenCode still waits on, until they end"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "replied": true,
             "turnStatus": "completed"
           },
