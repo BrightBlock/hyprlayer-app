@@ -446,6 +446,11 @@ watch set).
   applied; it refuses a rewind until then, and offers to load them again if the read
   fails. A re-read of a view already held reads forward. A server without tail
   reads refuses the cursor, and the view reads forward from the start.
+- **Answered asks.** A driver logs `permissionResolved` or `questionAnswered` when an
+  ask leaves its pending set: any client's answer, OpenCode's own reply, or a stop
+  that cancels it. A `tail` page's `open_request_ids` lists every ask the live harness
+  waits on, read after the page, and the view closes any ask it read that is not
+  there. Only a connection that announced the row kinds gets those rows.
 - **Stale check.** A send is refused when its `base_rev` is behind other authors'
   commits or in-flight reservations. A client's own turns, its in-flight sends and
   the app follow-ups of its turns never count. A reservation is released by its

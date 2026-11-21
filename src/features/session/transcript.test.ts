@@ -71,6 +71,24 @@ describe("a stopped turn", () => {
       { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus: "interrupted" },
     ]);
 
+  it("shows that it was stopped, and leaves the session open", () => {
+    const view = interrupted();
+    expect(view.items[view.items.length - 1]).toMatchObject({ kind: "interrupted" });
+    expect(viewToText(view)).toContain("Turn interrupted");
+    expect(isTerminal(view.state)).toBe(false);
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("shows no stop for a turn that completed or failed", () => {
+    for (const turnStatus of ["completed", "failed", null]) {
+      const view = reduceAll([
+        { kind: "userMessage", text: "go", stage: null },
+        { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus },
+      ]);
+      expect(view.items.map((it) => it.kind)).toEqual(["user"]);
+    }
+  });
+
   it("stays settled when the aborted call's result lands after turnDone", () => {
     const view = reduceEvent(interrupted(), {
       kind: "toolResult",
@@ -709,6 +727,112 @@ describe("permission flow", () => {
     expect(hasPendingPermission(view)).toBe(false);
     expect(view.items.every((it) => it.kind !== "permission" || it.decision === "deny")).toBe(true);
     expect(isBusy({ ...view, state: parkedState(view), streaming: false })).toBe(false);
+  });
+});
+
+// Cast so the rows read on a build that predates them.
+const resolved = (requestId: string, allow: boolean) =>
+  ({ kind: "permissionResolved", requestId, allow }) as unknown as SessionEvent;
+const answered = (requestId: string) => ({ kind: "questionAnswered", requestId }) as unknown as SessionEvent;
+
+describe("answered asks on a reload", () => {
+  // The live OpenCode check: its asks carry no tool use id, and name OpenCode's permission, not the tool.
+  function answeredOpenCodeTurn(): SessionEvent[] {
+    const events: SessionEvent[] = [
+      { kind: "init", claudeSessionId: "ses_1", model: "opencode/beam-free" },
+      { kind: "userMessage", text: "echo, then read it three times", stage: null },
+      { kind: "toolUse", id: "bash-1", name: "Bash", input: '{"command":"echo PERM-7"}', parentId: null },
+      { kind: "permissionAsk", requestId: "per_bash", toolName: "bash", input: '{"patterns":["echo PERM-7"]}' },
+    ];
+    for (let n = 0; n < 3; n += 1) {
+      events.push(
+        { kind: "toolUse", id: `read-${n}`, name: "Read", input: '{"filePath":"README.md"}', parentId: null },
+        { kind: "permissionAsk", requestId: `per_doom_${n}`, toolName: "doom_loop", input: "{}" },
+        resolved(`per_doom_${n}`, true),
+        { kind: "toolResult", toolUseId: `read-${n}`, content: "# demo", isError: false, parentId: null },
+      );
+    }
+    events.push(
+      resolved("per_bash", true),
+      { kind: "toolResult", toolUseId: "bash-1", content: "PERM-7", isError: false, parentId: null },
+      { kind: "assistantText", text: "DONE-P7", parentId: null },
+      { kind: "turnDone", costUsd: 0, numTurns: null, contextTokens: null, turnStatus: "completed" },
+    );
+    return events;
+  }
+
+  it("folds every answered ask closed on a live session", () => {
+    const view = restoredView(reduceAll(answeredOpenCodeTurn()), true);
+    expect(view.items.filter((it) => it.kind === "permission" && it.decision === null)).toEqual([]);
+    expect(view.pendingPermission).toBeNull();
+    expect(view.state).not.toBe("awaiting_permission");
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("keeps a denial visible and an allowed ask hidden", () => {
+    const view = reduceAll([
+      { kind: "userMessage", text: "go", stage: null },
+      { kind: "permissionAsk", requestId: "a", toolName: "bash", input: "{}" },
+      { kind: "permissionAsk", requestId: "d", toolName: "bash", input: "{}" },
+      resolved("a", true),
+      resolved("d", false),
+    ]);
+    const decisions = view.items.flatMap((it) => (it.kind === "permission" ? [[it.requestId, it.decision]] : []));
+    expect(decisions).toEqual([
+      ["a", "allow"],
+      ["d", "deny"],
+    ]);
+  });
+
+  it("leaves another ask waiting when one of two is answered", () => {
+    const view = reduceAll([
+      { kind: "userMessage", text: "go", stage: null },
+      { kind: "permissionAsk", requestId: "first", toolName: "doom_loop", input: "{}" },
+      { kind: "permissionAsk", requestId: "second", toolName: "doom_loop", input: "{}" },
+      resolved("second", true),
+    ]);
+    expect(view.state).toBe("awaiting_permission");
+    expect(hasPendingPermission(view)).toBe(true);
+    expect(view.items.find((it) => it.kind === "permission" && it.decision === null)).toMatchObject({
+      requestId: "first",
+    });
+  });
+
+  it("closes an answered question its tool's result doesn't name", () => {
+    const view = restoredView(
+      reduceAll([
+        { kind: "userMessage", text: "ask me", stage: null },
+        { kind: "toolUse", id: "q-tool", name: "question", input: "{}", parentId: null },
+        { kind: "questionAsk", requestId: "que_1", questions: TABS_QUESTION },
+        answered("que_1"),
+        { kind: "toolResult", toolUseId: "q-tool", content: "Tabs", isError: false, parentId: null },
+        { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus: "completed" },
+      ]),
+      true,
+    );
+    expect(view.pendingQuestion).toBeNull();
+    expect(view.state).not.toBe("awaiting_question");
+    expect(isBusy(view)).toBe(false);
+  });
+
+  it("changes nothing for an ask this device already answered", () => {
+    const asked = reduceAll([
+      { kind: "userMessage", text: "go", stage: null },
+      { kind: "permissionAsk", requestId: "r1", toolName: "bash", input: "{}" },
+    ]);
+    const local = resolvePermission(asked, "r1", "deny");
+    expect(reduceEvent(local, resolved("r1", false))).toEqual(local);
+  });
+
+  it("doesn't reopen a turn that already ended", () => {
+    const ended = reduceAll([
+      { kind: "userMessage", text: "go", stage: null },
+      { kind: "permissionAsk", requestId: "r1", toolName: "bash", input: "{}" },
+      { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null, turnStatus: "interrupted" },
+    ]);
+    const view = reduceEvent(ended, resolved("r1", false));
+    expect(view.streaming).toBe(false);
+    expect(isBusy(view)).toBe(false);
   });
 });
 

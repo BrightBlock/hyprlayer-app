@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::outbound::{EventPush, Outbound};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
-pub const TARGETED_EVENTS: [&str; 7] = [
+pub const TARGETED_EVENTS: [&str; 9] = [
     "SessionRevised",
     "SessionReset",
     "SessionViewers",
@@ -21,9 +21,30 @@ pub const TARGETED_EVENTS: [&str; 7] = [
     "GoalChanged",
     "PtyAgentChanged",
     "UiRequested",
+    // Session rows, not runtime events.
+    "permissionResolved",
+    "questionAnswered",
 ];
 /// Reported by `announce_client` when this server targets them.
 pub const TRANSCRIPT_SYNC: &str = "transcript_sync";
+
+/// What one connection decodes, read as each row goes out: an announce can follow a stream's open.
+#[derive(Clone, Default)]
+pub struct Decoder {
+    clients: Clients,
+    conn: Option<u64>,
+}
+
+impl Decoder {
+    pub(crate) fn new(clients: Clients, conn: Option<u64>) -> Self {
+        Self { clients, conn }
+    }
+
+    /// A targeted kind this connection never announced.
+    pub fn withholds(&self, kind: &str) -> bool {
+        TARGETED_EVENTS.contains(&kind) && !self.conn.is_some_and(|c| self.clients.decodes(c, kind))
+    }
+}
 
 /// A display-only identity (ADR-0009): it attributes and targets, and grants nothing.
 struct Announced {
@@ -134,6 +155,13 @@ impl Clients {
 
     pub fn agent_token(&self, conn: u64) -> Option<String> {
         self.lock().get(&conn)?.agent.clone()
+    }
+
+    pub fn decodes(&self, conn: u64, kind: &str) -> bool {
+        self.lock()
+            .get(&conn)
+            .and_then(|c| c.announced.as_ref())
+            .is_some_and(|a| a.capabilities.contains(kind))
     }
 
     pub fn client_ref(&self, conn: u64) -> Option<ClientRef> {

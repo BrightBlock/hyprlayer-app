@@ -215,7 +215,8 @@ export type TranscriptItem =
       outcome: ExitOutcome;
       code: number | null;
       stderrTail: string;
-    } & Sequenced);
+    } & Sequenced)
+  | ({ kind: "interrupted"; id: string } & Sequenced);
 
 export type SessionView = {
   items: TranscriptItem[];
@@ -805,6 +806,12 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
       };
     }
 
+    case "permissionResolved":
+      return closeAsk(view, event.requestId, event.allow ? "allow" : "deny");
+
+    case "questionAnswered":
+      return closeQuestion(view, event.requestId);
+
     case "usage":
       return { ...view, contextTokens: event.contextTokens };
 
@@ -812,7 +819,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
       return { ...view, contextWindow: event.tokens };
 
     case "turnDone": {
-      return {
+      const done: SessionView = {
         ...view,
         items: closeOpenAssistant(view.items),
         state: parkedState(view),
@@ -821,6 +828,8 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
         numTurns: event.numTurns ?? view.numTurns,
         contextTokens: event.contextTokens ?? view.contextTokens,
       };
+      if (event.turnStatus !== "interrupted") return done;
+      return { ...done, ...appended(done, (id) => ({ kind: "interrupted", id }), false, seq) };
     }
 
     case "exited": {
@@ -957,6 +966,16 @@ export function resolvePermission(
 ): SessionView {
   const asked = view.items.find((it) => it.kind === "permission" && it.requestId === requestId);
   const subagent = asked?.kind === "permission" && isSubagentTool(view.items, asked.toolUseId);
+  return { ...closeAsk(view, requestId, decision), streaming: view.streaming || !subagent };
+}
+
+export function resolveQuestion(view: SessionView, requestId: string): SessionView {
+  if (view.pendingQuestion?.requestId !== requestId) return view;
+  return { ...closeQuestion(view, requestId), streaming: true };
+}
+
+// A logged answer leaves `streaming` alone: the ask kept it up while the turn ran.
+function closeAsk(view: SessionView, requestId: string, decision: PermissionDecision): SessionView {
   const items = view.items.map((item) =>
     item.kind === "permission" && item.requestId === requestId && item.decision === null
       ? { ...item, decision }
@@ -965,13 +984,31 @@ export function resolvePermission(
   const pendingPermission =
     view.pendingPermission?.requestId === requestId ? null : view.pendingPermission;
   const next = { ...view, items, pendingPermission };
-  return { ...next, state: parkedState(next), streaming: view.streaming || !subagent };
+  return { ...next, state: parkedState(next) };
 }
 
-export function resolveQuestion(view: SessionView, requestId: string): SessionView {
+function closeQuestion(view: SessionView, requestId: string): SessionView {
   if (view.pendingQuestion?.requestId !== requestId) return view;
   const next = { ...view, pendingQuestion: null };
-  return { ...next, state: parkedState(next), streaming: true };
+  return { ...next, state: parkedState(next) };
+}
+
+/** Closes every ask outside `open`: the asks a live harness said it waits on, and any asked since. */
+export function settleUnwaitedAsks(view: SessionView, open: ReadonlySet<string>): SessionView {
+  // No row says how it closed; its tool's row shows what ran.
+  const items = view.items.map((it) =>
+    it.kind === "permission" && it.decision === null && !open.has(it.requestId)
+      ? { ...it, decision: "allow" as const }
+      : it,
+  );
+  const waits = <T extends { requestId: string }>(ask: T | null) => (ask && open.has(ask.requestId) ? ask : null);
+  const next = {
+    ...view,
+    items,
+    pendingPermission: waits(view.pendingPermission),
+    pendingQuestion: waits(view.pendingQuestion),
+  };
+  return { ...next, state: parkedState(next) };
 }
 
 export function expirePendingPrompts(view: SessionView): SessionView {
@@ -1104,6 +1141,9 @@ export function viewToText(view: SessionView): string {
         break;
       case "exit":
         lines.push(`--- ${exitLabel(item.outcome)} ---`, "");
+        break;
+      case "interrupted":
+        lines.push(`--- ${exitLabel("interrupted")} ---`, "");
         break;
     }
   }

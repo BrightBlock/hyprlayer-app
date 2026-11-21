@@ -372,6 +372,12 @@ impl ClaudeDriver {
             .lock()
             .ok()
             .and_then(|mut map| map.remove(request_id));
+        if updated_input.is_some() {
+            let _ = self.events.send(SessionEvent::PermissionResolved {
+                request_id: request_id.to_string(),
+                allow,
+            });
+        }
         self.write_line(protocol::permission_response_json(
             request_id,
             allow,
@@ -388,12 +394,17 @@ impl ClaudeDriver {
     }
 
     pub fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
-        let mut input = self
+        let pending = self
             .pending_permissions
             .lock()
             .ok()
-            .and_then(|mut map| map.remove(request_id))
-            .unwrap_or_else(|| json!({}));
+            .and_then(|mut map| map.remove(request_id));
+        if pending.is_some() {
+            let _ = self.events.send(SessionEvent::QuestionAnswered {
+                request_id: request_id.to_string(),
+            });
+        }
+        let mut input = pending.unwrap_or_else(|| json!({}));
         if let Value::Object(map) = &mut input {
             map.insert("answers".to_string(), json!(answers));
         }
@@ -857,7 +868,8 @@ fn claude_turn_status(
     terminal: Option<&str>,
 ) -> &'static str {
     match (subtype, terminal) {
-        (_, Some("aborted_streaming")) => "interrupted",
+        // A stop mid-tool ends on `aborted_tools`, with `is_error` set.
+        (_, Some("aborted_streaming" | "aborted_tools")) => "interrupted",
         (Some("error_max_budget_usd"), _) => "budget_exhausted",
         _ if is_error => "failed",
         _ => "completed",

@@ -772,14 +772,22 @@ impl SessionService<'_> {
         caller: Option<&str>,
     ) -> Result<SessionTurns> {
         // A tail read shows the asks the harness waits on, which may be older than its page.
-        let open = match (cursor, self.live_driver(session_id).await) {
-            (LogCursor::Tail, Some(driver)) => driver.pending_requests(),
-            _ => Vec::new(),
+        let driver = match cursor {
+            LogCursor::Tail => self.live_driver(session_id).await,
+            _ => None,
         };
-        self.runtime
+        let open = driver
+            .as_ref()
+            .and_then(|d| d.pending_requests())
+            .unwrap_or_default();
+        let mut turns = self
+            .runtime
             .session_actors
             .list_turns(session_id, cursor, limit, caller.map(str::to_string), open)
-            .await
+            .await?;
+        // Read after the page, so an ask in it that is missing here was answered.
+        turns.open_request_ids = driver.and_then(|d| d.pending_requests());
+        Ok(turns)
     }
 
     /// Each watched session's revision state for `caller`; ids with no row are omitted.

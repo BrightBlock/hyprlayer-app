@@ -481,14 +481,26 @@ async fn transcript_sync() {
         &a,
         Request::RespondPermission {
             session_id: sid.clone(),
-            request_id,
+            request_id: request_id.clone(),
             allow: true,
             message: None,
         },
     )
     .await
     .expect("respond_permission");
-    drain_frames(&mut a_stream, 1).await;
+    let answered = drain_frames(&mut a_stream, 1).await;
+    let answer_rows: Vec<serde_json::Value> = answered
+        .iter()
+        .map(|(_, f)| event_of(f))
+        .filter(|e| e.kind() == "permissionResolved")
+        .filter_map(|e| serde_json::to_value(e).ok())
+        .collect();
+    j.guard(
+        "A's stream carries its answer as a logged row",
+        answer_rows
+            == [json!({ "kind": "permissionResolved", "requestId": request_id, "allow": true })],
+        json!({ "answerRows": answer_rows.len() }),
+    );
     let (rev, cursor) = pull(&mut j, &b.client, &sid, b_cursor).await;
     b_cursor = cursor;
     j.guard("B's pull reaches rev 10", rev == 10, json!({ "rev": rev }));

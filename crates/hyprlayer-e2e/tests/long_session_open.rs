@@ -13,6 +13,7 @@ use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Sandbox, Server};
 use hyprlayer_proto::WireError;
 use hyprlayer_server::client::RpcClient;
+use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::{
     SessionEvents, SessionFrame, StreamRequest, StreamResponse, StreamStartOpts,
 };
@@ -409,5 +410,66 @@ async fn long_session_open() {
         json!({ "answered": answered }),
     );
 
+    j.step("the answer is logged, and a tail read names every ask still waiting");
+    desktop
+        .announce_client(
+            "desktop".into(),
+            "e2e".into(),
+            TARGETED_EVENTS.map(str::to_string).to_vec(),
+        )
+        .await
+        .expect("announce_client");
+    let logged = answer_rows(&desktop, &asker).await;
+    let tail_rows: Vec<serde_json::Value> = desktop
+        .list_session_turns(asker.clone(), LogCursor::Tail, TAIL_ROWS)
+        .await
+        .expect("a tail read of the asking session")
+        .entries
+        .into_iter()
+        .filter(|e| e.kind == "permissionResolved")
+        .filter_map(|e| serde_json::to_value(e.event).ok())
+        .collect();
+    let (page, _) = read(&phone, &down, &asker, LogCursor::Tail, TAIL_ROWS).await;
+    let waiting = page
+        .ok()
+        .and_then(|page| serde_json::to_value(page).ok())
+        .map(|page| page["openRequestIds"].clone());
+    j.guard(
+        "the log closes the ask by its id, and the tail read says nothing still waits",
+        logged == [json!({ "kind": "permissionResolved", "requestId": "req-ask", "allow": true })]
+            && tail_rows == logged
+            && waiting == Some(json!([])),
+        json!({ "logged": logged, "inTailRead": tail_rows == logged, "openRequestIds": waiting }),
+    );
+    let withheld = phone.get_session_log(asker.clone()).await.ok().map(|log| {
+        log.iter()
+            .filter(|e| e.kind == "permissionResolved")
+            .count()
+    });
+    j.guard(
+        "a client that never said it reads answer rows gets none",
+        withheld == Some(0),
+        json!({ "answerRows": withheld }),
+    );
+
     j.finish();
+}
+
+/// The asker's answer rows, as JSON so this reads on a build without them; waits for the first.
+async fn answer_rows(client: &RpcClient, sid: &str) -> Vec<serde_json::Value> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let rows: Vec<serde_json::Value> = client
+            .get_session_log(sid.to_string())
+            .await
+            .expect("get_session_log")
+            .into_iter()
+            .filter(|e| e.kind == "permissionResolved")
+            .filter_map(|e| serde_json::to_value(e.event).ok())
+            .collect();
+        if !rows.is_empty() || tokio::time::Instant::now() >= deadline {
+            return rows;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }

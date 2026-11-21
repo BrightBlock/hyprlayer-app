@@ -32,6 +32,7 @@ use tokio::time::Instant;
 
 use crate::client::{EventStream, RpcClient, StreamReceiver, TerminalStream};
 use crate::dispatch::{wire_error, Server, Wire};
+use crate::events::Decoder;
 use crate::outbound::Outbound;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -510,6 +511,7 @@ pub(crate) enum StreamSource {
         echo_user_messages: bool,
         with_meta: bool,
         partials: Partials,
+        decoder: Decoder,
         /// The session's rev once `replay` is applied.
         rev: u64,
     },
@@ -810,6 +812,7 @@ pub(crate) async fn prepare_stream(
                     echo_user_messages,
                     with_meta,
                     partials: Partials::for_stream(server, with_meta, all_partials),
+                    decoder: server.decoder(),
                     rev: attachment.rev,
                 }),
             ))
@@ -866,6 +869,7 @@ pub(crate) async fn prepare_stream(
                         echo_user_messages,
                         with_meta,
                         partials: Partials::for_stream(server, with_meta, all_partials),
+                        decoder: server.decoder(),
                         rev,
                     }),
                 ));
@@ -926,6 +930,7 @@ pub(crate) async fn prepare_stream(
                     echo_user_messages,
                     with_meta,
                     partials: Partials::for_stream(server, with_meta, all_partials),
+                    decoder: server.decoder(),
                     rev,
                 }),
             ))
@@ -985,6 +990,7 @@ pub(crate) async fn prepare_stream(
                     echo_user_messages,
                     with_meta,
                     partials: Partials::for_stream(server, with_meta, all_partials),
+                    decoder: server.decoder(),
                     rev: attachment.rev,
                 }),
             ))
@@ -1033,6 +1039,7 @@ pub(crate) async fn prepare_stream(
                     echo_user_messages,
                     with_meta,
                     partials: Partials::for_stream(server, with_meta, all_partials),
+                    decoder: server.decoder(),
                     rev: attachment.rev,
                 }),
             ))
@@ -1058,6 +1065,7 @@ pub(crate) async fn prepare_stream(
                     echo_user_messages,
                     with_meta,
                     partials: Partials::for_stream(server, with_meta, all_partials),
+                    decoder: server.decoder(),
                     rev: attachment.rev,
                 }),
             ))
@@ -1115,10 +1123,11 @@ async fn run_stream(
             echo_user_messages,
             with_meta,
             partials,
+            decoder,
             rev,
         } => {
-            if send_replay(&tx, stream_id, replay, rev, with_meta).await {
-                let sink = SessionSink::new(&tx, stream_id, with_meta, partials);
+            if send_replay(&tx, stream_id, replay, rev, with_meta, &decoder).await {
+                let sink = SessionSink::new(&tx, stream_id, with_meta, partials, decoder);
                 forward_session(&runtime, &session_id, live, echo_user_messages, sink).await
             } else {
                 "the client stopped reading during the replay"
@@ -1169,6 +1178,7 @@ async fn forward_session(
     mut sink: SessionSink<'_>,
 ) -> &'static str {
     let (tx, stream_id, with_meta) = (sink.tx, sink.stream_id, sink.with_meta);
+    let decoder = sink.decoder.clone();
     loop {
         let next = match sink.flush_at() {
             Some(at) => tokio::select! {
@@ -1212,8 +1222,8 @@ async fn forward_session(
                             resumed.replay.len()
                         );
                         live = resumed.live;
-                        if !send_replay(tx, stream_id, resumed.replay, resumed.rev, with_meta).await
-                        {
+                        let (replay, rev) = (resumed.replay, resumed.rev);
+                        if !send_replay(tx, stream_id, replay, rev, with_meta, &decoder).await {
                             return "the client stopped reading during a lag replay";
                         }
                     }
@@ -1254,6 +1264,7 @@ struct SessionSink<'a> {
     stream_id: u64,
     with_meta: bool,
     partials: Partials,
+    decoder: Decoder,
     held: Option<HeldPartial>,
     open_at: Instant,
 }
@@ -1283,12 +1294,19 @@ struct PartialItem<'a> {
 }
 
 impl<'a> SessionSink<'a> {
-    fn new(tx: &'a StreamTx, stream_id: u64, with_meta: bool, partials: Partials) -> Self {
+    fn new(
+        tx: &'a StreamTx,
+        stream_id: u64,
+        with_meta: bool,
+        partials: Partials,
+        decoder: Decoder,
+    ) -> Self {
         Self {
             tx,
             stream_id,
             with_meta,
             partials,
+            decoder,
             held: None,
             open_at: Instant::now(),
         }
@@ -1299,6 +1317,9 @@ impl<'a> SessionSink<'a> {
     }
 
     async fn send(&mut self, item: SessionStreamItem) -> bool {
+        if self.decoder.withholds(item.event.kind()) {
+            return true;
+        }
         let SessionEvent::PartialText { text, parent_id } = item.event else {
             return self.flush().await && self.write(&item).await;
         };
@@ -1372,8 +1393,12 @@ async fn send_replay(
     replay: Vec<SessionLogEntry>,
     rev: u64,
     with_meta: bool,
+    decoder: &Decoder,
 ) -> bool {
     for entry in replay {
+        if decoder.withholds(&entry.kind) {
+            continue;
+        }
         let sent = if with_meta {
             send_event(
                 tx,

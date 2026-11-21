@@ -96,6 +96,33 @@
         }
       ],
       "step": "a tail read carries the ask the harness still waits on"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "inTailRead": true,
+            "logged": [
+              {
+                "allow": true,
+                "kind": "permissionResolved",
+                "requestId": "req-ask"
+              }
+            ],
+            "openRequestIds": []
+          },
+          "guard": "the log closes the ask by its id, and the tail read says nothing still waits",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "answerRows": 0
+          },
+          "guard": "a client that never said it reads answer rows gets none",
+          "ok": true
+        }
+      ],
+      "step": "the answer is logged, and a tail read names every ask still waiting"
     }
   ]
 }

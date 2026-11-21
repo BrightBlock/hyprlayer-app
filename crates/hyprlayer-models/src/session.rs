@@ -215,6 +215,14 @@ pub enum SessionEvent {
         request_id: String,
         questions: Vec<Question>,
     },
+    // The ask left the harness's pending set: a client answered it, or the harness dropped it.
+    PermissionResolved {
+        request_id: String,
+        allow: bool,
+    },
+    QuestionAnswered {
+        request_id: String,
+    },
     Usage {
         context_tokens: u32,
         // The thread's cumulative uncached input plus output tokens.
@@ -285,6 +293,8 @@ impl SessionEvent {
             SessionEvent::ToolResult { .. } => "toolResult",
             SessionEvent::PermissionAsk { .. } => "permissionAsk",
             SessionEvent::QuestionAsk { .. } => "questionAsk",
+            SessionEvent::PermissionResolved { .. } => "permissionResolved",
+            SessionEvent::QuestionAnswered { .. } => "questionAnswered",
             SessionEvent::Usage { .. } => "usage",
             SessionEvent::ContextWindow { .. } => "contextWindow",
             SessionEvent::TurnDone { .. } => "turnDone",
@@ -482,6 +492,9 @@ pub struct SessionTurns {
     /// A `Tail` page's asks older than it that the live harness still waits on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub open_asks: Vec<SessionLogEntry>,
+    /// Every ask a `Tail` page's live harness waits on, read after the page; `None` when not reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_request_ids: Option<Vec<String>>,
 }
 
 /// A session-stream item with its log position; `seq` is `None` for an ephemeral event.

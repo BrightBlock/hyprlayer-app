@@ -983,6 +983,14 @@ const QueuedCommandRow = memo(function QueuedCommandRow({
   );
 });
 
+const InterruptedNotice = memo(function InterruptedNotice() {
+  return (
+    <div className="rounded-md border border-line-strong bg-panel px-3 py-2 shadow-card">
+      <p className="text-center text-ui font-medium text-ink-dim">{exitLabel("interrupted")}</p>
+    </div>
+  );
+});
+
 const ExitNotice = memo(function ExitNotice({
   item,
   auth,
@@ -1226,6 +1234,12 @@ function renderSingle(
       return (
         <div data-item-id={item.id}>
           <ExitNotice item={item} auth={prompt.auth} />
+        </div>
+      );
+    case "interrupted":
+      return (
+        <div data-item-id={item.id}>
+          <InterruptedNotice />
         </div>
       );
     default:

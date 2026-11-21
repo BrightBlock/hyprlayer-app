@@ -130,9 +130,9 @@ pub trait AgentDriver: Send + Sync {
 
     fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()>;
 
-    /// Request ids of the permission asks and questions the harness still waits on.
-    fn pending_requests(&self) -> Vec<String> {
-        Vec::new()
+    /// Request ids of the permission asks and questions the harness still waits on; `None` when not tracked.
+    fn pending_requests(&self) -> Option<Vec<String>> {
+        None
     }
 
     fn interrupt(&self) -> Result<()>;
@@ -181,8 +181,8 @@ impl AgentDriver for ClaudeDriver {
     fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         self.answer_question(request_id, answers)
     }
-    fn pending_requests(&self) -> Vec<String> {
-        self.pending_requests()
+    fn pending_requests(&self) -> Option<Vec<String>> {
+        Some(self.pending_requests())
     }
     fn interrupt(&self) -> Result<()> {
         self.interrupt()
@@ -249,8 +249,8 @@ impl AgentDriver for CodexDriver {
     fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         self.answer_question(request_id, answers)
     }
-    fn pending_requests(&self) -> Vec<String> {
-        self.pending_requests()
+    fn pending_requests(&self) -> Option<Vec<String>> {
+        Some(self.pending_requests())
     }
     fn interrupt(&self) -> Result<()> {
         self.interrupt()

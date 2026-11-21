@@ -572,6 +572,20 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     expect(isBusy(entryOf(id))).toBe(false);
   });
 
+  it("stop while parked on OpenCode leaves the ask to the abort, which ends the turn as interrupted", async () => {
+    const id = await startBusySession();
+    useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], harness: "opencode" } } }));
+    emit(INIT);
+    emit(PERMISSION_ASK);
+
+    await stopSession(id, () => {});
+
+    expect(h.respondPermission).not.toHaveBeenCalled();
+    expect(h.interruptSession).toHaveBeenCalledWith(id);
+    expect(entryOf(id).pendingPermission).toBeNull();
+    expect(isBusy(entryOf(id))).toBe(false);
+  });
+
   it("stop while parked on a question dismisses it, interrupts, and unlocks", async () => {
     const id = await startBusySession();
     emit(INIT);
@@ -2095,6 +2109,7 @@ describe("opening a long session tail first", () => {
       data: {
         entries,
         openAsks,
+        openRequestIds: cursor.kind === "tail" && open ? [...open] : null,
         nextCursor: last ? cursorAt(last) : { kind: "empty" },
         prevCursor: back && start > 0 ? { kind: "before", seq: entries[0].seq, createdAt: entries[0].createdAt } : null,
         remaining: rows.length - end,
@@ -2372,6 +2387,29 @@ describe("opening a long session tail first", () => {
     expect(entryOf(id).olderTurns).toBeUndefined();
     expect(rewindRefusal(entryOf(id).olderTurns)).toBeNull();
     expect(plain(id)).toEqual(expected);
+  });
+
+  it("never shows an ask the live harness no longer waits on, logged answer or not", async () => {
+    // Asks answered before the server logged answers: one older than the tail, one in it.
+    const ask = (requestId: string, toolName: string): SessionEvent => ({ kind: "permissionAsk", requestId, toolName, input: "{}" });
+    const events: SessionEvent[] = [INIT, user("ask"), toolUse("t-bash", "Bash"), ask("r-old", "bash")];
+    for (let s = 0; s < 60; s += 1) events.push(toolUse(`s${s}`), ask(`r-doom-${s}`, "doom_loop"), result(`s${s}`));
+    events.push(result("t-bash", "PERM-7"), toolUse("t-wait", "Bash"), ask("r-wait", "bash"));
+    const rows = events.map((event, seq) => at(seq, event));
+    holdBack = true;
+
+    const id = `long-${nextId + 1}`;
+    waiting.set(id, new Set(["r-wait"]));
+    await open(rows, true);
+    const live = () =>
+      entryOf(id).items.flatMap((it) => (it.kind === "permission" && it.decision === null ? [it.requestId] : []));
+    expect(live()).toEqual(["r-wait"]);
+    await release();
+    await whenBackfilled(id);
+
+    expect(live()).toEqual(["r-wait"]);
+    expect(entryOf(id).pendingPermission?.requestId).toBe("r-wait");
+    expect(entryOf(id).state).toBe("awaiting_permission");
   });
 
   it("shows an ask older than the tail at first paint, and keeps one card for it", async () => {

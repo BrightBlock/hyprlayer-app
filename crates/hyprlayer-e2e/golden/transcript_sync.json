@@ -235,6 +235,13 @@
         },
         {
           "evidence": {
+            "answerRows": 1
+          },
+          "guard": "A's stream carries its answer as a logged row",
+          "ok": true
+        },
+        {
+          "evidence": {
             "rev": 10
           },
           "guard": "B's pull reaches rev 10",

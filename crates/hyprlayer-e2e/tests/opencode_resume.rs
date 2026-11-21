@@ -11,6 +11,7 @@ use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::{EventStream, RpcClient};
+use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
 
 const IO: Duration = Duration::from_secs(20);
@@ -232,6 +233,49 @@ async fn opencode_resume() {
             "cancelDropped": dropped,
             "cancelledStatus": stopped,
         }),
+    );
+
+    j.step("the log closes each ask once: answered, denied, or cancelled by a stop");
+    client
+        .announce_client(
+            "desktop".into(),
+            "e2e".into(),
+            TARGETED_EVENTS.map(str::to_string).to_vec(),
+        )
+        .await
+        .expect("announce_client");
+    let named = [
+        (request_id, "denied"),
+        (question, "question"),
+        (permission, "permission"),
+        (cancelled, "cancelled"),
+    ];
+    let closed: Vec<serde_json::Value> = client
+        .get_session_log(id.clone())
+        .await
+        .expect("get_session_log")
+        .into_iter()
+        .filter(|e| matches!(e.kind.as_str(), "permissionResolved" | "questionAnswered"))
+        .filter_map(|e| serde_json::to_value(e.event).ok())
+        .map(|mut row| {
+            let ask = named
+                .iter()
+                .find(|(id, _)| id.as_deref() == row["requestId"].as_str())
+                .map_or("unknown", |(_, name)| *name);
+            row["requestId"] = json!(ask);
+            row
+        })
+        .collect();
+    j.guard(
+        "each ask has one closing row, with how it closed",
+        closed
+            == [
+                json!({ "kind": "permissionResolved", "requestId": "denied", "allow": false }),
+                json!({ "kind": "questionAnswered", "requestId": "question" }),
+                json!({ "kind": "permissionResolved", "requestId": "permission", "allow": true }),
+                json!({ "kind": "permissionResolved", "requestId": "cancelled", "allow": false }),
+            ],
+        json!({ "closed": closed }),
     );
 
     j.step("an OpenCode that ignores the prompt's messageID still ends each turn");

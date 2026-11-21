@@ -185,6 +185,18 @@
         }
       ],
       "step": "a waiting message can be withdrawn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnStatus": "interrupted"
+          },
+          "guard": "the turn reports interrupted, not failed",
+          "ok": true
+        }
+      ],
+      "step": "a stop mid-tool ends the turn as interrupted"
     }
   ]
 }

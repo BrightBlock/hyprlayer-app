@@ -147,6 +147,11 @@ Three consequences follow, accepted rather than designed around:
   harness still waits on, within the page's budget, so a pending prompt shows at
   first paint. A server from before this answers `unsupported_command`, and the
   client reads forward instead.)*
+  *(Amended 2026-11-20 — an ask that leaves the harness's pending set is logged as a
+  `permissionResolved` or `questionAnswered` row, so a reload never offers an answered
+  ask again. Those rows are targeted like the events above: a connection gets them only
+  if it announced them. A `tail` page also names `open_request_ids`, every ask the live
+  harness waits on, and the view closes any ask outside it.)*
 
 *(Amended 2026-11-11 — agents spawned by the runtime carry `HYPRLAYER_CTL`,
 `HYPRLAYER_SOCKET` and a per-spawn `HYPRLAYER_AGENT_TOKEN`. The `hook`, `ctl` and `mcp`

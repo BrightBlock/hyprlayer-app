@@ -101,6 +101,38 @@
       "guards": [
         {
           "evidence": {
+            "closed": [
+              {
+                "allow": false,
+                "kind": "permissionResolved",
+                "requestId": "denied"
+              },
+              {
+                "kind": "questionAnswered",
+                "requestId": "question"
+              },
+              {
+                "allow": true,
+                "kind": "permissionResolved",
+                "requestId": "permission"
+              },
+              {
+                "allow": false,
+                "kind": "permissionResolved",
+                "requestId": "cancelled"
+              }
+            ]
+          },
+          "guard": "each ask has one closing row, with how it closed",
+          "ok": true
+        }
+      ],
+      "step": "the log closes each ask once: answered, denied, or cancelled by a stop"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "replied": true,
             "turnStatus": "completed"
           },

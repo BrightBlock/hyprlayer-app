@@ -639,28 +639,39 @@ enum Ask {
 type Asks = Arc<StdMutex<std::collections::HashMap<String, Ask>>>;
 
 /// Mirrors OpenCode's own pending lists; a reply can also settle the session's other asks.
-fn track_ask(asks: &Asks, ev: &OcEvent) {
+/// Returns the row that closes an ask a reply took, unless this driver answered it first.
+fn track_ask(asks: &Asks, ev: &OcEvent) -> Option<SessionEvent> {
     let p = &ev.properties;
     let field = |key| p.get(key).and_then(Value::as_str).map(str::to_string);
     let mut asks = asks.lock().unwrap_or_else(PoisonError::into_inner);
     match ev.kind.as_str() {
         "permission.asked" => {
-            if let Some(id) = field("id") {
-                asks.insert(id, Ask::Permission);
-            }
+            asks.insert(field("id")?, Ask::Permission);
+            None
         }
         "question.asked" => {
-            if let Some(id) = field("id") {
-                let questions = p.get("questions").cloned().unwrap_or(json!([]));
-                asks.insert(id, Ask::Question(questions));
-            }
+            let questions = p.get("questions").cloned().unwrap_or(json!([]));
+            asks.insert(field("id")?, Ask::Question(questions));
+            None
         }
         "permission.replied" | "question.replied" | "question.rejected" => {
-            if let Some(id) = field("requestID") {
-                asks.remove(&id);
-            }
+            let id = field("requestID")?;
+            let ask = asks.remove(&id)?;
+            Some(closing(
+                id,
+                &ask,
+                field("reply").as_deref() != Some("reject"),
+            ))
         }
-        _ => {}
+        _ => None,
+    }
+}
+
+/// The row that closes an ask; a question's carries no decision.
+fn closing(request_id: String, ask: &Ask, allow: bool) -> SessionEvent {
+    match ask {
+        Ask::Permission => SessionEvent::PermissionResolved { request_id, allow },
+        Ask::Question(_) => SessionEvent::QuestionAnswered { request_id },
     }
 }
 
@@ -809,7 +820,9 @@ impl OpenCodeDriver {
                         if event_session_id(&ev) != Some(sid.as_str()) {
                             continue;
                         }
-                        track_ask(&tracked, &ev);
+                        if let Some(closed) = track_ask(&tracked, &ev) {
+                            let _ = tx.send(closed);
+                        }
                         let translated = xlate.handle(&ev);
                         if let Ok(mut so_far) = published_cost.lock() {
                             *so_far = Some(xlate.cost_total);
@@ -1058,7 +1071,11 @@ impl AgentDriver for OpenCodeDriver {
         allow: bool,
         _message: Option<&str>,
     ) -> CoreResult<()> {
-        self.take_ask(request_id);
+        if let Some(ask) = self.take_ask(request_id) {
+            let _ = self
+                .events
+                .send(closing(request_id.to_string(), &ask, allow));
+        }
         if !allow {
             self.mark_turn(|turn| turn.refused = true);
         }
@@ -1071,7 +1088,11 @@ impl AgentDriver for OpenCodeDriver {
     }
 
     fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> CoreResult<()> {
-        let questions = match self.take_ask(request_id) {
+        let taken = self.take_ask(request_id);
+        if let Some(ask) = &taken {
+            let _ = self.events.send(closing(request_id.to_string(), ask, true));
+        }
+        let questions = match taken {
             Some(Ask::Question(questions)) => Some(questions),
             _ => None,
         };
@@ -1106,17 +1127,23 @@ impl AgentDriver for OpenCodeDriver {
         Ok(())
     }
 
-    fn pending_requests(&self) -> Vec<String> {
+    fn pending_requests(&self) -> Option<Vec<String>> {
         let asks = self.asks.lock().unwrap_or_else(PoisonError::into_inner);
-        asks.keys().cloned().collect()
+        Some(asks.keys().cloned().collect())
     }
 
     fn interrupt(&self) -> CoreResult<()> {
-        // OpenCode's abort cancels its asks without a reply event.
-        self.asks
+        // OpenCode's abort cancels its asks without a reply event, so the stop declines them.
+        let mut cancelled: Vec<(String, Ask)> = self
+            .asks
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+            .drain()
+            .collect();
+        cancelled.sort_by(|a, b| a.0.cmp(&b.0));
+        for (request_id, ask) in cancelled {
+            let _ = self.events.send(closing(request_id, &ask, false));
+        }
         self.mark_turn(|turn| turn.interrupted = true);
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         Ok(())

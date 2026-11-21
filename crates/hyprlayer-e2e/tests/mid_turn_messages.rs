@@ -21,6 +21,7 @@ const QUIET: Duration = Duration::from_millis(800);
 /// Every line it reads is appended to `<sandbox>/harness.log`. A turn whose
 /// text carries `E2E_STEER` or `E2E_WITHDRAW` starts a tool and reads the next
 /// line while it "runs", the way claude queues input that arrives mid-turn.
+/// `E2E_STOP` ends on that line as 2.1.330 ends a turn stopped mid-tool.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 sid=""
 while [ $# -gt 0 ]; do
@@ -69,6 +70,14 @@ while IFS= read -r line; do
       tool_result toolu_hold
       reply "E2E_HEARD_NOTHING"
       result
+      ;;
+    *E2E_STOP*)
+      tool_use toolu_stop
+      IFS= read -r stop || break
+      printf '%s\n' "$stop" >> "$log"
+      printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_stop","content":"[Request interrupted by user for tool use]","is_error":true}]},"session_id":"%s"}\n' "$sid"
+      printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"session_id":"%s"}\n' "$sid"
+      printf '{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"%s","num_turns":1,"total_cost_usd":0.01,"terminal_reason":"aborted_tools","usage":{"input_tokens":1,"output_tokens":1}}\n' "$sid"
       ;;
     *)
       reply "E2E_REPLY"
@@ -288,6 +297,35 @@ async fn mid_turn_messages() {
         "a message already taken in cannot be withdrawn",
         gone == Value::Bool(false),
         json!({ "withdrawn": gone }),
+    );
+
+    j.step("a stop mid-tool ends the turn as interrupted");
+    send(
+        &mut j,
+        &client,
+        &session.id,
+        "E2E_STOP run the tool",
+        "stop-turn",
+    )
+    .await;
+    recv_until(&mut events, |e| matches!(e, SessionEvent::ToolUse { .. })).await;
+    j.call(
+        &client,
+        Request::InterruptSession {
+            session_id: session.id.clone(),
+        },
+    )
+    .await
+    .expect("interrupt_session");
+    let stopped = recv_until(&mut events, is_turn_done).await;
+    let status = stopped.iter().rev().find_map(|e| match e {
+        SessionEvent::TurnDone { turn_status, .. } => turn_status.clone(),
+        _ => None,
+    });
+    j.guard(
+        "the turn reports interrupted, not failed",
+        status.as_deref() == Some("interrupted"),
+        json!({ "turnStatus": status }),
     );
 
     j.finish();

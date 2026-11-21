@@ -801,6 +801,7 @@ impl ActorState {
             prev_cursor: page
                 .earlier
                 .map(|(seq, created_at)| LogCursor::Before { seq, created_at }),
+            open_request_ids: None,
         })
     }
 

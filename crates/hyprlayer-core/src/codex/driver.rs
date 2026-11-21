@@ -450,6 +450,10 @@ impl CodexDriver {
         let Some((rpc_id, kind)) = entry else {
             return Ok(());
         };
+        let _ = self.events.send(SessionEvent::PermissionResolved {
+            request_id: request_id.to_string(),
+            allow,
+        });
         self.reply(rpc_id, approval_reply(&kind, allow, message))
     }
 
@@ -475,6 +479,9 @@ impl CodexDriver {
         let Some(pending) = pending else {
             return Ok(());
         };
+        let _ = self.events.send(SessionEvent::QuestionAnswered {
+            request_id: request_id.to_string(),
+        });
         let body = question_reply(&pending, &json!(answers));
         self.reply(pending.rpc_id.clone(), body)
     }

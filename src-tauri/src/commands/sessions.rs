@@ -640,6 +640,8 @@ pub struct SessionTurnsDto {
     pub prev_cursor: Option<LogCursorDto>,
     /// A tail page's asks older than it that the live harness still waits on.
     pub open_asks: Vec<SessionLogEntryDto>,
+    /// Every ask a tail page's live harness waits on; null when the server didn't say.
+    pub open_request_ids: Option<Vec<String>>,
 }
 
 impl From<SessionTurns> for SessionTurnsDto {
@@ -662,6 +664,7 @@ impl From<SessionTurns> for SessionTurnsDto {
                 .into_iter()
                 .map(SessionLogEntryDto::from)
                 .collect(),
+            open_request_ids: turns.open_request_ids,
         }
     }
 }

@@ -99,7 +99,7 @@ use hyprlayer_models::{
 use hyprlayer_proto::{StaleTranscript, WireError};
 
 use crate::agent_access;
-use crate::events::{Clients, TRANSCRIPT_SYNC};
+use crate::events::{Clients, Decoder, TRANSCRIPT_SYNC};
 use crate::rpc::{
     AnnouncedClient, ArchivedWorkstreamView, CreatedProject, Dispatch, PromptContext, Request,
     ResolvedBranchPrefixes, Response, WatchedSession, WorkstreamView, WorktreeFile,
@@ -186,6 +186,13 @@ impl Server {
             .try_with(|conn| self.clients.client_ref(*conn))
             .ok()
             .flatten()
+    }
+
+    pub(crate) fn decoder(&self) -> Decoder {
+        Decoder::new(
+            self.clients.clone(),
+            crate::CONN.try_with(|conn| *conn).ok(),
+        )
     }
 }
 
@@ -1624,7 +1631,10 @@ impl Dispatch for Server {
     }
 
     async fn get_session_log(&self, session_id: String) -> Result<Vec<SessionLogEntry>, WireError> {
-        self.runtime.sessions().log(&session_id).await.wire()
+        let mut log = self.runtime.sessions().log(&session_id).await.wire()?;
+        let decoder = self.decoder();
+        log.retain(|e| !decoder.withholds(&e.kind));
+        Ok(log)
     }
 
     async fn list_session_turns(
@@ -1634,11 +1644,16 @@ impl Dispatch for Server {
         limit: u32,
     ) -> Result<SessionTurns, WireError> {
         let caller = self.caller().map(|c| c.client_id);
-        self.runtime
+        let mut turns = self
+            .runtime
             .sessions()
             .list_turns(&session_id, cursor, limit, caller.as_deref())
             .await
-            .wire()
+            .wire()?;
+        // The cursors name raw rows, so a page read past a withheld one still advances.
+        let decoder = self.decoder();
+        turns.entries.retain(|e| !decoder.withholds(&e.kind));
+        Ok(turns)
     }
 
     async fn announce_client(
@@ -2963,6 +2978,7 @@ mod tests {
                 echo_user_messages: false,
                 with_meta: false,
                 partials: streams::Partials::All,
+                decoder: Decoder::default(),
                 rev: attachment.rev,
             },
             tx,

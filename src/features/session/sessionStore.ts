@@ -106,6 +106,7 @@ import {
   resolvePermission,
   resolveQuestion,
   restoredView,
+  settleUnwaitedAsks,
   viewToText,
   type SessionView,
   type TranscriptItem,
@@ -735,6 +736,8 @@ type LogRead = {
   older?: LogCursorDto | null;
   /** A tail read's asks older than it that the live harness still waits on. */
   asks?: SessionLogEntryDto[];
+  /** Every ask a tail read's live harness waits on, when the server says. */
+  open?: string[] | null;
 };
 
 const FOLD_PAGE = 2000;
@@ -777,6 +780,7 @@ async function readTail(sessionId: string): Promise<LogRead | null> {
       revs: { rev: rev(page.rev), resetRev: rev(page.resetRev) },
       older: page.prevCursor ?? null,
       asks: page.openAsks ?? [],
+      open: page.openRequestIds ?? null,
     };
   } catch (e) {
     if (!isAppError(e) || (e.code !== "unsupported_command" && e.code !== "unreadable_request")) throw e;
@@ -932,6 +936,8 @@ type Backfill = {
   pages: SessionLogEntryDto[][];
   next: LogCursorDto | null;
   resetRev: number;
+  /** Every ask the live harness waited on at the tail read, when the server said. */
+  open: string[] | null;
   settle: () => void;
   done: Promise<void>;
 };
@@ -967,6 +973,7 @@ function startBackfill(sessionId: string, read: LogRead, live: boolean): void {
     pages: [],
     next: read.older,
     resetRev: read.revs?.resetRev ?? 0,
+    open: read.open ?? null,
     settle: () => {},
     done: Promise.resolve(),
   };
@@ -1067,21 +1074,25 @@ function showOlder(sessionId: string, fill: Backfill, older: SessionLogEntryDto[
   const since = new Map(fill.since.filter((row) => (row.seq ?? -1) > tailEnd).map((row) => [row.seq, row]));
   const rows = [...older, ...fill.tail, ...[...since.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))];
   const whole = foldLog({ entries: rows, cursor: { kind: "empty" }, revs: null }, current.items, current.counter);
-  // The log records no answer to a permission ask; this device's stays, before the status is derived.
+  // A server before answer rows logs none; this device's answers stay, before the status is derived.
   const decided = new Map(
     current.items.flatMap((it) => (it.kind === "permission" && it.decision !== null ? [[it.requestId, it.decision]] : [])),
   );
   const asked = whole.view.pendingPermission;
+  const answered: SessionView = {
+    ...whole.view,
+    items: whole.view.items.map((it) =>
+      it.kind === "permission" && it.decision === null && decided.has(it.requestId)
+        ? { ...it, decision: decided.get(it.requestId) ?? null }
+        : it,
+    ),
+    pendingPermission: asked && decided.has(asked.requestId) ? null : asked,
+  };
+  const askedSince = [...since.values()].flatMap((row) =>
+    row.event.kind === "permissionAsk" || row.event.kind === "questionAsk" ? [row.event.requestId] : [],
+  );
   const target = restoredView(
-    {
-      ...whole.view,
-      items: whole.view.items.map((it) =>
-        it.kind === "permission" && it.decision === null && decided.has(it.requestId)
-          ? { ...it, decision: decided.get(it.requestId) ?? null }
-          : it,
-      ),
-      pendingPermission: asked && decided.has(asked.requestId) ? null : asked,
-    },
+    fill.live && fill.open ? settleUnwaitedAsks(answered, new Set([...fill.open, ...askedSince])) : answered,
     fill.live,
   );
 
@@ -1929,17 +1940,8 @@ export async function stopSession(
   if (parked && isBusy(parked) && !isWorking(parked)) {
     const cleared = cancelPendingPrompts(parked);
     setEntry(sessionId, { ...parked, ...cleared, streaming: false, state: parkedState(cleared) });
-    try {
-      if (parked.pendingQuestion) {
-        await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, {}));
-      } else {
-        for (const requestId of openPermissionRequestIds(parked)) {
-          await unwrap(commands.respondPermission(sessionId, requestId, false, null));
-        }
-      }
-    } catch (e) {
-      log.warn("session", `declining ${sessionId}'s open prompt failed`, e);
-    }
+    // OpenCode's abort cancels its asks itself; declining first would end the turn as completed.
+    if (parked.harness !== "opencode") await declineParked(sessionId, parked);
   }
 
   try {
@@ -1954,6 +1956,20 @@ export async function stopSession(
     await killSession(sessionId);
   } catch (e) {
     log.warn("session", `killing ${sessionId} failed`, e);
+  }
+}
+
+async function declineParked(sessionId: string, parked: SessionEntry): Promise<void> {
+  try {
+    if (parked.pendingQuestion) {
+      await unwrap(commands.answerQuestion(sessionId, parked.pendingQuestion.requestId, {}));
+    } else {
+      for (const requestId of openPermissionRequestIds(parked)) {
+        await unwrap(commands.respondPermission(sessionId, requestId, false, null));
+      }
+    }
+  } catch (e) {
+    log.warn("session", `declining ${sessionId}'s open prompt failed`, e);
   }
 }
 
@@ -2360,7 +2376,7 @@ export async function restoreSessionIfNeeded(
     const row = active.find((a) => a.session.id === sessionId);
     const requested = (row?.session ?? rows.find((s) => s.id === sessionId))?.requestedPermissionMode ?? null;
     const live = row !== undefined;
-    const view = restoredView(folded, live);
+    const view = restoredView(live && read.open ? settleUnwaitedAsks(folded, new Set(read.open)) : folded, live);
     setEntry(sessionId, {
       ...view,
       ...position,
