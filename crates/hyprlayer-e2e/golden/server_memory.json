@@ -1,0 +1,31 @@
+{
+  "scenario": "server_memory",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "every read and upload comes back whole",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "bursts": 3,
+            "limit_mib": 24.0
+          },
+          "guard": "the server comes back near where it started",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "payload_mib": 79.2,
+            "ratio": 1.5
+          },
+          "guard": "a burst's peak stays within a bound of what it carried",
+          "ok": true
+        }
+      ],
+      "step": "bursts of large reads and an upload"
+    }
+  ]
+}

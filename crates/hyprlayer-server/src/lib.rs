@@ -45,8 +45,8 @@ use logging::RepeatGate;
 use outbound::Outbound;
 use streams::StreamRegistry;
 use transport::{
-    encode_control, label, parse_control, reject_undecodable, undecodable_id, Control, FrameReader,
-    FrameWriter,
+    encode_answer, encode_control, label, parse_control, reject_undecodable, undecodable_id,
+    Control, FrameReader, FrameWriter,
 };
 
 /// The bundle identifier Tauri derives the desktop's app dirs from; a
@@ -209,7 +209,10 @@ static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn executable_sha256(path: &Path) -> Option<String> {
     use sha2::{Digest, Sha256};
-    Some(format!("{:x}", Sha256::digest(std::fs::read(path).ok()?)))
+    // Streamed: the binary whole is a buffer the allocator would keep for the server's life.
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut std::fs::File::open(path).ok()?, &mut hasher).ok()?;
+    Some(format!("{:x}", hasher.finalize()))
 }
 
 async fn serve() -> i32 {
@@ -785,7 +788,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     // back to the caller instead of leaving it waiting.
                     let outcome: Outcome<_> =
                         // A task-local scope does not survive a further spawn, so it wraps the inner one.
-                        match tokio::spawn(CONN.scope(conn, async move { server.dispatch_checked(body).await }))
+                        match tokio::spawn(CONN.scope(conn, async move { server.answer(body).await }))
                             .await
                         {
                             Ok(result) => result.into(),
@@ -796,16 +799,16 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             Err(_) => return,
                         };
                     log_outcome(conn, command, started.elapsed(), &outcome);
-                    let bytes =
-                        encode_control(&Control::Response { id, outcome }).unwrap_or_else(|e| {
-                            tracing::error!("{command}: result is not serializable: {e}");
-                            let outcome = Outcome::Err(WireError::internal(format!(
-                                "{command}: result is not serializable: {e}"
-                            )));
-                            encode_control(&Control::Response { id, outcome })
-                                .expect("an error outcome always serializes")
-                        });
-                    if !tx.push_frame_written(bytes).await {
+                    let body = encode_answer(id, outcome).unwrap_or_else(|e| {
+                        tracing::error!("{command}: result is not serializable: {e}");
+                        let outcome = Outcome::Err(WireError::internal(format!(
+                            "{command}: result is not serializable: {e}"
+                        )));
+                        encode_control(&Control::Response { id, outcome })
+                            .expect("an error outcome always serializes")
+                            .into()
+                    });
+                    if !tx.push_frame_written(body).await {
                         tracing::debug!("conn {conn}: {command} finished after the client left");
                     }
                 });

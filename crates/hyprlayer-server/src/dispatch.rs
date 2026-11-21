@@ -106,6 +106,15 @@ use crate::rpc::{
 };
 use crate::streams::StreamState;
 
+/// What a response frame is encoded from.
+// Transient, like `Response` itself, so boxing it would only add an allocation per call.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum Answer {
+    Response(Response),
+    /// `read_attachment`'s bytes, which go out as base64.
+    Attachment(Vec<u8>),
+}
+
 pub struct Server {
     runtime: Arc<HyprlayerRuntime>,
     streams: StreamState,
@@ -141,6 +150,20 @@ impl Server {
         let _serial = self.worktree_watch.lock().await;
         let wanted = self.clients.watched_worktrees();
         self.runtime.workstreams().watch(wanted).await.wire()
+    }
+
+    /// A desktop's `read_attachment` keeps its bytes raw, for the writer to base64 a part at a time.
+    pub(crate) async fn answer(&self, body: Request) -> Result<Answer, WireError> {
+        match body {
+            Request::ReadAttachment { path } if self.agent_token().is_none() => self
+                .runtime
+                .attachments()
+                .read(path)
+                .await
+                .map(Answer::Attachment)
+                .wire(),
+            body => self.dispatch_checked(body).await.map(Answer::Response),
+        }
     }
 
     /// The one entry point for requests: an agent connection is checked against its allowlist first.
@@ -263,6 +286,21 @@ const WORKTREE_GONE: &str = "The worktree may have been deleted; archive this wo
 const COMMIT_GONE: &str =
     "This commit may no longer be on the branch after a rebase or squash-merge; \
      reopen the file from the Commits tab.";
+
+/// Base64 decoded over itself, a quad-aligned chunk at a time: decoding never outgrows its input.
+fn decode_in_place(mut buf: Vec<u8>) -> Result<Vec<u8>, base64::DecodeSliceError> {
+    const CHUNK: usize = 4096;
+    let mut out = [0u8; CHUNK / 4 * 3];
+    let (mut read, mut written) = (0, 0);
+    while read < buf.len() {
+        let end = (read + CHUNK).min(buf.len());
+        let n = B64.decode_slice(&buf[read..end], &mut out)?;
+        buf[written..written + n].copy_from_slice(&out[..n]);
+        (read, written) = (end, written + n);
+    }
+    buf.truncate(written);
+    Ok(buf)
+}
 
 fn file_conflict() -> WireError {
     WireError {
@@ -1756,8 +1794,7 @@ impl Dispatch for Server {
         file_name: String,
         data: String,
     ) -> Result<String, WireError> {
-        let data = B64
-            .decode(data)
+        let data = decode_in_place(data.into_bytes())
             .map_err(|e| WireError::protocol(format!("save_attachment data is not base64: {e}")))?;
         self.runtime
             .attachments()

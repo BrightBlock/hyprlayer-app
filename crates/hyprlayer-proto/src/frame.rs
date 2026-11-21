@@ -53,13 +53,18 @@ pub fn encode_data(payload: &[u8]) -> Vec<u8> {
 /// its slices concatenate to that frame; `last` closes it. Payload: lane byte,
 /// `last` byte, slice.
 pub fn encode_part(lane: u8, last: bool, slice: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(slice.len() + 7);
-    out.push(TAG_PART);
-    out.extend_from_slice(&(slice.len() as u32 + 2).to_le_bytes());
-    out.push(lane);
-    out.push(u8::from(last));
+    let mut out = Vec::with_capacity(slice.len() + PART_HEADER);
+    out.extend_from_slice(&part_header(lane, last, slice.len()));
     out.extend_from_slice(slice);
     out
+}
+
+pub const PART_HEADER: usize = 7;
+
+/// What a part frame carries ahead of a slice `len` bytes long.
+pub fn part_header(lane: u8, last: bool, len: usize) -> [u8; PART_HEADER] {
+    let [a, b, c, d] = (len as u32 + 2).to_le_bytes();
+    [TAG_PART, a, b, c, d, lane, u8::from(last)]
 }
 
 /// Leads a terminal stream event that is raw output: then the output's absolute
@@ -238,15 +243,7 @@ impl Decoder {
             return Ok(None);
         }
         let (_, whole) = self.partial.swap_remove(index);
-        if whole.first() == Some(&TAG_PART) {
-            return Err(DecodeError::BadPart);
-        }
-        let mut inner = Decoder::new();
-        inner.feed(&whole);
-        match inner.next_frame() {
-            Ok(Some(frame)) if inner.is_empty() => Ok(Some(frame)),
-            _ => Err(DecodeError::BadPart),
-        }
+        reassembled(whole).map(Some).ok_or(DecodeError::BadPart)
     }
 
     fn consume(&mut self, n: usize) {
@@ -260,6 +257,26 @@ impl Decoder {
             self.buf.drain(..self.start);
             self.start = 0;
         }
+    }
+}
+
+/// A lane's parts as the one frame they must be, taken in place: an upload is never copied.
+fn reassembled(mut whole: Vec<u8>) -> Option<Frame> {
+    match *whole.first()? {
+        TAG_CONTROL if whole.iter().position(|&b| b == b'\n') == Some(whole.len() - 1) => {
+            whole.pop();
+            whole.remove(0);
+            String::from_utf8(whole).ok().map(Frame::Control)
+        }
+        TAG_DATA
+            if whole.len() >= 5
+                && u32::from_le_bytes([whole[1], whole[2], whole[3], whole[4]]) as usize
+                    == whole.len() - 5 =>
+        {
+            whole.drain(..5);
+            Some(Frame::Data(whole))
+        }
+        _ => None,
     }
 }
 

@@ -842,7 +842,8 @@ pub fn read_text_file(worktree: &Path, rel: &str) -> Result<String> {
         });
     }
     let bytes = std::fs::read(&abs)?;
-    Ok(String::from_utf8_lossy(&bytes).to_string())
+    Ok(String::from_utf8(bytes)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
 }
 
 pub fn file_mtime_ms(worktree: &Path, rel: &str) -> Result<f64> {

@@ -138,5 +138,19 @@ async fn attachment_wire() {
         ratio(received) <= MAX_RATIO,
         json!({ "ratio": ratio(received) }),
     );
+
+    // Each read fits one frame, so it skips the part path the 1 MiB one takes.
+    j.step("small attachments read back whole");
+    let mut whole = Vec::new();
+    for len in [0, 1, 2, 3, 10_000] {
+        let data = &data[..len];
+        let path = save(&client, &ws, data).await;
+        whole.push(read(&client, path).await == data);
+    }
+    j.guard(
+        "each reads back the bytes saved",
+        whole.iter().all(|&ok| ok),
+        json!({ "lens": [0, 1, 2, 3, 10_000] }),
+    );
     j.finish();
 }

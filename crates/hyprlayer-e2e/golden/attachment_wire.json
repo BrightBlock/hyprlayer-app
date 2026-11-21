@@ -26,6 +26,24 @@
         }
       ],
       "step": "a 1 MiB attachment saves and reads back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lens": [
+              0,
+              1,
+              2,
+              3,
+              10000
+            ]
+          },
+          "guard": "each reads back the bytes saved",
+          "ok": true
+        }
+      ],
+      "step": "small attachments read back whole"
     }
   ]
 }

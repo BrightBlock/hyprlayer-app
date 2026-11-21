@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{oneshot, watch, Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::link::LinkWindow;
-use crate::transport::{encode_control, encode_event, Control, FrameReader, FrameWriter};
+use crate::transport::{encode_control, encode_event, Body, Control, FrameReader, FrameWriter};
 
 /// The most a small frame waits behind a large one once that one has started.
 pub const PART_BYTES: usize = 16 * 1024;
@@ -76,7 +76,7 @@ impl Done {
 }
 
 struct Queued {
-    bytes: Vec<u8>,
+    body: Body,
     sent: usize,
     /// Held from a split frame's first part to its last.
     lane: Option<u8>,
@@ -84,9 +84,9 @@ struct Queued {
 }
 
 impl Queued {
-    fn new(bytes: Vec<u8>, done: Done) -> Self {
+    fn new(body: Body, done: Done) -> Self {
         Self {
-            bytes,
+            body,
             sent: 0,
             lane: None,
             done,
@@ -150,11 +150,12 @@ impl Fair {
         while tries > 0 {
             let flow = self.flows.front_mut()?;
             let head = flow.frames.front_mut().expect("a flow holds a frame");
-            let split = parts && head.bytes.len() > PART_BYTES;
+            let len = head.body.len();
+            let split = parts && len > PART_BYTES;
             let size = if split {
-                (head.bytes.len() - head.sent).min(PART_BYTES)
+                (len - head.sent).min(PART_BYTES)
             } else {
-                head.bytes.len()
+                len
             };
             // The next flow starts a fresh turn, so this never spends a try.
             if self.turn > 0 && self.turn + size > PART_BYTES {
@@ -179,8 +180,10 @@ impl Fair {
                 Some(lane) => {
                     head.lane = Some(lane);
                     let end = head.sent + size;
-                    let last = end == head.bytes.len();
-                    let bytes = frame::encode_part(lane, last, &head.bytes[head.sent..end]);
+                    let last = end == len;
+                    let mut bytes = Vec::with_capacity(frame::PART_HEADER + size);
+                    bytes.extend_from_slice(&frame::part_header(lane, last, size));
+                    head.body.extend(head.sent..end, &mut bytes);
                     head.sent = end;
                     if !last {
                         return Some(Unit {
@@ -198,7 +201,7 @@ impl Fair {
                 None => {
                     let queued = flow.frames.pop_front().expect("the head");
                     Unit {
-                        bytes: queued.bytes,
+                        bytes: queued.body.into_bytes(),
                         done: queued.done,
                     }
                 }
@@ -272,7 +275,7 @@ impl Lanes {
         }
         if let Some(queued) = self.small.pop_front() {
             return Some(Unit {
-                bytes: queued.bytes,
+                bytes: queued.body.into_bytes(),
                 done: queued.done,
             });
         }
@@ -427,22 +430,22 @@ impl Outbound {
 
     /// A control frame that is not an event. `false` once the connection is gone.
     pub fn push_frame(&self, bytes: Vec<u8>) -> bool {
-        self.push_frame_with(bytes, Done::Nothing)
+        self.push_frame_with(bytes.into(), Done::Nothing)
     }
 
     /// Resolves once the frame is written, so nothing queued later can reach the wire first.
-    pub async fn push_frame_written(&self, bytes: Vec<u8>) -> bool {
+    pub async fn push_frame_written(&self, body: impl Into<Body>) -> bool {
         let (tx, rx) = oneshot::channel();
-        self.push_frame_with(bytes, Done::Signal(tx)) && rx.await.is_ok()
+        self.push_frame_with(body.into(), Done::Signal(tx)) && rx.await.is_ok()
     }
 
-    fn push_frame_with(&self, bytes: Vec<u8>, done: Done) -> bool {
+    fn push_frame_with(&self, body: Body, done: Done) -> bool {
         let mut lanes = self.lock();
         if lanes.closed || lanes.ending {
             return false;
         }
-        let queued = Queued::new(bytes, done);
-        if queued.bytes.len() > PART_BYTES {
+        let queued = Queued::new(body, done);
+        if queued.body.len() > PART_BYTES {
             lanes.bulk.push(None, queued);
         } else {
             lanes.small.push_back(queued);
@@ -517,9 +520,10 @@ impl Outbound {
             return false;
         }
         let len = bytes.len() as u64;
-        lanes
-            .data
-            .push(Some(stream_id), Queued::new(bytes, Done::Grant(queue, len)));
+        lanes.data.push(
+            Some(stream_id),
+            Queued::new(bytes.into(), Done::Grant(queue, len)),
+        );
         drop(lanes);
         self.0.wake.notify_one();
         true

@@ -3,11 +3,14 @@
 
 use std::io;
 
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
 use hyprlayer_models::RuntimeEvent;
 use hyprlayer_proto::frame::{self, Decoder, Frame};
 use hyprlayer_proto::{ControlFrame, Outcome, WireError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crate::dispatch::Answer;
 use crate::rpc::{Request, Response};
 use crate::streams::{StreamRequest, StreamResponse};
 
@@ -21,6 +24,93 @@ pub fn encode_control(control: &Control) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_writer(&mut out, control)?;
     out.push(b'\n');
     Ok(out)
+}
+
+const QUAD_BYTES: usize = 4096;
+
+/// A frame's bytes, or base64 of `raw` set in its envelope, encoded a part at a time as the
+/// writer reaches it: the base64 is never whole in memory.
+pub enum Body {
+    Bytes(Vec<u8>),
+    Base64 {
+        head: Vec<u8>,
+        raw: Vec<u8>,
+        tail: Vec<u8>,
+    },
+}
+
+impl From<Vec<u8>> for Body {
+    fn from(bytes: Vec<u8>) -> Self {
+        Body::Bytes(bytes)
+    }
+}
+
+impl Body {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Body::Bytes(bytes) => bytes.len(),
+            Body::Base64 { head, raw, tail } => head.len() + raw.len().div_ceil(3) * 4 + tail.len(),
+        }
+    }
+
+    /// Appends the frame's bytes `range` to `out`.
+    pub(crate) fn extend(&self, range: std::ops::Range<usize>, out: &mut Vec<u8>) {
+        let (head, raw, tail) = match self {
+            Body::Bytes(bytes) => return out.extend_from_slice(&bytes[range]),
+            Body::Base64 { head, raw, tail } => (head, raw, tail),
+        };
+        let encoded = head.len()..head.len() + raw.len().div_ceil(3) * 4;
+        out.extend_from_slice(&head[range.start.min(encoded.start)..range.end.min(encoded.start)]);
+        let mut at = range.start.clamp(encoded.start, encoded.end) - encoded.start;
+        let to = range.end.clamp(encoded.start, encoded.end) - encoded.start;
+        // Whole quads through the stack, so a part costs the writer a copy and no fill.
+        let mut quads = [0u8; QUAD_BYTES];
+        while at < to {
+            let first = at / 4;
+            let last = to.div_ceil(4).min(first + QUAD_BYTES / 4);
+            B64.encode_slice(&raw[first * 3..(last * 3).min(raw.len())], &mut quads)
+                .expect("sized to the quads");
+            let end = to.min(last * 4);
+            out.extend_from_slice(&quads[at - first * 4..end - first * 4]);
+            at = end;
+        }
+        let past =
+            range.start.max(encoded.end) - encoded.end..range.end.max(encoded.end) - encoded.end;
+        out.extend_from_slice(&tail[past]);
+    }
+
+    /// The whole frame, for a peer that reads no parts.
+    pub(crate) fn into_bytes(self) -> Vec<u8> {
+        match self {
+            Body::Bytes(bytes) => bytes,
+            body => {
+                let mut out = Vec::with_capacity(body.len());
+                body.extend(0..body.len(), &mut out);
+                out
+            }
+        }
+    }
+}
+
+/// The response frame for `outcome`; an attachment's bytes go in raw, for `Body::Base64`.
+pub(crate) fn encode_answer(id: u64, outcome: Outcome<Answer>) -> Result<Body, serde_json::Error> {
+    let outcome = match outcome {
+        Outcome::Ok(Answer::Attachment(raw)) => {
+            // The envelope as serde writes it, split at its empty string.
+            let empty = Outcome::Ok(Response::ReadAttachment(String::new()));
+            let mut head = encode_control(&Control::Response { id, outcome: empty })?;
+            let at = head
+                .windows(2)
+                .position(|pair| pair == b"\"\"")
+                .expect("the envelope holds the empty string")
+                + 1;
+            let tail = head.split_off(at);
+            return Ok(Body::Base64 { head, raw, tail });
+        }
+        Outcome::Ok(Answer::Response(response)) => Outcome::Ok(response),
+        Outcome::Err(error) => Outcome::Err(error),
+    };
+    encode_control(&Control::Response { id, outcome }).map(Body::Bytes)
 }
 
 /// `Control::Event` around an event serialized once for every connection; only `seq` differs.

@@ -380,6 +380,56 @@ terminal holding a full 256 KiB of scrollback, and not a backend/webview
 decomposition — `src/lib/terminal/channelRelease.ts`'s ~20.5 MB per dock remount is a
 frontend leak figure and is not comparable.
 
+#### Large transfers and the allocator
+
+On a Linux host over SSH, about 80 MB of parallel reads and one upload took the server from
+53 MB to 527 MB resident, where it stayed (2026-11-21). A counting allocator showed 4 MiB
+live after every burst, so the rest was the allocator's. One burst here is 8 × 2 MB
+`worktree_read_file`, 3 × 16 MiB `read_attachment` and one 16 MiB `save_attachment`,
+79 MiB before base64. There were two causes:
+
+- **Copies.** A burst allocated 501 MiB in blocks of 1 MiB or more and held 207 MiB at once.
+  - An attachment read held the file, its base64 `String`, and a frame grown to twice that: 101 MiB for 16.
+  - An upload took 143 MiB: its lane's buffer doubled to 32 MiB, a copy into an inner decoder, another into the line, serde's `String`, then the decoded bytes.
+  - A file read copied itself once more through `from_utf8_lossy`.
+  - At startup the server read its whole binary to hash it: 29.5 MiB release, 142 MiB debug.
+- **Retention.**
+  - glibc raises its mmap threshold to each mmapped block it frees, up to 32 MiB. After the startup hash, every transfer buffer came from arenas that never shrink. A container kept 500 MiB after three bursts and grew with each.
+  - macOS 26's malloc keeps freed pages of every size class in `phys_footprint` until memory pressure. `malloc_zone_pressure_relief` frees nothing.
+
+What changed:
+
+- **Attachment reads.** `read_attachment` answers with the file's bytes. The writer base64s each part as it sends it, inside the envelope serde writes (`transport::Body::Base64`). The base64 never exists whole, and the bytes go once the last part is written. A peer without `flow_control` gets the frame encoded whole at write time. Dev builds compile `base64` optimized. Unoptimized, encoding paced a debug read more than the link did, and `transport_fairness`'s far-link guard failed. That was measured before the stack-buffer encoder and has not been re-measured since.
+- **Uploads and small copies.** A split frame is taken in place when its last part lands, and `save_attachment` decodes base64 over its own buffer. The startup hash streams, and `read_text_file` keeps its bytes when they are UTF-8.
+- **Large blocks are unmapped once freed.**
+  - glibc: `mallopt(M_MMAP_THRESHOLD, 128 KiB)` pins the threshold. That covers the server's blocks and C code's (SQLite, libgit2).
+  - macOS: the server's global allocator maps blocks of 128 KiB and up straight from the VM (`hyprlayer-server/src/large_blocks.rs`). Smaller ones stay with `System`.
+  - Windows: unchanged. Its heap already returns blocks above its virtual-memory threshold, but that is not measured here.
+- **Rejected.**
+  - `M_ARENA_MAX=2` kept 132 MiB.
+  - `malloc_trim` is not needed once the threshold is pinned.
+  - mimalloc left 133, 53 and 190 MiB of footprint after three macOS bursts, and adds a C build to the Windows cross-build.
+  - `MallocLargeCache=0` and `MallocSpaceEfficient=1` work. They are undocumented, though, and read only from the environment the process started with.
+
+What it does not cover:
+
+- While it parses, an upload still holds its frame and serde's copy of the base64. Streaming it needs a wire change.
+- C allocations on macOS stay with libmalloc.
+
+The guard is `crates/hyprlayer-e2e/tests/server_memory.rs`, run locally and in the container
+tier over the relay. After three bursts the server must be within 24 MiB of where it started,
+and each burst must peak within 1.5 × its bytes. On macOS it reads `phys_footprint`, since
+`ps` RSS there also counts pages malloc has handed back as reusable. Before is `d7cc34d7`:
+
+| Measure | Before | After |
+|---|---|---|
+| Linux container (glibc 2.36, release, relay): start, then after three bursts | 23, 523 MiB | 23, 26 MiB |
+| Linux container: a burst's peak above its start | +206 to +366 MiB | +91 to +92 MiB |
+| macOS release footprint: start, then after three bursts | 30, 308 MiB | 9, 11 MiB |
+| macOS release: a burst's peak above its start | +23 to +227 MiB | +64 to +70 MiB |
+| macOS debug footprint: start, then after three bursts | 155, 533 MiB | 13, 20 MiB |
+| Per burst: allocated in ≥ 1 MiB blocks, and live at once (counting allocator, macOS debug) | 501, 207 MiB | 204, 105 MiB |
+
 ### The connection: priority, credit, gaps and liveness
 
 One socket carries responses, runtime events and every stream's data, so a reader on a

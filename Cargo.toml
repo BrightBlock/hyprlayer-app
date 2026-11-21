@@ -34,3 +34,7 @@ strip = true
 
 [patch.crates-io]
 portable-pty = { path = "vendor/portable-pty" }
+
+# The writer base64s an attachment as it sends it; unoptimized, that and not the link paces a debug read.
+[profile.dev.package.base64]
+opt-level = 3
