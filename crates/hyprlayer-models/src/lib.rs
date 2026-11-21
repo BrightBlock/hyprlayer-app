@@ -41,5 +41,7 @@ pub use session::{
     SessionStreamItem, SessionTurns, TurnKind, TurnStatus,
 };
 pub use skill::{SkillScope, SkillSourceKind, SkillTarget};
-pub use terminal::{PtyFirstPrompt, PtyLaunchSession, PtyLaunched, TerminalEvent};
+pub use terminal::{
+    PtyFirstPrompt, PtyLaunchSession, PtyLaunched, Rgb, TerminalEvent, TerminalTheme,
+};
 pub use workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};

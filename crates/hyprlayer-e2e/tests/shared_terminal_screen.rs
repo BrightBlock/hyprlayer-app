@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
+use hyprlayer_core::models::{Rgb, TerminalTheme};
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_e2e::agent_stub::{install, SCREEN_TUI};
 use hyprlayer_e2e::link::far_phone;
@@ -34,6 +35,13 @@ const DARK: Theme = Theme {
 const LIGHT: Theme = Theme {
     background: "\x1b]11;rgb:ffff/ffff/ffff\x1b\\",
     scheme: "\x1b[?997;2n",
+};
+const A_THEME: TerminalTheme = TerminalTheme {
+    foreground: Rgb(0xff, 0xff, 0xff),
+    background: Rgb(0, 0, 0),
+    cursor: Rgb(0xff, 0xff, 0xff),
+    ansi: [Rgb(0x80, 0x80, 0x80); 16],
+    dark: true,
 };
 
 enum Seen {
@@ -319,7 +327,7 @@ async fn shared_terminal_screen() {
     let (b_client, b_link) = far_phone(server.socket(), true, Duration::ZERO, false).await;
 
     j.step("A opens the program at 120x40 and B attaches at 80x24");
-    let (terminal, _, opened) = server
+    let (terminal, a_stream, opened) = server
         .client()
         .spawn_shell_terminal_stream(stub_command(&sandbox), 120, 40)
         .await
@@ -434,7 +442,32 @@ async fn shared_terminal_screen() {
     );
     show(&mut j, "(f)", &a, &b);
 
-    let _ = b.client.cancel_stream(b_stream).await;
+    j.step("(g) with nobody watching, the program asks for the theme");
+    a.client
+        .terminal_theme(A_THEME)
+        .await
+        .expect("A reports its theme");
+    for (desktop, stream) in [(&a, a_stream), (&b, b_stream)] {
+        let _ = desktop.client.cancel_stream(stream).await;
+        desktop.forget_stream();
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    a.send("t").await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let (a_stream, _) = a.attach(None).await;
+    let painted = a.painted(13).await;
+    let answers = reported(&a, "ANSWERS");
+    j.guard(
+        "the server answers each query once, in the theme of the desktop that last owned the size",
+        painted
+            && answers["osc11"] == json!(1)
+            && answers["scheme"] == json!(1)
+            && answers["dark"] == json!(1)
+            && answers["light"] == json!(0),
+        json!({ "answers": answers }),
+    );
+
+    let _ = a.client.cancel_stream(a_stream).await;
     let _ = server.client().terminal_close(terminal).await;
     j.finish();
 }

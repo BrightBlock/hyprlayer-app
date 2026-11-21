@@ -425,6 +425,10 @@ impl Outbound {
         self.0.features.heartbeat
     }
 
+    pub fn screen_frames(&self) -> bool {
+        self.0.features.screen_frames
+    }
+
     /// A request's turn to run, from the bulk pool or the other; hold it until its answer is
     /// written. `None` once the connection is gone: what it sent still runs, since a launch or
     /// a failed start's record may hang on it, and only the answer is lost.

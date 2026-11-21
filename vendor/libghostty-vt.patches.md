@@ -218,3 +218,42 @@ verification:
 (cd vendor/libghostty-vt && zig build test-lib-vt -Dtest-filter='cursorAbsolute keeps the hyperlink when style migration splits the page')
 just maintenance-test
 ```
+
+## 0009 leave kitty keyboard and XTVERSION queries unanswered
+
+status: active
+
+patch: `vendor/patches/libghostty-vt/0009-leave-kitty-keyboard-and-xtversion-unanswered.patch`
+
+herdr issue: none; Hyprlayer-only
+
+upstream discussion: not opened
+
+upstream pr: not opened
+
+vendored base: `44f2a44df7e8c4a0c6df3f7d872ef3d7ead88e51`
+
+local files:
+
+- `vendor/libghostty-vt/src/terminal/stream_terminal.zig`
+- `vendor/libghostty-vt/src/terminal/c/terminal.zig` (tests only)
+
+reason: Hyprlayer's server answers a TUI's queries for desktops that render it
+with xterm.js 5.5, which encodes the keys and has no kitty keyboard protocol.
+Answering `CSI ? u` tells the TUI it may push kitty flags and expect keys
+xterm.js never sends, so the query goes unanswered, as xterm.js leaves it.
+XTVERSION (`CSI > q`) is unanswered for the same reason: xterm.js does not
+answer it, and a TUI that reads "libghostty" may pick behaviour for the wrong
+terminal. Push, pop and set still change the kitty flags, which nothing in
+Hyprlayer reads, so herdr's key encoder test keeps passing.
+`GHOSTTY_TERMINAL_OPT_XTVERSION` has no effect while this patch is applied.
+Ghostty's tests for both queries now expect no answer.
+
+remove when: Hyprlayer's desktops encode kitty keys, or upstream offers an
+option to leave these queries unanswered.
+
+verification:
+
+```sh
+cargo test -p ghostty-vt --lib kitty_keyboard_and_xtversion_queries_go_unanswered
+```

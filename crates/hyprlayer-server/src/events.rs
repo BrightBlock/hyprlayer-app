@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use hyprlayer_core::{HyprlayerRuntime, RuntimeEvent};
-use hyprlayer_models::ClientRef;
+use hyprlayer_models::{ClientRef, TerminalTheme};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -66,6 +66,7 @@ struct Conn {
     agent: Option<String>,
     /// Sessions one of this connection's streams carries, with how many.
     streamed: HashMap<String, usize>,
+    terminal_theme: Option<TerminalTheme>,
 }
 
 impl Conn {
@@ -130,6 +131,7 @@ impl Clients {
                 worktree: None,
                 agent: None,
                 streamed: HashMap::new(),
+                terminal_theme: None,
             },
         );
     }
@@ -190,6 +192,22 @@ impl Clients {
         self.lock()
             .get(&conn)
             .is_some_and(|c| c.outbound.terminal_size())
+    }
+
+    pub fn screen_frames(&self, conn: u64) -> bool {
+        self.lock()
+            .get(&conn)
+            .is_some_and(|c| c.outbound.screen_frames())
+    }
+
+    pub fn terminal_theme(&self, conn: u64) -> Option<TerminalTheme> {
+        self.lock().get(&conn)?.terminal_theme
+    }
+
+    pub fn set_terminal_theme(&self, conn: u64, theme: TerminalTheme) {
+        if let Some(client) = self.lock().get_mut(&conn) {
+            client.terminal_theme = Some(theme);
+        }
     }
 
     pub fn decodes(&self, conn: u64, kind: &str) -> bool {

@@ -6,6 +6,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use hyprlayer_models::{
     AgentCaller, PermissionMode, PtyAgent, PtyAgentState, PtyLaunchSession, PtyLaunched,
+    TerminalTheme,
 };
 
 use crate::claude::driver::permission_mode_flag;
@@ -16,8 +17,6 @@ use crate::process::Exec;
 use crate::settings::Engine;
 use crate::store::Workstream;
 use crate::terminal::engines;
-#[cfg(unix)]
-use crate::terminal::screen::ScreenMirror;
 use crate::terminal::{PtySession, RingReader, SpawnTerminal};
 
 #[cfg(unix)]
@@ -278,6 +277,13 @@ impl TerminalService<'_> {
         Ok(())
     }
 
+    /// A terminal this viewer joins later takes the theme from its seat.
+    pub async fn set_theme(&self, viewer: u64, theme: TerminalTheme) {
+        for session in self.runtime.terminals.all().await {
+            session.set_theme(viewer, theme);
+        }
+    }
+
     pub async fn close(&self, req: CloseTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
         if let Some(s) = self.runtime.terminals.remove(&req.terminal_id).await {
@@ -477,9 +483,6 @@ impl TerminalService<'_> {
                 return Err(io_context("open agent pty", e));
             }
         };
-        // From the first byte, like claude's: the review dialog is read off the screen.
-        #[cfg(unix)]
-        let review = (remote.is_some() && session.resume).then(|| ScreenMirror::follow(&pty));
         let attachment = self
             .register_with_id(terminal_id.clone(), pty.clone())
             .await;
@@ -526,16 +529,16 @@ impl TerminalService<'_> {
                 pty.kill();
             } else if session.resume {
                 remote.resume(provider_session_id.clone(), owe_bypass);
-                match (review, self.runtime.pty_agents.snapshot(&terminal_id)) {
-                    (Some(screen), Some(snapshot)) => {
+                match self.runtime.pty_agents.snapshot(&terminal_id) {
+                    Some(snapshot) => {
                         // Waits for the lock: skipping it would leave the dialog for typed input to answer.
                         tokio::spawn(async move {
                             let input = snapshot.input.lock_owned().await;
-                            codex_remote::skip_hook_review(pty, screen, input).await;
+                            codex_remote::skip_hook_review(pty, input).await;
                         });
                     }
-                    _ => tracing::warn!(
-                        "resumed codex {terminal_id}: no screen to dismiss its hook review from"
+                    None => tracing::warn!(
+                        "resumed codex {terminal_id}: gone before its hook review could be dismissed"
                     ),
                 }
             }

@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // Fails when the app calls an RPC that the oldest server it accepts
 // (MIN_SERVER_VERSION) lacks or has with a different signature (ADR-0009).
+// A call on the line after `// server-compat: gated on <feature>` is made only
+// to a server whose hello lists that feature, so it is checked only when the
+// oldest server's hyprlayer-proto names the feature.
 // Usage: check-server-compat.mjs [--root <repo>]
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +15,7 @@ const rootArg = process.argv.indexOf("--root");
 const root = rootArg > 0 ? process.argv[rootArg + 1] : join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const RPC = "crates/hyprlayer-server/src/rpc.rs";
+const PROTO = "crates/hyprlayer-proto/src/lib.rs";
 const SERVER_TOML = "crates/hyprlayer-server/Cargo.toml";
 const MIN_FILE = "src-tauri/src/server_version.rs";
 const APP_SRC = "src-tauri/src";
@@ -41,7 +45,7 @@ function cmpVersion(a, b) {
   return 0;
 }
 
-const stripLineComments = (src) => src.replace(/^\s*\/\/.*$/gm, "");
+const stripLineComments = (src) => src.replace(/^[ \t]*\/\/.*$/gm, "");
 // Drop whitespace except between two word characters (`dyn Foo`, `&'a mut T`).
 const normalize = (s) =>
   s
@@ -97,18 +101,39 @@ function rustFiles(dir) {
   );
 }
 
+const GATE = /^\s*\/\/\s*server-compat: gated on (\w+)\s*$/;
+
 // Any `.method(` naming a table command counts, wherever the client came from;
 // a same-named method on another type fails closed.
 function appCalls(table) {
   const byVariant = new Map([...table].map(([method, { variant }]) => [variant, method]));
   const calls = new Map();
+  const gated = new Map();
   for (const file of rustFiles(APP_SRC)) {
-    const src = stripLineComments(read(file));
-    const note = (method) => calls.has(method) || calls.set(method, file);
-    for (const [, name] of src.matchAll(/\.\s*(\w+)\s*(?:::<[^>]*>)?\s*\(/g)) if (table.has(name)) note(name);
-    for (const [, variant] of src.matchAll(/\bRequest::(\w+)/g)) if (byVariant.has(variant)) note(byVariant.get(variant));
+    const raw = read(file);
+    const lines = raw.split("\n");
+    // Stripping keeps every newline, so a match's line is the same in both.
+    const src = stripLineComments(raw);
+    const note = (method, index) => {
+      const line = src.slice(0, index).split("\n").length - 1;
+      const feature = lines[line - 1]?.match(GATE)?.[1];
+      if (!feature) calls.has(method) || calls.set(method, file);
+      else gated.has(method) || gated.set(method, { file, feature });
+    };
+    for (const m of src.matchAll(/\.\s*(\w+)\s*(?:::<[^>]*>)?\s*\(/g)) if (table.has(m[1])) note(m[1], m.index);
+    for (const m of src.matchAll(/\bRequest::(\w+)/g)) if (byVariant.has(m[1])) note(byVariant.get(m[1]), m.index);
   }
-  return calls;
+  for (const method of calls.keys()) gated.delete(method);
+  return { calls, gated };
+}
+
+const names = (src, feature) => src.includes(`"${feature}"`);
+function protoAt(tag) {
+  try {
+    return git("show", `${tag}:${PROTO}`);
+  } catch {
+    return "";
+  }
 }
 
 const serverVersion = read(SERVER_TOML).match(/^version\s*=\s*"([^"]+)"/m)?.[1];
@@ -124,6 +149,7 @@ if (cmpVersion(minVersion, serverVersion) > 0)
 
 const head = parseTable(read(RPC), RPC);
 const failures = [];
+let skipped = 0;
 
 const serverTag = `server-v${serverVersion}`;
 let needsBump = false;
@@ -150,7 +176,15 @@ if (cmpVersion(minVersion, serverVersion) < 0) {
       "Run `git fetch --tags` and re-run.",
     ]);
   const min = tableAt(minTag);
-  const broken = [...appCalls(head)]
+  const { calls, gated } = appCalls(head);
+  const [headProto, minProto] = gated.size ? [existsSync(join(root, PROTO)) ? read(PROTO) : "", protoAt(minTag)] : ["", ""];
+  const unknown = [];
+  for (const [method, { file, feature }] of gated) {
+    if (!names(headProto, feature)) unknown.push(`${method} (called in ${file}): gated on ${feature}, which ${PROTO} doesn't name`);
+    else if (names(minProto, feature)) calls.set(method, file);
+    else skipped++;
+  }
+  const broken = [...calls]
     .sort(([a], [b]) => a.localeCompare(b))
     .flatMap(([method, file]) => {
       const was = min.get(method);
@@ -167,10 +201,17 @@ if (cmpVersion(minVersion, serverVersion) < 0) {
         ? `Bump the version in ${SERVER_TOML}, then raise MIN_SERVER_VERSION in ${MIN_FILE} to it.`
         : `Raise MIN_SERVER_VERSION in ${MIN_FILE} to ${serverVersion}, the crates/hyprlayer-server version.`,
     ]);
+  if (unknown.length)
+    failures.push([
+      "the app gates calls on hello features the server doesn't have:",
+      ...unknown,
+      `Name the feature as it is in ${PROTO}.`,
+    ]);
 }
 
 if (failures.length) {
   failures.forEach(report);
   process.exit(1);
 }
-console.log(`✓ server compat: app RPCs match server ${minVersion} (MIN_SERVER_VERSION); server ${serverVersion}`);
+const gatedNote = skipped ? `; ${skipped} gated on hello features it lacks` : "";
+console.log(`✓ server compat: app RPCs match server ${minVersion} (MIN_SERVER_VERSION); server ${serverVersion}${gatedNote}`);

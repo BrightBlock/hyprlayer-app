@@ -77,7 +77,7 @@ use hyprlayer_core::{
 use hyprlayer_models::{
     AgentSignal, AgentStatusReport, AgentWhoami, PtyAgent, PtyControlOutcome, RevealTarget,
     ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
-    SpawnedAgent, WaitOutcome, WaitUntil,
+    SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -322,6 +322,7 @@ hyprlayer_proto::commands! {
     TerminalWrite: terminal_write(terminal_id: String, data: String) -> ();
     TerminalResize: terminal_resize(terminal_id: String, cols: u16, rows: u16) -> ();
     TerminalFocus: terminal_focus(terminal_id: String) -> ();
+    TerminalTheme: terminal_theme(theme: TerminalTheme) -> ();
     TerminalClose: terminal_close(terminal_id: String) -> ();
     AgentResize: agent_resize(terminal_id: String, cols: u16, rows: u16) -> ();
     CaptureAgentSession: capture_agent_session(workstream_id: String, engine_id: String, after_ms: f64, exclude: Vec<String>) -> Option<String>;

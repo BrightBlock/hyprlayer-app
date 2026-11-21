@@ -1,24 +1,42 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, PoisonError};
 
-use hyprlayer_core::models::{PtyAgent, PtyControlOutcome, PtyLaunchSession, PtyLaunched};
+use hyprlayer_core::models::{
+    PtyAgent, PtyControlOutcome, PtyLaunchSession, PtyLaunched, TerminalTheme,
+};
 use hyprlayer_core::terminal::TerminalEvent;
-use hyprlayer_server::client::TerminalStream;
+use hyprlayer_proto::WireError;
+use hyprlayer_server::client::{RpcClient, TerminalStream};
 use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
-/// Whether the desktop's terminals are dark, kept so a reconnect can resend it.
+/// Whether the desktop's terminals are dark, and their colours, kept so a reconnect can resend them.
 #[derive(Default)]
-pub struct TerminalColors(Mutex<Option<bool>>);
+pub struct TerminalColors {
+    dark: Mutex<Option<bool>>,
+    theme: Mutex<Option<TerminalTheme>>,
+}
 
 impl TerminalColors {
     pub fn overlay(&self) -> Option<(String, String)> {
-        let dark = (*self.0.lock().unwrap_or_else(PoisonError::into_inner))?;
+        let dark = (*self.dark.lock().unwrap_or_else(PoisonError::into_inner))?;
         Some(colorfgbg(dark))
     }
+
+    pub fn theme(&self) -> Option<TerminalTheme> {
+        *self.theme.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+pub async fn send_theme(client: &RpcClient, theme: TerminalTheme) -> Result<(), WireError> {
+    if !client.server_features().screen_frames {
+        return Ok(());
+    }
+    // server-compat: gated on screen_frames
+    client.terminal_theme(theme).await
 }
 
 // rxvt's "fg;bg" palette indices, which claude's "auto" theme and vim read before any OSC 11 reply.
@@ -34,10 +52,23 @@ pub async fn set_terminal_color_scheme(
     colors: State<'_, TerminalColors>,
     dark: bool,
 ) -> CmdResult<()> {
-    *colors.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(dark);
+    *colors.dark.lock().unwrap_or_else(PoisonError::into_inner) = Some(dark);
     state
         .client()?
         .set_env_overlay(BTreeMap::from([colorfgbg(dark)]))
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_terminal_theme(
+    state: State<'_, AppState>,
+    colors: State<'_, TerminalColors>,
+    theme: TerminalTheme,
+) -> CmdResult<()> {
+    *colors.theme.lock().unwrap_or_else(PoisonError::into_inner) = Some(theme);
+    send_theme(&*state.client()?, theme)
         .await
         .map_err(AppError::from)
 }

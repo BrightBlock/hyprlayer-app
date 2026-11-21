@@ -122,6 +122,23 @@
         }
       ],
       "step": "(f) B reconnects after missing more output than the terminal keeps"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers": {
+              "dark": 1,
+              "light": 0,
+              "osc11": 1,
+              "scheme": 1
+            }
+          },
+          "guard": "the server answers each query once, in the theme of the desktop that last owned the size",
+          "ok": true
+        }
+      ],
+      "step": "(g) with nobody watching, the program asks for the theme"
     }
   ]
 }

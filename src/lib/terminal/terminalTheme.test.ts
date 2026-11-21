@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { xtermThemeFromCss } from "./terminalTheme";
+import { terminalColors, xtermThemeFromCss } from "./terminalTheme";
 
 const ANSI_SLOTS = [
   "black",
@@ -73,5 +73,34 @@ describe("xtermThemeFromCss", () => {
     const theme = xtermThemeFromCss();
     expect(theme.red).toBe("#123456");
     for (const slot of ANSI_SLOTS) expect(theme[slot], slot).toBeTruthy();
+  });
+});
+
+describe("terminalColors", () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute("style");
+  });
+
+  it("gives the server the theme's colours as RGB, ANSI slots in order, with its darkness", () => {
+    document.documentElement.style.setProperty("--color-ink", "#111111");
+    document.documentElement.style.setProperty("--color-surface", "rgb(247, 247, 247)");
+    document.documentElement.style.setProperty("--color-ansi-red", "#c0392b");
+    const colors = terminalColors(xtermThemeFromCss());
+    expect(colors.foreground).toEqual([0x11, 0x11, 0x11]);
+    expect(colors.background).toEqual([247, 247, 247]);
+    expect(colors.cursor).toEqual([0xd9, 0x77, 0x57]);
+    expect(colors.ansi).toHaveLength(16);
+    expect(colors.ansi[1]).toEqual([0xc0, 0x39, 0x2b]);
+    expect(colors.ansi[15]).toEqual([0xee, 0xee, 0xec]);
+    expect(colors.dark).toBe(false);
+  });
+
+  it("reads a colour it can't parse as the theme's plain ink or paper", () => {
+    document.documentElement.style.setProperty("--color-ansi-red", "oklch(0.6 0.2 25)");
+    document.documentElement.style.setProperty("--color-surface", "oklch(0.1 0 0)");
+    const colors = terminalColors(xtermThemeFromCss());
+    expect(colors.dark).toBe(true);
+    expect(colors.ansi[1]).toEqual([0xff, 0xff, 0xff]);
+    expect(colors.background).toEqual([0, 0, 0]);
   });
 });

@@ -29,6 +29,10 @@ pub const HEARTBEAT: &str = "heartbeat";
 /// only the active client's fit sizes a shared terminal.
 pub const TERMINAL_SIZE: &str = "terminal_size";
 
+/// A hello feature: the client renders the server's screen of a terminal, so the server answers
+/// the program's queries for it. A server that lists it takes `terminal_theme`.
+pub const SCREEN_FRAMES: &str = "screen_frames";
+
 /// The hello features a peer announced.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Features {
@@ -37,6 +41,7 @@ pub struct Features {
     pub link_credit: bool,
     pub heartbeat: bool,
     pub terminal_size: bool,
+    pub screen_frames: bool,
 }
 
 impl Features {
@@ -46,6 +51,7 @@ impl Features {
         link_credit: true,
         heartbeat: true,
         terminal_size: true,
+        screen_frames: true,
     };
 
     /// Unknown names are a newer peer's, so they are ignored.
@@ -57,6 +63,7 @@ impl Features {
             link_credit: has(LINK_CREDIT),
             heartbeat: has(HEARTBEAT),
             terminal_size: has(TERMINAL_SIZE),
+            screen_frames: has(SCREEN_FRAMES),
         }
     }
 
@@ -67,6 +74,7 @@ impl Features {
             (self.link_credit, LINK_CREDIT),
             (self.heartbeat, HEARTBEAT),
             (self.terminal_size, TERMINAL_SIZE),
+            (self.screen_frames, SCREEN_FRAMES),
         ]
         .into_iter()
         .filter(|&(on, _)| on)

@@ -24,6 +24,9 @@ What changed from herdr:
   `as_chunks`, which clippy 1.99 asks for. herdr's `clippy.toml` comes along.
 - `build.rs` builds from a copy in `OUT_DIR`, keeps Zig's cache there, and finds
   the cargo-xwin SDK.
+- Patch 0009 (Hyprlayer's own) leaves kitty keyboard and XTVERSION queries
+  unanswered. `lib.rs` gains `set_default_colors`, `for_each_viewport_row_cell`
+  and a test for the patch.
 - The vendored tree keeps only what a lib-vt build reads: 508 of its 1,339 files
   are gone (19.6 MB down to 15.2 MB), all of them files that no cold
   `zig build -Demit-lib-vt` for x86_64-linux-gnu, aarch64-linux-gnu,

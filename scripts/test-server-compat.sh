@@ -43,6 +43,8 @@ EOF
 server_version() { printf '[package]\nname = "hyprlayer-server"\nversion = "%s"\n' "$1" > crates/hyprlayer-server/Cargo.toml; }
 min_version() { printf 'pub const MIN_SERVER_VERSION: &str = "%s";\n' "$1" > src-tauri/src/server_version.rs; }
 commit() { git add -A && git commit -qm "$1"; }
+proto() { mkdir -p crates/hyprlayer-proto/src && printf 'pub const NEW_FEATURE: &str = "%s";\n' "$1" > crates/hyprlayer-proto/src/lib.rs; }
+gated() { printf '// A note.\n\n// Another.\nfn f(c: RpcClient) {\n    // server-compat: gated on %s\n    c.new_thing();\n}\n' "$1" > src-tauri/src/commands/gated.rs; }
 # Fails when the substitution matches nothing, so a stale pattern can't turn a case into a no-op.
 replace() {
   local before
@@ -136,6 +138,24 @@ case_ table_drift_without_bump_app_calls_old_min "git tag server-v0.10.0
   table \"\$TABLE
     NewThing: new_thing() -> Thing;\"
   echo 'fn f(c: RpcClient) { c.new_thing(); }' > src-tauri/src/commands/new.rs"
+case_ gated_call_on_a_feature_min_lacks "table \"\$TABLE
+    NewThing: new_thing() -> Thing;\"
+  proto new_feature
+  gated new_feature"
+case_ gated_call_on_a_feature_min_lists "proto new_feature
+  commit 'list new_feature'
+  git tag -f server-v0.9.0 >/dev/null
+  table \"\$TABLE
+    NewThing: new_thing() -> Thing;\"
+  gated new_feature"
+case_ gated_call_also_made_ungated "table \"\$TABLE
+    NewThing: new_thing() -> Thing;\"
+  proto new_feature
+  gated new_feature
+  echo 'fn g(c: RpcClient) { c.new_thing(); }' > src-tauri/src/commands/new.rs"
+case_ gated_call_on_an_unknown_feature "table \"\$TABLE
+    NewThing: new_thing() -> Thing;\"
+  gated no_such_feature"
 
 cd - >/dev/null
 if [[ "${BLESS:-}" == "1" ]]; then

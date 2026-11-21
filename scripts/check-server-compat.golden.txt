@@ -137,3 +137,25 @@ exit: 1
   new_thing (called in src-tauri/src/commands/new.rs): not in server-v0.9.0
   Bump the version in crates/hyprlayer-server/Cargo.toml, then raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to it.
 
+## gated_call_on_a_feature_min_lacks
+exit: 0
+✓ server compat: app RPCs match server 0.9.0 (MIN_SERVER_VERSION); server 0.10.0; 1 gated on hello features it lacks
+
+## gated_call_on_a_feature_min_lists
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  new_thing (called in src-tauri/src/commands/gated.rs): not in server-v0.9.0
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## gated_call_also_made_ungated
+exit: 1
+✗ the app calls commands that server 0.9.0 (MIN_SERVER_VERSION) lacks or has with another signature:
+  new_thing (called in src-tauri/src/commands/new.rs): not in server-v0.9.0
+  Raise MIN_SERVER_VERSION in src-tauri/src/server_version.rs to 0.10.0, the crates/hyprlayer-server version.
+
+## gated_call_on_an_unknown_feature
+exit: 1
+✗ the app gates calls on hello features the server doesn't have:
+  new_thing (called in src-tauri/src/commands/gated.rs): gated on no_such_feature, which crates/hyprlayer-proto/src/lib.rs doesn't name
+  Name the feature as it is in crates/hyprlayer-proto/src/lib.rs.
+

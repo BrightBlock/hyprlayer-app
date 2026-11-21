@@ -9,8 +9,11 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use hyprlayer_models::TerminalTheme;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::watch;
+
+use screen::Screen;
 
 const RING_CAP_BYTES: usize = 256 * 1024;
 const FLUSH_BYTES: usize = 64 * 1024;
@@ -33,6 +36,7 @@ const MARK_BYTES: u64 = 1024;
 const READ_QUEUE_CHUNKS: usize = 16;
 /// How long an exited child's output may take to reach EOF before the exit is signalled anyway.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
+const IDLE_COMPRESS: Duration = Duration::from_millis(250);
 
 pub use hyprlayer_models::terminal::TerminalEvent;
 
@@ -48,15 +52,13 @@ pub enum TerminalChunk {
 /// `(rows, cols)`, as `PtySize` orders them.
 type Size = (u16, u16);
 
-/// Sees every flush, in order, with the size it was written for.
-type OutputTap = Arc<dyn Fn(&[u8], Size) + Send + Sync>;
-
 /// The one copy of a pty's output: a byte-capped ring every subscriber reads
 /// through its own cursor, so scrollback replay and the live stream are the
 /// same bytes.
 struct OutputRing {
     inner: StdMutex<RingInner>,
     tail_tx: watch::Sender<u64>,
+    screen: Arc<Screen>,
 }
 
 struct RingInner {
@@ -72,11 +74,10 @@ struct RingInner {
     // The size from each offset on, ascending; the first is the size at head.
     sizes: VecDeque<(u64, Size)>,
     exited: Option<Option<i32>>,
-    tap: Option<OutputTap>,
 }
 
 impl OutputRing {
-    fn new(size: Size) -> Self {
+    fn new(size: Size, screen: Arc<Screen>) -> Self {
         let (tail_tx, _) = watch::channel(0);
         Self {
             inner: StdMutex::new(RingInner {
@@ -86,9 +87,9 @@ impl OutputRing {
                 flush_ends: VecDeque::new(),
                 sizes: VecDeque::from([(0, size)]),
                 exited: None,
-                tap: None,
             }),
             tail_tx,
+            screen,
         }
     }
 
@@ -96,7 +97,7 @@ impl OutputRing {
         if flush.is_empty() {
             return;
         }
-        let (tail, tap, size) = {
+        let tail = {
             let mut inner = self.inner.lock().unwrap();
             inner.make_room(flush.len());
             inner.bytes.extend(flush.iter().copied());
@@ -108,25 +109,11 @@ impl OutputRing {
             {
                 inner.flush_ends.push_back(tail);
             }
-            (tail, inner.tap.clone(), inner.size())
+            tail
         };
         // Outside the lock, before the wakeup: one thread pushes, so order holds and a woken reader sees it.
-        if let Some(tap) = tap {
-            tap(flush, size);
-        }
+        self.screen.feed(flush);
         self.tail_tx.send_replace(tail);
-    }
-
-    /// Feeds `tap` the retained output, then every later flush; `false` when output was already
-    /// trimmed. One tap per ring: a second replaces the first.
-    fn set_tap(&self, tap: OutputTap) -> bool {
-        let mut inner = self.inner.lock().unwrap();
-        let size = inner.size();
-        let (front, back) = inner.bytes.as_slices();
-        tap(front, size);
-        tap(back, size);
-        inner.tap = Some(tap);
-        inner.head == 0
     }
 
     fn size(&self) -> Size {
@@ -148,6 +135,8 @@ impl OutputRing {
             if inner.size() != size {
                 inner.sizes.push_back((tail, size));
             }
+            // Under the ring lock: a quiet pty's screen takes the size before any output does.
+            self.screen.resize(size);
             tail
         };
         self.tail_tx.send_replace(tail);
@@ -285,11 +274,14 @@ impl RingInner {
 }
 
 /// A client watching a pty. One that `follows` renders at the pty's size; an older one
-/// renders at its own fit, so each fit it sends takes the size.
+/// renders at its own fit, so each fit it sends takes the size. One that renders `frames`
+/// leaves the program's queries to the screen; any other answers them itself.
 #[derive(Debug, Clone, Copy)]
 pub struct Viewer {
     pub id: u64,
     pub follows: bool,
+    pub frames: bool,
+    pub theme: Option<TerminalTheme>,
 }
 
 struct Seat {
@@ -349,6 +341,20 @@ impl Viewers {
     fn wanted(&self) -> Option<Size> {
         self.0.first()?.fit
     }
+
+    fn set_theme(&mut self, id: u64, theme: TerminalTheme) {
+        if let Some(i) = self.find(id) {
+            self.0[i].viewer.theme = Some(theme);
+        }
+    }
+
+    fn screen_answers(&self) -> bool {
+        self.0.iter().all(|seat| seat.viewer.frames)
+    }
+
+    fn owner_theme(&self) -> Option<TerminalTheme> {
+        self.0.first()?.viewer.theme
+    }
 }
 
 /// Keeps the pty at the size its viewers settle on, marked in the output where it changes.
@@ -362,9 +368,16 @@ impl Sizing {
     fn update(&self, change: impl FnOnce(&mut Viewers)) {
         let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
         change(&mut viewers);
+        self.settle(&viewers);
+    }
+
+    fn settle(&self, viewers: &Viewers) {
         if let Some(size) = viewers.wanted() {
             self.set(size);
         }
+        self.ring
+            .screen
+            .follow(viewers.screen_answers(), viewers.owner_theme());
     }
 
     // Marked before the resize: output read after it may already answer the SIGWINCH.
@@ -387,14 +400,10 @@ impl Sizing {
 
     fn fit(&self, viewer: Option<u64>, size: Size) {
         let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
-        let seated = viewer.is_some_and(|id| viewers.fit(id, size));
-        // No viewer to weigh it against, as for an in-process caller: the fit stands.
-        let wanted = if seated {
-            viewers.wanted()
-        } else {
-            viewers.0.is_empty().then_some(size)
-        };
-        if let Some(size) = wanted {
+        if viewer.is_some_and(|id| viewers.fit(id, size)) {
+            self.settle(&viewers);
+        } else if viewers.0.is_empty() {
+            // No viewer to weigh it against, as for an in-process caller: the fit stands.
             self.set(size);
         }
     }
@@ -503,9 +512,11 @@ pub struct SpawnTerminal {
     pub workstream_id: String,
 }
 
+type PtyWriter = Arc<StdMutex<Box<dyn Write + Send>>>;
+
 pub struct PtySession {
     killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
-    writer: StdMutex<Box<dyn Write + Send>>,
+    writer: PtyWriter,
     sizing: Arc<Sizing>,
     #[cfg(unix)]
     pid: Option<u32>,
@@ -545,13 +556,27 @@ impl PtySession {
         let pid = child.process_id();
 
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
-        let writer = pair.master.take_writer().map_err(to_io)?;
-        let ring = Arc::new(OutputRing::new((cfg.rows, cfg.cols)));
+        let writer: PtyWriter = Arc::new(StdMutex::new(pair.master.take_writer().map_err(to_io)?));
+        let (replies, answered) = std::sync::mpsc::channel();
+        let size = (cfg.rows, cfg.cols);
+        let screen = Screen::new(size, screen::spawn_theme(&cfg.env), replies).map_err(to_io)?;
+        let ring = Arc::new(OutputRing::new(size, Arc::new(screen)));
         let master = Arc::new(StdMutex::new(Some(pair.master)));
+
+        let reply_writer = writer.clone();
+        // Its own thread: a child that doesn't read its input must not stop its output being read.
+        std::thread::spawn(move || {
+            for reply in answered {
+                let mut w = reply_writer.lock().unwrap_or_else(PoisonError::into_inner);
+                if w.write_all(&reply).and_then(|()| w.flush()).is_err() {
+                    break;
+                }
+            }
+        });
 
         let session = Arc::new(Self {
             killer: StdMutex::new(killer),
-            writer: StdMutex::new(writer),
+            writer,
             sizing: Arc::new(Sizing {
                 master: master.clone(),
                 ring: ring.clone(),
@@ -583,7 +608,18 @@ impl PtySession {
             let mut pending: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
             let mut last_flush: Option<Instant> = None;
             let mut streak = 0;
-            while let Ok(first) = chunk_rx.recv() {
+            loop {
+                let first = match chunk_rx.recv_timeout(IDLE_COMPRESS) {
+                    Ok(chunk) => chunk,
+                    Err(RecvTimeoutError::Timeout) => {
+                        ring.screen.compress();
+                        match chunk_rx.recv() {
+                            Ok(chunk) => chunk,
+                            Err(_) => break,
+                        }
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                };
                 pending.extend_from_slice(&first);
                 let mut disconnected = false;
                 let quick = last_flush.is_some_and(|at| at.elapsed() < FLUSH_INTERVAL);
@@ -662,10 +698,8 @@ impl PtySession {
         self.sizing.ring.clear_scrollback();
     }
 
-    /// Calls `tap` on the coalescer thread with every flush from the first byte, so it never lags
-    /// the ring; `false` when the earliest output was already gone.
-    pub fn tap_output(&self, tap: impl Fn(&[u8], (u16, u16)) + Send + Sync + 'static) -> bool {
-        self.sizing.ring.set_tap(Arc::new(tap))
+    pub fn screen(&self) -> Arc<Screen> {
+        self.sizing.ring.screen.clone()
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
@@ -689,6 +723,11 @@ impl PtySession {
     /// `viewer` typed or focused, so the pty takes its fit.
     pub fn claim(&self, viewer: u64) {
         self.sizing.update(|viewers| viewers.claim(viewer));
+    }
+
+    pub fn set_theme(&self, viewer: u64, theme: TerminalTheme) {
+        self.sizing
+            .update(|viewers| viewers.set_theme(viewer, theme));
     }
 
     pub fn kill(&self) {
@@ -736,6 +775,7 @@ fn torn_utf8_tail(bytes: &[u8]) -> usize {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use hyprlayer_models::Rgb;
 
     async fn first_output(rx: &mut RingReader) -> Vec<u8> {
         match rx.recv().await {
@@ -1023,6 +1063,162 @@ mod tests {
         assert!(replay.len() <= RING_CAP_BYTES, "ring exceeded its cap");
         let text = String::from_utf8(replay).expect("replay starts mid-codepoint");
         assert!(!text.contains('\u{fffd}'));
+    }
+
+    /// Sets mode 2031, prints each chunk it reads as `GOT <hex>`, and after a lone `q` asks `$QUERY`.
+    const ASKS: &str = r#"stty raw -echo min 0 time 3; printf '\033[?2031hREADY\r\n'; while :; do c=$(dd bs=256 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'); [ -z "$c" ] && continue; printf 'GOT %s\r\n' "$c"; [ "$c" = 71 ] && printf "$QUERY\r\n"; done"#;
+    const QUIET: Duration = Duration::from_millis(1200);
+
+    fn asking(query: &str, env: &[(&str, &str)]) -> Arc<PtySession> {
+        let mut vars = vec![("QUERY".to_string(), query.to_string())];
+        vars.extend(env.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), ASKS.into()],
+            cwd: std::env::temp_dir(),
+            cols: 120,
+            rows: 40,
+            env: vars,
+            workstream_id: "asks".into(),
+        })
+        .expect("spawn pty")
+    }
+
+    fn heard(s: &PtySession) -> Vec<String> {
+        String::from_utf8_lossy(&s.scrollback_bytes())
+            .split("\r\n")
+            .filter_map(|line| line.strip_prefix("GOT ").map(str::to_string))
+            .collect()
+    }
+
+    async fn settled(s: &PtySession, what: impl Fn(&PtySession) -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !what(s) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the pty never settled"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    async fn answers(s: &PtySession) -> String {
+        settled(s, |s| {
+            String::from_utf8_lossy(&s.scrollback_bytes()).contains("READY")
+        })
+        .await;
+        let before = heard(s).len();
+        s.write_input(b"q").unwrap();
+        settled(s, |s| heard(s).get(before).is_some_and(|got| got == "71")).await;
+        tokio::time::sleep(QUIET).await;
+        let hex: String = heard(s)[before + 1..].concat();
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+
+    fn theme(background: Rgb, dark: bool) -> TerminalTheme {
+        TerminalTheme {
+            foreground: Rgb(0x33, 0x33, 0x33),
+            background,
+            cursor: Rgb(0xd9, 0x77, 0x57),
+            ansi: [Rgb(0x10, 0x20, 0x30); 16],
+            dark,
+        }
+    }
+
+    fn viewer(id: u64, frames: bool, theme: Option<TerminalTheme>) -> Viewer {
+        Viewer {
+            id,
+            follows: true,
+            frames,
+            theme,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pty_nobody_watches_answers_its_queries_in_the_spawn_theme() {
+        let s = asking(r"\033[c\033[?996n\033]11;?\033\\", &[("COLORFGBG", "0;15")]);
+        assert_eq!(
+            answers(&s).await,
+            "\x1b[?62;22c\x1b[?997;2n\x1b]11;rgb:f7f7/f7f7/f7f7\x1b\\"
+        );
+        s.kill();
+    }
+
+    #[tokio::test]
+    async fn a_raw_viewer_answers_for_itself_and_a_frame_viewer_leaves_it_to_the_screen() {
+        let s = asking(r"\033[c", &[]);
+        let raw = s.subscribe().view(viewer(1, false, None));
+        assert_eq!(
+            answers(&s).await,
+            "",
+            "the screen answered over a raw viewer"
+        );
+        drop(raw);
+        assert_eq!(answers(&s).await, "\x1b[?62;22c");
+        let _frames = s.subscribe().view(viewer(2, true, None));
+        assert_eq!(answers(&s).await, "\x1b[?62;22c");
+        s.kill();
+    }
+
+    #[tokio::test]
+    async fn the_size_owner_s_theme_answers_and_a_flip_in_darkness_is_reported() {
+        let dark = theme(Rgb(0x10, 0x10, 0x10), true);
+        let light = theme(Rgb(0xfa, 0xfa, 0xfa), false);
+        let s = asking(r"\033]11;?\033\\\033]4;1;?\033\\", &[]);
+        let _a = s.subscribe().view(viewer(1, true, Some(dark)));
+        let _b = s.subscribe().view(viewer(2, true, Some(light)));
+        assert_eq!(
+            answers(&s).await,
+            "\x1b]11;rgb:1010/1010/1010\x1b\\\x1b]4;1;rgb:1010/2020/3030\x1b\\"
+        );
+
+        let before = heard(&s).len();
+        s.claim(2);
+        settled(&s, |s| {
+            heard(s)[before..].concat().contains("1b5b3f3939373b326e")
+        })
+        .await;
+        assert!(answers(&s)
+            .await
+            .starts_with("\x1b]11;rgb:fafa/fafa/fafa\x1b\\"));
+
+        let before = heard(&s).len();
+        s.set_theme(2, dark);
+        settled(&s, |s| {
+            heard(s)[before..].concat().contains("1b5b3f3939373b316e")
+        })
+        .await;
+        s.kill();
+    }
+
+    #[tokio::test]
+    async fn the_screen_takes_a_resize_before_any_output_follows_it() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/sh"),
+            args: vec!["-c".into(), "printf READY; sleep 30".into()],
+            cwd: std::env::temp_dir(),
+            cols: 120,
+            rows: 40,
+            env: vec![],
+            workstream_id: "quiet".into(),
+        })
+        .expect("spawn pty");
+        let screen = s.screen();
+        settled(&s, |_| {
+            screen
+                .rows()
+                .is_some_and(|rows| rows.first().is_some_and(|r| r == "READY"))
+        })
+        .await;
+        assert_eq!(screen.rows().map(|rows| rows.len()), Some(40));
+        s.fit(None, 80, 24);
+        let rows = screen.rows().expect("the screen reads");
+        assert_eq!((rows.len(), rows[0].as_str()), (24, "READY"));
+        s.kill();
     }
 
     #[test]

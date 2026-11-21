@@ -222,6 +222,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::spawn_shell_terminal,
             commands::terminal::default_shell_name,
             commands::terminal::set_terminal_color_scheme,
+            commands::terminal::set_terminal_theme,
             commands::scripts::get_scripts,
             commands::scripts::set_scripts,
             commands::scripts::script_run,
@@ -368,6 +369,14 @@ pub(crate) async fn attach_client(
             "could not send the environment overlay to the server: {}",
             e.message
         );
+    }
+    if let Some(theme) = colors.theme() {
+        if let Err(e) = commands::terminal::send_theme(&client, theme).await {
+            log::warn!(
+                "could not send the terminal theme to the server: {}",
+                e.message
+            );
+        }
     }
     let identity = handle.state::<ClientIdentity>();
     let supported = match client

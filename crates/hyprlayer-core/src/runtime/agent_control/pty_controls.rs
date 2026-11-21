@@ -16,7 +16,7 @@ use super::codex_remote::CodexRemote;
 use super::pty_agents::{asking, PtyAgents};
 use crate::error::{CoreError, Result};
 use crate::runtime::HyprlayerRuntime;
-use crate::terminal::screen::ScreenMirror;
+use crate::terminal::screen::Screen;
 use crate::terminal::PtySession;
 
 const TYPE_GAP: Duration = Duration::from_millis(20);
@@ -274,7 +274,7 @@ impl PtyControlService<'_> {
 struct Drive {
     agents: Arc<PtyAgents>,
     pty: Arc<PtySession>,
-    screen: Arc<ScreenMirror>,
+    screen: Arc<Screen>,
     terminal_id: String,
     _input: OwnedMutexGuard<()>,
 }
@@ -731,7 +731,7 @@ pub(super) fn composing(rows: &[String]) -> bool {
 }
 
 /// Why a paste into claude's input box would land wrong; `None` when it would land as a message.
-pub(super) fn paste_refusal(screen: &ScreenMirror) -> Option<&'static str> {
+pub(super) fn paste_refusal(screen: &Screen) -> Option<&'static str> {
     let Some((rows, bright)) = screen.rows_and_bright() else {
         return Some("the agent's screen can't be read");
     };
@@ -886,6 +886,7 @@ fn failed(detail: impl Into<String>) -> CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::screen::spawn_theme;
 
     /// Logged-out captures from `capture.py`, so their rows are the API-billing layout.
     const CAPTURES: [&str; 4] = [
@@ -895,7 +896,7 @@ mod tests {
         "2.1.330-68x30",
     ];
 
-    /// A capture's screen as `ScreenMirror::rows` reads it, at the size it was recorded.
+    /// A capture's screen as `Screen::rows` reads it, at the size it was recorded.
     fn screen(name: &str) -> Vec<String> {
         let path = format!(
             "{}/tests/fixtures/claude_tui/{name}.bin",
@@ -906,10 +907,15 @@ mod tests {
             .rsplit_once('-')
             .and_then(|(_, size)| size.split_once('x'))
             .expect("a <cols>x<rows> suffix");
-        let mut parser = vt100::Parser::new(rows.parse().unwrap(), cols.parse().unwrap(), 0);
-        parser.process(&bytes);
-        let screen = parser.screen();
-        screen.rows(0, screen.size().1).collect()
+        let (replies, _) = std::sync::mpsc::channel();
+        let screen = Screen::new(
+            (rows.parse().unwrap(), cols.parse().unwrap()),
+            spawn_theme(&[]),
+            replies,
+        )
+        .expect("a screen");
+        screen.feed(&bytes);
+        screen.rows().expect("the screen reads")
     }
 
     fn report(failures: Vec<String>) {

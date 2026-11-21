@@ -54,6 +54,11 @@ struct Inbox {
 
 /// Covers an SSH connect, a remote relay starting `serve`, and its first open.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+/// What this client announces: it renders raw output until it renders the server's frames.
+const ANNOUNCED: Features = Features {
+    screen_frames: false,
+    ..Features::ALL
+};
 /// A call still unanswered this long is logged, then left to finish: some
 /// (a workstream's Setup script, a first agent turn) legitimately take minutes.
 const STILL_PENDING: Duration = Duration::from_secs(30);
@@ -115,6 +120,7 @@ pub struct RpcClient {
     server_version: u32,
     server_build: Option<String>,
     server_semver: Option<String>,
+    server_features: Features,
 }
 
 impl RpcClient {
@@ -133,7 +139,7 @@ impl RpcClient {
                 protocol_version: PROTOCOL_VERSION,
                 build: None,
                 version: None,
-                features: Features::ALL.names(),
+                features: ANNOUNCED.names(),
                 stream_window: None,
             })
             .await?;
@@ -231,6 +237,7 @@ impl RpcClient {
             server_version,
             server_build,
             server_semver,
+            server_features,
         }))
     }
 
@@ -249,6 +256,10 @@ impl RpcClient {
     /// The server's release version; `None` from servers up to 0.8.2.
     pub fn server_semver(&self) -> Option<&str> {
         self.server_semver.as_deref()
+    }
+
+    pub fn server_features(&self) -> Features {
+        self.server_features
     }
 
     /// The server's runtime events, handed out once; the stream ends when the

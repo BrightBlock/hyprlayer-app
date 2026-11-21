@@ -96,7 +96,7 @@ use hyprlayer_core::{
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClientRef, PtyAgent,
     PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, WaitOutcome, WaitUntil,
+    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -228,6 +228,8 @@ impl Server {
             Some(id) => live.view(Viewer {
                 id,
                 follows: self.clients.terminal_size(id),
+                frames: self.clients.screen_frames(id),
+                theme: self.clients.terminal_theme(id),
             }),
             None => live,
         }
@@ -2134,6 +2136,13 @@ impl Dispatch for Server {
             })
             .await
             .wire()
+    }
+
+    async fn terminal_theme(&self, theme: TerminalTheme) -> Result<(), WireError> {
+        let viewer = connection("terminal_theme")?;
+        self.clients.set_terminal_theme(viewer, theme);
+        self.runtime.terminals().set_theme(viewer, theme).await;
+        Ok(())
     }
 
     async fn terminal_close(&self, terminal_id: String) -> Result<(), WireError> {

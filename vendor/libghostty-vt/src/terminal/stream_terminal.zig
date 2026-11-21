@@ -489,14 +489,16 @@ pub const Handler = struct {
             .device_attributes => self.reportDeviceAttributes(value),
             .device_status => self.deviceStatus(value.request),
             .enquiry => self.reportEnquiry(),
-            .kitty_keyboard_query => self.queryKittyKeyboard(),
+            // Hyprlayer: a desktop's xterm.js encodes keys and has no kitty keyboard to claim.
+            .kitty_keyboard_query => {},
             .request_mode => self.requestMode(value.mode),
             .request_mode_unknown => self.requestModeUnknown(value.mode, value.ansi),
             .size_report => self.reportSize(value),
             .window_title => try self.windowTitle(value.title),
             .report_pwd => try self.reportPwd(value.url),
             .progress_report => self.progressReport(value),
-            .xtversion => self.reportXtversion(),
+            // Hyprlayer: unanswered, as xterm.js leaves it.
+            .xtversion => {},
             .clipboard_contents => self.clipboardContents(
                 value.kind,
                 value.data,
@@ -4720,15 +4722,13 @@ test "kitty_keyboard_query" {
     var s: Stream = .init(.{ .allocator = testing.allocator, .handler = handler });
     defer s.deinit();
 
-    // Default kitty keyboard flags should be 0
+    // Hyprlayer: unanswered, before and after a push.
     s.nextSlice("\x1b[?u");
-    try testing.expectEqualStrings("\x1b[?0u", S.written.?);
+    try testing.expect(S.written == null);
 
-    // Push kitty keyboard mode with flags and query again
-    S.written = null;
     s.nextSlice("\x1b[>1u"); // push with disambiguate flag
     s.nextSlice("\x1b[?u");
-    try testing.expectEqualStrings("\x1b[?1u", S.written.?);
+    try testing.expect(S.written == null);
 }
 
 test "xtversion default" {
@@ -4752,9 +4752,9 @@ test "xtversion default" {
     var s: Stream = .init(.{ .allocator = testing.allocator, .handler = handler });
     defer s.deinit();
 
-    // Without xtversion effect set, should report "libghostty"
+    // Hyprlayer: unanswered, with or without an effect.
     s.nextSlice("\x1b[>0q");
-    try testing.expectEqualStrings("\x1bP>|libghostty\x1b\\", S.written.?);
+    try testing.expect(S.written == null);
 }
 
 test "xtversion with effect" {
@@ -4782,8 +4782,9 @@ test "xtversion with effect" {
     var s: Stream = .init(.{ .allocator = testing.allocator, .handler = handler });
     defer s.deinit();
 
+    // Hyprlayer: unanswered, with or without an effect.
     s.nextSlice("\x1b[>0q");
-    try testing.expectEqualStrings("\x1bP>|ghostty 1.2.3\x1b\\", S.written.?);
+    try testing.expect(S.written == null);
 }
 
 test "xtversion with empty string effect" {
@@ -4811,9 +4812,9 @@ test "xtversion with empty string effect" {
     var s: Stream = .init(.{ .allocator = testing.allocator, .handler = handler });
     defer s.deinit();
 
-    // Empty string from effect should fall back to "libghostty"
+    // Hyprlayer: unanswered, with or without an effect.
     s.nextSlice("\x1b[>0q");
-    try testing.expectEqualStrings("\x1bP>|libghostty\x1b\\", S.written.?);
+    try testing.expect(S.written == null);
 }
 
 test "size report csi_14_t with effect" {

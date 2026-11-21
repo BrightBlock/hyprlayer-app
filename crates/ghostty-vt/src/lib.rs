@@ -1,6 +1,7 @@
 // Modified by Hyprlayer from herdr e8d7d970: removed the experimental Kitty PNG
 // and file-source forwarding (vendored patch 0007) and the Kitty graphics tests,
-// and the PNG decoder uses `as_chunks` for clippy 1.99.
+// and the PNG decoder uses `as_chunks` for clippy 1.99. Added `set_default_colors`,
+// `for_each_viewport_row_cell` and a test for vendored patch 0009.
 #![allow(dead_code)]
 
 #[allow(
@@ -1016,6 +1017,44 @@ impl Terminal {
         }
     }
 
+    pub fn set_default_colors(
+        &mut self,
+        foreground: RgbColor,
+        background: RgbColor,
+        cursor: RgbColor,
+    ) -> Result<(), Error> {
+        for (option, color) in [
+            (
+                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND,
+                foreground,
+            ),
+            (
+                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND,
+                background,
+            ),
+            (
+                ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_CURSOR,
+                cursor,
+            ),
+        ] {
+            let color = ffi::GhosttyColorRgb {
+                r: color.r,
+                g: color.g,
+                b: color.b,
+            };
+            // SAFETY: self.raw is a live terminal handle and the option takes a GhosttyColorRgb.
+            unsafe {
+                ffi::ghostty_terminal_set(
+                    self.raw,
+                    option,
+                    (&color as *const ffi::GhosttyColorRgb).cast(),
+                )
+                .into_result()?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn default_palette(&self) -> Result<[RgbColor; 256], Error> {
         let mut out = [ffi::GhosttyColorRgb::default(); 256];
         // SAFETY: self.raw is a live terminal handle, and out is exactly the
@@ -1280,6 +1319,31 @@ impl Terminal {
             let wide = grid_ref_wide(&grid_ref)?;
             grid_ref_graphemes_into(&grid_ref, &mut graphemes)?;
             visit(wide, &graphemes);
+        }
+        Ok(())
+    }
+
+    pub fn for_each_viewport_row_cell(
+        &self,
+        row: u32,
+        mut visit: impl FnMut(CellWide, &[u32], bool),
+    ) -> Result<(), Error> {
+        let cols = self.cols()?;
+        let mut grid_ref = self.grid_ref(ghostty_viewport_point(0, row))?;
+        let mut graphemes = Vec::new();
+        for x in 0..cols {
+            grid_ref.x = x;
+            let wide = grid_ref_wide(&grid_ref)?;
+            grid_ref_graphemes_into(&grid_ref, &mut graphemes)?;
+            let mut style = ffi::GhosttyStyle {
+                size: mem::size_of::<ffi::GhosttyStyle>(),
+                ..Default::default()
+            };
+            // SAFETY: grid_ref came from this terminal and nothing has written to it since.
+            unsafe {
+                ffi::ghostty_grid_ref_style(&grid_ref, &mut style).into_result()?;
+            }
+            visit(wide, &graphemes, style.faint);
         }
         Ok(())
     }
@@ -3846,6 +3910,25 @@ mod tests {
         assert!(!output.is_empty());
         assert!(String::from_utf8_lossy(&output).contains("R"));
         assert_eq!(terminal.take_pwd_changes(), [b"file:///tmp/herdr".to_vec()]);
+    }
+
+    #[test]
+    fn kitty_keyboard_and_xtversion_queries_go_unanswered() {
+        let mut terminal = Terminal::new(80, 24, 0).unwrap();
+        let responses = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let sink = responses.clone();
+        terminal
+            .set_write_pty_callback(move |bytes| sink.lock().unwrap().extend_from_slice(bytes))
+            .unwrap();
+
+        terminal.write(b"\x1b[?u\x1b[>1u\x1b[?u\x1b[<u\x1b[>q\x1b[>0q");
+        assert_eq!(String::from_utf8_lossy(&responses.lock().unwrap()), "");
+
+        terminal.write(b"\x1b[c");
+        assert_eq!(
+            String::from_utf8_lossy(&responses.lock().unwrap()),
+            "\x1b[?62;22c"
+        );
     }
 
     #[test]

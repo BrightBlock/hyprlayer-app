@@ -16,7 +16,7 @@ use super::pty_controls::{footer_mode, ready};
 use super::rollout::RolloutTail;
 use super::TokenGuard;
 use crate::runtime::terminal_registry::TerminalRegistry;
-use crate::terminal::screen::ScreenMirror;
+use crate::terminal::screen::Screen;
 use crate::terminal::{PtySession, RingReader};
 
 pub(crate) const CLAUDE_ENGINE: &str = "claude-code";
@@ -66,7 +66,7 @@ struct Entry {
     /// Shared with the blocking reader, which holds it for the whole read so reads stay in order.
     rollout: Arc<Mutex<RolloutTail>>,
     /// Hooked claude only: what the change driver reads.
-    screen: Option<Arc<ScreenMirror>>,
+    screen: Option<Arc<Screen>>,
     /// Held by an agent's message or a change from the bar, so their keystrokes never interleave.
     input: Arc<tokio::sync::Mutex<()>>,
     /// Until when a footer follower reads the screen; each report extends it rather than spawning another.
@@ -108,7 +108,7 @@ pub(crate) struct PtySnapshot {
     pub signals: u64,
     pub prompt_owed: bool,
     pub session: Arc<PtySession>,
-    pub screen: Option<Arc<ScreenMirror>>,
+    pub screen: Option<Arc<Screen>>,
     pub input: Arc<tokio::sync::Mutex<()>>,
     pub remote: Option<Arc<CodexRemote>>,
 }
@@ -193,9 +193,7 @@ impl PtyAgents {
             token,
             remote,
         } = launch;
-        // From launch: claude repaints only changed cells, so a mirror started late reads stale text.
-        let screen = (agent.hooked && agent.engine_id == CLAUDE_ENGINE)
-            .then(|| ScreenMirror::follow(&session));
+        let screen = (agent.hooked && agent.engine_id == CLAUDE_ENGINE).then(|| session.screen());
         agent.status.controllable = screen.is_some() || remote.is_some();
         let terminal_id = agent.terminal_id.clone();
         let mut reader = session.subscribe();

@@ -2082,7 +2082,6 @@ dependencies = [
  "toml_edit 0.22.27",
  "tracing",
  "uuid",
- "vt100",
  "walkdir",
  "which",
  "windows-sys 0.60.2",

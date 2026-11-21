@@ -1,5 +1,7 @@
 import type { ITheme } from "@xterm/xterm";
 
+import type { Rgb, TerminalTheme } from "@/lib/bindings";
+
 const cssVar = (name: string, fallback: string): string => {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || fallback;
@@ -8,11 +10,11 @@ const cssVar = (name: string, fallback: string): string => {
 const ansiVar = (ansi: string, semantic: string | null, fallback: string): string =>
   cssVar(ansi, "") || (semantic ? cssVar(semantic, fallback) : fallback);
 
-function parseRgb(color: string): [number, number, number] | null {
+function parseRgb(color: string): Rgb | null {
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(color.trim())?.[1];
   if (hex) {
     const full = hex.length === 3 ? [...hex].map((c) => c + c).join("") : hex;
-    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as [number, number, number];
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)) as Rgb;
   }
   const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(color.trim());
   return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null;
@@ -24,6 +26,46 @@ export function isDarkBackground(color: string | undefined): boolean {
   if (!rgb) return true;
   const [r, g, b] = rgb;
   return 0.2126 * r + 0.7152 * g + 0.0722 * b <= 127.5;
+}
+
+const ANSI = [
+  "black",
+  "red",
+  "green",
+  "yellow",
+  "blue",
+  "magenta",
+  "cyan",
+  "white",
+  "brightBlack",
+  "brightRed",
+  "brightGreen",
+  "brightYellow",
+  "brightBlue",
+  "brightMagenta",
+  "brightCyan",
+  "brightWhite",
+] as const;
+
+export function terminalColors(theme: ITheme): TerminalTheme {
+  const dark = isDarkBackground(theme.background);
+  const [ink, paper]: Rgb[] = dark
+    ? [
+        [255, 255, 255],
+        [0, 0, 0],
+      ]
+    : [
+        [0, 0, 0],
+        [255, 255, 255],
+      ];
+  const rgb = (color: string | undefined, fallback: Rgb): Rgb => parseRgb(color ?? "") ?? fallback;
+  return {
+    foreground: rgb(theme.foreground, ink),
+    background: rgb(theme.background, paper),
+    cursor: rgb(theme.cursor, ink),
+    ansi: ANSI.map((slot) => rgb(theme[slot], ink)) as TerminalTheme["ansi"],
+    dark,
+  };
 }
 
 export function xtermThemeFromCss(): ITheme {

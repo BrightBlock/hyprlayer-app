@@ -4223,11 +4223,9 @@ test "set xtversion callback" {
     try testing.expectEqual(Result.success, set(t, .write_pty, @ptrCast(&S.writePty)));
     try testing.expectEqual(Result.success, set(t, .xtversion, @ptrCast(&S.xtversion)));
 
-    // XTVERSION: CSI > q
+    // Hyprlayer: XTVERSION (CSI > q) is unanswered, callback or not.
     vt_write(t, "\x1B[>q", 4);
-    try testing.expect(S.last_data != null);
-    // Response should be DCS >| version ST
-    try testing.expectEqualStrings("\x1BP>|myterm 1.0\x1B\\", S.last_data.?);
+    try testing.expect(S.last_data == null);
 }
 
 test "xtversion without callback reports default" {
@@ -4255,12 +4253,11 @@ test "xtversion without callback reports default" {
     };
     defer S.deinit();
 
-    // Set write_pty but not xtversion — should get default "libghostty"
     try testing.expectEqual(Result.success, set(t, .write_pty, @ptrCast(&S.writePty)));
 
+    // Hyprlayer: unanswered.
     vt_write(t, "\x1B[>q", 4);
-    try testing.expect(S.last_data != null);
-    try testing.expectEqualStrings("\x1BP>|libghostty\x1B\\", S.last_data.?);
+    try testing.expect(S.last_data == null);
 }
 
 test "set terminfo_name option" {

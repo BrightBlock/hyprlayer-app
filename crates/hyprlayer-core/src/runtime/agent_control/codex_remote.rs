@@ -29,7 +29,6 @@ mod unix {
     use crate::error::{CoreError, Result};
     use crate::process::orphan;
     use crate::runtime::terminals::{agent_command_line, default_shell, login_shell_args};
-    use crate::terminal::screen::ScreenMirror;
     use crate::terminal::PtySession;
 
     /// `sun_path` holds 104 bytes on macOS, its NUL included.
@@ -648,11 +647,8 @@ mod unix {
     /// Esc on a resumed TUI's "Hooks need review": Enter or a digit there trusts the hooks in
     /// `config.toml`, so only Esc is sent, and only while the dialog is on screen. Holds the
     /// terminal's input lock so an agent's first prompt waits behind it.
-    pub(crate) async fn skip_hook_review(
-        pty: Arc<PtySession>,
-        screen: Arc<ScreenMirror>,
-        _input: OwnedMutexGuard<()>,
-    ) {
+    pub(crate) async fn skip_hook_review(pty: Arc<PtySession>, _input: OwnedMutexGuard<()>) {
+        let screen = pty.screen();
         let started = Instant::now();
         let mut deadline = started + REVIEW_WAIT;
         // Two equal reads, or a second of it: an Esc during the dialog's first paint can be lost.

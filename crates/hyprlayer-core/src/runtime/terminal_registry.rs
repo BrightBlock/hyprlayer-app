@@ -38,6 +38,10 @@ impl TerminalRegistry {
         self.live.lock().await.get(id).cloned()
     }
 
+    pub async fn all(&self) -> Vec<Arc<PtySession>> {
+        self.live.lock().await.values().cloned().collect()
+    }
+
     pub async fn remove(&self, id: &str) -> Option<Arc<PtySession>> {
         self.live.lock().await.remove(id)
     }

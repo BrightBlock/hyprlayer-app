@@ -10,15 +10,23 @@ import { IS_MACOS } from "@/lib/platform";
 import { useThemeStore } from "@/lib/theme";
 import type { TerminalEngine, TerminalGrid } from "./terminalEngine";
 import { useTerminalFontSize } from "./terminalFontSize";
-import { isDarkBackground, xtermThemeFromCss } from "./terminalTheme";
+import { isDarkBackground, terminalColors, xtermThemeFromCss } from "./terminalTheme";
 
 let sentDark: boolean | undefined;
+let sentColors: string | undefined;
 
 function sendColorScheme(): void {
-  const dark = isDarkBackground(xtermThemeFromCss().background);
-  if (dark === sentDark) return;
-  sentDark = dark;
-  void commands.setTerminalColorScheme(dark).catch(() => {});
+  const theme = xtermThemeFromCss();
+  const dark = isDarkBackground(theme.background);
+  if (dark !== sentDark) {
+    sentDark = dark;
+    void commands.setTerminalColorScheme(dark).catch(() => {});
+  }
+  const colors = terminalColors(theme);
+  const key = JSON.stringify(colors);
+  if (key === sentColors) return;
+  sentColors = key;
+  void commands.setTerminalTheme(colors).catch(() => {});
 }
 
 /** `COLORFGBG` for every pty spawned from here on, following the theme. Call after `initTheme`. */
