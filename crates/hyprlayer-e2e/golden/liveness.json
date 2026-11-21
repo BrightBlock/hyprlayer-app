@@ -1,0 +1,77 @@
+{
+  "scenario": "liveness",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "within_s": 40
+          },
+          "guard": "the call pending on it fails as a disconnect",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "within_s": 40
+          },
+          "guard": "its runtime events end, so the desktop reconnects",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "within_s": 40
+          },
+          "guard": "the server stops listing it as a viewer",
+          "ok": true
+        }
+      ],
+      "step": "a link that goes silent both ways is noticed on both ends"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "a call on it still answers, on the same connection",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "the server still lists it as a viewer",
+          "ok": true
+        }
+      ],
+      "step": "an idle link outlives the deadline"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gap_under_s": 5
+          },
+          "guard": "its terminal keeps printing to it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "within_s": 10
+          },
+          "guard": "a call on it still answers, on the same connection",
+          "ok": true
+        }
+      ],
+      "step": "a slow, busy link outlives the deadline"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answered": 2
+          },
+          "guard": "it stays connected through the silence, and still a viewer",
+          "ok": true
+        }
+      ],
+      "step": "a client from before the heartbeat keeps today's behaviour"
+    }
+  ]
+}

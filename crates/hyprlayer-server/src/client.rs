@@ -23,7 +23,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::logging::RepeatGate;
-use crate::outbound::{self, Outbound, ReadReports};
+use crate::outbound::{self, Heartbeat, Outbound, ReadReports};
 use crate::rpc::{Request, Response};
 use crate::socket;
 use crate::streams::{StreamRequest, StreamResponse};
@@ -199,6 +199,9 @@ impl RpcClient {
         let reports = server_features
             .link_credit
             .then(|| ReadReports::new(outbound.clone(), reader.consumed()));
+        let heartbeat = server_features
+            .heartbeat
+            .then(|| Heartbeat::new(outbound.clone()));
         let holder = Arc::new(Holder(outbound.clone()));
         tokio::spawn(read_loop(
             reader,
@@ -213,6 +216,7 @@ impl RpcClient {
                 holder: Arc::downgrade(&holder),
                 credit_batch,
                 reports,
+                heartbeat,
             },
             writer_task.abort_handle(),
         ));
@@ -450,6 +454,8 @@ struct Loop {
     credit_batch: Option<u64>,
     /// Set when the server keeps a link window.
     reports: Option<ReadReports>,
+    /// Set when the server answers pings.
+    heartbeat: Option<Heartbeat>,
 }
 
 impl Loop {
@@ -542,7 +548,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
     let stream_senders = routes.stream_senders.clone();
     let mut skipped = HashSet::new();
     let reason = loop {
-        match outbound::next_frame(&mut reader, &mut routes.reports).await {
+        match outbound::next_frame(&mut reader, &mut routes.reports, &mut routes.heartbeat).await {
             Ok(Some(Frame::Control(line))) => match parse_control(&line) {
                 Ok(Control::Response { id, outcome }) => {
                     let waiter = pending

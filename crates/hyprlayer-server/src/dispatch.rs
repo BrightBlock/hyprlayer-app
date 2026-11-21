@@ -124,6 +124,10 @@ impl Server {
         }
     }
 
+    pub(crate) fn clients(&self) -> &Clients {
+        &self.clients
+    }
+
     pub(crate) fn runtime(&self) -> Arc<HyprlayerRuntime> {
         self.runtime.clone()
     }
@@ -2983,6 +2987,7 @@ mod tests {
             },
             tx,
             registry.clone(),
+            None,
         );
 
         // Past the writer's 32 KiB share and the 513 slots behind it.

@@ -1,6 +1,8 @@
 //! A phone-like client on one connection: a reader that stalls, then crawls at
 //! 256 KiB/s. Memory stays bounded on both ends, small calls overtake bulk
-//! data and large responses, and missed runtime events are reported, not lost.
+//! data and large responses, missed runtime events are reported, not lost, an
+//! event flood leaves bulk and stream data their share, and a device that
+//! streams a session hears only the revisions its stream can't carry.
 #![cfg(unix)]
 
 use std::path::Path;
@@ -16,7 +18,7 @@ use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, RuntimeEvent, Sandbox, Server, Value};
 use hyprlayer_proto::frame::{Decoder, Frame};
 use hyprlayer_server::client::{GapPacer, RpcClient};
-use hyprlayer_server::events::TARGETED_EVENTS;
+use hyprlayer_server::events::{REVISIONS_IN_STREAM, TARGETED_EVENTS};
 use hyprlayer_server::rpc::WatchedSession;
 use hyprlayer_server::streams::{
     SessionEvents, SessionFrame, StreamRequest, StreamResponse, StreamStartOpts,
@@ -43,6 +45,18 @@ const SLOW_BPS: u64 = 32 * KIB;
 const FLOOD_FOR: Duration = Duration::from_secs(12);
 /// The client's `GAP_INTERVAL`, less scheduling slack.
 const REREAD_SPACING: Duration = Duration::from_millis(4500);
+/// Fast enough to overrun a stalled or 32 KiB/s reader's queue, slow enough for the desktop to keep up.
+const TOGGLE_EVERY: Duration = Duration::from_millis(2);
+/// A 96 KiB attachment is ~128 KiB on the wire: ~4 s alone at `SLOW_BPS`.
+const SHARED_READ_BYTES: usize = 96 * 1024;
+/// With half the link, a read takes about twice as long as alone.
+const SHARE_RATIO_LIMIT: f64 = 3.0;
+const TICK_GAP_LIMIT: Duration = Duration::from_secs(2);
+const TICKER: &str = "while :; do echo tick; sleep 0.1; done";
+/// Ends a flood whose read never finishes, so a starved read still reports how long it took.
+const SHARE_FLOOD_CAP: Duration = Duration::from_secs(30);
+/// A device that streams the session may still hear its turn end and released sends.
+const STREAMED_REVISIONS_LIMIT: u64 = 2;
 
 /// Replays `<sandbox>/turn.jsonl` for every user line it is handed.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
@@ -78,6 +92,9 @@ struct Tap {
     decoder: Decoder,
     /// `sessionRevised` events per session id.
     revised: std::collections::HashMap<String, u64>,
+    /// The last revision each session's `sessionRevised` named.
+    last_rev: std::collections::HashMap<String, u64>,
+    viewers: u64,
     events: u64,
     reported_missed: u64,
     markers: u64,
@@ -96,6 +113,12 @@ impl Tap {
                 .and_then(Value::as_str)
             {
                 *self.revised.entry(session.to_string()).or_default() += 1;
+                let rev = event.pointer("/sessionRevised/rev").and_then(Value::as_u64);
+                self.last_rev
+                    .insert(session.to_string(), rev.unwrap_or_default());
+            }
+            if event.get("sessionViewers").is_some() {
+                self.viewers += 1;
             }
         }
         if let Some(count) = value
@@ -118,6 +141,12 @@ impl Link {
             .copied()
             .unwrap_or(0)
     }
+    fn last_rev(&self, session: &str) -> Option<u64> {
+        self.tap.lock().unwrap().last_rev.get(session).copied()
+    }
+    fn viewers(&self) -> u64 {
+        self.tap.lock().unwrap().viewers
+    }
     fn reported_missed(&self) -> u64 {
         self.tap.lock().unwrap().reported_missed
     }
@@ -133,7 +162,7 @@ async fn reread(client: &RpcClient, session: &str) {
     let _ = client.get_app_settings().await;
 }
 
-async fn phone(socket: &Path) -> (Arc<RpcClient>, Arc<Link>) {
+async fn connect_phone(socket: &Path) -> (Arc<RpcClient>, Arc<Link>) {
     let unix = tokio::net::UnixStream::connect(socket)
         .await
         .expect("connect to the sandbox socket");
@@ -239,14 +268,39 @@ fn write_turn(sandbox: &Sandbox) {
 }
 
 async fn announce(client: &RpcClient, id: &str) {
+    announce_with(client, id, &[]).await;
+}
+
+async fn announce_with(client: &RpcClient, id: &str, more: &[&str]) {
+    let mut capabilities: Vec<String> = TARGETED_EVENTS.map(str::to_string).to_vec();
+    capabilities.extend(more.iter().map(|c| c.to_string()));
     client
-        .announce_client(
-            id.into(),
-            format!("device-{id}"),
-            TARGETED_EVENTS.map(str::to_string).to_vec(),
-        )
+        .announce_client(id.into(), format!("device-{id}"), capabilities)
         .await
         .expect("announce_client");
+}
+
+/// Another device opening and closing the session: a `SessionViewers` each time, which never collapses.
+async fn toggle_viewers(client: Arc<RpcClient>, session: String, until: Instant) -> u64 {
+    let mut sent = 0;
+    for n in 0.. {
+        if Instant::now() >= until {
+            break;
+        }
+        let sessions = if n % 2 == 0 {
+            vec![WatchedSession {
+                session_id: session.clone(),
+                rev: 0,
+            }]
+        } else {
+            Vec::new()
+        };
+        if client.watch_sessions(sessions).await.is_ok() {
+            sent += 1;
+        }
+        tokio::time::sleep(TOGGLE_EVERY).await;
+    }
+    sent
 }
 
 async fn watch(client: &RpcClient, session: &str) {
@@ -338,20 +392,30 @@ async fn connection_backpressure() {
     announce(&desktop, "desktop").await;
     watch(&desktop, &session).await;
     let desktop_revised = Arc::new(AtomicU64::new(0));
+    let desktop_rev = Arc::new(AtomicU64::new(0));
     {
         let mut events = desktop.take_events().expect("the desktop's runtime events");
-        let (counter, session) = (desktop_revised.clone(), session.clone());
+        let (counter, latest, session) = (
+            desktop_revised.clone(),
+            desktop_rev.clone(),
+            session.clone(),
+        );
         tokio::spawn(async move {
             while let Some(event) = events.recv().await {
-                if matches!(&event, RuntimeEvent::SessionRevised { session_id, .. } if *session_id == session)
+                if let RuntimeEvent::SessionRevised {
+                    session_id, rev, ..
+                } = &event
                 {
-                    counter.fetch_add(1, Relaxed);
+                    if *session_id == session {
+                        counter.fetch_add(1, Relaxed);
+                        latest.fetch_max(*rev, Relaxed);
+                    }
                 }
             }
         });
     }
 
-    let (phone, link) = phone(server.socket()).await;
+    let (phone, link) = connect_phone(server.socket()).await;
     {
         let mut events = phone.take_events().expect("the phone's runtime events");
         tokio::spawn(async move { while events.recv().await.is_some() {} });
@@ -381,6 +445,8 @@ async fn connection_backpressure() {
     );
     link.stalled.store(true, Relaxed);
     let before = rss_bytes(pid);
+    let (revised_at_stall, missed_at_stall) = (link.revised(&session), link.reported_missed());
+    let sent_at_stall = desktop_revised.load(Relaxed);
     let turns_during_stall = {
         let (desktop, session, sent) = (desktop.clone(), session.clone(), desktop_revised.clone());
         let at_stall = sent.load(Relaxed);
@@ -430,24 +496,25 @@ async fn connection_backpressure() {
         json!({ "limit_ms": SMALL_CALL_LIMIT.as_millis() as u64 }),
     );
 
-    j.step("events sent during the stall are delivered or reported missed");
+    j.step("revisions sent during the stall collapse into the latest");
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let sent = desktop_revised.load(Relaxed);
-    let delivered = link.revised(&session);
-    let missed = link.reported_missed();
+    let sent = desktop_revised.load(Relaxed) - sent_at_stall;
+    let delivered = link.revised(&session) - revised_at_stall;
+    let missed = link.reported_missed() - missed_at_stall;
+    let latest = desktop_rev.load(Relaxed);
+    let last = link.last_rev(&session);
     j.note(
-        "events_during_stall",
-        json!({ "sent": sent, "delivered": delivered, "reported_missed": missed }),
+        "revisions_during_stall",
+        json!({ "sent": sent, "delivered": delivered, "reported_missed": missed, "latest": latest, "phone_last": last }),
     );
     j.guard(
-        "no event is lost silently",
-        sent > 0 && delivered + missed >= sent,
-        json!({ "sent_some": sent > 0 }),
+        "the stall held back more revisions than its queue holds",
+        sent >= STALL_EVENTS,
+        json!({ "at_least": STALL_EVENTS }),
     );
-    let surfaced = *phone.events_missed().borrow();
     j.guard(
-        "the client hears the gap, so it can re-read what the events would have changed",
-        missed > 0 && surfaced >= missed,
+        "the phone ends on the session's latest revision, with no gap to re-read",
+        last == Some(latest) && missed == 0,
         json!({}),
     );
     let _ = desktop.terminal_close(terminal).await;
@@ -494,6 +561,15 @@ async fn connection_backpressure() {
     j.step("a flood of events on a slow link re-reads at a bounded rate");
     link.bps.store(SLOW_BPS, Relaxed);
     let markers_before = link.markers();
+    let (viewers_before, missed_before) = (link.viewers(), link.reported_missed());
+    let toggler = server.connect().await;
+    {
+        let mut events = toggler.take_events().expect("the toggler's runtime events");
+        tokio::spawn(async move { while events.recv().await.is_some() {} });
+    }
+    announce(&toggler, "toggler").await;
+    let flood_ends = Instant::now() + FLOOD_FOR;
+    let toggling = tokio::spawn(toggle_viewers(toggler.clone(), session.clone(), flood_ends));
     let rereads = Arc::new(Mutex::new(Vec::new()));
     let rereading = {
         let (phone, rereads, session) = (phone.clone(), rereads.clone(), session.clone());
@@ -505,12 +581,12 @@ async fn connection_backpressure() {
             }
         })
     };
-    let flood_ends = Instant::now() + FLOOD_FOR;
     let mut flood_turns = 0;
     while Instant::now() < flood_ends {
         send_turn(&desktop, &session, &mut turns).await;
         flood_turns += 1;
     }
+    let toggled = toggling.await.expect("the viewer toggles");
     tokio::time::sleep(Duration::from_secs(8)).await;
     rereading.abort();
     let rereads = rereads.lock().unwrap().clone();
@@ -532,10 +608,187 @@ async fn connection_backpressure() {
         link.markers() > markers_before,
         json!({}),
     );
+    let (viewers, missed) = (
+        link.viewers() - viewers_before,
+        link.reported_missed() - missed_before,
+    );
+    j.note(
+        "viewer_events_during_flood",
+        json!({ "sent": toggled, "delivered": viewers, "reported_missed": missed }),
+    );
+    j.guard(
+        "no event is lost silently",
+        toggled > 0 && viewers + missed >= toggled,
+        json!({}),
+    );
+    let surfaced = *phone.events_missed().borrow();
+    j.guard(
+        "the client hears the gap, so it can re-read what the events would have changed",
+        missed > 0 && surfaced >= link.reported_missed(),
+        json!({}),
+    );
     j.guard(
         "re-reads stay apart however many gaps arrive",
         !rereads.is_empty() && spacing.iter().all(|s| *s >= REREAD_SPACING.as_secs_f64()),
         json!({ "at_least_s": REREAD_SPACING.as_secs_f64() }),
+    );
+
+    j.step("an event flood leaves large responses and stream data their share");
+    let blob: Vec<u8> = (0..SHARED_READ_BYTES)
+        .map(|i| (i * 31 % 251) as u8)
+        .collect();
+    let shared = desktop
+        .save_attachment(ws.clone(), "shared.bin".into(), STANDARD.encode(&blob))
+        .await
+        .expect("save_attachment");
+    let (slow, slow_link) = connect_phone(server.socket()).await;
+    {
+        let mut events = slow.take_events().expect("the slow phone's runtime events");
+        tokio::spawn(async move { while events.recv().await.is_some() {} });
+    }
+    announce(&slow, "slow").await;
+    watch(&slow, &session).await;
+    let (ticker, _ticker_stream, mut ticker_output) = slow
+        .spawn_shell_terminal_stream(TICKER.into(), 80, 24)
+        .await
+        .expect("spawn_shell_terminal");
+    let ticks = Arc::new(Mutex::new(Vec::<Instant>::new()));
+    {
+        let ticks = ticks.clone();
+        tokio::spawn(async move {
+            while let Some(TerminalEvent::Output { .. }) = ticker_output.recv().await {
+                ticks.lock().unwrap().push(Instant::now());
+            }
+        });
+    }
+    slow_link.bps.store(SLOW_BPS, Relaxed);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let timed_read = |client: Arc<RpcClient>, path: String| async move {
+        let started = Instant::now();
+        let read =
+            tokio::time::timeout(Duration::from_secs(120), client.read_attachment(path)).await;
+        matches!(read, Ok(Ok(_))).then(|| started.elapsed())
+    };
+    let alone = timed_read(slow.clone(), shared.clone()).await;
+    let flooding = Arc::new(AtomicBool::new(true));
+    let flood = {
+        let (desktop, session, flooding) = (desktop.clone(), session.clone(), flooding.clone());
+        tokio::spawn(async move {
+            let started = Instant::now();
+            while flooding.load(Relaxed) && started.elapsed() < SHARE_FLOOD_CAP {
+                send_turn(&desktop, &session, &mut turns).await;
+            }
+            turns
+        })
+    };
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let read_from = Instant::now();
+    let during = timed_read(slow.clone(), shared.clone()).await;
+    let read_to = Instant::now();
+    flooding.store(false, Relaxed);
+    let mut turns = flood.await.expect("the flood's turns");
+    let longest_tick_gap = {
+        let ticks = ticks.lock().unwrap();
+        ticks
+            .windows(2)
+            .filter(|w| w[1] >= read_from && w[0] <= read_to)
+            .map(|w| w[1] - w[0])
+            .max()
+    };
+    let ratio = match (alone, during) {
+        (Some(alone), Some(during)) => Some(during.as_secs_f64() / alone.as_secs_f64()),
+        _ => None,
+    };
+    j.note(
+        "share_during_flood",
+        json!({
+            "link_kib_s": SLOW_BPS / KIB,
+            "read_alone_ms": alone.map(|d| d.as_millis() as u64),
+            "read_during_flood_ms": during.map(|d| d.as_millis() as u64),
+            "longest_tick_gap_ms": longest_tick_gap.map(|d| d.as_millis() as u64),
+        }),
+    );
+    j.guard(
+        "a large response during the flood takes at most a few times as long as alone",
+        ratio.is_some_and(|r| r <= SHARE_RATIO_LIMIT),
+        json!({ "ratio_at_most": SHARE_RATIO_LIMIT }),
+    );
+    j.guard(
+        "a terminal keeps printing through the flood",
+        longest_tick_gap.is_some_and(|gap| gap < TICK_GAP_LIMIT),
+        json!({ "gap_under_ms": TICK_GAP_LIMIT.as_millis() as u64 }),
+    );
+    let _ = desktop.terminal_close(ticker).await;
+
+    j.step("a device that streams the session hears only the revisions its stream can't carry");
+    let (streamer, streamer_link) = connect_phone(server.socket()).await;
+    {
+        let mut events = streamer
+            .take_events()
+            .expect("the streamer's runtime events");
+        tokio::spawn(async move { while events.recv().await.is_some() {} });
+    }
+    announce_with(&streamer, "streamer", &[REVISIONS_IN_STREAM]).await;
+    watch(&streamer, &session).await;
+    let (_, _streamer_stream, mut rows) = streamer
+        .open_session_stream(StreamRequest::AttachSession {
+            session_id: session.clone(),
+            echo_user_messages: true,
+            with_meta: true,
+            all_partials: false,
+        })
+        .await
+        .expect("attach_session");
+    let (watcher, watcher_link) = connect_phone(server.socket()).await;
+    {
+        let mut events = watcher.take_events().expect("the watcher's runtime events");
+        tokio::spawn(async move { while events.recv().await.is_some() {} });
+    }
+    announce(&watcher, "watcher").await;
+    watch(&watcher, &session).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let marks = (
+        streamer_link.revised(&session),
+        watcher_link.revised(&session),
+    );
+    let rev_before = desktop_rev.load(Relaxed);
+    send_turn(&desktop, &session, &mut turns).await;
+    let mut streamed_rev = 0;
+    loop {
+        match tokio::time::timeout(IO, rows.recv()).await {
+            Ok(Some(SessionFrame::Item(item))) => {
+                streamed_rev = streamed_rev.max(item.rev);
+                // The attach replays the last turn; this one ends past it.
+                if matches!(item.event, SessionEvent::TurnDone { .. }) && item.rev > rev_before {
+                    break;
+                }
+            }
+            Ok(Some(SessionFrame::Bare(_))) => {}
+            _ => break,
+        }
+    }
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let latest = desktop_rev.load(Relaxed);
+    let streamer_heard = streamer_link.revised(&session) - marks.0;
+    let watcher_heard = watcher_link.revised(&session) - marks.1;
+    j.note(
+        "revisions_per_turn",
+        json!({ "steps": STEPS, "to_the_streaming_device": streamer_heard, "to_a_watching_device": watcher_heard, "latest": latest, "streamed_rev": streamed_rev }),
+    );
+    j.guard(
+        "the streaming device hears no more than the turn's end",
+        streamer_heard <= STREAMED_REVISIONS_LIMIT,
+        json!({ "at_most": STREAMED_REVISIONS_LIMIT }),
+    );
+    j.guard(
+        "its stream carries the turn up to the latest revision",
+        latest > 0 && streamed_rev == latest,
+        json!({}),
+    );
+    j.guard(
+        "a device that only watches still hears the turn's revisions, ending on the latest",
+        watcher_heard >= STEPS as u64 && watcher_link.last_rev(&session) == Some(latest),
+        json!({ "at_least": STEPS }),
     );
 
     j.step("a stream nobody reads holds the client's memory");

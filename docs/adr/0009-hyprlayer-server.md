@@ -15,7 +15,9 @@ binary mid-run; the release gate runs its tests under `cargo nextest`) · amende
 amended 2026-10-16 (`GoalChanged` is targeted by capability alone) · amended 2026-11-11
 (agent connections: per-spawn identity, a narrower command set; PtyAgentChanged and
 UiRequested are targeted; the `statusline` face; PTY codex over its own app-server;
-`portable-pty` is vendored)
+`portable-pty` is vendored) · amended 2026-11-21 (a heartbeat gives up a link gone silent;
+events leave large frames and stream data their share; a queued revision gives way to a
+newer one, and a device streaming a session hears none of its commits)
 
 ## Decision
 
@@ -378,7 +380,7 @@ terminal holding a full 256 KiB of scrollback, and not a backend/webview
 decomposition — `src/lib/terminal/channelRelease.ts`'s ~20.5 MB per dock remount is a
 frontend leak figure and is not comparable.
 
-### The connection: priority, credit and gaps
+### The connection: priority, credit, gaps and liveness
 
 One socket carries responses, runtime events and every stream's data, so a reader on a
 slow or stalled link must not make any of them wait on, or grow behind, the others. The
@@ -389,7 +391,7 @@ by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
 
 - **The hello's `features`.** Both sides list `flow_control`. A side sends part frames,
   `credit` or `events_missed` only to a peer that listed it, so a released desktop keeps
-  the base protocol. `link_credit` (below) is negotiated the same way.
+  the base protocol. `link_credit` and `heartbeat` (below) are negotiated the same way.
 - **One writer, in priority order** (`hyprlayer-server/src/outbound.rs`): frames up
   to 16 KiB, then runtime events, then larger responses and stream data taking turns.
   A frame over 16 KiB goes out as **part frames** — `P`, a `u32` length, a lane byte, a
@@ -513,12 +515,51 @@ by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
   gaps has been quiet for 500 ms, and never twice within 5 s, so a refetch can't feed a
   flood more gaps. The window then re-reads what a reconnect re-reads, minus the session
   stream reattach, since those streams are intact.
+- **Events lead large frames and stream data by at most 16 KiB.** While a larger
+  response or stream data waits, the writer counts the event bytes it sends, and past
+  16 KiB the next unit is theirs. Events wait for it even when only the link window holds
+  it back, since a flood of events keeps the window full by itself. Small frames still go
+  first. On a 32 KiB/s link a 25 s flood of revisions held a 128 KiB answer 22.5 s
+  against 4.1 s alone, and paused a ticking terminal 4.9 s; now 6.5 to 7.4 s and 0.9
+  to 1.0 s.
+- **A queued revision gives way to a newer one.** A `SessionRevised` takes the place and
+  the `seq` of its session's latest queued event when that one is a revision by the same
+  author and both carry turns or neither does, so a turn's end or a released send never
+  folds into a commit. It overtakes queued events about other sessions, never one about
+  its own, and never crosses a gap marker. A reader stalled through two 120-step turns got
+  210 of their 484 revisions and missed 276, the latest among them; now it gets 4, the
+  last of them the latest, and no gap.
+- **A device streaming a session hears none of its commits.** A client that announces
+  `revisions_in_stream` gets no `SessionRevised` that carries turns for a session one of
+  its streams carries with `with_meta` and echoed user messages: that stream carries
+  every such row with its rev and author. Revisions without turns still go, since a
+  turn's end and a released send move no row and an attached view rechecks on them
+  (`transcriptSync.test.ts` T18). The desktop announces it, and its attached view needs
+  nothing more: a revision there only raises `committedRev` and names the working device
+  (T1, T20), which the stream's rows do too, held or applied, and the stream's `turnDone`
+  flushes the queue. An ended view holds no stream, so it still hears every commit (#417,
+  #418). One 120-step turn sent 242 revisions, 74,940 bytes, to a device that also
+  streamed it; now 1. A released desktop announces no such thing and hears all of them.
+- **A link gone silent is given up.** With `heartbeat` on both hellos, each side times
+  how long its reads have had nothing. At 10 s it sends `ping`, which the peer answers
+  with `pong`; at 30 s the read fails. The server then drops the connection, which
+  unregisters its viewers, and the client fails its pending calls and ends its events,
+  which starts the desktop's reconnect. Both frames go with the reports: ahead of
+  everything, outside the window, and never reported as read. Any byte read resets the
+  clock, and a `link_credit` peer reports what it reads, so a link busy either way is
+  never quiet; a ping goes only on a link idle both ways, which it crosses in a round
+  trip. 30 s outlasts a cell handover and TCP's retransmit backoff across a stall of 10
+  to 15 s, and a wrong give-up costs one reconnect, which resumes from the held cursors
+  and offsets. 10 s also keeps a carrier NAT's mapping alive, for 8 bytes each way. With
+  both directions held, a call stayed pending and the phone stayed a viewer past 90 s; now
+  the call fails, the events end and the server drops the viewer 30 s in. A peer without
+  `heartbeat` keeps today's behaviour, and SSH's `ServerAliveInterval=15` ×
+  `ServerAliveCountMax=3` stays under it as a backstop.
 
 What it does not cover:
 
 - A client without `link_credit` still lets the link fill: over `ssh … relay` the SSH
   channel window holds up to ~2 MB that no priority can reorder.
-- Events outrank large frames and stream data, so an event flood still starves both.
 - Past 16 large reads, or 64 other calls such as the board's per-PR `gh` polls
   (`pipelineData.ts`), the next call waits for one to finish.
 - A request waiting for its slot is held whole, so a client that pipelines large
@@ -528,7 +569,11 @@ What it does not cover:
   desktop sends attachments separately, so a message rarely reaches 16 KiB.
 - A dropped `RpcClient` stops reporting, so the server writes to it only until its
   window fills, and holds the rest until the client's last frames are written and the
-  connection closes.
+  connection closes, which the heartbeat bounds: the client no longer answers pings.
+- A peer without `heartbeat` has no bound: over `ssh … relay` it has SSH's 45 s, and on
+  any other transport none.
+- Only `SessionRevised` gives way to a newer event. A flood of anything else, such as
+  `SessionViewers`, still overflows a slow reader's queue and is reported missed.
 
 The guard is `crates/hyprlayer-e2e/tests/connection_backpressure.rs`, on a proxy that
 stalls the link and then throttles it to 256 KiB/s:
@@ -541,6 +586,18 @@ stalls the link and then throttles it to 256 KiB/s:
 | Small call behind a large response that takes ~13 s | > 30 s (timed out) | 40 to 95 ms |
 | Client RSS growth, one stream unread for 6 s | +313 to +325 MiB | +0 MiB |
 | Re-reads during a 12 s event flood at 32 KiB/s | 6, 2.3 s apart | 4, 5.0 s apart |
+
+The heartbeat, the events' share and the revisions are guarded by
+`crates/hyprlayer-e2e/tests/liveness.rs` and `connection_backpressure.rs` (2026-11-21).
+Before is `67ef402f`:
+
+| Measure | Before | After |
+|---|---|---|
+| Both directions held: a pending call fails, events end, server drops the viewer | never, at 45 s | 30.0 s, 30.0 s, 30.1 s |
+| An idle link, a 16 KiB/s link printing `yes`, and a client without `heartbeat`, 45 s on | up | up |
+| 128 KiB answer and longest terminal gap during a revision flood at 32 KiB/s (4.1 s alone) | 22.5 s, 4.9 s | 6.5 to 7.4 s, 0.9 to 1.0 s |
+| Revisions to a stalled reader through two 120-step turns: delivered / missed / ends on the latest | 210 / 276 / no | 4 / 0 / yes |
+| `SessionRevised` per 120-step turn to a device streaming it, and to one only watching | 242, 242 | 1, 242 |
 
 The turns, the link window, the client's lanes and the request slots are guarded by
 `crates/hyprlayer-e2e/tests/transport_fairness.rs` (2026-11-20). Before is `8edf381b`,

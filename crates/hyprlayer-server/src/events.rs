@@ -10,7 +10,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::outbound::{EventPush, Outbound};
+use crate::outbound::{EventPush, EventScope, Outbound};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
 pub const TARGETED_EVENTS: [&str; 9] = [
@@ -27,6 +27,8 @@ pub const TARGETED_EVENTS: [&str; 9] = [
 ];
 /// Reported by `announce_client` when this server targets them.
 pub const TRANSCRIPT_SYNC: &str = "transcript_sync";
+/// Announced by a client whose streams carry their sessions' commits, so it hears no revision with turns for them.
+pub const REVISIONS_IN_STREAM: &str = "revisions_in_stream";
 
 /// What one connection decodes, read as each row goes out: an announce can follow a stream's open.
 #[derive(Clone, Default)]
@@ -62,6 +64,8 @@ struct Conn {
     worktree: Option<String>,
     /// The token an agent connection announced; such a connection hears no events.
     agent: Option<String>,
+    /// Sessions one of this connection's streams carries, with how many.
+    streamed: HashMap<String, usize>,
 }
 
 impl Conn {
@@ -79,6 +83,13 @@ impl Conn {
             Audience::Watchers(kind, session_id) => {
                 self.watching.contains(session_id) && announced(kind)
             }
+            Audience::Revision { session_id, turns } => {
+                self.watching.contains(session_id)
+                    && announced("SessionRevised")
+                    && !(*turns
+                        && announced(REVISIONS_IN_STREAM)
+                        && self.streamed.contains_key(session_id))
+            }
             Audience::Announced(kind) => announced(kind),
             Audience::Worktree(id) => self.worktree.as_deref() == Some(id),
         }
@@ -89,6 +100,11 @@ enum Audience {
     Everyone,
     /// Announced connections watching this session.
     Watchers(&'static str, String),
+    /// A `SessionRevised`'s watchers, less those whose stream of it already carries its turns.
+    Revision {
+        session_id: String,
+        turns: bool,
+    },
     /// Announced connections, whatever they watch.
     Announced(&'static str),
     /// Connections watching this workstream's worktree, announced or not: every desktop decodes it.
@@ -113,8 +129,21 @@ impl Clients {
                 watching: HashSet::new(),
                 worktree: None,
                 agent: None,
+                streamed: HashMap::new(),
             },
         );
+    }
+
+    /// Held while one of the connection's streams carries the session's rows.
+    pub(crate) fn stream_rows(&self, conn: u64, session_id: &str) -> StreamedRows {
+        if let Some(client) = self.lock().get_mut(&conn) {
+            *client.streamed.entry(session_id.to_string()).or_default() += 1;
+        }
+        StreamedRows {
+            clients: self.clone(),
+            conn,
+            session_id: session_id.to_string(),
+        }
     }
 
     /// Returns the sessions the connection watched, whose viewers may have changed.
@@ -228,6 +257,7 @@ impl Clients {
     pub fn send_event(&self, event: RuntimeEvent) {
         let kind = event_kind(&event);
         let audience = audience(&event);
+        let scope = scope(&event).map(Arc::new);
         // Serialized once, and only if some queue has room for it.
         let event = &event;
         let mut json: Option<Option<String>> = None;
@@ -238,7 +268,7 @@ impl Clients {
                 return true;
             }
             let slot = &mut json;
-            let pushed = client.outbound.push_event(move || {
+            let pushed = client.outbound.push_event(scope.as_ref(), move || {
                 cached(slot, || {
                     serde_json::to_string(event)
                         .inspect_err(|e| {
@@ -314,11 +344,62 @@ fn no_announced(clients: &HashMap<u64, Conn>) -> bool {
     clients.values().all(|o| o.announced.is_none())
 }
 
+/// Ends a connection's claim to carry a session's rows in a stream.
+pub(crate) struct StreamedRows {
+    clients: Clients,
+    conn: u64,
+    session_id: String,
+}
+
+impl Drop for StreamedRows {
+    fn drop(&mut self) {
+        let mut clients = self.clients.lock();
+        let Some(client) = clients.get_mut(&self.conn) else {
+            return;
+        };
+        if let Some(streams) = client.streamed.get_mut(&self.session_id) {
+            *streams -= 1;
+            if *streams == 0 {
+                client.streamed.remove(&self.session_id);
+            }
+        }
+    }
+}
+
+fn scope(event: &RuntimeEvent) -> Option<EventScope> {
+    let (session_id, revision) = match event {
+        RuntimeEvent::SessionRevised {
+            session_id,
+            turns,
+            author,
+            ..
+        } => (
+            session_id,
+            Some((
+                author.as_ref().map(|a| a.client_id.clone()),
+                !turns.is_empty(),
+            )),
+        ),
+        RuntimeEvent::SessionLifecycle { session_id, .. }
+        | RuntimeEvent::SessionReset { session_id, .. }
+        | RuntimeEvent::SessionViewers { session_id, .. }
+        | RuntimeEvent::GoalChanged { session_id, .. } => (session_id, None),
+        _ => return None,
+    };
+    Some(EventScope {
+        session: session_id.clone(),
+        revision,
+    })
+}
+
 fn audience(event: &RuntimeEvent) -> Audience {
     match event {
-        RuntimeEvent::SessionRevised { session_id, .. } => {
-            Audience::Watchers("SessionRevised", session_id.clone())
-        }
+        RuntimeEvent::SessionRevised {
+            session_id, turns, ..
+        } => Audience::Revision {
+            session_id: session_id.clone(),
+            turns: !turns.is_empty(),
+        },
         RuntimeEvent::SessionReset { session_id, .. } => {
             Audience::Watchers("SessionReset", session_id.clone())
         }

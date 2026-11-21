@@ -31,7 +31,7 @@ use tokio::time::Instant;
 
 use crate::client::{EventStream, RpcClient, StreamReceiver, TerminalStream};
 use crate::dispatch::{wire_error, Server, Wire};
-use crate::events::Decoder;
+use crate::events::{Decoder, StreamedRows};
 use crate::outbound::{Credit, Outbound, PART_BYTES};
 
 /// What a stream may have queued in the writer: a turn's worth ready behind the one going out.
@@ -496,6 +496,21 @@ pub(crate) enum StreamSource {
         /// The session's rev once `replay` is applied.
         rev: u64,
     },
+}
+
+impl StreamSource {
+    /// The session this stream carries every row and author of, as its revisions would.
+    pub(crate) fn rows_of(&self) -> Option<&str> {
+        match self {
+            StreamSource::Session {
+                session_id,
+                with_meta: true,
+                echo_user_messages: true,
+                ..
+            } => Some(session_id),
+            _ => None,
+        }
+    }
 }
 
 /// Which partial text a session stream forwards.
@@ -1057,12 +1072,14 @@ pub(crate) async fn prepare_stream(
 /// Starts forwarding a prepared source and registers its abort handle. Must
 /// only be called after the response naming `stream_id` is written
 /// (see `prepare_stream`'s doc comment). `None` when a cancel got there first.
+/// `rows` is held until the stream ends, however it ends.
 pub(crate) fn spawn_stream(
     runtime: Arc<HyprlayerRuntime>,
     stream_id: u64,
     source: StreamSource,
     outbound: Outbound,
     registry: StreamRegistry,
+    rows: Option<StreamedRows>,
 ) -> Option<AbortHandle> {
     // A client without credit gets the old unbounded window; its slot still bounds the server.
     let window = if outbound.flow_control() {
@@ -1084,7 +1101,10 @@ pub(crate) fn spawn_stream(
         open.remove(&stream_id);
         return None;
     }
-    let task = tokio::spawn(run_stream(runtime, stream_id, source, tx, for_task));
+    let task = tokio::spawn(async move {
+        let _rows = rows;
+        run_stream(runtime, stream_id, source, tx, for_task).await
+    });
     open.insert(stream_id, Entry::Open(task.abort_handle(), credit));
     Some(task.abort_handle())
 }

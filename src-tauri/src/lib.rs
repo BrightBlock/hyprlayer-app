@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use hyprlayer_core::docs::{DocScope, DocStatus, DocType};
-use hyprlayer_server::events::{TARGETED_EVENTS, TRANSCRIPT_SYNC};
+use hyprlayer_server::events::{REVISIONS_IN_STREAM, TARGETED_EVENTS, TRANSCRIPT_SYNC};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Manager;
@@ -369,7 +369,11 @@ pub(crate) async fn attach_client(
         .announce_client(
             identity.client_id.clone(),
             identity.device.clone(),
-            TARGETED_EVENTS.map(str::to_string).to_vec(),
+            TARGETED_EVENTS
+                .into_iter()
+                .chain([REVISIONS_IN_STREAM])
+                .map(str::to_string)
+                .collect(),
         )
         .await
     {

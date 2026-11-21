@@ -1,6 +1,7 @@
 //! One end's outbound frames, written by one task in priority order: small
 //! frames, then runtime events, then large frames and stream data taking turns
-//! (ADR-0009). Within each of those two, every frame or stream gets up to
+//! (ADR-0009). Events lead the last two by at most `PART_BYTES` while they
+//! wait. Within each of those two, every frame or stream gets up to
 //! `PART_BYTES` a turn; a peer that reads part frames gets anything larger a
 //! part at a time, each frame on a lane of its own.
 
@@ -26,6 +27,10 @@ const EVENT_QUEUE_FRAMES: usize = 256;
 /// stopped reading holds. Bulk answers have their own, so no other call waits behind them.
 const BULK_IN_FLIGHT: usize = 16;
 const CALLS_IN_FLIGHT: usize = 64;
+/// Also keeps a carrier NAT's mapping alive.
+const PING_AFTER: Duration = Duration::from_secs(10);
+/// Outlasts a cell handover and TCP's retransmit backoff across one.
+const DEAD_AFTER: Duration = Duration::from_secs(30);
 
 /// Bytes a sender may still add; may go negative by one frame.
 pub(crate) struct Credit(watch::Sender<i64>);
@@ -89,8 +94,22 @@ impl Queued {
     }
 }
 
+/// What an event says about one session, so a newer revision can take a queued one's place.
+#[derive(Debug, PartialEq, Eq)]
+pub struct EventScope {
+    pub session: String,
+    /// Author and whether it has turns, so a turn's end or a released send never folds into a commit.
+    pub revision: Option<(Option<String>, bool)>,
+}
+
+struct QueuedEvent {
+    bytes: Vec<u8>,
+    seq: u64,
+    scope: Option<Arc<EventScope>>,
+}
+
 enum EventItem {
-    Frame(Vec<u8>),
+    Frame(QueuedEvent),
     Missed { first_seq: u64, count: u64 },
 }
 
@@ -203,8 +222,7 @@ struct Lanes {
     closed: bool,
     /// Takes nothing more, and closes once what it holds is written.
     ending: bool,
-    /// What this end read, told to the peer first and outside the window: a report counted
-    /// there would itself be reported, and so on without end.
+    /// Reports and heartbeats, first and uncounted: a counted report would itself be reported, without end.
     reports: VecDeque<Vec<u8>>,
     /// Frames up to `PART_BYTES` that are not events: responses, or a client's requests and credit.
     small: VecDeque<Queued>,
@@ -220,6 +238,8 @@ struct Lanes {
     event_frames: usize,
     next_seq: u64,
     data_turn: bool,
+    /// Event bytes written since large frames or stream data last went, while they waited.
+    events_ahead: usize,
 }
 
 impl Default for Lanes {
@@ -238,6 +258,7 @@ impl Default for Lanes {
             event_frames: 0,
             next_seq: 0,
             data_turn: false,
+            events_ahead: 0,
         }
     }
 }
@@ -255,13 +276,38 @@ impl Lanes {
                 done: queued.done,
             });
         }
+        let waiting = !self.bulk.flows.is_empty() || !self.data.flows.is_empty();
+        if !waiting || self.events_ahead < PART_BYTES {
+            if let Some(unit) = self.next_event(flow_control) {
+                if waiting {
+                    self.events_ahead += unit.bytes.len();
+                }
+                return Some(unit);
+            }
+        }
+        if !room {
+            return None;
+        }
+        for data in [self.data_turn, !self.data_turn] {
+            let fair = if data { &mut self.data } else { &mut self.bulk };
+            if let Some(unit) = fair.next(flow_control, &mut self.free_lanes) {
+                self.data_turn = !data;
+                self.events_ahead = self.events_ahead.saturating_sub(unit.bytes.len());
+                return Some(unit);
+            }
+        }
+        // Every lane is mid-frame, so nothing waiting can go in the events' place.
+        self.next_event(flow_control)
+    }
+
+    fn next_event(&mut self, flow_control: bool) -> Option<Unit> {
         while let Some(item) = self.events.pop_front() {
             match item {
-                EventItem::Frame(bytes) => {
-                    self.event_bytes -= bytes.len();
+                EventItem::Frame(event) => {
+                    self.event_bytes -= event.bytes.len();
                     self.event_frames -= 1;
                     return Some(Unit {
-                        bytes,
+                        bytes: event.bytes,
                         done: Done::Nothing,
                     });
                 }
@@ -276,14 +322,20 @@ impl Lanes {
                 EventItem::Missed { .. } => {}
             }
         }
-        if !room {
-            return None;
-        }
-        for data in [self.data_turn, !self.data_turn] {
-            let fair = if data { &mut self.data } else { &mut self.bulk };
-            if let Some(unit) = fair.next(flow_control, &mut self.free_lanes) {
-                self.data_turn = !data;
-                return Some(unit);
+        None
+    }
+
+    /// The queued event a revision in `scope` takes the place of: its session's latest, not past a gap.
+    fn superseded(&self, scope: &EventScope) -> Option<usize> {
+        scope.revision.as_ref()?;
+        for (at, item) in self.events.iter().enumerate().rev() {
+            match item {
+                EventItem::Missed { .. } => return None,
+                EventItem::Frame(QueuedEvent {
+                    scope: Some(queued),
+                    ..
+                }) if queued.session == scope.session => return (**queued == *scope).then_some(at),
+                EventItem::Frame(_) => {}
             }
         }
         None
@@ -309,6 +361,7 @@ impl Lanes {
 }
 
 pub enum EventPush {
+    /// Queued, or in the place of a revision it supersedes.
     Queued,
     Dropped,
     Closed,
@@ -359,6 +412,11 @@ impl Outbound {
         self.0.features.raw_terminal
     }
 
+    /// Whether the peer announced `HEARTBEAT`: it answers pings, so its silence means something.
+    pub fn heartbeat(&self) -> bool {
+        self.0.features.heartbeat
+    }
+
     /// A request's turn to run, from the bulk pool or the other; hold it until its answer is
     /// written. `None` once the connection is gone: what it sent still runs, since a launch or
     /// a failed start's record may hang on it, and only the answer is lost.
@@ -396,27 +454,47 @@ impl Outbound {
 
     /// Numbers the event for this connection; once a gap opens, later events
     /// join it until the writer reaches it. An empty queue takes any size, and
-    /// `event_json` runs only when the queue may have room.
-    pub fn push_event<'a>(&self, event_json: impl FnOnce() -> Option<&'a str>) -> EventPush {
+    /// `event_json` runs only when the queue may have room. A superseding revision takes its place and seq.
+    pub fn push_event<'a>(
+        &self,
+        scope: Option<&Arc<EventScope>>,
+        event_json: impl FnOnce() -> Option<&'a str>,
+    ) -> EventPush {
         let mut lanes = self.lock();
         if lanes.closed {
             return EventPush::Closed;
         }
+        let superseded = scope.and_then(|scope| lanes.superseded(scope));
         let gap_open = matches!(lanes.events.back(), Some(EventItem::Missed { .. }));
         let busy = lanes.event_frames > 0;
-        let json = (!gap_open && !(busy && lanes.event_frames >= EVENT_QUEUE_FRAMES))
-            .then(event_json)
-            .flatten()
-            .filter(|json| !busy || lanes.event_bytes + json.len() <= EVENT_QUEUE_BYTES);
+        let room = superseded.is_some()
+            || (!gap_open && !(busy && lanes.event_frames >= EVENT_QUEUE_FRAMES));
+        let json = room.then(event_json).flatten().filter(|json| {
+            superseded.is_some() || !busy || lanes.event_bytes + json.len() <= EVENT_QUEUE_BYTES
+        });
         let Some(json) = json else {
             lanes.note_missed(1);
             return EventPush::Dropped;
         };
-        let bytes = encode_event(json, lanes.next_seq);
+        if let Some(at) = superseded {
+            let lanes = &mut *lanes;
+            if let Some(EventItem::Frame(queued)) = lanes.events.get_mut(at) {
+                let bytes = encode_event(json, queued.seq);
+                lanes.event_bytes = lanes.event_bytes - queued.bytes.len() + bytes.len();
+                queued.bytes = bytes;
+            }
+            return EventPush::Queued;
+        }
+        let seq = lanes.next_seq;
+        let bytes = encode_event(json, seq);
         lanes.next_seq += 1;
         lanes.event_bytes += bytes.len();
         lanes.event_frames += 1;
-        lanes.events.push_back(EventItem::Frame(bytes));
+        lanes.events.push_back(EventItem::Frame(QueuedEvent {
+            bytes,
+            seq,
+            scope: scope.cloned(),
+        }));
         drop(lanes);
         self.0.wake.notify_one();
         EventPush::Queued
@@ -568,17 +646,70 @@ impl ReadReports {
     }
 }
 
-/// A peer's report of what it read; it is never reported back.
-fn is_report(line: &str) -> bool {
-    line.starts_with(r#"{"received":"#)
+const PING: &str = r#""ping""#;
+const PONG: &str = r#""pong""#;
+
+/// Neither end counts these, so they are never reported back.
+fn is_uncounted(line: &str) -> bool {
+    line.starts_with(r#"{"received":"#) || line == PING || line == PONG
+}
+
+/// When a `HEARTBEAT` peer last sent anything: quiet for `PING_AFTER` it is pinged, for `DEAD_AFTER` given up.
+pub(crate) struct Heartbeat {
+    outbound: Outbound,
+    heard: Instant,
+    pinged: bool,
+}
+
+impl Heartbeat {
+    pub(crate) fn new(outbound: Outbound) -> Self {
+        Self {
+            outbound,
+            heard: Instant::now(),
+            pinged: false,
+        }
+    }
+
+    fn send(&self, control: &Control) {
+        self.outbound
+            .push_report(encode_control(control).expect("a heartbeat serializes"));
+    }
+
+    /// `FrameReader::fill`, which is cancel-safe, bounded by the peer's silence.
+    async fn fill<R: AsyncRead + Unpin>(
+        &mut self,
+        reader: &mut FrameReader<R>,
+    ) -> io::Result<bool> {
+        loop {
+            let quiet = if self.pinged { DEAD_AFTER } else { PING_AFTER };
+            match tokio::time::timeout_at((self.heard + quiet).into(), reader.fill()).await {
+                Ok(filled) => {
+                    self.heard = Instant::now();
+                    self.pinged = false;
+                    return filled;
+                }
+                Err(_) if self.pinged => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("the peer sent nothing for {}s", DEAD_AFTER.as_secs()),
+                    ))
+                }
+                Err(_) => {
+                    self.pinged = true;
+                    self.send(&Control::Ping);
+                }
+            }
+        }
+    }
 }
 
 /// The next frame already read, else reads more. Reports what was read whenever nothing is
 /// left to decode, so a small frame times a bare round trip, and before a large frame, so its
-/// parse never reads as a queue on the link.
+/// parse never reads as a queue on the link. Answers pings and returns no heartbeat.
 pub(crate) async fn next_frame<R: AsyncRead + Unpin>(
     reader: &mut FrameReader<R>,
     reports: &mut Option<ReadReports>,
+    heartbeat: &mut Option<Heartbeat>,
 ) -> io::Result<Option<Frame>> {
     loop {
         if let Some(frame) = reader.decoded()? {
@@ -588,8 +719,18 @@ pub(crate) async fn next_frame<R: AsyncRead + Unpin>(
             };
             if let Some(reports) = reports {
                 match &frame {
-                    Frame::Control(line) if is_report(line) => reports.told += len as u64 + 2,
+                    Frame::Control(line) if is_uncounted(line) => reports.told += len as u64 + 2,
                     _ if len > PART_BYTES => reports.report(reader.consumed()),
+                    _ => {}
+                }
+            }
+            if let (Some(heartbeat), Frame::Control(line)) = (heartbeat.as_ref(), &frame) {
+                match line.as_str() {
+                    PING => {
+                        heartbeat.send(&Control::Pong);
+                        continue;
+                    }
+                    PONG => continue,
                     _ => {}
                 }
             }
@@ -598,7 +739,11 @@ pub(crate) async fn next_frame<R: AsyncRead + Unpin>(
         if let Some(reports) = reports {
             reports.report(reader.consumed());
         }
-        if !reader.fill().await? {
+        let filled = match heartbeat {
+            Some(heartbeat) => heartbeat.fill(reader).await?,
+            None => reader.fill().await?,
+        };
+        if !filled {
             return Ok(None);
         }
     }
@@ -642,7 +787,10 @@ mod tests {
         let large = index_update(4000);
         assert!(large.len() > EVENT_QUEUE_BYTES);
         for _ in 0..3 {
-            assert!(matches!(out.push_event(|| Some(&large)), EventPush::Queued));
+            assert!(matches!(
+                out.push_event(None, || Some(&large)),
+                EventPush::Queued
+            ));
             while out.lock().next_unit(true, true, true).is_some() {}
         }
     }

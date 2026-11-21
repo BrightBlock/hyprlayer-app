@@ -102,6 +102,8 @@ pub fn label(control: &Control) -> &'static str {
         Control::Cancel { .. } => "cancel",
         Control::Credit { .. } => "credit",
         Control::Received { .. } => "received",
+        Control::Ping => "ping",
+        Control::Pong => "pong",
         Control::Shutdown => "shutdown",
     }
 }

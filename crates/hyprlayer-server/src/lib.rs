@@ -710,9 +710,10 @@ async fn read_requests<R: AsyncRead + Unpin>(
     let mut reports = tx
         .link_credit()
         .then(|| outbound::ReadReports::new(tx.clone(), reader.consumed()));
+    let mut heartbeat = tx.heartbeat().then(|| outbound::Heartbeat::new(tx.clone()));
     // Never waits on the writer, so credit, cancels and `received` always land.
     loop {
-        let Some(frame) = outbound::next_frame(reader, &mut reports).await? else {
+        let Some(frame) = outbound::next_frame(reader, &mut reports, &mut heartbeat).await? else {
             break;
         };
         let line = match frame {
@@ -868,12 +869,16 @@ async fn read_requests<R: AsyncRead + Unpin>(
                                 return;
                             }
                             if let (Some(stream_id), Some(source)) = (stream_id, source) {
+                                let rows = source
+                                    .rows_of()
+                                    .map(|session| server.clients().stream_rows(conn, session));
                                 streams::spawn_stream(
                                     server.runtime(),
                                     stream_id,
                                     source,
                                     tx,
                                     streams,
+                                    rows,
                                 );
                             }
                         }
@@ -1062,6 +1067,7 @@ mod tests {
             streams::StreamSource::Terminal(pty.subscribe()),
             out.clone(),
             streams.clone(),
+            None,
         );
         (pty, task)
     }
