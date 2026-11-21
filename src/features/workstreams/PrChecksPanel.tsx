@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { openExternalUrl } from "@/lib/browser";
-import type { ChecksState, ReviewDecision, WorkstreamView } from "@/lib/bindings";
+import type { CheckBucket, ChecksState, PrChecks, ReviewDecision, WorkstreamView } from "@/lib/bindings";
 import { useWorkstreamPr } from "@/lib/queries";
 import { Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
@@ -18,10 +18,17 @@ function StatusDot({ state }: { state: ChecksState }) {
   return <span className={`h-2 w-2 shrink-0 rounded-full ${tone}`} />;
 }
 
-function CheckGlyph({ state }: { state: ChecksState }) {
-  if (state === "pending") return <Spinner size="xs" />;
-  if (state === "failing") return <Icon name="close" size="xs" className="text-bad-ink" />;
+function CheckGlyph({ bucket }: { bucket: CheckBucket }) {
+  if (bucket === "pending") return <Spinner size="xs" />;
+  if (bucket === "fail") return <Icon name="close" size="xs" className="text-bad-ink" />;
+  if (bucket === "skipping") return <Icon name="checkSkipped" size="xs" className="text-ink-dim" />;
+  if (bucket === "cancel") return <Icon name="checkCancelled" size="xs" className="text-ink-dim" />;
   return <Icon name="check" size="xs" className="text-ok" />;
+}
+
+function checksCount({ failed, pending, passed, total }: PrChecks): string {
+  const parts = [failed > 0 && `${failed} failing`, pending > 0 && `${pending} running`].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : `${passed}/${total}`;
 }
 
 function MergeConflictRow({ url }: { url: string }) {
@@ -89,10 +96,10 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
     data.reviewDecision === "reviewRequired" || data.reviewDecision === "changesRequested"
       ? data.reviewDecision
       : null;
-  const hasChecks = data.checksList.length > 0;
+  const hasChecks = data.checks.list.length > 0;
   const hasContent = hasChecks || isConflicting || reviewBlock !== null;
   const open = hasContent && !collapsed;
-  const base: ChecksState = isConflicting ? "failing" : data.checks;
+  const base: ChecksState = isConflicting ? "failing" : data.checks.state;
   const reviewWaiting = reviewBlock !== null && (base === "passing" || base === "none");
   const headerState: ChecksState = reviewWaiting ? "pending" : base;
 
@@ -115,7 +122,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
             : reviewWaiting
               ? "review"
               : hasChecks
-                ? `${data.checksPassed}/${data.checksTotal}`
+                ? checksCount(data.checks)
                 : "none yet"}
         </span>
       </button>
@@ -123,7 +130,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
         <div className="min-h-0 flex-1 overflow-y-auto border-t border-edge py-1">
           {isConflicting && <MergeConflictRow url={data.url} />}
           {reviewBlock && <ReviewBlockRow decision={reviewBlock} url={data.url} />}
-          {data.checksList.map((check, i) => (
+          {data.checks.list.map((check, i) => (
             <button
               key={`${check.name}-${i}`}
               type="button"
@@ -133,7 +140,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
               className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui hover:bg-edge/50 disabled:cursor-default disabled:hover:bg-transparent"
             >
               <span className="w-3 shrink-0 text-center font-mono">
-                <CheckGlyph state={check.state} />
+                <CheckGlyph bucket={check.bucket} />
               </span>
               <span className="min-w-0 flex-1 truncate text-ink">{check.name}</span>
               {check.url && <Icon name="external" size="xs" className="opacity-0 group-hover:opacity-60" />}

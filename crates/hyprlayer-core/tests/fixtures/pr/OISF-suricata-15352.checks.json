@@ -1,0 +1,429 @@
+[
+ {
+  "bucket": "pass",
+  "event": "",
+  "name": "codecov/patch",
+  "startedAt": "2026-11-21T15:10:31Z",
+  "workflow": ""
+ },
+ {
+  "bucket": "pass",
+  "event": "",
+  "name": "codecov/project",
+  "startedAt": "2026-11-21T15:10:28Z",
+  "workflow": ""
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "CentOS Stream 9",
+  "startedAt": "2026-05-11T08:17:40Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 20.04 (unsupported rust)",
+  "startedAt": "2026-05-11T08:16:23Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 9 (Minimal/Recommended Build)",
+  "startedAt": "2026-05-11T08:16:00Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Build RPMs (fedora:43)",
+  "startedAt": "2026-05-11T08:15:49Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (Minimal/Recommended Build)",
+  "startedAt": "2026-05-11T08:13:31Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "PF_RING",
+  "startedAt": "2026-05-11T08:12:34Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Build RPMs (almalinux:9)",
+  "startedAt": "2026-05-11T08:12:31Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (DPDK Build) (24.11.3)",
+  "startedAt": "2026-05-11T08:11:56Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Debian 11",
+  "startedAt": "2026-05-11T08:11:21Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (unix socket mode coverage)",
+  "startedAt": "2026-05-11T08:10:56Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 10 (schema, plugins)",
+  "startedAt": "2026-05-11T08:08:18Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (RUSTC+CARGO vars)",
+  "startedAt": "2026-05-11T08:08:02Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (cocci)",
+  "startedAt": "2026-05-11T08:06:28Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Debian 13 (xdp)",
+  "startedAt": "2026-05-11T08:03:55Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (fuzz corpus coverage)",
+  "startedAt": "2026-05-11T08:03:33Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Windows MSYS2 UCRT64 (libpcap)",
+  "startedAt": "2026-05-11T08:02:39Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (pcap unix socket ASAN)",
+  "startedAt": "2026-05-11T08:02:36Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Windows MSYS2 MINGW64 (libpcap)",
+  "startedAt": "2026-05-11T08:02:35Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (Fuzz)",
+  "startedAt": "2026-05-11T08:01:38Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 9 (no jansson)",
+  "startedAt": "2026-05-11T08:00:13Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Fedora 43 (gcc, debug, flto, asan, wshadow, rust-strict)",
+  "startedAt": "2026-05-11T07:59:16Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Windows MSYS2 MINGW64 (NPcap)",
+  "startedAt": "2026-05-11T07:58:31Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (afpacket IPS tests in namespaces)",
+  "startedAt": "2026-05-11T07:58:09Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (unittests coverage)",
+  "startedAt": "2026-05-11T07:57:51Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Fedora 43 (clang, debug, asan, wshadow, rust-strict, systemd)",
+  "startedAt": "2026-05-11T07:57:46Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Fedora 43 (Suricata Verify codecov)",
+  "startedAt": "2026-05-11T07:57:12Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Debian 12 MSRV",
+  "startedAt": "2026-05-11T07:56:35Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 20.04 (-DNDEBUG)",
+  "startedAt": "2026-05-11T07:56:12Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 9 Test Templates",
+  "startedAt": "2026-05-11T07:56:07Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (Netmap build)",
+  "startedAt": "2026-05-11T07:55:35Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 9 (schema, rust-checks)",
+  "startedAt": "2026-05-11T07:55:04Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (afpacket and dpdk coverage)",
+  "startedAt": "2026-05-11T07:54:38Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Debian 12 (xdp)",
+  "startedAt": "2026-05-11T07:53:50Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (DPDK Build) (23.11.5)",
+  "startedAt": "2026-05-11T07:53:39Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (DPDK Build) (22.11.10)",
+  "startedAt": "2026-05-11T07:51:32Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 24.04 (afpacket and dpdk live tests with ASAN)",
+  "startedAt": "2026-05-11T07:49:34Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 Dist Builder",
+  "startedAt": "2026-05-11T07:47:36Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "AlmaLinux 8",
+  "startedAt": "2026-05-11T07:46:20Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Windows MSYS2 MINGW64 (WinDivert)",
+  "startedAt": "2026-05-11T07:45:35Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "MacOS Latest",
+  "startedAt": "2026-05-11T07:41:18Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "skipping",
+  "event": "",
+  "name": "CodeQL",
+  "startedAt": "2026-05-11T07:41:04Z",
+  "workflow": ""
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (Debug Validation)",
+  "startedAt": "2026-05-11T07:40:33Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Fedora (non-root, debug, clang, asan, wshadow, rust-strict, no-ja)",
+  "startedAt": "2026-05-11T07:37:01Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 Dist Builder",
+  "startedAt": "2026-05-11T07:36:50Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Ubuntu 22.04 (DPDK Build) (21.11.9)",
+  "startedAt": "2026-05-11T07:36:46Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "New Author Check",
+  "startedAt": "2026-05-11T07:35:47Z",
+  "workflow": "New Authors Check"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Prepare dependencies / Prepare dependencies",
+  "startedAt": "2026-05-11T07:35:42Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Prepare cbindgen",
+  "startedAt": "2026-05-11T07:35:25Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Analyze (rust)",
+  "startedAt": "2026-05-11T07:34:35Z",
+  "workflow": "CodeQL (Rust/C)"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Formatting Check (clang 14)",
+  "startedAt": "2026-05-11T07:34:15Z",
+  "workflow": "formatting-check"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Prepare dependencies / Prepare dependencies",
+  "startedAt": "2026-05-11T07:33:41Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Cargo Audit",
+  "startedAt": "2026-05-11T07:32:40Z",
+  "workflow": "Cargo Audit and Update"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Scan-build",
+  "startedAt": "2026-05-11T07:32:14Z",
+  "workflow": "Scan-build"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "tests",
+  "startedAt": "2026-05-11T07:31:47Z",
+  "workflow": "Nix Env Build"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Commit Check",
+  "startedAt": "2026-05-11T07:31:36Z",
+  "workflow": "commit-check"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Fuzzing (address)",
+  "startedAt": "2026-05-11T07:30:55Z",
+  "workflow": "ClusterFuzzLite"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Analyze (cpp)",
+  "startedAt": "2026-05-11T07:27:30Z",
+  "workflow": "CodeQL (Rust/C)"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Prepare cbindgen",
+  "startedAt": "2026-05-11T07:27:07Z",
+  "workflow": "builds"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "Cargo Update",
+  "startedAt": "2026-05-11T07:25:34Z",
+  "workflow": "Cargo Audit and Update"
+ }
+]

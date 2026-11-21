@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, Mutex as AsyncMutex, Notify};
 use crate::config::ConfigService;
 use crate::error::Result;
 use crate::index::watcher::WatchHandle;
-use crate::pr::{self, ChecksState, PrState, PrStatus};
+use crate::pr::{self, PrState, PrStatus};
 use crate::process::binaries::{BinaryKind, BinaryResolver};
 use crate::store::{Db, ObservedPr, Workstream};
 use hyprlayer_models::RuntimeEvent;
@@ -414,7 +414,7 @@ fn cadence(status: &Option<PrStatus>, active: bool) -> Duration {
     match (active, status) {
         (false, Some(s)) if s.state == PrState::Open => BG_OPEN,
         (false, _) => BG_IDLE,
-        (true, Some(s)) if s.state == PrState::Open && s.checks == ChecksState::Pending => FAST,
+        (true, Some(s)) if s.state == PrState::Open && s.checks.pending > 0 => FAST,
         (true, Some(s)) if s.state == PrState::Open => MEDIUM,
         (true, _) => SLOW,
     }
@@ -440,7 +440,7 @@ fn next_tick(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pr::MergeableState;
+    use crate::pr::{ChecksState, MergeableState, PrChecks};
 
     fn pr(state: PrState, checks: ChecksState) -> Option<PrStatus> {
         Some(PrStatus {
@@ -450,11 +450,16 @@ mod tests {
             state,
             mergeable: true,
             mergeable_state: MergeableState::Mergeable,
-            checks,
-            checks_total: 0,
-            checks_passed: 0,
-            checks_failed: 0,
-            checks_list: Vec::new(),
+            checks: PrChecks {
+                state: checks,
+                total: 0,
+                passed: 0,
+                failed: 0,
+                pending: u32::from(checks == ChecksState::Pending),
+                skipped: 0,
+                cancelled: 0,
+                list: Vec::new(),
+            },
             review_decision: None,
         })
     }
@@ -479,6 +484,15 @@ mod tests {
             MEDIUM
         );
         assert_eq!(cadence(&None, true), SLOW);
+    }
+
+    #[test]
+    fn a_failing_pr_with_a_running_check_stays_fast() {
+        let mut failing = pr(PrState::Open, ChecksState::Failing);
+        let checks = &mut failing.as_mut().unwrap().checks;
+        checks.failed = 1;
+        checks.pending = 1;
+        assert_eq!(cadence(&failing, true), FAST);
     }
 
     #[test]

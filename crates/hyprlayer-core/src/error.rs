@@ -519,7 +519,7 @@ impl CoreError {
                 Some("The worktree may have been deleted; archive this workstream.".into())
             }
             CoreError::Exec { program, stderr_tail, .. } => {
-                if program.contains("gh") && stderr_tail.contains("auth") {
+                if program.contains("gh") && crate::repos::is_github_auth_failure(stderr_tail) {
                     Some("Run `gh auth login` in a terminal.".into())
                 } else {
                     None
@@ -961,6 +961,23 @@ mod tests {
             exec(Some(1), "  \n ").to_string(),
             "`git` failed with exit code 1"
         );
+    }
+
+    #[test]
+    fn a_gh_auth_failure_offers_gh_auth_login() {
+        let gh = |stderr: &str| CoreError::Exec {
+            program: "gh".into(),
+            exit: Some(1),
+            stderr_tail: stderr.into(),
+        };
+        let login = Some("Run `gh auth login` in a terminal.".to_string());
+        assert_eq!(gh("gh: Bad credentials (HTTP 401)").remedy(), login);
+        assert_eq!(
+            gh("Try authenticating with:  gh auth login").remedy(),
+            login
+        );
+        assert_eq!(gh("gh: Could not resolve to a PullRequest").remedy(), None);
+        assert_eq!(exec(Some(1), "fatal: Bad credentials").remedy(), None);
     }
 
     #[test]

@@ -2185,7 +2185,10 @@ fn pr_not_found(pr_number: u32, err: Option<CoreError>) -> CoreError {
 
 fn clean_gh_stderr(stderr: &str) -> String {
     let mut s = stderr.trim();
-    s = s.strip_prefix("GraphQL: ").unwrap_or(s);
+    s = s
+        .strip_prefix("GraphQL: ")
+        .or_else(|| s.strip_prefix("gh: "))
+        .unwrap_or(s);
     if let Some(open) = s.rfind(" (") {
         if s.ends_with(')') && !s[open + 2..s.len() - 1].contains(' ') {
             s = s[..open].trim_end();
@@ -2220,6 +2223,10 @@ mod tests {
             clean_gh_stderr(
                 "GraphQL: Could not resolve to a PullRequest with the number of 999. (repository.pullRequest)"
             ),
+            "Could not resolve to a PullRequest with the number of 999."
+        );
+        assert_eq!(
+            clean_gh_stderr("gh: Could not resolve to a PullRequest with the number of 999."),
             "Could not resolve to a PullRequest with the number of 999."
         );
         assert_eq!(clean_gh_stderr("  not found  "), "not found");

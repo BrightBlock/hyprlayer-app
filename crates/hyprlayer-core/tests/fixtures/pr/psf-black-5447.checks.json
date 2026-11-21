@@ -1,0 +1,660 @@
+[
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "compare / preview-new-changes",
+  "startedAt": "2026-10-04T00:00:12Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "compare / assert-no-changes",
+  "startedAt": "2026-10-04T00:00:12Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "skipping",
+  "event": "push",
+  "name": "coveralls-finish",
+  "startedAt": "2026-10-03T23:52:11Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "coveralls-finish",
+  "startedAt": "2026-10-03T23:52:01Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "skipping",
+  "event": "pull_request",
+  "name": "publish-mypyc",
+  "startedAt": "2026-10-03T23:51:12Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "skipping",
+  "event": "pull_request",
+  "name": "publish-hatch",
+  "startedAt": "2026-10-03T23:48:54Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "mypyc wheels cp312-macosx_x86_64",
+  "startedAt": "2026-10-03T23:48:12Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "mypyc wheels cp310-manylinux_x86_64",
+  "startedAt": "2026-10-03T23:48:05Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "mypyc wheels cp314-win_amd64",
+  "startedAt": "2026-10-03T23:48:05Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "analysis / target / preview-new-changes",
+  "startedAt": "2026-10-03T23:48:04Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "analysis / target / assert-no-changes",
+  "startedAt": "2026-10-03T23:48:04Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "analysis / base / assert-no-changes",
+  "startedAt": "2026-10-03T23:48:04Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "analysis / base / preview-new-changes",
+  "startedAt": "2026-10-03T23:48:04Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "skipping",
+  "event": "pull_request",
+  "name": "lint",
+  "startedAt": "2026-10-03T23:47:56Z",
+  "workflow": "lint and format"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.14, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:55Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (pypy3.11-v7.3.22, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:54Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.12.10, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:54Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.13, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:54Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.10, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:53Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.15, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:53Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.11, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:52Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.15, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:52Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "skipping",
+  "event": "pull_request",
+  "name": "uvloop",
+  "startedAt": "2026-10-03T23:47:51Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "uvloop (macOS-latest)",
+  "startedAt": "2026-10-03T23:47:51Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (pypy3.11-v7.3.22, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:51Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.12, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:51Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.14, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:51Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.14, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:50Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.13, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.14, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "docs (windows-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.15, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.11, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.10, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.12.10, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:49Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.13, macOS-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.14, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "generate wheels matrix",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "check",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "changelog"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.12.10, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (pypy3.11-v7.3.22, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "docs (ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.13, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.14, windows-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.15, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.11, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.15, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.13, windows-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.15, windows-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.13, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.12.10, windows-latest)",
+  "startedAt": "2026-10-03T23:47:48Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "sdist + pure wheel",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "build and publish"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (pypy3.11-v7.3.22, windows-latest)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.12.10, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.10, windows-latest)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.10, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.11, windows-latest)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "test (3.11, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "pull_request",
+  "name": "configure",
+  "startedAt": "2026-10-03T23:47:47Z",
+  "workflow": "diff-shades"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.13, windows-latest)",
+  "startedAt": "2026-10-03T23:47:46Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.13, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:46Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.13, windows-latest)",
+  "startedAt": "2026-10-03T23:47:46Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.13, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:46Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "fail",
+  "event": "push",
+  "name": "test (3.15, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.10, windows-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.11, windows-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.15, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.15, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (pypy3.11-v7.3.22, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.14, windows-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "lint",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "lint and format"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.10, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (pypy3.11-v7.3.22, windows-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.11, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.12.10, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.14, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "uvloop (ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:45Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.14, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.11, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "uvloop (windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "uvloop (windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.15, windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.12, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "docs (windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.15, windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.13, ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.12, windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "docs (ubuntu-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "docs"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.14, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.12.10, windows-11-arm)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test-release-tool (3.14, windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test release tool"
+ },
+ {
+  "bucket": "pass",
+  "event": "push",
+  "name": "test (3.12.10, windows-latest)",
+  "startedAt": "2026-10-03T23:47:44Z",
+  "workflow": "test"
+ },
+ {
+  "bucket": "pass",
+  "event": "",
+  "name": "docs/readthedocs.org:black",
+  "startedAt": "0001-01-01T00:00:00Z",
+  "workflow": ""
+ },
+ {
+  "bucket": "pass",
+  "event": "",
+  "name": "pre-commit.ci - pr",
+  "startedAt": "0001-01-01T00:00:00Z",
+  "workflow": ""
+ }
+]

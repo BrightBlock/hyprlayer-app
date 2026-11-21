@@ -57,17 +57,18 @@ export function PrStatusBar({
   const reviewRequired = data.reviewDecision === "reviewRequired";
   const changesRequested = data.reviewDecision === "changesRequested";
   const reviewBlocks = reviewRequired || changesRequested;
-  const checksOk = data.checks === "passing" || data.checks === "none";
+  const checks = data.checks.state;
+  const checksOk = checks === "passing" || checks === "none";
   const directOk = checksOk && !reviewBlocks;
   const queuesAuto =
-    automerge && data.checks !== "failing" && (data.checks === "pending" || reviewRequired);
+    automerge && checks !== "failing" && (checks === "pending" || reviewRequired);
   const canMerge = isOpen && data.mergeable && (directOk || queuesAuto) && !merge.isPending;
 
   const mergeTitle = () => {
     if (queuesAuto) return "Queue auto-merge. GitHub merges once requirements are met";
     if (canMerge) return "Merge this pull request";
-    if (data.checks === "pending") return "Waiting for checks to finish";
-    if (data.checks === "failing") return "Fix the failing checks before merging";
+    if (checks === "pending") return "Waiting for checks to finish";
+    if (checks === "failing") return "Fix the failing checks before merging";
     if (reviewRequired) return "Waiting for a required review before this can merge";
     if (changesRequested) return "A reviewer requested changes. Address them before merging";
     if (!data.mergeable) return "GitHub reports this PR is not mergeable (conflicts or branch protection)";
@@ -86,7 +87,7 @@ export function PrStatusBar({
         PR #{data.number}
       </button>
 
-      {isOpen && data.checks === "failing" && (
+      {isOpen && checks === "failing" && (
         <PillButton
           tint="border-bad/40 bg-bad/10 text-bad hover:bg-bad/20"
           onClick={() => void addressPrFeedback(id, "ci", data.number)}

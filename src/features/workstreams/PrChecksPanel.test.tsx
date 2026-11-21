@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrChecksPanel } from "./PrChecksPanel";
-import type { PrStatus, WorkstreamView } from "@/lib/bindings";
+import type { PrChecks, PrStatus, WorkstreamView } from "@/lib/bindings";
 
 const q = vi.hoisted(() => ({ useWorkstreamPr: vi.fn() }));
 vi.mock("@/lib/queries", () => q);
@@ -21,11 +21,7 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     state: "open",
     mergeable: true,
     mergeableState: "mergeable",
-    checks: "none",
-    checksTotal: 0,
-    checksPassed: 0,
-    checksFailed: 0,
-    checksList: [],
+    checks: { state: "none", total: 0, passed: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0, list: [] },
     reviewDecision: null,
     ...overrides,
   };
@@ -62,5 +58,32 @@ describe("PrChecksPanel review surfacing", () => {
     expect(screen.getByText("Merge conflict")).toBeTruthy();
     expect(screen.getByText("Review required")).toBeTruthy();
     expect(screen.getByText("conflict")).toBeTruthy();
+  });
+});
+
+describe("PrChecksPanel header count", () => {
+  const checks = (c: Omit<PrChecks, "state" | "list">, state: PrChecks["state"]): PrChecks => ({
+    ...c,
+    state,
+    list: [{ name: "build", bucket: "fail", url: null }],
+  });
+
+  it("counts failures and running checks instead of passed/total", () => {
+    renderPanel(
+      makePr({ checks: checks({ total: 20, passed: 11, failed: 1, pending: 0, skipped: 8, cancelled: 0 }, "failing") }),
+    );
+    expect(screen.getByText("1 failing")).toBeTruthy();
+    cleanup();
+    renderPanel(
+      makePr({ checks: checks({ total: 3, passed: 1, failed: 1, pending: 1, skipped: 0, cancelled: 0 }, "failing") }),
+    );
+    expect(screen.getByText("1 failing · 1 running")).toBeTruthy();
+  });
+
+  it("shows passed/total once nothing fails or runs", () => {
+    renderPanel(
+      makePr({ checks: checks({ total: 20, passed: 12, failed: 0, pending: 0, skipped: 8, cancelled: 0 }, "passing") }),
+    );
+    expect(screen.getByText("12/20")).toBeTruthy();
   });
 });

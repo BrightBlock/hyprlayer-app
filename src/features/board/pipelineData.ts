@@ -70,9 +70,9 @@ export function usePrSummary(view: WorkstreamView, enabled: boolean): string | n
   const status = pr.data;
   if (!status) return `PR #${number}`;
   const parts = [`PR #${status.number}`];
-  if (status.checks === "passing") parts.push("checks ✓");
-  else if (status.checks === "failing") parts.push(`${status.checksFailed} failing`);
-  else if (status.checks === "pending") parts.push("checks running");
+  if (status.checks.state === "passing") parts.push("checks ✓");
+  else if (status.checks.state === "failing") parts.push(`${status.checks.failed} failing`);
+  else if (status.checks.state === "pending") parts.push("checks running");
   if (status.reviewDecision === "approved") parts.push("approved");
   else if (status.reviewDecision === "changesRequested") parts.push("changes requested");
   return parts.join(" · ");

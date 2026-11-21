@@ -1,0 +1,1534 @@
+[
+ {
+  "data": {
+   "rateLimit": {
+    "limit": 5000,
+    "remaining": 4904,
+    "resetAt": "2026-11-21T19:13:51Z"
+   },
+   "repository": {
+    "pullRequest": {
+     "number": 5447,
+     "url": "https://github.com/psf/black/pull/5447",
+     "title": "Bump wcwidth from 0.2.14 to 0.9.1",
+     "state": "CLOSED",
+     "mergeable": "MERGEABLE",
+     "reviewDecision": null,
+     "headRefName": "dependabot/pip/wcwidth-0.9.1",
+     "isCrossRepository": false,
+     "isDraft": false,
+     "baseRefName": "main",
+     "headRefOid": "04a41e79b3d6e900c256cfe3f2fbed55c420f5cd",
+     "mergeStateStatus": "UNSTABLE",
+     "latestReviews": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "contexts": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "OTQ"
+           },
+           "nodes": [
+            {
+             "__typename": "CheckRun",
+             "name": "lint",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-10-03T23:47:56Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898936/job/111319864093",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "lint and format"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "generate wheels matrix",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111319839568",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "check",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898876/job/111319839423",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "changelog"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "configure",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111319839621",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "docs (ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898912/job/111319839635",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "docs (ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895903/job/111319830693",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "lint",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895913/job/111319830921",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "lint and format"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839982",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831060",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.12, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:51Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830840",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "docs (windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898912/job/111319839443",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "docs (windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895903/job/111319830571",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:53Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839911",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831026",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.12, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830677",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839994",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.10, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831007",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.12, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830853",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840034",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831034",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.13, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830804",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:52Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839958",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831009",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.13, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:46Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830772",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839961",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831000",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.13, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:46Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830813",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840006",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.11, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831016",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.14, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:51Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830958",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840009",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830984",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.14, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830869",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:54Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840032",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831024",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.14, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830839",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840013",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831070",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.15, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830950",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839963",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.12.10, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830980",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.15, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830816",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840050",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831025",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test-release-tool (3.15, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895857/job/111319830890",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test release tool"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:54Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840091",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831043",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840084",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:46Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831050",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839997",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.13, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:46Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831133",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840060",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831035",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:55Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840019",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:50Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831046",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839972",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831089",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:49Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840154",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.14, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831023",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840097",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831010",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:53Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840002",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:52Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831065",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840085",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831047",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "FAILURE",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831090",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (3.15, windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840014",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:48Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840054",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831036",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:54Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319840109",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:51Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831044",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319839991",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "test (pypy3.11-v7.3.22, windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319831085",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "uvloop",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-10-03T23:47:51Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111319854717",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "sdist + pure wheel",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:47Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111319839390",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "analysis / base / assert-no-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:04Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111319879844",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "uvloop (ubuntu-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:45Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830922",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "analysis / base / preview-new-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:04Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111319879862",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "uvloop (macOS-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:51Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830849",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "uvloop (windows-latest)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830907",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "uvloop (windows-11-arm)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:44Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111319830927",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "coveralls-finish",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-10-03T23:52:11Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162895862/job/111320528444",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "push",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "mypyc wheels cp310-manylinux_x86_64",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:05Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111319881525",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "analysis / target / assert-no-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:04Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111319879876",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "coveralls-finish",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:52:01Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898893/job/111320494804",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "mypyc wheels cp312-macosx_x86_64",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:12Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111319881521",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "analysis / target / preview-new-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:04Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111319879831",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "mypyc wheels cp314-win_amd64",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:05Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111319881599",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "publish-hatch",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-10-03T23:48:54Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111320008430",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "compare / assert-no-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-04T00:00:12Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111321732637",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "compare / preview-new-changes",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-10-04T00:00:12Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898874/job/111321732689",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "diff-shades"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "publish-mypyc",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-10-03T23:51:12Z",
+             "detailsUrl": "https://github.com/psf/black/actions/runs/37162898898/job/111320372195",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "build and publish"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "StatusContext",
+             "context": "docs/readthedocs.org:black",
+             "state": "SUCCESS",
+             "startedAt": "2026-10-03T23:48:25Z",
+             "targetUrl": "https://black--5447.org.readthedocs.build/en/5447/"
+            },
+            {
+             "__typename": "StatusContext",
+             "context": "pre-commit.ci - pr",
+             "state": "SUCCESS",
+             "startedAt": "2026-10-03T23:47:59Z",
+             "targetUrl": "https://results.pre-commit.ci/run/github/125266328/1791071262._8suoK97T0mN3WN9p3selw"
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+]

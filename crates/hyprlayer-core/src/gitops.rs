@@ -204,6 +204,44 @@ pub fn remote_to_web_url(raw: &str) -> Option<String> {
     Some(format!("https://{host}/{path}"))
 }
 
+pub(crate) fn gh_api_hostname(dir: &Path) -> Option<String> {
+    let repo = git2::Repository::discover(dir).ok()?;
+    let config = repo.config().ok()?;
+    let names = repo.remotes().ok()?;
+    let remotes: Vec<(String, String, bool)> = names
+        .iter()
+        .flatten()
+        .filter_map(|name| {
+            let url = repo.find_remote(name).ok()?.url()?.to_string();
+            let resolved = config
+                .get_string(&format!("remote.{name}.gh-resolved"))
+                .is_ok();
+            Some((name.to_string(), url, resolved))
+        })
+        .collect();
+    base_remote_api_host(&remotes)
+}
+
+fn base_remote_api_host(remotes: &[(String, String, bool)]) -> Option<String> {
+    let rank = |name: &str| match name.to_ascii_lowercase().as_str() {
+        "upstream" => 0,
+        "github" => 1,
+        "origin" => 2,
+        _ => 3,
+    };
+    let (_, url, _) = remotes
+        .iter()
+        .find(|r| r.2)
+        .or_else(|| remotes.iter().min_by_key(|r| rank(&r.0)))?;
+    let web = remote_to_web_url(url)?;
+    let host = web
+        .strip_prefix("https://")?
+        .split('/')
+        .next()?
+        .to_ascii_lowercase();
+    (host != "github.com" && !host.ends_with(".github.com")).then_some(host)
+}
+
 pub fn file_web_url(file_abs: &Path) -> Option<String> {
     let file_abs = file_abs.canonicalize().ok()?;
     let start = file_abs.parent().unwrap_or(&file_abs);
@@ -1389,6 +1427,46 @@ mod tests {
         assert_eq!(web("C:\\repos\\thing"), None);
         assert_eq!(web("file:///srv/git/repo.git"), None);
         assert_eq!(web("git@localhost:repo.git"), None);
+    }
+
+    #[test]
+    fn gh_api_host_follows_the_remote_gh_would_pick() {
+        let host = |remotes: &[(&str, &str, bool)]| {
+            let remotes: Vec<_> = remotes
+                .iter()
+                .map(|(n, u, r)| (n.to_string(), u.to_string(), *r))
+                .collect();
+            base_remote_api_host(&remotes)
+        };
+        let ghe = "git@ghe.corp.example:team/app.git";
+        let dotcom = "https://github.com/acme/app.git";
+        assert_eq!(host(&[("origin", dotcom, false)]), None);
+        assert_eq!(
+            host(&[("origin", "git@ssh.github.com:acme/app.git", false)]),
+            None
+        );
+        assert_eq!(
+            host(&[("origin", ghe, false)]).as_deref(),
+            Some("ghe.corp.example")
+        );
+        assert_eq!(
+            host(&[("origin", dotcom, false), ("upstream", ghe, false)]).as_deref(),
+            Some("ghe.corp.example")
+        );
+        assert_eq!(
+            host(&[("fork", ghe, false), ("origin", dotcom, false)]),
+            None
+        );
+        assert_eq!(
+            host(&[
+                ("origin", dotcom, false),
+                ("mine", "https://GHE.Corp.Example/me/app", true)
+            ])
+            .as_deref(),
+            Some("ghe.corp.example")
+        );
+        assert_eq!(host(&[("origin", "/srv/git/app.git", false)]), None);
+        assert_eq!(host(&[]), None);
     }
 
     #[test]

@@ -2,11 +2,11 @@
 //! and observed PR follow the workstream from its first session through merge and onto a new branch.
 #![cfg(unix)]
 
-use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 use hyprlayer_core::{Harness, SessionEvent, Stage};
+use hyprlayer_e2e::fake_gh::{self, set_pr, FakePr};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{
     events_until, json, text, Journey, Request, RuntimeEvent, Sandbox, Server, Value,
@@ -37,38 +37,6 @@ while IFS= read -r line; do
   printf '{"type":"result","subtype":"success","is_error":false,"result":"ok","session_id":"%s","num_turns":%s,"total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}\n' "$sid" "$turn"
 done
 "##;
-
-/// `gh pr view <ref>` answers from `<dir>/<ref with / as _>` ("<number> <STATE> [MERGEABLE]"), else as gh does for no PR.
-fn fake_gh(dir: &Path) -> String {
-    format!(
-        r##"#!/bin/sh
-dir="{dir}"
-[ "$1" = "--version" ] && {{ echo "gh version 2.81.0 (2026-01-01)"; exit 0; }}
-[ -f "$dir/FAIL" ] && {{ echo "HTTP 502: Bad Gateway" >&2; exit 1; }}
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  key=$(printf '%s' "$3" | tr '/' '_')
-  if [ -f "$dir/$key" ]; then
-    read -r number state mergeable < "$dir/$key"
-    printf '{{"number":%s,"url":"https://github.com/e2e/demo/pull/%s","title":"E2E #%s","state":"%s","mergeable":"%s","reviewDecision":"","statusCheckRollup":[]}}\n' "$number" "$number" "$number" "$state" "${{mergeable:-UNKNOWN}}"
-    exit 0
-  fi
-  echo "no pull requests found for branch \"$3\"" >&2
-  exit 1
-fi
-echo "e2e gh stub: unsupported: $*" >&2
-exit 1
-"##,
-        dir = dir.display()
-    )
-}
-
-fn set_pr(dir: &Path, reference: &str, number: u32, state: &str) {
-    std::fs::write(
-        dir.join(reference.replace('/', "_")),
-        format!("{number} {state}\n"),
-    )
-    .expect("write the gh state");
-}
 
 fn git(dir: &str, args: &[&str]) -> bool {
     Command::new("git")
@@ -249,7 +217,7 @@ async fn pr_branch_drift() {
     sandbox.stage_tool("claude", FAKE_CLAUDE);
     let gh_state = sandbox.root.join("gh-state");
     std::fs::create_dir_all(&gh_state).expect("create the gh state dir");
-    sandbox.stage_tool("gh", &fake_gh(&gh_state));
+    sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
     let mut j = Journey::new("pr_branch_drift", &sandbox);
     let server = Server::start(&sandbox).await;
@@ -279,7 +247,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("a renamed branch still finds its PR");
-    set_pr(&gh_state, "feature/csp-1", 339, "OPEN");
+    set_pr(&gh_state, "feature/csp-1", &FakePr::new(339, "OPEN"));
     let before = pr_number(&client, &id).await;
     let renamed = git(&worktree, &["branch", "-m", "feature/csp-1"]);
     let after = pr_number(&client, &id).await;
@@ -307,7 +275,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("a switched branch follows HEAD");
-    set_pr(&gh_state, "feature/csp-2", 340, "OPEN");
+    set_pr(&gh_state, "feature/csp-2", &FakePr::new(340, "OPEN"));
     let switched = git(&worktree, &["switch", "-q", "-c", "feature/csp-2"]);
     let followed = pr_number(&client, &id).await;
     j.guard(
@@ -317,7 +285,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("an attached PR wins over HEAD");
-    set_pr(&gh_state, "339", 339, "OPEN");
+    set_pr(&gh_state, "339", &FakePr::new(339, "OPEN"));
     j.call(
         &client,
         Request::AttachWorkstreamPr {
@@ -340,8 +308,14 @@ async fn pr_branch_drift() {
     j.step("the watcher records the current branch's PR on the row");
     let open = await_observed(&client, &id, json!({ "number": 340, "state": "open" })).await;
     while events_rx.try_recv().is_ok() {}
-    std::fs::write(gh_state.join("feature_csp-2"), "340 OPEN MERGEABLE\n")
-        .expect("write the gh state");
+    set_pr(
+        &gh_state,
+        "feature/csp-2",
+        &FakePr {
+            mergeable: "MERGEABLE",
+            ..FakePr::new(340, "OPEN")
+        },
+    );
     j.call(
         &client,
         Request::WatchWorktree {
@@ -354,7 +328,7 @@ async fn pr_branch_drift() {
         .call(Request::SetForeground { foreground: true })
         .await;
     let churn_changes_row = next_status_event(&mut events_rx, &id).await;
-    set_pr(&gh_state, "feature/csp-2", 340, "MERGED");
+    set_pr(&gh_state, "feature/csp-2", &FakePr::new(340, "MERGED"));
     let merged = await_observed(&client, &id, json!({ "number": 340, "state": "merged" })).await;
     let merge_changes_row = next_status_event(&mut events_rx, &id).await;
     let attached_row = client
@@ -387,7 +361,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("a merged worktree keeps following its branch");
-    set_pr(&gh_state, "hotfix/csp-3", 341, "MERGED");
+    set_pr(&gh_state, "hotfix/csp-3", &FakePr::new(341, "MERGED"));
     git(&worktree, &["switch", "-q", "-c", "hotfix/csp-3"]);
     let hotfix = await_observed(&client, &id, json!({ "number": 341, "state": "merged" })).await;
     let hotfix_stage = stage_of(&client, &id).await;
@@ -428,7 +402,7 @@ async fn pr_branch_drift() {
     set_stage(&mut j, &client, &id, Stage::Ship).await;
     git(&worktree, &["switch", "-q", "-c", "feature/csp-5"]);
     let no_pr_before = await_stage(&client, &id, json!("general")).await;
-    set_pr(&gh_state, "feature/csp-5", 342, "OPEN");
+    set_pr(&gh_state, "feature/csp-5", &FakePr::new(342, "OPEN"));
     await_observed(&client, &id, json!({ "number": 342, "state": "open" })).await;
     set_stage(&mut j, &client, &id, Stage::Ship).await;
     git(&worktree, &["switch", "-q", "-c", "feature/csp-6"]);
@@ -447,7 +421,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("leaving the branch for a detached HEAD holds the card");
-    set_pr(&gh_state, "feature/csp-6", 343, "MERGED");
+    set_pr(&gh_state, "feature/csp-6", &FakePr::new(343, "MERGED"));
     await_observed(&client, &id, json!({ "number": 343, "state": "merged" })).await;
     set_stage(&mut j, &client, &id, Stage::Ship).await;
     git(&worktree, &["switch", "-q", "--detach"]);
@@ -477,7 +451,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("a failed lookup after a move shows no PR, and recovers");
-    set_pr(&gh_state, "feature/csp-7", 344, "OPEN");
+    set_pr(&gh_state, "feature/csp-7", &FakePr::new(344, "OPEN"));
     await_observed(&client, &id, json!({ "number": 344, "state": "open" })).await;
     std::fs::write(gh_state.join("FAIL"), "").expect("make gh fail");
     while events_rx.try_recv().is_ok() {}
@@ -533,7 +507,7 @@ async fn pr_branch_drift() {
     j.step("a merged PR reads through a missing worktree");
     let husk = create_workstream(&mut j, &client, &project, "Husk").await;
     let husk_id = text(&husk, "/item/id");
-    set_pr(&gh_state, "360", 360, "OPEN");
+    set_pr(&gh_state, "360", &FakePr::new(360, "OPEN"));
     j.call(
         &client,
         Request::AttachWorkstreamPr {
@@ -545,7 +519,7 @@ async fn pr_branch_drift() {
     .expect("attach_workstream_pr");
     let on_attach = observed_pr(&client, &husk_id).await;
     std::fs::remove_dir_all(text(&husk, "/item/worktreePath")).expect("remove the worktree");
-    set_pr(&gh_state, "360", 360, "MERGED");
+    set_pr(&gh_state, "360", &FakePr::new(360, "MERGED"));
     j.call(
         &client,
         Request::WatchWorktree {
@@ -574,7 +548,11 @@ async fn pr_branch_drift() {
     j.step("archiving records the PR it just looked up");
     let quick = create_workstream(&mut j, &client, &project, "Quick merge").await;
     let quick_id = text(&quick, "/item/id");
-    set_pr(&gh_state, &text(&quick, "/item/branch"), 350, "MERGED");
+    set_pr(
+        &gh_state,
+        &text(&quick, "/item/branch"),
+        &FakePr::new(350, "MERGED"),
+    );
     j.call(
         &client,
         Request::ArchiveWorkstream {
@@ -617,7 +595,8 @@ async fn pr_branch_drift() {
 
     j.step("an archive looks up the branch it was archived on");
     git(&worktree, &["switch", "-q", "feature/csp-2"]);
-    std::fs::remove_file(gh_state.join("feature_csp-2")).expect("hide the PR from the archive");
+    std::fs::remove_file(gh_state.join("feature_csp-2.json"))
+        .expect("hide the PR from the archive");
     j.call(
         &client,
         Request::ArchiveWorkstream {
@@ -627,7 +606,7 @@ async fn pr_branch_drift() {
     )
     .await
     .expect("archive_workstream");
-    set_pr(&gh_state, "feature/csp-2", 340, "MERGED");
+    set_pr(&gh_state, "feature/csp-2", &FakePr::new(340, "MERGED"));
     j.call(&client, Request::RefreshArchivedWorkstreams {})
         .await
         .expect("refresh_archived_workstreams");

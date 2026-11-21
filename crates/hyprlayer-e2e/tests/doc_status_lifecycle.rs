@@ -11,6 +11,7 @@ use hyprlayer_core::docs::frontmatter;
 use hyprlayer_core::index::indexer::ThoughtQuery;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
+use hyprlayer_e2e::fake_gh::{self, set_pr, FakePr};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_server::client::{EventStream, RpcClient};
@@ -52,32 +53,6 @@ while IFS= read -r line; do
   printf '{"type":"result","subtype":"success","is_error":false,"result":"E2E_REPLY_%s","session_id":"%s","num_turns":%s,"total_cost_usd":0.01,"usage":{"input_tokens":11,"output_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":7}}\n' "$turn" "$sid" "$turn"
 done
 "##;
-
-/// `gh pr view <ref>` answers from `<dir>/<ref with / as _>` ("<number> <STATE>"), else as gh does for no PR.
-fn fake_gh(dir: &Path) -> String {
-    format!(
-        r##"#!/bin/sh
-dir="{dir}"
-[ "$1" = "--version" ] && {{ echo "gh version 2.81.0 (2026-01-01)"; exit 0; }}
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  key=$(printf '%s' "$3" | tr '/' '_')
-  if [ -f "$dir/$key" ]; then
-    read -r number state < "$dir/$key"
-    printf '{{"number":%s,"url":"https://github.com/e2e/demo/pull/%s","title":"E2E #%s","state":"%s","mergeable":"UNKNOWN","reviewDecision":"","statusCheckRollup":[]}}\n' "$number" "$number" "$number" "$state"
-    exit 0
-  fi
-  case "$3" in
-    *[!0-9]*) echo "no pull requests found for branch \"$3\"" >&2 ;;
-    *) echo "GraphQL: Could not resolve to a PullRequest with the number of $3. (repository.pullRequest)" >&2 ;;
-  esac
-  exit 1
-fi
-echo "e2e gh stub: unsupported: $*" >&2
-exit 1
-"##,
-        dir = dir.display()
-    )
-}
 
 const BUILT_PLAN: &str = "---\ntitle: Widget\ntype: plan\nstatus: draft\nauthor: e2e\n---\n\n\
 # Widget\n\n## Phase 1: Model\n\n### Changes Required\n\nAdd the model.\n\n\
@@ -147,14 +122,6 @@ async fn await_status(client: &RpcClient, path: &Path, want: &str) -> bool {
             .await;
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-}
-
-/// `answer` as `gh pr view <reference>` reports it from now on.
-fn set_pr(dir: &Path, reference: &str, number: u32, state: &str) {
-    let path = dir.join(reference.replace('/', "_"));
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, format!("{number} {state}\n")).expect("write the gh state");
-    std::fs::rename(&tmp, &path).expect("publish the gh state");
 }
 
 /// Writes each doc through one agent turn in `workstream`, then waits until every one is attributed.
@@ -252,7 +219,7 @@ async fn doc_status_lifecycle() {
     sandbox.stage_tool("claude", FAKE_CLAUDE);
     let gh_state = sandbox.root.join("gh-state");
     std::fs::create_dir_all(&gh_state).expect("create the gh state dir");
-    sandbox.stage_tool("gh", &fake_gh(&gh_state));
+    sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
     let mut j = Journey::new("doc_status_lifecycle", &sandbox);
     let server = Server::start(&sandbox).await;
@@ -398,7 +365,7 @@ async fn doc_status_lifecycle() {
 
     j.step("a merge settles what the workstream wrote");
     let record_41 = doc("prs/41_description.md");
-    set_pr(&gh_state, &w1_branch, 41, "MERGED");
+    set_pr(&gh_state, &w1_branch, &FakePr::new(41, "MERGED"));
     j.call(
         &client,
         Request::WatchWorktree {
@@ -459,7 +426,7 @@ async fn doc_status_lifecycle() {
     j.step("a PR closed unmerged archives its record and nothing else");
     let record_42 = doc("prs/42_description.md");
     std::fs::write(record_42.as_path(), record(42, "active")).expect("write record 42");
-    set_pr(&gh_state, &w2_branch, 42, "CLOSED");
+    set_pr(&gh_state, &w2_branch, &FakePr::new(42, "CLOSED"));
     j.call(
         &client,
         Request::WatchWorktree {
@@ -500,7 +467,7 @@ async fn doc_status_lifecycle() {
     .await;
     let record_43 = doc("prs/43_description.md");
     std::fs::write(record_43.as_path(), record(43, "draft")).expect("write record 43");
-    set_pr(&gh_state, &w3_branch, 43, "MERGED");
+    set_pr(&gh_state, &w3_branch, &FakePr::new(43, "MERGED"));
     j.call(
         &client,
         Request::ArchiveWorkstream {
@@ -535,7 +502,7 @@ async fn doc_status_lifecycle() {
         )
         .expect("write a sweep record");
         if let Some(state) = state {
-            set_pr(&gh_state, &number.to_string(), *number, state);
+            set_pr(&gh_state, &number.to_string(), &FakePr::new(*number, state));
         }
     }
     let stopped = server.shutdown(&client).await;

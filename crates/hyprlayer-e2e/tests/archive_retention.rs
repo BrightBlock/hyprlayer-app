@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use hyprlayer_core::claude::memory::project_key;
 use hyprlayer_core::{Harness, SessionEvent, Stage, WorktreeMode};
+use hyprlayer_e2e::fake_gh::{self, set_pr, FakePr};
 use hyprlayer_e2e::flows::onboard_and_import;
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_proto::WireError;
@@ -16,17 +17,6 @@ use hyprlayer_server::streams::StreamStartOpts;
 
 const DAY_MS: f64 = 86_400_000.0;
 const IO: Duration = Duration::from_secs(20);
-
-/// Merged PR #7 for the branch named in `<sandbox>/gh-merged`, no PR for any other.
-const FAKE_GH: &str = r#"#!/bin/sh
-merged="$(cat "$(dirname "$0")/../gh-merged" 2>/dev/null)"
-if [ "$1 $2" = "pr view" ] && [ -n "$merged" ] && [ "$3" = "$merged" ]; then
-  printf '{"number":7,"url":"https://github.invalid/e2e/demo/pull/7","title":"E2E","state":"MERGED","mergeable":"UNKNOWN","statusCheckRollup":[]}\n'
-  exit 0
-fi
-echo "no pull requests found for branch \"$3\"" >&2
-exit 1
-"#;
 
 /// One reply per user turn, in claude's stream-json.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
@@ -57,7 +47,9 @@ struct Ws {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn archive_retention() {
     let sandbox = Sandbox::new();
-    sandbox.stage_tool("gh", FAKE_GH);
+    let gh_state = sandbox.root.join("gh-state");
+    std::fs::create_dir_all(&gh_state).expect("create the gh state dir");
+    sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     sandbox.stage_tool("claude", FAKE_CLAUDE);
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
     let mut j = Journey::new("archive_retention", &sandbox);
@@ -70,7 +62,7 @@ async fn archive_retention() {
     let dirty = create(&mut j, &client, &project, "Dirty work", "$WS_B").await;
     let kept = create(&mut j, &client, &project, "Kept work", "$WS_C").await;
     let legacy = create(&mut j, &client, &project, "Legacy work", "$WS_D").await;
-    std::fs::write(sandbox.root.join("gh-merged"), &merged.branch).expect("name the merged branch");
+    set_pr(&gh_state, &merged.branch, &FakePr::new(7, "MERGED"));
     std::fs::write(dirty.worktree.join("committed.txt"), "one\n").expect("write a file");
     sandbox.git(&dirty.worktree, &["add", "committed.txt"]);
     sandbox.git(

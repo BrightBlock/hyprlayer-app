@@ -26,11 +26,7 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     state: "open",
     mergeable: true,
     mergeableState: "mergeable",
-    checks: "passing",
-    checksTotal: 1,
-    checksPassed: 1,
-    checksFailed: 0,
-    checksList: [],
+    checks: { state: "passing", total: 1, passed: 1, failed: 0, pending: 0, skipped: 0, cancelled: 0, list: [] },
     reviewDecision: null,
     ...overrides,
   };
@@ -83,6 +79,30 @@ describe("PrStatusBar merge gate", () => {
 
   it("does not queue auto-merge for changes-requested (author's turn)", () => {
     renderBar(makePr({ reviewDecision: "changesRequested" }), true);
+    expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
+    expect(mergeBtn().disabled).toBe(true);
+  });
+});
+
+describe("PrStatusBar checks", () => {
+  it("shows no Fix CI and enables Merge for a green rollup like facebook/react#38314", () => {
+    renderBar(
+      makePr({
+        checks: { state: "passing", total: 244, passed: 243, failed: 0, pending: 0, skipped: 1, cancelled: 0, list: [] },
+      }),
+    );
+    expect(screen.queryByText("Fix CI")).toBeNull();
+    expect(mergeBtn().disabled).toBe(false);
+  });
+
+  it("offers Fix CI and no Auto-merge for a failed check while another runs", () => {
+    renderBar(
+      makePr({
+        checks: { state: "failing", total: 2, passed: 0, failed: 1, pending: 1, skipped: 0, cancelled: 0, list: [] },
+      }),
+      true,
+    );
+    expect(screen.getByText("Fix CI")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
     expect(mergeBtn().disabled).toBe(true);
   });

@@ -1,5 +1,5 @@
 //! The pull-request surface against real GitHub. `pr.rs` shells out to `gh`
-//! and parses its `--json` stdout, so the contract under test is gh's output
+//! and parses its JSON stdout, so the contract under test is gh's output
 //! shape as much as our own code — which only a live run can check.
 //!
 //! Needs network, a `gh` authenticated with `repo` scope, and push access to
@@ -110,6 +110,15 @@ async fn pr_lifecycle() {
     j.alias(
         format!("https://github.com/{E2E_REPO}/pull/{number}"),
         "$PR_URL",
+    );
+    let by_branch = j
+        .call(&client, Request::WorkstreamPrStatus { id: id.clone() })
+        .await
+        .expect("workstream_pr_status");
+    j.guard(
+        "before attaching, the branch's open PR is found by branch name",
+        by_branch.pointer("/number").and_then(Value::as_u64) == Some(number as u64),
+        json!({ "state": by_branch.pointer("/state") }),
     );
     let attached = j
         .call(

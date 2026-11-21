@@ -4,6 +4,7 @@
 pub mod agent_stub;
 mod cli_assets;
 pub mod containers;
+pub mod fake_gh;
 pub mod flows;
 pub mod goal_stub;
 mod journey;

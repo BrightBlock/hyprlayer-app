@@ -9,6 +9,13 @@
       "guards": [
         {
           "evidence": {
+            "state": "open"
+          },
+          "guard": "before attaching, the branch's open PR is found by branch name",
+          "ok": true
+        },
+        {
+          "evidence": {
             "state": "open",
             "title": "E2E probe"
           },

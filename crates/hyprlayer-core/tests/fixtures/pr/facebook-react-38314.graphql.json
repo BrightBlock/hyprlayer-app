@@ -1,0 +1,4183 @@
+[
+ {
+  "data": {
+   "rateLimit": {
+    "limit": 5000,
+    "remaining": 4916,
+    "resetAt": "2026-11-21T19:13:51Z"
+   },
+   "repository": {
+    "pullRequest": {
+     "number": 38314,
+     "url": "https://github.com/react/react/pull/38314",
+     "title": "[Flight] Run @gaearon's Flight fuzz tests on the tee stack",
+     "state": "OPEN",
+     "mergeable": "CONFLICTING",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "headRefName": "flight-fuzz-harness",
+     "isCrossRepository": false,
+     "isDraft": true,
+     "baseRefName": "flight-value-path",
+     "headRefOid": "09944f58c136a51073800d96c3ba75321e1334a9",
+     "mergeStateStatus": "DIRTY",
+     "latestReviews": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "contexts": {
+           "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "MTAw"
+           },
+           "nodes": [
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v6",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351317/job/136558691009",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run prettier",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351619/job/136558692095",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Cache Runtime node_modules",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742119",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v6",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:46:35Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351897/job/136558708126",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run prettier",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351549/job/136558705711",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v7",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351317/job/136558691054",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v7",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351897/job/136558708872",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v8",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351317/job/136558691145",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v8",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351897/job/136558708798",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v9",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351317/job/136558691073",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v9",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351897/job/136558709254",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v10",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351317/job/136558690724",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "ESLint v10",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351897/job/136558708682",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) ESLint Plugin E2E"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run eslint",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351619/job/136558691598",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Cache Runtime, Compiler node_modules",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742013",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run eslint",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351549/job/136558705614",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Check license",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351619/job/136558692246",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Resolve build shard weights",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742330",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Check license",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351549/job/136558705974",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Test print warnings",
+             "status": "COMPLETED",
+             "conclusion": "CANCELLED",
+             "startedAt": "2026-11-20T20:46:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351619/job/136558692123",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Discover flow inline configs",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558741929",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Test print warnings",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:46:55Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351549/job/136558705252",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Shared) Lint"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fizz/Flight on Node 20 (stable, development)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742041",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fizz/Flight on Node 20 (stable, production)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742309",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fizz/Flight on Node 20 (experimental, development)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558742045",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fizz/Flight on Node 20 (experimental, production)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:47:34Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136558741589",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Confirm generated inline Fizz runtime is up to date",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559548950",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Check flags",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559548942",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Cache Runtime Playwright Chromium",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:14Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559548890",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589631",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589771",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589622",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589867",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589864",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=production (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589641",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=production (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589662",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=production (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:57Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589704",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=production (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:58Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590105",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=production (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589782",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589914",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589797",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589985",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589945",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589954",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=production (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590029",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=production (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589861",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=production (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590074",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=production (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589942",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=production (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590300",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590390",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590111",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590161",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590146",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590260",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590356",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590261",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590379",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590249",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590555",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:58Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590330",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590344",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590338",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:12Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590353",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=development --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590203",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590680",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590445",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590255",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590664",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-classic --env=production --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590281",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590563",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590309",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590706",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590386",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590572",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590617",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590840",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590620",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590425",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590367",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:58Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590503",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590525",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590476",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590492",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=development --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:03Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590495",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:15Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590681",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590522",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590633",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590549",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=www-modern --env=production --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590519",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590657",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:09Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590585",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:10Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590612",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:13Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559590665",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596917",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596823",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596779",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596863",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596935",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=development --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597008",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=false (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596842",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ },
+ {
+  "data": {
+   "rateLimit": {
+    "limit": 5000,
+    "remaining": 4915,
+    "resetAt": "2026-11-21T19:13:51Z"
+   },
+   "repository": {
+    "pullRequest": {
+     "number": 38314,
+     "url": "https://github.com/react/react/pull/38314",
+     "title": "[Flight] Run @gaearon's Flight fuzz tests on the tee stack",
+     "state": "OPEN",
+     "mergeable": "CONFLICTING",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "headRefName": "flight-fuzz-harness",
+     "isCrossRepository": false,
+     "isDraft": true,
+     "baseRefName": "flight-value-path",
+     "headRefOid": "09944f58c136a51073800d96c3ba75321e1334a9",
+     "mergeStateStatus": "DIRTY",
+     "latestReviews": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "contexts": {
+           "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "MjAw"
+           },
+           "nodes": [
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=false (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596873",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=false (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597054",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=false (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596880",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=false (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596913",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=true (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:15Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596949",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=true (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596967",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=true (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596884",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=true (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597016",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=xplat --env=production --variant=true (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597168",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development --persistent (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596942",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development --persistent (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597031",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development --persistent (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596899",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development --persistent (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597005",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=stable --env=development --persistent (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559596919",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development --persistent (Shard 1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597003",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development --persistent (Shard 2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:29Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597030",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development --persistent (Shard 3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597132",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development --persistent (Shard 4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597126",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test -r=experimental --env=development --persistent (Shard 5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:50:15Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559597138",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Test eslint-plugin-react-hooks",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559586968",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (0, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:49Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588335",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (0, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588240",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (1, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:33Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588244",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (1, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588183",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (2, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588405",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (2, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588370",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (3, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588480",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (3, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:58Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588463",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (4, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588245",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (4, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588305",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (5, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:51Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588352",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (5, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588346",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (6, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588421",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (6, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588581",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (7, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588356",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (7, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:52Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588473",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (8, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:52Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588513",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (8, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:52Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588367",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (9, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:51Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588477",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (9, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588447",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (10, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:59Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588418",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (10, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588385",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (11, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588399",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (11, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588344",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (12, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:54Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588357",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (12, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:44Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588501",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (13, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:43Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588442",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (13, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:51Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588381",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (14, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588863",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (14, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588575",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (15, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588499",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (15, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588543",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (16, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588494",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (16, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:51Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588571",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (17, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588483",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (17, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:49Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588565",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (18, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588486",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (18, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588618",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (19, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588492",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (19, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588638",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (20, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588584",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (20, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588540",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (21, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588660",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (21, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:49Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588678",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (22, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:54Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588774",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (22, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:47Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588764",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (23, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:59Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588703",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (23, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:54Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588693",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (24, stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:54Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559589181",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn build and lint (24, experimental)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:49Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559588828",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-browser",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:18Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549438",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549613",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-webpack",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549633",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-turbopack",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:28Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549450",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-parcel",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549535",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-unbundled",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:19Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549501",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-bun",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549522",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-browser-esm",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549583",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-browser-fb",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:14Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549487",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-browser-turbopack",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:14Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549491",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-browser-parcel",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549601",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-edge-webpack",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:28Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549566",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-edge-turbopack",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:19Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549495",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-edge-parcel",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:19Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549597",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-esm",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:28Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549651",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-node-fb",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549544",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-legacy",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:14Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549565",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check markup",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549694",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check dom-fb",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:32Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549861",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check fabric",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549594",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check test",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:18Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549593",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check art",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:21Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549537",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check noop",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:18Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549563",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Flow check custom",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:49:14Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136559549538",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 1/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212302",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 2/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212304",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 3/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212294",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 4/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212168",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 5/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212305",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 6/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212029",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ },
+ {
+  "data": {
+   "rateLimit": {
+    "limit": 5000,
+    "remaining": 4914,
+    "resetAt": "2026-11-21T19:13:51Z"
+   },
+   "repository": {
+    "pullRequest": {
+     "number": 38314,
+     "url": "https://github.com/react/react/pull/38314",
+     "title": "[Flight] Run @gaearon's Flight fuzz tests on the tee stack",
+     "state": "OPEN",
+     "mergeable": "CONFLICTING",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "headRefName": "flight-fuzz-harness",
+     "isCrossRepository": false,
+     "isDraft": true,
+     "baseRefName": "flight-value-path",
+     "headRefOid": "09944f58c136a51073800d96c3ba75321e1334a9",
+     "mergeStateStatus": "DIRTY",
+     "latestReviews": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "contexts": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "MjUz"
+           },
+           "nodes": [
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 7/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212296",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 8/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212371",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 9/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212648",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=development, 10/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212339",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 1/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212420",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 2/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212376",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 3/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212485",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 4/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212378",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 5/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212281",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 6/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:35Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212222",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 7/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212285",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 8/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212505",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 9/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212322",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=stable --env=production, 10/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212405",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 1/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212311",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 2/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212556",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 3/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212417",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 4/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:42Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212577",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 5/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212312",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 6/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212400",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 7/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212537",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 8/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212475",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 9/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212561",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=development, 10/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:42Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212498",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 1/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212497",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 2/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212583",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 3/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:36Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212477",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 4/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212522",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 5/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212594",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 6/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212520",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 7/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212588",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 8/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:39Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212611",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 9/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:41Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212605",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (-r=experimental --env=production, 10/10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:37Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561212659",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (devtools) (1/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:54Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211241",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (devtools) (2/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:11Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211372",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (devtools) (3/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211313",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (devtools) (4/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:08Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211350",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "yarn test-build (devtools) (5/5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:59Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211278",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Process artifacts combined",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211140",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Search build artifacts for unminified errors",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:51Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211136",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Check release dependencies",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:56Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211227",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Check fixtures DOM (stable)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211090",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run fixtures Flight tests (Node default)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211333",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run fixtures Flight tests (Node 20.19.0)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:53Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211244",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Build DevTools and process artifacts (chrome)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211357",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Build DevTools and process artifacts (firefox)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:51:46Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211220",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Build DevTools and process artifacts (edge)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:01Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211473",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run React DevTools browser extension e2e tests",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211373",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run react-devtools-cdt-mcp e2e tests",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:52:06Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561211222",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Run sizebot",
+             "status": "COMPLETED",
+             "conclusion": "SKIPPED",
+             "startedAt": "2026-11-20T20:51:19Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561214706",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Merge DevTools artifacts",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:53:16Z",
+             "detailsUrl": "https://github.com/react/react/actions/runs/44814351370/job/136561999448",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "(Runtime) Build and Test"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Meta CLA Check",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-20T20:46:20Z",
+             "detailsUrl": "https://code.facebook.com/cla/",
+             "checkSuite": {
+              "workflowRun": null
+             }
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+]

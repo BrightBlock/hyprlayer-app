@@ -92,11 +92,7 @@ export const commands = {
 	state: PrState,
 	mergeable: boolean,
 	mergeableState: MergeableState,
-	checks: ChecksState,
-	checksTotal: number,
-	checksPassed: number,
-	checksFailed: number,
-	checksList: PrCheck[],
+	checks: PrChecks,
 	reviewDecision: ReviewDecision | null,
 } | null, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
 	listWorkstreamOpenPrs: (id: string, query: string) => typedError<PrSummary[], AppError>(__TAURI_INVOKE("list_workstream_open_prs", { id, query })),
@@ -114,11 +110,7 @@ export const commands = {
 	state: PrState,
 	mergeable: boolean,
 	mergeableState: MergeableState,
-	checks: ChecksState,
-	checksTotal: number,
-	checksPassed: number,
-	checksFailed: number,
-	checksList: PrCheck[],
+	checks: PrChecks,
 	reviewDecision: ReviewDecision | null,
 } | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
@@ -683,6 +675,8 @@ export type CatalogProvider = {
 	models: CatalogModel[],
 	available?: boolean | null,
 };
+
+export type CheckBucket = "pass" | "fail" | "pending" | "skipping" | "cancel";
 
 export type CheckOutcome = "pass" | "fail";
 
@@ -1436,8 +1430,19 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermiss
 
 export type PrCheck = {
 	name: string,
-	state: ChecksState,
+	bucket: CheckBucket,
 	url: string | null,
+};
+
+export type PrChecks = {
+	state: ChecksState,
+	total: number,
+	passed: number,
+	failed: number,
+	pending: number,
+	skipped: number,
+	cancelled: number,
+	list: PrCheck[],
 };
 
 export type PrState = "open" | "merged" | "closed";
@@ -1449,11 +1454,7 @@ export type PrStatus = {
 	state: PrState,
 	mergeable: boolean,
 	mergeableState: MergeableState,
-	checks: ChecksState,
-	checksTotal: number,
-	checksPassed: number,
-	checksFailed: number,
-	checksList: PrCheck[],
+	checks: PrChecks,
 	reviewDecision: ReviewDecision | null,
 };
 

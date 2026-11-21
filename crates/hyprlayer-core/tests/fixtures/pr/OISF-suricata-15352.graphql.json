@@ -1,0 +1,1009 @@
+[
+ {
+  "data": {
+   "rateLimit": {
+    "limit": 5000,
+    "remaining": 4935,
+    "resetAt": "2026-11-21T18:44:38Z"
+   },
+   "repository": {
+    "pullRequest": {
+     "number": 15352,
+     "url": "https://github.com/OISF/suricata/pull/15352",
+     "title": "affinity: bind worker memory to local NUMA node",
+     "state": "OPEN",
+     "mergeable": "MERGEABLE",
+     "reviewDecision": "REVIEW_REQUIRED",
+     "headRefName": "numa-memory-affinity-v2",
+     "isCrossRepository": true,
+     "isDraft": true,
+     "baseRefName": "main",
+     "headRefOid": "3c639c38d43fe3376c0de536fcb442fcb767fe6b",
+     "mergeStateStatus": "BLOCKED",
+     "latestReviews": {
+      "nodes": []
+     },
+     "commits": {
+      "nodes": [
+       {
+        "commit": {
+         "statusCheckRollup": {
+          "contexts": {
+           "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "NjE"
+           },
+           "nodes": [
+            {
+             "__typename": "CheckRun",
+             "name": "Cargo Audit",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:32:40Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716197/job/75305114278",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "Cargo Audit and Update"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fuzzing (address)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:30:55Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716184/job/75305113362",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "ClusterFuzzLite"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Analyze (cpp)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:27:30Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716196/job/75305113849",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "CodeQL (Rust/C)"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "New Author Check",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:35:47Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716244/job/75305115209",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "New Authors Check"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "tests",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:31:47Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716175/job/75305112807",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "Nix Env Build"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Scan-build",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:32:14Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716207/job/75305115384",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "Scan-build"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Prepare dependencies / Prepare dependencies",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:35:42Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75305115722",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Commit Check",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:31:36Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716179/job/75305113451",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "commit-check"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Prepare dependencies / Prepare dependencies",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:33:41Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716193/job/75305114245",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Formatting Check (clang 14)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:34:15Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716182/job/75305112876",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "formatting-check"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Analyze (rust)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:34:35Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716196/job/75305113862",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "CodeQL (Rust/C)"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Cargo Update",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:25:34Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716197/job/75305114260",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "Cargo Audit and Update"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Prepare cbindgen",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:27:07Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75305115712",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Prepare cbindgen",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:35:25Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716193/job/75305114272",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 9 (no jansson)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:00:13Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035850",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 Dist Builder",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:36:50Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716193/job/75306934659",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "docs"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (cocci)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:06:28Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036086",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (RUSTC+CARGO vars)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:08:02Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036080",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Debian 12 (xdp)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:53:50Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035926",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Debian 13 (xdp)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:03:55Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036093",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "MacOS Latest",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:41:18Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035916",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Windows MSYS2 MINGW64 (NPcap)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:58:31Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036213",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Windows MSYS2 MINGW64 (WinDivert)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:45:35Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035902",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 10 (schema, plugins)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:08:18Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035697",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 9 (schema, rust-checks)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:55:04Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035688",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 9 Test Templates",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:56:07Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035679",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 8",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:46:20Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035654",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fedora 43 (Suricata Verify codecov)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:57:12Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035652",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fedora 43 (clang, debug, asan, wshadow, rust-strict, systemd)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:57:46Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035758",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fedora 43 (gcc, debug, flto, asan, wshadow, rust-strict)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:59:16Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036047",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Fedora (non-root, debug, clang, asan, wshadow, rust-strict, no-ja)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:37:01Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035811",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (unittests coverage)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:57:51Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036041",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (unix socket mode coverage)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:10:56Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036088",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (afpacket and dpdk coverage)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:54:38Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035873",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (pcap unix socket ASAN)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:02:36Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036026",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (afpacket IPS tests in namespaces)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:58:09Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036033",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (afpacket and dpdk live tests with ASAN)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:49:34Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036004",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 24.04 (fuzz corpus coverage)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:03:33Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035949",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 20.04 (-DNDEBUG)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:56:12Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035877",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (Debug Validation)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:40:33Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035886",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (Fuzz)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:01:38Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035904",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (Netmap build)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:55:35Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036096",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (DPDK Build) (24.11.3)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:11:56Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036123",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (DPDK Build) (23.11.5)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:53:39Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036061",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (DPDK Build) (22.11.10)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:51:32Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036022",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (DPDK Build) (21.11.9)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:36:46Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036048",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 Dist Builder",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:47:36Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035818",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Debian 12 MSRV",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T07:56:35Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307035909",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Debian 11",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:11:21Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75307036062",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Build RPMs (almalinux:9)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:12:31Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207449",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Build RPMs (fedora:43)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:15:49Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207486",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "CentOS Stream 9",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:17:40Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207519",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "AlmaLinux 9 (Minimal/Recommended Build)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:16:00Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207439",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 20.04 (unsupported rust)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:16:23Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207471",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Ubuntu 22.04 (Minimal/Recommended Build)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:13:31Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207473",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Windows MSYS2 MINGW64 (libpcap)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:02:35Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207472",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "Windows MSYS2 UCRT64 (libpcap)",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:02:39Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207494",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "PF_RING",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-05-11T08:12:34Z",
+             "detailsUrl": "https://github.com/OISF/suricata/actions/runs/25630716206/job/75309207458",
+             "checkSuite": {
+              "workflowRun": {
+               "event": "pull_request",
+               "workflow": {
+                "name": "builds"
+               }
+              }
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "CodeQL",
+             "status": "COMPLETED",
+             "conclusion": "NEUTRAL",
+             "startedAt": "2026-05-11T07:41:04Z",
+             "detailsUrl": "https://github.com/OISF/suricata/runs/75307678245",
+             "checkSuite": {
+              "workflowRun": null
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "codecov/patch",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-21T15:10:31Z",
+             "detailsUrl": "https://app.codecov.io/gh/OISF/suricata/pull/15352",
+             "checkSuite": {
+              "workflowRun": null
+             }
+            },
+            {
+             "__typename": "CheckRun",
+             "name": "codecov/project",
+             "status": "COMPLETED",
+             "conclusion": "SUCCESS",
+             "startedAt": "2026-11-21T15:10:28Z",
+             "detailsUrl": "https://app.codecov.io/gh/OISF/suricata/pull/15352",
+             "checkSuite": {
+              "workflowRun": null
+             }
+            }
+           ]
+          }
+         }
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+]
