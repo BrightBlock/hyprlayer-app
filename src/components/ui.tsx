@@ -19,7 +19,7 @@ import { IS_MACOS } from "@/lib/platform";
 import { startEdgeDrag } from "@/lib/resize";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRovingRadio } from "@/lib/useRovingRadio";
-import { Icon, type IconSize } from "./Icon";
+import { Icon, type IconName, type IconSize } from "./Icon";
 
 // Unregistered names never conflict, so `rounded-card` would survive `rounded-md`, and `text-ui` would be read as a colour and dropped beside `text-ink`.
 const twMerge = extendTailwindMerge({
@@ -1049,9 +1049,11 @@ export function ContextMenu({ position, onClose, children }: ContextMenuProps) {
 type ContextMenuItemProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   danger?: boolean;
   hint?: ReactNode;
+  icon?: IconName;
+  chord?: Chord | null;
 };
 
-export function ContextMenuItem({ danger, hint, className, children, ...rest }: ContextMenuItemProps) {
+export function ContextMenuItem({ danger, hint, icon, chord, className, children, ...rest }: ContextMenuItemProps) {
   return (
     <button
       type="button"
@@ -1064,7 +1066,15 @@ export function ContextMenuItem({ danger, hint, className, children, ...rest }: 
       )}
       {...rest}
     >
-      {children}
+      {icon || chord ? (
+        <span className="flex items-center gap-2">
+          {icon && <Icon name={icon} size="sm" className={danger ? undefined : "text-ink-dim"} />}
+          <span className="min-w-0 flex-1">{children}</span>
+          {chord && <ChordHint chord={chord} className="ml-4 text-meta text-ink-dim" />}
+        </span>
+      ) : (
+        children
+      )}
       {hint && <span className="mt-0.5 block text-ui text-warn-ink">{hint}</span>}
     </button>
   );

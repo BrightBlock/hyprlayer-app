@@ -85,6 +85,8 @@ import {
 } from "@/features/session/sessionStore";
 import { isBusy } from "@/features/session/transcript";
 import { useCommand } from "@/lib/keybindings/registry";
+import { useChord } from "@/lib/keybindings/useChord";
+import { wantsNativeMenu } from "@/lib/platform";
 import { TAB_SELECT_COUNT, tabSelectId } from "@/lib/keybindings/commands";
 import {
   importDroppedPaths,
@@ -339,6 +341,9 @@ export function ProjectPage() {
     y: number;
     pane: PaneId;
   } | null>(null);
+  const splitRightChord = useChord("tab.toggleSplit");
+  const splitDownChord = useChord("pane.splitDown");
+  const closePaneChord = useChord("pane.close");
   const [splitMenu, setSplitMenu] = useState<{ x: number; y: number; paneId: PaneId } | null>(
     null,
   );
@@ -663,10 +668,8 @@ export function ProjectPage() {
       return appendShell(current, makeShell(id, focusedPaneId(current), ptyEngineId));
     });
   };
-  const onNewTabDefault = () => {
-    if (!multiplexer.enabled) return addShell();
-    addShell(defaultEngine(multiplexer)?.id);
-  };
+  const newTabEngineId = () => (multiplexer.enabled ? defaultEngine(multiplexer)?.id : undefined);
+  const onNewTabDefault = () => addShell(newTabEngineId());
   const openNewAgentMenu = (e: ReactMouseEvent, pane: PaneId) => {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
@@ -706,7 +709,7 @@ export function ProjectPage() {
     if (!canSplit(paneId, dir)) return;
     updateTabs((current) => {
       const id = nextShellId(current.shells, current.archived);
-      const withShell = { ...current, shells: [...current.shells, makeShell(id, paneId)] };
+      const withShell = { ...current, shells: [...current.shells, makeShell(id, paneId, newTabEngineId())] };
       return splitPaneState(withShell, paneId, dir, "after", id);
     });
     setMaximized(null);
@@ -1511,6 +1514,8 @@ export function ProjectPage() {
                     return (
                       <ContextMenu position={menu} onClose={() => setSplitMenu(null)}>
                         <ContextMenuItem
+                          icon="layoutSplit2"
+                          chord={splitRightChord}
                           disabled={!canRow}
                           hint={!canRow ? "Not enough room" : undefined}
                           onClick={() => {
@@ -1521,6 +1526,8 @@ export function ProjectPage() {
                           Split right
                         </ContextMenuItem>
                         <ContextMenuItem
+                          icon="layoutSplitDown"
+                          chord={splitDownChord}
                           disabled={!canCol}
                           hint={!canCol ? "Not enough room" : undefined}
                           onClick={() => {
@@ -1530,8 +1537,32 @@ export function ProjectPage() {
                         >
                           Split down
                         </ContextMenuItem>
+                        {paneIds.length > 1 &&
+                          (zoomedPaneId === menu.paneId ? (
+                            <ContextMenuItem
+                              icon="paneRestore"
+                              onClick={() => {
+                                setMaximized(null);
+                                setSplitMenu(null);
+                              }}
+                            >
+                              Restore split view
+                            </ContextMenuItem>
+                          ) : (
+                            <ContextMenuItem
+                              icon="paneZoom"
+                              onClick={() => {
+                                if (wsId) setMaximized({ wsId, paneId: menu.paneId });
+                                setSplitMenu(null);
+                              }}
+                            >
+                              Expand pane
+                            </ContextMenuItem>
+                          ))}
                         <MenuSeparator />
                         <ContextMenuItem
+                          icon="close"
+                          chord={closePaneChord}
                           disabled={paneIds.length === 1}
                           onClick={() => {
                             mergePane(menu.paneId);
@@ -1652,6 +1683,11 @@ export function ProjectPage() {
                           {renderLeafStrip(paneId)}
                           <div
                             data-pane-content
+                            onContextMenu={(e) => {
+                              if (e.defaultPrevented || wantsNativeMenu(e.target)) return;
+                              e.preventDefault();
+                              setSplitMenu({ x: e.clientX, y: e.clientY, paneId });
+                            }}
                             className={`relative flex min-h-0 flex-1 flex-col ${
                               dropTarget?.paneId === paneId && dropTarget.edge === null
                                 ? "ring-2 ring-inset ring-accent/60"

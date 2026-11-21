@@ -5,6 +5,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands } from "./lib/bindings";
+import { wantsNativeMenu } from "./lib/platform";
 import { attachEventListeners, onEventsMissed, onServerReconnected, registerEventBridge } from "./lib/events";
 import { hydrateRunning, scriptRunBridge } from "./features/session/scriptsStore";
 import { reconnectBridge } from "./features/hosts/reconnect";
@@ -137,11 +138,8 @@ setupQueryFocus();
 setupMotionGate();
 setupDragRegion();
 
-const NATIVE_MENU_SELECTOR =
-  "input, textarea, [contenteditable]:not([contenteditable='false']), [data-native-menu]";
 window.addEventListener("contextmenu", (e) => {
-  const target = e.target;
-  if (target instanceof Element && target.closest(NATIVE_MENU_SELECTOR)) return;
+  if (wantsNativeMenu(e.target)) return;
   e.preventDefault();
   window.getSelection()?.removeAllRanges();
 });
