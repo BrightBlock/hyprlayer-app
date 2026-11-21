@@ -395,9 +395,13 @@ function holdItem(sessionId: string, item: Arrival): void {
   if (queue) queue.push(item);
   else held.set(sessionId, [item]);
   reportHeld(sessionId);
-  // A queued message waits on this turn's end; sending it is the user's own action.
-  const ended = item.event.kind === "turnDone" || item.event.kind === "exited";
-  if (ended && (entryOf(sessionId)?.queued.length ?? 0) > 0) void pullNow(sessionId);
+  const { kind } = item.event;
+  // An exit ends the stream a later flush would ride; a queued message waits on this turn's end.
+  const due = kind === "exited" || (kind === "turnDone" && (entryOf(sessionId)?.queued.length ?? 0) > 0);
+  if (!due) return;
+  // A pull mid-read already applied what it held.
+  if (pulls.has(sessionId)) repull.add(sessionId);
+  else void pullNow(sessionId);
 }
 
 function reportHeld(sessionId: string): void {
@@ -2481,6 +2485,7 @@ export const sessionBridge: EventBridge = () => [
     // A sync server pulls other devices' turns itself.
     void syncSupport().then((synced) => {
       if (!synced) markDrifted(payload.sessionId, payload.state);
+      else if (isTerminal(payload.state)) readExit(payload.sessionId);
     });
   }),
 ];
@@ -2510,6 +2515,13 @@ function catchUpEnded(sessionId: string): void {
   const entry = entryOf(sessionId);
   const sync = syncOf(sessionId);
   if (!entry || !sync || !isTerminal(entry.state) || channels.has(sessionId)) return;
+  if (sync.committedRev > sync.localRev) void pullNow(sessionId);
+}
+
+// Off the stream only the lifecycle names an exit; its row sits past any held turns, which it finishes.
+function readExit(sessionId: string): void {
+  const sync = syncOf(sessionId);
+  if (!sync || channels.has(sessionId) || resuming.has(sessionId)) return;
   if (sync.committedRev > sync.localRev) void pullNow(sessionId);
 }
 

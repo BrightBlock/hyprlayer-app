@@ -52,8 +52,10 @@ const h = vi.hoisted(() => {
   const setSessionModel = vi.fn(async () => ({ status: "ok", data: null }));
   const setSessionEffort = vi.fn(async () => ({ status: "ok", data: null }));
   const listenRevised = vi.fn(async (_cb: (e: { payload: unknown }) => void) => () => {});
+  const listenLifecycle = vi.fn(async (_cb: (e: { payload: unknown }) => void) => () => {});
   return {
     listenRevised,
+    listenLifecycle,
     setSessionModel,
     setSessionEffort,
     notifyNeedsAttention,
@@ -110,6 +112,7 @@ vi.mock("../../lib/bindings", () => ({
   },
   events: {
     sessionRevised: { listen: h.listenRevised },
+    sessionLifecycle: { listen: h.listenLifecycle },
     sessionReset: { listen: async () => () => {} },
     sessionViewers: { listen: async () => () => {} },
     serverDisconnected: { listen: async () => () => {} },
@@ -148,6 +151,7 @@ const {
   respondPermission,
   rewindRefusal,
   rewindToMessage,
+  sessionBridge,
   whenBackfilled,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
@@ -1392,6 +1396,113 @@ describe("transcript sync: queue and reload", () => {
     told(2, [], false);
     await settle();
     expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
+  });
+
+  describe("a view not streaming the session learns another device's kill", () => {
+    const KILLED: SessionEvent = { kind: "exited", outcome: "killed", code: null, stderrTail: "" };
+    const THEIRS_TOO: SessionEvent = { kind: "userMessage", text: "theirs too", stage: null, author: OTHER };
+
+    async function caughtUpRunning() {
+      let revised: ((e: { payload: unknown }) => void) | null = null;
+      let lifecycle: ((e: { payload: unknown }) => void) | null = null;
+      h.listenRevised.mockImplementationOnce(async (cb) => {
+        revised = cb;
+        return () => {};
+      });
+      h.listenLifecycle.mockImplementationOnce(async (cb) => {
+        lifecycle = cb;
+        return () => {};
+      });
+      transcriptSyncBridge();
+      sessionBridge();
+      const id = await startBusySession();
+      emitAt(INIT, 0, 0);
+      emitAt(TURN_DONE, 1, 0);
+      emitAt(KILLED, 2, 1, null);
+      const told = (rev: number, turns: { seq: number; kind: string }[], working: boolean, author: typeof OTHER | null = OTHER) =>
+        revised!({ payload: { sessionId: id, workstreamId: "ws1", rev, turns, author, working, at: 0 } });
+      // Another device resumes and runs a turn; this view loads it and is left running, off the stream.
+      told(2, [{ seq: 4, kind: "user" }], true);
+      h.listSessionTurns.mockResolvedValueOnce(page([row(3, INIT), row(4, THEIRS), row(5, reply("one")), row(6, TURN_DONE)], 2));
+      await pullNow(id);
+      expect(entryOf(id).state).toBe("running");
+      expect(entryOf(id).live).toBe(false);
+      expect(syncOf(id)?.phase).toBe("inSync");
+      const killed = () => lifecycle!({ payload: { sessionId: id, workstreamId: "ws1", state: "killed" } });
+      return { id, told, killed };
+    }
+
+    it("while it holds that device's turns, and reads them since they are finished", async () => {
+      const { id, told, killed } = await caughtUpRunning();
+      told(3, [{ seq: 7, kind: "user" }], true);
+      told(4, [{ seq: 8, kind: "assistant" }], true);
+      told(4, [], false);
+      await settle();
+      const calls = h.listSessionTurns.mock.calls.length;
+      expect(syncOf(id)?.phase).toBe("behind");
+      expect(syncOf(id)?.pendingTurns).toHaveLength(2);
+
+      h.listSessionTurns.mockResolvedValueOnce(
+        page([row(7, THEIRS_TOO), row(8, reply("two")), row(9, TURN_DONE), row(10, KILLED)], 5),
+      );
+      told(5, [], false, null);
+      await settle();
+      // A running view holds the turns; only the kill lets them in.
+      expect(h.listSessionTurns.mock.calls.length).toBe(calls);
+      killed();
+
+      await vi.waitFor(() => expect(entryOf(id).state).toBe("killed"));
+      expect(syncOf(id)?.phase).toBe("inSync");
+      expect(syncOf(id)?.pendingTurns).toEqual([]);
+      expect(entryOf(id).items.some((it) => "text" in it && it.text === "two")).toBe(true);
+    });
+
+    it("with nothing held", async () => {
+      const { id, told, killed } = await caughtUpRunning();
+      h.listSessionTurns.mockResolvedValueOnce(page([row(7, KILLED)], 3));
+      told(3, [], false, null);
+      killed();
+
+      await vi.waitFor(() => expect(entryOf(id).state).toBe("killed"));
+      expect(syncOf(id)?.phase).toBe("inSync");
+    });
+  });
+
+  it("an attached view holding another device's turn ends on the exit and shows the finished turn", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    emitAt(THEIRS, 2, 1, OTHER);
+    emitAt(reply("theirs done"), 3, 2, OTHER);
+    expect(syncOf(id)?.phase).toBe("behind");
+
+    emitAt({ kind: "exited", outcome: "killed", code: null, stderrTail: "" }, 4, 3, null);
+
+    await vi.waitFor(() => expect(entryOf(id).state).toBe("killed"));
+    expect(entryOf(id).live).toBe(false);
+    expect(entryOf(id).items.some((it) => "text" in it && it.text === "theirs done")).toBe(true);
+    expect(syncOf(id)?.phase).toBe("inSync");
+  });
+
+  it("an exit held while a Load is reading still ends the attached view", async () => {
+    const id = await startBusySession();
+    emitAt(INIT, 0, 0);
+    emitAt(TURN_DONE, 1, 0);
+    emitAt(THEIRS, 2, 1, OTHER);
+    let read: (v: unknown) => void = () => {};
+    h.listSessionTurns.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+    // A commit the stream hasn't shown yet, so the Load reads the log.
+    syncInput(id, { kind: "stale", rev: 2, committedRev: 2 });
+    const load = pullNow(id);
+    await vi.waitFor(() => expect(h.listSessionTurns).toHaveBeenCalled());
+    emitAt(reply("theirs done"), 3, 2, OTHER);
+    emitAt({ kind: "exited", outcome: "killed", code: null, stderrTail: "" }, 4, 3, null);
+    read(page([], 2));
+    await load;
+
+    await vi.waitFor(() => expect(entryOf(id).state).toBe("killed"));
+    expect(entryOf(id).items.some((it) => "text" in it && it.text === "theirs done")).toBe(true);
+    expect(syncOf(id)?.phase).toBe("inSync");
   });
 
   it("holds another device's turn on an idle attached view until Pull", async () => {
