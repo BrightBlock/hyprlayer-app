@@ -186,6 +186,45 @@ async fn resume_keeps_model() {
         replied && restarted["model"] == SWITCHED && restarted["effort"] == "low",
         json!({ "replied": replied, "launch": restarted }),
     );
+    let mode = listed_field(&mut j, &client, &ws, &id, "requestedPermissionMode").await;
+    j.guard(
+        "list_sessions reports the mode the restart asked for",
+        mode == "acceptEdits",
+        json!({ "mode": mode }),
+    );
+
+    j.step("a reopened tab with no pick of its own resumes in the mode the row asked for");
+    j.call(
+        &client,
+        Request::KillSession {
+            session_id: id.clone(),
+        },
+    )
+    .await
+    .expect("kill_session");
+    recv_until(&mut events, |e| matches!(e, SessionEvent::Exited { .. })).await;
+    // What the desktop sends for a tab with no pick: the row's requested mode.
+    let asked = listed_field(&mut j, &client, &ws, &id, "requestedPermissionMode").await;
+    let requested: Option<PermissionMode> = serde_json::from_value(asked).unwrap_or(None);
+    let (_, _, _, mut events) = client
+        .resume_session_stream(id.clone(), None, None, requested, None)
+        .await
+        .expect("resume_session");
+    send(&mut j, &client, &id, "after the reopen").await;
+    let replied = turn_done(&mut events).await;
+    let launched = launched_mode(&argv);
+    let kept = listed_field(&mut j, &client, &ws, &id, "requestedPermissionMode").await;
+    j.guard(
+        "the relaunch runs acceptEdits and the row keeps it",
+        replied && launched == "acceptEdits" && kept == "acceptEdits",
+        json!({ "replied": replied, "launched": launched, "row": kept }),
+    );
+    let reopened = launch(&argv);
+    j.guard(
+        "it names no model or effort and runs the row's",
+        reopened["model"] == SWITCHED && reopened["effort"] == "low",
+        json!({ "launch": reopened }),
+    );
 
     j.step("a restart that names a model sets both");
     drop(events);
@@ -200,6 +239,12 @@ async fn resume_keeps_model() {
         "the named model runs with no effort",
         replied && named["model"] == OTHER && named["effort"].is_null(),
         json!({ "replied": replied, "launch": named }),
+    );
+    let mode = listed_field(&mut j, &client, &ws, &id, "requestedPermissionMode").await;
+    j.guard(
+        "a restart that names no mode reports Auto",
+        mode.is_null(),
+        json!({ "mode": mode }),
     );
 
     j.step("a model and effort picked while the session is exited persist");
@@ -269,6 +314,29 @@ async fn resume_keeps_model() {
         json!({ "replied": replied, "launch": recovered }),
     );
 
+    j.step("a session started in Bypass reports it before it ever launches");
+    let (bypass, _prompt, _stream_id, _bypass_events) = client
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::General,
+            "bypass".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Claude),
+                permission_mode: Some(PermissionMode::BypassPermissions),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start_stage_session (bypass)");
+    j.alias(&bypass.id, "$BYPASS");
+    let mode = listed_field(&mut j, &client, &ws, &bypass.id, "requestedPermissionMode").await;
+    j.guard(
+        "list_sessions reports bypassPermissions",
+        mode == "bypassPermissions",
+        json!({ "mode": mode }),
+    );
+
     j.step("shutdown");
     drop(events);
     let stopped = server.shutdown(&client).await;
@@ -279,6 +347,22 @@ async fn resume_keeps_model() {
     );
 
     j.finish();
+}
+
+/// The latest launch's `--permission-mode`.
+fn launched_mode(argv: &Path) -> Value {
+    let log = std::fs::read_to_string(argv).unwrap_or_default();
+    let words: Vec<&str> = log
+        .lines()
+        .last()
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect();
+    words
+        .iter()
+        .position(|w| *w == "--permission-mode")
+        .and_then(|i| words.get(i + 1))
+        .map_or(Value::Null, |v| json!(v))
 }
 
 /// The latest launch's resume, model and effort flags.
@@ -343,6 +427,16 @@ async fn send(j: &mut Journey, client: &RpcClient, id: &str, text: &str) {
 }
 
 async fn listed_model(j: &mut Journey, client: &RpcClient, ws: &str, id: &str) -> Value {
+    listed_field(j, client, ws, id, "model").await
+}
+
+async fn listed_field(
+    j: &mut Journey,
+    client: &RpcClient,
+    ws: &str,
+    id: &str,
+    field: &str,
+) -> Value {
     let sessions = j
         .call(
             client,
@@ -355,7 +449,7 @@ async fn listed_model(j: &mut Journey, client: &RpcClient, ws: &str, id: &str) -
     sessions
         .as_array()
         .and_then(|all| all.iter().find(|s| s["id"] == id))
-        .map(|s| s["model"].clone())
+        .map(|s| s[field].clone())
         .unwrap_or(Value::Null)
 }
 

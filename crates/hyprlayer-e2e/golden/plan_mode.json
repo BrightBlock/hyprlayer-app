@@ -39,6 +39,13 @@
           },
           "guard": "the client hears the harness leave plan mode",
           "ok": true
+        },
+        {
+          "evidence": {
+            "mode": "default"
+          },
+          "guard": "the row records the mode the harness left plan mode for",
+          "ok": true
         }
       ],
       "step": "the agent exits plan mode"
@@ -134,6 +141,29 @@
         }
       ],
       "step": "restart applies a different mode"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "heard": [
+              "acceptEdits"
+            ],
+            "mode": "acceptEdits"
+          },
+          "guard": "a switch to Accept edits is heard and recorded",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "heard": [],
+            "mode": null
+          },
+          "guard": "the harness's report of Auto's own mode leaves the row on Auto and reaches no client",
+          "ok": true
+        }
+      ],
+      "step": "an in-place switch to Auto stays Auto"
     },
     {
       "guards": [

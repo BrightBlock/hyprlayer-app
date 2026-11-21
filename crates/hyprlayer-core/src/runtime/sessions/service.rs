@@ -410,18 +410,7 @@ impl SessionService<'_> {
                     .ok_or_else(|| CoreError::SessionNotFound {
                         session_id: session_id.to_string(),
                     })?;
-            if session.harness == Harness::Opencode {
-                if !opencode_model_is_supported(model_id) {
-                    return Err(CoreError::OpencodeProviderUnsupported);
-                }
-                if let Some(server) = self.runtime.providers().opencode_server_if_running().await {
-                    if server.knows_model(model_id).await == Some(false) {
-                        return Err(CoreError::OpencodeModelUnavailable {
-                            model: model_id.to_string(),
-                        });
-                    }
-                }
-            }
+            self.check_model(session.harness, model_id).await?;
         }
         // opencode and codex report a model only at spawn, so a relaunch reads the switch from the row.
         let (db, id, stored) = (
@@ -434,6 +423,48 @@ impl SessionService<'_> {
             driver.set_model(model);
         }
         Ok(())
+    }
+
+    async fn check_model(&self, harness: Harness, model_id: &str) -> Result<()> {
+        if harness != Harness::Opencode {
+            return Ok(());
+        }
+        if !opencode_model_is_supported(model_id) {
+            return Err(CoreError::OpencodeProviderUnsupported);
+        }
+        if let Some(server) = self.runtime.providers().opencode_server_if_running().await {
+            if server.knows_model(model_id).await == Some(false) {
+                return Err(CoreError::OpencodeModelUnavailable {
+                    model: model_id.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Only a start that never launched: a conversation that ran lives in its harness.
+    pub async fn set_harness(
+        &self,
+        session_id: &str,
+        harness: Harness,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<()> {
+        let op = self.op_lock(session_id).await;
+        let _held = op.lock().await;
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        let log = blocking(move || db.session_log(&id)).await?;
+        if self.is_live(session_id).await || !owes_first_turn(&log) {
+            return Err(CoreError::SessionLaunched {
+                session_id: session_id.to_string(),
+            });
+        }
+        if let Some(model_id) = model.as_deref() {
+            self.check_model(harness, model_id).await?;
+        }
+        let (db, id) = (self.runtime.db.clone(), session_id.to_string());
+        blocking(move || db.set_session_harness(&id, harness, model.as_deref(), effort.as_deref()))
+            .await
     }
 
     pub async fn set_effort(&self, session_id: &str, effort: Option<String>) -> Result<()> {
@@ -455,6 +486,9 @@ impl SessionService<'_> {
         mode: Option<PermissionMode>,
     ) -> Result<()> {
         let driver = self.require_live(session_id).await?;
+        // Ahead of the switch, so the harness's report of it is read against what was asked.
+        let (db, id, requested) = (self.runtime.db.clone(), session_id.to_string(), mode);
+        blocking(move || db.set_session_requested_permission_mode(&id, requested)).await?;
         let mode = match mode {
             Some(mode) => mode,
             None => pipeline::policy_for(self.require_row(session_id).await?.stage).permission_mode,
@@ -1184,11 +1218,14 @@ impl SessionService<'_> {
         let harness = harness.unwrap_or_default();
         let first_input = Some(input.trim().to_string()).filter(|t| !t.is_empty());
         let bodies = self.action_prompt_bodies(stage, &workstream).await;
-        let mut prompt =
-            pipeline::compose_prompt(stage, &input, &workstream.base_branch, &bodies, harness);
-        if let Some(suffix) = pipeline::implement_notes_suffix(harness, stage, &workstream.id) {
-            prompt.push_str(&suffix);
-        }
+        let prompt = pipeline::stage_prompt(
+            harness,
+            stage,
+            &input,
+            &workstream.base_branch,
+            &bodies,
+            &workstream.id,
+        );
         self.stage_start_effects(&workstream, stage, &attached_docs, &input)
             .await;
         let wire_prompt = pipeline::append_docs(prompt.clone(), &attached_docs);
@@ -1217,6 +1254,8 @@ impl SessionService<'_> {
                 // A retry of a start that never launched runs what was asked for, not the harness default.
                 db.set_session_model(&session.id, requested.0.as_deref())?;
                 db.set_session_effort(&session.id, requested.1.as_deref())?;
+                db.set_session_requested_permission_mode(&session.id, permission_mode)?;
+                session.requested_permission_mode = permission_mode;
                 db.set_session_first_turn(&session.id, &first_turn)?;
                 if lineage.origin != SessionOrigin::User || lineage.parent_session_id.is_some() {
                     db.set_session_lineage(
@@ -1468,6 +1507,7 @@ impl SessionService<'_> {
         }
     }
 
+    /// A client's relaunch; only it records the mode asked for, so a server-started one never rewrites it.
     pub async fn launch(&self, params: LaunchSessionParams) -> Result<()> {
         let unsent = if params.resume && params.session.provider_session_id.is_none() {
             self.unsent_first_turn(&params.session).await
@@ -1475,6 +1515,7 @@ impl SessionService<'_> {
             None
         };
         let session_id = params.session.id.clone();
+        let requested = params.permission_mode;
         let driver = match self.launch_driver(params).await {
             Ok(driver) => driver,
             Err(e) => {
@@ -1485,6 +1526,12 @@ impl SessionService<'_> {
                 return Err(e);
             }
         };
+        let (db, sid) = (self.runtime.db.clone(), session_id.clone());
+        if let Err(e) =
+            blocking(move || db.set_session_requested_permission_mode(&sid, requested)).await
+        {
+            tracing::warn!("session {session_id}: could not record its mode: {e}");
+        }
         if let Some(first) = unsent {
             // Callers hold the op lock across the launch, and the first send takes it.
             let runtime = self.runtime.handle.clone();
@@ -1510,25 +1557,16 @@ impl SessionService<'_> {
     /// The first turn a start that failed before any init still owes its harness, follow-up included.
     async fn unsent_first_turn(&self, session: &Session) -> Option<FirstTurn> {
         let (db, id) = (self.runtime.db.clone(), session.id.clone());
-        let (log, stored) =
-            blocking(move || Ok((db.session_log(&id)?, db.session_first_turn(&id)?)))
-                .await
-                .ok()?;
-        if log
-            .iter()
-            .any(|e| matches!(e.event, SessionEvent::Init { .. }))
-        {
-            return None;
-        }
-        // No failed exit means a harness is still coming up with the prompt, as in a restart before its init.
-        let failed = log.iter().rev().find_map(|e| match &e.event {
-            SessionEvent::Exited { outcome, .. } => Some(*outcome),
-            _ => None,
-        });
-        if !matches!(
-            failed,
-            Some(ExitOutcome::SpawnFailed | ExitOutcome::Crashed)
-        ) {
+        let (log, stored, input) = blocking(move || {
+            Ok((
+                db.session_log(&id)?,
+                db.session_first_turn(&id)?,
+                db.session_first_input(&id)?,
+            ))
+        })
+        .await
+        .ok()?;
+        if !owes_first_turn(&log) {
             return None;
         }
         // The log's turn, not the one stored at start: a rewind may have replaced it.
@@ -1556,9 +1594,18 @@ impl SessionService<'_> {
             .await
             .ok()?;
         let bodies = self.action_prompt_bodies(session.stage, &workstream).await;
+        let wire_prompt = pipeline::recompose_first_turn(
+            session.harness,
+            session.stage,
+            input.as_deref().unwrap_or_default(),
+            &workstream.base_branch,
+            &bodies,
+            &workstream.id,
+            &turn.text,
+        );
         Some(FirstTurn {
             session_id: session.id.clone(),
-            wire_prompt: turn.text,
+            wire_prompt,
             stage: session.stage,
             prompt_name: turn.prompt_name,
             client_message_id: turn.client_message_id,
@@ -2082,4 +2129,23 @@ fn failed_start(reason: &str) -> SessionEvent {
         code: None,
         stderr_tail: reason.to_string(),
     }
+}
+
+/// No init, and the start ended failed: no failed exit means a harness is still coming up with
+/// the prompt, as in a restart before its init.
+fn owes_first_turn(log: &[SessionLogEntry]) -> bool {
+    if log
+        .iter()
+        .any(|e| matches!(e.event, SessionEvent::Init { .. }))
+    {
+        return false;
+    }
+    let failed = log.iter().rev().find_map(|e| match &e.event {
+        SessionEvent::Exited { outcome, .. } => Some(*outcome),
+        _ => None,
+    });
+    matches!(
+        failed,
+        Some(ExitOutcome::SpawnFailed | ExitOutcome::Crashed)
+    )
 }

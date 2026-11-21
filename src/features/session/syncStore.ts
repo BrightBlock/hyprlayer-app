@@ -1,3 +1,4 @@
+import { focusManager } from "@tanstack/react-query";
 import { create } from "zustand";
 
 import {
@@ -61,6 +62,7 @@ export function selfClientId(): string | null {
 const SYNCED_FLASH_MS = 3_000;
 const WATCH_DEBOUNCE_MS = 300;
 const POLL_MS = 15_000;
+const IDLE_POLL_MS = 60_000;
 
 const drafting = new Map<string, boolean>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -216,9 +218,14 @@ export function forgetSyncSupport(): void {
 let installed = false;
 let connected = true;
 let watchTimer: ReturnType<typeof setTimeout> | null = null;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollMs = POLL_MS;
+// The server replaces a connection's watched set, so an empty one goes out once to clear it.
+let serverWatching = false;
 
 export function scheduleWatch(): void {
   if (!installed) return;
+  pollMs = POLL_MS;
   if (watchTimer !== null) clearTimeout(watchTimer);
   watchTimer = setTimeout(() => {
     watchTimer = null;
@@ -226,9 +233,37 @@ export function scheduleWatch(): void {
   }, WATCH_DEBOUNCE_MS);
 }
 
+function schedulePoll(): void {
+  if (pollTimer !== null) clearTimeout(pollTimer);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    if (connected && visible()) void sendWatch();
+    else schedulePoll();
+  }, pollMs);
+}
+
 async function sendWatch(): Promise<void> {
-  if (!connected || !handlers || !(await syncSupport())) return;
+  // Armed first, so a reply that never comes can't end the chain.
+  schedulePoll();
+  try {
+    await watchOnce();
+  } finally {
+    schedulePoll();
+  }
+}
+
+// A reply naming a revision or a turn this client hadn't heard of.
+function stirred(reply: SessionRevDto): boolean {
+  const known = syncOf(reply.sessionId);
+  const heard = Math.max(known?.localRev ?? 0, known?.remoteRev ?? 0);
+  return reply.working || reply.inFlight > 0 || rev(reply.rev) > heard || rev(reply.resetRev) > (known?.resetRev ?? 0);
+}
+
+async function watchOnce(): Promise<void> {
+  if (!connected || !handlers) return;
   const ids = handlers.watched();
+  if (ids.length === 0 && !serverWatching) return;
+  if (!(await syncSupport())) return;
   const { bySession } = useTranscriptSync.getState();
   const sessions = ids.map((sessionId) => ({ sessionId, rev: bySession[sessionId]?.localRev ?? 0 }));
   let replies: SessionRevDto[];
@@ -238,6 +273,8 @@ async function sendWatch(): Promise<void> {
     log.warn("sync", "watching sessions failed", e);
     return;
   }
+  serverWatching = ids.length > 0;
+  pollMs = replies.some(stirred) ? POLL_MS : Math.min(pollMs * 2, IDLE_POLL_MS);
   const still = new Set(handlers.watched());
   const viewers: Record<string, ClientRef[]> = {};
   for (const reply of replies) viewers[reply.sessionId] = reply.viewers;
@@ -264,6 +301,8 @@ async function sendWatch(): Promise<void> {
 export function transcriptSyncReconnected(): void {
   forgetSyncSupport();
   connected = true;
+  // A new connection starts with nothing watched.
+  serverWatching = false;
   scheduleWatch();
 }
 
@@ -274,9 +313,10 @@ export function setupTranscriptSync(): void {
     (self) => useTranscriptSync.setState({ self }),
     (e) => log.warn("sync", "loading this client's identity failed", e),
   );
-  setInterval(() => {
-    if (connected && visible()) void sendWatch();
-  }, POLL_MS);
+  // An idle poll can be a minute out; a returning user shouldn't wait for it.
+  focusManager.subscribe((focused) => {
+    if (focused) scheduleWatch();
+  });
 }
 
 export const transcriptSyncBridge: EventBridge = () => [

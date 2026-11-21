@@ -353,6 +353,9 @@ pub struct Session {
     /// What it launched with, or was asked to start on; a retry of a failed start shows it.
     #[serde(default)]
     pub effort: Option<String>,
+    /// The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own.
+    #[serde(default)]
+    pub requested_permission_mode: Option<PermissionMode>,
 }
 
 impl Session {
@@ -566,6 +569,7 @@ mod tests {
             origin: SessionOrigin::User,
             parent_session_id: None,
             effort: None,
+            requested_permission_mode: None,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

@@ -20,12 +20,7 @@ use hyprlayer_models::session::QuestionAnswers;
 pub use hyprlayer_models::agent::PermissionMode;
 
 pub(crate) fn permission_mode_flag(mode: PermissionMode) -> &'static str {
-    match mode {
-        PermissionMode::Default => "default",
-        PermissionMode::AcceptEdits => "acceptEdits",
-        PermissionMode::Plan => "plan",
-        PermissionMode::BypassPermissions => "bypassPermissions",
-    }
+    mode.as_str()
 }
 
 pub struct SpawnConfig {

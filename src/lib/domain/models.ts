@@ -137,9 +137,15 @@ export function modelOption(
   };
 }
 
+// Init may report an id without the date or `[1m]` the catalog's carries, or with them.
+const bareModelId = (id: string) => id.replace(/\[[^\]]*\]$/, "").replace(/-\d{8}(-v\d+)?$/, "");
+
 /** The catalog key for a launch's model flag or id; an unknown one stays as given. */
 export function claudeModelKey(flagOrId: string, catalog: readonly ModelOption[]): string {
-  return catalog.find((m) => m.key === flagOrId || m.flag === flagOrId || m.resolvedModel === flagOrId)?.key ?? flagOrId;
+  const exact = catalog.find((m) => m.key === flagOrId || m.flag === flagOrId || m.resolvedModel === flagOrId);
+  if (exact) return exact.key;
+  const bare = bareModelId(flagOrId);
+  return catalog.find((m) => m.resolvedModel && bareModelId(m.resolvedModel) === bare)?.key ?? flagOrId;
 }
 
 export function resumeModelFlag(model: ModelOption): string {

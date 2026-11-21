@@ -41,6 +41,7 @@ import {
   invalidateWorktreeGit,
   useActiveSessions,
   useWorkstreamDocList,
+  workstreamSessionsQuery,
 } from "@/lib/queries";
 import { findWorkstreamForNotify, notifyNeedsAttention } from "@/lib/notifications";
 import { useToast } from "@/lib/toast";
@@ -195,12 +196,13 @@ function entryOf(sessionId: string): SessionEntry | undefined {
   return useSessionStore.getState().sessions[sessionId];
 }
 
-function setEntry(sessionId: string, next: SessionEntry): void {
+/** `at` times a turn by its rows rather than by when they reached this client; `closed` is a turn a fold ended. */
+function setEntry(sessionId: string, next: SessionEntry, clock: { at?: number; closed?: LastTurn | null } = {}): void {
   const prev = useSessionStore.getState().sessions[sessionId];
   const workingSince = nextWorkingSince(prev, next);
   const awaitingSince = nextAwaitingSince(prev, next);
   const taskStartedAt = nextTaskStartedAt(prev, next);
-  const turn = nextTurn(prev, next, Date.now());
+  const turn = nextTurn(prev, next, clock.at ?? Date.now(), clock.closed);
   const recap = turn.turnSince !== null ? null : (next.recap ?? prev?.recap ?? null);
   useSessionStore.setState((s) => ({
     sessions: {
@@ -369,9 +371,9 @@ function dispatch(sessionId: string, item: SessionStreamItemDto): void {
   }
 }
 
-function applySynced(sessionId: string, item: Routed): void {
+function applySynced(sessionId: string, item: Routed, at?: number): void {
   if (!entryOf(sessionId)) return;
-  applyEvent(sessionId, item.event, item);
+  applyEvent(sessionId, item.event, item, at);
   const applied = rev(item.rev);
   const sync = syncOf(sessionId);
   // Most items repeat the rev already applied; partial text arrives per token.
@@ -410,7 +412,7 @@ function applyHeld(sessionId: string): Arrival[] {
   if (!queue) return [];
   held.delete(sessionId);
   for (const item of queue) {
-    applySynced(sessionId, item);
+    applySynced(sessionId, item, item.createdAt ?? item.receivedAt);
     if (item.event.kind !== "userMessage") continue;
     // A live user message has no createdAt; when it arrived is the closest stand-in.
     const entry = entryOf(sessionId);
@@ -430,7 +432,7 @@ function trimHeld(sessionId: string, appliedSeq: number): void {
   else if (kept.length < queue.length) held.set(sessionId, kept);
 }
 
-function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | null): void {
+function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | null, at?: number): void {
   const current = entryOf(sessionId);
   if (!current) return;
   const seq = synced?.seq ?? null;
@@ -469,7 +471,7 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
     }
     nextEntry.turnAuthor = turnAuthorAfter(current.turnAuthor ?? null, synced, selfClientId(), current.streaming);
   }
-  setEntry(sessionId, nextEntry);
+  setEntry(sessionId, nextEntry, { at });
   settled?.onSent?.();
   if (event.kind === "permissionModeChanged") {
     setSessionPermissionMode(current.workstreamId, sessionId, event.mode);
@@ -1145,9 +1147,16 @@ export async function retryFailedStart(
   sessionId: string,
   model: string | null,
   effort: string | null,
+  harness?: Harness,
 ): Promise<void> {
-  if (model) await unwrap(commands.setSessionModel(sessionId, model));
-  if (effort) await unwrap(commands.setSessionEffort(sessionId, effort));
+  // A new harness replaces the row's model and effort, null included: they were the old one's.
+  if (harness) {
+    await unwrap(commands.setSessionHarness(sessionId, harness, model, effort));
+    void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });
+  } else {
+    if (model) await unwrap(commands.setSessionModel(sessionId, model));
+    if (effort) await unwrap(commands.setSessionEffort(sessionId, effort));
+  }
   try {
     await resumeSession(sessionId);
   } catch (e) {
@@ -1500,13 +1509,17 @@ async function pullOnce(sessionId: string): Promise<void> {
           return;
         }
         const opened = turnOpeners(page.entries, before);
-        setEntry(sessionId, {
-          ...current,
-          ...merged.view,
-          appliedSeq: merged.appliedSeq,
-          cursor: merged.cursor,
-          turnAuthor: opened.turnAuthor === undefined ? current.turnAuthor : opened.turnAuthor,
-        });
+        setEntry(
+          sessionId,
+          {
+            ...current,
+            ...merged.view,
+            appliedSeq: merged.appliedSeq,
+            cursor: merged.cursor,
+            turnAuthor: opened.turnAuthor === undefined ? current.turnAuthor : opened.turnAuthor,
+          },
+          { closed: merged.closedTurn },
+        );
         // The stream's own exit will now be skipped as already applied.
         if (isTerminal(merged.view.state) && channels.has(sessionId)) endStream(sessionId, current.workstreamId);
         trimHeld(sessionId, merged.appliedSeq);
@@ -1833,15 +1846,13 @@ export async function runPromptTextInWorkstream(
       !active.filePath &&
       !active.terminalView &&
       !active.ptyAgent;
-    const session = await startSession({
-      workstreamId,
-      stage: "general",
-      input: text,
-      ...newChatLaunchArgs(settings, reuseShell ? active : null, claudeCatalogSnapshot()),
-      promptName: title,
-    });
+    const launch = newChatLaunchArgs(settings, reuseShell ? active : null, claudeCatalogSnapshot());
+    const session = await startSession({ workstreamId, stage: "general", input: text, ...launch, promptName: title });
     if (reuseShell) {
-      bindSessionToShell(workstreamId, active.id, session.id);
+      bindSessionToShell(workstreamId, active.id, session.id, {
+        harness: session.harness,
+        permissionMode: launch.permissionMode,
+      });
     } else {
       openPromptTab(workstreamId, session.id, title);
     }
@@ -2075,8 +2086,10 @@ export async function restoreSessionIfNeeded(
 ): Promise<void> {
   if (entryOf(sessionId) || channels.has(sessionId) || restoring.has(sessionId)) return;
   restoring.add(sessionId);
+  // A tab with no pick of its own relaunches in the mode the session last asked for.
+  const followsSession = permissionMode === null && sessionPermissionMode(workstreamId, sessionId) === undefined;
   try {
-    const [read, active] = await Promise.all([
+    const [read, active, rows] = await Promise.all([
       readLog(sessionId),
       // The server outlives the app (ADR-0009): a session it still reports
       // live is attached to below rather than shown as a frozen transcript.
@@ -2084,11 +2097,15 @@ export async function restoreSessionIfNeeded(
         log.warn("session", "listing live sessions failed; restoring as if none were live", e);
         return [];
       }),
+      followsSession
+        ? queryClient.ensureQueryData(workstreamSessionsQuery(workstreamId)).catch(() => [] as Session[])
+        : [],
     ]);
     if (entryOf(sessionId) || channels.has(sessionId)) return;
 
     const { view: folded, ...position } = foldLog(read);
     const row = active.find((a) => a.session.id === sessionId);
+    const requested = (row?.session ?? rows.find((s) => s.id === sessionId))?.requestedPermissionMode ?? null;
     const live = row !== undefined;
     const view = restoredView(folded, live);
     setEntry(sessionId, {
@@ -2098,7 +2115,7 @@ export async function restoreSessionIfNeeded(
       stage,
       autoAllow: [],
       live: false,
-      permissionMode,
+      permissionMode: followsSession ? requested : permissionMode,
       workingSince: null,
       taskStartedAt: {},
       queued: [],
@@ -2289,7 +2306,7 @@ export async function openGoalSession(goal: Goal, request: GoalSheetRequest): Pr
   const { sessionId, workstreamId } = goal;
   const launch = "newSession" in request.target ? request.target.newSession : null;
   if (launch?.shellId !== undefined) {
-    bindSessionToShell(workstreamId, launch.shellId, sessionId);
+    bindSessionToShell(workstreamId, launch.shellId, sessionId, { harness: launch.harness });
   } else if (launch) {
     const planPath = request.planPath ?? launch.attachedDocs?.[0];
     const stage = launch.stage;

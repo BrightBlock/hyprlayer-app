@@ -837,6 +837,19 @@ impl ActorState {
         }
         self.track_writes(&event);
 
+        // The log never holds a mode, so the row keeps the one a relaunch must ask for.
+        if let SessionEvent::PermissionModeChanged { mode } = &event {
+            let (db, sid, mode) = (self.db.clone(), self.session_id.clone(), *mode);
+            match blocking(move || db.record_reported_permission_mode(&sid, mode)).await {
+                // Claude acks a switch to Auto with the stage's mode; the session is still on Auto.
+                Ok(false) => return,
+                Ok(true) => {}
+                Err(e) => tracing::warn!(
+                    "session {}: its mode change was not recorded: {e}",
+                    self.session_id
+                ),
+            }
+        }
         let unreportable_exit =
             matches!(&event, SessionEvent::Exited { outcome, .. } if !outcome.is_reportable());
         // Modes are live state: a replayed one would be stale, and an older app

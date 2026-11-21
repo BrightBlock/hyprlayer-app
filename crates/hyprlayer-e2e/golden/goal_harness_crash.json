@@ -142,6 +142,34 @@
       "guards": [
         {
           "evidence": {
+            "iteration": 2,
+            "launches": 2,
+            "mode": null
+          },
+          "guard": "an Auto session the goal relaunched still asks for no mode",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launchedModes": [
+              "acceptEdits",
+              "acceptEdits",
+              "acceptEdits",
+              "acceptEdits",
+              "acceptEdits"
+            ],
+            "mode": "acceptEdits"
+          },
+          "guard": "an Accept edits session the goal relaunched still asks for it, and runs it",
+          "ok": true
+        }
+      ],
+      "step": "a goal's relaunch leaves the session's requested mode as it was"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

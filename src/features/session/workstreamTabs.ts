@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import { scopedKey } from "@/lib/hostScope";
-import type { Bootstrap, PermissionMode, Session } from "@/lib/bindings";
+import type { Bootstrap, Harness, PermissionMode, Session } from "@/lib/bindings";
 import { queryClient } from "@/lib/queryClient";
 import { actionEngine, resolveMultiplexer } from "@/features/multiplexer/engines";
 
@@ -437,17 +437,23 @@ export function consumeComposerFocus(shellId: number): boolean {
   return true;
 }
 
+/** `launched` is what the session started on, so a failed start's tab shows that, not an earlier pick. */
 export function bindSessionToShell(
   workstreamId: string,
   shellId: number,
   sessionId: string,
+  launched: { harness?: Harness; permissionMode?: PermissionMode | null } = {},
 ): void {
+  const picks = {
+    ...(launched.harness ? { harness: launched.harness } : {}),
+    ...(launched.permissionMode ? { permissionMode: launched.permissionMode } : {}),
+  };
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId] ?? initialTabState();
     if (!current.shells.some((s) => s.id === shellId)) return all;
     const bound = {
       ...current,
-      shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId } : s)),
+      shells: current.shells.map((s) => (s.id === shellId ? { ...s, sessionId, ...picks } : s)),
     };
     return { ...all, [workstreamId]: focusShell(bound, shellId) };
   });

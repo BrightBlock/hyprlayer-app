@@ -159,6 +159,7 @@ export const commands = {
 	killSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("kill_session", { sessionId })),
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
+	setSessionHarness: (sessionId: string, harness: Harness, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_harness", { sessionId, harness, model, effort })),
 	setSessionPermissionMode: (sessionId: string, mode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_permission_mode", { sessionId, mode })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<SessionLogEntryDto[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
@@ -1929,6 +1930,8 @@ export type Session = {
 	parentSessionId?: string | null,
 	/**  What it launched with, or was asked to start on; a retry of a failed start shows it. */
 	effort?: string | null,
+	/**  The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own. */
+	requestedPermissionMode?: PermissionMode | null,
 };
 
 export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null; mcpServers?: string[] | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean; authRequired?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string; toolUseId?: string | null } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched"; quiet?: boolean } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };

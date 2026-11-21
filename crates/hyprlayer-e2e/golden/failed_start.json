@@ -172,6 +172,68 @@
       "guards": [
         {
           "evidence": {
+            "code": null
+          },
+          "guard": "a start that never launched moves to another harness",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "picked": true,
+            "spawns": 1
+          },
+          "guard": "claude starts fresh on the picked model, with no effort left from the failed start",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "turns": 1
+          },
+          "guard": "claude reads the prompt the OpenCode start never sent, once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "replied": true
+          },
+          "guard": "claude's reply reaches the client",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harness": "claude",
+            "state": "running"
+          },
+          "guard": "the row runs on claude now",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "code": "session_launched"
+          },
+          "guard": "a session that ran keeps its harness",
+          "ok": true
+        }
+      ],
+      "step": "retry the failed OpenCode start on claude"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "claude_prompt": true,
+            "turns": 1
+          },
+          "guard": "claude reads claude's commit prompt, not the one OpenCode was given",
+          "ok": true
+        }
+      ],
+      "step": "a stage prompt composed for OpenCode is sent as claude's"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "ended": true
           },
           "guard": "the stream ends with a failure and its reason",

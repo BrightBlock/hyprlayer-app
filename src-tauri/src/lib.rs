@@ -146,6 +146,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::kill_session,
             commands::sessions::set_session_model,
             commands::sessions::set_session_effort,
+            commands::sessions::set_session_harness,
             commands::sessions::set_session_permission_mode,
             commands::sessions::list_sessions,
             commands::sessions::get_session_log,

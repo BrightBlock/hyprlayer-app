@@ -16,12 +16,17 @@ export function tabPick(harness: Harness, shell: ShellPicks): { model?: string; 
   }
 }
 
-/** Resume writes only what the user picked on this tab; anything else leaves the row's own model and effort. */
+/**
+ * Resume writes only what the user picked on this tab; anything else leaves the row's own model and effort.
+ * A pick of another harness than the row's moves the start there with everything the tab shows.
+ */
 export function retryWrites(
   harness: Harness,
   shell: ShellPicks,
   resolved: { model: string | null; effort: string | null },
-): { model: string | null; effort: string | null } {
+  rowHarness?: Harness,
+): { model: string | null; effort: string | null; harness?: Harness } {
+  if (rowHarness && rowHarness !== harness) return { ...resolved, harness };
   const pick = tabPick(harness, shell);
   return {
     model: pick.model != null ? resolved.model : null,

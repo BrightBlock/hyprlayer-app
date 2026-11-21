@@ -286,6 +286,9 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN first_turn TEXT;
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN requested_permission_mode TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

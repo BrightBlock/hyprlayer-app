@@ -1,10 +1,12 @@
 import { create } from "zustand";
 
-import type { Goal, GoalSource, GoalSpec, Stage } from "./bindings";
+import type { Goal, GoalSource, GoalSpec, Harness, Stage } from "./bindings";
 
 export type GoalSheetTarget =
   | { sessionId: string }
-  | { newSession: { stage: Stage; shellId?: number; attachedDocs?: string[]; permissionMode?: string } };
+  | {
+      newSession: { stage: Stage; shellId?: number; attachedDocs?: string[]; permissionMode?: string; harness?: Harness };
+    };
 
 // A `spec` skips `derive_goal`, so a caller that already derived one keeps its scope and unticks.
 export type GoalSheetRequest = {

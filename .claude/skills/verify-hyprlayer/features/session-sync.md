@@ -7,7 +7,7 @@ Two desktops attached to one server can both show the same session. Turns anothe
 - `sync-behind` shows the `N new turns from <device>` strip, with `Load` and `Dismiss`. <!-- src: src/features/session/SyncComposerNotice.tsx:120 --> <!-- src: src/features/session/SyncComposerNotice.tsx:130 -->
 - `sync-load` pulls the held turns in, under a `New from <device>` divider, then shows `Synced with <device>`. <!-- src: src/features/session/SyncComposerNotice.tsx:160 -->
 - `sync-guard` shows the warning card when a draft exists, and holds Send. <!-- src: src/features/session/SyncComposerNotice.tsx:168 --> <!-- src: src/features/session/SyncComposerNotice.tsx:59 --> <!-- src: src/features/session/SyncComposerNotice.tsx:187 -->
-- `sync-route` holds another client's turns; agent-authored turns apply live. <!-- src: src/features/session/transcriptSync.ts:261 --> <!-- src: src/features/session/transcriptSync.ts:266 -->
+- `sync-route` holds another client's turns; agent-authored turns apply live. <!-- src: src/features/session/transcriptSync.ts:262 --> <!-- src: src/features/session/transcriptSync.ts:267 -->
 
 ## How to get to it (user POV)
 
@@ -31,12 +31,13 @@ Preconditions:
 - **Guard.** Type a draft into A's composer without sending, then send `Reply with exactly SYNC-B-2` from B. A shows the warning card: `This session moved on from another client`, `<device> added 2 turns while you were drafting.`, `Pull 2 turns`, `Send anyway`. `button[aria-label="Send"]` is `disabled`.
 - **Pull.** Click `Pull 2 turns`. B's turn is in A's transcript, the draft is unchanged, and Send is enabled again.
 - **Read back.** `get_session_log` (`{ sessionId }`) lists each `userMessage` once, in order.
+- **Turn time.** After `Load`, A's activity line times the pulled turn by its rows, from its `userMessage` to its `turnDone` (`createdAt`), not by when A pulled it: a turn of a few seconds reads a few seconds. <!-- src: src/features/session/sessionStore.ts:415 --> <!-- src: src/features/session/transcriptSync.ts:373 -->
+- **B's controls.** B's status bar shows the session's own model, effort and permission mode (`Haiku 5.5`, `Low`, `Accept edits` for a session started so in A), not B's defaults. `list_sessions` carries the mode as `requestedPermissionMode`; null is Auto. <!-- src: src/features/session/SessionChat.tsx:634 --> <!-- src: src/features/session/SessionChat.tsx:663 -->
 - **Teardown.** `driver_session stop` for B's port, then `verify.sh cleanup <B run-dir>`. It removes only B's profile dir, and A keeps running. Doctor A afterwards.
 - **Proof.** Screenshot A's strip, the guard card and the synced transcript. Save the log.
 
 ## Gotchas
 
 - The device label is the machine name, so both apps on one Mac read the same `<device>`.
-- In B, the status bar shows B's own default model and permission (`Opus 5.5`, `Auto`) for the adopted session, not the session's model. Read the model from `list_active_sessions`.
-- After a pull, A's activity line reads `… for 0.0s` for the pulled turn.
-- An ended view that missed a revision catches up on the watch poll (#418); this recipe doesn't drive it.
+- B's controls follow the session only while B's tab has no pick of its own. A pick in B wins, as it does in A.
+- An ended view that missed a revision catches up on the watch poll (#418); this recipe doesn't drive it. An idle poll runs once a minute, so allow up to 60s. EventsMissed, a reconnect and window focus watch at once.

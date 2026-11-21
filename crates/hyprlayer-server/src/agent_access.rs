@@ -277,6 +277,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::CancelQueuedMessage { .. }
         | Request::SetSessionModel { .. }
         | Request::SetSessionEffort { .. }
+        | Request::SetSessionHarness { .. }
         | Request::AnnounceClient { .. }
         | Request::WatchSessions { .. }
         | Request::RecapSession { .. }

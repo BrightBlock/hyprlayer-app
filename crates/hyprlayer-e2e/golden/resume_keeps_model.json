@@ -81,6 +81,13 @@
           },
           "guard": "the restart names no model and runs the session's",
           "ok": true
+        },
+        {
+          "evidence": {
+            "mode": "acceptEdits"
+          },
+          "guard": "list_sessions reports the mode the restart asked for",
+          "ok": true
         }
       ],
       "step": "a permission-mode restart keeps them"
@@ -89,15 +96,48 @@
       "guards": [
         {
           "evidence": {
+            "launched": "acceptEdits",
+            "replied": true,
+            "row": "acceptEdits"
+          },
+          "guard": "the relaunch runs acceptEdits and the row keeps it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launch": {
+              "effort": "low",
+              "launches": 5,
+              "model": "claude-e2e-switched",
+              "resumed": true
+            }
+          },
+          "guard": "it names no model or effort and runs the row's",
+          "ok": true
+        }
+      ],
+      "step": "a reopened tab with no pick of its own resumes in the mode the row asked for"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "launch": {
               "effort": null,
-              "launches": 5,
+              "launches": 6,
               "model": "claude-e2e-other",
               "resumed": true
             },
             "replied": true
           },
           "guard": "the named model runs with no effort",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "mode": null
+          },
+          "guard": "a restart that names no mode reports Auto",
           "ok": true
         }
       ],
@@ -109,7 +149,7 @@
           "evidence": {
             "launch": {
               "effort": "medium",
-              "launches": 6,
+              "launches": 7,
               "model": "claude-e2e-exited-pick",
               "resumed": true
             },
@@ -136,7 +176,7 @@
           "evidence": {
             "launch": {
               "effort": null,
-              "launches": 8,
+              "launches": 9,
               "model": "claude-e2e-other",
               "resumed": true
             },
@@ -147,6 +187,18 @@
         }
       ],
       "step": "a session stored on a retired model fails visibly and a pick recovers it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mode": "bypassPermissions"
+          },
+          "guard": "list_sessions reports bypassPermissions",
+          "ok": true
+        }
+      ],
+      "step": "a session started in Bypass reports it before it ever launches"
     },
     {
       "guards": [

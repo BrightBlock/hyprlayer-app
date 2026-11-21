@@ -9,7 +9,7 @@ use std::time::Duration;
 use hyprlayer_core::{Harness, PermissionMode, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server, Value};
-use hyprlayer_server::client::EventStream;
+use hyprlayer_server::client::{EventStream, RpcClient};
 use hyprlayer_server::streams::StreamStartOpts;
 
 const IO: Duration = Duration::from_secs(20);
@@ -17,7 +17,8 @@ const IO: Duration = Duration::from_secs(20);
 /// Logs each session spawn's `--permission-mode` to `<sandbox>/spawns.log`
 /// (the binary probe passes none, so it is not logged). An
 /// `EXIT_PLAN` turn asks to run ExitPlanMode and, once allowed, sends the
-/// `status` line claude 2.1.281 sends at that moment, verbatim.
+/// `status` line claude 2.1.281 sends at that moment, verbatim. An in-place
+/// `set_permission_mode` is answered with a `status` line naming the new mode.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 sid=""
 mode=""
@@ -35,6 +36,10 @@ turn=0
 while IFS= read -r line; do
   case "$line" in
     *control_response*) continue ;;
+    *set_permission_mode*)
+      to=$(printf '%s' "$line" | sed -n 's/.*"mode":"\([A-Za-z]*\)".*/\1/p')
+      printf '{"type":"system","subtype":"status","status":null,"permissionMode":"%s","session_id":"%s"}\n' "$to" "$sid"
+      continue ;;
   esac
   turn=$((turn + 1))
   case "$line" in
@@ -165,6 +170,12 @@ async fn plan_mode() {
         modes == [PermissionMode::Default],
         json!({ "modes": modes }),
     );
+    let recorded = requested_mode(&mut j, &client, &ws, &session.id).await;
+    j.guard(
+        "the row records the mode the harness left plan mode for",
+        recorded == "default",
+        json!({ "mode": recorded }),
+    );
 
     j.step("the mode change is live state, not history");
     let log = j
@@ -289,6 +300,71 @@ async fn plan_mode() {
         json!({ "spawns": spawns() }),
     );
 
+    j.step("an in-place switch to Auto stays Auto");
+    let (auto, _prompt, _stream_id, mut auto_events) = client
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::General,
+            "E2E_PROMPT_AUTO".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Claude),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start_stage_session (auto)");
+    j.alias(&auto.id, "$AUTO");
+    j.call(
+        &client,
+        Request::LaunchAndConverse {
+            session_id: auto.id.clone(),
+        },
+    )
+    .await
+    .expect("launch_and_converse (auto)");
+    drain_turn(&mut auto_events).await;
+    // Each switch is followed by a turn; the stub answers a switch before it reads the turn.
+    let switch = |mode: Option<PermissionMode>| Request::SetSessionPermissionMode {
+        session_id: auto.id.clone(),
+        mode,
+    };
+    let turn = |text: &str| Request::SendUserMessage {
+        session_id: auto.id.clone(),
+        text: text.into(),
+        attached_docs: vec![],
+        prompt_name: None,
+        client_message_id: None,
+        base_rev: None,
+    };
+    j.call(&client, switch(Some(PermissionMode::AcceptEdits)))
+        .await
+        .expect("set_session_permission_mode (acceptEdits)");
+    j.call(&client, turn("after accept edits"))
+        .await
+        .expect("send_user_message");
+    let heard_edits = mode_changes(&drain_turn(&mut auto_events).await);
+    let edits = requested_mode(&mut j, &client, &ws, &auto.id).await;
+    j.guard(
+        "a switch to Accept edits is heard and recorded",
+        heard_edits == [PermissionMode::AcceptEdits] && edits == "acceptEdits",
+        json!({ "heard": heard_edits, "mode": edits }),
+    );
+    j.call(&client, switch(None))
+        .await
+        .expect("set_session_permission_mode (auto)");
+    j.call(&client, turn("after auto"))
+        .await
+        .expect("send_user_message");
+    let heard_auto = mode_changes(&drain_turn(&mut auto_events).await);
+    let back = requested_mode(&mut j, &client, &ws, &auto.id).await;
+    j.guard(
+        "the harness's report of Auto's own mode leaves the row on Auto and reaches no client",
+        heard_auto.is_empty() && back.is_null(),
+        json!({ "heard": heard_auto, "mode": back }),
+    );
+    drop(auto_events);
+
     j.step("shutdown");
     let stopped = server.shutdown(&client).await;
     j.guard(
@@ -298,6 +374,34 @@ async fn plan_mode() {
     );
 
     j.finish();
+}
+
+fn mode_changes(events: &[SessionEvent]) -> Vec<PermissionMode> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::PermissionModeChanged { mode } => Some(*mode),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The session row's `requestedPermissionMode`; null is Auto.
+async fn requested_mode(j: &mut Journey, client: &RpcClient, ws: &str, id: &str) -> Value {
+    let sessions = j
+        .call(
+            client,
+            Request::ListSessions {
+                workstream_id: ws.to_string(),
+            },
+        )
+        .await
+        .expect("list_sessions");
+    sessions
+        .as_array()
+        .and_then(|all| all.iter().find(|s| s["id"] == id))
+        .map(|s| s["requestedPermissionMode"].clone())
+        .unwrap_or_default()
 }
 
 fn is_mode_event(e: &SessionEvent) -> bool {

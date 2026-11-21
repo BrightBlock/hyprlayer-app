@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::session_event_codec::{decode_raw_event, encode_raw_event};
 use super::{now_ms, Db};
 use crate::agent::Harness;
-use crate::claude::{ExitOutcome, SessionEvent, SessionState};
+use crate::claude::{ExitOutcome, PermissionMode, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 
@@ -238,7 +238,7 @@ fn apply_row_mutation(
 
 const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, state, model, \
                     cost_usd, started_at, ended_at, exit_summary, title, archived_at, \
-                    origin, parent_session_id, effort, \
+                    origin, parent_session_id, effort, requested_permission_mode, \
                     (SELECT e.kind FROM session_events e
                       WHERE e.session_id = sessions.id AND e.kind IN ('userMessage', 'turnDone')
                       ORDER BY e.seq DESC LIMIT 1) AS last_turn_kind, \
@@ -290,6 +290,9 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         origin: SessionOrigin::parse(&row.get::<_, String>("origin")?),
         parent_session_id: row.get("parent_session_id")?,
         effort: row.get("effort")?,
+        requested_permission_mode: row
+            .get::<_, Option<String>>("requested_permission_mode")?
+            .and_then(|m| PermissionMode::try_parse(&m)),
     })
 }
 
@@ -353,6 +356,7 @@ impl Db {
             origin: SessionOrigin::User,
             parent_session_id: None,
             effort: None,
+            requested_permission_mode: None,
         };
         self.with(|conn| {
             conn.execute(
@@ -454,6 +458,78 @@ impl Db {
                 params![id, model],
             )?;
             Ok(())
+        })
+    }
+
+    /// The model and effort belong to the old harness, so they go with it.
+    pub fn set_session_harness(
+        &self,
+        id: &str,
+        harness: Harness,
+        model: Option<&str>,
+        effort: Option<&str>,
+    ) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET harness = ?2, model = ?3, effort = ?4 WHERE id = ?1",
+                params![id, harness.as_str(), model, effort],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn set_session_requested_permission_mode(
+        &self,
+        id: &str,
+        mode: Option<PermissionMode>,
+    ) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET requested_permission_mode = ?2 WHERE id = ?1",
+                params![id, mode.map(PermissionMode::as_str)],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// A mode the harness reports switching to. `false`, and nothing written, when the session
+    /// asks for Auto and the report is only Auto's resolution, the stage's own mode.
+    pub fn record_reported_permission_mode(&self, id: &str, mode: PermissionMode) -> Result<bool> {
+        self.with(|conn| {
+            let row: Option<(String, Option<String>)> = conn
+                .query_row(
+                    "SELECT stage, requested_permission_mode FROM sessions WHERE id = ?1",
+                    params![id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((stage, requested)) = row else {
+                return Ok(true);
+            };
+            let auto = requested
+                .as_deref()
+                .and_then(PermissionMode::try_parse)
+                .is_none();
+            if auto && mode == pipeline::policy_for(Stage::parse(&stage)).permission_mode {
+                return Ok(false);
+            }
+            conn.execute(
+                "UPDATE sessions SET requested_permission_mode = ?2 WHERE id = ?1",
+                params![id, mode.as_str()],
+            )?;
+            Ok(true)
+        })
+    }
+
+    pub fn session_first_input(&self, id: &str) -> Result<Option<String>> {
+        self.with(|conn| {
+            conn.query_row(
+                "SELECT first_input FROM sessions WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::flatten)
         })
     }
 

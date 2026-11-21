@@ -88,8 +88,8 @@ use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, PullOutcome};
 use hyprlayer_core::{
-    CoreError, HyprlayerRuntime, LogCursor, ProjectSource, ScriptKind, Session, SessionLogEntry,
-    Stage, Workstream, WorkstreamDoc, WorktreeMode,
+    CoreError, Harness, HyprlayerRuntime, LogCursor, ProjectSource, ScriptKind, Session,
+    SessionLogEntry, Stage, Workstream, WorkstreamDoc, WorktreeMode,
 };
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClientRef, PtyAgent,
@@ -1589,6 +1589,20 @@ impl Dispatch for Server {
         self.runtime
             .sessions()
             .set_effort(&session_id, effort)
+            .await
+            .wire()
+    }
+
+    async fn set_session_harness(
+        &self,
+        session_id: String,
+        harness: Harness,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .sessions()
+            .set_harness(&session_id, harness, model, effort)
             .await
             .wire()
     }

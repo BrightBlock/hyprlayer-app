@@ -296,6 +296,50 @@ async fn goal_harness_crash() {
         }),
     );
 
+    j.step("a goal's relaunch leaves the session's requested mode as it was");
+    let s4 = new_session(&mut j, &client, &ws, "$S4", None).await;
+    control_for(&sandbox, &s4, "crash-once", "2");
+    let g4 = start_with(
+        &mut j,
+        &client,
+        &s4,
+        GoalSpec {
+            limits: GoalLimits {
+                max_iterations: 2,
+                ..spec("E2E_CRASH_AUTO").limits
+            },
+            ..spec("E2E_CRASH_AUTO")
+        },
+        "$G4",
+    )
+    .await;
+    let done = wait_goal(&client, &g4.id, |d| d.goal.status != GoalStatus::Running).await;
+    let launches = read_file(&controls.join(&s4).join("argv.log"))
+        .lines()
+        .count();
+    let auto = requested_mode(&mut j, &client, &ws, &s4).await;
+    let explicit = requested_mode(&mut j, &client, &ws, &s2).await;
+    j.guard(
+        "an Auto session the goal relaunched still asks for no mode",
+        done.goal.iteration == 2 && launches == 2 && auto.is_null(),
+        json!({ "iteration": done.goal.iteration, "launches": launches, "mode": auto }),
+    );
+    // The resumed goal relaunched it after its harness was gone, with no live mode to copy.
+    let s2_modes: Vec<String> = read_file(&controls.join(&s2).join("argv.log"))
+        .lines()
+        .filter_map(|l| {
+            l.split(' ')
+                .skip_while(|t| *t != "--permission-mode")
+                .nth(1)
+                .map(str::to_string)
+        })
+        .collect();
+    j.guard(
+        "an Accept edits session the goal relaunched still asks for it, and runs it",
+        explicit == "acceptEdits" && s2_modes.iter().all(|m| m == "acceptEdits"),
+        json!({ "mode": explicit, "launchedModes": s2_modes }),
+    );
+
     j.step("shutdown");
     let stopped = server.shutdown(&client).await;
     j.guard(
@@ -450,6 +494,29 @@ fn goal_lines(stdin_log: &Path, condition: &str) -> usize {
 
 fn note_of(detail: &GoalDetail, index: usize) -> Option<GoalIterationNote> {
     detail.iterations.get(index).and_then(|i| i.note)
+}
+
+/// The session row's `requestedPermissionMode`; null is Auto.
+async fn requested_mode(
+    j: &mut Journey,
+    client: &RpcClient,
+    ws: &str,
+    id: &str,
+) -> serde_json::Value {
+    let sessions = j
+        .call(
+            client,
+            Request::ListSessions {
+                workstream_id: ws.to_string(),
+            },
+        )
+        .await
+        .expect("list_sessions");
+    sessions
+        .as_array()
+        .and_then(|all| all.iter().find(|s| s["id"] == id))
+        .map(|s| s["requestedPermissionMode"].clone())
+        .unwrap_or_default()
 }
 
 fn read_file(path: &Path) -> String {

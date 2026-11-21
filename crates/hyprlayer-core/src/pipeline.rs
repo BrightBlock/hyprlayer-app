@@ -408,6 +408,45 @@ pub fn compose_prompt(
     }
 }
 
+/// A stage's first turn for `harness`, before its attached docs.
+pub fn stage_prompt(
+    harness: Harness,
+    stage: Stage,
+    input: &str,
+    base_branch: &str,
+    bodies: &ActionPromptBodies,
+    workstream_id: &str,
+) -> String {
+    let mut prompt = compose_prompt(stage, input, base_branch, bodies, harness);
+    if let Some(suffix) = implement_notes_suffix(harness, stage, workstream_id) {
+        prompt.push_str(&suffix);
+    }
+    prompt
+}
+
+/// A first turn composed for another harness, recomposed for `harness`; any other text is kept.
+pub fn recompose_first_turn(
+    harness: Harness,
+    stage: Stage,
+    input: &str,
+    base_branch: &str,
+    bodies: &ActionPromptBodies,
+    workstream_id: &str,
+    text: &str,
+) -> String {
+    let composed = |h| stage_prompt(h, stage, input, base_branch, bodies, workstream_id);
+    // The longest match: codex's plan prompt extends claude's.
+    [Harness::Claude, Harness::Codex, Harness::Opencode]
+        .into_iter()
+        .map(composed)
+        .filter(|p| text.starts_with(p.as_str()))
+        .max_by_key(String::len)
+        .map_or_else(
+            || text.to_string(),
+            |p| composed(harness) + &text[p.len()..],
+        )
+}
+
 pub const PTY_SHIP_DESCRIBE: &str = "Once the pull request is open, run /describe_pr to write \
 its description.";
 

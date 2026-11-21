@@ -518,13 +518,14 @@ function GoalForm({
         const started = await start.mutateAsync({ target: target(), spec: builtSpec });
         closeGoalSheet();
         const permissionMode = form.permissionKey;
+        const harness = form.harness;
         notifyGoalStarted(
           started,
           !newSession
             ? request
             : "sessionId" in request.target
-              ? { ...request, target: { newSession: { stage, permissionMode } } }
-              : { ...request, target: { newSession: { ...request.target.newSession, permissionMode } } },
+              ? { ...request, target: { newSession: { stage, permissionMode, harness } } }
+              : { ...request, target: { newSession: { ...request.target.newSession, permissionMode, harness } } },
         );
         return;
       }

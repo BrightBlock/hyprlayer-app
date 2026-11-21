@@ -186,11 +186,13 @@ const inTurn = (e: TurnInput) => isBusy(e) && e.state !== "starting";
 /**
  * Times a turn from its first streamed event to idle, across any approval or question it waits on.
  * A turn that leaves background agents running opens a wait; the turn that closes it is timed from the wait's start.
+ * `closed` is a turn that opened and ended within one fold, which never shows this entry busy.
  */
 export function nextTurn(
   prev: TurnInput | undefined,
   next: TurnInput,
   now: number,
+  closed?: LastTurn | null,
 ): { turnSince: number | null; lastTurn: LastTurn | null; waitSince: number | null } {
   const prevSince = prev && isBusy(prev) ? (prev.turnSince ?? null) : null;
   const prevWait = prev?.waitSince ?? null;
@@ -207,7 +209,7 @@ export function nextTurn(
         return { turnSince: null, lastTurn: { ms: 0, endedAt: now, waiting: { agents, workflows } }, waitSince: now };
       }
     }
-    return { turnSince: null, lastTurn: prev?.lastTurn ?? null, waitSince };
+    return { turnSince: null, lastTurn: closed ?? prev?.lastTurn ?? null, waitSince };
   }
   const { agents, workflows } = pendingWork(next.items);
   if (agents > 0 || workflows > 0) {

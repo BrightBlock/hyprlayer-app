@@ -226,7 +226,8 @@ describe("an ended view that missed its revision", () => {
     expect(reads()).toEqual([]);
 
     append(id, refused);
-    await poll();
+    // An idle view polls once a minute at most.
+    await vi.advanceTimersByTimeAsync(60_000);
 
     await vi.waitFor(() => expect(kinds(id).filter((k) => k === "exit")).toHaveLength(2));
     expect(reads()).toEqual([[id, cursorAt(tail)]]);

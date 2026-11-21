@@ -377,6 +377,149 @@ async fn failed_start() {
     );
     drop(resumed);
 
+    j.step("retry the failed OpenCode start on claude");
+    let moved = j
+        .call(
+            &client,
+            Request::SetSessionHarness {
+                session_id: session.id.clone(),
+                harness: Harness::Claude,
+                model: Some(PICKED_MODEL.into()),
+                effort: None,
+            },
+        )
+        .await;
+    j.guard(
+        "a start that never launched moves to another harness",
+        moved.is_ok(),
+        json!({ "code": moved.as_ref().err().map(|e| e.code.clone()) }),
+    );
+    let (_, _, _, mut moved_events) = client
+        .resume_session_stream(session.id.clone(), None, None, None, None)
+        .await
+        .expect("resume_session");
+    let replied = recv_until(&mut moved_events, |e| {
+        matches!(e, SessionEvent::TurnDone { .. })
+    })
+    .await;
+    let spawns = std::fs::read_to_string(sandbox.root.join("spawns.log")).unwrap_or_default();
+    let spawned: Vec<&str> = spawns.lines().filter(|l| l.contains(&session.id)).collect();
+    let picked_only = format!(" {PICKED_MODEL} -");
+    j.guard(
+        "claude starts fresh on the picked model, with no effort left from the failed start",
+        spawned.len() == 1 && spawned[0].starts_with("new ") && spawned[0].ends_with(&picked_only),
+        json!({ "spawns": spawned.len(), "picked": spawned.iter().all(|l| l.ends_with(&picked_only)) }),
+    );
+    let turns = claude_turns(&harness_log, &session.id);
+    j.guard(
+        "claude reads the prompt the OpenCode start never sent, once",
+        turns == [PROMPT],
+        json!({ "turns": turns.len() }),
+    );
+    let reply = replied.iter().any(
+        |e| matches!(e, SessionEvent::AssistantText { text, .. } if text.starts_with("E2E_REPLY_")),
+    );
+    j.guard(
+        "claude's reply reaches the client",
+        reply,
+        json!({ "replied": reply }),
+    );
+    let sessions = j
+        .call(
+            &client,
+            Request::ListSessions {
+                workstream_id: ws.clone(),
+            },
+        )
+        .await
+        .expect("list_sessions");
+    let row = sessions
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| text(r, "/id") == session.id))
+        .cloned()
+        .unwrap_or(Value::Null);
+    j.guard(
+        "the row runs on claude now",
+        text(&row, "/harness") == "claude" && text(&row, "/state") == "running",
+        json!({ "harness": row.pointer("/harness"), "state": row.pointer("/state") }),
+    );
+    let again = j
+        .call(
+            &client,
+            Request::SetSessionHarness {
+                session_id: session.id.clone(),
+                harness: Harness::Opencode,
+                model: None,
+                effort: None,
+            },
+        )
+        .await;
+    let code = again.as_ref().err().map(|e| e.code.clone());
+    j.guard(
+        "a session that ran keeps its harness",
+        code.as_deref() == Some("session_launched"),
+        json!({ "code": code }),
+    );
+    drop(moved_events);
+
+    j.step("a stage prompt composed for OpenCode is sent as claude's");
+    let (commit, _prompt, _stream_id, mut commit_events) = client
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::Commit,
+            "E2E_COMMIT_INPUT".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Opencode),
+                model: Some(UNLAUNCHABLE_MODEL.into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start_stage_session (commit)");
+    j.alias(&commit.id, "$COMMIT");
+    let _ = j
+        .call(
+            &client,
+            Request::LaunchAndConverse {
+                session_id: commit.id.clone(),
+            },
+        )
+        .await;
+    recv_until(&mut commit_events, |e| {
+        matches!(e, SessionEvent::Exited { .. })
+    })
+    .await;
+    j.call(
+        &client,
+        Request::SetSessionHarness {
+            session_id: commit.id.clone(),
+            harness: Harness::Claude,
+            model: None,
+            effort: None,
+        },
+    )
+    .await
+    .expect("set_session_harness (commit)");
+    let (_, _, _, mut commit_resumed) = client
+        .resume_session_stream(commit.id.clone(), None, None, None, None)
+        .await
+        .expect("resume_session (commit)");
+    recv_until(&mut commit_resumed, |e| {
+        matches!(e, SessionEvent::TurnDone { .. })
+    })
+    .await;
+    let turns = claude_turns(&harness_log, &commit.id);
+    let first = turns.first().map(String::as_str).unwrap_or_default();
+    j.guard(
+        "claude reads claude's commit prompt, not the one OpenCode was given",
+        first.starts_with(pipeline::COMMIT_PROMPT_DEFAULT)
+            && !first.starts_with(pipeline::COMMIT_PROMPT_NO_ASK_TOOL)
+            && first.contains("E2E_COMMIT_INPUT"),
+        json!({ "turns": turns.len(), "claude_prompt": first.starts_with(pipeline::COMMIT_PROMPT_DEFAULT) }),
+    );
+    drop(commit_resumed);
+
     j.step("claude dies at its first turn");
     std::fs::write(sandbox.root.join("fake-mode"), "die").expect("set the fake's mode");
     let (died, mut died_events) = start_claude(&client, &ws, "E2E_DIED_PROMPT").await;

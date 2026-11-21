@@ -106,6 +106,7 @@ import {
   applyPermissionMode,
   cancelQueuedMessage,
   dismissDrift,
+  dropSession,
   isFirstUserTurn,
   killSession,
   pullNow,
@@ -627,9 +628,11 @@ export function SessionChat({
   );
   // Its model can still change: the retry runs on what the picker shows.
   const failedStart = session?.state === "spawn_failed";
-  // Without a pick on this tab, a failed start shows the model and effort its row will retry on.
-  const failedRow = failedStart ? startedRow : undefined;
-  const rowFor = (h: Harness) => (failedRow?.harness === h ? failedRow : undefined);
+  // No init ever ran, so no conversation ties it to a harness: the retry may take any.
+  const neverLaunched = failedStart && !session?.claudeSessionId;
+  // Without a pick on this tab, an existing session shows the model and effort it runs on, never this device's defaults.
+  const sessionRow = started ? startedRow : undefined;
+  const rowFor = (h: Harness) => (sessionRow?.harness === h ? sessionRow : undefined);
   const mode = asStageKey(shell.mode);
   const cycleStageChord = effectiveChord(
     useBootstrap().data?.settings.keybindings?.overrides ?? {},
@@ -653,13 +656,17 @@ export function SessionChat({
       undefined,
     claudeCatalog,
   );
-  const effort = effectiveEffort(
-    shell.effort ?? rowFor("claude")?.effort ?? claudeDefaults?.defaultEffort ?? undefined,
-    model,
-  );
+  const claudeEffortKey = shell.effort ?? rowFor("claude")?.effort ?? claudeDefaults?.defaultEffort ?? undefined;
+  const effort = effectiveEffort(claudeEffortKey, model);
   const claudeEffortItems = effortsForModel(model);
+  // The row has the mode another client started it in; null there is Auto.
   const permissionMode = permissionModeOption(
-    shell.permissionMode ?? (claudeDefaults?.defaultPlanMode ? "plan" : undefined),
+    shell.permissionMode ??
+      (started
+        ? (session?.permissionMode ?? sessionRow?.requestedPermissionMode ?? undefined)
+        : claudeDefaults?.defaultPlanMode
+          ? "plan"
+          : undefined),
   );
   const modelItems = visibleModels(claudeDefaults?.visibleModels, claudeCatalog);
 
@@ -673,8 +680,7 @@ export function SessionChat({
   );
   const startedHarness = startedRow?.harness;
   const harness = harnessOption(
-    startedHarness ??
-      shell.harness ??
+    (neverLaunched ? (shell.harness ?? startedHarness) : (startedHarness ?? shell.harness)) ??
       effectiveHarnessKey(bootstrapSettings?.providers?.defaultHarness),
   );
   const usingOpencode = harness.key === "opencode";
@@ -723,7 +729,7 @@ export function SessionChat({
     [ocCatalog.data],
   );
 
-  const lockedProvider = lockedSessionProvider(started, harness.key, ocModel);
+  const lockedProvider = lockedSessionProvider(started && !neverLaunched, harness.key, ocModel);
   const lockOther = (itemProvider: string): Pick<OptionMenuItem, "disabled"> =>
     lockedProvider !== null && itemProvider !== lockedProvider ? { disabled: true } : {};
 
@@ -820,6 +826,9 @@ export function SessionChat({
     };
   });
 
+  // A failed start moving to Claude takes its pick on Resume, with the harness; the row still validates as the old one.
+  const rowTakesClaude = !neverLaunched || startedHarness === "claude";
+
   const applyClaudeModel = async (key: string) => {
     if (key === model.key) return;
     const next = modelOption(key, claudeCatalog);
@@ -834,18 +843,17 @@ export function SessionChat({
       if (!ok) return;
     }
     onModelChange(key);
-    if (sid) {
-      const nextEffort = effectiveEffort(
-        shell.effort ?? claudeDefaults?.defaultEffort ?? undefined,
-        next,
-      );
+    if (sid && rowTakesClaude) {
+      const nextEffort = effectiveEffort(claudeEffortKey, next);
       await applyModel(sid, resumeModelFlag(next), nextEffort?.key ?? null, permissionMode.flag);
     }
   };
 
   const applyClaudeEffort = (key: string) => {
     onEffortChange(key);
-    if (sid) void applyEffort(sid, effectiveEffort(key, model)?.key ?? null).catch((e) => setError(errorMessage(e)));
+    if (sid && rowTakesClaude) {
+      void applyEffort(sid, effectiveEffort(key, model)?.key ?? null).catch((e) => setError(errorMessage(e)));
+    }
   };
 
   const onPickModel = (namespaced: string) => {
@@ -969,6 +977,11 @@ export function SessionChat({
   };
 
   const sid = shell.sessionId;
+  // A tab letting go of its session stops watching it, as closing the tab does.
+  const resetSession = useCallback(() => {
+    onResetSession();
+    if (sid) dropSession(sid);
+  }, [onResetSession, sid]);
   const sync = useTranscriptSync((s) => (sid ? s.bySession[sid] : undefined));
   const divider = useTranscriptSync((s) => (sid ? (s.divider[sid] ?? null) : null));
   const held = useTranscriptSync((s) => (sid ? s.held[sid] : undefined));
@@ -1320,6 +1333,8 @@ export function SessionChat({
         promptName: expanded.title,
       });
       onSessionStarted(created.id);
+      // The tab keeps the mode it launched with; a reload rebuilds the session from the tab.
+      if (shell.permissionMode === undefined && permissionMode.flag) onPermissionModeChange(permissionMode.key);
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;
@@ -1394,7 +1409,7 @@ export function SessionChat({
       if (!ok) return;
     }
     if (live && sid) await killSession(sid).catch(() => {});
-    onResetSession();
+    resetSession();
   };
   useCommand("session.clear", focused && started ? () => void handleClear() : null);
 
@@ -1490,7 +1505,7 @@ export function SessionChat({
         if (!sid) return;
         onDraftChange(text);
         if (isFirstUserTurn(sid, itemId)) {
-          onResetSession();
+          resetSession();
         } else {
           void rewindToMessage(sid, itemId);
         }
@@ -1503,7 +1518,7 @@ export function SessionChat({
         onRetry: () => void retryAuth(),
       },
     }),
-    [sid, onDraftChange, onResetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
+    [sid, onDraftChange, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
   );
 
   usePublishSessionControls(
@@ -1647,7 +1662,7 @@ export function SessionChat({
                     : "Session ended."}
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button onClick={onResetSession} disabled={resuming}>
+                  <Button onClick={resetSession} disabled={resuming}>
                     New session
                   </Button>
                   <Button
@@ -1660,11 +1675,13 @@ export function SessionChat({
                       setResuming(true);
                       try {
                         if (failedStart) {
-                          const writes = retryWrites(harness.key, shell, {
-                            model: startModelFlag,
-                            effort: startEffort,
-                          });
-                          await retryFailedStart(sid, writes.model, writes.effort);
+                          const writes = retryWrites(
+                            harness.key,
+                            shell,
+                            { model: startModelFlag, effort: startEffort },
+                            startedHarness,
+                          );
+                          await retryFailedStart(sid, writes.model, writes.effort, writes.harness);
                         } else {
                           await resumeSession(sid);
                         }

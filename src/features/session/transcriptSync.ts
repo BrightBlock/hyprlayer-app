@@ -1,6 +1,7 @@
 import type { ClientRef, LogCursorDto, SessionEvent, SessionLogEntryDto, TurnKind } from "@/lib/bindings";
 import { isAgentAuthor } from "@/lib/domain/agentControl";
 import type { SyncPhase } from "@/lib/domain/sync";
+import type { LastTurn } from "./activityStatus";
 import { reduceEvent, type SessionView } from "./transcript";
 
 export type PendingTurn = { rev: number; kinds: TurnKind[] };
@@ -344,6 +345,8 @@ export type Merged = {
   firstNewSeq: number | null;
   revisions: number;
   reset: boolean;
+  /** The last turn these rows both opened and ended, timed by them. */
+  closedTurn: LastTurn | null;
 };
 
 export function mergeEntries(
@@ -351,7 +354,7 @@ export function mergeEntries(
   appliedSeq: number,
   page: { entries: SessionLogEntryDto[]; nextCursor: LogCursorDto },
 ): Merged {
-  const unchanged = { view, appliedSeq, cursor: page.nextCursor, firstNewSeq: null, revisions: 0 };
+  const unchanged = { view, appliedSeq, cursor: page.nextCursor, firstNewSeq: null, revisions: 0, closedTurn: null };
   // A rewind reuses seqs, so its boundary is found whatever its seq.
   if (page.entries.some((e) => e.event.kind === "rewound")) return { ...unchanged, reset: true };
   const fresh = page.entries
@@ -362,7 +365,14 @@ export function mergeEntries(
 
   let next = view;
   let revisions = 0;
+  let openedAt: number | null = null;
+  let closedTurn: LastTurn | null = null;
   for (const { entry, seq } of fresh) {
+    if (entry.event.kind === "userMessage") openedAt ??= entry.createdAt;
+    if (entry.event.kind === "turnDone" && openedAt !== null && entry.createdAt !== null) {
+      closedTurn = { ms: entry.createdAt - openedAt, endedAt: entry.createdAt };
+      openedAt = null;
+    }
     const before = next;
     next = reduceEvent(next, entry.event, seq);
     if (next === before) continue;
@@ -379,5 +389,6 @@ export function mergeEntries(
     firstNewSeq: fresh[0].seq,
     revisions,
     reset: false,
+    closedTurn,
   };
 }

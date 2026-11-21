@@ -6,6 +6,7 @@ import { leaf, leaves, type LayoutNode, type PaneId } from "./paneTree";
 import { takeSeenTitle } from "./titleSeen";
 import {
   activeShellIn,
+  bindSessionToShell,
   defaultTabState,
   archiveShellState,
   closePaneState,
@@ -689,6 +690,25 @@ describe("composer focus signal", () => {
     expect(consumeComposerFocus(7)).toBe(true);
     expect(useComposerFocusStore.getState().pendingShellId).toBeNull();
     expect(consumeComposerFocus(7)).toBe(false);
+  });
+});
+
+describe("bindSessionToShell", () => {
+  const WS = "ws-bind";
+  beforeEach(() => {
+    useWorkstreamTabsStore.setState({
+      byWs: { [WS]: { ...defaultTabState(), shells: [{ ...shell(1), harness: "codex" }] } },
+    });
+  });
+
+  it("records the harness and mode the session launched on over the tab's earlier pick", () => {
+    bindSessionToShell(WS, 1, "s1", { harness: "claude", permissionMode: "plan" });
+
+    expect(useWorkstreamTabsStore.getState().byWs[WS]!.shells[0]).toMatchObject({
+      sessionId: "s1",
+      harness: "claude",
+      permissionMode: "plan",
+    });
   });
 });
 

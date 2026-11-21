@@ -76,6 +76,9 @@ pub enum CoreError {
     #[error("session {session_id} must be archived before it is deleted")]
     SessionNotArchived { session_id: String },
 
+    #[error("session {session_id} has run on its harness, so it can't move to another")]
+    SessionLaunched { session_id: String },
+
     #[error("No goal with id {goal_id}")]
     GoalNotFound { goal_id: String },
 
@@ -570,6 +573,9 @@ impl CoreError {
                 Some("Wait for the agent to finish its turn, or stop it.".into())
             }
             CoreError::SessionNotArchived { .. } => Some("Archive the session first.".into()),
+            CoreError::SessionLaunched { .. } => {
+                Some("Start a new session to use another harness.".into())
+            }
             CoreError::GoalNotFound { .. } => {
                 Some("The goal ended with its session; start a new one.".into())
             }
@@ -799,6 +805,7 @@ impl CoreError {
             CoreError::SessionNotFound { .. } => "session_not_found",
             CoreError::SessionBusy { .. } => "session_busy",
             CoreError::SessionNotArchived { .. } => "session_not_archived",
+            CoreError::SessionLaunched { .. } => "session_launched",
             CoreError::GoalNotFound { .. } => "goal_not_found",
             CoreError::GoalActive { .. } => "goal_active",
             CoreError::GoalInvalid { .. } => "goal_invalid",

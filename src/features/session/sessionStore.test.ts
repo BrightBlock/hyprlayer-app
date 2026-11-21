@@ -139,6 +139,7 @@ const {
   reattachRunningGoal,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
+const { activityStatus } = await import("./activityStatus");
 const { pullNow } = await import("./sessionStore");
 const { forgetSyncSupport, noteComposerInput, syncInput, syncOf, transcriptSyncBridge, useTranscriptSync } =
   await import("./syncStore");
@@ -1383,6 +1384,45 @@ describe("transcript sync: queue and reload", () => {
     expect(texts()).toContain("theirs done");
     expect(entryOf(id).streaming).toBe(false);
     expect(syncOf(id)?.phase).toBe("inSync");
+  });
+
+  describe("another device's turn, once pulled, is timed from its rows", () => {
+    const T0 = 1_700_000_100_000;
+    const ctx = { harnessLabel: "Claude Code", otherDevice: null };
+    const doneLine = (id: string) => activityStatus(entryOf(id), ctx)?.label;
+
+    it("when it was held off the stream", async () => {
+      const id = await startBusySession();
+      emitAt(INIT, 0, 0);
+      emitAt(TURN_DONE, 1, 0);
+      const at = (event: SessionEvent, seq: number, rev: number, createdAt: number) =>
+        h.state.lastChannel?.onmessage?.({ seq, createdAt, rev, author: OTHER, event });
+      at(THEIRS, 2, 1, T0);
+      at(reply("theirs done"), 3, 2, T0 + 9_000);
+      at(TURN_DONE, 4, 2, T0 + 12_400);
+      await settle();
+
+      await pullNow(id);
+
+      expect(entryOf(id).lastTurn).toEqual({ ms: 12_400, endedAt: T0 + 12_400 });
+      expect(doneLine(id)).toMatch(/ for 12\.4s$/);
+    });
+
+    it("when it was read from the log", async () => {
+      const id = await startBusySession();
+      emitAt(INIT, 0, 0);
+      emitAt(TURN_DONE, 1, 0);
+      const timed = (seq: number, event: SessionEvent, createdAt: number) => ({ ...row(seq, event), createdAt });
+      h.listSessionTurns.mockResolvedValueOnce(
+        page([timed(2, THEIRS, T0), timed(3, reply("theirs done"), T0 + 70_000), timed(4, TURN_DONE, T0 + 83_000)], 2),
+      );
+      syncInput(id, { kind: "polled", rev: 2, resetRev: 0, inFlight: 0, working: false });
+
+      await pullNow(id);
+
+      expect(entryOf(id).lastTurn).toEqual({ ms: 83_000, endedAt: T0 + 83_000 });
+      expect(doneLine(id)).toMatch(/ for 1m 23s$/);
+    });
   });
 
   it("never alerts for a prompt in another device's turn, even when Pull applies it", async () => {

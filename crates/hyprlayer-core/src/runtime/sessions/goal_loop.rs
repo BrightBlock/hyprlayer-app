@@ -618,7 +618,12 @@ impl Run {
             .find(&session.workstream_id)
             .await
             .map_err(|e| warn_over(&goal_id, e))?;
-        let mode = rt.sessions().permission_mode(&session.id).await;
+        // With no harness live, the mode the session last asked for.
+        let mode = rt
+            .sessions()
+            .permission_mode(&session.id)
+            .await
+            .or(session.requested_permission_mode);
         drop(rt);
         let watch = Watch::attach(actors.clone(), &session.id)
             .await
