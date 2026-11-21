@@ -46,6 +46,7 @@ Steps:
 
 ## Gotchas
 
+- After `Chat` closes a review, the right aside comes back on `Plan`, which hides the Git panel and the changes list. Click `Changes` in the aside first.
 - Tab and toggle buttons render lowercase text (`changes`, `commits`, `files`, `list`, `tree`) styled `capitalize`. A text selector must use the lowercase string. <!-- src: src/features/workstreams/ChangesPanel.tsx:562 --> <!-- src: src/features/workstreams/ChangesPanel.tsx:566 -->
 - Every row has the same `Stage`/`Unstage` label, so scope the selector to the row. The button is `opacity-0` until hover, but it's in the DOM and clickable. <!-- src: src/features/workstreams/ChangesPanel.tsx:91 -->
 - `Discard changes…` is irreversible, and the dialog says so. Never use it on a seed file or a real project's change. <!-- src: src/features/workstreams/ChangesPanel.tsx:753 -->

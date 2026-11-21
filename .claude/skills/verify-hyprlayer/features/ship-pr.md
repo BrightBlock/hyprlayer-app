@@ -65,6 +65,7 @@ Live steps (`hyprlayer-live-tests`, gate checked):
 
 ## Gotchas
 
+- After `Chat` closes a review, the right aside comes back on `Plan`, which hides the Git panel and the changes list. Click `Changes` in the aside first.
 - Ship's enablement keys on `git.aheadOfBase`, not `git.ahead`, so a pushed but PR-less branch still shows Ship. <!-- src: src/features/workstreams/useGitActions.ts:60 --> Earlier runs faked the pushed state offline with `git update-ref refs/remotes/origin/<branch> HEAD`, undone with `-d` (from run memory).
 - A failed PR probe, such as a spent GraphQL quota, now comes back as an error, not "no PR". The bar keeps the last known PR and retries every 60s. If the bar looks stale, check `gh api rate_limit --jq .resources.graphql`. Every running Hyprlayer instance draws on the same quota. <!-- src: crates/hyprlayer-core/src/runtime/workstreams.rs:766 --> <!-- src: src/lib/queries.ts:882 -->
 - `Ship` and `Merge` appear in several places at once (Git panel, review header, lifecycle). Select by the container or the dialog's `aria-label`, not bare text.

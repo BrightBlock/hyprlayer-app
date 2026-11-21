@@ -40,4 +40,4 @@ Preconditions:
 - `Dark` in the popover is the theme the tiles call `Dark+`. Named themes leave the popover's segment empty. <!-- src: src/lib/theme.ts:33 -->
 - `System` resolves through `prefers-color-scheme`. With the OS in dark mode it adds `dark`, not `system`. <!-- src: src/lib/theme.ts:57 -->
 - Zoom rescales the webview, so the bridge's coordinates and screenshot size change. `⌘=`, `⌘-` and `⌘0` drive the same store. <!-- src: src/lib/appearance.ts:161 -->
-- The Omarchy tile shows only on Linux with Omarchy detected. On a Mac, expect seven tiles. <!-- src: src/features/settings/AppearanceSettings.tsx:107 -->
+- The Omarchy tile shows only on Linux with Omarchy detected. On a Mac, expect seven tiles. With Omarchy detected, a profile with no explicit choice starts in `mode: "omarchy"` with no theme class and inline `--color-*` tokens, so restore by clicking the `Omarchy <name>` tile. <!-- src: src/lib/theme.ts:176 --> <!-- src: src/features/settings/AppearanceSettings.tsx:107 -->

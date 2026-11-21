@@ -21,7 +21,7 @@ After an implement session finishes its plan's tasks, the app walks the workstre
 
 Preconditions:
 
-- **Instance.** Use **shared** (`.dev`). In the `review_lifecycle` sandbox the right panel offers `Plan`, but it reads `Document is not in the thoughts index: thoughts/shared/plans/e2e.md`, so no lifecycle renders there. <!-- src: crates/hyprlayer-core/src/error.rs:279 --> <!-- src: src/features/review/ReadyForReviewCard.tsx:74 -->
+- **Instance.** Use **shared** (`.dev`), or an isolated instance with one implement session: open a `Native chat` tab, set `Agent mode: Implement`, start one short Haiku turn, then `openPlanPreview` that session with a tracking plan (plan-tab.md). On a folder workstream the Review step reads `No changes to review`, and the chat card stays hidden because the diff is empty. In the `review_lifecycle` sandbox the right panel offers `Plan`, but it reads `Document is not in the thoughts index: thoughts/shared/plans/e2e.md`, so no lifecycle renders there. <!-- src: crates/hyprlayer-core/src/error.rs:279 --> <!-- src: src/features/review/ReadyForReviewCard.tsx:74 -->
 - **Workstream.** Find one with an implement session whose tracked plan has every task done. Use `window.__TAURI__.core.invoke('list_sessions', { workstreamId })` for `stage: "implement"` and `parentSessionId` links, and `plan-tab.md` for picking the plan. <!-- src: src/lib/bindings.ts:163 -->
   - Read-only checks (badge, rows, `Report`, `Full report`) can use any such workstream.
 - **Anything that starts an agent spends model turns.** Run those only in the `jtsiros/hyprlayer-live-tests` project, per ADR-0012 (agent timing). Never use a real project: name any doc it writes `zz-…`. <!-- src: docs/adr/0012-live-test-repo.md:12 --> This covers:

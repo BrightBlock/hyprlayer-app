@@ -7,7 +7,21 @@ description: Launch, health-check and drive the Hyprlayer desktop app (Tauri web
 
 The surface is the Tauri desktop app's webview. Only a debug `tauri dev` build is drivable: `tauri-plugin-mcp-bridge` is compiled out of release builds. The server (`hyprlayer-server`) runs as a separate process the app spawns. Other surfaces (the `hyprlayer-server` CLI, remote hosts over ssh) are covered by `crates/hyprlayer-e2e`, not this skill.
 
-Helper: `.claude/skills/verify-hyprlayer/verify.sh launch isolated|shared | doctor <run-dir> | cleanup <run-dir>`. Run it from the repo root.
+Helper: `.claude/skills/verify-hyprlayer/verify.sh launch isolated|shared|attach <app-data-dir> | doctor <run-dir> | cleanup <run-dir>`. Run it from the repo root. It runs on macOS and Linux.
+
+## Platform paths and keys
+
+| | macOS | Linux |
+|---|---|---|
+| Profile config (`settings.json`, `hosts.json`, `account.json`) | `~/Library/Application Support/<ID>/` | `~/.config/<ID>/` |
+| Profile data (`hyprlayer.db`) | `~/Library/Application Support/<ID>/` | `~/.local/share/<ID>/` |
+| Server socket | `<data dir>/hyprlayer.sock` | `$XDG_RUNTIME_DIR/hyprlayer/<hash>.sock` <!-- src: crates/hyprlayer-server/src/socket.rs:11 --> |
+| Shared CLI config | `~/Library/Application Support/hyprlayer/config.json` | `~/.config/hyprlayer/config.json` <!-- src: crates/hyprlayer-core/src/env.rs:118 --> |
+| Run dirs | canonical `/private/var/…` | plain `/tmp/…` |
+| `mod` in a chord | ⌘ (`Meta` in `webview_keyboard`, `metaKey` in a `KeyboardEvent`) | Ctrl (`Control`, `ctrlKey`) <!-- src: src/lib/keybindings/chord.ts:98 --> |
+| File mode | `stat -f %Sp` | `stat -c %A` |
+
+Recipes write ⌘ chords; read them as Ctrl on Linux. A few defaults differ by platform beyond that: `nav.dashboard` and the Library are `ctrl+1`/`ctrl+2` on macOS but `alt+1`/`alt+2` elsewhere. <!-- src: src/lib/keybindings/commands.ts:47 -->
 
 ## Launch
 
@@ -19,14 +33,19 @@ Pick the mode by what the feature needs:
   ```
   The script prints the run dir (`$TMPDIR/hl-verify/verify-<ts>`), then blocks until the log says `connected to this machine`, then runs doctor. It takes about 1–2 minutes warm and several minutes cold. Ready means doctor passed. Attach only after that: attaching while setup is still connecting deadlocks the app.
 - **shared**: the `.dev` profile (`ai.brightblock.hyprlayer.dev`, Vite 1430), with the user's real projects, sessions and thoughts tree. Use it only for features that need real data, such as a plan under `thoughts/shared/plans`. If 1430 is already listening, the script says so and exits: attach to that instance, never start a competitor or kill it.
+- **attach**: an isolated app that is a client of another profile's server, for a second desktop on one session (session-sync.md) or the `review_lifecycle` sandbox (review-workspace.md). It writes `hosts.json` with `localProfile` set to that server's app-data dir, waits for `connected to`, and never spawns a server of its own.
+  ```bash
+  .claude/skills/verify-hyprlayer/verify.sh launch attach <app-data-dir>
+  ```
+  The target server must already be serving. On Linux it must also share the desktop's `XDG_RUNTIME_DIR`, or the app looks for the socket in the wrong place.
   A free 1430 can still leave a `.dev` server running with live agents. The app attaches to it and replaces it only when it's below `MIN_SERVER_VERSION`, so check its version in the `.dev` log first. Cleanup leaves that server running. `Hyprlayer Dev.app` is the `.main` profile, not `.dev`. <!-- src: src-tauri/src/supervisor.rs:134 -->
 
-`launch` creates a non-git seed folder and records it as `SEED` in `<run-dir>/run.env`. Run dirs are canonical (`/private/var/…`) because the app stores resolved paths, and a `/var/…` path matches nothing. Once the page renders (Drive, step 1), import the seed from `webview_execute_js`:
+`launch` creates a non-git seed folder and records it as `SEED` in `<run-dir>/run.env`. Run dirs are canonical (`pwd -P`) because the app stores resolved paths: on macOS a `/var/…` path matches nothing stored under `/private/var/…`. Once the page renders (Drive, step 1), import the seed from `webview_execute_js`:
 ```js
 (async () => { await window.__TAURI__.core.invoke('import_local_folder', { path: '<SEED>', directoryName: null }); location.reload(); })()
 ```
 Then click `a[aria-label^="Home"]`. Don't use `location.replace('/')`: on load the router replays `hyprlayer:last-route`, so `/` lands back on the last route. <!-- src: src/router.tsx:201 -->
-Use a non-git folder. A git import runs `thoughts init`, which writes the CLI config `~/Library/Application Support/hyprlayer/config.json` that every profile shares.
+Use a non-git folder. A git import runs `thoughts init`, which writes the shared CLI config (see the platform table) that every profile uses.
 
 Teardown is `cleanup` (below).
 
@@ -35,7 +54,7 @@ Teardown is `cleanup` (below).
 ```bash
 .claude/skills/verify-hyprlayer/verify.sh doctor <run-dir>
 ```
-It is read-only. It checks that `tauri dev` is alive, that the app binary is this repo's `target/debug/Hyprlayer`, that Vite owns its port, that the bridge port is owned by that app pid, that the app connected, and that a `target/debug/hyprlayer-server` owns this identifier's `hyprlayer.sock`. It prints the git build and the bridge port. Run it before the first drive, after anything surprising, and after any failed drive. A non-zero exit means don't drive.
+It is read-only. It checks that `tauri dev` is alive, that the app binary is this repo's `target/debug/Hyprlayer`, that Vite owns its port, that the bridge port is owned by that app pid, that the app connected, and that a `target/debug/hyprlayer-server` serves this profile (by its socket on macOS, by the `HYPRLAYER_APP_DATA_DIR` it was given on Linux). An attach run checks the target's server instead, and that the app spawned none. It prints the git build and the bridge port. Run it before the first drive, after anything surprising, and after any failed drive. A non-zero exit means don't drive.
 
 ## Drive
 
@@ -49,7 +68,7 @@ It is read-only. It checks that `tauri dev` is alive, that the app binary is thi
    - `strategy: "text"` resolves to the nearest interactive ancestor. Text inside a non-interactive `label` can resolve to a whole dialog and click its center; use an XPath like `//div[@role="dialog"]//label[span[normalize-space()="<text>"]]`.
    - The rail's Home is `a[aria-label^="Home"]`: its label becomes `Home (Multiplexer mode on)`. <!-- src: src/routes/Root.tsx:1081 -->
 4. `webview_keyboard type` replaces a controlled input's value (it never appends), so retype to change a field. Enter doesn't submit a form under the bridge, so click the submit button.
-   - `press` with `modifiers` reaches `window` keydown handlers: `Meta`+`k` and the keybinding recorder work.
+   - `press` with `modifiers` reaches `window` keydown handlers: `Meta`+`k` on macOS (`Control`+`k` on Linux) and the keybinding recorder work. A synthetic `contextmenu` dispatched from JS doesn't open the sidebar's row menus; use `webview_interact` `right-click`.
    - It can't empty a field: `press Backspace` doesn't edit the value. Type the next value over it, or, as a seed, set it through the native `value` setter and dispatch `input`.
    - In xterm, `press Enter` sends nothing. End the `type` text with `\n` instead.
 5. To read or set live app state, import the exact module URL the page loaded. After HMR it carries a `?t=` stamp, and a plain `import('/src/…')` returns a stale duplicate instance:
@@ -70,7 +89,7 @@ Write everything to the `EVIDENCE` dir from `<run-dir>/run.env`, which is `targe
 - Read side effects back through a second view: a list RPC's JSON, the file on disk, `git` refs. Save them as `.json`/`.txt` beside the screenshots.
 - A file you edit in the shared thoughts tree is committed and pushed by auto-sync within seconds. Copy it into the evidence dir first, revert it right after, and use the `thoughts/` symlink path, never `~/thoughts`. An app write can reset the file mode, and `cp` over it keeps the new mode, so check `git -C thoughts/shared diff --summary` after the revert.
   - An isolated profile with no mapped git project doesn't sync: a scratch doc it created stayed uncommitted for two minutes. <!-- src: src/features/library/useThoughtsSync.ts:65 -->
-  - A Library save keeps the mode: a `755` doc stayed `755` (#403). A plan tick once reset one to `644` (plan-tab.md); that write hasn't been re-checked.
+  - A Library save keeps the mode: a `755` doc stayed `755` (#403). A plan tick once reset one to `644` (plan-tab.md); on Linux a tick kept a `755` plan at `755`.
 - `localStorage` in the shared profile holds the user's routes and scopes. Snapshot it into `sessionStorage` at attach (it survives a reload) and restore any changed keys before cleanup.
 
 ## Cleanup
@@ -78,7 +97,7 @@ Write everything to the `EVIDENCE` dir from `<run-dir>/run.env`, which is `targe
 ```bash
 .claude/skills/verify-hyprlayer/verify.sh cleanup <run-dir>
 ```
-It kills only the process tree under the recorded pnpm pid. For isolated runs it stops that profile's server (servers outlive the app by design) and removes the identifier's Application Support and Logs dirs. It also deletes the run dir, including the seed. It copies `dev.log` into the evidence dir first, and evidence is never removed. Run it after every failed iteration too. Afterwards, `lsof -nP -iTCP:<vite port> -sTCP:LISTEN` should be empty. Never `pkill Hyprlayer` or free port 1430: that kills the user's app.
+It kills only the process tree under the recorded pnpm pid. For isolated and attach runs it stops that profile's own server (servers outlive the app by design; an attach run has none) and removes the identifier's config, data and log dirs. It also deletes the run dir, including the seed. It copies `dev.log` into the evidence dir first, and evidence is never removed. Run it after every failed iteration too. Afterwards nothing should listen on the Vite port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, or `ss -ltn` on Linux). Never `pkill Hyprlayer` or free port 1430: that kills the user's app.
 
 ## Gotchas
 

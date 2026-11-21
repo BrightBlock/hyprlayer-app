@@ -19,9 +19,9 @@ Two desktops attached to one server can both show the same session. Turns anothe
 Preconditions:
 
 - **App A:** a doctor-passed isolated instance with a folder workstream. Start a short Haiku session there (`Reply with exactly SYNC-A-1`), titles and recaps off (session-send.md seed).
-- **App B:** a second debug app attached to A's server, never a second server on that profile. Launch it as review-workspace.md's sandbox steps 3–4 do, with Vite on the next free port (1432) and `localProfile` set to A's `~/Library/Application Support/<A IDENTIFIER>`. <!-- src: src-tauri/src/hosts.rs:135 --> <!-- src: src-tauri/src/supervisor.rs:226 -->
+- **App B:** a second debug app attached to A's server, never a second server on that profile. Launch it with `verify.sh launch attach <A's data dir>` (the platform table in SKILL.md gives the dir). Vite and the bridge take the next free ports (1432, 9224). <!-- src: src-tauri/src/hosts.rs:135 --> <!-- src: src-tauri/src/supervisor.rs:226 -->
   - Ready is `connected to <adjective-animal>` in B's `dev.log`, and `announced this client as <device>; transcript sync on`.
-  - B's doctor fails its last two checks by design, as for the sandbox. `lsof -U | grep <A IDENTIFIER>/hyprlayer.sock` shows only A's server.
+  - B's doctor checks that B reached A's server and spawned none of its own. Clean up B with `verify.sh cleanup` on B's run dir only; A's server keeps running.
   - B's bridge takes the next port (9224). Drive each app with `appIdentifier` set to its port.
 - **Cost:** one Haiku turn per B send, about $0.006 each on a short session.
 

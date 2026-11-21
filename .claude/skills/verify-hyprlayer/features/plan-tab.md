@@ -23,6 +23,7 @@ The right sidebar's Plan tab previews the plan a session is building. It shows p
 Preconditions:
 
 - A **shared** instance (the `.dev` profile) on the hyprlayer-app project. It needs a workstream with an implement or validate session; the lifecycle (Validate/Review/Ship) only renders for those.
+- Or an **isolated** instance. It indexes the same shared thoughts tree, so `openPlanPreview(<any isolated session id>, { key: '<absolute plan path>', … })` renders the header, counts, roll-up and tick against the real plan. Counts, roll-up and tick were verified this way on Linux; the lifecycle rows need an implement session (review-lifecycle.md).
 - A plan under `thoughts/shared/plans` in tracking status (`active`, `approved` or `implemented`) with at least one open manual check. Parse the plans to find one rather than grepping. `2026-08-21-scope-sidebar-docs-to-workstream.md` (1 of 9 open) and `2026-08-17-linux-tiling-wm-window-sizing.md` (22 of 41) have worked.
 - A tracking plan with none open, for the empty case.
 - A copy of every plan file you'll edit, saved in the evidence dir before the first edit.
