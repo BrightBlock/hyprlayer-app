@@ -498,6 +498,95 @@ while IFS= read -r line; do
 done
 "#;
 
+pub const SCREEN_TUI: &str = r#"#!/bin/sh
+stty -icanon -echo -icrnl min 0 time 2
+cat "$1"
+printf '\033[?2031h'
+cr=$(printf '\r')
+n=0; hl=0; winched=""; floods=0; ruled=""
+trap 'winched=1' WINCH
+label() { case $1 in 0) l=low ;; 1) l=medium ;; *) l=high ;; esac; }
+# Anchored to the bottom row, as claude's fullscreen renderer is, so a flood can't move it.
+paint() {
+  set -- $(stty size); rows=$1; cols=$2
+  [ "$cols" = "$ruled" ] || { rule=$(printf "%$((cols - 1))s" '' | sed 's/ /─/g'); ruled=$cols; }
+  n=$((n + 1))
+  printf '\033[%s;1H\033[J Effort · %sx%s\r\n' $((rows - 5)) "$cols" "$rows"
+  for i in 0 1 2; do
+    mark="  "; [ $i -eq $hl ] && mark="❯ "
+    label $i; printf ' %s%s. %s\r\n' "$mark" $((i + 1)) "$l"
+  done
+  printf '%s\r\n Enter to select · j to move · (paint %s)' "$rule" "$n"
+}
+listen() {
+  stty min 0 time 15
+  got=""
+  while c=$(dd bs=64 count=1 2>/dev/null | od -An -tx1); [ -n "$c" ]; do got="$got $c"; done
+  got=$(printf '%s' "$got" | tr -s ' \n' '  ')
+  stty min 0 time 2
+}
+count() { printf '%s' "$got" | grep -o "$1" | wc -l | tr -d ' '; }
+theme() {
+  printf '\033]11;?\033\\\033[?996n'
+  listen
+  dark=' 72 67 62 3a 30 30 30 30'; light=' 72 67 62 3a 66 66 66 66'
+  darks=$(count "$dark"); lights=$(count "$light")
+  before_dark=${got%%"$dark"*}; before_light=${got%%"$light"*}
+  first=none; sgr=0
+  if [ "$darks" -gt 0 ] && [ ${#before_dark} -le ${#before_light} ]; then first=dark; sgr='97;40'
+  elif [ "$lights" -gt 0 ]; then first=light; sgr='30;107'; fi
+  printf '\033[%s;1H\033[2K ANSWERS osc11=%s scheme=%s dark=%s light=%s' $((rows - 7)) \
+    "$(count ' 5d 31 31 3b 72 67 62 3a')" "$(count ' 5b 3f 39 39 37 3b')" "$darks" "$lights"
+  printf '\033[%s;1H\033[2K\033[%sm THEME %-5s \033[0m' $((rows - 6)) "$sgr" "$first"
+  paint
+}
+heard() {
+  paint
+  listen
+  printf '\033[%s;1H\033[2K HEARD ctrl_f3=%s batched_key=%s' $((rows - 8)) \
+    "$(count ' 1b 5b 31 3b 35 52')" "$(count ' 78 1b 5d 31 31 3b')"
+  paint
+}
+burst() {
+  i=0; while [ $i -lt "$1" ]; do yes "$line" | head -n 400; sleep 0.005; i=$((i + 1)); done
+}
+flood() {
+  floods=$((floods + 1))
+  line=$(printf '\033[1;1H0123456789 0123456789 0123456789 0123456789 0123456789 0123456789\033[K')
+  burst 64
+  printf '\033[3;1H\033[2K STATUS %s' "$floods"
+  burst 32
+  paint
+}
+scroll() {
+  printf '\033[%s;1H\033[J' $((rows - 6))
+  i=1; while [ $i -le 60 ]; do printf 'scrolled line %02d · the quick brown fox jumps over the lazy dog\r\n' $i; i=$((i + 1)); done
+  paint
+}
+load() {
+  printf '\033[%s;1H\033[J' $((rows - 6))
+  yes 'yes-like load 0123456789 abcdefghijklmnopqrstuvwxyz 0123456789' & p=$!
+  sleep 4; kill $p; wait $p 2>/dev/null
+  paint
+}
+repaints() { i=0; while [ $i -lt 580 ]; do paint; sleep 0.016; i=$((i + 1)); done; }
+paint
+while :; do
+  k=$(dd bs=1 count=1 2>/dev/null; echo .); k=${k%.}
+  [ -z "$winched" ] || { winched=""; paint; }
+  case $k in
+    j) hl=$(( (hl + 1) % 3 )); paint ;;
+    "$cr") label $hl; printf '\033[%s;1H\033[2K ⎿  Set effort level to %s' $((rows - 9)) "$l"; paint ;;
+    t) theme ;;
+    h) heard ;;
+    F) flood ;;
+    S) scroll ;;
+    Y) load ;;
+    R) repaints ;;
+  esac
+done
+"#;
+
 /// Where both stubs log.
 pub fn stub_dir(sandbox: &Sandbox) -> PathBuf {
     sandbox.root.join("agent-control")

@@ -1,0 +1,127 @@
+{
+  "scenario": "shared_terminal_screen",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "grids_match": true,
+            "mismatched_cells": 0
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "A opens the program at 120x40 and B attaches at 80x24"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "grids_match": true,
+            "mismatched_cells": 0
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(a) A resizes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "grids_match": true,
+            "mismatched_cells": 0
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(b) B types, which gives it the size, then resizes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "grids_match": true,
+            "mismatched_cells": 0
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(c) B answers the picker, which erases and redraws it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "active": "light",
+            "answers_seen": 2,
+            "grids_match": true,
+            "mismatched_cells": 0,
+            "scheme_answers": 2,
+            "themes_heard": {
+              "dark": 1,
+              "light": 1
+            }
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(d) the program asks for the theme while B, the light desktop, is active"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "batched_key_heard": 1,
+            "ctrl_f3_heard": 1,
+            "grids_match": true,
+            "mismatched_cells": 0
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "Ctrl+F3 and a key batched with a reply reach the program"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "b_skipped_output": true,
+            "grids_match": false,
+            "mismatched_cells": 37
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(e) B's link stalls for 5 s while the program writes, then B reads"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "answers_seen": 0,
+            "grids_match": false,
+            "mismatched_cells": 452,
+            "resumed": false
+          },
+          "guard": "A saw every byte and both desktops drew the repaint",
+          "ok": true
+        }
+      ],
+      "step": "(f) B reconnects after missing more output than the terminal keeps"
+    }
+  ]
+}

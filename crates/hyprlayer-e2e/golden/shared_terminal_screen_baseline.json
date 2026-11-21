@@ -1,0 +1,73 @@
+{
+  "scenario": "shared_terminal_screen_baseline",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "a picker redraw and a 60-line scroll arrive",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "the yes-like load streams for its window",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "a desktop attaching to it gets the screen",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "paints": 580
+          },
+          "guard": "the scripted repaint finishes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ptys": 20
+          },
+          "guard": "20 idle PTYs paint and sit",
+          "ok": true
+        }
+      ],
+      "step": "raw bytes on a 11 ms RTT, 30 MB/s link"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "a picker redraw and a 60-line scroll arrive",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "the yes-like load streams for its window",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "a desktop attaching to it gets the screen",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "paints": 580
+          },
+          "guard": "the scripted repaint finishes",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ptys": 20
+          },
+          "guard": "20 idle PTYs paint and sit",
+          "ok": true
+        }
+      ],
+      "step": "raw bytes on a 60 ms RTT, 1 Mbit/s link"
+    }
+  ]
+}

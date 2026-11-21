@@ -4,8 +4,7 @@
 //! server memory.
 #![cfg(unix)]
 
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,6 +12,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
+use hyprlayer_e2e::link::{far_phone, phone, uncapped, DEEP_LINK_BYTES, DEEP_UPLINK_BYTES};
 use hyprlayer_e2e::{json, next_output, text, Journey, Sandbox, Server};
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use hyprlayer_server::events::TARGETED_EVENTS;
@@ -20,8 +20,6 @@ use hyprlayer_server::rpc::WatchedSession;
 use hyprlayer_server::streams::{
     SessionEvents, SessionFrame, StreamRequest, StreamResponse, StreamStartOpts,
 };
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * 1024;
@@ -43,10 +41,6 @@ const LISTING_FILES: usize = 600;
 const UPLOAD_STREAM_FLOOR: u64 = 128 * KIB;
 /// A busy terminal may slow another stream's turn this much, not starve it.
 const SHARE_RATIO_LIMIT: f64 = 3.0;
-/// What a buffering link (an SSH channel, a bufferbloated cell link) holds downstream.
-const DEEP_LINK_BYTES: u64 = 4 * MIB;
-/// What ssh's channel window and the socket buffers under it hold upstream.
-const DEEP_UPLINK_BYTES: u64 = 2 * MIB;
 /// Large reads in flight at once, as many as the server runs at a time.
 const SLOT_READS: usize = 16;
 /// A far link's first large read pays one more round trip than a nearby read plus the round
@@ -89,213 +83,12 @@ while IFS= read -r line; do
 done
 "#;
 
-/// One connection's two directions, as a proxy that can stall, throttle or buffer them.
-#[derive(Default)]
-struct Link {
-    down_stalled: AtomicBool,
-    down_bps: AtomicU64,
-    up_bps: AtomicU64,
-    /// Read from the server, not yet delivered to the client.
-    buffered: AtomicU64,
-    /// Read from the client, not yet delivered to the server.
-    up_buffered: AtomicU64,
-    /// When each runtime event reached the client.
-    events: Arc<Mutex<Vec<Instant>>>,
-}
-
-impl Link {
-    fn first_event_after(&self, from: Instant) -> Option<Duration> {
-        let events = self.events.lock().unwrap();
-        events.iter().find(|at| **at >= from).map(|at| *at - from)
-    }
-}
-
-async fn phone(socket: &Path, deep: bool) -> (Arc<RpcClient>, Arc<Link>) {
-    far_phone(socket, deep, Duration::ZERO, false).await
-}
-
-/// `deep`: the link takes up to `DEEP_LINK_BYTES` from the server at once and
-/// delivers it at `down_bps`; otherwise it reads only as fast as it delivers.
-/// `deep_up`: the same toward the server, up to `DEEP_UPLINK_BYTES`, as ssh's channel
-/// window and socket buffers hold. `one_way` delays each direction.
-async fn far_phone(
-    socket: &Path,
-    deep: bool,
-    one_way: Duration,
-    deep_up: bool,
-) -> (Arc<RpcClient>, Arc<Link>) {
-    let unix = tokio::net::UnixStream::connect(socket)
-        .await
-        .expect("connect to the sandbox socket");
-    let (mut srv_rd, mut srv_wr) = unix.into_split();
-    let (client_end, proxy_end) = tokio::io::duplex(64 * 1024);
-    let (mut cli_rd, mut cli_wr) = tokio::io::split(proxy_end);
-    let link = Arc::new(Link::default());
-    // A shallow uplink is paced in step with its reads, so it pushes back on the client.
-    let (up_tx, mut up_rx) = mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
-    let up = link.clone();
-    tokio::spawn(async move {
-        let mut buf = vec![0u8; 4096];
-        loop {
-            while deep_up && up.up_buffered.load(Relaxed) > DEEP_UPLINK_BYTES {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-            let n = match cli_rd.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
-            };
-            up.up_buffered.fetch_add(n as u64, Relaxed);
-            if up_tx
-                .send((Instant::now() + one_way, buf[..n].to_vec()))
-                .is_err()
-            {
-                break;
-            }
-            if !deep_up {
-                pace(n, up.up_bps.load(Relaxed)).await;
-            }
-        }
-    });
-    let up_writer = link.clone();
-    tokio::spawn(async move {
-        let mut free_at = Instant::now();
-        while let Some((due, chunk)) = up_rx.recv().await {
-            tokio::time::sleep_until(due.into()).await;
-            if srv_wr.write_all(&chunk).await.is_err() {
-                break;
-            }
-            up_writer.up_buffered.fetch_sub(chunk.len() as u64, Relaxed);
-            let bps = up_writer.up_bps.load(Relaxed);
-            if deep_up && bps > 0 {
-                free_at = free_at
-                    .max(Instant::now() - Duration::from_millis(5))
-                    .max(due);
-                free_at += Duration::from_secs_f64(chunk.len() as f64 / bps as f64);
-                tokio::time::sleep_until(free_at.into()).await;
-            }
-        }
-    });
-    let (tx, mut rx) = mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
-    let filler = link.clone();
-    tokio::spawn(async move {
-        let mut buf = vec![0u8; 4096];
-        loop {
-            while filler.down_stalled.load(Relaxed)
-                || (deep && filler.buffered.load(Relaxed) > DEEP_LINK_BYTES)
-            {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-            let n = match srv_rd.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => n,
-            };
-            filler.buffered.fetch_add(n as u64, Relaxed);
-            if tx
-                .send((Instant::now() + one_way, buf[..n].to_vec()))
-                .is_err()
-            {
-                break;
-            }
-            if !deep {
-                while filler.buffered.load(Relaxed) > 0 {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
-                }
-            }
-        }
-    });
-    let down = link.clone();
-    tokio::spawn(async move {
-        // Paced against a running deadline: a timer's millisecond overshoot is made up, not lost.
-        let mut free_at = Instant::now();
-        while let Some((due, chunk)) = rx.recv().await {
-            tokio::time::sleep_until(due.into()).await;
-            while down.down_stalled.load(Relaxed) {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            if cli_wr.write_all(&chunk).await.is_err() {
-                return;
-            }
-            down.buffered.fetch_sub(chunk.len() as u64, Relaxed);
-            let bps = down.down_bps.load(Relaxed);
-            let now = Instant::now();
-            free_at = free_at.max(now - Duration::from_millis(5)).max(due);
-            if bps > 0 {
-                free_at += Duration::from_secs_f64(chunk.len() as f64 / bps as f64);
-                tokio::time::sleep_until(free_at.into()).await;
-            }
-        }
-    });
-    let client = RpcClient::connect(client_end).await.expect("handshake");
-    drain_events(&client, link.events.clone());
-    (client, link)
-}
-
-/// A far link with no bandwidth cap: each direction late by `one_way`, nothing throttled.
-async fn uncapped(socket: &Path, one_way: Duration) -> Arc<RpcClient> {
-    let unix = tokio::net::UnixStream::connect(socket)
-        .await
-        .expect("connect to the sandbox socket");
-    let (srv_rd, srv_wr) = unix.into_split();
-    let (client_end, proxy_end) = tokio::io::duplex(1024 * 1024);
-    let (cli_rd, cli_wr) = tokio::io::split(proxy_end);
-    tokio::spawn(delayed(cli_rd, srv_wr, one_way));
-    tokio::spawn(delayed(srv_rd, cli_wr, one_way));
-    let client = RpcClient::connect(client_end).await.expect("handshake");
-    drain_events(&client, Arc::default());
-    client
-}
-
-async fn delayed<R, W>(mut rd: R, mut wr: W, one_way: Duration)
-where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
-{
-    let (tx, mut rx) = mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
-    tokio::spawn(async move {
-        while let Some((due, bytes)) = rx.recv().await {
-            tokio::time::sleep_until(due.into()).await;
-            if wr.write_all(&bytes).await.is_err() {
-                break;
-            }
-        }
-    });
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = match rd.read(&mut buf).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        if tx
-            .send((Instant::now() + one_way, buf[..n].to_vec()))
-            .is_err()
-        {
-            break;
-        }
-    }
-}
-
 async fn timed_read(client: &RpcClient, path: &str) -> Option<Duration> {
     let started = Instant::now();
     match tokio::time::timeout(IO, client.read_attachment(path.to_string())).await {
         Ok(Ok(_)) => Some(started.elapsed()),
         _ => None,
     }
-}
-
-async fn pace(bytes: usize, bps: u64) {
-    if bps > 0 {
-        tokio::time::sleep(Duration::from_secs_f64(bytes as f64 / bps as f64)).await;
-    }
-}
-
-/// Notes when each runtime event arrived.
-fn drain_events(client: &RpcClient, arrivals: Arc<Mutex<Vec<Instant>>>) {
-    let mut events = client.take_events().expect("runtime events");
-    tokio::spawn(async move {
-        while events.recv().await.is_some() {
-            arrivals.lock().unwrap().push(Instant::now());
-        }
-    });
 }
 
 fn rss_bytes(pid: u32) -> u64 {

@@ -8,6 +8,7 @@ pub mod fake_gh;
 pub mod flows;
 pub mod goal_stub;
 mod journey;
+pub mod link;
 mod sandbox;
 mod server;
 mod terminal;
