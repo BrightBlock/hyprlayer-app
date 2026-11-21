@@ -18,10 +18,14 @@ DEV_ID="ai.brightblock.hyprlayer.dev"
 
 die() { echo "verify: $*" >&2; exit 1; }
 
-# The shell exports the release profile's dirs, and a nested Claude session's vars leak into agents.
+# The shell exports the release profile's dirs, and a nested Claude session's vars leak into agents:
+# CLAUDE_CODE_CHILD_SESSION turns transcript saving off. Named, so a user's provider and auth vars stay.
 CLEAN_ENV=(env -u HYPRLAYER_APP_DATA_DIR -u HYPRLAYER_APP_CONFIG_DIR -u HYPRLAYER_APP_LOG_DIR
   -u HYPRLAYER_AGENT_TOKEN -u HYPRLAYER_SOCKET -u HYPRLAYER_WORKSTREAM_ID
-  -u HYPRLAYER_TERMINAL_ID -u HYPRLAYER_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT)
+  -u HYPRLAYER_TERMINAL_ID -u HYPRLAYER_SESSION_ID -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT
+  -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID -u CLAUDE_CODE_SESSION_ATTENDED
+  -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_EXECPATH
+  -u CLAUDE_CODE_CHILD_NOTES_DIR -u CLAUDE_PID -u CLAUDE_EFFORT -u AI_AGENT)
 clean_env() { "${CLEAN_ENV[@]}" "$@"; }
 
 free_port() {

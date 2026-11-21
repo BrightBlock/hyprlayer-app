@@ -2,8 +2,9 @@
 //! context while the user's own statusLine still prints, a typed shift+tab read from the footer, a
 //! model switch, the title a first prompt earns once, titles off, codex's status from its hooks and
 //! rollout, and the bar changing a claude's model, effort and mode in its running TUI: a route
-//! round the `/model` picker that never lands on "More models", footers a narrow terminal wraps, a
-//! switch plan mode follows with its own, and a relaunch that keeps the session's mode and effort.
+//! round the `/model` picker that never lands on "More models", footers a narrow terminal wraps,
+//! claude 2.1.330's pickers, a switch plan mode follows with its own, and a relaunch that keeps the
+//! session's mode and effort.
 //!
 //! The harnesses are `agent_stub`'s PTY claude (as a raw-mode TUI for the changes) and codex; the
 //! title model is a claude stand-in that logs each prompt it names. Nothing here covers the real
@@ -597,6 +598,55 @@ async fn pty_status_bar() {
         json!({ "outcome": narrow, "reported": maxed.and_then(|s| s.status.effort) }),
     );
 
+    j.step("claude 2.1.330's pickers, whose Enter saves a default, still change it session-only");
+    let v330 = tui_stub
+        .launch(
+            &mut j,
+            &c,
+            &mut rx,
+            &["--stub-tui", "--stub-330", "--stub-narrow"],
+            "$V330",
+        )
+        .await;
+    type_line(&c, &v330.term, "status").await;
+    until(&mut rx, &v330.term, |s| s.status.model.is_some()).await;
+    let model = control(
+        &mut j,
+        &c,
+        Request::PtyAgentSetModel {
+            terminal_id: v330.term.clone(),
+            model: "claude-fable-5-2".into(),
+        },
+    )
+    .await;
+    let fable = until(&mut rx, &v330.term, |s| {
+        s.status.model.as_deref() == Some("claude-fable-5-2")
+    })
+    .await;
+    let effort = control(
+        &mut j,
+        &c,
+        Request::PtyAgentSetEffort {
+            terminal_id: v330.term.clone(),
+            effort: "high".into(),
+        },
+    )
+    .await;
+    let high = until(&mut rx, &v330.term, |s| {
+        s.status.effort.as_deref() == Some("high")
+    })
+    .await;
+    j.guard(
+        "rows naming the model only in their hint, and footers offering `s` before Enter's save, still switch to Fable and high effort",
+        model == "applied" && fable.is_some() && effort == "ok" && high.is_some(),
+        json!({
+            "model": model,
+            "switched": fable.is_some(),
+            "effort": effort,
+            "reported": high.and_then(|s| s.status.effort),
+        }),
+    );
+
     j.step("a switch in plan mode confirms though claude's own switch follows it");
     let plan = control(
         &mut j,
@@ -732,10 +782,10 @@ async fn pty_status_bar() {
 
     j.step("the TUI never got a digit, an Enter in a picker, or a Tab in the slider");
     let mut keys = Vec::new();
-    for launch in [&tui, &route, &warm, &mute] {
+    for launch in [&tui, &route, &v330, &warm, &mute] {
         keys.extend(lines(&launch.log.join("keys.log")));
     }
-    let traps: Vec<String> = [&tui, &route, &warm, &mute]
+    let traps: Vec<String> = [&tui, &route, &v330, &warm, &mute]
         .iter()
         .flat_map(|l| lines(&l.log.join("traps.log")))
         .collect();
@@ -753,7 +803,7 @@ async fn pty_status_bar() {
         .collect();
     let typed = typed_commands(&keys);
     // A driver Esc outside a picker would interrupt the turn; the busy switch above is where it would land.
-    let interrupts = [&tui, &route, &warm, &mute]
+    let interrupts = [&tui, &route, &v330, &warm, &mute]
         .iter()
         .flat_map(|l| lines(&l.log.join("tui.log")))
         .filter(|line| line == "interrupted")

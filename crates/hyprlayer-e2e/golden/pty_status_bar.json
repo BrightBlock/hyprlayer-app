@@ -327,6 +327,21 @@
       "guards": [
         {
           "evidence": {
+            "effort": "ok",
+            "model": "applied",
+            "reported": "high",
+            "switched": true
+          },
+          "guard": "rows naming the model only in their hint, and footers offering `s` before Enter's save, still switch to Fable and high effort",
+          "ok": true
+        }
+      ],
+      "step": "claude 2.1.330's pickers, whose Enter saves a default, still change it session-only"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "outcome": "applied",
             "plan": "ok",
             "planModeModel": "claude-sonnet-5-5"
@@ -389,6 +404,9 @@
               "/effort",
               "/plan",
               "/model",
+              "status",
+              "/model",
+              "/effort",
               "/model",
               "/model",
               "hold",

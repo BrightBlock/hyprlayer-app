@@ -1,8 +1,8 @@
 //! Changes a hooked claude PTY's model, effort and mode from the status bar, session-only, by
-//! driving its TUI as a person would (recipe observed on claude 2.1.322). A digit or Enter in a
-//! picker, and a typed `/model <x>` or `/effort <x>`, each save a default (the model one on the
-//! user's claude account), so none is ever sent. A codex over its own app-server goes through the
-//! API instead.
+//! driving its TUI as a person would (recipe observed on claude 2.1.322 to 2.1.330). A digit or
+//! Enter in a picker, and a typed `/model <x>` or `/effort <x>`, each save a default (the model one
+//! on the user's claude account), so none is ever sent. A codex over its own app-server goes
+//! through the API instead.
 
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -32,11 +32,13 @@ const PLAN_CONFIRM: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(50);
 const MAX_PRESSES: usize = 6;
 
-const MODEL_FOOTER: &str = "Enter to set as default · s to use this session only · Esc to cancel";
+/// A picker footer's hint for `s`, the only part the driver relies on: 2.1.330 reorders the rest
+/// and renames Enter's action to "save". The second is `/effort`'s before 2.1.330. The leading
+/// space keeps a note like `Set model to opus for this session only` from reading as one.
+const SESSION_HINTS: [&str; 2] = [" s to use this session only", " s for this session only"];
 /// The `/model` picker's footer while "More models" is highlighted.
 const MORE_FOOTER: &str = "Enter to expand · Esc to cancel";
-const EFFORT_FOOTER: &str =
-    "←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel";
+const MODEL_TITLE: &str = "Select model";
 const SWITCH_DIALOG: &str = "Switch model?";
 const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
@@ -51,7 +53,8 @@ const BACKSPACE: &[u8] = b"\x7f";
 const SESSION_ONLY: &[u8] = b"s";
 
 static MODEL_ROW: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*(❯\s+)?(\d)\.\s{2}(\S.*?)(\s+✔)?\s{2,}").expect("model row regex")
+    Regex::new(r"^\s*(?:❯\s+)?\d\.\s+(?P<label>\S.*?)(?:\s+✔)?\s{2,}(?P<hint>\S.*)$")
+        .expect("model row regex")
 });
 static FOOTER_MODE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:⏸|⏵⏵) (manual mode|accept edits|plan mode|auto mode|bypass permissions) on")
@@ -602,6 +605,7 @@ impl Drop for PendingSwitch<'_> {
 
 #[derive(PartialEq)]
 struct ModelPicker {
+    /// The model each row picks, as `display_name` names it.
     labels: Vec<String>,
     /// A "More models" row follows the numbered ones in the arrow cycle.
     more: bool,
@@ -613,21 +617,12 @@ fn model_picker(rows: &[String]) -> Option<ModelPicker> {
     if input_line(rows).is_some() {
         return None;
     }
-    let model_footer = rfind_wrapped(rows, MODEL_FOOTER);
-    let footer = model_footer.max(rfind_wrapped(rows, MORE_FOOTER))?;
-    let title = rows[..footer]
+    let footer = session_footer(rows).max(rfind_wrapped(rows, MORE_FOOTER))?;
+    // Neither footer is this picker's alone: 2.1.330's `/effort` offers the same `s`.
+    let top = rows[..footer]
         .iter()
-        .rposition(|r| r.trim() == "Select model");
-    // "Enter to expand" isn't the picker's alone; its title or a lit "More models" row makes it this picker.
-    let more_lit = || {
-        rows[..footer]
-            .iter()
-            .any(|r| r.trim_start().starts_with('❯') && r.contains("More models"))
-    };
-    if title.is_none() && model_footer != Some(footer) && !more_lit() {
-        return None;
-    }
-    let top = title.map_or(0, |i| i + 1);
+        .rposition(|r| r.trim() == MODEL_TITLE)?
+        + 1;
     let mut picker = ModelPicker {
         labels: Vec::new(),
         more: false,
@@ -640,7 +635,7 @@ fn model_picker(rows: &[String]) -> Option<ModelPicker> {
             if lit {
                 picker.highlighted = Some(picker.labels.len());
             }
-            picker.labels.push(caps[3].to_string());
+            picker.labels.push(row_model(&caps["label"], &caps["hint"]));
         } else if row.contains("More models") {
             picker.more = true;
             more_lit = lit;
@@ -650,6 +645,16 @@ fn model_picker(rows: &[String]) -> Option<ModelPicker> {
         picker.highlighted = Some(picker.labels.len());
     }
     (!picker.labels.is_empty()).then_some(picker)
+}
+
+/// A row's label, or its hint's leading name where the label is only that name's family: logged-out
+/// 2.1.326 and 2.1.330 show `Opus   Opus 5.5 · …`.
+fn row_model(label: &str, hint: &str) -> String {
+    let lead = hint.split(" · ").next().unwrap_or(hint);
+    match lead.strip_prefix(label) {
+        Some(version) if version.starts_with(' ') => lead.to_string(),
+        _ => label.to_string(),
+    }
 }
 
 #[derive(PartialEq)]
@@ -674,7 +679,7 @@ fn effort_slider(rows: &[String]) -> Option<EffortSlider> {
     if input_line(rows).is_some() {
         return None;
     }
-    let footer = rfind_wrapped(rows, EFFORT_FOOTER)?;
+    let footer = session_footer(rows)?;
     let (at, levels) = rows[..footer]
         .iter()
         .enumerate()
@@ -765,8 +770,9 @@ fn has_draft(rows: &[String], bright: &[String]) -> bool {
         .is_some_and(|line| !input_text(line).is_empty())
 }
 
-/// The model row the `/model` picker highlights; `None` on "More models".
+/// The model row the `/model` picker highlights while its footer offers `s`; `None` on "More models".
 fn highlighted(rows: &[String]) -> Option<String> {
+    session_footer(rows)?;
     let picker = model_picker(rows)?;
     picker.labels.get(picker.highlighted?).cloned()
 }
@@ -780,9 +786,16 @@ fn input_text(line: &str) -> &str {
 fn showing_picker(rows: &[String]) -> bool {
     input_line(rows).is_none()
         && (model_picker(rows).is_some()
-            || [MODEL_FOOTER, EFFORT_FOOTER, SWITCH_DIALOG]
-                .iter()
-                .any(|text| rfind_wrapped(rows, text).is_some()))
+            || session_footer(rows).is_some()
+            || rfind_wrapped(rows, SWITCH_DIALOG).is_some())
+}
+
+/// The newest row a footer offering `s` for this session only starts on.
+fn session_footer(rows: &[String]) -> Option<usize> {
+    SESSION_HINTS
+        .iter()
+        .filter_map(|hint| rfind_wrapped(rows, hint))
+        .max()
 }
 
 /// The newest row `text` starts on; a narrow terminal wraps a footer at words onto up to three rows,
@@ -816,7 +829,7 @@ fn switch_dialog_for(rows: &[String], label: &str) -> bool {
         && rows
             .iter()
             .any(|r| r.split_whitespace().collect::<Vec<_>>().join(" ") == yes)
-        && !rows.iter().any(|r| r.contains("Enter to set as default"))
+        && session_footer(rows).is_none()
 }
 
 /// The newest footer among the last four lines.
@@ -867,5 +880,110 @@ fn display_name(id: &str) -> Option<String> {
 fn failed(detail: impl Into<String>) -> CoreError {
     CoreError::PtyControlFailed {
         detail: detail.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Logged-out captures from `capture.py`, so their rows are the API-billing layout.
+    const CAPTURES: [&str; 4] = [
+        "2.1.326-120x40",
+        "2.1.326-68x30",
+        "2.1.330-120x40",
+        "2.1.330-68x30",
+    ];
+
+    /// A capture's screen as `ScreenMirror::rows` reads it, at the size it was recorded.
+    fn screen(name: &str) -> Vec<String> {
+        let path = format!(
+            "{}/tests/fixtures/claude_tui/{name}.bin",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).expect("read the capture");
+        let (cols, rows) = name
+            .rsplit_once('-')
+            .and_then(|(_, size)| size.split_once('x'))
+            .expect("a <cols>x<rows> suffix");
+        let mut parser = vt100::Parser::new(rows.parse().unwrap(), cols.parse().unwrap(), 0);
+        parser.process(&bytes);
+        let screen = parser.screen();
+        screen.rows(0, screen.size().1).collect()
+    }
+
+    fn report(failures: Vec<String>) {
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn each_claudes_model_picker_routes_to_session_only() {
+        let mut failures = Vec::new();
+        for capture in CAPTURES {
+            let rows = screen(&format!("model-{capture}"));
+            let mut fail = |what: &str| failures.push(format!("{capture}: {what}"));
+            match model_picker(&rows) {
+                None => fail("no /model picker read"),
+                Some(picker) => {
+                    if picker.labels
+                        != [
+                            "Default (recommended)",
+                            "Opus 5.5",
+                            "Fable 5.2",
+                            "Sonnet 5.5",
+                            "Haiku 5.5",
+                        ]
+                    {
+                        fail(&format!("rows read as {:?}", picker.labels));
+                    }
+                    if picker.more {
+                        fail("a More models row read where none shows");
+                    }
+                }
+            }
+            if highlighted(&rows).as_deref() != Some("Opus 5.5") {
+                fail("`s` would not pick the lit Opus 5.5 row");
+            }
+            if !showing_picker(&rows) {
+                fail("dismiss would leave it open");
+            }
+            if ready(&rows) || effort_slider(&rows).is_some() {
+                fail("read as the input box or the effort slider");
+            }
+            if switch_dialog_for(&rows, "Opus 5.5") {
+                fail("Enter allowed while the picker shows");
+            }
+        }
+        report(failures);
+    }
+
+    #[test]
+    fn each_claudes_effort_slider_reads_its_level() {
+        let mut failures = Vec::new();
+        for capture in CAPTURES {
+            let rows = screen(&format!("effort-{capture}"));
+            let mut fail = |what: &str| failures.push(format!("{capture}: {what}"));
+            match effort_slider(&rows) {
+                None => fail("no /effort slider read"),
+                Some(slider) if slider.selected().as_deref() != Some("medium") => {
+                    fail(&format!("selected {:?}, not medium", slider.selected()))
+                }
+                Some(_) => {}
+            }
+            if !showing_picker(&rows) {
+                fail("dismiss would leave it open");
+            }
+            if model_picker(&rows).is_some() || ready(&rows) {
+                fail("read as the /model picker or the input box");
+            }
+        }
+        report(failures);
+    }
+
+    #[test]
+    fn claude_2_1_330_notes_a_session_only_switch() {
+        let rows = screen("session-2.1.330-68x30");
+        assert!(ready(&rows) && !showing_picker(&rows));
+        assert!(switch_noted(&rows, "Opus 5.5"));
     }
 }

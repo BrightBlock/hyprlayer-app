@@ -47,14 +47,16 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `--stub-ignore-allow` shows anyway), then `PostModelSwitch`, the `❯ /model` note and the
 /// statusLine; in plan mode a switch to Haiku is followed by claude's own `auto` switch to Sonnet.
 /// `--stub-silent-switch` closes it with neither; `--stub-narrow` wraps the pickers' footers as
-/// claude does in a narrow terminal. The
+/// claude does in a narrow terminal. `--stub-330` paints the pickers as logged-out claude 2.1.330
+/// does: family-label rows that name the model in their hint, an effort row, `Enter to save`
+/// footers, and under `--stub-narrow` each hint's price on a row of its own. The
 /// `/effort` slider stops at the ends of ←/→ and `s` reruns the statusLine. Every byte it reads is
 /// logged as `<screen> <hex>` to `keys.log`; a digit, an Enter in a picker or a Tab in the slider
 /// goes to `traps.log` too, as it would save a claude default. `tui.log` records the switch path.
 pub const PTY_CLAUDE: &str = r#"#!/bin/sh
 base="$(dirname "$0")/../agent-control"
 sid=""; settings=""; mcp=""; prev=""
-tui=""; dialog=""; ignore_allow=""; silent=""; narrow=""
+tui=""; dialog=""; ignore_allow=""; silent=""; narrow=""; v330=""
 for a in "$@"; do
   case "$prev" in
     --session-id|--resume) sid="$a" ;;
@@ -67,6 +69,7 @@ for a in "$@"; do
     --stub-ignore-allow) ignore_allow=1 ;;
     --stub-silent-switch) silent=1 ;;
     --stub-narrow) narrow=1 ;;
+    --stub-330) v330=1 ;;
   esac
   prev="$a"
 done
@@ -215,6 +218,18 @@ row_hint() {
     4) echo "Fastest for quick answers" ;;
   esac
 }
+row_family() {
+  case $1 in 0) echo "Default (recommended)" ;; *) row_label $1 | cut -d' ' -f1 ;; esac
+}
+row_hint330() {
+  case $1 in
+    0) echo "Use the default model (currently Sonnet 5.5) · \$2/\$10 per Mtok" ;;
+    1) echo "Opus 5.5 · Best for everyday, complex tasks · \$4/\$20 per Mtok" ;;
+    2) echo "Fable 5.2 · Most capable for your hardest and longest-running tasks · \$8/\$40 per Mtok" ;;
+    3) echo "Sonnet 5.5 · Efficient for routine tasks · \$2/\$10 per Mtok" ;;
+    4) echo "Haiku 5.5 · Fastest for quick answers · \$0.10/\$0.50 per Mtok" ;;
+  esac
+}
 eff_level() {
   case $1 in 0) echo low ;; 1) echo medium ;; 2) echo high ;; 3) echo xhigh ;; *) echo max ;; esac
 }
@@ -235,26 +250,43 @@ paint_input() {
   fi
   footer; printf '\n'
 }
+# A footer and its last words, which a narrow terminal puts on a row of their own.
+wrap() {
+  if [ -n "$narrow" ]; then printf '%s\n   %s\n' "$1" "$2"; else printf '%s %s\n' "$1" "$2"; fi
+}
 paint_model() {
   cls
-  printf '   Select model\n   Switch between Claude models.\n\n'
+  if [ -n "$v330" ]; then
+    printf '  Select model\n  Your pick is the default for new sessions. For other models, use --model.\n\n'
+  else
+    printf '   Select model\n   Switch between Claude models.\n\n'
+  fi
   i=0
   while [ $i -le 4 ]; do
     mark="  "; [ $i -eq $hl ] && mark="❯ "
     tick=""; [ $i -ge 1 ] && [ "$(row_id $i)" = "$model" ] && tick=" ✔"
-    printf '   %s%s.  %s%s   %s\n' "$mark" "$((i + 1))" "$(row_label $i)" "$tick" "$(row_hint $i)"
+    if [ -z "$v330" ]; then
+      printf '   %s%s.  %s%s   %s\n' "$mark" "$((i + 1))" "$(row_label $i)" "$tick" "$(row_hint $i)"
+    else
+      hint=$(row_hint330 $i); lead=$hint
+      [ -n "$narrow" ] && lead=${hint% · \$*}
+      printf '  %s%s. %-26s %s\n' "$mark" "$((i + 1))" "$(row_family $i)$tick" "$lead"
+      [ "$lead" = "$hint" ] || printf '%32s%s\n' '' "${hint#"$lead"}"
+    fi
     i=$((i + 1))
   done
+  more="  "
   if [ $hl -eq 5 ]; then
-    echo "more highlighted" >> "$dir/tui.log"
-    printf '   ❯ ▸   More models\n\n   Enter to expand · Esc to cancel\n'
+    more="❯ "; echo "more highlighted" >> "$dir/tui.log"
+  fi
+  printf '   %s▸   More models\n\n' "$more"
+  [ -n "$v330" ] && printf '  ◐ %s effort ←/→ to adjust\n\n' "$effort"
+  if [ $hl -eq 5 ]; then
+    printf '   Enter to expand · Esc to cancel\n'
+  elif [ -n "$v330" ]; then
+    wrap '  s to use this session only · Enter to save · Esc to' cancel
   else
-    printf '     ▸   More models\n\n'
-    if [ -n "$narrow" ]; then
-      printf '   Enter to set as default · s to use this session only · Esc to\n   cancel\n'
-    else
-      printf '   Enter to set as default · s to use this session only · Esc to cancel\n'
-    fi
+    wrap '   Enter to set as default · s to use this session only · Esc to' cancel
   fi
 }
 paint_dialog() {
@@ -267,10 +299,10 @@ paint_effort() {
   printf '   Effort\n\n'
   printf "%$(eff_col $eidx)s▲\n" ''
   printf '          low     medium     high     xhigh      max      Tab to toggle\n\n'
-  if [ -n "$narrow" ]; then
-    printf '   ←/→ to adjust · Enter to confirm · s for this session only · Esc\n   to cancel\n'
+  if [ -n "$v330" ]; then
+    wrap '  ←/→ to adjust · s to use this session only · Enter to save · Esc' 'to cancel'
   else
-    printf '   ←/→ to adjust · Enter to confirm · s for this session only · Esc to cancel\n'
+    wrap '   ←/→ to adjust · Enter to confirm · s for this session only · Esc' 'to cancel'
   fi
 }
 hex() { printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
