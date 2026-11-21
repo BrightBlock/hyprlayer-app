@@ -76,15 +76,23 @@ pub struct AttachTerminalRequest {
     pub offset: Option<u64>,
 }
 
+/// `viewer` is the client the call came from; `None` in process.
 pub struct WriteTerminalRequest {
     pub terminal_id: String,
     pub data: String,
+    pub viewer: Option<u64>,
 }
 
 pub struct ResizeTerminalRequest {
     pub terminal_id: String,
     pub cols: u16,
     pub rows: u16,
+    pub viewer: Option<u64>,
+}
+
+pub struct FocusTerminalRequest {
+    pub terminal_id: String,
+    pub viewer: u64,
 }
 
 pub struct CloseTerminalRequest {
@@ -133,6 +141,7 @@ pub struct ResizeAgentTerminalRequest {
     pub terminal_id: String,
     pub cols: u16,
     pub rows: u16,
+    pub viewer: Option<u64>,
 }
 
 pub struct CaptureSessionRequest {
@@ -237,8 +246,12 @@ impl TerminalService<'_> {
             .decode(req.data)
             .map_err(|e| io_context("bad input", std::io::Error::other(e)))?;
         if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
+            let typed = !is_terminal_reply(&bytes);
+            if let Some(viewer) = req.viewer.filter(|_| typed) {
+                s.claim(viewer);
+            }
             s.write_input(&bytes)?;
-            if !is_terminal_reply(&bytes) {
+            if typed {
                 self.runtime.pty_agents.note_input(&req.terminal_id);
                 self.runtime
                     .agent_control()
@@ -251,7 +264,16 @@ impl TerminalService<'_> {
     pub async fn resize(&self, req: ResizeTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
         if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
-            let _ = s.resize(req.cols, req.rows);
+            s.fit(req.viewer, req.cols, req.rows);
+        }
+        Ok(())
+    }
+
+    /// The viewer's person is at this terminal, so it takes their fit.
+    pub async fn focus(&self, req: FocusTerminalRequest) -> Result<()> {
+        ensure_running(self.runtime)?;
+        if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
+            s.claim(req.viewer);
         }
         Ok(())
     }
@@ -772,10 +794,10 @@ impl TerminalService<'_> {
         };
         let nudge = req.rows.saturating_sub(1).max(2);
         if nudge != req.rows {
-            let _ = session.resize(req.cols, nudge);
+            session.fit(req.viewer, req.cols, nudge);
             tokio::time::sleep(Duration::from_millis(30)).await;
         }
-        let _ = session.resize(req.cols, req.rows);
+        session.fit(req.viewer, req.cols, req.rows);
         Ok(())
     }
 

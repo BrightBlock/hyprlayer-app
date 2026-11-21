@@ -186,6 +186,12 @@ impl Clients {
         self.lock().get(&conn)?.agent.clone()
     }
 
+    pub fn terminal_size(&self, conn: u64) -> bool {
+        self.lock()
+            .get(&conn)
+            .is_some_and(|c| c.outbound.terminal_size())
+    }
+
     pub fn decodes(&self, conn: u64, kind: &str) -> bool {
         self.lock()
             .get(&conn)

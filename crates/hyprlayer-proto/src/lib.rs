@@ -25,6 +25,10 @@ pub const LINK_CREDIT: &str = "link_credit";
 /// A hello feature: the peer answers `ping` with `pong`, so a link gone silent can be given up.
 pub const HEARTBEAT: &str = "heartbeat";
 
+/// A hello feature: the client renders a terminal at the size its stream gives (`resized`), so
+/// only the active client's fit sizes a shared terminal.
+pub const TERMINAL_SIZE: &str = "terminal_size";
+
 /// The hello features a peer announced.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Features {
@@ -32,6 +36,7 @@ pub struct Features {
     pub raw_terminal: bool,
     pub link_credit: bool,
     pub heartbeat: bool,
+    pub terminal_size: bool,
 }
 
 impl Features {
@@ -40,6 +45,7 @@ impl Features {
         raw_terminal: true,
         link_credit: true,
         heartbeat: true,
+        terminal_size: true,
     };
 
     /// Unknown names are a newer peer's, so they are ignored.
@@ -50,6 +56,7 @@ impl Features {
             raw_terminal: has(RAW_TERMINAL),
             link_credit: has(LINK_CREDIT),
             heartbeat: has(HEARTBEAT),
+            terminal_size: has(TERMINAL_SIZE),
         }
     }
 
@@ -59,6 +66,7 @@ impl Features {
             (self.raw_terminal, RAW_TERMINAL),
             (self.link_credit, LINK_CREDIT),
             (self.heartbeat, HEARTBEAT),
+            (self.terminal_size, TERMINAL_SIZE),
         ]
         .into_iter()
         .filter(|&(on, _)| on)

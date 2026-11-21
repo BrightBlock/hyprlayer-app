@@ -826,8 +826,11 @@ fn reply_len(b: &[u8]) -> Option<usize> {
                 // Cursor-position report.
                 b'R' => !params.is_empty(),
                 b'c' => matches!(params.first(), Some(b'?' | b'>')),
+                // Status reports, the colour-scheme one (`? 997 ; N`) included; no key ends in `n`.
+                b'n' => true,
                 b'I' | b'O' => params.is_empty(),
-                b'y' => params.first() == Some(&b'?') && params.last() == Some(&b'$'),
+                // DECRQM, private or ANSI.
+                b'y' => params.last() == Some(&b'$'),
                 _ => false,
             };
             reply.then_some(end + 3)

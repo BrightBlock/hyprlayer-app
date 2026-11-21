@@ -1,0 +1,163 @@
+{
+  "scenario": "shared_terminal_size",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "both desktops learn the terminal's one size",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "printed": false
+          },
+          "guard": "a watching desktop's fit leaves the terminal's size alone",
+          "ok": true
+        }
+      ],
+      "step": "two desktops attach at different sizes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "replies": 12
+          },
+          "guard": "its replies leave the terminal's size alone",
+          "ok": true
+        }
+      ],
+      "step": "a watching desktop remounts and its terminal answers the program's queries"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "picked": true
+          },
+          "guard": "both desktops show the same grid",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "and it is the redraw the program meant",
+          "ok": true
+        }
+      ],
+      "step": "a multi-line redraw with no resize renders the same on both"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "printed": "SIZE 24 80"
+          },
+          "guard": "the terminal takes the typist's fit",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "size": [
+              80,
+              24
+            ]
+          },
+          "guard": "each desktop renders what follows at that size",
+          "ok": true
+        }
+      ],
+      "step": "the desktop that types takes the size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              100,
+              30
+            ]
+          },
+          "guard": "the watcher switches size before the output written for it",
+          "ok": true
+        }
+      ],
+      "step": "a resize from the active desktop reaches the watching one first"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "the remaining desktop's fit takes over",
+          "ok": true
+        }
+      ],
+      "step": "the active desktop leaves and the size goes back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "a resume learns the size before any output",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "sizes": [
+              [
+                80,
+                24
+              ],
+              [
+                100,
+                30
+              ],
+              [
+                120,
+                40
+              ]
+            ]
+          },
+          "guard": "and renders each stretch at the size it was written for",
+          "ok": true
+        }
+      ],
+      "step": "a resume replays the sizes in line with the output"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              90,
+              20
+            ]
+          },
+          "guard": "the focused desktop's fit takes over",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "and focusing back returns it",
+          "ok": true
+        }
+      ],
+      "step": "focusing a desktop gives it the size"
+    }
+  ]
+}

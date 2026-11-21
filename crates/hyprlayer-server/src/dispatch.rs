@@ -65,8 +65,9 @@ use hyprlayer_core::runtime::settings_service::{
     CliInstallMethod, CliInstallMethodId, CliUpdateResult,
 };
 use hyprlayer_core::runtime::terminals::{
-    default_shell, CaptureSessionRequest, CloseTerminalRequest, MintCodexSessionRequest,
-    ResizeAgentTerminalRequest, ResizeTerminalRequest, SessionExistsRequest, WriteTerminalRequest,
+    default_shell, CaptureSessionRequest, CloseTerminalRequest, FocusTerminalRequest,
+    MintCodexSessionRequest, ResizeAgentTerminalRequest, ResizeTerminalRequest,
+    SessionExistsRequest, WriteTerminalRequest,
 };
 use hyprlayer_core::runtime::workstreams::{
     ArchiveCleanupReport, ArchiveWorkstreamRequest, BranchRename, CreateWorkstreamRequest,
@@ -84,6 +85,7 @@ use hyprlayer_core::skill_sources::{
     SkillUpdate, SkillfishCandidate,
 };
 use hyprlayer_core::skills::{self, AgentSkill, SkillAssetText, SkillFile, SlashCommand};
+use hyprlayer_core::terminal::{RingReader, Viewer};
 use hyprlayer_core::worktree::seed::SeedReport;
 use hyprlayer_core::worktree::thoughts_links::{self, LinkStatus};
 use hyprlayer_core::worktree::{self, PullOutcome};
@@ -213,6 +215,22 @@ impl Server {
             .try_with(|conn| self.clients.client_ref(*conn))
             .ok()
             .flatten()
+    }
+
+    /// The connection a terminal call came on, as the pty's viewer.
+    fn viewer(&self) -> Option<u64> {
+        crate::CONN.try_with(|conn| *conn).ok()
+    }
+
+    /// `live`, seated for this connection: it counts toward the terminal's size while it streams.
+    pub(crate) fn view(&self, live: RingReader) -> RingReader {
+        match self.viewer() {
+            Some(id) => live.view(Viewer {
+                id,
+                follows: self.clients.terminal_size(id),
+            }),
+            None => live,
+        }
     }
 
     pub(crate) fn decoder(&self) -> Decoder {
@@ -2079,7 +2097,11 @@ impl Dispatch for Server {
     async fn terminal_write(&self, terminal_id: String, data: String) -> Result<(), WireError> {
         self.runtime
             .terminals()
-            .write(WriteTerminalRequest { terminal_id, data })
+            .write(WriteTerminalRequest {
+                terminal_id,
+                data,
+                viewer: self.viewer(),
+            })
             .await
             .wire()
     }
@@ -2096,6 +2118,19 @@ impl Dispatch for Server {
                 terminal_id,
                 cols,
                 rows,
+                viewer: self.viewer(),
+            })
+            .await
+            .wire()
+    }
+
+    async fn terminal_focus(&self, terminal_id: String) -> Result<(), WireError> {
+        let viewer = connection("terminal_focus")?;
+        self.runtime
+            .terminals()
+            .focus(FocusTerminalRequest {
+                terminal_id,
+                viewer,
             })
             .await
             .wire()
@@ -2121,6 +2156,7 @@ impl Dispatch for Server {
                 terminal_id,
                 cols,
                 rows,
+                viewer: self.viewer(),
             })
             .await
             .wire()

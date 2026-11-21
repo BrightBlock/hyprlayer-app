@@ -320,6 +320,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::GenerateTitleCodex { .. }
         | Request::TerminalWrite { .. }
         | Request::TerminalResize { .. }
+        | Request::TerminalFocus { .. }
         | Request::TerminalClose { .. }
         | Request::AgentResize { .. }
         | Request::CaptureAgentSession { .. }

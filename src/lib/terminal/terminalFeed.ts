@@ -7,7 +7,10 @@ import { b64ToBytes } from "./terminalCodec";
 /** A full reset (RIS) that waits behind the output already queued, which `Terminal.reset()` does not. */
 const START_OVER = "\x1bc";
 
-type Screen = { write(data: Uint8Array | string): void };
+type Screen = {
+  write(data: Uint8Array | string): void;
+  follow(grid: { cols: number; rows: number }): void;
+};
 
 /** One view's terminal output across the streams it opens, so a reattach asks only for what follows. */
 export class TerminalFeed {
@@ -50,6 +53,7 @@ export class TerminalFeed {
     let first = true;
     channel.onmessage = (ev) => {
       if (ev.kind === "exited") return this.onExited();
+      if (ev.kind === "resized") return this.screen.follow(ev);
       const bytes = b64ToBytes(ev.data);
       const at = ev.offset ?? undefined;
       // Only a resume's first output can be a replay; a live stream's gap keeps writing, as it always has.

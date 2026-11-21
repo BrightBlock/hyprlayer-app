@@ -7,7 +7,7 @@ import { onServerReconnected } from "@/lib/events";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { TerminalFeed } from "@/lib/terminal/terminalFeed";
-import { writeTerminal } from "@/lib/terminal/terminalInput";
+import { claimIfFocused, claimOnPress, writeTerminal } from "@/lib/terminal/terminalInput";
 import {
   attachTerminalClipboard,
   useTerminalThemeSync,
@@ -97,6 +97,7 @@ export function TerminalTab({
         streaming = true;
         lastGrid = engine.fit();
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
+        claimIfFocused(id);
       }
     })().catch((e) => {
       // Otherwise the pane stays blank with no reason anywhere.
@@ -104,6 +105,7 @@ export function TerminalTab({
       if (!disposed) engine.write(`\r\n\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
     });
 
+    const offPress = claimOnPress(host, () => id);
     const unsubInput = engine.onInput((data) => {
       if (id) writeTerminal(id, data);
     });
@@ -114,7 +116,10 @@ export function TerminalTab({
       const { from, channel } = feed.resume();
       void unwrap(commands.terminalAttach(id, from, channel))
         .then((ok) => {
-          if (!ok && !disposed && !ended) exited();
+          if (disposed || ended || !id) return;
+          if (!ok) return exited();
+          // A new connection is a new viewer with no fit. No claim: a reconnect isn't the user acting.
+          void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
         })
         .catch((e) => log.warn("terminal", "reattaching after a reconnect failed", e));
     });
@@ -141,6 +146,7 @@ export function TerminalTab({
         if (!focused || disposed) return;
         scheduleFit();
         engine.refresh();
+        if (id) void commands.terminalFocus(id);
       })
       .then((fn) => {
         if (focusCancelled) fn();
@@ -152,6 +158,7 @@ export function TerminalTab({
       focusCancelled = true;
       unlistenFocus?.();
       if (raf) cancelAnimationFrame(raf);
+      offPress();
       unsubInput();
       offReconnect();
       ro.disconnect();

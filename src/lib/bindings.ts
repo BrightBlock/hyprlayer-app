@@ -243,6 +243,8 @@ export const commands = {
 	terminalAttach: (terminalId: string, offset: number | null, onEvent: Channel<TerminalEvent>) => typedError<boolean, AppError>(__TAURI_INVOKE("terminal_attach", { terminalId, offset, onEvent })),
 	terminalWrite: (terminalId: string, data: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_write", { terminalId, data })),
 	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
+	/**  The user is at this terminal: a terminal shared with another desktop takes this one's size. */
+	terminalFocus: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_focus", { terminalId })),
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
 	/**  Ends the server streams behind channels the webview released; their terminals and sessions keep running. */
 	terminalRelease: (channelIds: number[]) => typedError<null, AppError>(__TAURI_INVOKE("terminal_release", { channelIds })),
@@ -2331,7 +2333,9 @@ export type TerminalEvent = { kind: "output";
 /**  Base64. */
 data: string; 
 /**  Where `data` starts in the terminal's output; a reattach from its end replays only what follows. */
-offset?: number | null } | { kind: "exited"; code: number | null };
+offset?: number | null } | 
+/**  The terminal's size from here on: a viewer renders at it, not at its own fit. */
+{ kind: "resized"; cols: number; rows: number } | { kind: "exited"; code: number | null };
 
 export type ThoughtQuery = {
 	text?: string | null,

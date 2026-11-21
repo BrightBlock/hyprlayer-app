@@ -23,10 +23,22 @@ pub async fn read_until(events: &mut TerminalStream, needle: &str, within: Durat
                     &STANDARD.decode(data).unwrap_or_default(),
                 ));
             }
+            Ok(Some(TerminalEvent::Resized { .. })) => {}
             Ok(Some(TerminalEvent::Exited { .. })) | Ok(None) | Err(_) => break,
         }
     }
     plain(&text)
+}
+
+/// The next output's base64, past any size change; `None` once the terminal exits or the stream ends.
+pub async fn next_output(events: &mut TerminalStream) -> Option<String> {
+    loop {
+        match events.recv().await? {
+            TerminalEvent::Output { data, .. } => return Some(data),
+            TerminalEvent::Resized { .. } => {}
+            TerminalEvent::Exited { .. } => return None,
+        }
+    }
 }
 
 /// Drops CSI and OSC sequences: bash's bracketed-paste toggle would otherwise
@@ -70,7 +82,7 @@ pub async fn wait_for_exit(events: &mut TerminalStream, within: Duration) -> Opt
     loop {
         match tokio::time::timeout_at(deadline, events.recv()).await {
             Ok(Some(TerminalEvent::Exited { code })) => return Some(code),
-            Ok(Some(TerminalEvent::Output { .. })) => {}
+            Ok(Some(TerminalEvent::Output { .. } | TerminalEvent::Resized { .. })) => {}
             Ok(None) | Err(_) => return None,
         }
     }

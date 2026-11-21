@@ -12,10 +12,9 @@ use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, RuntimeEvent, Sandbox, Server, Value};
+use hyprlayer_e2e::{json, next_output, text, Journey, RuntimeEvent, Sandbox, Server, Value};
 use hyprlayer_proto::frame::{Decoder, Frame};
 use hyprlayer_server::client::{GapPacer, RpcClient};
 use hyprlayer_server::events::{REVISIONS_IN_STREAM, TARGETED_EVENTS};
@@ -432,7 +431,7 @@ async fn connection_backpressure() {
     {
         let printed = printed.clone();
         tokio::spawn(async move {
-            while let Some(TerminalEvent::Output { data, .. }) = output.recv().await {
+            while let Some(data) = next_output(&mut output).await {
                 printed.fetch_add(data.len() as u64, Relaxed);
             }
         });
@@ -656,7 +655,7 @@ async fn connection_backpressure() {
     {
         let ticks = ticks.clone();
         tokio::spawn(async move {
-            while let Some(TerminalEvent::Output { .. }) = ticker_output.recv().await {
+            while next_output(&mut ticker_output).await.is_some() {
                 ticks.lock().unwrap().push(Instant::now());
             }
         });
@@ -813,8 +812,8 @@ async fn connection_backpressure() {
     let growth = peak.saturating_sub(before);
     let (answered, call_took) = held.await.expect("the call during the hold");
     let mut waiting = 0u64;
-    while let Ok(Some(TerminalEvent::Output { data, .. })) =
-        tokio::time::timeout(Duration::from_millis(300), unread.recv()).await
+    while let Ok(Some(data)) =
+        tokio::time::timeout(Duration::from_millis(300), next_output(&mut unread)).await
     {
         waiting += data.len() as u64;
         if waiting > MIB {

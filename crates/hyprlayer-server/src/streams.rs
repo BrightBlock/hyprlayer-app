@@ -477,6 +477,7 @@ impl Ready<'_> {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum JsonTerminalEvent {
     Output { data: String },
+    Resized { cols: u16, rows: u16 },
     Exited { code: Option<i32> },
 }
 
@@ -589,7 +590,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(attachment.live)),
+                Some(StreamSource::Terminal(server.view(attachment.live))),
             ))
         }
         StreamRequest::TerminalAttach {
@@ -613,7 +614,7 @@ pub(crate) async fn prepare_stream(
                             stream_id: Some(stream_id),
                             resumed: attachment.resumed,
                         },
-                        Some(StreamSource::Terminal(attachment.live)),
+                        Some(StreamSource::Terminal(server.view(attachment.live))),
                     ))
                 }
                 None => Ok((
@@ -638,7 +639,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(attachment.live)),
+                Some(StreamSource::Terminal(server.view(attachment.live))),
             ))
         }
         StreamRequest::SpawnShellTerminal {
@@ -661,7 +662,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(attachment.live)),
+                Some(StreamSource::Terminal(server.view(attachment.live))),
             ))
         }
         StreamRequest::AgentOpen {
@@ -688,7 +689,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: attachment.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(attachment.live)),
+                Some(StreamSource::Terminal(server.view(attachment.live))),
             ))
         }
         StreamRequest::PtyLaunch {
@@ -716,7 +717,7 @@ pub(crate) async fn prepare_stream(
                     launched,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(attachment.live)),
+                Some(StreamSource::Terminal(server.view(attachment.live))),
             ))
         }
         StreamRequest::ScriptRun {
@@ -741,7 +742,7 @@ pub(crate) async fn prepare_stream(
                     terminal_id: run.terminal_id,
                     stream_id,
                 },
-                Some(StreamSource::Terminal(run.live)),
+                Some(StreamSource::Terminal(server.view(run.live))),
             ))
         }
         StreamRequest::StartStageSession {
@@ -1161,6 +1162,9 @@ async fn forward_terminal(stream_id: u64, mut live: RingReader, tx: &StreamTx) -
                     data: B64.encode(bytes),
                 },
             ),
+            TerminalChunk::Resized { cols, rows } => {
+                ready.send(stream_id, &JsonTerminalEvent::Resized { cols, rows })
+            }
             TerminalChunk::Exited { code } => {
                 ready.send(stream_id, &JsonTerminalEvent::Exited { code })
             }

@@ -415,6 +415,11 @@ impl Outbound {
         self.0.features.raw_terminal
     }
 
+    /// Whether the peer announced `TERMINAL_SIZE`.
+    pub fn terminal_size(&self) -> bool {
+        self.0.features.terminal_size
+    }
+
     /// Whether the peer announced `HEARTBEAT`: it answers pings, so its silence means something.
     pub fn heartbeat(&self) -> bool {
         self.0.features.heartbeat

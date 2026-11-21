@@ -17,6 +17,22 @@ export function writeTerminal(terminalId: string, data: string): void {
   void drain(terminalId, data);
 }
 
+/** A terminal opened in the focused window takes this desktop's size from any other sharing it. */
+export function claimIfFocused(terminalId: string): void {
+  if (document.hasFocus()) void commands.terminalFocus(terminalId);
+}
+
+/** A press in a terminal takes its size back from another desktop sharing it; returns the unsubscribe. */
+export function claimOnPress(host: HTMLElement, terminalId: () => string | undefined): () => void {
+  const claim = () => {
+    const id = terminalId();
+    if (id) void commands.terminalFocus(id);
+  };
+  // Capture: xterm keeps a press to itself while the program tracks the mouse.
+  host.addEventListener("mousedown", claim, true);
+  return () => host.removeEventListener("mousedown", claim, true);
+}
+
 async function drain(terminalId: string, data: string): Promise<void> {
   for (let next = data; next; ) {
     await commands.terminalWrite(terminalId, strToB64(next)).catch(() => undefined);

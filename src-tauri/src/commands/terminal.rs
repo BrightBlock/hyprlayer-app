@@ -119,6 +119,17 @@ pub async fn terminal_resize(
         .map_err(AppError::from)
 }
 
+/// The user is at this terminal: a terminal shared with another desktop takes this one's size.
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_focus(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
+    state
+        .client()?
+        .terminal_focus(terminal_id)
+        .await
+        .map_err(AppError::from)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {

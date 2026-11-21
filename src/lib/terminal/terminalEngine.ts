@@ -19,8 +19,11 @@ export interface TerminalEngine {
   /** Ties the engine to a pty, so what its capped replay lost carries over from earlier engines. */
   bind(terminalId: string): void;
   write(data: Uint8Array | string): void;
+  /** Renders at the pty's size from here in the output on, and stops fitting its host. */
+  follow(grid: TerminalGrid): void;
   onInput(cb: (data: string) => void): () => void;
   onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void;
+  /** The grid that fits the host; the terminal takes it only until it follows a pty's size. */
   fit(): TerminalGrid;
   refresh(): void;
   grid(): TerminalGrid;
@@ -98,6 +101,8 @@ class XtermEngine implements TerminalEngine {
   // Set by bind: the replay that follows is not yet written, then not yet parsed.
   private replay: "awaiting" | "parsing" | null = null;
   private lastGesture = -Infinity;
+  private following = false;
+  private fitted: TerminalGrid | null = null;
 
   constructor(opts: {
     fontSize: number;
@@ -222,6 +227,41 @@ class XtermEngine implements TerminalEngine {
     });
   }
 
+  follow(grid: TerminalGrid): void {
+    if (!this.term) return;
+    this.following = true;
+    // Behind the output already written, which was drawn for the old size.
+    this.term.write("", () => {
+      this.term?.resize(grid.cols, grid.rows);
+      this.measurePane();
+      this.showWhole();
+    });
+  }
+
+  private measurePane(): void {
+    try {
+      const d = this.fitAddon?.proposeDimensions();
+      if (d && d.cols > 0 && d.rows > 0) {
+        this.fitted = { cols: d.cols, rows: d.rows };
+        this.rendererReady = true;
+      }
+    } catch {
+    }
+  }
+
+  // A grid bigger than the pane is scaled down to show whole, without resizing anything.
+  private showWhole(): void {
+    const el = this.term?.element;
+    if (!el || !this.term || !this.fitted) return;
+    const scale = Math.min(
+      1,
+      this.fitted.cols / this.term.cols,
+      this.fitted.rows / this.term.rows,
+    );
+    el.style.transformOrigin = "0 0";
+    el.style.transform = scale < 1 ? `scale(${scale})` : "";
+  }
+
   private userJustActed(): boolean {
     return this.replay === null && performance.now() - this.lastGesture < USER_GESTURE_MS;
   }
@@ -244,10 +284,16 @@ class XtermEngine implements TerminalEngine {
     // inside this same try, so a single miss disabled refresh() forever.
     // Retry on the next frame instead, bounded, and self-heal once ready.
     if (!this.fitAddon) return EMPTY_GRID;
+    if (this.following) {
+      this.measurePane();
+      this.showWhole();
+      return this.fitted ?? this.grid();
+    }
     try {
       this.fitAddon.fit();
       this.rendererReady = true;
       this.fitRetries = 0;
+      this.fitted = this.grid();
     } catch {
       if (!this.rendererReady && this.fitRetries < FIT_RETRY_LIMIT) {
         this.fitRetries += 1;

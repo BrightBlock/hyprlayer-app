@@ -15,6 +15,11 @@ pub enum TerminalEvent {
         #[cfg_attr(feature = "specta", specta(type = Option<f64>))]
         offset: Option<u64>,
     },
+    /// The terminal's size from here on: a viewer renders at it, not at its own fit.
+    Resized {
+        cols: u16,
+        rows: u16,
+    },
     Exited {
         code: Option<i32>,
     },

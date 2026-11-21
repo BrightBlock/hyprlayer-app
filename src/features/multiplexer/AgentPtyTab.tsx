@@ -9,7 +9,7 @@ import { unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { useToast } from "@/lib/toast";
 import { TerminalFeed } from "@/lib/terminal/terminalFeed";
-import { writeTerminal } from "@/lib/terminal/terminalInput";
+import { claimIfFocused, claimOnPress, writeTerminal } from "@/lib/terminal/terminalInput";
 import {
   attachTerminalClipboard,
   useTerminalThemeSync,
@@ -182,6 +182,7 @@ export function AgentPtyTab({
       if (disposed) return;
       lastGrid = eng.fit();
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
+      claimIfFocused(id);
     })();
 
     // The stream died with the old connection; a gone agent is reported through `onAgentTerminalGone`.
@@ -189,9 +190,13 @@ export function AgentPtyTab({
       const id = idRef.current;
       if (disposed || !streaming || !id || exitShownFor === id) return;
       const { from, channel } = feed.resume();
-      void unwrap(commands.terminalAttach(id, from, channel)).catch((e) =>
-        log.warn("agent", "reattaching after a reconnect failed", e),
-      );
+      void unwrap(commands.terminalAttach(id, from, channel))
+        .then((ok) => {
+          if (!ok || disposed) return;
+          // A new connection is a new viewer with no fit. No claim: a reconnect isn't the user acting.
+          void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
+        })
+        .catch((e) => log.warn("agent", "reattaching after a reconnect failed", e));
     });
 
     restartRef.current = (opts: Omit<AgentLaunchSession, "sessionId">) => {
@@ -228,9 +233,11 @@ export function AgentPtyTab({
         if (disposed) return;
         lastGrid = eng.fit();
         void commands.agentResize(newId, lastGrid.cols, lastGrid.rows);
+        claimIfFocused(newId);
       })();
     };
 
+    const offPress = claimOnPress(host, () => idRef.current);
     const unsubInput = eng.onInput((data) => {
       if (idRef.current) writeTerminal(idRef.current, data);
     });
@@ -272,6 +279,7 @@ export function AgentPtyTab({
         if (!focused || disposed) return;
         scheduleFit();
         eng.refresh();
+        if (idRef.current) void commands.terminalFocus(idRef.current);
       })
       .then((fn) => {
         if (focusCancelled) fn();
@@ -284,6 +292,7 @@ export function AgentPtyTab({
       restartRef.current = null;
       unlistenFocus?.();
       if (raf) cancelAnimationFrame(raf);
+      offPress();
       unsubInput();
       unsubKey();
       unsubGone();

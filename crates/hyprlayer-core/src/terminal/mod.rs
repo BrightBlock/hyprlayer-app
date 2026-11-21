@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
@@ -37,14 +37,19 @@ const EXIT_DRAIN: Duration = Duration::from_millis(500);
 pub use hyprlayer_models::terminal::TerminalEvent;
 
 /// A terminal's output as its readers take it: raw bytes at their absolute offset, then the exit.
+/// A viewer's reader also gets each size the output that follows was written for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalChunk {
     Output { offset: u64, bytes: Vec<u8> },
+    Resized { cols: u16, rows: u16 },
     Exited { code: Option<i32> },
 }
 
-/// Sees every flush, in order.
-type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
+/// `(rows, cols)`, as `PtySize` orders them.
+type Size = (u16, u16);
+
+/// Sees every flush, in order, with the size it was written for.
+type OutputTap = Arc<dyn Fn(&[u8], Size) + Send + Sync>;
 
 /// The one copy of a pty's output: a byte-capped ring every subscriber reads
 /// through its own cursor, so scrollback replay and the live stream are the
@@ -64,12 +69,14 @@ struct RingInner {
     // End offsets of retained flushes, ascending, at most one per MARK_BYTES. A trim
     // drops back to one, so head always lands on a flush end — a char boundary.
     flush_ends: VecDeque<u64>,
+    // The size from each offset on, ascending; the first is the size at head.
+    sizes: VecDeque<(u64, Size)>,
     exited: Option<Option<i32>>,
     tap: Option<OutputTap>,
 }
 
 impl OutputRing {
-    fn new() -> Self {
+    fn new(size: Size) -> Self {
         let (tail_tx, _) = watch::channel(0);
         Self {
             inner: StdMutex::new(RingInner {
@@ -77,6 +84,7 @@ impl OutputRing {
                 head: 0,
                 snapshot_floor: 0,
                 flush_ends: VecDeque::new(),
+                sizes: VecDeque::from([(0, size)]),
                 exited: None,
                 tap: None,
             }),
@@ -88,7 +96,7 @@ impl OutputRing {
         if flush.is_empty() {
             return;
         }
-        let (tail, tap) = {
+        let (tail, tap, size) = {
             let mut inner = self.inner.lock().unwrap();
             inner.make_room(flush.len());
             inner.bytes.extend(flush.iter().copied());
@@ -100,11 +108,11 @@ impl OutputRing {
             {
                 inner.flush_ends.push_back(tail);
             }
-            (tail, inner.tap.clone())
+            (tail, inner.tap.clone(), inner.size())
         };
         // Outside the lock, before the wakeup: one thread pushes, so order holds and a woken reader sees it.
         if let Some(tap) = tap {
-            tap(flush);
+            tap(flush, size);
         }
         self.tail_tx.send_replace(tail);
     }
@@ -113,11 +121,37 @@ impl OutputRing {
     /// trimmed. One tap per ring: a second replaces the first.
     fn set_tap(&self, tap: OutputTap) -> bool {
         let mut inner = self.inner.lock().unwrap();
+        let size = inner.size();
         let (front, back) = inner.bytes.as_slices();
-        tap(front);
-        tap(back);
+        tap(front, size);
+        tap(back, size);
         inner.tap = Some(tap);
         inner.head == 0
+    }
+
+    fn size(&self) -> Size {
+        self.inner.lock().unwrap().size()
+    }
+
+    /// Marks where output starts being for `size`; `false` when it already is.
+    fn set_size(&self, size: Size) -> bool {
+        let tail = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.size() == size {
+                return false;
+            }
+            let tail = inner.tail();
+            // A resize with no output since the last one replaces it.
+            if inner.sizes.len() > 1 && inner.sizes.back().is_some_and(|&(at, _)| at == tail) {
+                inner.sizes.pop_back();
+            }
+            if inner.size() != size {
+                inner.sizes.push_back((tail, size));
+            }
+            tail
+        };
+        self.tail_tx.send_replace(tail);
+        true
     }
 
     fn exit(&self, code: Option<i32>) {
@@ -172,16 +206,33 @@ impl OutputRing {
 
     // A cursor below head has lagged; it resumes at head, and the chunk's offset shows the gap.
     // A chunk cut short ends on a char boundary, since a resume can start at its end.
-    fn next_chunk(&self, cursor: &mut u64, max: usize) -> Option<TerminalChunk> {
+    // With `shown`, a size change comes before the output written for it, which it bounds.
+    fn next_chunk(
+        &self,
+        cursor: &mut u64,
+        max: usize,
+        shown: Option<&mut Option<Size>>,
+    ) -> Option<TerminalChunk> {
         let inner = self.inner.lock().unwrap();
         *cursor = (*cursor).max(inner.head);
-        let tail = inner.tail();
-        if *cursor == tail {
+        let mut until = inner.tail();
+        if let Some(shown) = shown {
+            let (size, changes_at) = inner.size_at(*cursor);
+            if *shown != Some(size) {
+                *shown = Some(size);
+                return Some(TerminalChunk::Resized {
+                    cols: size.1,
+                    rows: size.0,
+                });
+            }
+            until = changes_at.unwrap_or(until);
+        }
+        if *cursor == inner.tail() {
             return inner.exited.map(|code| TerminalChunk::Exited { code });
         }
         let offset = *cursor;
         let from = (offset - inner.head) as usize;
-        let end = inner.bytes.len().min(from.saturating_add(max));
+        let end = ((until - inner.head) as usize).min(from.saturating_add(max));
         let mut bytes: Vec<u8> = inner.bytes.range(from..end).copied().collect();
         let torn = torn_utf8_tail(&bytes);
         if end < inner.bytes.len() && torn < bytes.len() {
@@ -201,6 +252,19 @@ impl RingInner {
         self.snapshot_floor.max(self.head)
     }
 
+    fn size(&self) -> Size {
+        self.sizes.back().expect("a ring always has a size").1
+    }
+
+    // The size output at `offset` was written for, and where the next size starts.
+    fn size_at(&self, offset: u64) -> (Size, Option<u64>) {
+        let next = self.sizes.partition_point(|&(at, _)| at <= offset);
+        (
+            self.sizes[next.saturating_sub(1)].1,
+            self.sizes.get(next).map(|&(at, _)| at),
+        )
+    }
+
     fn make_room(&mut self, incoming: usize) {
         let mut new_head = self.head;
         while (self.tail() - new_head) as usize + incoming > RING_CAP_BYTES {
@@ -213,28 +277,177 @@ impl RingInner {
             self.bytes.drain(0..(new_head - self.head) as usize);
             self.head = new_head;
             self.snapshot_floor = self.snapshot_floor.max(new_head);
+            while self.sizes.len() > 1 && self.sizes[1].0 <= new_head {
+                self.sizes.pop_front();
+            }
         }
     }
 }
 
+/// A client watching a pty. One that `follows` renders at the pty's size; an older one
+/// renders at its own fit, so each fit it sends takes the size.
+#[derive(Debug, Clone, Copy)]
+pub struct Viewer {
+    pub id: u64,
+    pub follows: bool,
+}
+
+struct Seat {
+    viewer: Viewer,
+    readers: usize,
+    fit: Option<Size>,
+}
+
+/// A pty's viewers, the most recently active first: the pty takes that one's fit.
+#[derive(Default)]
+struct Viewers(Vec<Seat>);
+
+impl Viewers {
+    fn find(&self, id: u64) -> Option<usize> {
+        self.0.iter().position(|seat| seat.viewer.id == id)
+    }
+
+    fn join(&mut self, viewer: Viewer) {
+        match self.find(viewer.id) {
+            Some(i) => self.0[i].readers += 1,
+            None => self.0.push(Seat {
+                viewer,
+                readers: 1,
+                fit: None,
+            }),
+        }
+    }
+
+    fn leave(&mut self, id: u64) {
+        if let Some(i) = self.find(id) {
+            self.0[i].readers -= 1;
+            if self.0[i].readers == 0 {
+                self.0.remove(i);
+            }
+        }
+    }
+
+    /// `false` for a viewer with no reader here.
+    fn fit(&mut self, id: u64, size: Size) -> bool {
+        let Some(i) = self.find(id) else {
+            return false;
+        };
+        self.0[i].fit = Some(size);
+        if !self.0[i].viewer.follows {
+            self.claim(id);
+        }
+        true
+    }
+
+    fn claim(&mut self, id: u64) {
+        if let Some(i) = self.find(id) {
+            let seat = self.0.remove(i);
+            self.0.insert(0, seat);
+        }
+    }
+
+    fn wanted(&self) -> Option<Size> {
+        self.0.first()?.fit
+    }
+}
+
+/// Keeps the pty at the size its viewers settle on, marked in the output where it changes.
+struct Sizing {
+    master: Arc<StdMutex<Option<Box<dyn MasterPty + Send>>>>,
+    ring: Arc<OutputRing>,
+    viewers: StdMutex<Viewers>,
+}
+
+impl Sizing {
+    fn update(&self, change: impl FnOnce(&mut Viewers)) {
+        let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+        change(&mut viewers);
+        if let Some(size) = viewers.wanted() {
+            self.set(size);
+        }
+    }
+
+    // Marked before the resize: output read after it may already answer the SIGWINCH.
+    fn set(&self, (rows, cols): Size) {
+        if !self.ring.set_size((rows, cols)) {
+            return;
+        }
+        if let Some(master) = self.master.lock().unwrap().as_ref() {
+            let size = PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            };
+            if let Err(e) = master.resize(size) {
+                tracing::debug!("pty resize to {cols}x{rows} failed: {e}");
+            }
+        }
+    }
+
+    fn fit(&self, viewer: Option<u64>, size: Size) {
+        let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+        let seated = viewer.is_some_and(|id| viewers.fit(id, size));
+        // No viewer to weigh it against, as for an in-process caller: the fit stands.
+        let wanted = if seated {
+            viewers.wanted()
+        } else {
+            viewers.0.is_empty().then_some(size)
+        };
+        if let Some(size) = wanted {
+            self.set(size);
+        }
+    }
+}
+
+struct ReaderSeat {
+    id: u64,
+    follows: bool,
+    shown: Option<Size>,
+}
+
 /// One subscriber's cursor into a session's output ring.
 pub struct RingReader {
-    ring: Arc<OutputRing>,
+    sizing: Arc<Sizing>,
     tail_rx: watch::Receiver<u64>,
     cursor: u64,
     done: bool,
+    seat: Option<ReaderSeat>,
+}
+
+impl Drop for RingReader {
+    fn drop(&mut self) {
+        if let Some(seat) = &self.seat {
+            self.sizing.update(|viewers| viewers.leave(seat.id));
+        }
+    }
 }
 
 impl RingReader {
-    fn attach(ring: Arc<OutputRing>, from: Option<u64>) -> (Self, bool) {
-        let (cursor, resumed, tail_rx) = ring.attach(from);
+    fn attach(sizing: Arc<Sizing>, from: Option<u64>) -> (Self, bool) {
+        let (cursor, resumed, tail_rx) = sizing.ring.attach(from);
         let reader = Self {
-            ring,
+            sizing,
             tail_rx,
             cursor,
             done: false,
+            seat: None,
         };
         (reader, resumed)
+    }
+
+    /// `viewer`'s reader: it counts toward the pty's size until dropped, and a viewer that
+    /// follows also gets each size in line with the output.
+    pub fn view(mut self, viewer: Viewer) -> Self {
+        if self.seat.is_none() {
+            self.sizing.update(|viewers| viewers.join(viewer));
+            self.seat = Some(ReaderSeat {
+                id: viewer.id,
+                follows: viewer.follows,
+                shown: None,
+            });
+        }
+        self
     }
 
     /// Everything past the cursor as one `Output`; `Exited` once the ring is
@@ -246,7 +459,12 @@ impl RingReader {
     /// `recv`, with at most `max` bytes in an `Output`.
     pub async fn recv_at_most(&mut self, max: usize) -> Option<TerminalChunk> {
         while !self.done {
-            if let Some(chunk) = self.ring.next_chunk(&mut self.cursor, max) {
+            let shown = self
+                .seat
+                .as_mut()
+                .filter(|seat| seat.follows)
+                .map(|seat| &mut seat.shown);
+            if let Some(chunk) = self.sizing.ring.next_chunk(&mut self.cursor, max, shown) {
                 self.done = matches!(chunk, TerminalChunk::Exited { .. });
                 return Some(chunk);
             }
@@ -261,7 +479,7 @@ impl RingReader {
     /// A fresh reader's first wake is the retained scrollback.
     pub async fn skip(&mut self) -> bool {
         while !self.done {
-            match self.ring.advance(&mut self.cursor) {
+            match self.sizing.ring.advance(&mut self.cursor) {
                 Some(true) => return true,
                 Some(false) => self.done = true,
                 None => {
@@ -286,12 +504,9 @@ pub struct SpawnTerminal {
 }
 
 pub struct PtySession {
-    master: Arc<StdMutex<Option<Box<dyn MasterPty + Send>>>>,
     killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
     writer: StdMutex<Box<dyn Write + Send>>,
-    ring: Arc<OutputRing>,
-    /// `(rows, cols)` as last set.
-    size: Arc<StdMutex<(u16, u16)>>,
+    sizing: Arc<Sizing>,
     #[cfg(unix)]
     pid: Option<u32>,
     pub workstream_id: String,
@@ -331,15 +546,17 @@ impl PtySession {
 
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
         let writer = pair.master.take_writer().map_err(to_io)?;
-        let ring = Arc::new(OutputRing::new());
+        let ring = Arc::new(OutputRing::new((cfg.rows, cfg.cols)));
         let master = Arc::new(StdMutex::new(Some(pair.master)));
 
         let session = Arc::new(Self {
-            master: master.clone(),
             killer: StdMutex::new(killer),
             writer: StdMutex::new(writer),
-            ring: ring.clone(),
-            size: Arc::new(StdMutex::new((cfg.rows, cfg.cols))),
+            sizing: Arc::new(Sizing {
+                master: master.clone(),
+                ring: ring.clone(),
+                viewers: StdMutex::default(),
+            }),
             #[cfg(unix)]
             pid,
             workstream_id: cfg.workstream_id,
@@ -424,33 +641,31 @@ impl PtySession {
     /// A reader positioned at the replay floor: its first `recv()` is the
     /// retained scrollback, and it streams from there.
     pub fn subscribe(&self) -> RingReader {
-        RingReader::attach(self.ring.clone(), None).0
+        RingReader::attach(self.sizing.clone(), None).0
     }
 
     /// A reader from `offset` and `true` while the ring still holds it; otherwise `subscribe`'s and `false`.
     pub fn resume(&self, offset: u64) -> (RingReader, bool) {
-        RingReader::attach(self.ring.clone(), Some(offset))
+        RingReader::attach(self.sizing.clone(), Some(offset))
     }
 
     pub fn scrollback_bytes(&self) -> Vec<u8> {
-        self.ring.scrollback_bytes()
+        self.sizing.ring.scrollback_bytes()
     }
 
     /// The newest `max` output bytes; may start mid-character.
     pub fn tail_bytes(&self, max: usize) -> Vec<u8> {
-        self.ring.tail_bytes(max)
+        self.sizing.ring.tail_bytes(max)
     }
 
     pub fn clear_scrollback(&self) {
-        self.ring.clear_scrollback();
+        self.sizing.ring.clear_scrollback();
     }
 
     /// Calls `tap` on the coalescer thread with every flush from the first byte, so it never lags
     /// the ring; `false` when the earliest output was already gone.
     pub fn tap_output(&self, tap: impl Fn(&[u8], (u16, u16)) + Send + Sync + 'static) -> bool {
-        let size = self.size.clone();
-        self.ring
-            .set_tap(Arc::new(move |bytes| tap(bytes, *size.lock().unwrap())))
+        self.sizing.ring.set_tap(Arc::new(tap))
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> std::io::Result<()> {
@@ -459,23 +674,21 @@ impl PtySession {
         w.flush()
     }
 
+    /// `(rows, cols)`.
     pub fn size(&self) -> (u16, u16) {
-        *self.size.lock().unwrap()
+        self.sizing.ring.size()
     }
 
-    pub fn resize(&self, cols: u16, rows: u16) -> std::io::Result<()> {
-        *self.size.lock().unwrap() = (rows, cols);
-        match self.master.lock().unwrap().as_ref() {
-            Some(master) => master
-                .resize(PtySize {
-                    rows,
-                    cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .map_err(to_io),
-            None => Ok(()),
+    /// `viewer`'s fit, which sizes the pty once that viewer is the most recently active.
+    pub fn fit(&self, viewer: Option<u64>, cols: u16, rows: u16) {
+        if cols > 0 && rows > 0 {
+            self.sizing.fit(viewer, (rows, cols));
         }
+    }
+
+    /// `viewer` typed or focused, so the pty takes its fit.
+    pub fn claim(&self, viewer: u64) {
+        self.sizing.update(|viewers| viewers.claim(viewer));
     }
 
     pub fn kill(&self) {
@@ -575,7 +788,7 @@ mod tests {
             }
         }
         assert!(seen.contains("MARKER_OK"), "got: {seen:?}");
-        s.resize(100, 30).expect("resize ok");
+        s.fit(None, 100, 30);
         s.kill();
     }
 

@@ -8,10 +8,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server};
+use hyprlayer_e2e::{json, next_output, text, Journey, Request, Sandbox, Server};
 use hyprlayer_proto::frame::{encode_control, Decoder, Frame};
 use hyprlayer_proto::PROTOCOL_VERSION;
 use hyprlayer_server::client::RpcClient;
@@ -289,7 +288,7 @@ async fn liveness() {
     {
         let arrivals = arrivals.clone();
         tokio::spawn(async move {
-            while let Some(TerminalEvent::Output { .. }) = output.recv().await {
+            while next_output(&mut output).await.is_some() {
                 arrivals.lock().unwrap().push(Instant::now());
             }
         });

@@ -3,6 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const writes: string[] = [];
 const disposeCalls: string[] = [];
+// What the terminal did, in the order it did it: xterm parses a write later, a resize at once.
+const parsed: string[] = [];
+let queued: { data: string; cb?: () => void }[] = [];
+let proposal: { cols: number; rows: number } | undefined;
+
+// xterm runs a write's callback once that write is parsed, before the next one.
+function parseQueued() {
+  const batch = queued;
+  queued = [];
+  for (const { data, cb } of batch) {
+    if (data) parsed.push(`parsed:${data}`);
+    cb?.();
+  }
+}
 
 class FakeTerminal {
   cols = 80;
@@ -27,8 +41,15 @@ class FakeTerminal {
   onKey() {
     return { dispose: () => disposeCalls.push("onKey") };
   }
-  write(data: Uint8Array | string) {
-    writes.push(typeof data === "string" ? data : new TextDecoder().decode(data));
+  write(data: Uint8Array | string, cb?: () => void) {
+    const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+    writes.push(text);
+    queued.push({ data: text, cb });
+  }
+  resize(cols: number, rows: number) {
+    this.cols = cols;
+    this.rows = rows;
+    parsed.push(`resize:${cols}x${rows}`);
   }
   refresh() {}
   focus() {}
@@ -52,7 +73,12 @@ class FakeFitAddon {
   activate(t: FakeTerminal) {
     this.terminal = t;
   }
-  fit() {}
+  proposeDimensions() {
+    return proposal;
+  }
+  fit() {
+    if (proposal) this.terminal?.resize(proposal.cols, proposal.rows);
+  }
   dispose() {}
 }
 
@@ -99,6 +125,9 @@ beforeEach(() => {
   writes.length = 0;
   disposeCalls.length = 0;
   fitAddons.length = 0;
+  parsed.length = 0;
+  queued = [];
+  proposal = undefined;
 });
 
 describe("XtermEngine disposal", () => {
@@ -168,5 +197,108 @@ describe("XtermEngine disposal", () => {
     engine.dispose();
     expect(() => engine.dispose()).not.toThrow();
     expect(disposeCalls.filter((c) => c === "terminal")).toHaveLength(1);
+  });
+});
+
+// Ways following the pty's size could fail:
+// - the size lands before output written for the old size is parsed;
+// - output written after the size is parsed before the size lands;
+// - a fit still resizes a following terminal to its host, so two desktops fight over the size;
+// - a fit reports the followed size instead of what would fit the host;
+// - before any size arrives (an older server), the terminal stops fitting itself.
+describe("XtermEngine following the pty's size", () => {
+  it("applies a size between the output written before and after it", () => {
+    const engine = newEngine();
+    engine.write("old");
+    engine.follow({ cols: 100, rows: 30 });
+    engine.write("new");
+    expect(parsed).toEqual([]);
+    parseQueued();
+    expect(parsed).toEqual(["parsed:old", "resize:100x30", "parsed:new"]);
+  });
+
+  it("reports the host's fit without resizing a following terminal", () => {
+    const engine = newEngine();
+    engine.follow({ cols: 100, rows: 30 });
+    parseQueued();
+    proposal = { cols: 90, rows: 20 };
+    expect(engine.fit()).toEqual({ cols: 90, rows: 20 });
+    expect(engine.grid()).toEqual({ cols: 100, rows: 30 });
+  });
+
+  it("fits itself to its host until it learns the pty's size", () => {
+    const engine = newEngine();
+    proposal = { cols: 90, rows: 20 };
+    expect(engine.fit()).toEqual({ cols: 90, rows: 20 });
+    expect(engine.grid()).toEqual({ cols: 90, rows: 20 });
+  });
+});
+
+// Ways showing a followed grid in a pane that doesn't match it could fail:
+// - a grid bigger than the pane is clipped, so the watcher can't see the prompt;
+// - it is scaled by different factors across and down, distorting it;
+// - a grid that fits is scaled, or moved off the top-left corner;
+// - the scale goes stale when the pane or the grid changes;
+// - a terminal fitted to its own pane is ever scaled.
+describe("XtermEngine showing a followed grid", () => {
+  function mounted() {
+    const host = document.createElement("div");
+    const engine = newEngine();
+    engine.mount(host);
+    return { engine, host };
+  }
+
+  function scale(host: HTMLElement): number {
+    const m = /^scale\(([\d.]+)\)$/.exec(host.style.transform);
+    return m ? Number(m[1]) : 1;
+  }
+
+  it("scales a grid bigger than its pane down to show whole, the same both ways", () => {
+    const { engine, host } = mounted();
+    proposal = { cols: 80, rows: 16 };
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    expect(scale(host)).toBeCloseTo(16 / 31);
+    expect(host.style.transform).toMatch(/^scale\([\d.]+\)$/);
+    expect(["0 0", "0px 0px", "left top"]).toContain(host.style.transformOrigin);
+    expect(engine.grid()).toEqual({ cols: 104, rows: 31 });
+  });
+
+  it("shows a grid that fits at 1:1", () => {
+    const { engine, host } = mounted();
+    proposal = { cols: 120, rows: 40 };
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    expect(host.style.transform).toBe("");
+  });
+
+  it("rescales when the pane changes", () => {
+    const { engine, host } = mounted();
+    proposal = { cols: 52, rows: 31 };
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    expect(scale(host)).toBeCloseTo(0.5);
+    proposal = { cols: 120, rows: 40 };
+    engine.fit();
+    expect(host.style.transform).toBe("");
+  });
+
+  it("rescales once the grid changes, not before", () => {
+    const { engine, host } = mounted();
+    proposal = { cols: 80, rows: 24 };
+    engine.follow({ cols: 160, rows: 24 });
+    parseQueued();
+    expect(scale(host)).toBeCloseTo(0.5);
+    engine.follow({ cols: 80, rows: 24 });
+    expect(scale(host)).toBeCloseTo(0.5);
+    parseQueued();
+    expect(host.style.transform).toBe("");
+  });
+
+  it("never scales a terminal fitted to its own pane", () => {
+    const { engine, host } = mounted();
+    proposal = { cols: 90, rows: 20 };
+    engine.fit();
+    expect(host.style.transform).toBe("");
   });
 });

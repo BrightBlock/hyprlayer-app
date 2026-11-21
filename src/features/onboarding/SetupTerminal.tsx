@@ -53,6 +53,8 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
     channel.onmessage = (ev) => {
       if (ev.kind === "output") {
         engine.write(b64ToBytes(ev.data));
+      } else if (ev.kind === "resized") {
+        engine.follow(ev);
       } else if (ev.kind === "exited") {
         engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
         if (!disposed) onExit?.(ev.code ?? null);

@@ -17,7 +17,7 @@ pub use journey::Journey;
 pub use sandbox::Sandbox;
 pub use serde_json::{json, Value};
 pub use server::{server_binary, Server, Stopped};
-pub use terminal::{keystrokes, read_until, wait_for_exit};
+pub use terminal::{keystrokes, next_output, read_until, wait_for_exit};
 
 /// Polls `check` until it holds or `within` passes.
 pub async fn eventually(within: std::time::Duration, mut check: impl FnMut() -> bool) -> bool {

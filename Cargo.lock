@@ -2096,6 +2096,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "vt100",
 ]
 
 [[package]]

@@ -11,10 +11,9 @@ use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Sandbox, Server};
+use hyprlayer_e2e::{json, next_output, text, Journey, Sandbox, Server};
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::rpc::WatchedSession;
@@ -535,7 +534,7 @@ impl Output {
         let output = Self::default();
         let seen = output.0.clone();
         tokio::spawn(async move {
-            while let Some(TerminalEvent::Output { data, .. }) = stream.recv().await {
+            while let Some(data) = next_output(&mut stream).await {
                 seen.lock()
                     .unwrap()
                     .push((Instant::now(), data.len() as u64 * 3 / 4));

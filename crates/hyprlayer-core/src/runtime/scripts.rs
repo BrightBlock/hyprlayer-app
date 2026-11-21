@@ -434,6 +434,7 @@ fn spawn_monitor(
                         }
                     }
                 }
+                TerminalChunk::Resized { .. } => {}
                 TerminalChunk::Exited { code } => {
                     let phase = if code == Some(0) {
                         RunPhase::Passed

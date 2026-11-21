@@ -215,6 +215,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::terminal_attach,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
+            commands::terminal::terminal_focus,
             commands::terminal::terminal_close,
             commands::terminal::terminal_release,
             commands::terminal::spawn_cli_terminal,
