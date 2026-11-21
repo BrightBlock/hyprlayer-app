@@ -17,6 +17,9 @@ it. The release gate, `scripts/release.sh`, runs the Rust tests as one `cargo ne
 run --run-ignored all`, which adds the container tier and the desktop's ssh sign-in;
 it needs Docker and cargo-nextest 0.9.145+ (`brew install cargo-nextest`).
 
+Every Rust build compiles `crates/ghostty-vt`, whose build script needs Zig 0.16.0:
+`mise install` reads the pin in `mise.toml`, or set `ZIG` to the binary.
+
 When a clippy lint is wrong for the code (a `#[tauri::command]` whose arity *is* the
 IPC contract), add `#[allow(clippy::...)]` with a comment saying why rather than
 reshaping a signature the bindings depend on.

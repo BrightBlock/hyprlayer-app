@@ -1,0 +1,13 @@
+# Modified by Hyprlayer from herdr e8d7d970: dropped the dependencies that only
+# the removed Kitty forwarding code used.
+[package]
+name = "ghostty-vt"
+version = "0.0.0"
+edition = "2021"
+description = "Herdr's binding to its vendored libghostty-vt"
+license = "Apache-2.0"
+repository = "https://github.com/herdrdev/herdr"
+publish = false
+
+[dependencies]
+png = "0.17"

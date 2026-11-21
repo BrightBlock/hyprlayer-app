@@ -134,7 +134,8 @@ Four things to know before you rely on it:
 
 ## Development
 
-Prerequisites: Rust (stable), Node 22+, pnpm 11+, and the
+Prerequisites: Rust (stable), Node 22+, pnpm 11+, Zig 0.16.0 (pinned in
+`mise.toml`; `mise install` fetches it), and the
 [Tauri platform deps](https://tauri.app/start/prerequisites/).
 
 ```sh

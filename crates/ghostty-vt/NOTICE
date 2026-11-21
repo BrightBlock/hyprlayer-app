@@ -1,0 +1,13 @@
+ghostty-vt
+
+This crate is herdr's crates/ghostty-vt (https://github.com/herdrdev/herdr,
+commit e8d7d9705a7a2c89cef4dd42079379f05685af87), licensed under the Apache
+License, Version 2.0 (LICENSE). Hyprlayer modified it; each modified file says
+so at its top.
+
+It builds and links vendor/libghostty-vt at the repository root: the
+libghostty-vt source distribution of Ghostty (https://github.com/ghostty-org/ghostty,
+commit 44f2a44df7e8c4a0c6df3f7d872ef3d7ead88e51), Copyright (c) 2024 Mitchell
+Hashimoto, Ghostty contributors, under the MIT License
+(vendor/libghostty-vt/LICENSE), with herdr's patches listed in
+vendor/libghostty-vt.patches.md.

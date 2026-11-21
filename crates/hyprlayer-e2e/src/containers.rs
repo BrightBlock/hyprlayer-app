@@ -16,7 +16,8 @@ use crate::sandbox::Sandbox;
 
 const IMAGE: &str = "hyprlayer-e2e/remote-host";
 /// Bookworm on both sides, so the binary it builds runs on the host's glibc.
-const BUILDER: &str = "rust:1-bookworm";
+/// `containers/builder/Dockerfile` takes it as `BASE`.
+const RUST_BASE: &str = "rust:1-bookworm";
 /// The remote host's base; `containers/remote-host/Dockerfile` takes it as `BASE`.
 const HOST_BASE: &str = "debian:bookworm-slim";
 const ALIAS: &str = "e2e-host";
@@ -50,6 +51,13 @@ impl Platform {
     }
 
     /// A private tag per platform: `docker run --platform` would re-point the shared base tag.
+    fn rust_base(self) -> &'static str {
+        match self {
+            Platform::Native => "hyprlayer-e2e/rust-base:native",
+            Platform::Amd64 => "hyprlayer-e2e/rust-base:amd64",
+        }
+    }
+
     fn builder(self) -> &'static str {
         match self {
             Platform::Native => "hyprlayer-e2e/builder:native",
@@ -140,26 +148,25 @@ impl RemoteHost {
         }
         let lock = build_lock();
         let platform = options.platform.docker();
-        ensure_tag(BUILDER, options.platform.builder(), options.platform);
+        ensure_tag(RUST_BASE, options.platform.rust_base(), options.platform);
         ensure_tag(HOST_BASE, options.platform.host_base(), options.platform);
+        build_image(
+            "builder",
+            options.platform.rust_base(),
+            options.platform.builder(),
+            platform,
+        );
         let binary = linux_server(options.build, options.platform);
         let image = match options.platform {
             Platform::Native => IMAGE.to_string(),
             Platform::Amd64 => format!("{IMAGE}:amd64"),
         };
-        let dockerfile = dockerfile_dir();
-        let base = format!("BASE={}", options.platform.host_base());
-        docker(&[
-            "build",
-            "--quiet",
-            "--platform",
-            platform,
-            "--build-arg",
-            &base,
-            "--tag",
+        build_image(
+            "remote-host",
+            options.platform.host_base(),
             &image,
-            &dockerfile,
-        ]);
+            platform,
+        );
         drop(lock);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -534,12 +541,21 @@ fn native_platform() -> &'static str {
     NATIVE.get_or_init(|| docker(&["version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"]))
 }
 
-fn dockerfile_dir() -> String {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+fn build_image(dir: &str, base: &str, tag: &str, platform: &str) {
+    let context = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("containers")
-        .join("remote-host")
-        .display()
-        .to_string()
+        .join(dir);
+    docker(&[
+        "build",
+        "--quiet",
+        "--platform",
+        platform,
+        "--build-arg",
+        &format!("BASE={base}"),
+        "--tag",
+        tag,
+        &context.display().to_string(),
+    ]);
 }
 
 fn docker(args: &[&str]) -> String {

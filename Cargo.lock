@@ -1624,6 +1624,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghostty-vt"
+version = "0.0.0"
+dependencies = [
+ "png 0.17.16",
+]
+
+[[package]]
 name = "gio"
 version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2047,6 +2054,7 @@ dependencies = [
  "fs4",
  "futures-util",
  "getrandom 0.4.2",
+ "ghostty-vt",
  "git2",
  "globset",
  "hyprlayer-models",

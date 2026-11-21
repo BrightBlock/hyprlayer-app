@@ -7,6 +7,7 @@ members = [
     "crates/hyprlayer-proto",
     "crates/hyprlayer-server",
     "crates/hyprlayer-e2e",
+    "crates/ghostty-vt",
 ]
 
 [workspace.package]
@@ -16,6 +17,7 @@ license = "AGPL-3.0-only"
 repository = "https://github.com/brightblock-ai/hyprlayer-app"
 
 [workspace.dependencies]
+ghostty-vt = { path = "crates/ghostty-vt" }
 hyprlayer-core = { path = "crates/hyprlayer-core" }
 hyprlayer-models = { path = "crates/hyprlayer-models" }
 hyprlayer-proto = { path = "crates/hyprlayer-proto" }

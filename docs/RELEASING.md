@@ -229,11 +229,13 @@ holds a secret, a Git credential or the signing key.
 
 | Leg | Image (`scripts/builders/`) | Produces |
 | --- | --- | --- |
-| Windows | `windows/`: `rust:<version>-slim-trixie` with cargo-xwin (the MSVC CRT and Windows SDK baked in), LLVM and Debian's NSIS | `target/windows-release/`: `Hyprlayer_<v>_x64-setup.exe`, `hyprlayer-server-x86_64-pc-windows-msvc.exe` |
-| Linux | `linux/`: `rust:<version>-slim-bookworm` with an amd64 bookworm sysroot | `target/linux-release/`: the `.deb`, the `.rpm`, `hyprlayer-server-x86_64-unknown-linux-gnu`, `aur/` and `aur-server/` |
+| Windows | `windows/`: `rust:<version>-slim-trixie` with cargo-xwin (the MSVC CRT and Windows SDK baked in), LLVM, Debian's NSIS and Zig 0.16.0 | `target/windows-release/`: `Hyprlayer_<v>_x64-setup.exe`, `hyprlayer-server-x86_64-pc-windows-msvc.exe` |
+| Linux | `linux/`: `rust:<version>-slim-bookworm` with an amd64 bookworm sysroot and Zig 0.16.0 | `target/linux-release/`: the `.deb`, the `.rpm`, `hyprlayer-server-x86_64-unknown-linux-gnu`, `aur/` and `aur-server/` |
 
 `run.sh` passes the Mac's `rustc` version and `package.json`'s pnpm version as
-build args, so all three legs compile with the same toolchain. Each leg keeps
+build args, so all three legs compile with the same toolchain. Zig, which builds
+hyprlayer-core's libghostty-vt, is pinned twice: `mise.toml` for the Mac leg, and
+each Dockerfile by version and checksum, so bump them together. Each leg keeps
 named volumes for its cargo target dir, registry, pnpm store and `~/.cache`, so a
 release after the first rebuilds only the workspace crates; budget about 16 GB of
 Docker disk. The image layers are cached too: after changing a Dockerfile's pinned

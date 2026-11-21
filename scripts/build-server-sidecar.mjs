@@ -6,7 +6,7 @@
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,6 +36,18 @@ if (cross) args.push("--target", triple);
 const env = { ...process.env };
 if (triple === "x86_64-pc-windows-msvc") {
   env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -C target-feature=+crt-static`.trim();
+}
+
+// ghostty-vt's build script runs the Zig that mise.toml pins. PATH, not ZIG: the
+// build script reruns when ZIG changes, and tauri's own compile runs without it.
+if (!env.ZIG) {
+  try {
+    const zig = run("mise", ["which", "zig"], { stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const key = Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+    env[key] = `${dirname(zig)}${delimiter}${env[key] ?? ""}`;
+  } catch {
+    // No mise: the build script finds zig on PATH or explains how to install it.
+  }
 }
 
 console.log(`build-server-sidecar: cargo ${args.join(" ")}`);
