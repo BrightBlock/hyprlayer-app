@@ -227,13 +227,14 @@ impl SessionActors {
         cursor: LogCursor,
         limit: u32,
         caller: Option<String>,
+        open: Vec<String>,
     ) -> Result<SessionTurns> {
         let mut handles = self.handles.lock().await;
         if !handles.contains_key(session_id) {
             handles.insert(session_id.to_string(), self.spawn_actor(session_id));
         }
         let handle = handles.get(session_id).expect("just inserted above");
-        handle.list_turns(cursor, limit, caller).await
+        handle.list_turns(cursor, limit, caller, open).await
     }
 
     /// Stops a deleted session's actor: its control channel closes, ending its open streams.
@@ -309,7 +310,7 @@ impl SessionRuntimeHandle {
         caller: Option<String>,
     ) -> Result<SessionTurns> {
         self.actors
-            .list_turns(session_id, cursor, limit, caller)
+            .list_turns(session_id, cursor, limit, caller, Vec::new())
             .await
     }
 

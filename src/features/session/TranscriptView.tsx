@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1524,6 +1525,9 @@ function SyncDivider({
 
 type Props = {
   items: TranscriptItem[];
+  /** The older turns are still being read in, or reading them failed. */
+  olderTurns?: "loading" | "failed";
+  onLoadOlder?: () => void;
   busy: boolean;
   permission: PermissionHandlers;
   prompt: PromptHandlers;
@@ -1585,6 +1589,8 @@ export const TranscriptView = memo(
   forwardRef<TranscriptHandle, Props>(function TranscriptView(
     {
       items,
+      olderTurns,
+      onLoadOlder,
       busy,
       permission,
       prompt,
@@ -1633,16 +1639,19 @@ export const TranscriptView = memo(
 
     // The group holding the target expands via JumpTargetId in a child effect, which
     // commits a render after this one — so the anchor may not exist yet on the first try.
+    const landed = useRef<number | null>(null);
     useEffect(() => {
-      if (!jump) return;
+      if (!jump || landed.current === jump.nonce) return;
       let frame = 0;
       let tries = 0;
       const attempt = () => {
         const el = scrollRef.current?.querySelector(jump.selector);
         if (!el) {
+          // A target older than the tail shows once the older turns are in, which reruns this.
           if (tries++ < JUMP_MAX_FRAMES) frame = requestAnimationFrame(attempt);
           return;
         }
+        landed.current = jump.nonce;
         setAtBottom(false);
         jumping.current = true;
         settleJump();
@@ -1654,7 +1663,7 @@ export const TranscriptView = memo(
       return () => {
         if (frame) cancelAnimationFrame(frame);
       };
-    }, [jump, settleJump, setAtBottom]);
+    }, [jump, olderTurns, settleJump, setAtBottom]);
 
     useEffect(
       () => () => {
@@ -1735,6 +1744,17 @@ export const TranscriptView = memo(
       setAtBottom(false);
     };
 
+    // Older turns read in after the first paint land above the reader; the text in view holds still.
+    const wasPending = useRef(olderTurns);
+    const heightBefore = useRef(0);
+    if (wasPending.current && !olderTurns) heightBefore.current = scrollRef.current?.scrollHeight ?? 0;
+    useLayoutEffect(() => {
+      const landed = wasPending.current && !olderTurns;
+      wasPending.current = olderTurns;
+      const el = scrollRef.current;
+      if (landed && el && !atBottom.current) el.scrollTop += el.scrollHeight - heightBefore.current;
+    }, [olderTurns]);
+
     useEffect(() => {
       if (busy) return;
       const el = scrollRef.current;
@@ -1805,6 +1825,16 @@ export const TranscriptView = memo(
         className="-mt-9 min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pt-14 [overflow-anchor:none]"
       >
         <div ref={contentRef} className="mx-auto w-[90%]">
+          {olderTurns === "failed" && (
+            <div className="mb-5 flex items-center gap-3 text-label text-ink-dim">
+              <span>Earlier turns didn't load</span>
+              {onLoadOlder && (
+                <Button size="sm" onClick={onLoadOlder}>
+                  Load earlier turns
+                </Button>
+              )}
+            </div>
+          )}
           <OpenBackgroundIds.Provider value={openBackgroundIds}>
             <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
               <SelfClientId.Provider value={sync.selfClientId}>

@@ -139,6 +139,14 @@ Three consequences follow, accepted rather than designed around:
   always holds one. The frame decoder has no size cap, because one row, one attachment
   upload or one doc read is a single frame of any size. A cap low enough to protect a
   phone would drop the connection on real data.
+  *(Amended 2026-11-20 — a `tail` cursor reads the newest page and `before` the page
+  ahead of a verified row, so a long session's newest rows arrive in one page and the
+  older ones follow: 18 round trips and 4.7 MB before the first paint became one and
+  133 KB. A rewind refuses a `before` cursor whose row it cut, as it does an `after`.
+  A `tail` page also carries `open_asks`: the ask rows older than it that the live
+  harness still waits on, within the page's budget, so a pending prompt shows at
+  first paint. A server from before this answers `unsupported_command`, and the
+  client reads forward instead.)*
 
 *(Amended 2026-11-11 — agents spawned by the runtime carry `HYPRLAYER_CTL`,
 `HYPRLAYER_SOCKET` and a per-spawn `HYPRLAYER_AGENT_TOKEN`. The `hook`, `ctl` and `mcp`

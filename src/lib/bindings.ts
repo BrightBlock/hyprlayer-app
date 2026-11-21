@@ -148,7 +148,7 @@ export const commands = {
 	listGoals: (workstreamId: string | null, activeOnly: boolean) => typedError<Goal[], AppError>(__TAURI_INVOKE("list_goals", { workstreamId, activeOnly })),
 	deriveGoal: (request: DeriveGoalRequest) => typedError<GoalSpec, AppError>(__TAURI_INVOKE("derive_goal", { request })),
 	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionStreamItemDto>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
-	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | { kind: "tail" } | { kind: "before"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
 	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
 	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null, clientMessageId: string | null, baseRev: number | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName, clientMessageId, baseRev })),
@@ -1326,7 +1326,7 @@ export type LocalServer = {
  *  A cursor crossing the Tauri boundary: `seq` is `f64` because a specta `i64`
  *  exports as a BigInt the TS generator rejects.
  */
-export type LogCursorDto = { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null };
+export type LogCursorDto = { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | { kind: "tail" } | { kind: "before"; seq: number | null; createdAt: number | null };
 
 export type MemoryFile = {
 	name: string,
@@ -1997,6 +1997,10 @@ export type SessionTurnsDto = {
 	resetRev: number | null,
 	working: boolean,
 	inFlight: number,
+	/**  A tail or before page's next read back; null once it holds the first row. */
+	prevCursor: LogCursorDto | null,
+	/**  A tail page's asks older than it that the live harness still waits on. */
+	openAsks: SessionLogEntryDto[],
 };
 
 export type SessionViewers = {

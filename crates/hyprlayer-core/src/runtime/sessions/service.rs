@@ -771,9 +771,14 @@ impl SessionService<'_> {
         limit: u32,
         caller: Option<&str>,
     ) -> Result<SessionTurns> {
+        // A tail read shows the asks the harness waits on, which may be older than its page.
+        let open = match (cursor, self.live_driver(session_id).await) {
+            (LogCursor::Tail, Some(driver)) => driver.pending_requests(),
+            _ => Vec::new(),
+        };
         self.runtime
             .session_actors
-            .list_turns(session_id, cursor, limit, caller.map(str::to_string))
+            .list_turns(session_id, cursor, limit, caller.map(str::to_string), open)
             .await
     }
 

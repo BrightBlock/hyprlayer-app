@@ -439,6 +439,13 @@ watch set).
   and viewers, so the next poll recovers any of the three.
 - **Catch-up.** `list_session_turns` pages raw rows after a verified cursor;
   `next_cursor` is the page's last raw row, so an undecodable tail still advances.
+  A `tail` cursor reads the newest page and `before` the page ahead of a verified
+  row; `prev_cursor` names the next read back until the first row is in hand, and
+  `open_asks` the older asks the live harness still waits on. A first open paints
+  its tail, then reads the older pages in behind it and refolds every row it has
+  applied; it refuses a rewind until then, and offers to load them again if the read
+  fails. A re-read of a view already held reads forward. A server without tail
+  reads refuses the cursor, and the view reads forward from the start.
 - **Stale check.** A send is refused when its `base_rev` is behind other authors'
   commits or in-flight reservations. A client's own turns, its in-flight sends and
   the app follow-ups of its turns never count. A reservation is released by its

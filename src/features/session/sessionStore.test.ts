@@ -34,6 +34,10 @@ const h = vi.hoisted(() => {
     state.lastChannel = args[args.length - 1] as FakeChannel;
     return { status: "ok", data: null };
   });
+  const rewindSession = vi.fn(async (...args: unknown[]) => {
+    state.lastChannel = args[args.length - 1] as FakeChannel;
+    return { status: "ok", data: { liveRewound: true } };
+  });
   const connectionStatus = vi.fn(async () => ({
     status: "ok",
     data: { state: "connected", transcriptSync: false },
@@ -70,6 +74,7 @@ const h = vi.hoisted(() => {
     getSessionLog,
     listActiveSessions,
     restartSession,
+    rewindSession,
   };
 });
 
@@ -95,6 +100,7 @@ vi.mock("../../lib/bindings", () => ({
     getSessionLog: h.getSessionLog,
     listActiveSessions: h.listActiveSessions,
     restartSession: h.restartSession,
+    rewindSession: h.rewindSession,
     connectionStatus: h.connectionStatus,
     listSessionTurns: h.listSessionTurns,
     getClientIdentity: h.getClientIdentity,
@@ -137,6 +143,12 @@ const {
   armResumeAfterSend,
   takeArmedResume,
   reattachRunningGoal,
+  loadOlderTurns,
+  refreshSession,
+  respondPermission,
+  rewindRefusal,
+  rewindToMessage,
+  whenBackfilled,
 } = await import("./sessionStore");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
 const { activityStatus } = await import("./activityStatus");
@@ -1742,7 +1754,7 @@ describe("reconnecting from the held cursor", () => {
   });
   const history = (n: number): Row[] => [at(0, INIT), ...Array.from({ length: n - 1 }, (_, i) => at(i + 1, reply(`r${i + 1}`)))];
 
-  // The server as it is: rows after the cursor it is handed, refusing one a rewind rewrote.
+  // The server as it is: rows after the cursor it is handed or back from the newest, refusing one a rewind rewrote.
   const server = new Map<string, { rows: Row[]; resetRev: number }>();
   const reads: { sessionId: string; cursor: LogCursorDto; rows: number }[] = [];
   const streams = new Map<string, InstanceType<typeof h.FakeChannel>>();
@@ -1750,18 +1762,22 @@ describe("reconnecting from the held cursor", () => {
 
   function listTurns(sessionId: string, cursor: LogCursorDto, limit: number) {
     const log = server.get(sessionId)!;
-    if (cursor.kind === "after" && log.rows[cursor.seq ?? -1]?.createdAt !== cursor.createdAt) {
+    const held = cursor.kind === "after" || cursor.kind === "before";
+    if (held && log.rows[cursor.seq ?? -1]?.createdAt !== cursor.createdAt) {
       return { status: "error", error: { code: "session_epoch_advanced", message: "stale cursor" } };
     }
-    const from = cursor.kind === "after" ? (cursor.seq ?? -1) + 1 : 0;
-    const entries = log.rows.slice(from, from + limit);
+    const back = cursor.kind === "tail" || cursor.kind === "before";
+    const end = cursor.kind === "before" ? (cursor.seq ?? 0) : log.rows.length;
+    const from = back ? Math.max(0, end - limit) : cursor.kind === "after" ? (cursor.seq ?? -1) + 1 : 0;
+    const entries = log.rows.slice(from, back ? end : from + limit);
     reads.push({ sessionId, cursor, rows: entries.length });
-    const last = entries[entries.length - 1];
+    const [first, last] = [entries[0], entries[entries.length - 1]];
     return {
       status: "ok",
       data: {
         entries,
         nextCursor: last ? { kind: "after", seq: last.seq, createdAt: last.createdAt } : cursor,
+        prevCursor: back && from > 0 ? { kind: "before", seq: first.seq, createdAt: first.createdAt } : null,
         remaining: Math.max(0, log.rows.length - from - entries.length),
         rev: log.rows.length,
         resetRev: log.resetRev,
@@ -1801,6 +1817,7 @@ describe("reconnecting from the held cursor", () => {
     server.set(id, { rows, resetRev: 0 });
     h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live ? [{ session: { id } }] : [] });
     await restoreSessionIfNeeded(id, "ws1", "general");
+    await whenBackfilled(id);
     return id;
   }
 
@@ -1810,6 +1827,7 @@ describe("reconnecting from the held cursor", () => {
     h.listSessionTurns.mockClear();
     h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live.map((id) => ({ session: { id } })) });
     await reattachSessions();
+    await Promise.all(Object.keys(useSessionStore.getState().sessions).map(whenBackfilled));
   }
 
   beforeEach(() => {
@@ -2005,6 +2023,437 @@ describe("reconnecting from the held cursor", () => {
     expect(reads).toEqual([{ sessionId: id, cursor: cursorAt(server.get(id)!.rows[10]), rows: 3 }]);
     expect(resumedFrom()).toEqual([[id, tail(id)]]);
     expect(texts(id)).toEqual([...replies(10), "theirs done"]);
+  });
+});
+
+describe("opening a long session tail first", () => {
+  const SELF = { clientId: "me", device: "my-mac" };
+  type Row = { seq: number; kind: string; event: SessionEvent; createdAt: number };
+  const at = (seq: number, event: SessionEvent): Row => ({ seq, kind: event.kind, event, createdAt: 1_700_000_000_000 + seq });
+  const cursorAt = (row: Row): LogCursorDto => ({ kind: "after", seq: row.seq, createdAt: row.createdAt });
+  const reply = (text: string): SessionEvent => ({ kind: "assistantText", text, parentId: null });
+  const user = (text: string): SessionEvent => ({ kind: "userMessage", text, stage: null });
+  const toolUse = (id: string, name = "Read"): SessionEvent => ({ kind: "toolUse", id, name, input: "{}", parentId: null });
+  const result = (id: string, content = `read ${id}`): SessionEvent => ({
+    kind: "toolResult",
+    toolUseId: id,
+    content,
+    isError: false,
+    parentId: null,
+  });
+  // The server's byte budget, as rows: 41 puts the tail's first row on a tool's result.
+  const PAGE_ROWS = 41;
+
+  // Turns of `steps` tool calls; turn 2 leaves a permission ask unanswered.
+  function longLog(turns: number, steps: number, open = false): Row[] {
+    const events: SessionEvent[] = [INIT];
+    for (let t = 1; t <= turns; t += 1) {
+      events.push(user(`ask ${t}`));
+      if (t === 2) events.push({ kind: "permissionAsk", requestId: "req-2", toolName: "Bash", input: "{}" });
+      for (let s = 0; s < steps; s += 1) events.push(toolUse(`t${t}s${s}`), result(`t${t}s${s}`));
+      if (open && t === turns) {
+        events.push(toolUse("pending"));
+        break;
+      }
+      events.push(reply(`done ${t}`), TURN_DONE);
+    }
+    return events.map((event, seq) => at(seq, event));
+  }
+
+  const logs = new Map<string, Row[]>();
+  // Request ids a live harness still waits on, per session.
+  const waiting = new Map<string, Set<string>>();
+  let refuseTail = false;
+  let holdBack = false;
+  const heldBack: Array<() => void> = [];
+  const streams = new Map<string, InstanceType<typeof h.FakeChannel>>();
+  let nextId = 0;
+
+  // The server as it is: forward from a cursor, or back from the newest row or a held one.
+  function serve(id: string, cursor: LogCursorDto, limit: number) {
+    const rows = logs.get(id)!;
+    const back = cursor.kind === "tail" || cursor.kind === "before";
+    if (back && refuseTail) {
+      return { status: "error", error: { code: "unsupported_command", message: "The server doesn't support this yet." } };
+    }
+    const n = Math.min(limit, PAGE_ROWS);
+    let start = cursor.kind === "after" ? (cursor.seq ?? -1) + 1 : 0;
+    let end = Math.min(rows.length, start + n);
+    if (back) {
+      end = cursor.kind === "tail" ? rows.length : (cursor.seq ?? 0);
+      start = Math.max(0, end - n);
+    }
+    const entries = rows.slice(start, end);
+    const last = entries[entries.length - 1];
+    const open = waiting.get(id);
+    const openAsks =
+      cursor.kind === "tail" && open
+        ? rows.slice(0, start).filter((r) => r.event.kind === "permissionAsk" && open.has(r.event.requestId))
+        : [];
+    return {
+      status: "ok",
+      data: {
+        entries,
+        openAsks,
+        nextCursor: last ? cursorAt(last) : { kind: "empty" },
+        prevCursor: back && start > 0 ? { kind: "before", seq: entries[0].seq, createdAt: entries[0].createdAt } : null,
+        remaining: rows.length - end,
+        rev: rows.length,
+        resetRev: 0,
+        working: false,
+        inFlight: 0,
+      },
+    };
+  }
+
+  const asked = () => (h.listSessionTurns.mock.calls as unknown[][]).map((c) => c[1] as LogCursorDto);
+  const plain = (id: string) => entryOf(id).items.map(({ id: _id, ...rest }) => rest);
+  const release = async () => {
+    holdBack = false;
+    while (heldBack.length > 0) heldBack.shift()!();
+  };
+
+  async function open(rows: Row[], live = false): Promise<string> {
+    const id = `long-${(nextId += 1)}`;
+    logs.set(id, rows);
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: live ? [{ session: { id } }] : [] });
+    await restoreSessionIfNeeded(id, "ws1", "general");
+    return id;
+  }
+
+  // The same log opened forward from its start, as before tail reads.
+  async function forwardId(rows: Row[], live = false): Promise<string> {
+    refuseTail = true;
+    const id = await open(rows, live);
+    refuseTail = false;
+    forgetSyncSupport();
+    return id;
+  }
+  const forward = async (rows: Row[], live = false) => plain(await forwardId(rows, live));
+
+  beforeEach(() => {
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: true } });
+    h.listSessionTurns.mockImplementation(async (id: string, cursor: LogCursorDto, limit: number) => {
+      if (holdBack && cursor.kind === "before") await new Promise<void>((resolve) => heldBack.push(resolve));
+      return serve(id, cursor, limit);
+    });
+    h.resumeSession.mockImplementation(async (...args: unknown[]) => {
+      streams.set(args[0] as string, args[args.length - 1] as InstanceType<typeof h.FakeChannel>);
+      return { status: "ok", data: h.RESUMED };
+    });
+    h.rewindSession.mockClear();
+    useTranscriptSync.setState({ self: SELF });
+    refuseTail = false;
+    holdBack = false;
+  });
+
+  afterEach(async () => {
+    await release();
+    h.connectionStatus.mockResolvedValue({ status: "ok", data: { state: "connected", transcriptSync: false } });
+    h.resumeSession.mockImplementation(async () => ({ status: "ok", data: h.RESUMED }));
+    h.listActiveSessions.mockResolvedValue({ status: "ok", data: [] });
+    useTranscriptSync.setState({ self: null });
+  });
+
+  it("shows the newest rows after one tail read, then pages the older ones in", async () => {
+    const rows = longLog(10, 30);
+    expect(rows[rows.length - PAGE_ROWS].event.kind).toBe("toolResult");
+    const expected = await forward(rows);
+    h.listSessionTurns.mockClear();
+    holdBack = true;
+
+    const id = await open(rows);
+
+    expect(asked()[0]).toEqual({ kind: "tail" });
+    expect(asked().filter((c) => c.kind !== "before")).toHaveLength(1);
+    const shown = entryOf(id).items;
+    expect(shown.some((it) => it.kind === "assistant" && it.text === "done 10")).toBe(true);
+    expect(shown.some((it) => it.kind === "user" && it.text === "ask 1")).toBe(false);
+    expect(entryOf(id).cursor).toEqual(cursorAt(rows[rows.length - 1]));
+
+    await release();
+    await whenBackfilled(id);
+
+    expect(plain(id)).toEqual(expected);
+    expect(entryOf(id).cursor).toEqual(cursorAt(rows[rows.length - 1]));
+  });
+
+  it("reads forward from the start on a server from before tail reads, asking once per connection", async () => {
+    refuseTail = true;
+    const rows = longLog(3, 30);
+
+    const first = await open(rows);
+    const second = await open(rows);
+
+    expect(asked()[0]).toEqual({ kind: "tail" });
+    expect(asked().filter((c) => c.kind === "tail")).toHaveLength(1);
+    expect(asked().filter((c) => c.kind === "empty")).toHaveLength(2);
+    expect(plain(first)).toEqual(plain(second));
+    expect(entryOf(first).items.some((it) => it.kind === "user" && it.text === "ask 1")).toBe(true);
+  });
+
+  it("keeps the rows that arrived live while the older ones were read", async () => {
+    const rows = longLog(10, 30, true);
+    const live = [at(rows.length, result("pending")), at(rows.length + 1, reply("done live")), at(rows.length + 2, TURN_DONE)];
+    const expected = await forward([...rows, ...live], true);
+    holdBack = true;
+
+    const id = await open(rows, true);
+    logs.get(id)!.push(...live);
+    for (const row of live) {
+      streams.get(id)!.onmessage?.({ seq: row.seq, createdAt: row.createdAt, rev: row.seq + 1, author: SELF, event: row.event });
+    }
+    await release();
+    await whenBackfilled(id);
+
+    expect(plain(id)).toEqual(expected);
+    const pending = entryOf(id).items.find((it) => it.kind === "tool" && it.toolUseId === "pending");
+    expect(pending?.kind === "tool" && pending.result?.content).toBe("read pending");
+  });
+
+  it("refuses a rewind while the older turns load, and counts from the first message once they are in", async () => {
+    const rows = longLog(10, 15);
+    holdBack = true;
+    const id = await open(rows, true);
+    expect(rewindRefusal(entryOf(id).olderTurns)?.title).toBe("Earlier turns are still loading");
+    const users = entryOf(id).items.filter((it) => it.kind === "user");
+    expect(users).toHaveLength(1);
+    const n = rows.length;
+    const later = [at(n, user("typed after clicking rewind")), at(n + 1, reply("answer")), at(n + 2, TURN_DONE)];
+
+    await rewindToMessage(id, users[0].id);
+    for (const row of later) {
+      logs.get(id)!.push(row);
+      streams.get(id)!.onmessage?.({ seq: row.seq, createdAt: row.createdAt, rev: row.seq + 1, author: SELF, event: row.event });
+    }
+    await release();
+    await whenBackfilled(id);
+
+    expect(h.rewindSession).not.toHaveBeenCalled();
+    expect(entryOf(id).items.some((it) => it.kind === "user" && it.text === "typed after clicking rewind")).toBe(true);
+    await rewindToMessage(id, users[0].id);
+    expect((h.rewindSession.mock.calls[0] as unknown[])[1]).toBe(10);
+  });
+
+  it("gives a skill body to the older skill awaiting it once the older rows are in", async () => {
+    // A skill body goes to the first launched skill awaiting one, which the tail alone lacks.
+    const launched = (id: string) => [toolUse(id, "Skill"), result(id, "Launching skill: plan")];
+    const events: SessionEvent[] = [INIT, user("first"), ...launched("skill-old"), reply("old"), TURN_DONE, user("second")];
+    for (let s = 0; s < 17; s += 1) events.push(toolUse(`s${s}`), result(`s${s}`));
+    events.push(...launched("skill-new"));
+    events.push({ kind: "assistantText", text: "Base directory for this skill: /skills/plan\nbody", parentId: null, injected: true });
+    events.push(reply("second done"), TURN_DONE);
+    const rows = events.map((event, seq) => at(seq, event));
+    const expected = await forward(rows);
+
+    const id = await open(rows);
+    await whenBackfilled(id);
+
+    expect(plain(id)).toEqual(expected);
+  });
+
+  it("restores a question asked before the tail on a live session", async () => {
+    const events: SessionEvent[] = [INIT, user("ask"), { kind: "questionAsk", requestId: "q1", questions: [] }];
+    for (let s = 0; s < 60; s += 1) events.push({ kind: "assistantText", text: `sub ${s}`, parentId: "agent" });
+    const rows = events.map((event, seq) => at(seq, event));
+    const expected = await forwardId(rows, true);
+
+    const id = await open(rows, true);
+    await whenBackfilled(id);
+
+    expect([entryOf(id).state, entryOf(id).pendingQuestion]).toEqual([entryOf(expected).state, entryOf(expected).pendingQuestion]);
+    expect(entryOf(id).pendingQuestion?.requestId).toBe("q1");
+  });
+
+  it("settles a live result for a tool launched before the tail, once", async () => {
+    const events: SessionEvent[] = [INIT, user("ask"), toolUse("bg", "Task")];
+    for (let s = 0; s < 40; s += 1) events.push(toolUse(`s${s}`), result(`s${s}`));
+    const rows = events.map((event, seq) => at(seq, event));
+    const live = [at(rows.length, result("bg", "bg done"))];
+    const expected = await forward([...rows, ...live], true);
+    holdBack = true;
+
+    const id = await open(rows, true);
+    expect(entryOf(id).items.some((it) => it.kind === "tool" && it.toolUseId === "bg")).toBe(false);
+    logs.get(id)!.push(...live);
+    for (const row of live) {
+      streams.get(id)!.onmessage?.({ seq: row.seq, createdAt: row.createdAt, rev: row.seq + 1, author: SELF, event: row.event });
+    }
+    await release();
+    await whenBackfilled(id);
+
+    expect(plain(id)).toEqual(expected);
+  });
+
+  it("keeps a subagent's ask answered here while the older turns load answered", async () => {
+    const events: SessionEvent[] = [INIT, user("ask"), toolUse("task", "Task")];
+    for (let s = 0; s < 60; s += 1) events.push(toolUse(`s${s}`), result(`s${s}`));
+    events.push({ kind: "toolUse", id: "sub", name: "Bash", input: "{}", parentId: "task" });
+    events.push({ kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}", toolUseId: "sub" });
+    holdBack = true;
+    const id = await open(
+      events.map((event, seq) => at(seq, event)),
+      true,
+    );
+    expect(entryOf(id).pendingPermission?.requestId).toBe("r1");
+
+    await respondPermission(id, "r1", true, null);
+    await release();
+    await whenBackfilled(id);
+
+    expect(entryOf(id).pendingPermission).toBeNull();
+    expect(entryOf(id).state).not.toBe("awaiting_permission");
+  });
+
+  // Without turn 2's unanswered ask, a live session at rest reads running.
+  const restingLog = () =>
+    longLog(10, 30)
+      .filter((row) => row.event.kind !== "permissionAsk")
+      .map((row, seq) => at(seq, row.event));
+
+  it("keeps a live session's running state when the older turns land after its resume", async () => {
+    const rows = restingLog();
+    const expected = entryOf(await forwardId(rows, true)).state;
+    holdBack = true;
+
+    const id = await open(rows, true);
+    expect(entryOf(id).state).toBe(expected);
+    await release();
+    await whenBackfilled(id);
+
+    expect(entryOf(id).state).toBe(expected);
+    expect(entryOf(id).live).toBe(true);
+  });
+
+  it("keeps a live session's running state when the older turns land before its resume settles", async () => {
+    const rows = restingLog();
+    const expected = entryOf(await forwardId(rows, true)).state;
+    let resumed = () => {};
+    h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+      streams.set(args[0] as string, args[args.length - 1] as InstanceType<typeof h.FakeChannel>);
+      await new Promise<void>((resolve) => (resumed = resolve));
+      return { status: "ok", data: h.RESUMED };
+    });
+    holdBack = true;
+
+    const opening = open(rows, true);
+    await vi.waitFor(() => expect(heldBack.length).toBe(1));
+    await release();
+    await vi.waitFor(() => expect(entryOf(`long-${nextId}`).olderTurns).toBeUndefined());
+    resumed();
+    const id = await opening;
+
+    expect(entryOf(id).state).toBe(expected);
+  });
+
+  it("offers to load the older turns again after a read fails, keeping rows applied meanwhile", async () => {
+    const rows = longLog(10, 30, true);
+    const live = [at(rows.length, result("pending")), at(rows.length + 1, reply("done live")), at(rows.length + 2, TURN_DONE)];
+    const expected = await forward([...rows, ...live], true);
+    let failing = true;
+    h.listSessionTurns.mockImplementation(async (id: string, cursor: LogCursorDto, limit: number) =>
+      failing && cursor.kind === "before"
+        ? { status: "error", error: { code: "internal", message: "the read broke" } }
+        : serve(id, cursor, limit),
+    );
+
+    const id = await open(rows, true);
+    await whenBackfilled(id);
+    expect(entryOf(id).olderTurns).toBe("failed");
+    expect(rewindRefusal(entryOf(id).olderTurns)?.title).toBe("Earlier turns didn't load");
+    logs.get(id)!.push(...live);
+    for (const row of live) {
+      streams.get(id)!.onmessage?.({ seq: row.seq, createdAt: row.createdAt, rev: row.seq + 1, author: SELF, event: row.event });
+    }
+    failing = false;
+    loadOlderTurns(id);
+    await whenBackfilled(id);
+
+    expect(entryOf(id).olderTurns).toBeUndefined();
+    expect(rewindRefusal(entryOf(id).olderTurns)).toBeNull();
+    expect(plain(id)).toEqual(expected);
+  });
+
+  it("shows an ask older than the tail at first paint, and keeps one card for it", async () => {
+    const events: SessionEvent[] = [INIT, user("ask"), toolUse("t-ask", "Bash")];
+    events.push({ kind: "permissionAsk", requestId: "r-old", toolName: "Bash", input: "{}", toolUseId: "t-ask" });
+    for (let s = 0; s < 60; s += 1) events.push({ kind: "assistantText", text: `sub ${s}`, parentId: "agent" });
+    const rows = events.map((event, seq) => at(seq, event));
+    const expected = entryOf(await forwardId(rows, true));
+    holdBack = true;
+
+    const id = `long-${nextId + 1}`;
+    waiting.set(id, new Set(["r-old"]));
+    await open(rows, true);
+    const cards = () => entryOf(id).items.filter((it) => it.kind === "permission" && it.requestId === "r-old");
+    expect(entryOf(id).pendingPermission?.requestId).toBe("r-old");
+    expect(cards()).toHaveLength(1);
+    await release();
+    await whenBackfilled(id);
+
+    expect(cards()).toHaveLength(1);
+    expect([entryOf(id).state, entryOf(id).pendingPermission?.requestId]).toEqual([
+      expected.state,
+      expected.pendingPermission?.requestId,
+    ]);
+  });
+
+  it("keeps item ids unique for rows applied after the older ones are in", async () => {
+    const id = await open(longLog(10, 30, true), true);
+    await whenBackfilled(id);
+    streams.get(id)!.onmessage?.({ seq: null, rev: 9999, author: SELF, event: reply("after") });
+
+    const ids = entryOf(id).items.map((it) => it.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("settles when the session goes away mid-read", async () => {
+    holdBack = true;
+    const id = await open(longLog(10, 30));
+    h.listSessionTurns.mockImplementation(async () => ({ status: "error", error: { code: "session_not_found", message: "gone" } }));
+    await release();
+
+    const settled = await Promise.race([
+      whenBackfilled(id).then(() => "settled"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 200)),
+    ]);
+    expect(settled).toBe("settled");
+  });
+
+  it("reads forward when a server refuses the older pages, and stops asking it for tails", async () => {
+    const rows = longLog(10, 30);
+    const expected = await forward(rows);
+    holdBack = true;
+    const id = await open(rows);
+    refuseTail = true;
+    await release();
+    await whenBackfilled(id);
+
+    expect(plain(id)).toEqual(expected);
+    h.listSessionTurns.mockClear();
+    await open(rows);
+    expect(asked().some((c) => c.kind === "tail")).toBe(false);
+  });
+
+  it("keeps the whole view across a refresh, with the attachments on its older messages", async () => {
+    const events: SessionEvent[] = [INIT, { kind: "userMessage", text: "with file", stage: null, clientMessageId: "n1" }];
+    for (let s = 0; s < 60; s += 1) events.push(toolUse(`s${s}`), result(`s${s}`));
+    events.push(TURN_DONE);
+    const id = await open(events.map((event, seq) => at(seq, event)));
+    await whenBackfilled(id);
+    const e = entryOf(id);
+    const file = { name: "a.png", path: "/a.png", kind: "image" as const };
+    const items = e.items.map((it) => (it.kind === "user" && it.clientMessageId === "n1" ? { ...it, attachments: [file] } : it));
+    useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...e, items } } }));
+    const whole = entryOf(id).items.length;
+    holdBack = true;
+
+    h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [] });
+    await refreshSession(id);
+
+    expect(entryOf(id).items).toHaveLength(whole);
+    const asked = entryOf(id).items.find((it) => it.kind === "user");
+    expect(asked?.kind === "user" && asked.attachments).toEqual([file]);
   });
 });
 

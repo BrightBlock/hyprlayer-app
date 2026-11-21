@@ -1,0 +1,101 @@
+{
+  "scenario": "long_session_open",
+  "steps": [
+    {
+      "guards": [],
+      "step": "the desktop runs ten turns of 120 file reads"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "holdsNewest": true
+          },
+          "guard": "one read holds the newest row",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "fits": true
+          },
+          "guard": "that read fits one page's budget",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "follows": true
+          },
+          "guard": "its cursor is the newest row, so reading on from it repeats nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "marksOlder": true
+          },
+          "guard": "it names the read that continues back from its first row",
+          "ok": true
+        }
+      ],
+      "step": "the phone opens the session at its newest rows"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "matches": true
+          },
+          "guard": "the pages join without a gap or an overlap, ending at the first row",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "fits": true
+          },
+          "guard": "each page fits the budget or is a single row",
+          "ok": true
+        }
+      ],
+      "step": "paging back from the tail adds up to the whole log"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refused": true
+          },
+          "guard": "reading back from a row the rewind cut is refused as a moved log",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "endsAtNewest": true,
+            "moved": true
+          },
+          "guard": "a tail read after it carries the moved resetRev and the new newest row",
+          "ok": true
+        }
+      ],
+      "step": "a rewind refuses a cursor that reads back across it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "carried": true,
+            "fits": true
+          },
+          "guard": "it carries the one ask older than the page, within the page's budget",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "answered": true
+          },
+          "guard": "an answered ask is no longer carried",
+          "ok": true
+        }
+      ],
+      "step": "a tail read carries the ask the harness still waits on"
+    }
+  ]
+}

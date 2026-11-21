@@ -197,6 +197,7 @@ export function forgetSync(sessionId: string): void {
 }
 
 let supported: boolean | null = null;
+let tailRefused = false;
 
 /** Whether the connected server targets sync events at this client; errors read as no. */
 export async function syncSupport(): Promise<boolean> {
@@ -213,6 +214,16 @@ export async function syncSupport(): Promise<boolean> {
 
 export function forgetSyncSupport(): void {
   supported = null;
+  tailRefused = false;
+}
+
+/** False once this connection's server refused a tail read, as one from before them does. */
+export function tailReads(): boolean {
+  return !tailRefused;
+}
+
+export function refuseTailReads(): void {
+  tailRefused = true;
 }
 
 let installed = false;

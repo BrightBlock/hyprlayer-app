@@ -124,6 +124,7 @@ import {
 } from "./transcriptSync";
 import {
   forgetSync,
+  refuseTailReads,
   rev,
   scheduleWatch,
   selfClientId,
@@ -132,6 +133,7 @@ import {
   syncInput,
   syncOf,
   syncSupport,
+  tailReads,
 } from "./syncStore";
 import { nextTurn, recapWanted, type LastTurn, type TurnRecap } from "./activityStatus";
 import { GOAL_PROMPT } from "./goalPrompt";
@@ -164,9 +166,14 @@ export type SessionEntry = SessionView & {
   /** Where a catch-up read resumes: the last raw row folded, pulled or applied live. */
   cursor?: LogCursorDto | null;
   turnAuthor?: TurnAuthor;
+  /** Shows only the newest rows while the older ones are read in, or after that read failed. */
+  olderTurns?: OlderTurns;
   /** A running or paused goal, from the session row and then each `GoalChanged`. */
   goal?: GoalBrief | null;
 };
+
+/** A rewind counts turns from the session's first message, so it waits on either. */
+export type OlderTurns = "loading" | "failed";
 
 export type QueuedMessage = {
   text: string;
@@ -240,6 +247,7 @@ async function recapIfAway(sessionId: string, workstreamId: string, endedAt: num
 function forgetSession(sessionId: string): void {
   channels.delete(sessionId);
   held.delete(sessionId);
+  endBackfill(sessionId);
   armedResumes.delete(sessionId);
   forgetSync(sessionId);
 }
@@ -436,6 +444,7 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   const current = entryOf(sessionId);
   if (!current) return;
   const seq = synced?.seq ?? null;
+  if (seq !== null) backfills.get(sessionId)?.since.push({ seq, kind: event.kind, event, createdAt: synced?.createdAt ?? null });
 
   // A mode restart must not mark the transcript terminal.
   if (event.kind === "exited" && current.reloading) {
@@ -722,31 +731,58 @@ type LogRead = {
   cursor: LogCursorDto;
   /** Set when read through `list_session_turns`; they match the rows read. */
   revs: { rev: number; resetRev: number } | null;
+  /** Set by `readLog`, whose fold replaces the view: where the rows it left unread page back from. */
+  older?: LogCursorDto | null;
+  /** A tail read's asks older than it that the live harness still waits on. */
+  asks?: SessionLogEntryDto[];
 };
 
 const FOLD_PAGE = 2000;
+// About a screen of history, so the first paint costs one small page.
+const TAIL_PAGE = 100;
 const PULL_PAGE = 200;
 const FOLD_RESTARTS = 3;
 
-// With sync, a fold pages from the start so it carries the rev it read up to (R6).
-async function readLog(sessionId: string): Promise<LogRead> {
+// With sync, a fold carries the rev it read up to (R6). Only an open with no view held reads the tail first.
+async function readLog(sessionId: string, tailFirst = false): Promise<LogRead> {
   if (!(await syncSupport())) {
     const entries = await unwrap(commands.getSessionLog(sessionId));
     const lastRow = entries[entries.length - 1];
     const cursor: LogCursorDto = lastRow
       ? { kind: "after", seq: lastRow.seq, createdAt: lastRow.createdAt }
       : { kind: "empty" };
-    return { entries, cursor, revs: null };
+    return { entries, cursor, revs: null, older: null };
   }
+  const tail = tailFirst ? await readTail(sessionId) : null;
+  if (tail) return tail;
   for (let attempt = 1; attempt <= FOLD_RESTARTS; attempt += 1) {
     try {
       const read = await readTurns(sessionId);
-      if (read) return read;
+      if (read) return { ...read, older: null };
     } catch (e) {
       if (attempt === FOLD_RESTARTS || !isSessionEpochAdvanced(e)) throw e;
     }
   }
   throw new Error(`${sessionId} kept rewinding while its log was read`);
+}
+
+// Null from a server before tail reads, which is not asked again on this connection.
+async function readTail(sessionId: string): Promise<LogRead | null> {
+  if (!tailReads()) return null;
+  try {
+    const page = await unwrap(commands.listSessionTurns(sessionId, { kind: "tail" }, TAIL_PAGE));
+    return {
+      entries: page.entries,
+      cursor: page.nextCursor,
+      revs: { rev: rev(page.rev), resetRev: rev(page.resetRev) },
+      older: page.prevCursor ?? null,
+      asks: page.openAsks ?? [],
+    };
+  } catch (e) {
+    if (!isAppError(e) || (e.code !== "unsupported_command" && e.code !== "unreadable_request")) throw e;
+    refuseTailReads();
+    return null;
+  }
 }
 
 // Null when a rewind between pages rewrote rows already read, or `resetRev` moved off the one held.
@@ -802,9 +838,15 @@ function turnOpeners(
   return { turnAuthor, device };
 }
 
-type Folded = { view: SessionView; cursor: LogCursorDto; appliedSeq: number; turnAuthor: TurnAuthor };
+type Folded = {
+  view: SessionView;
+  cursor: LogCursorDto;
+  appliedSeq: number;
+  turnAuthor: TurnAuthor;
+  olderTurns: OlderTurns | undefined;
+};
 
-function foldLog(read: LogRead, previousItems: TranscriptItem[] = []): Folded {
+function foldLog(read: LogRead, previousItems: TranscriptItem[] = [], counter = 0): Folded {
   // The log stores no attachments; recover them from the optimistic item this
   // device already rendered, matched by the nonce both share.
   const attachmentsById = new Map(
@@ -812,9 +854,9 @@ function foldLog(read: LogRead, previousItems: TranscriptItem[] = []): Folded {
       .filter((it): it is Extract<TranscriptItem, { kind: "user" }> => it.kind === "user" && !!it.clientMessageId)
       .map((it) => [it.clientMessageId as string, it.attachments]),
   );
-  let view = initialSessionView("starting");
+  let view: SessionView = { ...initialSessionView("starting"), counter };
   let appliedSeq = -1;
-  for (const stored of read.entries) {
+  for (const stored of [...(read.asks ?? []), ...read.entries]) {
     if (stored.seq !== null && stored.seq > appliedSeq) appliedSeq = stored.seq;
     try {
       view = reduceEvent(view, stored.event, stored.seq);
@@ -831,7 +873,7 @@ function foldLog(read: LogRead, previousItems: TranscriptItem[] = []): Folded {
     }
   }
   const turnAuthor = turnOpeners(read.entries, -1).turnAuthor ?? null;
-  return { view, cursor: read.cursor, appliedSeq, turnAuthor };
+  return { view, cursor: read.cursor, appliedSeq, turnAuthor, olderTurns: read.older ? "loading" : undefined };
 }
 
 // The held view plus the rows after its cursor; null when they cross a rewind.
@@ -847,6 +889,7 @@ function foldOnto(current: SessionEntry, read: LogRead): Folded | null {
     cursor: merged.cursor,
     appliedSeq: merged.appliedSeq,
     turnAuthor: opened === undefined ? (current.turnAuthor ?? null) : opened,
+    olderTurns: current.olderTurns,
   };
 }
 
@@ -860,7 +903,10 @@ async function readAndFold(
     const current = entryOf(sessionId);
     if (!current) return null;
     const folded = foldOnto(current, tail);
-    if (folded) return { current, read: tail, folded };
+    if (folded) {
+      noteApplied(sessionId, tail.entries);
+      return { current, read: tail, folded };
+    }
   }
   const read = await readLog(sessionId);
   const current = entryOf(sessionId);
@@ -872,6 +918,212 @@ async function readAndFold(
 function foldLoaded(sessionId: string, read: LogRead): void {
   held.delete(sessionId);
   if (read.revs) syncInput(sessionId, { kind: "loaded", ...read.revs });
+  if (read.older === null) endBackfill(sessionId);
+}
+
+// A tail-first open's read of the rows before its paint; a whole fold written since ends it.
+type Backfill = {
+  live: boolean;
+  painted: SessionEntry;
+  tail: SessionLogEntryDto[];
+  /** Rows applied after the paint, so the final fold holds them too. */
+  since: SessionLogEntryDto[];
+  /** Older pages read so far, oldest first, and the read that continues back. */
+  pages: SessionLogEntryDto[][];
+  next: LogCursorDto | null;
+  resetRev: number;
+  settle: () => void;
+  done: Promise<void>;
+};
+const backfills = new Map<string, Backfill>();
+// The connection blips a reconnect recovers from; anything else ends the read.
+const TRANSIENT = new Set(["server_disconnected", "server_unavailable"]);
+const BACKFILL_RETRY_MS = [1_000, 2_000, 4_000, 8_000, 16_000];
+
+/** Resolves once the read of the older turns behind a tail-first paint has ended or failed. */
+export function whenBackfilled(sessionId: string): Promise<void> {
+  return backfills.get(sessionId)?.done ?? Promise.resolve();
+}
+
+function endBackfill(sessionId: string, fill = backfills.get(sessionId)): void {
+  if (!fill || backfills.get(sessionId) !== fill) return;
+  backfills.delete(sessionId);
+  fill.settle();
+}
+
+function noteApplied(sessionId: string, rows: SessionLogEntryDto[]): void {
+  backfills.get(sessionId)?.since.push(...rows);
+}
+
+function startBackfill(sessionId: string, read: LogRead, live: boolean): void {
+  endBackfill(sessionId);
+  const painted = entryOf(sessionId);
+  if (!read.older || !painted) return;
+  const fill: Backfill = {
+    live,
+    painted,
+    tail: read.entries,
+    since: [],
+    pages: [],
+    next: read.older,
+    resetRev: read.revs?.resetRev ?? 0,
+    settle: () => {},
+    done: Promise.resolve(),
+  };
+  backfills.set(sessionId, fill);
+  void readOlder(sessionId, fill);
+}
+
+/** Reads the older turns again after a failed read, keeping the rows applied since the paint. */
+export function loadOlderTurns(sessionId: string): void {
+  const entry = entryOf(sessionId);
+  if (entry?.olderTurns !== "failed") return;
+  const fill = backfills.get(sessionId);
+  if (!fill || !tailReads()) {
+    void refreshSession(sessionId).catch((e) => log.warn("session", `reading ${sessionId} forward failed`, e));
+    return;
+  }
+  setEntry(sessionId, { ...entry, olderTurns: "loading" });
+  void readOlder(sessionId, fill);
+}
+
+function olderFailed(sessionId: string, fill: Backfill, e: unknown): void {
+  log.warn("session", `reading ${sessionId}'s older turns failed`, e);
+  fill.settle();
+  const entry = entryOf(sessionId);
+  if (entry?.olderTurns) setEntry(sessionId, { ...entry, olderTurns: "failed" });
+}
+
+async function readOlder(sessionId: string, fill: Backfill): Promise<void> {
+  fill.done = new Promise<void>((resolve) => (fill.settle = resolve));
+  const current = () => backfills.get(sessionId) === fill;
+  let retries = 0;
+  while (fill.next) {
+    let page: SessionTurnsDto;
+    try {
+      page = await unwrap(commands.listSessionTurns(sessionId, fill.next, FOLD_PAGE));
+    } catch (e) {
+      if (!current()) return;
+      const code = isAppError(e) ? e.code : null;
+      if (code && TRANSIENT.has(code) && retries < BACKFILL_RETRY_MS.length) {
+        await new Promise((resolve) => setTimeout(resolve, BACKFILL_RETRY_MS[retries++]));
+        if (current()) continue;
+        return;
+      }
+      if (isSessionEpochAdvanced(e) || code === "session_not_found") {
+        // A rewind cut the row it reads back from, and its reset's reload folds the view again.
+        endBackfill(sessionId, fill);
+        if (isSessionEpochAdvanced(e)) syncInput(sessionId, { kind: "reset" });
+        return;
+      }
+      if (code === "unsupported_command" || code === "unreadable_request") {
+        refuseTailReads();
+        // Its whole fold ends this backfill; a resume in flight can make it fold nothing.
+        await refreshSession(sessionId).catch((err) => log.warn("session", `reading ${sessionId} forward failed`, err));
+        if (!current()) return;
+      }
+      olderFailed(sessionId, fill, e);
+      return;
+    }
+    if (!current()) return;
+    if (rev(page.resetRev) !== fill.resetRev) {
+      endBackfill(sessionId, fill);
+      syncInput(sessionId, { kind: "reset" });
+      return;
+    }
+    fill.pages.unshift(page.entries);
+    fill.next = page.prevCursor ?? null;
+  }
+  endBackfill(sessionId, fill);
+  showOlder(sessionId, fill, fill.pages.flat());
+}
+
+/** Why a rewind is refused now, or null when the view holds every turn. */
+export function rewindRefusal(olderTurns: OlderTurns | undefined): { title: string; body: string } | null {
+  if (olderTurns === "loading") return { title: "Earlier turns are still loading", body: "Rewind once they show." };
+  if (olderTurns === "failed") return { title: "Earlier turns didn't load", body: "Load them above the transcript, then rewind." };
+  return null;
+}
+
+// The latest row sets these; a live event since the paint keeps its own.
+const LATEST_FIELDS = [
+  "pendingQuestion",
+  "pendingPermission",
+  "model",
+  "claudeSessionId",
+  "mcpServers",
+  "contextWindow",
+  "contextTokens",
+  "costUsd",
+  "numTurns",
+  "turnAuthor",
+] as const;
+
+// Replaces the tail with a forward fold of every row applied: older pages, the tail, and rows since.
+function showOlder(sessionId: string, fill: Backfill, older: SessionLogEntryDto[]): void {
+  const current = entryOf(sessionId);
+  if (!current?.olderTurns) return;
+  const tailEnd = fill.tail[fill.tail.length - 1]?.seq ?? -1;
+  const since = new Map(fill.since.filter((row) => (row.seq ?? -1) > tailEnd).map((row) => [row.seq, row]));
+  const rows = [...older, ...fill.tail, ...[...since.values()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))];
+  const whole = foldLog({ entries: rows, cursor: { kind: "empty" }, revs: null }, current.items, current.counter);
+  // The log records no answer to a permission ask; this device's stays, before the status is derived.
+  const decided = new Map(
+    current.items.flatMap((it) => (it.kind === "permission" && it.decision !== null ? [[it.requestId, it.decision]] : [])),
+  );
+  const asked = whole.view.pendingPermission;
+  const target = restoredView(
+    {
+      ...whole.view,
+      items: whole.view.items.map((it) =>
+        it.kind === "permission" && it.decision === null && decided.has(it.requestId)
+          ? { ...it, decision: decided.get(it.requestId) ?? null }
+          : it,
+      ),
+      pendingPermission: asked && decided.has(asked.requestId) ? null : asked,
+    },
+    fill.live,
+  );
+
+  // A row's items keep the ids they had, so scroll anchors and React keys hold.
+  const keyOf = (seen: Map<string, number>, it: TranscriptItem) => {
+    const base = `${it.seq}:${it.kind}`;
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return `${base}:${n}`;
+  };
+  const kept = new Map<string, string>();
+  const seenCurrent = new Map<string, number>();
+  for (const it of current.items) {
+    if (it.seq != null) kept.set(keyOf(seenCurrent, it), it.id);
+    else if (it.kind === "user" && it.clientMessageId) kept.set(it.clientMessageId, it.id);
+  }
+  const seenTarget = new Map<string, number>();
+  const items = target.items.map((it): TranscriptItem => {
+    const byRow = it.seq != null ? kept.get(keyOf(seenTarget, it)) : undefined;
+    const sent = it.kind === "user" && it.clientMessageId ? kept.get(it.clientMessageId) : undefined;
+    return { ...it, id: sent ?? byRow ?? it.id };
+  });
+  // Text still streaming and a send not yet echoed have no row to fold.
+  const echoed = new Set(items.flatMap((it) => (it.kind === "user" && it.clientMessageId ? [it.clientMessageId] : [])));
+  const unlogged = current.items.filter(
+    (it) =>
+      it.seq == null &&
+      ((it.kind === "assistant" && it.streaming) ||
+        (it.kind === "user" && !!it.clientMessageId && !echoed.has(it.clientMessageId))),
+  );
+
+  const folded = { ...target, turnAuthor: whole.turnAuthor };
+  const latest = Object.fromEntries(
+    LATEST_FIELDS.map((key) => [key, current[key] === fill.painted[key] ? folded[key] : current[key]]),
+  ) as Pick<SessionEntry, (typeof LATEST_FIELDS)[number]>;
+  const next: SessionEntry = { ...current, ...latest, items: [...items, ...unlogged], counter: target.counter, olderTurns: undefined };
+  // The live process owns state and streaming; an ask only the older rows held re-parks it, as a resume would.
+  const asks = (e: SessionEntry) => `${e.pendingQuestion?.requestId}:${e.pendingPermission?.requestId}`;
+  if (asks(next) !== asks(current)) {
+    if (!isTerminal(current.state)) next.state = parkedState(next);
+  }
+  setEntry(sessionId, next);
 }
 
 // Re-reads and re-folds the log into the existing entry, in place (no
@@ -1045,7 +1297,7 @@ export function isFirstUserTurn(sessionId: string, itemId: string): boolean {
 
 export async function rewindToMessage(sessionId: string, itemId: string): Promise<void> {
   const current = entryOf(sessionId);
-  if (!current) return;
+  if (!current || rewindRefusal(current.olderTurns)) return;
   const ordinal = userTurnOrdinal(current.items, itemId);
   if (ordinal === 0) return;
 
@@ -1508,6 +1760,7 @@ async function pullOnce(sessionId: string): Promise<void> {
           syncInput(sessionId, { kind: "reset" });
           return;
         }
+        noteApplied(sessionId, page.entries);
         const opened = turnOpeners(page.entries, before);
         setEntry(
           sessionId,
@@ -2090,7 +2343,7 @@ export async function restoreSessionIfNeeded(
   const followsSession = permissionMode === null && sessionPermissionMode(workstreamId, sessionId) === undefined;
   try {
     const [read, active, rows] = await Promise.all([
-      readLog(sessionId),
+      readLog(sessionId, true),
       // The server outlives the app (ADR-0009): a session it still reports
       // live is attached to below rather than shown as a frozen transcript.
       unwrap(commands.listActiveSessions()).catch((e) => {
@@ -2122,6 +2375,7 @@ export async function restoreSessionIfNeeded(
       goal: row?.session.goal ?? null,
     });
     foldLoaded(sessionId, read);
+    startBackfill(sessionId, read, live);
     if (live) await resumeSession(sessionId, { cursor: position.cursor });
   } catch (error) {
     log.error("session", `restoring ${sessionId} failed`, error);
@@ -2182,7 +2436,8 @@ export async function reattachSessions(): Promise<void> {
   for (const a of active) setSessionGoal(a.session.id, a.session.goal ?? null);
   await Promise.all(
     Object.keys(useSessionStore.getState().sessions).map((id) =>
-      resync(id, live.has(id)).catch((e) =>
+      // A view still missing its older turns reads the whole log.
+      resync(id, live.has(id), !entryOf(id)?.olderTurns).catch((e) =>
         log.warn("session", `reattaching ${id} after a reconnect failed`, e),
       ),
     ),

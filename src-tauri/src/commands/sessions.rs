@@ -229,6 +229,8 @@ fn start_failure_fallback(error: &WireError, exit_seen: bool) -> Option<SessionE
 pub enum LogCursorDto {
     Empty,
     After { seq: f64, created_at: f64 },
+    Tail,
+    Before { seq: f64, created_at: f64 },
 }
 
 impl From<LogCursor> for LogCursorDto {
@@ -236,6 +238,11 @@ impl From<LogCursor> for LogCursorDto {
         match cursor {
             LogCursor::Empty => LogCursorDto::Empty,
             LogCursor::After { seq, created_at } => LogCursorDto::After {
+                seq: seq as f64,
+                created_at,
+            },
+            LogCursor::Tail => LogCursorDto::Tail,
+            LogCursor::Before { seq, created_at } => LogCursorDto::Before {
                 seq: seq as f64,
                 created_at,
             },
@@ -248,6 +255,11 @@ impl From<LogCursorDto> for LogCursor {
         match dto {
             LogCursorDto::Empty => LogCursor::Empty,
             LogCursorDto::After { seq, created_at } => LogCursor::After {
+                seq: seq as i64,
+                created_at,
+            },
+            LogCursorDto::Tail => LogCursor::Tail,
+            LogCursorDto::Before { seq, created_at } => LogCursor::Before {
                 seq: seq as i64,
                 created_at,
             },
@@ -624,6 +636,10 @@ pub struct SessionTurnsDto {
     pub reset_rev: f64,
     pub working: bool,
     pub in_flight: u32,
+    /// A tail or before page's next read back; null once it holds the first row.
+    pub prev_cursor: Option<LogCursorDto>,
+    /// A tail page's asks older than it that the live harness still waits on.
+    pub open_asks: Vec<SessionLogEntryDto>,
 }
 
 impl From<SessionTurns> for SessionTurnsDto {
@@ -640,6 +656,12 @@ impl From<SessionTurns> for SessionTurnsDto {
             reset_rev: turns.reset_rev as f64,
             working: turns.working,
             in_flight: turns.in_flight,
+            prev_cursor: turns.prev_cursor.map(LogCursorDto::from),
+            open_asks: turns
+                .open_asks
+                .into_iter()
+                .map(SessionLogEntryDto::from)
+                .collect(),
         }
     }
 }

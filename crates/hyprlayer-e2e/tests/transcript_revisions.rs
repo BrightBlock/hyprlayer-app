@@ -333,7 +333,7 @@ async fn transcript_revisions() {
     j.step("a rewritten cursor is refused");
     let (seq, created_at) = match next_cursor_of(&turns) {
         LogCursor::After { seq, created_at } => (seq, created_at),
-        LogCursor::Empty => panic!("a non-empty log has a last row"),
+        other => panic!("a non-empty log has a last row, not {other:?}"),
     };
     let refused = j
         .call(
@@ -461,6 +461,6 @@ fn page_cursor_matches_its_last_row(page: &Value) -> bool {
             seq: cursor_seq,
             created_at: cursor_created_at,
         } => Some(cursor_seq) == seq && Some(cursor_created_at) == created_at,
-        LogCursor::Empty => false,
+        _ => false,
     }
 }

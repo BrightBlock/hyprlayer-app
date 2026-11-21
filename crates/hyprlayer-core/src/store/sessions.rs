@@ -136,6 +136,15 @@ pub(crate) struct SessionLogPage {
     pub entries: Vec<SessionLogEntry>,
     pub last: Option<(i64, f64)>,
     pub remaining: u32,
+    /// A backward page's first raw row, while rows before it remain.
+    pub earlier: Option<(i64, f64)>,
+}
+
+/// Where a page starts: the rows after a seq, or the newest rows before one.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum PageFrom {
+    After(Option<i64>),
+    Before(Option<i64>),
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -867,21 +876,31 @@ impl Db {
         })
     }
 
-    /// A page of raw rows after `after_seq`, decoded as `session_log_after` does. It
-    /// stops before the row that would pass `max_bytes` of payload, but always holds one.
+    /// A page of raw rows in seq order, decoded as `session_log_after` does; a backward page
+    /// holds the newest rows before its seq. It stops before the row that would pass
+    /// `max_bytes` of payload, but always holds one.
     pub(crate) fn session_log_page(
         &self,
         session_id: &str,
-        after_seq: Option<i64>,
+        from: PageFrom,
         limit: u32,
         max_bytes: usize,
     ) -> Result<SessionLogPage> {
-        let rows: Vec<StoredEvent> = self.with(|conn| {
-            let mut stmt = conn.prepare(
+        let (sql, bound) = match from {
+            PageFrom::After(seq) => (
                 "SELECT seq, kind, payload, created_at FROM session_events
                  WHERE session_id = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
-            )?;
-            let mut rows = stmt.query(params![session_id, after_seq.unwrap_or(-1), limit])?;
+                seq.unwrap_or(-1),
+            ),
+            PageFrom::Before(seq) => (
+                "SELECT seq, kind, payload, created_at FROM session_events
+                 WHERE session_id = ?1 AND seq < ?2 ORDER BY seq DESC LIMIT ?3",
+                seq.unwrap_or(i64::MAX),
+            ),
+        };
+        let mut rows: Vec<StoredEvent> = self.with(|conn| {
+            let mut stmt = conn.prepare(sql)?;
+            let mut rows = stmt.query(params![session_id, bound, limit])?;
             let mut page = Vec::new();
             let mut bytes = 0;
             while let Some(row) = rows.next()? {
@@ -902,22 +921,81 @@ impl Db {
             }
             Ok(page)
         })?;
+        if let PageFrom::Before(_) = from {
+            rows.reverse();
+        }
 
         let last = rows.last().map(|r| (r.seq as i64, r.created_at));
-        let after_last = last.map_or(after_seq.unwrap_or(-1), |(seq, _)| seq);
-        let remaining = self.with(|conn| {
-            conn.query_row(
+        let after_last = match (last, from) {
+            (Some((seq, _)), _) => seq,
+            (None, PageFrom::After(seq)) => seq.unwrap_or(-1),
+            (None, PageFrom::Before(seq)) => seq.map_or(-1, |seq| seq - 1),
+        };
+        let first = rows.first().map(|r| (r.seq as i64, r.created_at));
+        let (remaining, earlier) = self.with(|conn| {
+            let remaining = conn.query_row(
                 "SELECT COUNT(*) FROM session_events WHERE session_id = ?1 AND seq > ?2",
                 params![session_id, after_last],
                 |row| row.get::<_, i64>(0),
-            )
+            )?;
+            let earlier = match (from, first) {
+                (PageFrom::Before(_), Some((seq, created_at))) => conn
+                    .query_row(
+                        "SELECT 1 FROM session_events WHERE session_id = ?1 AND seq < ?2 LIMIT 1",
+                        params![session_id, seq],
+                        |_| Ok((seq, created_at)),
+                    )
+                    .optional()?,
+                _ => None,
+            };
+            Ok((remaining, earlier))
         })?;
 
         Ok(SessionLogPage {
             entries: decode_session_log(session_id, rows),
             last,
+            earlier,
             remaining: remaining as u32,
         })
+    }
+
+    /// The ask rows naming one of `request_ids`, oldest first, with their payload bytes.
+    pub(crate) fn session_open_asks(
+        &self,
+        session_id: &str,
+        request_ids: &[String],
+    ) -> Result<(Vec<SessionLogEntry>, usize)> {
+        if request_ids.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
+        let rows: Vec<StoredEvent> = self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT seq, kind, payload, created_at FROM session_events
+                 WHERE session_id = ?1 AND kind IN ('permissionAsk', 'questionAsk') ORDER BY seq",
+            )?;
+            let rows = stmt.query_map(params![session_id], |row| {
+                Ok(StoredEvent {
+                    seq: row.get::<_, i64>("seq")? as f64,
+                    kind: row.get("kind")?,
+                    payload: row.get("payload")?,
+                    created_at: row.get("created_at")?,
+                })
+            })?;
+            rows.collect()
+        })?;
+        let asks: Vec<SessionLogEntry> = decode_session_log(session_id, rows)
+            .into_iter()
+            .filter(|entry| match &entry.event {
+                SessionEvent::PermissionAsk { request_id, .. }
+                | SessionEvent::QuestionAsk { request_id, .. } => request_ids.contains(request_id),
+                _ => false,
+            })
+            .collect();
+        let bytes = asks
+            .iter()
+            .map(|ask| encode_raw_event(&ask.event).map_or(0, |payload| payload.len()))
+            .sum();
+        Ok((asks, bytes))
     }
 
     pub fn session_events(&self, session_id: &str) -> Result<Vec<StoredEvent>> {

@@ -453,6 +453,19 @@ impl CodexDriver {
         self.reply(rpc_id, approval_reply(&kind, allow, message))
     }
 
+    pub fn pending_requests(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .map(|s| {
+                s.pending_approvals
+                    .keys()
+                    .chain(s.pending_questions.keys())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     pub fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         let pending = self
             .state

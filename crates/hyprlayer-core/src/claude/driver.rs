@@ -380,6 +380,13 @@ impl ClaudeDriver {
         ))
     }
 
+    pub fn pending_requests(&self) -> Vec<String> {
+        self.pending_permissions
+            .lock()
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
     pub fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> Result<()> {
         let mut input = self
             .pending_permissions

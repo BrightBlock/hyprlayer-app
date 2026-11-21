@@ -22,6 +22,7 @@ import { eventToChord, formatChord, hasPrimaryModifier } from "@/lib/keybindings
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
+import { useToast } from "@/lib/toast";
 import {
   useBootstrap,
   useClaudeProbe,
@@ -109,6 +110,7 @@ import {
   dropSession,
   isFirstUserTurn,
   killSession,
+  loadOlderTurns,
   pullNow,
   refreshSession,
   respondPermission,
@@ -116,6 +118,7 @@ import {
   resumeSession,
   retryAfterSignIn,
   retryFailedStart,
+  rewindRefusal,
   rewindToMessage,
   sendMessage,
   startSession,
@@ -982,6 +985,7 @@ export function SessionChat({
     onResetSession();
     if (sid) dropSession(sid);
   }, [onResetSession, sid]);
+  const olderTurns = session?.olderTurns;
   const sync = useTranscriptSync((s) => (sid ? s.bySession[sid] : undefined));
   const divider = useTranscriptSync((s) => (sid ? (s.divider[sid] ?? null) : null));
   const held = useTranscriptSync((s) => (sid ? s.held[sid] : undefined));
@@ -1503,6 +1507,12 @@ export function SessionChat({
     () => ({
       onRewind: (itemId, text) => {
         if (!sid) return;
+        // Until the older turns are in, the first message shown need not be the session's first.
+        const refused = rewindRefusal(olderTurns);
+        if (refused) {
+          useToast.getState().show(refused.title, refused.body, { tone: "warn" });
+          return;
+        }
         onDraftChange(text);
         if (isFirstUserTurn(sid, itemId)) {
           resetSession();
@@ -1518,7 +1528,7 @@ export function SessionChat({
         onRetry: () => void retryAuth(),
       },
     }),
-    [sid, onDraftChange, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
+    [sid, olderTurns, onDraftChange, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
   );
 
   usePublishSessionControls(
@@ -1611,6 +1621,8 @@ export function SessionChat({
             <TranscriptView
               ref={transcriptRef}
               items={session?.items ?? []}
+              olderTurns={olderTurns}
+              onLoadOlder={sid ? () => loadOlderTurns(sid) : undefined}
               busy={working}
               permission={permission}
               prompt={prompt}

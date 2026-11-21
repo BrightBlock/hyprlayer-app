@@ -413,6 +413,7 @@ pub struct SessionLogEntry {
 }
 
 /// What a client folded before resuming. `Empty` still needs a replay: it holds no rows.
+/// `Tail` and `Before` only start a `list_session_turns` page that reads back from the end.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -422,6 +423,8 @@ pub struct SessionLogEntry {
 pub enum LogCursor {
     Empty,
     After { seq: i64, created_at: f64 },
+    Tail,
+    Before { seq: i64, created_at: f64 },
 }
 
 /// Who wrote a turn: display-only, it grants nothing (ADR-0009).
@@ -473,6 +476,12 @@ pub struct SessionTurns {
     pub working: bool,
     /// Other authors' sends accepted but not yet committed, as the caller sees them.
     pub in_flight: u32,
+    /// A `Tail` or `Before` page's next read back; `None` once it holds the first row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prev_cursor: Option<LogCursor>,
+    /// A `Tail` page's asks older than it that the live harness still waits on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_asks: Vec<SessionLogEntry>,
 }
 
 /// A session-stream item with its log position; `seq` is `None` for an ephemeral event.

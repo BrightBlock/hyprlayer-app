@@ -15,8 +15,8 @@ use crate::error::{CoreError, Result};
 use crate::runtime::attribution::{self, DocAttribution};
 use crate::store::session_event_codec::encode_raw_event;
 use crate::store::{
-    ApplySessionEventOutcome, Db, FieldOp, LogCursor, SessionLogEntry, SessionRowMutation,
-    StoredEvent,
+    ApplySessionEventOutcome, Db, FieldOp, LogCursor, PageFrom, SessionLogEntry,
+    SessionRowMutation, StoredEvent,
 };
 
 use super::delivery::{LiveAttachment, SessionAttachment, SessionDelivery, INGRESS_CAPACITY};
@@ -87,6 +87,7 @@ pub(crate) enum Control {
         cursor: LogCursor,
         limit: u32,
         caller: Option<String>,
+        open: Vec<String>,
         reply: oneshot::Sender<Result<SessionTurns>>,
     },
     RevState {
@@ -274,6 +275,7 @@ impl ActorHandle {
         cursor: LogCursor,
         limit: u32,
         caller: Option<String>,
+        open: Vec<String>,
     ) -> Result<SessionTurns> {
         let (reply, reply_rx) = oneshot::channel();
         self.control
@@ -281,6 +283,7 @@ impl ActorHandle {
                 cursor,
                 limit,
                 caller,
+                open,
                 reply,
             })
             .map_err(|_| actor_gone())?;
@@ -399,8 +402,8 @@ async fn run(
                     Some(Control::ReleaseUserTurn { client_message_id }) => {
                         state.release_reservation(&client_message_id);
                     }
-                    Some(Control::ListTurns { cursor, limit, caller, reply }) => {
-                        let _ = reply.send(state.list_turns(cursor, limit, caller).await);
+                    Some(Control::ListTurns { cursor, limit, caller, open, reply }) => {
+                        let _ = reply.send(state.list_turns(cursor, limit, caller, open).await);
                     }
                     Some(Control::RevState { caller, reply }) => {
                         let _ = reply.send(state.rev_state(caller.as_deref()));
@@ -580,17 +583,27 @@ impl ActorState {
         match cursor {
             LogCursor::Empty => Ok(None),
             LogCursor::After { seq, created_at } => {
-                let (sid, db) = (self.session_id.clone(), self.db.clone());
-                let held = blocking(move || db.session_event_created_at(&sid, seq)).await?;
-                if held != Some(created_at) {
-                    return Err(CoreError::SessionEpochAdvanced {
-                        session_id: self.session_id.clone(),
-                        epoch: self.epoch,
-                    });
-                }
+                self.verify_row(seq, created_at).await?;
                 Ok(Some(seq))
             }
+            // A read-back form names no row to resume after, so the caller reads the log again.
+            LogCursor::Tail | LogCursor::Before { .. } => Err(CoreError::SessionEpochAdvanced {
+                session_id: self.session_id.clone(),
+                epoch: self.epoch,
+            }),
         }
+    }
+
+    async fn verify_row(&self, seq: i64, created_at: f64) -> Result<()> {
+        let (sid, db) = (self.session_id.clone(), self.db.clone());
+        let held = blocking(move || db.session_event_created_at(&sid, seq)).await?;
+        if held != Some(created_at) {
+            return Err(CoreError::SessionEpochAdvanced {
+                session_id: self.session_id.clone(),
+                epoch: self.epoch,
+            });
+        }
+        Ok(())
     }
 
     async fn attach_from(
@@ -739,23 +752,41 @@ impl ActorState {
         Ok(())
     }
 
+    /// `open` names the asks a live harness waits on; a tail page carries those older than it.
     async fn list_turns(
         &mut self,
         cursor: LogCursor,
         limit: u32,
         caller: Option<String>,
+        open: Vec<String>,
     ) -> Result<SessionTurns> {
-        let after_seq = self.verify_cursor(cursor).await?;
+        let from = match cursor {
+            LogCursor::Tail => PageFrom::Before(None),
+            LogCursor::Before { seq, created_at } => {
+                self.verify_row(seq, created_at).await?;
+                PageFrom::Before(Some(seq))
+            }
+            forward => PageFrom::After(self.verify_cursor(forward).await?),
+        };
         let (sid, db) = (self.session_id.clone(), self.db.clone());
         let limit = limit.clamp(1, TURNS_PAGE_MAX);
-        let page =
-            blocking(move || db.session_log_page(&sid, after_seq, limit, TURNS_PAGE_MAX_BYTES))
-                .await?;
+        let (asks, page) = blocking(move || {
+            let (asks, ask_bytes) = db.session_open_asks(&sid, &open)?;
+            // The asks share the page's budget; the page still holds its newest row.
+            let budget = TURNS_PAGE_MAX_BYTES.saturating_sub(ask_bytes);
+            Ok((asks, db.session_log_page(&sid, from, limit, budget)?))
+        })
+        .await?;
+        // An empty page back holds nothing older, so its end is the log's start.
+        let unmoved = match from {
+            PageFrom::After(_) => cursor,
+            PageFrom::Before(_) => LogCursor::Empty,
+        };
         Ok(SessionTurns {
             entries: page.entries,
             next_cursor: page
                 .last
-                .map_or(cursor, |(seq, created_at)| LogCursor::After {
+                .map_or(unmoved, |(seq, created_at)| LogCursor::After {
                     seq,
                     created_at,
                 }),
@@ -764,6 +795,12 @@ impl ActorState {
             reset_rev: self.reset_rev,
             working: self.in_turn,
             in_flight: self.foreign_in_flight(caller.as_deref()) as u32,
+            open_asks: page.earlier.map_or_else(Vec::new, |(first, _)| {
+                asks.into_iter().filter(|ask| ask.seq < first).collect()
+            }),
+            prev_cursor: page
+                .earlier
+                .map(|(seq, created_at)| LogCursor::Before { seq, created_at }),
         })
     }
 
