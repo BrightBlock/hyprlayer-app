@@ -8,6 +8,7 @@ mod ctl;
 pub mod dispatch;
 pub mod events;
 pub mod hook;
+mod link;
 pub mod logging;
 mod mcp;
 pub mod outbound;
@@ -576,7 +577,7 @@ where
     };
     tracing::debug!("conn {conn}: client connected ({peer})");
 
-    let out = Outbound::new(features);
+    let out = Outbound::new(features, features.link_credit);
     clients.register(conn, out.clone());
     streams::open_connection(&server, conn);
     let writer_task = tokio::spawn({
@@ -705,10 +706,13 @@ async fn read_requests<R: AsyncRead + Unpin>(
             tracing::info!("conn {conn}: client connected ({peer})");
         }
     };
+    // Reports what it read to a client that windows its own writes, uploads included.
+    let mut reports = tx
+        .link_credit()
+        .then(|| outbound::ReadReports::new(tx.clone(), reader.consumed()));
+    // Never waits on the writer, so credit, cancels and `received` always land.
     loop {
-        // A client that stopped reading stops being read, rather than queueing answers without end.
-        tx.response_room().await;
-        let Some(frame) = reader.next_frame().await? else {
+        let Some(frame) = outbound::next_frame(reader, &mut reports).await? else {
             break;
         };
         let line = match frame {
@@ -753,7 +757,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 };
                 if let Some(reply) = reply {
                     let bytes = encode_control(&reply).expect("an error outcome always serializes");
-                    tx.push_response(bytes);
+                    tx.push_frame(bytes);
                 }
                 continue;
             }
@@ -769,6 +773,11 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 let server = server.clone();
                 let tx = tx.clone();
                 tokio::spawn(async move {
+                    let _slot = if body.takes_no_slot() {
+                        None
+                    } else {
+                        tx.request_slot(body.answers_in_bulk()).await
+                    };
                     let command = body.command();
                     let started = Instant::now();
                     // Its own task, so a panicking handler still gets an answer
@@ -795,7 +804,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             encode_control(&Control::Response { id, outcome })
                                 .expect("an error outcome always serializes")
                         });
-                    if !tx.push_response(bytes) {
+                    if !tx.push_frame_written(bytes).await {
                         tracing::debug!("conn {conn}: {command} finished after the client left");
                     }
                 });
@@ -807,6 +816,8 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 let tx = tx.clone();
                 let streams = streams.clone();
                 tokio::spawn(async move {
+                    // Held until the response is written; the stream runs on without it.
+                    let _slot = tx.request_slot(false).await;
                     let command = body.command();
                     let started = Instant::now();
                     let preparing = server.clone();
@@ -850,7 +861,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             // The response must reach the wire before a byte of
                             // the stream it names does, or a fast source could
                             // race a data frame ahead of the id that explains it.
-                            if !tx.push_response_written(bytes).await {
+                            if !tx.push_frame_written(bytes).await {
                                 if let Some(stream_id) = stream_id {
                                     streams.remove(stream_id);
                                 }
@@ -873,7 +884,7 @@ async fn read_requests<R: AsyncRead + Unpin>(
                                 outcome: Outcome::Err(error),
                             })
                             .expect("a WireError outcome always serializes");
-                            tx.push_response(bytes);
+                            tx.push_frame(bytes);
                         }
                     }
                 });
@@ -883,6 +894,9 @@ async fn read_requests<R: AsyncRead + Unpin>(
                 streams.abort(stream_id)
             }
             Control::Credit { stream_id, bytes } => streams.grant(stream_id, bytes),
+            Control::Received { bytes, read_us } => {
+                tx.received(bytes, read_us.map(Duration::from_micros))
+            }
             Control::Shutdown if server.is_agent(conn) => {
                 tracing::warn!("conn {conn}: refused an agent connection's shutdown");
             }
@@ -1056,7 +1070,7 @@ mod tests {
     async fn an_aborted_connection_ends_the_streams_it_owned() {
         let root = tempfile::tempdir().unwrap();
         let runtime = open_runtime(root.path()).await;
-        let out = Outbound::new(Features::ALL);
+        let out = Outbound::new(Features::ALL, false);
         let streams = StreamRegistry::default();
         let (pty, task) = parked_stream(&runtime, &out, &streams, 1);
         let task = task.expect("the stream started");
@@ -1083,7 +1097,7 @@ mod tests {
     async fn a_cancel_that_beats_the_stream_open_still_cancels_it() {
         let root = tempfile::tempdir().unwrap();
         let runtime = open_runtime(root.path()).await;
-        let out = Outbound::new(Features::ALL);
+        let out = Outbound::new(Features::ALL, false);
         let streams = StreamRegistry::default();
         streams.reserve(7);
         streams.abort(7);

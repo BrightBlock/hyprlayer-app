@@ -333,7 +333,7 @@ forwarder kept draining the ring into a 256-frame attach channel and a 1,024-fra
 connection queue, so the ring never dropped anything: a stalled reader with `yes`
 running grew the server by 82 to 161 MiB in 8 s. It holds now because nothing reads the ring
 until the connection has room (see *The connection* below). A stalled reader costs the
-ring plus one frame in flight per terminal, the stream's one slot in the writer: the
+ring plus 32 KiB queued per terminal, the stream's share of the writer: the
 server's forwarder reads the ring itself, with no core forwarder or attach channel
 between them. A blocked forwarder
 can no longer see its terminal exit, so `TerminalRegistry::insert` watches for the exit
@@ -389,8 +389,8 @@ by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
 
 - **The hello's `features`.** Both sides list `flow_control`. A side sends part frames,
   `credit` or `events_missed` only to a peer that listed it, so a released desktop keeps
-  the base protocol.
-- **One writer, in priority order** (`hyprlayer-server/src/outbound.rs`): responses up
+  the base protocol. `link_credit` (below) is negotiated the same way.
+- **One writer, in priority order** (`hyprlayer-server/src/outbound.rs`): frames up
   to 16 KiB, then runtime events, then larger responses and stream data taking turns.
   A frame over 16 KiB goes out as **part frames** — `P`, a `u32` length, a lane byte, a
   `last` byte, then a slice of the whole frame's encoding — so a small frame waits behind
@@ -398,21 +398,109 @@ by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
   the wire would still hold everything for its full length; parts are what keep that
   wait to one slice. The decoder reassembles parts per lane, so callers see only
   control and data frames.
+- **Large frames and streams take turns of 16 KiB.** Within each of those two classes the
+  writer runs deficit round-robin: every large response, and every stream, sends up to
+  16 KiB a turn, so a 2 MiB answer no longer holds a 27 KiB one (8.5 s before, 0.27 s
+  now), nor one session row a terminal's ticks (6.6 s, 0.22 s). Each split frame holds a
+  lane id of its own from its first part to its last, out of 256; a frame waits for one
+  when all are taken. The `flow_control` decoder already kept one partial frame per lane
+  byte, so a peer from #408 reads the interleaving as is.
+- **The client writes the same way.** `RpcClient` queues through the same `Outbound`:
+  requests, `credit`, `cancel` and `received` first, a request over 16 KiB in parts. A
+  2 MiB upload on a 256 KiB/s uplink held a small call and a keystroke 9.1 s and stopped
+  the stream it held credit for; now 0.5 s. A server that listed `flow_control` decodes
+  parts, so this needs no new feature. A desktop terminal sends one write at a time
+  (`terminalInput.ts`), so a large paste and the Enter after it can't swap.
 - **Stream credit.** Each stream may have `STREAM_WINDOW` (512 KiB) of event bytes
   unread at the client. The server's hello names that window (`stream_window`), and the
   client returns credit (`credit { stream_id, bytes }`) as its consumer reads, in batches
   of a quarter of the named window, so either side's constant can change alone. Each
-  stream also has one frame in flight
-  in the writer, and the terminal forwarder waits for both before it reads the ring
-  again, so output piles up in the ring, which coalesces it and drops the oldest. A
-  session stream that waits instead lags its broadcast and recovers from the log, as
-  before. The client queues a stream's frames without waiting, so one unread stream
+  stream may also have 32 KiB queued in the writer, two turns' worth, so a stream of
+  small rows fills its turn: with one frame in flight it got one ~3 KiB row per 16 KiB
+  terminal part. The terminal forwarder waits for both before it reads the ring
+  again, so output piles up in the ring, which coalesces it and drops the oldest. It
+  reads at most 16,362 bytes, so a frame fits one part, and cuts on a char boundary
+  since a resume can start there. A session stream that waits instead lags its
+  broadcast and recovers from the log, as before. The client queues a stream's frames
+  without waiting, so one unread stream
   never stalls the read loop; a stream past 64 MiB unread is closed.
+- **Each link holds about what it carries in a round trip and a half.** A buffering link
+  (an SSH channel, a bufferbloated cell link) takes whatever is written, and a small call
+  then waits behind all of it: 7.4 s behind three terminals at 256 KiB/s, 8.9 s behind one
+  at 64 KiB/s. With `link_credit` on both hellos, each side keeps no more written and not
+  yet reported read than `link.rs` allows: 1.5 × the link's recent peak rate × its
+  smallest round trip, from 128 KiB to 8 MiB. Each side sends `received { bytes, read_us }`
+  whenever it has decoded all it read, and before it parses a frame over 16 KiB, stamped
+  with when it read them. The rest waits in the writer, where priority and turns apply.
+  - Frames up to 16 KiB and events may run 128 KiB past the window, so a report held up
+    behind an upload doesn't hold calls or answers the other way, yet an event flood
+    can't fill the link. Reports go first and aren't counted, or reporting a report
+    would never end.
+  - Both ways, because a client's upload filled ssh's ~2 MiB channel ahead of its
+    reports, and the server stopped writing: a keystroke's echo during a 4 MiB upload
+    waited 14.6 s. Windowing the client's own writes keeps that pipe to its window.
+  - Every byte counts, not stream bytes only. A cap on stream frames as they are queued
+    stops every stream behind one large row until the link carries it, and a cap on
+    bytes consumed lets an unread stream hold the whole budget.
+  - Rates come from the reader's stamps, so a report late on its way back neither slows
+    the measured rate nor reads as a queue: its lateness past the smallest seen is taken
+    off its round trip. One burst's reports, how far apart the reader read them, give
+    the link's rate; for a burst that arrived in one read, how late it came past the
+    round trip two agreeing small frames showed. Without those, a window-limited sender
+    grows eightfold a round trip until it sees a queue.
+  - Cut fast: a round trip past three times the smallest forgets the peak and sets the
+    window to the current rate × the smallest round trip. A sample from a sender the
+    window wasn't holding back can raise it, never lower it, and a sender that hasn't
+    filled the window for 1 s, or a link idle that long, starts again from 128 KiB.
+  - The smallest round trip is measured again when none has come near it for 2 s: the
+    window holds to 16 KiB until a part sent then is reported, whose round trip, and
+    lag on the way back, replace the old ones. Only that probe can raise them, so a
+    queue can't ratchet them up.
+  - The stated bound: after a rate drop, a small call waits about 1.5 × the smallest
+    round trip × the old rate ÷ the new one, less when stream credit holds less in
+    flight. From 4 MiB/s to 256 KiB/s at 100 ms behind three terminals it waited 2.4 to
+    2.5 s, then 0.5 s once the window had cut.
+  - Rejected: a fixed 128 KiB window, which kept 2 s at 64 KiB/s but made a 5.3 MiB
+    read take 1.18 s at a 20 ms round trip and 4.6 s at 100 ms. The smallest round trip
+    over the connection's life, which pinned a path that grew from 4 ms to 150 ms at
+    0.86 MB/s against 8.5 MB/s fresh; the probe gets 8.2. A sliding minimum, because a
+    link that never empties ratchets it up with its own queue. Gain 2, which gives 3.2 s
+    after that drop. Trusting one small frame as the bare round trip: one 20 to 40 ms
+    slow let 2.8 to 5.6 MB onto a 1 MB/s link. Taking a burst's spread past its first
+    round, since then `ahead` includes what was delivered but not reported: it measured
+    409 MB/s on a 4 MiB/s link. Answers and events wholly outside the window, which
+    would let an event flood fill a buffering link.
+  - The cost: a connection's first large read pays one more round trip. A 5.3 MiB read
+    took 0.37 to 0.42 s at 100 ms and 0.23 s at 20 ms, then 0.27 s and 0.18 to 0.19 s,
+    against 0.27 s and 0.18 s before; without two small calls first, 0.47 to 0.52 s at
+    100 ms. A local socket is unaffected, 0.17 s against 0.16 s. While an upload fills
+    the uplink, a stream fell from 1.5 MiB/s to 383 KiB/s.
+- **Requests in flight, not reading, are capped, in two pools.** The read loop never
+  waits, so `credit`, `cancel` and `received` always land. A request whose answer carries
+  a file's or a transcript's contents (`Request::answers_in_bulk`: attachments,
+  transcript pages, docs, worktree and review files, terminal and script output, skill
+  files) waits for one of 16 slots per connection, and any other call, a stream's open
+  included, for one of 64. Each holds its slot until its answer is written. Once the
+  connection closes, what it sent still runs without one and only the answer is lost: a
+  start dropped mid-prepare must still end as a failed start, and a launch sent just
+  before the drop must still run (`failed_start`). Four take none, since their answers
+  are a few bytes: `wait_session` and `wait_pty_agent` park for their timeout, and
+  `terminal_write` and `terminal_resize` must not queue behind slow calls such as `gh`.
+  With one pool, a `respond_permission` behind 16 large reads at 256 KiB/s waited 4.5 s
+  while every slot held an answer; now 67 ms. A reader that stopped reading holds at
+  most 16 bulk and 64 other answers, each serialized straight into its frame rather
+  than copied there: 64 pipelined 2 MiB reads grew the server by 279 MiB before and
+  60 to 67 MiB now, and 512 pipelined 316 KiB directory listings by 125 MiB with no
+  slot for them and 25 MiB with one. The bound is 16 times the largest bulk answer
+  plus 64 times the largest other. The 4 MiB pause on unwritten responses it replaces stopped `credit`
+  and `cancel` too, and lifted only once a whole response was written, so one 4.7 MiB
+  answer held a small call 10.4 s.
 - **A stream ends with its connection.** Closing a connection wakes a stream waiting
   for credit. A connection task aborted at shutdown still aborts its streams. A stream
   id is reserved before the response that names it is written, so a `cancel` that
-  arrives first still cancels it. A dropped client receiver sends its `cancel` even
-  behind a full queue.
+  arrives first still cancels it. The client's queue has no cap, so a dropped receiver's
+  `cancel` never waits. The client and each stream returning credit keep its writer
+  running; once the last is dropped, what they queued is still written.
 - **Events carry a per-connection `seq`.** The server holds at most 256 events or
   64 KiB per connection, and an empty queue takes one event of any size. Each event is
   serialized once per broadcast, and only once some queue has room. Past the cap, and
@@ -425,13 +513,22 @@ by 652 MB in 12 s. `PROTOCOL_VERSION` stays 1; everything below is negotiated.
   gaps has been quiet for 500 ms, and never twice within 5 s, so a refetch can't feed a
   flood more gaps. The window then re-reads what a reconnect re-reads, minus the session
   stream reattach, since those streams are intact.
-- **Responses push back.** Past 4 MiB of unwritten responses the server stops reading
-  that connection's requests until they drain. That pause also delays `credit`, which
-  only data needs, and data goes after responses anyway; the responses drain as the
-  client reads, so the pause always ends.
 
-What it does not cover: bytes already below the socket. Over `ssh … relay`, the SSH
-channel window holds up to ~2 MB that no priority can reorder.
+What it does not cover:
+
+- A client without `link_credit` still lets the link fill: over `ssh … relay` the SSH
+  channel window holds up to ~2 MB that no priority can reorder.
+- Events outrank large frames and stream data, so an event flood still starves both.
+- Past 16 large reads, or 64 other calls such as the board's per-PR `gh` polls
+  (`pipelineData.ts`), the next call waits for one to finish.
+- A request waiting for its slot is held whole, so a client that pipelines large
+  requests past its slots grows the server by what it sends.
+- A request over 16 KiB goes in parts, so a later small one overtakes it: an interrupt
+  can reach the server before a long `send_user_message` it was meant to stop. The
+  desktop sends attachments separately, so a message rarely reaches 16 KiB.
+- A dropped `RpcClient` stops reporting, so the server writes to it only until its
+  window fills, and holds the rest until the client's last frames are written and the
+  connection closes.
 
 The guard is `crates/hyprlayer-e2e/tests/connection_backpressure.rs`, on a proxy that
 stalls the link and then throttles it to 256 KiB/s:
@@ -444,6 +541,31 @@ stalls the link and then throttles it to 256 KiB/s:
 | Small call behind a large response that takes ~13 s | > 30 s (timed out) | 40 to 95 ms |
 | Client RSS growth, one stream unread for 6 s | +313 to +325 MiB | +0 MiB |
 | Re-reads during a 12 s event flood at 32 KiB/s | 6, 2.3 s apart | 4, 5.0 s apart |
+
+The turns, the link window, the client's lanes and the request slots are guarded by
+`crates/hyprlayer-e2e/tests/transport_fairness.rs` (2026-11-20). Before is `8edf381b`,
+rerun on `b2eb8713`; the far-link rows' before is this change's fixed 128 KiB window, the
+permission and uplink rows' its first adaptive window with one pool (`15df1bb6`), and the
+listings row's a build that gave those calls no slot:
+
+| Measure | Before | After |
+|---|---|---|
+| Server RSS growth, 64 pipelined 2 MiB reads, reader stalled | +279 MiB | +60 to +67 MiB |
+| Small calls behind a 4.7 MiB response at 512 KiB/s | 46 ms, then 10.4 s | 26 to 54 ms |
+| 27 KiB response behind a 2 MiB one at 256 KiB/s (108 ms alone) | 8.5 s | 0.27 to 0.28 s |
+| Small call and keystroke echo during a 2 MiB upload, 256 KiB/s up | 9.1 s, 9.1 s | 0.45 to 0.46 s, 0.45 to 0.47 s |
+| A terminal stream during that upload, 2 s | 0 | 766 KiB |
+| Session turn beside a busy terminal at 256 KiB/s, against alone | 55× | 2.0× |
+| Terminal tick gap and echo beside a 1.5 MiB session row | 6.6 s, 5.6 s | 0.17 to 0.22 s, 0.06 to 0.10 s |
+| Small call on a 4 MiB-deep link: 3 terminals at 256 KiB/s | 7.4 to 7.8 s | 0.57 to 0.60 s |
+| The same, 1 terminal at 64 KiB/s | 8.0 to 8.9 s | 1.9 to 2.1 s |
+| 5.3 MiB read at a 100 ms round trip, no rate cap: first after two small calls, next | 4.6 s, 4.6 s (fixed window) | 0.37 to 0.42 s, 0.27 s |
+| The same at 20 ms | 1.18 s, 1.18 s (fixed window) | 0.23 s, 0.18 to 0.19 s |
+| Small call during that read on a 1.5 MiB/s, 100 ms, 4 MiB-deep link | 106 to 126 ms (fixed window) | 152 to 253 ms |
+| Small call after 4 MiB/s drops to 256 KiB/s at 100 ms, three terminals | 0.5 s, one stream held to 1.2 MiB/s (fixed window) | 2.4 to 2.5 s, then 0.5 s |
+| `respond_permission` behind 16 large reads at 256 KiB/s | 4.5 s | 66 to 67 ms |
+| Small call, echo and event during a 4 MiB upload into a 2 MiB-deep uplink at 256 KiB/s | 1.9 s, 14.6 s, 7 ms | 0.51 to 0.52 s, 0.46 s, 2 to 9 ms |
+| Server RSS growth, 512 pipelined 316 KiB listings, reader stalled | +125 MiB | +25 MiB |
 
 ### Terminal output and resume
 
@@ -489,7 +611,7 @@ The guard is `crates/hyprlayer-e2e/tests/terminal_resume.rs`:
 
 | Measure | Before | After |
 |---|---|---|
-| Wire bytes per output byte, `seq 1 60000`, unthrottled | 1.51–1.52× (~1,800 frames) | 1.0013–1.0016× (9–10 frames) |
+| Wire bytes per output byte, `seq 1 60000`, unthrottled | 1.51–1.52× (~1,800 frames) | 1.0013–1.0016× (9–10 frames); 1.0019× in 30 once a read fits one part |
 | Reattach with no new output | ~349 KB | 114 bytes (`resumed: true`) |
 | Reattach 1,000 bytes back | the scrollback | 1,136 bytes |
 | Reattach at a trimmed offset | the scrollback, unannounced | the scrollback, `resumed: false` |

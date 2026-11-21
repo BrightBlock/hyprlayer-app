@@ -1,34 +1,61 @@
-//! One connection's outbound frames, written by one task in priority order:
-//! responses, then runtime events, then large responses and stream data taking
-//! turns (ADR-0009). A client that reads part frames gets anything over
-//! `PART_BYTES` a part at a time, so a small frame never waits behind all of it.
+//! One end's outbound frames, written by one task in priority order: small
+//! frames, then runtime events, then large frames and stream data taking turns
+//! (ADR-0009). Within each of those two, every frame or stream gets up to
+//! `PART_BYTES` a turn; a peer that reads part frames gets anything larger a
+//! part at a time, each frame on a lane of its own.
 
 use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
+use hyprlayer_proto::frame::Frame;
 use hyprlayer_proto::{frame, Features};
-use tokio::io::AsyncWrite;
-use tokio::sync::{oneshot, Notify, OwnedSemaphorePermit};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{oneshot, watch, Notify, OwnedSemaphorePermit, Semaphore};
 
-use crate::transport::{encode_control, encode_event, Control, FrameWriter};
+use crate::link::LinkWindow;
+use crate::transport::{encode_control, encode_event, Control, FrameReader, FrameWriter};
 
 /// The most a small frame waits behind a large one once that one has started.
 pub const PART_BYTES: usize = 16 * 1024;
 /// Past either, a client that stopped reading misses events rather than queueing them.
 const EVENT_QUEUE_BYTES: usize = 64 * 1024;
 const EVENT_QUEUE_FRAMES: usize = 256;
-/// Past this the connection stops reading requests until its responses drain.
-const RESPONSE_QUEUE_BYTES: usize = 4 * 1024 * 1024;
-const BULK_LANE: u8 = 0;
-const DATA_LANE: u8 = 1;
+/// Requests dispatched and not yet answered on the wire; they bound what a reader that
+/// stopped reading holds. Bulk answers have their own, so no other call waits behind them.
+const BULK_IN_FLIGHT: usize = 16;
+const CALLS_IN_FLIGHT: usize = 64;
+
+/// Bytes a sender may still add; may go negative by one frame.
+pub(crate) struct Credit(watch::Sender<i64>);
+
+impl Credit {
+    pub(crate) fn new(bytes: i64) -> Self {
+        Self(watch::Sender::new(bytes))
+    }
+
+    pub(crate) fn grant(&self, bytes: u64) {
+        let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);
+        self.0
+            .send_modify(|left| *left = left.saturating_add(bytes));
+    }
+
+    pub(crate) fn take(&self, bytes: usize) {
+        self.0.send_modify(|left| *left -= bytes as i64);
+    }
+
+    pub(crate) async fn available(&self) {
+        let _ = self.0.subscribe().wait_for(|left| *left > 0).await;
+    }
+}
 
 /// What the writer releases once a frame's last byte is written.
 enum Done {
     Nothing,
     Signal(oneshot::Sender<()>),
-    /// A stream's one frame in flight.
-    Slot(OwnedSemaphorePermit),
+    /// Gives a stream's queued bytes back.
+    Grant(Arc<Credit>, u64),
 }
 
 impl Done {
@@ -38,7 +65,7 @@ impl Done {
             Done::Signal(tx) => {
                 let _ = tx.send(());
             }
-            Done::Slot(slot) => drop(slot),
+            Done::Grant(queue, bytes) => queue.grant(bytes),
         }
     }
 }
@@ -46,6 +73,8 @@ impl Done {
 struct Queued {
     bytes: Vec<u8>,
     sent: usize,
+    /// Held from a split frame's first part to its last.
+    lane: Option<u8>,
     done: Done,
 }
 
@@ -54,6 +83,7 @@ impl Queued {
         Self {
             bytes,
             sent: 0,
+            lane: None,
             done,
         }
     }
@@ -69,25 +99,157 @@ struct Unit {
     done: Done,
 }
 
+/// A stream's frames, in order, or one frame of its own.
+struct Flow {
+    stream: Option<u64>,
+    frames: VecDeque<Queued>,
+}
+
+/// Flows taking turns of up to `PART_BYTES`: deficit round-robin over parts.
 #[derive(Default)]
+struct Fair {
+    flows: VecDeque<Flow>,
+    /// Bytes the front flow has sent this turn.
+    turn: usize,
+}
+
+impl Fair {
+    fn push(&mut self, stream: Option<u64>, queued: Queued) {
+        let flow = stream.and_then(|id| self.flows.iter_mut().find(|f| f.stream == Some(id)));
+        match flow {
+            Some(flow) => flow.frames.push_back(queued),
+            None => self.flows.push_back(Flow {
+                stream,
+                frames: VecDeque::from([queued]),
+            }),
+        }
+    }
+
+    /// A whole frame, or with `parts` the next part of one over `PART_BYTES`.
+    fn next(&mut self, parts: bool, lanes: &mut Vec<u8>) -> Option<Unit> {
+        let mut tries = self.flows.len();
+        while tries > 0 {
+            let flow = self.flows.front_mut()?;
+            let head = flow.frames.front_mut().expect("a flow holds a frame");
+            let split = parts && head.bytes.len() > PART_BYTES;
+            let size = if split {
+                (head.bytes.len() - head.sent).min(PART_BYTES)
+            } else {
+                head.bytes.len()
+            };
+            // The next flow starts a fresh turn, so this never spends a try.
+            if self.turn > 0 && self.turn + size > PART_BYTES {
+                self.rotate();
+                continue;
+            }
+            let lane = match (split, head.lane) {
+                (false, _) => None,
+                (true, Some(lane)) => Some(lane),
+                (true, None) => match lanes.pop() {
+                    Some(lane) => Some(lane),
+                    // Every lane is mid-frame; this frame starts once one ends.
+                    None => {
+                        self.rotate();
+                        tries -= 1;
+                        continue;
+                    }
+                },
+            };
+            self.turn += size;
+            let unit = match lane {
+                Some(lane) => {
+                    head.lane = Some(lane);
+                    let end = head.sent + size;
+                    let last = end == head.bytes.len();
+                    let bytes = frame::encode_part(lane, last, &head.bytes[head.sent..end]);
+                    head.sent = end;
+                    if !last {
+                        return Some(Unit {
+                            bytes,
+                            done: Done::Nothing,
+                        });
+                    }
+                    lanes.push(lane);
+                    let queued = flow.frames.pop_front().expect("the head");
+                    Unit {
+                        bytes,
+                        done: queued.done,
+                    }
+                }
+                None => {
+                    let queued = flow.frames.pop_front().expect("the head");
+                    Unit {
+                        bytes: queued.bytes,
+                        done: queued.done,
+                    }
+                }
+            };
+            if flow.frames.is_empty() {
+                self.flows.pop_front();
+                self.turn = 0;
+            }
+            return Some(unit);
+        }
+        None
+    }
+
+    fn rotate(&mut self) {
+        self.flows.rotate_left(1);
+        self.turn = 0;
+    }
+}
+
 struct Lanes {
     closed: bool,
-    responses: VecDeque<Queued>,
-    /// Responses over `PART_BYTES`.
-    bulk: VecDeque<Queued>,
+    /// Takes nothing more, and closes once what it holds is written.
+    ending: bool,
+    /// What this end read, told to the peer first and outside the window: a report counted
+    /// there would itself be reported, and so on without end.
+    reports: VecDeque<Vec<u8>>,
+    /// Frames up to `PART_BYTES` that are not events: responses, or a client's requests and credit.
+    small: VecDeque<Queued>,
+    /// Larger ones.
+    bulk: Fair,
     events: VecDeque<EventItem>,
-    data: VecDeque<Queued>,
-    response_bytes: usize,
+    data: Fair,
+    /// Lane ids no split frame holds.
+    free_lanes: Vec<u8>,
+    /// For a peer that reports what it read.
+    link: Option<LinkWindow>,
     event_bytes: usize,
     event_frames: usize,
     next_seq: u64,
     data_turn: bool,
 }
 
+impl Default for Lanes {
+    fn default() -> Self {
+        Self {
+            closed: false,
+            ending: false,
+            reports: VecDeque::new(),
+            small: VecDeque::new(),
+            bulk: Fair::default(),
+            events: VecDeque::new(),
+            data: Fair::default(),
+            free_lanes: (0..=u8::MAX).rev().collect(),
+            link: None,
+            event_bytes: 0,
+            event_frames: 0,
+            next_seq: 0,
+            data_turn: false,
+        }
+    }
+}
+
 impl Lanes {
-    fn next_unit(&mut self, flow_control: bool) -> Option<Unit> {
-        if let Some(queued) = self.responses.pop_front() {
-            self.response_bytes -= queued.bytes.len();
+    /// `room`: the link window has room for large frames and stream data; `spare`: for small
+    /// frames and events, which may run past it.
+    fn next_unit(&mut self, flow_control: bool, room: bool, spare: bool) -> Option<Unit> {
+        if !spare {
+            return None;
+        }
+        if let Some(queued) = self.small.pop_front() {
             return Some(Unit {
                 bytes: queued.bytes,
                 done: queued.done,
@@ -114,54 +276,24 @@ impl Lanes {
                 EventItem::Missed { .. } => {}
             }
         }
-        let order = if self.data_turn {
-            [DATA_LANE, BULK_LANE]
-        } else {
-            [BULK_LANE, DATA_LANE]
-        };
-        for lane in order {
-            if let Some(unit) = self.take(lane, flow_control) {
-                self.data_turn = lane == BULK_LANE;
+        if !room {
+            return None;
+        }
+        for data in [self.data_turn, !self.data_turn] {
+            let fair = if data { &mut self.data } else { &mut self.bulk };
+            if let Some(unit) = fair.next(flow_control, &mut self.free_lanes) {
+                self.data_turn = !data;
                 return Some(unit);
             }
         }
         None
     }
 
-    /// The next part of `lane`'s head frame, or all of it when it is small or the client reads no parts.
-    fn take(&mut self, lane: u8, parts: bool) -> Option<Unit> {
-        let queue = match lane {
-            BULK_LANE => &mut self.bulk,
-            _ => &mut self.data,
-        };
-        let head = queue.front_mut()?;
-        let len = head.bytes.len();
-        let unit = if parts && len > PART_BYTES {
-            let end = (head.sent + PART_BYTES).min(len);
-            let bytes = frame::encode_part(lane, end == len, &head.bytes[head.sent..end]);
-            head.sent = end;
-            if end < len {
-                return Some(Unit {
-                    bytes,
-                    done: Done::Nothing,
-                });
-            }
-            let queued = queue.pop_front()?;
-            Unit {
-                bytes,
-                done: queued.done,
-            }
-        } else {
-            let queued = queue.pop_front()?;
-            Unit {
-                bytes: queued.bytes,
-                done: queued.done,
-            }
-        };
-        if lane == BULK_LANE {
-            self.response_bytes -= len;
-        }
-        Some(unit)
+    fn has_queued(&self) -> bool {
+        !self.small.is_empty()
+            || !self.events.is_empty()
+            || !self.bulk.flows.is_empty()
+            || !self.data.flows.is_empty()
     }
 
     fn note_missed(&mut self, count: u64) {
@@ -185,10 +317,10 @@ pub enum EventPush {
 struct Shared {
     features: Features,
     lanes: Mutex<Lanes>,
+    bulk: Arc<Semaphore>,
+    calls: Arc<Semaphore>,
     /// Wakes the writer.
     wake: Notify,
-    /// Wakes a request reader waiting for response room.
-    room: Notify,
     gone: Notify,
 }
 
@@ -196,69 +328,70 @@ struct Shared {
 pub struct Outbound(Arc<Shared>);
 
 impl Outbound {
-    pub fn new(features: Features) -> Self {
+    /// `features` are what the peer reads; `windowed` when it reports what it read.
+    pub fn new(features: Features, windowed: bool) -> Self {
+        let lanes = Lanes {
+            link: windowed.then(LinkWindow::new),
+            ..Lanes::default()
+        };
         Self(Arc::new(Shared {
             features,
-            lanes: Mutex::default(),
+            lanes: Mutex::new(lanes),
+            bulk: Arc::new(Semaphore::new(BULK_IN_FLIGHT)),
+            calls: Arc::new(Semaphore::new(CALLS_IN_FLIGHT)),
             wake: Notify::new(),
-            room: Notify::new(),
             gone: Notify::new(),
         }))
     }
 
-    /// Whether the client announced `FLOW_CONTROL`: parts, stream credit, gap markers.
+    /// Whether the peer announced `FLOW_CONTROL`: parts, stream credit, gap markers.
     pub fn flow_control(&self) -> bool {
         self.0.features.flow_control
     }
 
-    /// Whether the client announced `RAW_TERMINAL`.
+    /// Whether the peer announced `LINK_CREDIT`: it reports what it reads and windows its writes.
+    pub fn link_credit(&self) -> bool {
+        self.0.features.link_credit
+    }
+
+    /// Whether the peer announced `RAW_TERMINAL`.
     pub fn raw_terminal(&self) -> bool {
         self.0.features.raw_terminal
     }
 
-    /// `false` once the connection is gone.
-    pub fn push_response(&self, bytes: Vec<u8>) -> bool {
-        self.push_response_with(bytes, Done::Nothing)
+    /// A request's turn to run, from the bulk pool or the other; hold it until its answer is
+    /// written. `None` once the connection is gone: what it sent still runs, since a launch or
+    /// a failed start's record may hang on it, and only the answer is lost.
+    pub async fn request_slot(&self, bulk: bool) -> Option<OwnedSemaphorePermit> {
+        let pool = if bulk { &self.0.bulk } else { &self.0.calls };
+        pool.clone().acquire_owned().await.ok()
+    }
+
+    /// A control frame that is not an event. `false` once the connection is gone.
+    pub fn push_frame(&self, bytes: Vec<u8>) -> bool {
+        self.push_frame_with(bytes, Done::Nothing)
     }
 
     /// Resolves once the frame is written, so nothing queued later can reach the wire first.
-    pub async fn push_response_written(&self, bytes: Vec<u8>) -> bool {
+    pub async fn push_frame_written(&self, bytes: Vec<u8>) -> bool {
         let (tx, rx) = oneshot::channel();
-        self.push_response_with(bytes, Done::Signal(tx)) && rx.await.is_ok()
+        self.push_frame_with(bytes, Done::Signal(tx)) && rx.await.is_ok()
     }
 
-    fn push_response_with(&self, bytes: Vec<u8>, done: Done) -> bool {
+    fn push_frame_with(&self, bytes: Vec<u8>, done: Done) -> bool {
         let mut lanes = self.lock();
-        if lanes.closed {
+        if lanes.closed || lanes.ending {
             return false;
         }
-        lanes.response_bytes += bytes.len();
-        let large = bytes.len() > PART_BYTES;
-        let queue = if large {
-            &mut lanes.bulk
+        let queued = Queued::new(bytes, done);
+        if queued.bytes.len() > PART_BYTES {
+            lanes.bulk.push(None, queued);
         } else {
-            &mut lanes.responses
-        };
-        queue.push_back(Queued::new(bytes, done));
+            lanes.small.push_back(queued);
+        }
         drop(lanes);
         self.0.wake.notify_one();
         true
-    }
-
-    /// Waits while queued responses exceed `RESPONSE_QUEUE_BYTES`.
-    pub async fn response_room(&self) {
-        loop {
-            let notified = self.0.room.notified();
-            tokio::pin!(notified);
-            notified.as_mut().enable();
-            {
-                let lanes = self.lock();
-                if lanes.closed || lanes.response_bytes <= RESPONSE_QUEUE_BYTES {
-                    return;
-                }
-            }
-            notified.await;
-        }
     }
 
     /// Numbers the event for this connection; once a gap opens, later events
@@ -299,16 +432,36 @@ impl Outbound {
         }
     }
 
-    /// `slot` is the stream's one frame in flight; the writer releases it once the frame is written.
-    pub fn push_data(&self, bytes: Vec<u8>, slot: OwnedSemaphorePermit) -> bool {
+    /// `queue` gets the frame's bytes back once the writer has written it.
+    pub(crate) fn push_data(&self, stream_id: u64, bytes: Vec<u8>, queue: Arc<Credit>) -> bool {
         let mut lanes = self.lock();
-        if lanes.closed {
+        if lanes.closed || lanes.ending {
             return false;
         }
-        lanes.data.push_back(Queued::new(bytes, Done::Slot(slot)));
+        let len = bytes.len() as u64;
+        lanes
+            .data
+            .push(Some(stream_id), Queued::new(bytes, Done::Grant(queue, len)));
         drop(lanes);
         self.0.wake.notify_one();
         true
+    }
+
+    fn push_report(&self, bytes: Vec<u8>) {
+        let mut lanes = self.lock();
+        if !lanes.closed && !lanes.ending {
+            lanes.reports.push_back(bytes);
+            drop(lanes);
+            self.0.wake.notify_one();
+        }
+    }
+
+    /// The peer read `bytes` more of what was written, `read` after its hello by its clock.
+    pub fn received(&self, bytes: u64, read: Option<Duration>) {
+        if let Some(link) = &mut self.lock().link {
+            link.received(bytes, read, Instant::now());
+        }
+        self.0.wake.notify_one();
     }
 
     pub fn is_closed(&self) -> bool {
@@ -327,7 +480,13 @@ impl Outbound {
         }
     }
 
-    /// Drops everything queued: its slots and write signals release.
+    /// Takes no more frames; the writer ends once it has written the ones queued.
+    pub fn finish(&self) {
+        self.lock().ending = true;
+        self.0.wake.notify_one();
+    }
+
+    /// Drops everything queued and every request still waiting for its turn.
     pub fn close(&self) {
         let dropped = {
             let mut lanes = self.lock();
@@ -336,8 +495,9 @@ impl Outbound {
             dropped
         };
         drop(dropped);
+        self.0.bulk.close();
+        self.0.calls.close();
         self.0.wake.notify_one();
-        self.0.room.notify_waiters();
         self.0.gone.notify_waiters();
     }
 
@@ -349,13 +509,25 @@ impl Outbound {
                 if lanes.closed {
                     return None;
                 }
-                let before = lanes.response_bytes;
-                if let Some(unit) = lanes.next_unit(self.0.features.flow_control) {
-                    if before > RESPONSE_QUEUE_BYTES && lanes.response_bytes <= RESPONSE_QUEUE_BYTES
-                    {
-                        self.0.room.notify_waiters();
+                if let Some(bytes) = lanes.reports.pop_front() {
+                    return Some(Unit {
+                        bytes,
+                        done: Done::Nothing,
+                    });
+                }
+                let room = lanes.link.as_ref().is_none_or(LinkWindow::has_room);
+                let spare = lanes.link.as_ref().is_none_or(LinkWindow::has_spare);
+                if let Some(unit) = lanes.next_unit(self.0.features.flow_control, room, spare) {
+                    let waiting = lanes.has_queued();
+                    if let Some(link) = &mut lanes.link {
+                        link.wrote(unit.bytes.len(), waiting, Instant::now());
                     }
                     return Some(unit);
+                }
+                if room && lanes.ending {
+                    drop(lanes);
+                    self.close();
+                    return None;
                 }
             }
             notified.await;
@@ -364,6 +536,71 @@ impl Outbound {
 
     fn lock(&self) -> MutexGuard<'_, Lanes> {
         self.0.lanes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// What this end has read and not yet told a peer that keeps a link window.
+pub(crate) struct ReadReports {
+    outbound: Outbound,
+    told: u64,
+    since: Instant,
+}
+
+impl ReadReports {
+    /// `consumed`: what the reader had taken by its hello.
+    pub(crate) fn new(outbound: Outbound, consumed: u64) -> Self {
+        Self {
+            outbound,
+            told: consumed,
+            since: Instant::now(),
+        }
+    }
+
+    fn report(&mut self, consumed: u64) {
+        let bytes = consumed - self.told;
+        if bytes > 0 {
+            self.told = consumed;
+            let read_us = Some(self.since.elapsed().as_micros() as u64);
+            let received =
+                encode_control(&Control::Received { bytes, read_us }).expect("received serializes");
+            self.outbound.push_report(received);
+        }
+    }
+}
+
+/// A peer's report of what it read; it is never reported back.
+fn is_report(line: &str) -> bool {
+    line.starts_with(r#"{"received":"#)
+}
+
+/// The next frame already read, else reads more. Reports what was read whenever nothing is
+/// left to decode, so a small frame times a bare round trip, and before a large frame, so its
+/// parse never reads as a queue on the link.
+pub(crate) async fn next_frame<R: AsyncRead + Unpin>(
+    reader: &mut FrameReader<R>,
+    reports: &mut Option<ReadReports>,
+) -> io::Result<Option<Frame>> {
+    loop {
+        if let Some(frame) = reader.decoded()? {
+            let len = match &frame {
+                Frame::Control(line) => line.len(),
+                Frame::Data(payload) => payload.len(),
+            };
+            if let Some(reports) = reports {
+                match &frame {
+                    Frame::Control(line) if is_report(line) => reports.told += len as u64 + 2,
+                    _ if len > PART_BYTES => reports.report(reader.consumed()),
+                    _ => {}
+                }
+            }
+            return Ok(Some(frame));
+        }
+        if let Some(reports) = reports {
+            reports.report(reader.consumed());
+        }
+        if !reader.fill().await? {
+            return Ok(None);
+        }
     }
 }
 
@@ -401,12 +638,12 @@ mod tests {
 
     #[test]
     fn an_event_larger_than_the_queue_still_goes_when_the_queue_is_empty() {
-        let out = Outbound::new(Features::ALL);
+        let out = Outbound::new(Features::ALL, false);
         let large = index_update(4000);
         assert!(large.len() > EVENT_QUEUE_BYTES);
         for _ in 0..3 {
             assert!(matches!(out.push_event(|| Some(&large)), EventPush::Queued));
-            while out.lock().next_unit(true).is_some() {}
+            while out.lock().next_unit(true, true, true).is_some() {}
         }
     }
 }

@@ -393,3 +393,39 @@ hyprlayer_proto::commands! {
     InstallAgentBundleVersion: install_agent_bundle_version(version: Option<String>) -> BundleInstall;
     RepairAgentBundle: repair_agent_bundle() -> BundleInstall;
 }
+
+impl Request {
+    /// Answers that carry a file's or a transcript's contents and can run to megabytes. They
+    /// take turns for their own slots, so no other call waits behind them.
+    pub fn answers_in_bulk(&self) -> bool {
+        matches!(
+            self,
+            Request::ReadAttachment { .. }
+                | Request::ListSessionTurns { .. }
+                | Request::GetSessionLog { .. }
+                | Request::GetDoc { .. }
+                | Request::QueryDocs { .. }
+                | Request::WorktreeReadFile { .. }
+                | Request::WorktreeFileSides { .. }
+                | Request::WorktreeCommitFileSides { .. }
+                | Request::ReviewFileSides { .. }
+                | Request::WorkstreamPromptContext { .. }
+                | Request::ReadTerminal { .. }
+                | Request::GetScriptOutput { .. }
+                | Request::ReadSkillFile { .. }
+                | Request::ReadSkillAsset { .. }
+        )
+    }
+
+    /// Calls that park for their timeout, or must not queue behind slow ones such as `gh`.
+    /// Their answers are a few bytes, so they take no slot.
+    pub fn takes_no_slot(&self) -> bool {
+        matches!(
+            self,
+            Request::WaitSession { .. }
+                | Request::WaitPtyAgent { .. }
+                | Request::TerminalWrite { .. }
+                | Request::TerminalResize { .. }
+        )
+    }
+}

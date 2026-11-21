@@ -1,0 +1,272 @@
+{
+  "scenario": "transport_fairness",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limit_mib": 96.0,
+            "reads": 64
+          },
+          "guard": "server memory stays bounded while the reads wait on the stalled link",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "every read is answered once the link moves",
+          "ok": true
+        }
+      ],
+      "step": "a stalled reader's pipelined large reads hold bounded server memory"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "calls": 512,
+            "limit_mib": 96.0
+          },
+          "guard": "server memory stays bounded while the calls wait on the stalled link",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "every call is answered once the link moves",
+          "ok": true
+        }
+      ],
+      "step": "a stalled reader's pipelined small calls hold bounded server memory"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the large response takes longer than a small call may",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "every small call issued behind it answers in time",
+          "ok": true
+        }
+      ],
+      "step": "a small call overtakes a large response the link is still carrying"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "the mid-sized response lands soon after it is asked for",
+          "ok": true
+        }
+      ],
+      "step": "a mid-sized response is not held behind a large one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the upload takes longer than a small call may",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a small call issued during the upload answers in time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a keystroke typed during the upload echoes in time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "at_least_kib_s": 128
+          },
+          "guard": "a stream keeps flowing during the upload, since its credit still goes up",
+          "ok": true
+        }
+      ],
+      "step": "an upload holds neither calls, keystrokes nor stream credit"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the reads take longer than a small call may",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "an answer to a permission ask and a small call both land in time",
+          "ok": true
+        }
+      ],
+      "step": "an interactive call is not held behind the server's large reads"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the upload takes longer than a small call may",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a small call, an echo and an event all land in time meanwhile",
+          "ok": true
+        }
+      ],
+      "step": "an upload into a buffering uplink holds neither answers, events nor echo"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {},
+          "guard": "the turn reaches the phone with a busy terminal beside it",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "at_most": 3.0
+          },
+          "guard": "the busy terminal slows it by a share, not a multiple",
+          "ok": true
+        }
+      ],
+      "step": "a busy terminal leaves another stream its share of the link"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the large row reaches the phone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a ticking terminal keeps ticking meanwhile",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a keystroke echoes meanwhile",
+          "ok": true
+        }
+      ],
+      "step": "one stream's large frame does not hold the others"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limit_ms": "$TIME",
+            "link_buffer_mib": 4.0
+          },
+          "guard": "every small call answers in time with busy streams filling the link",
+          "ok": true
+        }
+      ],
+      "step": "a buffering link holds little ahead of a small call"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "rounds": 2.5,
+            "samples": 3,
+            "slack_ms": "$TIME"
+          },
+          "guard": "a connection's first large read after its first small calls costs a round trip and a half more at most",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "rtt_ms": "$TIME"
+          },
+          "guard": "on the far link, those small calls bring the first read half a round trip sooner at least",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "at_most": 1.25
+          },
+          "guard": "its next large read goes at a nearby read's pace plus the round trip",
+          "ok": true
+        }
+      ],
+      "step": "a far link with room carries a large read near a nearby one's pace"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "slower_than_ms": "$TIME"
+          },
+          "guard": "the read takes longer than a small call may",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "a small call during it lands soon, not after it",
+          "ok": true
+        }
+      ],
+      "step": "a far link the window has measured keeps a small call ahead of a large read"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "at_least_kib_s": 3072
+          },
+          "guard": "the streams used most of the fast link first",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "every small call after the drop answers in time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "once the window has cut, small calls land soon",
+          "ok": true
+        }
+      ],
+      "step": "a small call after the link drops its rate still answers in time"
+    }
+  ]
+}

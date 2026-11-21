@@ -171,7 +171,8 @@ impl OutputRing {
     }
 
     // A cursor below head has lagged; it resumes at head, and the chunk's offset shows the gap.
-    fn next_chunk(&self, cursor: &mut u64) -> Option<TerminalChunk> {
+    // A chunk cut short ends on a char boundary, since a resume can start at its end.
+    fn next_chunk(&self, cursor: &mut u64, max: usize) -> Option<TerminalChunk> {
         let inner = self.inner.lock().unwrap();
         *cursor = (*cursor).max(inner.head);
         let tail = inner.tail();
@@ -179,15 +180,15 @@ impl OutputRing {
             return inner.exited.map(|code| TerminalChunk::Exited { code });
         }
         let offset = *cursor;
-        *cursor = tail;
-        Some(TerminalChunk::Output {
-            offset,
-            bytes: inner
-                .bytes
-                .range((offset - inner.head) as usize..)
-                .copied()
-                .collect(),
-        })
+        let from = (offset - inner.head) as usize;
+        let end = inner.bytes.len().min(from.saturating_add(max));
+        let mut bytes: Vec<u8> = inner.bytes.range(from..end).copied().collect();
+        let torn = torn_utf8_tail(&bytes);
+        if end < inner.bytes.len() && torn < bytes.len() {
+            bytes.truncate(bytes.len() - torn);
+        }
+        *cursor = offset + bytes.len() as u64;
+        Some(TerminalChunk::Output { offset, bytes })
     }
 }
 
@@ -239,8 +240,13 @@ impl RingReader {
     /// Everything past the cursor as one `Output`; `Exited` once the ring is
     /// drained and the child is gone; `None` after that. Cancel-safe.
     pub async fn recv(&mut self) -> Option<TerminalChunk> {
+        self.recv_at_most(usize::MAX).await
+    }
+
+    /// `recv`, with at most `max` bytes in an `Output`.
+    pub async fn recv_at_most(&mut self, max: usize) -> Option<TerminalChunk> {
         while !self.done {
-            if let Some(chunk) = self.ring.next_chunk(&mut self.cursor) {
+            if let Some(chunk) = self.ring.next_chunk(&mut self.cursor, max) {
                 self.done = matches!(chunk, TerminalChunk::Exited { .. });
                 return Some(chunk);
             }

@@ -13,13 +13,14 @@ use crate::streams::{StreamRequest, StreamResponse};
 
 pub type Control = ControlFrame<Request, Response, StreamRequest, StreamResponse, RuntimeEvent>;
 
-/// Requests a client queues before its callers wait.
-pub const OUTBOUND_QUEUE_FRAMES: usize = 1024;
-
 const READ_CHUNK: usize = 64 * 1024;
 
+/// Serialized straight into the frame: a large response is never held twice.
 pub fn encode_control(control: &Control) -> Result<Vec<u8>, serde_json::Error> {
-    Ok(frame::encode_control(&serde_json::to_string(control)?))
+    let mut out = vec![frame::TAG_CONTROL];
+    serde_json::to_writer(&mut out, control)?;
+    out.push(b'\n');
+    Ok(out)
 }
 
 /// `Control::Event` around an event serialized once for every connection; only `seq` differs.
@@ -100,6 +101,7 @@ pub fn label(control: &Control) -> &'static str {
         Control::EventsMissed { .. } => "events_missed",
         Control::Cancel { .. } => "cancel",
         Control::Credit { .. } => "credit",
+        Control::Received { .. } => "received",
         Control::Shutdown => "shutdown",
     }
 }
@@ -123,26 +125,42 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
         self.decoder.unconsumed()
     }
 
+    /// Bytes taken as frames or parts so far, the hello included.
+    pub fn consumed(&self) -> u64 {
+        self.decoder.consumed()
+    }
+
     /// `None` at a clean EOF; an EOF inside a frame is `UnexpectedEof`.
     pub async fn next_frame(&mut self) -> io::Result<Option<Frame>> {
         loop {
-            if let Some(frame) = self
-                .decoder
-                .next_frame()
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-            {
+            if let Some(frame) = self.decoded()? {
                 return Ok(Some(frame));
             }
-            let n = self.inner.read(&mut self.chunk).await?;
-            if n == 0 {
-                return if self.decoder.is_empty() {
-                    Ok(None)
-                } else {
-                    Err(io::ErrorKind::UnexpectedEof.into())
-                };
+            if !self.fill().await? {
+                return Ok(None);
             }
-            self.decoder.feed(&self.chunk[..n]);
         }
+    }
+
+    /// The next frame already read, without reading more.
+    pub fn decoded(&mut self) -> io::Result<Option<Frame>> {
+        self.decoder
+            .next_frame()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Reads once; `false` at a clean EOF, and an EOF inside a frame is `UnexpectedEof`.
+    pub async fn fill(&mut self) -> io::Result<bool> {
+        let n = self.inner.read(&mut self.chunk).await?;
+        if n == 0 {
+            return if self.decoder.is_empty() {
+                Ok(false)
+            } else {
+                Err(io::ErrorKind::UnexpectedEof.into())
+            };
+        }
+        self.decoder.feed(&self.chunk[..n]);
+        Ok(true)
     }
 
     /// The next control line, parsed; a data frame in its place is invalid.

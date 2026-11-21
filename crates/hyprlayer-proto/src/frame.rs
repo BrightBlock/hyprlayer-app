@@ -86,6 +86,9 @@ pub fn encode_terminal_output_frame(stream_id: u64, offset: u64, output: &[u8]) 
 /// What a whole stream frame carries ahead of its event: tag, length, stream id.
 pub const STREAM_FRAME_HEADER: usize = 13;
 
+/// What a raw terminal output frame carries ahead of its bytes: the stream frame's header, tag, offset.
+pub const TERMINAL_OUTPUT_HEADER: usize = STREAM_FRAME_HEADER + 9;
+
 /// A raw terminal output event's offset and bytes; `None` for any other event.
 pub fn decode_terminal_output(event: &[u8]) -> Option<(u64, &[u8])> {
     let [TAG_TERMINAL_OUTPUT, rest @ ..] = event else {
@@ -149,6 +152,7 @@ pub struct Decoder {
     scanned: usize,
     /// Each lane's frame so far, while its parts arrive.
     partial: Vec<(u8, Vec<u8>)>,
+    consumed: u64,
 }
 
 impl Decoder {
@@ -168,6 +172,11 @@ impl Decoder {
     /// Bytes fed but not yet taken as a frame: what arrived instead of a hello.
     pub fn unconsumed(&self) -> &[u8] {
         &self.buf[self.start..]
+    }
+
+    /// Bytes taken as whole frames or parts so far.
+    pub fn consumed(&self) -> u64 {
+        self.consumed
     }
 
     pub fn next_frame(&mut self) -> Result<Option<Frame>, DecodeError> {
@@ -241,6 +250,7 @@ impl Decoder {
     }
 
     fn consume(&mut self, n: usize) {
+        self.consumed += n as u64;
         self.start += n;
         self.scanned = 0;
         if self.start == self.buf.len() {

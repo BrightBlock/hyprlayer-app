@@ -26,14 +26,18 @@ use hyprlayer_core::{
 use hyprlayer_models::{ClientRef, PtyLaunchSession, PtyLaunched, SessionStreamItem};
 use hyprlayer_proto::{frame, WireError, STREAM_WINDOW};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{watch, OwnedSemaphorePermit, Semaphore};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
 
 use crate::client::{EventStream, RpcClient, StreamReceiver, TerminalStream};
 use crate::dispatch::{wire_error, Server, Wire};
 use crate::events::Decoder;
-use crate::outbound::Outbound;
+use crate::outbound::{Credit, Outbound, PART_BYTES};
+
+/// What a stream may have queued in the writer: a turn's worth ready behind the one going out.
+const STREAM_QUEUE_BYTES: i64 = 2 * PART_BYTES as i64;
+/// Raw output per terminal frame, so one fits a part and needs no lane.
+const TERMINAL_READ_BYTES: usize = PART_BYTES - frame::TERMINAL_OUTPUT_HEADER;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamStartOpts {
@@ -419,55 +423,32 @@ impl StreamRegistry {
     }
 }
 
-/// Event bytes the client still has room for; may go negative by one frame.
-pub(crate) struct Credit(watch::Sender<i64>);
-
-impl Credit {
-    fn new(bytes: i64) -> Self {
-        Self(watch::Sender::new(bytes))
-    }
-
-    fn grant(&self, bytes: u64) {
-        let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);
-        self.0
-            .send_modify(|left| *left = left.saturating_add(bytes));
-    }
-
-    fn take(&self, bytes: usize) {
-        self.0.send_modify(|left| *left -= bytes as i64);
-    }
-
-    async fn available(&self) {
-        let _ = self.0.subscribe().wait_for(|left| *left > 0).await;
-    }
-}
-
-/// One stream's way onto its connection: one frame in flight, and no more
-/// unread at the client than its credit.
+/// One stream's way onto its connection: no more than `STREAM_QUEUE_BYTES`
+/// queued in the writer, and no more unread at the client than its credit.
 pub(crate) struct StreamTx {
     outbound: Outbound,
-    slot: Arc<Semaphore>,
+    stream_id: u64,
+    queue: Arc<Credit>,
+    /// Event bytes the client still has room for.
     credit: Arc<Credit>,
 }
 
 pub(crate) struct Ready<'a> {
     tx: &'a StreamTx,
-    slot: OwnedSemaphorePermit,
 }
 
 impl StreamTx {
-    /// Waits until this stream's last frame is written and the client has room for more.
+    /// Waits until the writer and the client both have room for more of this stream.
     async fn ready(&self) -> Option<Ready<'_>> {
         let room = async {
-            let slot = self.slot.clone().acquire_owned().await.ok()?;
+            self.queue.available().await;
             self.credit.available().await;
-            Some(slot)
         };
-        let slot = tokio::select! {
-            slot = room => slot?,
+        tokio::select! {
+            () = room => {}
             () = self.outbound.closed() => return None,
-        };
-        (!self.outbound.is_closed()).then_some(Ready { tx: self, slot })
+        }
+        (!self.outbound.is_closed()).then_some(Ready { tx: self })
     }
 }
 
@@ -484,10 +465,10 @@ impl Ready<'_> {
 
     // Credit counts the event as it goes out, everything after the stream id, as the client does.
     fn push(self, frame: Vec<u8>) -> bool {
-        self.tx
-            .credit
-            .take(frame.len() - frame::STREAM_FRAME_HEADER);
-        self.tx.outbound.push_data(frame, self.slot)
+        let tx = self.tx;
+        tx.credit.take(frame.len() - frame::STREAM_FRAME_HEADER);
+        tx.queue.take(frame.len());
+        tx.outbound.push_data(tx.stream_id, frame, tx.queue.clone())
     }
 }
 
@@ -1092,7 +1073,8 @@ pub(crate) fn spawn_stream(
     let credit = Arc::new(Credit::new(window));
     let tx = StreamTx {
         outbound,
-        slot: Arc::new(Semaphore::new(1)),
+        stream_id,
+        queue: Arc::new(Credit::new(STREAM_QUEUE_BYTES)),
         credit: credit.clone(),
     };
     let for_task = registry.clone();
@@ -1146,7 +1128,7 @@ async fn forward_terminal(stream_id: u64, mut live: RingReader, tx: &StreamTx) -
         let Some(ready) = tx.ready().await else {
             return "the client stopped reading";
         };
-        let Some(chunk) = live.recv().await else {
+        let Some(chunk) = live.recv_at_most(TERMINAL_READ_BYTES).await else {
             return "the terminal closed";
         };
         let sent = match chunk {
@@ -1875,10 +1857,11 @@ mod tests {
 
     #[tokio::test]
     async fn closing_the_connection_wakes_a_stream_waiting_for_credit() {
-        let outbound = Outbound::new(Features::ALL);
+        let outbound = Outbound::new(Features::ALL, false);
         let tx = StreamTx {
             outbound: outbound.clone(),
-            slot: Arc::new(Semaphore::new(1)),
+            stream_id: 1,
+            queue: Arc::new(Credit::new(STREAM_QUEUE_BYTES)),
             credit: Arc::new(Credit::new(0)),
         };
         let closing = async {

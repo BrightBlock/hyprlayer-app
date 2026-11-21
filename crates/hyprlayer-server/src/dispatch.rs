@@ -2962,10 +2962,10 @@ mod tests {
             .expect("attach");
         let ingress = runtime.test_session_ingress(&session_id).await;
 
-        // A tiny pipe nobody reads yet: `run_stream` stalls behind its first
-        // frame, so nothing keeps reading `live` while the burst below lands.
+        // A tiny pipe nobody reads yet: `run_stream` stalls once its writer
+        // share is queued, so nothing keeps reading `live` while the burst below lands.
         let (ours, theirs) = tokio::io::duplex(64);
-        let tx = Outbound::new(Features::default());
+        let tx = Outbound::new(Features::default(), false);
         tokio::spawn(outbound::write(tx.clone(), FrameWriter::new(ours)));
         let registry = StreamRegistry::default();
         streams::spawn_stream(
@@ -2985,7 +2985,8 @@ mod tests {
             registry.clone(),
         );
 
-        const TOTAL: usize = 600;
+        // Past the writer's 32 KiB share and the 513 slots behind it.
+        const TOTAL: usize = 1500;
         for i in 0..TOTAL {
             ingress.send(turn_done(i as f64)).await.unwrap();
         }

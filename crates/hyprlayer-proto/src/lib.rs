@@ -19,17 +19,22 @@ pub const FLOW_CONTROL: &str = "flow_control";
 /// A hello feature: terminal output as raw bytes in its stream frame (`frame::TAG_TERMINAL_OUTPUT`), not base64 in JSON.
 pub const RAW_TERMINAL: &str = "raw_terminal";
 
+/// A hello feature: the client reports what it has read (`received`), and the server keeps no more unread on the link than its measured rate and round trip need.
+pub const LINK_CREDIT: &str = "link_credit";
+
 /// The hello features a peer announced.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Features {
     pub flow_control: bool,
     pub raw_terminal: bool,
+    pub link_credit: bool,
 }
 
 impl Features {
     pub const ALL: Features = Features {
         flow_control: true,
         raw_terminal: true,
+        link_credit: true,
     };
 
     /// Unknown names are a newer peer's, so they are ignored.
@@ -38,6 +43,7 @@ impl Features {
         Self {
             flow_control: has(FLOW_CONTROL),
             raw_terminal: has(RAW_TERMINAL),
+            link_credit: has(LINK_CREDIT),
         }
     }
 
@@ -45,6 +51,7 @@ impl Features {
         [
             (self.flow_control, FLOW_CONTROL),
             (self.raw_terminal, RAW_TERMINAL),
+            (self.link_credit, LINK_CREDIT),
         ]
         .into_iter()
         .filter(|&(on, _)| on)
@@ -232,6 +239,13 @@ pub enum ControlFrame<Req, Resp, StreamReq, StreamResp, Ev> {
     Credit {
         stream_id: u64,
         bytes: u64,
+    },
+    /// The sender read `bytes` more of the connection, the last of them `read_us` after its
+    /// hello; its peer may have that many more in flight.
+    Received {
+        bytes: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read_us: Option<u64>,
     },
     Shutdown,
 }

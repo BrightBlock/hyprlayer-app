@@ -8,7 +8,7 @@ use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as B64;
@@ -23,12 +23,13 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::logging::RepeatGate;
+use crate::outbound::{self, Outbound, ReadReports};
 use crate::rpc::{Request, Response};
 use crate::socket;
 use crate::streams::{StreamRequest, StreamResponse};
 use crate::transport::{
     encode_control, label, parse_control, undecodable_event, undecodable_id, Control, FrameReader,
-    FrameWriter, OUTBOUND_QUEUE_FRAMES,
+    FrameWriter,
 };
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Response, WireError>>>>>;
@@ -87,9 +88,26 @@ impl From<io::Error> for ConnectError {
     }
 }
 
+/// Keeps the writer running: the client holds one, and so does each stream returning credit.
+/// Once the last is dropped, what they queued is still written before the writer ends.
+struct Holder(Outbound);
+
+impl std::ops::Deref for Holder {
+    type Target = Outbound;
+    fn deref(&self) -> &Outbound {
+        &self.0
+    }
+}
+
+impl Drop for Holder {
+    fn drop(&mut self) {
+        self.0.finish();
+    }
+}
+
 pub struct RpcClient {
     next_id: AtomicU64,
-    outbound: mpsc::Sender<Vec<u8>>,
+    outbound: Arc<Holder>,
     pending: Pending,
     pending_streams: PendingStream,
     events: Mutex<Option<mpsc::Receiver<RuntimeEvent>>>,
@@ -135,45 +153,53 @@ impl RpcClient {
                 )))
             }
         };
-        let (server_version, server_build, server_semver, credit_batch) = match hello {
-            Some(Control::Hello {
-                protocol_version,
-                build,
-                version,
-                features,
-                stream_window,
-            }) => {
-                check_version(protocol_version).map_err(ConnectError::Refused)?;
-                // A quarter of whatever window the server keeps, so its window can change alone.
-                let credit_batch = Features::parse(&features)
-                    .flow_control
-                    .then(|| (stream_window.unwrap_or(STREAM_WINDOW) / 4).max(1));
-                (protocol_version, build, version, credit_batch)
-            }
-            Some(Control::Refused { error }) => return Err(ConnectError::Refused(error)),
-            Some(other) => {
-                return Err(ConnectError::Protocol(format!(
-                    "expected hello, got {}",
-                    label(&other)
-                )))
-            }
-            None => return Err(ConnectError::Protocol("closed before hello".into())),
-        };
+        let (server_version, server_build, server_semver, server_features, credit_batch) =
+            match hello {
+                Some(Control::Hello {
+                    protocol_version,
+                    build,
+                    version,
+                    features,
+                    stream_window,
+                }) => {
+                    check_version(protocol_version).map_err(ConnectError::Refused)?;
+                    let features = Features::parse(&features);
+                    // A quarter of whatever window the server keeps, so its window can change alone.
+                    let credit_batch = features
+                        .flow_control
+                        .then(|| (stream_window.unwrap_or(STREAM_WINDOW) / 4).max(1));
+                    (protocol_version, build, version, features, credit_batch)
+                }
+                Some(Control::Refused { error }) => return Err(ConnectError::Refused(error)),
+                Some(other) => {
+                    return Err(ConnectError::Protocol(format!(
+                        "expected hello, got {}",
+                        label(&other)
+                    )))
+                }
+                None => return Err(ConnectError::Protocol("closed before hello".into())),
+            };
 
-        let (outbound, mut rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_QUEUE_FRAMES);
+        // The server's own lanes: control frames and small requests first, larger ones in parts.
+        // Windowed by the server's reports, so an upload never fills the uplink ahead of ours.
+        let outbound = Outbound::new(server_features, server_features.link_credit);
         let (events_tx, events_rx) = mpsc::channel(EVENT_QUEUE);
         let missed = Arc::new(watch::Sender::new(0));
         let pending: Pending = Arc::default();
         let pending_streams: PendingStream = Arc::default();
 
-        let writer_task = tokio::spawn(async move {
-            while let Some(bytes) = rx.recv().await {
-                if let Err(e) = writer.write_bytes(&bytes).await {
+        let writer_task = tokio::spawn({
+            let outbound = outbound.clone();
+            async move {
+                if let Err(e) = outbound::write(outbound, writer).await {
                     tracing::warn!("writing to the server failed: {e}");
-                    break;
                 }
             }
         });
+        let reports = server_features
+            .link_credit
+            .then(|| ReadReports::new(outbound.clone(), reader.consumed()));
+        let holder = Arc::new(Holder(outbound.clone()));
         tokio::spawn(read_loop(
             reader,
             Loop {
@@ -183,15 +209,17 @@ impl RpcClient {
                 events: events_tx,
                 missed: missed.clone(),
                 next_seq: 0,
-                outbound: outbound.downgrade(),
+                outbound,
+                holder: Arc::downgrade(&holder),
                 credit_batch,
+                reports,
             },
             writer_task.abort_handle(),
         ));
 
         Ok(Arc::new(Self {
             next_id: AtomicU64::new(1),
-            outbound,
+            outbound: holder,
             pending,
             pending_streams,
             events: Mutex::new(Some(events_rx)),
@@ -243,12 +271,7 @@ impl RpcClient {
         let started = Instant::now();
         let line = serde_json::to_string(&Control::Request { id, body: request })
             .map_err(|e| WireError::protocol(format!("{command}: {e}")))?;
-        if self
-            .outbound
-            .send(hyprlayer_proto::frame::encode_control(&line))
-            .await
-            .is_err()
-        {
+        if !self.outbound.push_frame(frame::encode_control(&line)) {
             self.lock_pending().remove(&id);
             return Err(WireError::disconnected());
         }
@@ -280,12 +303,7 @@ impl RpcClient {
         let started = Instant::now();
         let line = serde_json::to_string(&Control::StreamRequest { id, body: request })
             .map_err(|e| WireError::protocol(e.to_string()))?;
-        if self
-            .outbound
-            .send(hyprlayer_proto::frame::encode_control(&line))
-            .await
-            .is_err()
-        {
+        if !self.outbound.push_frame(frame::encode_control(&line)) {
             self.pending_streams
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
@@ -308,23 +326,22 @@ impl RpcClient {
     /// reads — mirrors dropping a local receiver, since nothing here can
     /// drop the server's side of the channel for it.
     pub async fn cancel_stream(&self, stream_id: u64) -> Result<(), WireError> {
-        let line = serde_json::to_string(&Control::Cancel { stream_id })
-            .map_err(|e| WireError::protocol(e.to_string()))?;
-        self.outbound
-            .send(hyprlayer_proto::frame::encode_control(&line))
-            .await
-            .map_err(|_| WireError::disconnected())
+        self.send_control(&Control::Cancel { stream_id })
     }
 
     /// Asks the server to stop. The server answers by closing the connection,
     /// so callers wait for the socket to disappear rather than for a reply.
     pub async fn request_shutdown(&self) -> Result<(), WireError> {
-        let line = serde_json::to_string(&Control::Shutdown)
-            .map_err(|e| WireError::protocol(e.to_string()))?;
-        self.outbound
-            .send(hyprlayer_proto::frame::encode_control(&line))
-            .await
-            .map_err(|_| WireError::disconnected())
+        self.send_control(&Control::Shutdown)
+    }
+
+    fn send_control(&self, control: &Control) -> Result<(), WireError> {
+        let bytes = encode_control(control).map_err(|e| WireError::protocol(e.to_string()))?;
+        if self.outbound.push_frame(bytes) {
+            Ok(())
+        } else {
+            Err(WireError::disconnected())
+        }
     }
 
     fn lock_pending(
@@ -426,10 +443,13 @@ struct Loop {
     missed: Arc<watch::Sender<u64>>,
     /// The seq the next event should carry; a later one means events were lost.
     next_seq: u64,
-    /// Weak, so dropping the `RpcClient` still ends its writer.
-    outbound: mpsc::WeakSender<Vec<u8>>,
+    outbound: Outbound,
+    /// Weak, so dropping the `RpcClient` and its streams still ends the writer.
+    holder: Weak<Holder>,
     /// Set when the server honors stream credit: how much is returned at once.
     credit_batch: Option<u64>,
+    /// Set when the server keeps a link window.
+    reports: Option<ReadReports>,
 }
 
 impl Loop {
@@ -478,7 +498,7 @@ impl Loop {
             stream_id,
             rx,
             queued,
-            credit: self.credit_batch.and(self.outbound.upgrade()),
+            credit: self.credit_batch.and(self.holder.upgrade()),
             batch: self.credit_batch.unwrap_or(u64::MAX),
             owed: 0,
         }
@@ -499,10 +519,9 @@ impl Loop {
             tracing::warn!(
                 "closing stream {stream_id}: {queued} bytes unread and the server kept sending"
             );
-            if let Some(outbound) = self.outbound.upgrade() {
-                let cancel = Control::Cancel { stream_id };
-                let _ = outbound.try_send(encode_control(&cancel).expect("a cancel serializes"));
-            }
+            let cancel = Control::Cancel { stream_id };
+            self.outbound
+                .push_frame(encode_control(&cancel).expect("a cancel serializes"));
             return;
         }
         inbox.queued.fetch_add(event.len(), Ordering::Relaxed);
@@ -523,7 +542,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
     let stream_senders = routes.stream_senders.clone();
     let mut skipped = HashSet::new();
     let reason = loop {
-        match reader.next_frame().await {
+        match outbound::next_frame(&mut reader, &mut routes.reports).await {
             Ok(Some(Frame::Control(line))) => match parse_control(&line) {
                 Ok(Control::Response { id, outcome }) => {
                     let waiter = pending
@@ -563,6 +582,9 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 Ok(Control::EventsMissed { first_seq, count }) => {
                     routes.events_missed(first_seq, count)
                 }
+                Ok(Control::Received { bytes, read_us }) => routes
+                    .outbound
+                    .received(bytes, read_us.map(Duration::from_micros)),
                 Ok(other) => tracing::warn!("unexpected {} frame from server", label(&other)),
                 // Never fatal: an unreadable frame fails its own call at most,
                 // so the connection and its sessions stay up.
@@ -613,9 +635,10 @@ async fn read_loop<R: AsyncRead + Unpin>(
             Err(e) => break format!("reading failed ({e})"),
         }
     };
-    // Close the outbound channel before draining: a call that has not sent
-    // yet then fails at `send`, instead of queueing a request nothing will
+    // Close the outbound queue before draining: a call that has not sent
+    // yet then fails to push, instead of queueing a request nothing will
     // ever answer and awaiting it forever.
+    routes.outbound.close();
     writer.abort();
     let waiters: Vec<_> = pending
         .lock()
@@ -657,7 +680,7 @@ pub struct StreamReceiver {
     rx: mpsc::UnboundedReceiver<Vec<u8>>,
     queued: Arc<AtomicUsize>,
     /// The writer's queue, when the server honors credit.
-    credit: Option<mpsc::Sender<Vec<u8>>>,
+    credit: Option<Arc<Holder>>,
     batch: u64,
     owed: u64,
 }
@@ -674,11 +697,7 @@ impl StreamReceiver {
                     stream_id: self.stream_id,
                     bytes: std::mem::take(&mut self.owed),
                 };
-                let line = encode_control(&credit).expect("credit serializes");
-                if let Err(TrySendError::Full(line)) = outbound.try_send(line) {
-                    let outbound = outbound.clone();
-                    tokio::spawn(async move { outbound.send(line).await });
-                }
+                outbound.push_frame(encode_control(&credit).expect("credit serializes"));
             }
         }
         Some(bytes)
@@ -692,13 +711,7 @@ impl Drop for StreamReceiver {
             let cancel = Control::Cancel {
                 stream_id: self.stream_id,
             };
-            let line = encode_control(&cancel).expect("a cancel serializes");
-            if let Err(TrySendError::Full(line)) = outbound.try_send(line) {
-                if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                    let outbound = outbound.clone();
-                    runtime.spawn(async move { outbound.send(line).await });
-                }
-            }
+            outbound.push_frame(encode_control(&cancel).expect("a cancel serializes"));
         }
     }
 }
@@ -908,15 +921,10 @@ mod tests {
             })
             .await
             .expect("the stream opens");
-        for id in 0..OUTBOUND_QUEUE_FRAMES as u64 + 400 {
-            let client = client.clone();
-            tokio::spawn(async move { client.cancel_stream(1000 + id).await });
+        // Far more than the stalled pipe takes.
+        for id in 0..1500 {
+            client.cancel_stream(1000 + id).await.expect("queued");
         }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while client.outbound.capacity() > 0 && Instant::now() < deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(client.outbound.capacity(), 0, "the queue filled");
 
         drop(stream);
         let _ = resume.send(());

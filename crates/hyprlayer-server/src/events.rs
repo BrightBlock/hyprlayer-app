@@ -389,7 +389,7 @@ mod tests {
     use super::*;
 
     fn connect(clients: &Clients, conn: u64, announce: bool) -> Outbound {
-        let outbound = Outbound::new(Features::ALL);
+        let outbound = Outbound::new(Features::ALL, false);
         clients.register(conn, outbound.clone());
         if announce {
             let client = ClientRef {
