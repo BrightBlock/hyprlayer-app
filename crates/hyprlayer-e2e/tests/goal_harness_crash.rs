@@ -314,26 +314,31 @@ async fn goal_harness_crash() {
     )
     .await;
     let done = wait_goal(&client, &g4.id, |d| d.goal.status != GoalStatus::Running).await;
-    let launches = read_file(&controls.join(&s4).join("argv.log"))
-        .lines()
-        .count();
+    let s4_argv = controls.join(&s4).join("argv.log");
+    // The ended goal relaunches the harness it capped without the cap, after the goal's own status write.
+    let lifted = eventually(IO, || {
+        read_file(&s4_argv)
+            .lines()
+            .last()
+            .is_some_and(|l| l.contains("--resume") && !l.contains("--max-budget-usd"))
+    })
+    .await;
+    let mut s4_modes = launched_modes(&s4_argv);
+    s4_modes.dedup();
     let auto = requested_mode(&mut j, &client, &ws, &s4).await;
     let explicit = requested_mode(&mut j, &client, &ws, &s2).await;
     j.guard(
-        "an Auto session the goal relaunched still asks for no mode",
-        done.goal.iteration == 2 && launches == 2 && auto.is_null(),
-        json!({ "iteration": done.goal.iteration, "launches": launches, "mode": auto }),
+        "an Auto session the goal and its cap lift relaunched still asks for no mode, and runs the stage's",
+        done.goal.iteration == 2 && lifted && s4_modes == ["default"] && auto.is_null(),
+        json!({
+            "iteration": done.goal.iteration,
+            "lifted": lifted,
+            "launchedModes": s4_modes,
+            "mode": auto,
+        }),
     );
     // The resumed goal relaunched it after its harness was gone, with no live mode to copy.
-    let s2_modes: Vec<String> = read_file(&controls.join(&s2).join("argv.log"))
-        .lines()
-        .filter_map(|l| {
-            l.split(' ')
-                .skip_while(|t| *t != "--permission-mode")
-                .nth(1)
-                .map(str::to_string)
-        })
-        .collect();
+    let s2_modes = launched_modes(&controls.join(&s2).join("argv.log"));
     j.guard(
         "an Accept edits session the goal relaunched still asks for it, and runs it",
         explicit == "acceptEdits" && s2_modes.iter().all(|m| m == "acceptEdits"),
@@ -524,6 +529,19 @@ fn read_file(path: &Path) -> String {
         .unwrap_or_default()
         .trim()
         .to_string()
+}
+
+/// Each launch's `--permission-mode`, in launch order.
+fn launched_modes(argv_log: &Path) -> Vec<String> {
+    read_file(argv_log)
+        .lines()
+        .filter_map(|l| {
+            l.split(' ')
+                .skip_while(|t| *t != "--permission-mode")
+                .nth(1)
+                .map(str::to_string)
+        })
+        .collect()
 }
 
 fn turns(controls: &Path, session_id: &str) -> u32 {

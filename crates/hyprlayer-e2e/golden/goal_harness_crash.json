@@ -143,10 +143,13 @@
         {
           "evidence": {
             "iteration": 2,
-            "launches": 2,
+            "launchedModes": [
+              "default"
+            ],
+            "lifted": true,
             "mode": null
           },
-          "guard": "an Auto session the goal relaunched still asks for no mode",
+          "guard": "an Auto session the goal and its cap lift relaunched still asks for no mode, and runs the stage's",
           "ok": true
         },
         {
