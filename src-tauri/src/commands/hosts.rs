@@ -136,6 +136,13 @@ pub async fn list_local_servers(app: AppHandle) -> CmdResult<Vec<LocalServer>> {
     Ok(supervisor::list_local_servers(&data_dir).await)
 }
 
+/// Restarts the reconnect schedule as the window's loop starts, or stops it while the loop is halted.
+#[tauri::command]
+#[specta::specta]
+pub fn pace_reconnect(app: AppHandle, on: bool) {
+    crate::runtime_events::pace_reconnect(app, on);
+}
+
 /// Reconnects in place after a drop, so a rebuilt server or a slept laptop
 /// costs no relaunch (plan Phase 8 §4). Same host only: the connect sequence is
 /// re-runnable, the profile is not.
@@ -172,6 +179,7 @@ pub async fn reconnect_server(
             state.reconnected(client.clone(), outdated);
             log::info!("reconnected to {}", configured.name());
             crate::attach_client(&app, client, &configured).await;
+            crate::runtime_events::wake_after_reply(app);
             Ok(state.status())
         }
         supervisor::Outcome::Blocked { error, .. } => {

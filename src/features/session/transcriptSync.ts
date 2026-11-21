@@ -365,14 +365,7 @@ export function mergeEntries(
 
   let next = view;
   let revisions = 0;
-  let openedAt: number | null = null;
-  let closedTurn: LastTurn | null = null;
   for (const { entry, seq } of fresh) {
-    if (entry.event.kind === "userMessage") openedAt ??= entry.createdAt;
-    if (entry.event.kind === "turnDone" && openedAt !== null && entry.createdAt !== null) {
-      closedTurn = { ms: entry.createdAt - openedAt, endedAt: entry.createdAt };
-      openedAt = null;
-    }
     const before = next;
     next = reduceEvent(next, entry.event, seq);
     if (next === before) continue;
@@ -389,6 +382,20 @@ export function mergeEntries(
     firstNewSeq: fresh[0].seq,
     revisions,
     reset: false,
-    closedTurn,
+    closedTurn: closedTurnIn(fresh.map(({ entry }) => entry)),
   };
+}
+
+/** The last turn these rows both opened and ended, timed by them. */
+export function closedTurnIn(entries: SessionLogEntryDto[]): LastTurn | null {
+  let openedAt: number | null = null;
+  let closed: LastTurn | null = null;
+  for (const entry of entries) {
+    if (entry.event.kind === "userMessage") openedAt ??= entry.createdAt;
+    if (entry.event.kind === "turnDone" && openedAt !== null && entry.createdAt !== null) {
+      closed = { ms: entry.createdAt - openedAt, endedAt: entry.createdAt };
+      openedAt = null;
+    }
+  }
+  return closed;
 }

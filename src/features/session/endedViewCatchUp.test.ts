@@ -177,24 +177,42 @@ describe("an ended view that missed its revision", () => {
     expect(syncOf(id)).toMatchObject({ localRev: revOf(id), phase: "inSync" });
   });
 
-  it("leaves another device's turn it was told of for a pull it asks for", async () => {
+  it("loads another device's turn it was told of once that turn ends", async () => {
     const id = await openEnded();
-    append(id, { kind: "userMessage", text: "from the phone", stage: null, author: OTHER });
-    append(id, { kind: "assistantText", text: "theirs", parentId: null });
+    const tail = server.get(id)![4];
     const revised = h.listeners.get("sessionRevised")!;
-    const told = (turns: { seq: number; kind: string }[]) =>
+    const told = (turns: { seq: number; kind: string }[], working: boolean) =>
       revised({
-        payload: { sessionId: id, workstreamId: "ws1", rev: revOf(id), turns, author: OTHER, working: false, at: 0 },
+        payload: {
+          sessionId: id,
+          workstreamId: "ws1",
+          rev: revOf(id),
+          turns,
+          author: working ? OTHER : null,
+          working,
+          at: 0,
+        },
       });
-    told([{ seq: 5, kind: "user" }]);
-    told([{ seq: 6, kind: "assistant" }]);
-    told([]);
-
+    // The phone resumes the session and runs a turn.
+    h.working.add(id);
+    append(id, { kind: "init", claudeSessionId: "c1", model: "m" });
+    append(id, { kind: "userMessage", text: "from the phone", stage: null, author: OTHER });
+    told([{ seq: 6, kind: "user" }], true);
+    append(id, { kind: "assistantText", text: "theirs", parentId: null });
+    told([{ seq: 7, kind: "assistant" }], true);
     await poll();
-
-    expect(h.watchSessions).toHaveBeenCalled();
     expect(reads()).toEqual([]);
-    expect(kinds(id).filter((k) => k === "user")).toHaveLength(1);
+
+    append(id, { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null });
+    h.working.delete(id);
+    told([], false);
+
+    await vi.waitFor(() => expect(kinds(id).filter((k) => k === "user")).toHaveLength(2));
+    expect(reads()).toEqual([[id, cursorAt(tail)]]);
+    expect(kinds(id).filter((k) => k === "assistant")).toHaveLength(2);
+    expect(syncOf(id)).toMatchObject({ localRev: revOf(id), phase: "inSync" });
+    // Resumed elsewhere, so no longer ended: its composer sends through a resume of its own.
+    expect(entryOf(id)).toMatchObject({ state: "running", streaming: false, live: false });
   });
 
   it("waits out another device's turn that is still running", async () => {

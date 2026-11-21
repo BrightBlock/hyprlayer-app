@@ -1372,7 +1372,7 @@ describe("transcript sync: queue and reload", () => {
     expect(syncOf(id)?.phase).toBe("inSync");
   });
 
-  it("an ended view leaves another device's finished turn for a pull it asks for", async () => {
+  it("an ended view reads another device's turn once it finishes, not while it runs", async () => {
     let revised: ((e: { payload: unknown }) => void) | null = null;
     h.listenRevised.mockImplementationOnce(async (cb) => {
       revised = cb;
@@ -1382,14 +1382,16 @@ describe("transcript sync: queue and reload", () => {
     const id = await startBusySession();
     emitAt({ kind: "exited", outcome: "crashed", code: 1, stderrTail: "boom" }, 1, 1, null);
     h.listSessionTurns.mockResolvedValue(page([], 2));
-    const told = (rev: number, turns: { seq: number; kind: string }[]) =>
-      revised!({ payload: { sessionId: id, workstreamId: "ws1", rev, turns, author: OTHER, working: false, at: 0 } });
+    const told = (rev: number, turns: { seq: number; kind: string }[], working: boolean) =>
+      revised!({ payload: { sessionId: id, workstreamId: "ws1", rev, turns, author: OTHER, working, at: 0 } });
 
-    told(2, [{ seq: 3, kind: "assistant" }]);
-    told(2, []);
+    told(2, [{ seq: 3, kind: "assistant" }], true);
     await settle();
-
     expect(h.listSessionTurns).not.toHaveBeenCalled();
+
+    told(2, [], false);
+    await settle();
+    expect(h.listSessionTurns).toHaveBeenCalledTimes(1);
   });
 
   it("holds another device's turn on an idle attached view until Pull", async () => {
@@ -1448,6 +1450,28 @@ describe("transcript sync: queue and reload", () => {
 
       expect(entryOf(id).lastTurn).toEqual({ ms: 83_000, endedAt: T0 + 83_000 });
       expect(doneLine(id)).toMatch(/ for 1m 23s$/);
+    });
+
+    it("when Resume read it, replacing this view's earlier turn", async () => {
+      const id = await startBusySession();
+      const at = (event: SessionEvent, seq: number, rev: number, createdAt: number) =>
+        h.state.lastChannel?.onmessage?.({ seq, createdAt, rev, author: SELF, event });
+      at(INIT, 0, 0, T0 - 60_000);
+      at(TURN_DONE, 1, 0, T0 - 50_000);
+      at({ kind: "exited", outcome: "killed", code: null, stderrTail: "" }, 2, 1, T0 - 40_000);
+      const earlier = entryOf(id).lastTurn;
+      expect(earlier).not.toBeNull();
+      expect(isTerminal(entryOf(id).state)).toBe(true);
+      // Another device resumed and finished a turn this view never heard of.
+      const timed = (seq: number, event: SessionEvent, createdAt: number) => ({ ...row(seq, event), createdAt });
+      h.listSessionTurns.mockResolvedValueOnce(
+        page([timed(3, INIT, T0), timed(4, THEIRS, T0), timed(5, reply("theirs"), T0 + 5_000), timed(6, TURN_DONE, T0 + 9_200)], 3),
+      );
+
+      await resumeSession(id);
+
+      expect(entryOf(id).lastTurn).toEqual({ ms: 9_200, endedAt: T0 + 9_200 });
+      expect(doneLine(id)).toMatch(/ for 9\.2s$/);
     });
   });
 

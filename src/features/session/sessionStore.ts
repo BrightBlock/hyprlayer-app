@@ -113,6 +113,7 @@ import {
 } from "./transcript";
 import {
   canSend,
+  closedTurnIn,
   heldSummary,
   mergeEntries,
   route,
@@ -897,11 +898,12 @@ function foldOnto(current: SessionEntry, read: LogRead): Folded | null {
   };
 }
 
-// `catchUp` reads only past the held cursor, falling back to the whole log. Null if the entry left meanwhile.
+// `catchUp` reads past the held cursor, else the whole log. Null if the entry left meanwhile.
+// `closed` is only a tail's: a whole log repeats turns this view already timed, and re-timing one re-asks its recap.
 async function readAndFold(
   sessionId: string,
   catchUp: boolean,
-): Promise<{ current: SessionEntry; read: LogRead; folded: Folded } | null> {
+): Promise<{ current: SessionEntry; read: LogRead; folded: Folded; closed: LastTurn | null } | null> {
   const tail = catchUp ? await readAfterCursor(sessionId) : null;
   if (tail) {
     const current = entryOf(sessionId);
@@ -909,13 +911,13 @@ async function readAndFold(
     const folded = foldOnto(current, tail);
     if (folded) {
       noteApplied(sessionId, tail.entries);
-      return { current, read: tail, folded };
+      return { current, read: tail, folded, closed: closedTurnIn(tail.entries) };
     }
   }
   const read = await readLog(sessionId);
   const current = entryOf(sessionId);
   if (!current) return null;
-  return { current, read, folded: foldLog(read, current.items) };
+  return { current, read, folded: foldLog(read, current.items), closed: null };
 }
 
 // A fold to the log's end replaces everything held: those rows are in it, or the reload discarded them.
@@ -1145,7 +1147,7 @@ async function foldAndWriteEntry(sessionId: string, catchUp = false): Promise<Lo
   const fold = await readAndFold(sessionId, catchUp);
   if (!fold) return null;
   const { view, ...position } = fold.folded;
-  setEntry(sessionId, { ...fold.current, ...view, ...position, live: true, state: "starting" });
+  setEntry(sessionId, { ...fold.current, ...view, ...position, live: true, state: "starting" }, { closed: fold.closed });
   foldLoaded(sessionId, fold.read);
   return position.cursor;
 }
@@ -2427,7 +2429,11 @@ async function resync(sessionId: string, live: boolean, catchUp = true): Promise
   const fold = await readAndFold(sessionId, catchUp);
   if (!fold || channels.has(sessionId)) return;
   const { view, ...position } = fold.folded;
-  setEntry(sessionId, { ...fold.current, ...restoredView(view, false), ...position, live: false, drifted: false });
+  setEntry(
+    sessionId,
+    { ...fold.current, ...restoredView(view, false), ...position, live: false, drifted: false },
+    { closed: fold.closed },
+  );
   foldLoaded(sessionId, fold.read);
   settleFolded(sessionId);
 }
@@ -2496,16 +2502,15 @@ function onRevised(event: SessionRevised): void {
     attached: channels.has(sessionId),
     own: selfId !== null && attributed(event.author)?.clientId === selfId,
   });
-  catchUpEnded(sessionId);
+  if (!event.working) catchUpEnded(sessionId);
 }
 
-// An ended view shows no strip to pull from, so it reads the revisions it was not told were turns.
+// An ended view has no composer to guard or strip to pull from, so it reads a turn once it ends, never half of one.
 function catchUpEnded(sessionId: string): void {
   const entry = entryOf(sessionId);
   const sync = syncOf(sessionId);
   if (!entry || !sync || !isTerminal(entry.state) || channels.has(sessionId)) return;
-  const told = sync.pendingTurns[sync.pendingTurns.length - 1]?.rev ?? 0;
-  if (sync.committedRev > Math.max(sync.localRev, told)) void pullNow(sessionId);
+  if (sync.committedRev > sync.localRev) void pullNow(sessionId);
 }
 
 function onReset(event: SessionReset): void {

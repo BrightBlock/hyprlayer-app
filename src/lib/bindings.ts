@@ -316,6 +316,8 @@ export const commands = {
 	 *  re-runnable, the profile is not.
 	 */
 	reconnectServer: () => typedError<ConnectionStatus, AppError>(__TAURI_INVOKE("reconnect_server")),
+	/**  Restarts the reconnect schedule as the window's loop starts, or stops it while the loop is halted. */
+	paceReconnect: (on: boolean) => __TAURI_INVOKE<void>("pace_reconnect", { on }),
 	/**
 	 *  Stops the connected server so the reconnect that follows starts this app's
 	 *  build in its place: the dropped stream raises `server-disconnected`, the
@@ -370,6 +372,7 @@ export const events = {
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
 	ptyAgentChanged: makeEvent<PtyAgentChanged>("pty-agent-changed"),
 	quitRequested: makeEvent<QuitRequested>("quit-requested"),
+	reconnectDue: makeEvent<ReconnectDue>("reconnect-due"),
 	reviewChanged: makeEvent<ReviewChanged>("review-changed"),
 	scriptRunChanged: makeEvent<ScriptRunChanged>("script-run-changed"),
 	serverDisconnected: makeEvent<ServerDisconnected>("server-disconnected"),
@@ -1706,6 +1709,9 @@ export type QuitSettings = {
 export type RecapSettings = {
 	enabled?: boolean,
 };
+
+/**  Wakes the window's reconnect loop: a hidden webview's timers and late replies stall, an event still runs. */
+export type ReconnectDue = null;
 
 export type RelatedLink = {
 	raw: string,

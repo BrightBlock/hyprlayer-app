@@ -172,6 +172,10 @@ pub struct QuitRequested;
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct ServerDisconnected;
 
+/// Wakes the window's reconnect loop: a hidden webview's timers and late replies stall, an event still runs.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+pub struct ReconnectDue;
+
 /// The connection lost runtime events; re-read what they would have changed.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 pub struct EventsMissed;

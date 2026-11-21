@@ -1,12 +1,15 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use hyprlayer_core::models::runtime::ThoughtsIndexUpdateKind;
 use hyprlayer_core::models::RuntimeEvent;
 use hyprlayer_server::client::GapPacer;
+use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager};
 use tauri_specta::Event;
 
 use crate::client::RpcClient;
+use crate::commands::hosts::ConnectionState;
 use crate::events;
 use crate::state::AppState;
 
@@ -35,7 +38,48 @@ pub fn spawn(handle: AppHandle, client: Arc<RpcClient>) {
         if handle.state::<AppState>().mark_lost(&client) {
             log::warn!("the server connection is lost; the window will try to reconnect");
             let _ = events::ServerDisconnected.emit(&handle);
+            pace_reconnect(handle, true);
         }
+    });
+}
+
+/// Quick at first, then settled; never gives up, since relaunching is what reconnecting spares.
+const RECONNECT_DELAYS: [Duration; 4] = [
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+];
+const RECONNECT_STEADY: Duration = Duration::from_secs(30);
+
+static PACER: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+
+/// Starts the schedule from its first step, or stops it; at most one runs. The window still makes each attempt.
+pub fn pace_reconnect(handle: AppHandle, on: bool) {
+    let mut pacer = PACER.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(old) = pacer.take() {
+        old.abort();
+    }
+    if !on {
+        return;
+    }
+    *pacer = Some(tauri::async_runtime::spawn(async move {
+        for attempt in 0.. {
+            let delay = RECONNECT_DELAYS.get(attempt).copied();
+            tokio::time::sleep(delay.unwrap_or(RECONNECT_STEADY)).await;
+            if handle.state::<AppState>().status().state == ConnectionState::Connected {
+                return;
+            }
+            let _ = events::ReconnectDue.emit(&handle);
+        }
+    }));
+}
+
+// A reply that lands once a hidden page has suspended waits for its next wake; the pacer stops at Connected.
+pub fn wake_after_reply(handle: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let _ = events::ReconnectDue.emit(&handle);
     });
 }
 

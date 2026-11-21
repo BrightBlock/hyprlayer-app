@@ -9,32 +9,29 @@ import { useToast } from "@/lib/toast";
 import { HOST_KEY_CHANGED } from "./failures";
 import { useReconnectStore } from "./reconnectState";
 
-// Quick at first, then settled: the loop never gives up, because relaunching is
-// the annoyance this reconnect exists to remove (plan Phase 8 §5). A host asleep
-// for three hours should find its session waiting.
-const DELAYS = [1_000, 2_000, 5_000, 15_000];
-const STEADY_DELAY = 30_000;
-
 let running = false;
 // Resolves the wait between attempts. Non-null only while waiting, which is what
 // makes the loop single-flight: a focus during an attempt wakes nothing.
 let wake: (() => void) | null = null;
 
-function wait(ms: number): Promise<void> {
+// Paced by the shell's `reconnectDue`: a hidden window's own timers stall for minutes.
+function nextAttempt(): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(done, ms);
-    wake = done;
-    function done() {
-      clearTimeout(timer);
+    wake = () => {
       wake = null;
       resolve();
-    }
+    };
   });
 }
 
 /** Jumps the timer — the user coming back is the strongest signal a retry is worth making. */
 export function reconnectNow(): void {
   wake?.();
+}
+
+// The shell's schedule restarts with each loop, so a resumed one retries in about 1s.
+function pace(on: boolean): void {
+  void commands.paceReconnect(on).catch((e) => log.warn("reconnect", "pacing the retries failed", e));
 }
 
 async function attempt(): Promise<void> {
@@ -97,9 +94,10 @@ async function reconnectLoop(): Promise<void> {
   useReconnectStore.setState({ lostAt, halted: null, keyChanged: null });
   let lastCode: string | null = null;
   log.info("reconnect", "server connection lost; reconnecting");
+  pace(true);
   try {
     for (let n = 1; ; n++) {
-      await wait(DELAYS[n - 1] ?? STEADY_DELAY);
+      await nextAttempt();
       try {
         await attempt();
         log.info(
@@ -127,6 +125,7 @@ async function reconnectLoop(): Promise<void> {
         // not help either; everything else keeps trying.
         if (isAppError(e) && e.code === "protocol_version_mismatch") {
           log.error("reconnect", "stopped: the app and server speak different protocols");
+          pace(false);
           useReconnectStore.setState({ halted: "protocol" });
           useToast.getState().show(errorMessage(e), errorRemedy(e) ?? "", { tone: "bad" });
           return;
@@ -134,6 +133,7 @@ async function reconnectLoop(): Promise<void> {
         // Asking again every 30s would overrule the user's answer; the server dialog offers Sign in.
         if (isAppError(e) && e.code === "remote_sign_in_cancelled") {
           log.info("reconnect", "stopped: sign-in was cancelled");
+          pace(false);
           useReconnectStore.setState({ halted: "signIn" });
           return;
         }
@@ -146,6 +146,7 @@ async function reconnectLoop(): Promise<void> {
 
 export const reconnectBridge: EventBridge = () => [
   events.serverDisconnected.listen(() => startReconnecting()),
+  events.reconnectDue.listen(() => reconnectNow()),
   // The same focus signal `lib/queryFocus.ts` already feeds from Tauri's window
   // event, rather than a second listener over the same thing.
   Promise.resolve(
