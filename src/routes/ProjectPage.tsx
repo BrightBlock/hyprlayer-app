@@ -40,6 +40,7 @@ import { classifyArchivedStatus, restoreArchivedAgent } from "@/features/session
 import { archiveStoppedSession, setSessionArchived } from "@/features/session/sessionArchive";
 import { StopAgentDialog } from "@/features/session/StopAgentDialog";
 import { DocPreviewTab } from "@/features/session/DocPreviewTab";
+import { WebPreviewTab } from "@/features/session/WebPreviewTab";
 import { TabTitle } from "@/features/session/TabTitle";
 import { TerminalTab } from "@/features/session/TerminalTab";
 import { SidebarTasksPanel } from "@/features/session/PlanTasksView";
@@ -170,7 +171,7 @@ type ShellMenu = {
 };
 
 function isViewerShell(shell: ShellTab): boolean {
-  return !!(shell.docPreviewPath || shell.diffView || shell.filePath);
+  return !!(shell.docPreviewPath || shell.diffView || shell.filePath || shell.webView);
 }
 
 function isTerminalShell(shell: ShellTab): boolean {
@@ -610,6 +611,7 @@ export function ProjectPage() {
         | "sessionId"
         | "handoffNudgeDismissed"
         | "terminalView"
+        | "webView"
         | "ptyAgent"
       >
     >,
@@ -655,13 +657,25 @@ export function ProjectPage() {
         }
       : {}),
   });
-  const addShellToPane = (paneId: PaneId, ptyEngineId?: string) => {
+  const appendToPane = (paneId: PaneId, build: (id: number, target: PaneId) => ShellTab) =>
     updateTabs((current) => {
       const id = nextShellId(current.shells, current.archived);
       const target = leaves(current.layout).includes(paneId) ? paneId : focusedPaneId(current);
-      return appendShell(current, makeShell(id, target, ptyEngineId));
+      return appendShell(current, build(id, target));
     });
-  };
+  const addShellToPane = (paneId: PaneId, ptyEngineId?: string) =>
+    appendToPane(paneId, (id, target) => makeShell(id, target, ptyEngineId));
+  const addWebPreviewToPane = (paneId: PaneId) =>
+    appendToPane(paneId, (id, target) => ({
+      ...makeShell(id, target),
+      title: "Web preview",
+      webView: { url: "" },
+    }));
+  const navigateWebPreview = (shell: ShellTab, url: string) =>
+    patchShell(shell.id, {
+      webView: { url },
+      ...(shell.titleLocked ? {} : { title: new URL(url).host }),
+    });
   const addShell = (ptyEngineId?: string) => {
     updateTabs((current) => {
       const id = nextShellId(current.shells, current.archived);
@@ -1107,6 +1121,10 @@ export function ProjectPage() {
           <span className="text-ink-dim">
             <Icon name="terminal" size="sm" />
           </span>
+        ) : shell.webView ? (
+          <span className="text-ink-dim">
+            <Icon name="globe" size="sm" />
+          </span>
         ) : isLivePty(shell) && shell.ptyAgent ? (
           (() => {
             const e = ptyEngineFor(shell.ptyAgent.engineId);
@@ -1163,13 +1181,22 @@ export function ProjectPage() {
         <ScrollableTabStrip
           activeId={active?.id ?? null}
           trailing={
-            <IconButton
-              onClick={(e) => onPlus(e, paneId)}
-              title="New agent"
-              aria-label="New agent"
-            >
-              <Icon name="add" />
-            </IconButton>
+            <>
+              <IconButton
+                onClick={(e) => onPlus(e, paneId)}
+                title="New agent"
+                aria-label="New agent"
+              >
+                <Icon name="add" />
+              </IconButton>
+              <IconButton
+                onClick={() => addWebPreviewToPane(paneId)}
+                title="New web preview"
+                aria-label="New web preview"
+              >
+                <Icon name="globe" />
+              </IconButton>
+            </>
           }
         >
           {paneShells(tabs, paneId).map((shell) =>
@@ -1221,6 +1248,15 @@ export function ProjectPage() {
           workstreamId={activeView.item.id}
           path={shell.docPreviewPath}
           title={shell.title}
+        />
+      );
+    }
+    if (shell.webView) {
+      return (
+        <WebPreviewTab
+          key={`${activeView.item.id}:${shell.id}`}
+          url={shell.webView.url}
+          onNavigate={(url) => navigateWebPreview(shell, url)}
         />
       );
     }

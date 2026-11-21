@@ -1,6 +1,6 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 
+import { openExternalUrl } from "@/lib/browser";
 import { Icon } from "@/components/Icon";
 import type { RelatedLink, RelatedTarget } from "@/lib/bindings";
 import { prefetchDoc, useRelatedDocs } from "@/lib/queries";
@@ -86,7 +86,7 @@ function ExternalRow({
         className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-body text-info underline"
         onClick={(e) => {
           e.preventDefault();
-          void openUrl(target.url);
+          void openExternalUrl(target.url);
         }}
       >
         <Icon name={docTypeIcon("external")} size="sm" className="shrink-0 text-ink-dim" />

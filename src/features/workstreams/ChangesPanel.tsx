@@ -1,6 +1,6 @@
 import { memo, useMemo, useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import type { GitFileEntry } from "@/lib/bindings";
 import {
   Badge,
@@ -347,7 +347,7 @@ function ArtifactsSection({ workstreamId }: { workstreamId: string }) {
           <button
             key={a.url}
             type="button"
-            onClick={() => void openUrl(a.url)}
+            onClick={() => void openExternalUrl(a.url)}
             title={a.description ? `${a.description}\n${a.url}` : a.url}
             className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-edge/50"
           >

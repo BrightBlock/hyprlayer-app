@@ -1,6 +1,6 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState, type ReactNode } from "react";
 
+import { openExternalUrl } from "@/lib/browser";
 import { cx } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { initialsOf } from "@/lib/format";
@@ -98,7 +98,7 @@ export function TicketField({ id, value, placeholder, onChange }: FieldProps) {
           href={value}
           onClick={(e) => {
             e.preventDefault();
-            void openUrl(value);
+            void openExternalUrl(value);
           }}
           className={cx(CONTROL, "flex min-w-0 items-center truncate text-info underline")}
         >

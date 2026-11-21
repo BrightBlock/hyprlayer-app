@@ -200,6 +200,7 @@ export const commands = {
 	getAppSettings: () => typedError<AppSettings, AppError>(__TAURI_INVOKE("get_app_settings")),
 	setAppSettings: (settings: AppSettings) => typedError<AppSettings, AppError>(__TAURI_INVOKE("set_app_settings", { settings })),
 	detectEditors: () => typedError<EditorTarget[], AppError>(__TAURI_INVOKE("detect_editors")),
+	detectBrowsers: () => typedError<EditorTarget[], AppError>(__TAURI_INVOKE("detect_browsers")),
 	githubUsername: () => typedError<string | null, AppError>(__TAURI_INVOKE("github_username")),
 	defaultUsername: () => __TAURI_INVOKE<string>("default_username"),
 	playSound: () => typedError<null, AppError>(__TAURI_INVOKE("play_sound")),
@@ -982,7 +983,7 @@ export type DocStatus = "draft" | "active" | "implemented" | "superseded" | "arc
 
 export type DocType = "plan" | "research" | "handoff" | "note" | "pr";
 
-export type EditorKind = "files" | "editor" | "terminal";
+export type EditorKind = "files" | "editor" | "terminal" | "browser";
 
 export type EditorTarget = {
 	id: string,

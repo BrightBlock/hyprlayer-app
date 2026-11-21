@@ -60,6 +60,7 @@ export type ShellTab = {
   diffView?: { path: string; staged: boolean; sha?: string };
   filePath?: string;
   terminalView?: { terminalId?: string };
+  webView?: { url: string };
   ptyAgent?: {
     engineId: string;
     terminalId?: string;
@@ -377,7 +378,9 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
 );
 
 export function isAgentTab(shell: ShellTab): boolean {
-  return !shell.docPreviewPath && !shell.diffView && !shell.filePath && !shell.terminalView;
+  return (
+    !shell.docPreviewPath && !shell.diffView && !shell.filePath && !shell.terminalView && !shell.webView
+  );
 }
 
 export function useAgentTabCount(workstreamId: string | null): number {

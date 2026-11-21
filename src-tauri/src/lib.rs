@@ -173,6 +173,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::system::get_app_settings,
             commands::system::set_app_settings,
             commands::system::detect_editors,
+            commands::system::detect_browsers,
             commands::system::github_username,
             commands::system::default_username,
             commands::system::play_sound,

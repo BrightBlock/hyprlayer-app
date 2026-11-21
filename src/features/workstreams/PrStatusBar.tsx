@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
 import { addressPrFeedback } from "@/features/session/sessionStore";
@@ -78,7 +78,7 @@ export function PrStatusBar({
     <div className="flex shrink-0 flex-wrap items-center gap-1.5">
       <button
         type="button"
-        onClick={() => void openUrl(data.url)}
+        onClick={() => void openExternalUrl(data.url)}
         title={`${data.title}\n${data.url}`}
         className={`${pill} border-edge bg-edge/40 text-ink-dim hover:bg-edge/70 hover:text-ink`}
       >

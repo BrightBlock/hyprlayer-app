@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import { Icon } from "@/components/Icon";
 import { Button, IconButton } from "@/components/ui";
 import { liveGoalForPlan, workstreamGoalLabel } from "@/lib/domain/goals";
@@ -322,7 +322,7 @@ function Stages({
               done={livePr.state === "merged"}
               label={`PR #${livePr.number} ${livePr.state}`}
               action={
-                <Button size="sm" onClick={() => void openUrl(livePr.url)}>
+                <Button size="sm" onClick={() => void openExternalUrl(livePr.url)}>
                   Open PR
                   <Icon name="external" size="xs" />
                 </Button>

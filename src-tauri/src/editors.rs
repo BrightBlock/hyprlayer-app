@@ -10,6 +10,7 @@ pub enum EditorKind {
     Files,
     Editor,
     Terminal,
+    Browser,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
@@ -134,6 +135,70 @@ const CANDIDATES: &[Candidate] = &[
         windows_paths: &[],
         bins: &["alacritty"],
     },
+    Candidate {
+        id: "chrome",
+        name: "Google Chrome",
+        kind: EditorKind::Browser,
+        macos_app: "Google Chrome",
+        windows_paths: &["Google\\Chrome\\Application\\chrome.exe"],
+        bins: &["google-chrome-stable", "google-chrome"],
+    },
+    Candidate {
+        id: "firefox",
+        name: "Firefox",
+        kind: EditorKind::Browser,
+        macos_app: "Firefox",
+        windows_paths: &["Mozilla Firefox\\firefox.exe"],
+        bins: &["firefox"],
+    },
+    Candidate {
+        id: "safari",
+        name: "Safari",
+        kind: EditorKind::Browser,
+        macos_app: "Safari",
+        windows_paths: &[],
+        bins: &[],
+    },
+    Candidate {
+        id: "edge",
+        name: "Microsoft Edge",
+        kind: EditorKind::Browser,
+        macos_app: "Microsoft Edge",
+        windows_paths: &["Microsoft\\Edge\\Application\\msedge.exe"],
+        bins: &["microsoft-edge-stable", "microsoft-edge"],
+    },
+    Candidate {
+        id: "brave",
+        name: "Brave",
+        kind: EditorKind::Browser,
+        macos_app: "Brave Browser",
+        windows_paths: &["BraveSoftware\\Brave-Browser\\Application\\brave.exe"],
+        bins: &["brave-browser", "brave"],
+    },
+    Candidate {
+        id: "arc",
+        name: "Arc",
+        kind: EditorKind::Browser,
+        macos_app: "Arc",
+        windows_paths: &[],
+        bins: &[],
+    },
+    Candidate {
+        id: "chromium",
+        name: "Chromium",
+        kind: EditorKind::Browser,
+        macos_app: "Chromium",
+        windows_paths: &["Chromium\\Application\\chrome.exe"],
+        bins: &["chromium", "chromium-browser"],
+    },
+    Candidate {
+        id: "zen",
+        name: "Zen",
+        kind: EditorKind::Browser,
+        macos_app: "Zen",
+        windows_paths: &["Zen Browser\\zen.exe"],
+        bins: &["zen-browser", "zen"],
+    },
 ];
 
 pub fn detect() -> Vec<EditorTarget> {
@@ -150,20 +215,7 @@ pub fn detect() -> Vec<EditorTarget> {
         None,
     ));
 
-    for c in CANDIDATES {
-        if let Some((open_with, app_path)) = detect_candidate(c) {
-            entries.push((
-                EditorTarget {
-                    id: c.id.into(),
-                    name: c.name.into(),
-                    kind: c.kind,
-                    open_with: Some(open_with),
-                    icon_data_url: None,
-                },
-                app_path,
-            ));
-        }
-    }
+    entries.extend(detected(|kind| !matches!(kind, EditorKind::Browser)));
 
     #[cfg(target_os = "macos")]
     if let Some(path) = find_app_bundle("Terminal") {
@@ -179,8 +231,38 @@ pub fn detect() -> Vec<EditorTarget> {
         ));
     }
 
+    with_icons(entries)
+}
+
+pub fn detect_browsers() -> Vec<EditorTarget> {
+    with_icons(detected(|kind| matches!(kind, EditorKind::Browser)).collect())
+}
+
+fn detected(
+    keep: impl Fn(EditorKind) -> bool,
+) -> impl Iterator<Item = (EditorTarget, Option<PathBuf>)> {
+    CANDIDATES
+        .iter()
+        .filter(move |c| keep(c.kind))
+        .filter_map(|c| {
+            let (open_with, app_path) = detect_candidate(c)?;
+            Some((
+                EditorTarget {
+                    id: c.id.into(),
+                    name: c.name.into(),
+                    kind: c.kind,
+                    open_with: Some(open_with),
+                    icon_data_url: None,
+                },
+                app_path,
+            ))
+        })
+}
+
+fn with_icons(entries: Vec<(EditorTarget, Option<PathBuf>)>) -> Vec<EditorTarget> {
     #[cfg(target_os = "macos")]
-    {
+    let entries = {
+        let mut entries = entries;
         let icons: Vec<Option<String>> = std::thread::scope(|scope| {
             let handles: Vec<_> = entries
                 .iter()
@@ -197,7 +279,8 @@ pub fn detect() -> Vec<EditorTarget> {
         for (entry, icon) in entries.iter_mut().zip(icons) {
             entry.0.icon_data_url = icon;
         }
-    }
+        entries
+    };
 
     entries.into_iter().map(|(target, _)| target).collect()
 }

@@ -78,6 +78,7 @@ import { claudeModels, type ModelOption } from "@/lib/domain/models";
 import {
   bindSessionToShell,
   focusedPaneId,
+  isAgentTab,
   openCommitTab,
   openPlanStageTab,
   openPromptTab,
@@ -2113,14 +2114,7 @@ export async function runPromptTextInWorkstream(
     }
     const settings = queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings;
     const reuseShell =
-      active &&
-      !active.sessionId &&
-      active.mode === "general" &&
-      !active.docPreviewPath &&
-      !active.diffView &&
-      !active.filePath &&
-      !active.terminalView &&
-      !active.ptyAgent;
+      active && !active.sessionId && active.mode === "general" && isAgentTab(active) && !active.ptyAgent;
     const launch = newChatLaunchArgs(settings, reuseShell ? active : null, claudeCatalogSnapshot());
     const session = await startSession({ workstreamId, stage: "general", input: text, ...launch, promptName: title });
     if (reuseShell) {

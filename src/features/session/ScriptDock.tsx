@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import { Kbd, Popover } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { commands, type ScriptKind, type ScriptStatus } from "@/lib/bindings";
@@ -117,7 +117,7 @@ export function ScriptDock({
     void commands.scriptClearOutput(workstreamId, kind, liveId);
   };
   const openPort = (): void => {
-    if (port) void openUrl(`http://localhost:${port}`);
+    if (port) void openExternalUrl(`http://localhost:${port}`);
   };
   const closeTerm = (term: number): void => {
     const id = closeDockTerminal(workstreamId, term);

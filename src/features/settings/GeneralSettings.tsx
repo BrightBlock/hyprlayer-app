@@ -2,9 +2,11 @@ import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import type { AppSettings, Bootstrap, TabTitleSettings } from "@/lib/bindings";
+import { useBrowser } from "@/lib/browser";
 import { claudeModels, modelOptions } from "@/lib/domain/models";
 import { IS_MACOS } from "@/lib/platform";
 import {
+  useBrowserTargets,
   useClaudeProbe,
   useOpencodeCatalog,
   useSetAppSettings,
@@ -32,6 +34,7 @@ export function GeneralSettings({ data }: { data: Bootstrap }) {
       <DefaultHarnessCard settings={data.settings} />
       <TabTitlesCard settings={data.settings} />
       <RecapsCard settings={data.settings} />
+      <BrowserCard />
       <QuitCard settings={data.settings} />
       <SetupWizardCard />
     </>
@@ -158,6 +161,34 @@ function RecapsCard({ settings }: { settings: AppSettings }) {
       >
         Uses the title model.
       </SettingRow>
+    </SettingsCard>
+  );
+}
+
+function BrowserCard() {
+  const targets = useBrowserTargets();
+  const browser = useBrowser((s) => s.browser);
+  const setBrowser = useBrowser((s) => s.setBrowser);
+  return (
+    <SettingsCard
+      title="Browser"
+      description="Links, and a web preview's Open in browser, open here."
+    >
+      {targets.isError && (
+        <div className="mb-3">
+          <ErrorNote error={targets.error} />
+        </div>
+      )}
+      <DropdownSelect
+        aria-label="Browser"
+        value={browser ?? ""}
+        onChange={(v) => setBrowser(v || null)}
+        options={[
+          { value: "", label: "System default" },
+          ...(targets.data ?? []).flatMap((t) => (t.openWith ? [{ value: t.openWith, label: t.name }] : [])),
+        ]}
+        className="w-[220px]"
+      />
     </SettingsCard>
   );
 }

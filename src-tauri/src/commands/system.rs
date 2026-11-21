@@ -194,6 +194,14 @@ pub async fn detect_editors(state: State<'_, AppState>) -> CmdResult<Vec<EditorT
 
 #[tauri::command]
 #[specta::specta]
+pub async fn detect_browsers() -> CmdResult<Vec<EditorTarget>> {
+    tokio::task::spawn_blocking(editors::detect_browsers)
+        .await
+        .map_err(|e| AppError::internal(format!("browser detection failed: {e}")))
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn github_username(state: State<'_, AppState>) -> CmdResult<Option<String>> {
     state
         .client()?

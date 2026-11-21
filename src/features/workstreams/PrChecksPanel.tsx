@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import type { ChecksState, ReviewDecision, WorkstreamView } from "@/lib/bindings";
 import { useWorkstreamPr } from "@/lib/queries";
 import { Spinner } from "@/components/ui";
@@ -29,7 +29,7 @@ function MergeConflictRow({ url }: { url: string }) {
     <div className="border-b border-edge px-3 py-2">
       <button
         type="button"
-        onClick={() => void openUrl(url)}
+        onClick={() => void openExternalUrl(url)}
         title="Open the PR on GitHub to resolve the conflict"
         className="group flex w-full items-center gap-2 text-left text-ui"
       >
@@ -57,7 +57,7 @@ function ReviewBlockRow({
     <div className="border-b border-edge px-3 py-2">
       <button
         type="button"
-        onClick={() => void openUrl(url)}
+        onClick={() => void openExternalUrl(url)}
         title="Open the PR on GitHub"
         className="group flex w-full items-center gap-2 text-left text-ui"
       >
@@ -128,7 +128,7 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
               key={`${check.name}-${i}`}
               type="button"
               disabled={!check.url}
-              onClick={() => check.url && void openUrl(check.url)}
+              onClick={() => check.url && void openExternalUrl(check.url)}
               title={check.url ?? check.name}
               className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-ui hover:bg-edge/50 disabled:cursor-default disabled:hover:bg-transparent"
             >

@@ -155,6 +155,14 @@ export function useEditorTargets() {
   });
 }
 
+export function useBrowserTargets() {
+  return useQuery({
+    queryKey: ["browser-targets"],
+    queryFn: () => unwrap(commands.detectBrowsers()),
+    staleTime: Infinity,
+  });
+}
+
 export function useProjectDetail(path: string) {
   return useQuery({
     queryKey: ["project", path],

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import { Icon } from "@/components/Icon";
 import { IconButton, TabStrip } from "@/components/ui";
 import { useUiStore } from "@/lib/uiStore";
@@ -82,7 +82,7 @@ export function RepoLink({ repo }: { repo: string }) {
   return (
     <button
       type="button"
-      onClick={() => void openUrl(`https://github.com/${repo}`).catch(() => {})}
+      onClick={() => void openExternalUrl(`https://github.com/${repo}`).catch(() => {})}
       className="inline-flex max-w-full items-center gap-1 text-left text-ink underline decoration-edge underline-offset-2 hover:decoration-ink-dim"
     >
       <span className="truncate">{repo}</span>

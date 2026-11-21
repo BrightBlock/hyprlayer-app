@@ -4,8 +4,8 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/lib/browser";
 import { log } from "@/lib/log";
 import { b64ToBytes } from "./terminalCodec";
 import { isDarkBackground } from "./terminalTheme";
@@ -51,7 +51,7 @@ const themeReporting = new Set<string>();
 
 // xterm's defaults go through confirm() and window.open(), and neither reaches the browser here.
 function openLink(_event: MouseEvent, uri: string): void {
-  void openUrl(uri).catch((e) => log.warn("terminal", "opening a terminal link failed", e));
+  void openExternalUrl(uri).catch((e) => log.warn("terminal", "opening a terminal link failed", e));
 }
 
 function copyFromProgram(base64: string): void {
