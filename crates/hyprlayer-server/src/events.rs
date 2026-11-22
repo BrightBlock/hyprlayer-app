@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::outbound::{EventPush, EventScope, Outbound};
 
 /// Kinds a released desktop cannot decode; a connection gets one only if it announced it.
-pub const TARGETED_EVENTS: [&str; 9] = [
+pub const TARGETED_EVENTS: [&str; 10] = [
     "SessionRevised",
     "SessionReset",
     "SessionViewers",
@@ -21,6 +21,7 @@ pub const TARGETED_EVENTS: [&str; 9] = [
     "GoalChanged",
     "PtyAgentChanged",
     "UiRequested",
+    "WorkstreamsChanged",
     // Session rows, not runtime events.
     "permissionResolved",
     "questionAnswered",
@@ -440,6 +441,7 @@ fn audience(event: &RuntimeEvent) -> Audience {
         RuntimeEvent::GoalChanged { .. } => Audience::Announced("GoalChanged"),
         RuntimeEvent::PtyAgentChanged { .. } => Audience::Announced("PtyAgentChanged"),
         RuntimeEvent::UiRequested { .. } => Audience::Announced("UiRequested"),
+        RuntimeEvent::WorkstreamsChanged { .. } => Audience::Announced("WorkstreamsChanged"),
         RuntimeEvent::WorktreeChanged { workstream_id } => {
             Audience::Worktree(workstream_id.clone())
         }
@@ -474,6 +476,7 @@ fn event_kind(event: &hyprlayer_core::models::RuntimeEvent) -> &'static str {
         E::ThoughtsIndexUpdated { .. } => "ThoughtsIndexUpdated",
         E::DocStateChanged { .. } => "DocStateChanged",
         E::ProjectsChanged => "ProjectsChanged",
+        E::WorkstreamsChanged { .. } => "WorkstreamsChanged",
         E::PrStatusChanged { .. } => "PrStatusChanged",
         E::WorktreeChanged { .. } => "WorktreeChanged",
         E::ReviewChanged { .. } => "ReviewChanged",

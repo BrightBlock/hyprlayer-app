@@ -521,6 +521,8 @@ async fn agent_breadth() {
         &mcp.call("create_workstream", json!({ "title": "Spawned work" }))
             .await,
     );
+    let changed = |e: &RuntimeEvent| matches!(e, RuntimeEvent::WorkstreamsChanged { project_path } if *project_path == project);
+    let announced = events_until(&mut rx, IO, changed).await.iter().any(changed);
     let new_ws = text(&made, "/id");
     let new_tree = text(&made, "/worktreePath");
     j.alias(&new_ws, "$AGENT_WS");
@@ -554,6 +556,11 @@ async fn agent_breadth() {
         "the agent's workstream lands in its project and the setup script runs in its worktree",
         in_project && setup_ran && made["title"] == json!("Spawned work"),
         json!({ "title": made["title"], "inProject": in_project, "setupRanInWorktree": setup_ran }),
+    );
+    j.guard(
+        "the desktop hears WorkstreamsChanged for the project, so its sidebar lists the agent's workstream",
+        announced,
+        json!({ "workstreamsChanged": announced }),
     );
 
     j.step("documents outside the project stay read-only");

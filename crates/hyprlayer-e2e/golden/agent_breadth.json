@@ -252,6 +252,13 @@
           },
           "guard": "the agent's workstream lands in its project and the setup script runs in its worktree",
           "ok": true
+        },
+        {
+          "evidence": {
+            "workstreamsChanged": true
+          },
+          "guard": "the desktop hears WorkstreamsChanged for the project, so its sidebar lists the agent's workstream",
+          "ok": true
         }
       ],
       "step": "create_workstream runs the setup script"

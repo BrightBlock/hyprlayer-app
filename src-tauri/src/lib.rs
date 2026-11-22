@@ -294,6 +294,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             events::ThoughtsIndexUpdated,
             events::DocStateChanged,
             events::PrStatusChanged,
+            events::WorkstreamsChanged,
             events::WorktreeChanged,
             events::ReviewChanged,
             events::WorkstreamBranchChanged,

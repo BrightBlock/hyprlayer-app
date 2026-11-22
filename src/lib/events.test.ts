@@ -20,6 +20,7 @@ vi.mock("./bindings", () => ({
     binariesChanged: stub("binariesChanged"),
     omarchyThemeChanged: stub("omarchyThemeChanged"),
     prStatusChanged: stub("prStatusChanged"),
+    workstreamsChanged: stub("workstreamsChanged"),
     worktreeChanged: stub("worktreeChanged"),
     reviewChanged: stub("reviewChanged"),
     workstreamBranchChanged: stub("workstreamBranchChanged"),
@@ -37,6 +38,7 @@ vi.mock("./bindings", () => ({
 vi.mock("./theme", () => ({ refreshOmarchyTheme: vi.fn() }));
 
 const { attachEventListeners, onEventsMissed } = await import("./events");
+const { onWorkstreamArchived } = await import("./queries");
 
 describe("binariesChanged", () => {
   beforeEach(() => {
@@ -93,6 +95,29 @@ describe("eventsMissed", () => {
 
     expect(invalidate).toHaveBeenCalledWith();
     expect(resync).toHaveBeenCalledOnce();
+  });
+});
+
+describe("workstreamsChanged", () => {
+  beforeEach(() => {
+    listeners.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("re-reads the lists and cleans up after a workstream that left its project's list", async () => {
+    const key = ["workstreams", "/repo"];
+    queryClient.setQueryData(key, [{ item: { id: "ws-kept" } }, { item: { id: "ws-gone" } }]);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockImplementation(async () => {
+      queryClient.setQueryData(key, [{ item: { id: "ws-kept" } }, { item: { id: "ws-new" } }]);
+    });
+    const cleanup = vi.fn();
+    onWorkstreamArchived(cleanup);
+    attachEventListeners();
+    listeners.get("workstreamsChanged")?.({ payload: { projectPath: "/repo" } });
+
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect(cleanup).toHaveBeenCalledWith("ws-gone");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["workstreams"] });
   });
 });
 

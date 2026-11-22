@@ -30,6 +30,7 @@ import {
   type StartGoalRequest,
   type SubmitReviewRequest,
   type Stage,
+  type WorkstreamView,
   type WorktreeMode,
   type ThoughtQuery,
   type ThoughtsProfile,
@@ -652,6 +653,18 @@ export function useDefaultUsername() {
 
 export function invalidateWorkstreamLists() {
   void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+}
+
+// The event names only the project, so an archive made elsewhere shows as an id that left its list.
+export async function refreshProjectWorkstreams(projectPath: string): Promise<void> {
+  const ids = () =>
+    new Set(queryClient.getQueryData<WorkstreamView[]>(["workstreams", projectPath])?.map((w) => w.item.id));
+  const before = ids();
+  await queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+  const after = ids();
+  for (const id of before) {
+    if (!after.has(id)) for (const cleanup of workstreamArchiveCleanups) cleanup(id);
+  }
 }
 
 function invalidateWorkstream(id: string) {

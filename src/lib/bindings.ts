@@ -383,6 +383,7 @@ export const events = {
 	thoughtsIndexUpdated: makeEvent<ThoughtsIndexUpdated>("thoughts-index-updated"),
 	uiRequested: makeEvent<UiRequested>("ui-requested"),
 	workstreamBranchChanged: makeEvent<WorkstreamBranchChanged>("workstream-branch-changed"),
+	workstreamsChanged: makeEvent<WorkstreamsChanged>("workstreams-changed"),
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
 };
 
@@ -2511,6 +2512,10 @@ export type WorkstreamView = {
 	item: Workstream,
 	git: WorktreeStatus,
 	seed: SeedReport | null,
+};
+
+export type WorkstreamsChanged = {
+	projectPath: string,
 };
 
 export type WorktreeChanged = {

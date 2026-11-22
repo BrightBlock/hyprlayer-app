@@ -18,6 +18,7 @@ import {
   invalidateWorkstreamLists,
   invalidateWorkstreamPr,
   invalidateWorktreeGit,
+  refreshProjectWorkstreams,
 } from "./queries";
 
 export type EventBridge = () => Array<Promise<() => void>>;
@@ -129,6 +130,7 @@ export function attachEventListeners(): () => void {
       // Not on every status change: CI churn would recompute git status for every worktree.
       if (event.payload.observedPrChanged) invalidateWorkstreamLists();
     }),
+    events.workstreamsChanged.listen((event) => void refreshProjectWorkstreams(event.payload.projectPath)),
     events.worktreeChanged.listen((event) => {
       invalidateWorktreeGit(event.payload.workstreamId);
     }),

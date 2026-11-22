@@ -110,6 +110,9 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
             let _ = events::DocStateChanged { ids, change }.emit(handle);
         }
         RuntimeEvent::ProjectsChanged => {}
+        RuntimeEvent::WorkstreamsChanged { project_path } => {
+            let _ = events::WorkstreamsChanged { project_path }.emit(handle);
+        }
         RuntimeEvent::GoalChanged {
             goal_id,
             session_id,

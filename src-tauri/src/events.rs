@@ -47,6 +47,12 @@ pub struct PrStatusChanged {
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
 #[serde(rename_all = "camelCase")]
+pub struct WorkstreamsChanged {
+    pub project_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
 pub struct WorktreeChanged {
     pub workstream_id: String,
 }

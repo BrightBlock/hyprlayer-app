@@ -1405,16 +1405,25 @@ impl WorkstreamService<'_> {
         );
         let result = self.create_inner(req).await;
         match &result {
-            Ok(created) => tracing::info!(
-                "{what}: workstream {} on {} at {} in {:?}",
-                created.item.id,
-                created.item.branch,
-                created.item.worktree_path,
-                started.elapsed()
-            ),
+            Ok(created) => {
+                tracing::info!(
+                    "{what}: workstream {} on {} at {} in {:?}",
+                    created.item.id,
+                    created.item.branch,
+                    created.item.worktree_path,
+                    started.elapsed()
+                );
+                self.announce_list_change(&created.item.project_path);
+            }
             Err(e) => tracing::warn!("{what} failed after {:?}: {e}", started.elapsed()),
         }
         result
+    }
+
+    fn announce_list_change(&self, project_path: &str) {
+        let _ = self.runtime.events.send(RuntimeEvent::WorkstreamsChanged {
+            project_path: project_path.to_string(),
+        });
     }
 
     async fn create_inner(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
@@ -1645,7 +1654,9 @@ impl WorkstreamService<'_> {
 
     pub async fn archive(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
         let what = format!("archive workstream {}", req.id);
-        logged(&what, self.archive_inner(req)).await
+        let archived = logged(&what, self.archive_inner(req)).await?;
+        self.announce_list_change(&archived.project_path);
+        Ok(archived)
     }
 
     async fn archive_inner(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
