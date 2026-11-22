@@ -4,6 +4,7 @@ import type {
   ExitOutcome,
   Question,
   QuestionOption,
+  QuestionSubject,
   SessionEvent,
   SessionState,
 } from "@/lib/bindings";
@@ -16,7 +17,7 @@ export type { Question, QuestionOption, SessionState };
 // "expired": the ask died with its harness process, so no answer can reach it.
 export type PermissionDecision = "allow" | "deny" | "expired";
 
-export type PendingQuestion = { requestId: string; questions: Question[] };
+export type PendingQuestion = { requestId: string; questions: Question[]; subject?: QuestionSubject | null };
 
 // Stored rows written before typed questions still carry a raw JSON string here.
 // Removable no earlier than 0.9, once that wire shape is retired.
@@ -802,6 +803,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
         pendingQuestion: {
           requestId: event.requestId,
           questions: parseQuestions(event.questions),
+          subject: event.subject,
         },
       };
     }

@@ -15,7 +15,7 @@ use super::protocol::{self, Block, ParsedLine};
 use crate::agent::{declined_message, KillFlag, UsageSoFar};
 use crate::error::{CoreError, Result};
 use crate::store::session_event_codec::questions_from_value;
-use hyprlayer_models::session::QuestionAnswers;
+use hyprlayer_models::session::{QuestionAnswers, QuestionSubject};
 
 pub use hyprlayer_models::agent::PermissionMode;
 
@@ -795,6 +795,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
                 Some(questions) => vec![SessionEvent::QuestionAsk {
                     request_id,
                     questions: questions_from_value(Some(questions)),
+                    subject: question_subject(&input),
                 }],
                 None => vec![SessionEvent::PermissionAsk {
                     request_id,
@@ -860,6 +861,29 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
         ParsedLine::ControlResponse { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
+}
+
+// Models send `metadata` as an object or as a JSON string of one.
+fn question_subject(input: &Value) -> Option<QuestionSubject> {
+    let decoded: Value;
+    let metadata = match input.get("metadata")? {
+        Value::String(raw) => {
+            decoded = serde_json::from_str(raw).ok()?;
+            &decoded
+        }
+        other => other,
+    };
+    let (kind, id) = metadata.get("source")?.as_str()?.split_once(':')?;
+    let archive = match kind.trim() {
+        "workstream" => false,
+        "archive" => true,
+        _ => return None,
+    };
+    let workstream_id = id.trim();
+    (!workstream_id.is_empty()).then(|| QuestionSubject {
+        workstream_id: workstream_id.to_string(),
+        archive,
+    })
 }
 
 fn claude_turn_status(
@@ -1114,11 +1138,60 @@ mod tests {
             [SessionEvent::QuestionAsk {
                 request_id,
                 questions: q,
+                subject: None,
             }] => {
                 assert_eq!(request_id, "req-1");
                 assert_eq!(serde_json::to_value(q).unwrap(), questions);
             }
             other => panic!("expected one QuestionAsk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ask_user_question_metadata_source_names_its_subject() {
+        let subject = |id: &str, archive| {
+            Some(QuestionSubject {
+                workstream_id: id.into(),
+                archive,
+            })
+        };
+        for (metadata, expected) in [
+            (
+                json!({ "source": "workstream:ws-461" }),
+                subject("ws-461", false),
+            ),
+            (
+                json!({ "source": "archive:ws-461" }),
+                subject("ws-461", true),
+            ),
+            (json!(r#"{"source":"archive:ws-7"}"#), subject("ws-7", true)),
+            (
+                json!({ "source": "workstream: ws-2 " }),
+                subject("ws-2", false),
+            ),
+            (json!({ "source": "workstream:" }), None),
+            (json!({ "source": "merge:ws-461" }), None),
+            (json!({ "source": "ws-461" }), None),
+            (json!({ "source": 461 }), None),
+            (json!({}), None),
+            (json!("not json"), None),
+            (Value::Null, None),
+        ] {
+            let events = parsed_to_events(ParsedLine::CanUseTool {
+                request_id: "req-1".into(),
+                tool_name: "AskUserQuestion".into(),
+                input: json!({
+                    "questions": [{ "question": "Archive it?", "options": [] }],
+                    "metadata": metadata,
+                }),
+                tool_use_id: None,
+            });
+            match events.as_slice() {
+                [SessionEvent::QuestionAsk { subject, .. }] => {
+                    assert_eq!(subject, &expected, "metadata {metadata}")
+                }
+                other => panic!("expected one QuestionAsk, got {other:?}"),
+            }
         }
     }
 

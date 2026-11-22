@@ -294,6 +294,9 @@ pub enum UiRequest {
         // The PTY agent it is about; a desktop whose tab binds that terminal notifies on its own.
         #[serde(default)]
         terminal_id: Option<String>,
+        // Raised by a project's Lead; only these reach the Lead dock.
+        #[serde(default)]
+        from_lead: bool,
     },
     Reveal {
         workstream_id: String,

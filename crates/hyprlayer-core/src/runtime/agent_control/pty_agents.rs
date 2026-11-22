@@ -642,6 +642,7 @@ impl PtyAgents {
                 body: body.into(),
                 session_id: None,
                 terminal_id: Some(agent.terminal_id.clone()),
+                from_lead: false,
             },
         });
     }

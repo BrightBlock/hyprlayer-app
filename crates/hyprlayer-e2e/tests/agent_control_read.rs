@@ -1223,6 +1223,7 @@ async fn notify(rx: &mut Receiver<RuntimeEvent>, title: &str) -> Value {
                     body,
                     session_id,
                     terminal_id,
+                    ..
                 },
         } if t == title => Some(json!({
             "workstreamId": workstream_id,

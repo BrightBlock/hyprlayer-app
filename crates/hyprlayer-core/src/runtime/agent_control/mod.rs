@@ -332,6 +332,7 @@ impl AgentControlService<'_> {
                         // Not an ask: no stream fold raises it, so every desktop must.
                         session_id: None,
                         terminal_id: None,
+                        from_lead: false,
                     },
                 });
             }
@@ -373,6 +374,7 @@ impl AgentControlService<'_> {
                 body,
                 session_id: None,
                 terminal_id: None,
+                from_lead: identity.lead,
             },
         });
     }

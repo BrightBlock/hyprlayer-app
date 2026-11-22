@@ -560,6 +560,7 @@ impl Translator {
                 vec![SessionEvent::QuestionAsk {
                     request_id,
                     questions: questions_from_value(Some(&Value::Array(ui))),
+                    subject: None,
                 }]
             }
             _ => Vec::new(),
@@ -2016,6 +2017,7 @@ mod tests {
             SessionEvent::QuestionAsk {
                 request_id,
                 questions,
+                ..
             } => {
                 assert_eq!(request_id, "q1");
                 assert_eq!(questions[0].question, "Which auth method?");

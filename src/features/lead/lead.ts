@@ -7,7 +7,13 @@ import { log } from "@/lib/log";
 import { useUiStore } from "@/lib/uiStore";
 import { useActiveSessions, useBootstrap, useLeads } from "@/lib/queries";
 import { useFleet } from "@/features/dashboard/fleet";
-import { isStreamingSession, restoreSessionIfNeeded, resumeSession } from "@/features/session/sessionStore";
+import {
+  isStreamingSession,
+  restoreSessionIfNeeded,
+  resumeSession,
+  useSessionStore,
+} from "@/features/session/sessionStore";
+import type { PendingQuestion } from "@/features/session/transcript";
 import { leadSettings, type Lead } from "@/features/settings/settingsPatches";
 
 export type ProjectLead = { view: LeadView; settings: Lead };
@@ -56,6 +62,23 @@ export function useFollowLead({ sessionId, workstreamId }: LeadView): void {
   }, [sessionId, workstreamId, live]);
 }
 
+export type LeadAsk = {
+  sessionId: string;
+  question: PendingQuestion;
+  subject: { view: WorkstreamView; archive: boolean } | null;
+};
+
+export function useLeadAsk(lead: ProjectLead | null, views: readonly WorkstreamView[]): LeadAsk | null {
+  const sessionId = lead?.view.sessionId ?? null;
+  const question = useSessionStore((s) => (sessionId ? (s.sessions[sessionId]?.pendingQuestion ?? null) : null));
+  if (!lead || !sessionId || !question) return null;
+  const named = question.subject;
+  const view = named
+    ? views.find((v) => v.item.id === named.workstreamId && v.item.id !== lead.view.workstreamId)
+    : undefined;
+  return { sessionId, question, subject: named && view ? { view, archive: named.archive } : null };
+}
+
 export type LeadNote = { title: string; body: string };
 
 const useLeadNotes = create<Record<string, LeadNote | undefined>>(() => ({}));
@@ -68,10 +91,9 @@ export function clearLeadNote(workstreamId: string): void {
   useLeadNotes.setState({ [workstreamId]: undefined });
 }
 
-// notify_user and request_attention carry no session or terminal; an ask's notification names one.
 export const leadNoteBridge: EventBridge = () => [
   events.uiRequested.listen(({ payload: { request } }) => {
-    if (request.kind !== "notify" || request.sessionId || request.terminalId) return;
+    if (request.kind !== "notify" || !request.fromLead) return;
     useLeadNotes.setState({ [request.workstreamId]: { title: request.title, body: request.body } });
   }),
 ];

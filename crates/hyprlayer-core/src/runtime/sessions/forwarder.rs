@@ -1364,6 +1364,7 @@ impl ActorState {
                     body,
                     session_id: Some(session_id),
                     terminal_id: None,
+                    from_lead: false,
                 },
             });
         });

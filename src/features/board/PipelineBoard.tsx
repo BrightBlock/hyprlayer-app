@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { shortBranch } from "@/lib/domain/projects";
+import type { LeadAsk } from "@/features/lead/lead";
 import { PipelineCard, type PipelineCardHandlers } from "./PipelineCard";
 import {
   MERGED_VISIBLE,
@@ -19,6 +20,7 @@ export function PipelineBoard({
   merged,
   driven,
   leadCard,
+  ask,
   now,
   handlers,
   onOpenArchived,
@@ -29,6 +31,7 @@ export function PipelineBoard({
   merged: ArchivedWorkstreamView[];
   driven: ReadonlySet<string>;
   leadCard: ReactNode;
+  ask: LeadAsk | null;
   now: number;
   handlers: PipelineCardHandlers;
   onOpenArchived: () => void;
@@ -40,8 +43,10 @@ export function PipelineBoard({
     review: [],
     merged: [],
   };
+  const askFor = (id: string) => (ask?.subject?.view.item.id === id ? ask : undefined);
   for (const view of views) {
-    grouped[pipelineColumnOf(view, live.get(view.item.id)?.activity === "needs-you")].push(view);
+    const waiting = askFor(view.item.id) !== undefined || live.get(view.item.id)?.activity === "needs-you";
+    grouped[pipelineColumnOf(view, waiting)].push(view);
   }
   const hiddenMerged = merged.length - MERGED_VISIBLE;
 
@@ -70,6 +75,7 @@ export function PipelineBoard({
                     live={live.get(view.item.id)}
                     session={sessions.get(view.item.id)}
                     driven={driven.has(view.item.id)}
+                    ask={askFor(view.item.id)}
                     now={now}
                     handlers={handlers}
                   />

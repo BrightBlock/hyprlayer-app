@@ -532,6 +532,7 @@ async fn run_turn_answering(
             Ok(Ok(SessionEvent::QuestionAsk {
                 request_id,
                 questions,
+                ..
             })) => {
                 let question_text = questions
                     .first()

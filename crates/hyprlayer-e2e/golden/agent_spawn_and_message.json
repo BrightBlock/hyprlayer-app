@@ -166,6 +166,7 @@
             "notifies": [
               {
                 "body": "Partner got 2 agent messages in a row. Reply to it to let agents continue.",
+                "fromLead": false,
                 "kind": "notify",
                 "sessionId": null,
                 "terminalId": null,
@@ -174,6 +175,7 @@
               },
               {
                 "body": "Lead got 2 agent messages in a row. Reply to it to let agents continue.",
+                "fromLead": false,
                 "kind": "notify",
                 "sessionId": null,
                 "terminalId": null,
@@ -586,6 +588,7 @@
             "notifies": [
               {
                 "body": "Waker got 5 agent messages in a row. Reply to it to let agents continue.",
+                "fromLead": false,
                 "kind": "notify",
                 "sessionId": null,
                 "terminalId": null,

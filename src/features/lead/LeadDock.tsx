@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 import { Icon } from "@/components/Icon";
 import { Button, ErrorNote, Spinner } from "@/components/ui";
+import type { WorkstreamView } from "@/lib/bindings";
 import { formatCompactAge } from "@/lib/format";
-import { useMessageLead, useWorkstreamSessions } from "@/lib/queries";
+import { errorMessage } from "@/lib/ipc";
+import { useArchiveWorkstream, useMessageLead, useWorkstreamSessions } from "@/lib/queries";
+import { useToast } from "@/lib/toast";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useSlowNow } from "@/lib/useSlowNow";
 import { QuestionPrompt } from "@/features/session/QuestionPrompt";
@@ -11,7 +14,7 @@ import { answerQuestion, useSessionStore } from "@/features/session/sessionStore
 import { isWorking, type TranscriptItem } from "@/features/session/transcript";
 import { nextDockPhase, type DockEvent, type DockPhase } from "./dockPhase";
 import { LeadMark } from "./LeadChip";
-import { clearLeadNote, useFollowLead, useLeadNote, type LeadNote, type ProjectLead } from "./lead";
+import { clearLeadNote, useFollowLead, useLeadNote, type LeadAsk, type LeadNote, type ProjectLead } from "./lead";
 
 function latestReply(items: readonly TranscriptItem[]): string | null {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -27,14 +30,57 @@ function tokenMs(name: string, fallback: number): number {
 
 const SHRINK_SHARE = 0.7;
 
+// The mutation's promise, not mutate's callbacks: archiving drops the workstream, which unmounts this.
+export function ArchiveOrLater({ ask, workstream }: { ask: LeadAsk; workstream: WorkstreamView }) {
+  const archive = useArchiveWorkstream();
+  const answer = (label: string) => {
+    const q = ask.question.questions[0];
+    void answerQuestion(ask.sessionId, ask.question.requestId, q ? { [q.question]: label } : {});
+  };
+  const archiveThenAnswer = () =>
+    archive.mutateAsync({ id: workstream.item.id }).then(
+      () => answer("Archive"),
+      (e: unknown) =>
+        useToast.getState().show(`Couldn't archive ${workstream.item.title}`, errorMessage(e), { tone: "bad" }),
+    );
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <Button variant="primary" size="sm" busy={archive.isPending} onClick={() => void archiveThenAnswer()}>
+        Archive
+      </Button>
+      <Button size="sm" disabled={archive.isPending} onClick={() => answer("Later")}>
+        Later
+      </Button>
+    </span>
+  );
+}
+
+function ArchiveAsk({ ask, workstream }: { ask: LeadAsk; workstream: WorkstreamView }) {
+  const text = ask.question.questions[0]?.question ?? "";
+  const title = workstream.item.title;
+  return (
+    <div className="flex items-center gap-2.5 border-b border-edge-2 py-2 pr-2 pl-3.5">
+      <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-warn" />
+      <span className="min-w-0 flex-1 text-body text-ink-2">
+        {!text.includes(title) && <span className="font-semibold text-ink">{title} </span>}
+        {text}
+      </span>
+      <ArchiveOrLater ask={ask} workstream={workstream} />
+    </div>
+  );
+}
+
 export function LeadDock({
   lead,
+  ask,
   expanded,
   chat,
   onExpand,
   onMinimize,
 }: {
   lead: ProjectLead;
+  ask: LeadAsk | null;
   expanded: boolean;
   chat: ReactNode;
   onExpand: () => void;
@@ -48,7 +94,6 @@ export function LeadDock({
   const endedAt = useSessionStore((s) => (sessionId ? (s.sessions[sessionId]?.lastTurn?.endedAt ?? null) : null));
   const lastActiveAt = useWorkstreamSessions(workstreamId ?? "", !!workstreamId).data?.find((s) => s.id === sessionId)
     ?.lastActiveAt;
-  const question = useSessionStore((s) => (sessionId ? (s.sessions[sessionId]?.pendingQuestion ?? null) : null));
   const working = useSessionStore((s) => {
     const entry = sessionId ? s.sessions[sessionId] : undefined;
     return entry ? isWorking(entry) : false;
@@ -236,14 +281,15 @@ export function LeadDock({
       <div ref={docked} inert={phase !== "closed"} className="shrink-0 border-t border-edge bg-panel">
         {header(false)}
         <div className="px-6 pt-1 pb-3.5">
-          {question && sessionId && (
+          {ask && !ask.subject?.archive && (
             <QuestionPrompt
-              key={question.requestId}
-              pending={question}
-              onSubmit={(answers) => void answerQuestion(sessionId, question.requestId, answers)}
+              key={ask.question.requestId}
+              pending={ask.question}
+              onSubmit={(answers) => void answerQuestion(ask.sessionId, ask.question.requestId, answers)}
             />
           )}
           <div className="rounded-card border border-edge bg-surface focus-within:border-ink-dim/70">
+            {ask?.subject?.archive && <ArchiveAsk ask={ask} workstream={ask.subject.view} />}
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             <form onSubmit={submit} className="flex items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
               <input
@@ -273,6 +319,7 @@ export function LeadDock({
         >
           {header(true)}
           <div style={contentStyle} className="flex min-h-0 flex-1 flex-col">
+            {ask?.subject?.archive && <ArchiveAsk ask={ask} workstream={ask.subject.view} />}
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             {/* SessionChat's transcript slides 36px up under its own header; this clip keeps it off the dock's. */}
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-t border-edge-2">

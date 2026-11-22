@@ -161,6 +161,14 @@
       "guards": [
         {
           "evidence": {
+            "lead": true,
+            "removed": null
+          },
+          "guard": "the Lead's main, its only active workstream, does not block removal",
+          "ok": true
+        },
+        {
+          "evidence": {
             "files_kept": true,
             "still_registered": false
           },

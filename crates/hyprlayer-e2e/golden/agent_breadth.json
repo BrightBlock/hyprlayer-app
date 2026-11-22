@@ -462,6 +462,45 @@
       "guards": [
         {
           "evidence": {
+            "listed": {
+              "driving": [],
+              "liveChildren": 5,
+              "projectPath": "$SANDBOX/home/code/demo",
+              "projectRules": null,
+              "sessionId": "$PROJECT_LEAD",
+              "workstreamId": "$MAIN"
+            },
+            "spawns": [
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "ok"
+            ]
+          },
+          "guard": "with Max live children at 4, the Lead holds 5 live children and lists them",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "spawns": [
+              "ok",
+              "ok",
+              "ok",
+              "ok",
+              "agent_limit_reached: an agent limit was reached: this agent already has 4 live children, the Max live children"
+            ]
+          },
+          "guard": "a caller that is not a Lead is still refused its fifth child",
+          "ok": true
+        }
+      ],
+      "step": "a Lead's own live-children limit sits above every agent's"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

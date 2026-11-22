@@ -253,6 +253,7 @@ async fn session_lifecycle() {
         SessionEvent::QuestionAsk {
             request_id,
             questions,
+            ..
         } => Some((request_id.clone(), questions.clone())),
         _ => None,
     });

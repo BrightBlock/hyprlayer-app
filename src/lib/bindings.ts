@@ -1755,6 +1755,11 @@ export type QuestionOption = {
 	description: string,
 };
 
+export type QuestionSubject = {
+	workstreamId: string,
+	archive: boolean,
+};
+
 export type QuitRequested = null;
 
 export type QuitSettings = {
@@ -2001,7 +2006,7 @@ export type Session = {
 	lead?: boolean,
 };
 
-export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null; mcpServers?: string[] | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean; authRequired?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string; toolUseId?: string | null } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "permissionResolved"; requestId: string; allow: boolean } | { kind: "questionAnswered"; requestId: string } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched"; quiet?: boolean } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
+export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null; mcpServers?: string[] | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean; authRequired?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string; toolUseId?: string | null } | { kind: "questionAsk"; requestId: string; questions: Question[]; subject?: QuestionSubject | null } | { kind: "permissionResolved"; requestId: string; allow: boolean } | { kind: "questionAnswered"; requestId: string } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched"; quiet?: boolean } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };
 
 export type SessionLifecycle = {
 	sessionId: string,
@@ -2463,7 +2468,7 @@ export type TypeCount = {
 };
 
 /**  An agent's ask of every attached desktop. */
-export type UiRequest = { kind: "openSessionTab"; workstreamId: string; sessionId: string; focus: boolean; permissionMode?: PermissionMode | null; model?: string | null; effort?: string | null } | { kind: "openTerminalTab"; workstreamId: string; terminalId: string; engineId: string; providerSessionId: string | null; bypass: boolean } | { kind: "notify"; workstreamId: string; title: string; body: string; sessionId?: string | null; terminalId?: string | null } | { kind: "reveal"; workstreamId: string; target: RevealTarget };
+export type UiRequest = { kind: "openSessionTab"; workstreamId: string; sessionId: string; focus: boolean; permissionMode?: PermissionMode | null; model?: string | null; effort?: string | null } | { kind: "openTerminalTab"; workstreamId: string; terminalId: string; engineId: string; providerSessionId: string | null; bypass: boolean } | { kind: "notify"; workstreamId: string; title: string; body: string; sessionId?: string | null; terminalId?: string | null; fromLead?: boolean } | { kind: "reveal"; workstreamId: string; target: RevealTarget };
 
 export type UiRequested = {
 	request: UiRequest,

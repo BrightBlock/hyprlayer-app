@@ -127,6 +127,14 @@ pub struct Question {
     pub options: Vec<QuestionOption>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionSubject {
+    pub workstream_id: String,
+    pub archive: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(transparent)]
@@ -214,6 +222,8 @@ pub enum SessionEvent {
     QuestionAsk {
         request_id: String,
         questions: Vec<Question>,
+        #[serde(default)]
+        subject: Option<QuestionSubject>,
     },
     // The ask left the harness's pending set: a client answered it, or the harness dropped it.
     PermissionResolved {

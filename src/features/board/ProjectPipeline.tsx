@@ -9,7 +9,7 @@ import { useActiveSessions, useArchivedWorkstreams, useBootstrap } from "@/lib/q
 import { useSlowNow } from "@/lib/useSlowNow";
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { useFleet } from "@/features/dashboard/fleet";
-import { setLeadDockExpanded, useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
+import { setLeadDockExpanded, useLeadAsk, useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
 import { LeadChip } from "@/features/lead/LeadChip";
 import { LeadDock } from "@/features/lead/LeadDock";
 import { selectAgentTab } from "@/features/search/selectAgentTab";
@@ -54,6 +54,7 @@ export function ProjectPipeline({
   const mainId = lead?.view.sessionId ? lead.view.workstreamId : null;
   const shown = useMemo(() => (mainId ? sorted.filter((v) => v.item.id !== mainId) : sorted), [sorted, mainId]);
   const driven = useMemo(() => new Set(lead?.view.driving), [lead?.view.driving]);
+  const ask = useLeadAsk(lead, shown);
   const expanded = useLeadDockExpanded(projectPath) && !!lead?.view.sessionId;
 
   const live = useMemo(
@@ -85,6 +86,7 @@ export function ProjectPipeline({
   const dock = lead && (
     <LeadDock
       lead={lead}
+      ask={ask}
       expanded={expanded}
       chat={leadChat}
       onExpand={expandLead}
@@ -108,7 +110,7 @@ export function ProjectPipeline({
   const mainLive = mainId ? live.get(mainId) : undefined;
   const leadWaiting = mainLive?.activity === "needs-you" && mainLive.sessionId === lead?.view.sessionId;
   const leadCard =
-    mainView && mainLive && leadWaiting ? (
+    mainView && mainLive && leadWaiting && !ask?.subject ? (
       <LeadCard view={mainView} live={mainLive} now={now} handlers={handlers} />
     ) : null;
 
@@ -149,6 +151,7 @@ export function ProjectPipeline({
             merged={merged}
             driven={driven}
             leadCard={leadCard}
+            ask={ask}
             now={now}
             handlers={handlers}
             onOpenArchived={openArchivedWorktrees}

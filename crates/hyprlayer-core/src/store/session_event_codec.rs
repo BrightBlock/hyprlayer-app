@@ -97,7 +97,7 @@ fn truncated(payload: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyprlayer_models::session::ExitOutcome;
+    use hyprlayer_models::session::{ExitOutcome, QuestionSubject};
 
     fn question(text: &str) -> Question {
         Question {
@@ -128,6 +128,15 @@ mod tests {
     fn a_canonical_question_array_decodes_unchanged() {
         let payload = r#"{"kind":"questionAsk","requestId":"q-1","questions":[{"question":"Ship it?","header":"Header","multiSelect":false,"options":[{"label":"Yes","description":"Do it"}]}]}"#;
         assert_eq!(decoded_questions(payload), vec![question("Ship it?")]);
+    }
+
+    #[test]
+    fn a_question_row_written_before_subjects_decodes_without_one() {
+        let payload = r#"{"kind":"questionAsk","requestId":"q-1","questions":[]}"#;
+        assert!(matches!(
+            decode_raw_event(payload).unwrap(),
+            SessionEvent::QuestionAsk { subject: None, .. }
+        ));
     }
 
     #[test]
@@ -169,6 +178,10 @@ mod tests {
         let event = SessionEvent::QuestionAsk {
             request_id: "q-1".into(),
             questions: vec![question("Ship it?")],
+            subject: Some(QuestionSubject {
+                workstream_id: "ws-461".into(),
+                archive: true,
+            }),
         };
         let raw = encode_raw_event(&event).unwrap();
         let value: Value = serde_json::from_str(&raw).unwrap();

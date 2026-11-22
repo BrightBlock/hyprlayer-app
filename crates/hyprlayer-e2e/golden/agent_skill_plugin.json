@@ -57,6 +57,31 @@
       "guards": [
         {
           "evidence": {
+            "agent": true,
+            "disabledRule": false,
+            "enabledRule": true,
+            "projectFile": true
+          },
+          "guard": "the launch names the Lead agent, its enabled rules and the project's own file",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "enabledRule": true,
+            "projectFile": false,
+            "resumed": true,
+            "sameSession": true
+          },
+          "guard": "under Inherit only the resumed Lead keeps its rules and drops the project's file",
+          "ok": true
+        }
+      ],
+      "step": "a Lead launches as its own agent with the enabled guardrails"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "mcpConfig": false,
             "pluginDir": false
           },

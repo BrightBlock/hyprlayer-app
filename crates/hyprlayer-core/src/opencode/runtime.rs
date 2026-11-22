@@ -1489,6 +1489,7 @@ impl Translator {
             "question.asked" => vec![SessionEvent::QuestionAsk {
                 request_id: str_field(p, "id"),
                 questions: questions_from_value(p.get("questions")),
+                subject: None,
             }],
             "session.idle" => {
                 let Some(turn) = open else {

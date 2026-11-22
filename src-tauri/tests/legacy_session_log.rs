@@ -163,6 +163,7 @@ fn missing_and_malformed_question_fields_survive_as_empty_typed_lists() {
             SessionEvent::QuestionAsk {
                 request_id,
                 questions,
+                ..
             } => assert!(
                 questions.is_empty(),
                 "{request_id} should normalize to an empty question list"
