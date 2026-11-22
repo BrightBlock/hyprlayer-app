@@ -1555,7 +1555,7 @@ export function Root() {
           </main>
 
           <StatusBar
-            workstreamId={activeWorkstreamId ?? null}
+            workstreamId={activeWorkstreamId ?? scriptsActiveWs}
             workstream={activeWorkstream ?? null}
             thoughts={
               thoughtsSync.hidden ? null : (
@@ -1575,7 +1575,7 @@ export function Root() {
             }
             serverMenu={(anchorRef) => <ServerMenu anchorRef={anchorRef} />}
             rightPanelWidth={
-              currentSection === "Agent" && !narrow && !diffHidden ? diffWidth : undefined
+              currentSection === "Agent" && !onBoard && !narrow && !diffHidden ? diffWidth : undefined
             }
           />
         </div>
