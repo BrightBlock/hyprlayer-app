@@ -41,6 +41,14 @@
           },
           "guard": "after `git switch -c` the new branch's PR is found, not the old branch's cached one",
           "ok": true
+        },
+        {
+          "evidence": {
+            "head": "feature/csp-2",
+            "rowKeepsAppBranch": true
+          },
+          "guard": "the row keeps the app's branch and the git status names the branch HEAD is on",
+          "ok": true
         }
       ],
       "step": "a switched branch follows HEAD"
@@ -389,6 +397,81 @@
       "guards": [
         {
           "evidence": {
+            "inPlace": 710,
+            "renamed": {
+              "afterRestart": "unknown",
+              "afterTicks": 711,
+              "backOnBranch": 711,
+              "firstRead": 711,
+              "ghCallsAfterRestart": 0,
+              "ghCallsWhileDetached": 0,
+              "restarted": true
+            }
+          },
+          "guard": "a detached HEAD keeps the PR: an unrenamed branch is still looked up, a renamed one is served from the cache without asking gh, and with nothing cached reads unknown, not no PR",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ghMergeCalls": 0,
+            "oldNamePr": "OPEN",
+            "refused": "pr_unknown_while_detached"
+          },
+          "guard": "with nothing cached mid-rebase, Merge is refused instead of merging the old name's PR",
+          "ok": true
+        }
+      ],
+      "step": "a rebase keeps its PR, renamed or not"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ghEdits": 2,
+            "retargets": [
+              {
+                "github": "release",
+                "ok": true,
+                "sidebar": "release"
+              },
+              {
+                "github": "main",
+                "ok": true,
+                "sidebar": "main"
+              }
+            ]
+          },
+          "guard": "each retarget while detached edits the PR on GitHub and the sidebar shows the new base",
+          "ok": true
+        }
+      ],
+      "step": "a base change mid-rebase reaches GitHub and the sidebar"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "pollsAfterAnEdit": 0,
+            "readThenDetachAtOnce": {
+              "afterRename": 716,
+              "detached": 716,
+              "ghCallsForTheOldName": 0
+            },
+            "renameRecordedWithoutARead": {
+              "number": 715,
+              "state": "open"
+            }
+          },
+          "guard": "a terminal rename is recorded within seconds, an edit asks gh nothing, and a rebase started right after the sidebar showed the PR keeps it without asking for the old name",
+          "ok": true
+        }
+      ],
+      "step": "a rebase right after a rename keeps the PR"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "lookup": {
               "kind": "found",
               "state": "merged"
@@ -474,6 +557,41 @@
         }
       ],
       "step": "pushing a branch does not claim an old merged PR with its name"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "ownDetached": false,
+            "renamed": true,
+            "renamedDetached": true
+          },
+          "guard": "a merged PR on a renamed branch never deletes the app's branch on origin, detached or not; the app branch's own merged PR still does",
+          "ok": true
+        }
+      ],
+      "step": "archiving mid-rebase deletes the app's branch only for its own PR"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterSweep": {
+              "number": 713,
+              "state": "open"
+            },
+            "atArchive": {
+              "number": 713,
+              "state": "open"
+            },
+            "backdated": 1,
+            "ghCallsForTheOldName": 0
+          },
+          "guard": "the sweep keeps the open PR a mid-rebase archive recorded and asks gh nothing for the app's old branch name",
+          "ok": true
+        }
+      ],
+      "step": "an archive sweep mid-rebase keeps the PR the archive recorded"
     },
     {
       "guards": [

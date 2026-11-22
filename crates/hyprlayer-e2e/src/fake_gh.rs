@@ -59,6 +59,13 @@ if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
   sed 's/"state":"OPEN"/"state":"MERGED"/' "$dir/$key.json" > "$dir/$key.merging" && mv "$dir/$key.merging" "$dir/$key.json"
   exit 0
 fi
+if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$4" = "--base" ]; then
+  for f in "$dir"/*.json; do
+    grep -q "\"number\":$3," "$f" || continue
+    sed "s/\"baseRefName\":\"[^\"]*\"/\"baseRefName\":\"$5\"/" "$f" > "$f.editing" && mv "$f.editing" "$f"
+  done
+  exit 0
+fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   key=$(printf '%s' "$3" | tr '/' '_')
   [ -f "$dir/$key.json" ] && {{ cat "$dir/$key.json"; exit 0; }}

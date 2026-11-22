@@ -16,7 +16,12 @@ const q = vi.hoisted(() => {
     useSetWorkstreamBase: vi.fn(mutation),
     useUpdateFromBase: vi.fn(mutation),
     usePullWorkstreamBranch: vi.fn(mutation),
-    useWorkstreamBases: vi.fn(() => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() })),
+    useWorkstreamBases: vi.fn(() => ({
+      data: undefined as { branches: string[] } | undefined,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    })),
     useWorkstreamSessions: vi.fn(() => ({ data: [] })),
     useWorktreeGitStatus: vi.fn(() => ({ data: { staged: [], unstaged: [] } })),
   };
@@ -153,6 +158,43 @@ describe("GitPanel PR row", () => {
     expect(screen.getByText("Attach an existing PR…")).toBeTruthy();
     expect(ship()?.disabled).toBe(false);
     expect(screen.queryByText("Archive")).toBeNull();
+  });
+});
+
+describe("GitPanel branch row", () => {
+  const renderOn = (branch: string | null) => {
+    q.useWorkstreamPr.mockReturnValue({ data: { kind: "noPr" } });
+    render(<GitPanel view={{ ...VIEW, git: { ...VIEW.git, branch } }} />);
+  };
+
+  it("shows the branch HEAD is on and names the workstream's branch in the title", () => {
+    renderOn("feature/csp-1");
+    const row = screen.getByTitle("feature/csp-1 (workstream branch feat) → main");
+    expect(row.textContent).toBe("feature/csp-1");
+  });
+
+  it("shows only the branch when HEAD is on the workstream's branch", () => {
+    renderOn("feat");
+    expect(screen.getByTitle("feat → main").textContent).toBe("feat");
+  });
+
+  it("shows a detached HEAD as such", () => {
+    renderOn(null);
+    expect(screen.getByTitle(/^feat , HEAD is detached/).textContent).toBe("detached HEAD");
+  });
+
+  it("offers the base, never the workstream's own branch, as a target while HEAD is on the base", () => {
+    q.useWorkstreamBases.mockReturnValue({
+      data: { branches: ["origin/main", "origin/feat"] },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    });
+    renderOn("main");
+    fireEvent.click(screen.getByLabelText("Change target branch"));
+    expect(screen.queryByRole("button", { name: /^main/ })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^feat/ })).toBeNull();
+    q.useWorkstreamBases.mockReset();
   });
 });
 

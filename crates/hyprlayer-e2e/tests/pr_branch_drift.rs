@@ -2,7 +2,7 @@
 //! and observed PR follow the workstream from its first session through merge and onto a new branch.
 #![cfg(unix)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
@@ -19,6 +19,7 @@ use hyprlayer_server::streams::StreamStartOpts;
 const IO: Duration = Duration::from_secs(20);
 /// Longer than the watcher's 20s poll of a focused open PR.
 const WATCHER: Duration = Duration::from_secs(30);
+const IN_FLIGHT_POLL: Duration = Duration::from_secs(1);
 const NEVER_FETCHED: &str = "1111111111111111111111111111111111111111";
 
 const FAKE_CLAUDE: &str = r##"#!/bin/sh
@@ -226,6 +227,53 @@ async fn await_unwatched(client: &RpcClient, id: &str, want: Value) -> Value {
     }
 }
 
+async fn observed_unpoked(client: &RpcClient, id: &str, want: &Value, within: Duration) -> Value {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let seen = observed_pr(client, id).await;
+        if seen == *want || tokio::time::Instant::now() >= deadline {
+            return seen;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn archived_pr(client: &RpcClient, id: &str) -> Value {
+    let listed = client
+        .call(Request::ListArchivedWorkstreams {})
+        .await
+        .expect("list_archived_workstreams");
+    let listed = serde_json::to_value(&listed).expect("serialize the archive list");
+    find_in(&listed, id)
+        .and_then(|v| v.pointer("/info/pr").cloned())
+        .unwrap_or(Value::Null)
+}
+
+fn gh_lines(dir: &Path, prefix: &str) -> usize {
+    std::fs::read_to_string(dir.join("calls.log"))
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.starts_with(prefix))
+        .count()
+}
+
+fn gh_node(dir: &Path, reference: &str, field: &str) -> Value {
+    std::fs::read_to_string(dir.join(format!("{}.json", reference.replace('/', "_"))))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .map_or(Value::Null, |node| node[field].clone())
+}
+
+fn remote_has(sandbox: &Sandbox, repo: &Path, branch: &str) -> bool {
+    !sandbox
+        .git(
+            repo,
+            &["ls-remote", "origin", &format!("refs/heads/{branch}")],
+        )
+        .trim()
+        .is_empty()
+}
+
 fn first_number(value: &Value) -> Value {
     match value {
         Value::Object(map) => map
@@ -311,6 +359,23 @@ async fn pr_branch_drift() {
         cached == json!(339) && switched && followed == json!(340),
         json!({ "cached": cached, "switched": switched, "pr": followed }),
     );
+    let listed = serde_json::to_value(
+        client
+            .call(Request::ListAllWorkstreams {})
+            .await
+            .expect("list_all_workstreams"),
+    )
+    .expect("serialize the list");
+    let row = find_in(&listed, &id);
+    let evidence = json!({
+        "rowKeepsAppBranch": row.and_then(|v| v.pointer("/item/branch")) == Some(&json!(branch)),
+        "head": row.and_then(|v| v.pointer("/git/branch").cloned()),
+    });
+    j.guard(
+        "the row keeps the app's branch and the git status names the branch HEAD is on",
+        evidence == json!({ "rowKeepsAppBranch": true, "head": "feature/csp-2" }),
+        evidence,
+    );
 
     j.step("an attached PR wins over HEAD");
     set_pr(&gh_state, "339", &FakePr::new(339, "OPEN"));
@@ -389,6 +454,7 @@ async fn pr_branch_drift() {
     );
 
     j.step("a merged worktree keeps following its branch");
+    set_stage(&mut j, &client, &id, Stage::Ship).await;
     set_pr(&gh_state, "hotfix/csp-3", &FakePr::new(341, "MERGED"));
     git(&worktree, &["switch", "-q", "-c", "hotfix/csp-3"]);
     let hotfix = await_observed(&client, &id, json!({ "number": 341, "state": "merged" })).await;
@@ -982,6 +1048,226 @@ async fn pr_branch_drift() {
         evidence,
     );
 
+    j.step("a rebase keeps its PR, renamed or not");
+    let plain = create_workstream(&mut j, &client, &project, "Rebase in place").await;
+    let plain_id = text(&plain, "/item/id");
+    let plain_tree = text(&plain, "/item/worktreePath");
+    let plain_branch = text(&plain, "/item/branch");
+    set_pr(&gh_state, &plain_branch, &FakePr::new(710, "OPEN"));
+    await_observed(
+        &client,
+        &plain_id,
+        json!({ "number": 710, "state": "open" }),
+    )
+    .await;
+    let before = fake_gh::calls(&gh_state, &plain_branch);
+    git(&plain_tree, &["checkout", "-q", "--detach"]);
+    let_watcher_tick(&client, &plain_id).await;
+    let plain_during = pr_number(&client, &plain_id).await;
+    j.note(
+        "rebaseInPlaceWatcherCalls",
+        json!(fake_gh::calls(&gh_state, &plain_branch) - before),
+    );
+    git(&plain_tree, &["switch", "-q", &plain_branch]);
+
+    let moved = create_workstream(&mut j, &client, &project, "Rebase renamed").await;
+    let moved_id = text(&moved, "/item/id");
+    let moved_tree = text(&moved, "/item/worktreePath");
+    let moved_branch = text(&moved, "/item/branch");
+    set_pr(&gh_state, "feature/rebase-1", &FakePr::new(711, "OPEN"));
+    git(&moved_tree, &["branch", "-m", "feature/rebase-1"]);
+    await_observed(
+        &client,
+        &moved_id,
+        json!({ "number": 711, "state": "open" }),
+    )
+    .await;
+    set_pr(&gh_state, &moved_branch, &FakePr::new(712, "OPEN"));
+    let moved_calls = || {
+        ["711", "712", "feature/rebase-1", moved_branch.as_str()]
+            .iter()
+            .map(|r| fake_gh::calls(&gh_state, r))
+            .sum::<usize>()
+    };
+    git(&moved_tree, &["checkout", "-q", "--detach"]);
+    tokio::time::sleep(IN_FLIGHT_POLL).await;
+    let before = moved_calls();
+    let first_read = pr_number(&client, &moved_id).await;
+    let_watcher_tick(&client, &moved_id).await;
+    let after_ticks = pr_number(&client, &moved_id).await;
+    let detached_calls = moved_calls() - before;
+    let stopped = server.shutdown(&client).await;
+    let server = Server::start(&sandbox).await;
+    let client = server.client();
+    let after_restart = lookup(&client, &moved_id).await["kind"].clone();
+    let restart_calls = moved_calls() - before;
+    let merges_before = gh_lines(&gh_state, "pr merge");
+    let merge = client
+        .call(Request::MergeWorkstreamPr {
+            id: moved_id.clone(),
+            method: MergeMethod::Squash,
+        })
+        .await;
+    let merge_evidence = json!({
+        "refused": merge.err().map(|e| e.code),
+        "ghMergeCalls": gh_lines(&gh_state, "pr merge") - merges_before,
+        "oldNamePr": gh_node(&gh_state, &moved_branch, "state"),
+    });
+    git(&moved_tree, &["switch", "-q", "feature/rebase-1"]);
+    let back = pr_number(&client, &moved_id).await;
+    let evidence = json!({
+        "inPlace": plain_during,
+        "renamed": {
+            "firstRead": first_read,
+            "afterTicks": after_ticks,
+            "ghCallsWhileDetached": detached_calls,
+            "restarted": stopped.status.success(),
+            "afterRestart": after_restart,
+            "ghCallsAfterRestart": restart_calls,
+            "backOnBranch": back,
+        },
+    });
+    j.guard(
+        "a detached HEAD keeps the PR: an unrenamed branch is still looked up, a renamed one is \
+         served from the cache without asking gh, and with nothing cached reads unknown, not no PR",
+        evidence
+            == json!({
+                "inPlace": 710,
+                "renamed": {
+                    "firstRead": 711,
+                    "afterTicks": 711,
+                    "ghCallsWhileDetached": 0,
+                    "restarted": true,
+                    "afterRestart": "unknown",
+                    "ghCallsAfterRestart": 0,
+                    "backOnBranch": 711,
+                },
+            }),
+        evidence,
+    );
+    j.guard(
+        "with nothing cached mid-rebase, Merge is refused instead of merging the old name's PR",
+        merge_evidence
+            == json!({
+                "refused": "pr_unknown_while_detached",
+                "ghMergeCalls": 0,
+                "oldNamePr": "OPEN",
+            }),
+        merge_evidence,
+    );
+
+    j.step("a base change mid-rebase reaches GitHub and the sidebar");
+    let based = create_workstream(&mut j, &client, &project, "Base mid rebase").await;
+    let based_id = text(&based, "/item/id");
+    let based_tree = text(&based, "/item/worktreePath");
+    set_pr(&gh_state, "feature/base-1", &FakePr::new(714, "OPEN"));
+    git(&based_tree, &["branch", "-m", "feature/base-1"]);
+    await_observed(
+        &client,
+        &based_id,
+        json!({ "number": 714, "state": "open" }),
+    )
+    .await;
+    git(&based_tree, &["checkout", "-q", "--detach"]);
+    let mut retargets = Vec::new();
+    for base in ["origin/release", "origin/main"] {
+        let set = client
+            .call(Request::SetWorkstreamBaseBranch {
+                id: based_id.clone(),
+                base: base.into(),
+            })
+            .await;
+        let shown = lookup(&client, &based_id).await;
+        retargets.push(json!({
+            "ok": set.is_ok(),
+            "github": gh_node(&gh_state, "feature/base-1", "baseRefName"),
+            "sidebar": shown.pointer("/pr/baseRefName"),
+        }));
+    }
+    git(&based_tree, &["switch", "-q", "feature/base-1"]);
+    let evidence = json!({ "retargets": retargets, "ghEdits": gh_lines(&gh_state, "pr edit") });
+    j.guard(
+        "each retarget while detached edits the PR on GitHub and the sidebar shows the new base",
+        evidence
+            == json!({
+                "retargets": [
+                    { "ok": true, "github": "release", "sidebar": "release" },
+                    { "ok": true, "github": "main", "sidebar": "main" },
+                ],
+                "ghEdits": 2,
+            }),
+        evidence,
+    );
+
+    j.step("a rebase right after a rename keeps the PR");
+    let quick = create_workstream(&mut j, &client, &project, "Quick rename").await;
+    let quick_id = text(&quick, "/item/id");
+    let quick_tree = text(&quick, "/item/worktreePath");
+    let quick_branch = text(&quick, "/item/branch");
+    let _ = client
+        .call(Request::WatchWorktree {
+            workstream_id: Some(quick_id.clone()),
+        })
+        .await;
+    let _ = client
+        .call(Request::SetForeground { foreground: true })
+        .await;
+    let deadline = tokio::time::Instant::now() + WATCHER;
+    while fake_gh::calls(&gh_state, &quick_branch) == 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    set_pr(&gh_state, "feature/quick-1", &FakePr::new(715, "OPEN"));
+    git(&quick_tree, &["branch", "-m", "feature/quick-1"]);
+    let recorded = observed_unpoked(
+        &client,
+        &quick_id,
+        &json!({ "number": 715, "state": "open" }),
+        Duration::from_secs(10),
+    )
+    .await;
+    let polled = fake_gh::calls(&gh_state, "feature/quick-1");
+    std::fs::write(PathBuf::from(&quick_tree).join("edit.txt"), "edit\n").expect("write a file");
+    git(&quick_tree, &["add", "edit.txt"]);
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let polled_after_edit = fake_gh::calls(&gh_state, "feature/quick-1") - polled;
+
+    let rushed = create_workstream(&mut j, &client, &project, "Rushed rebase").await;
+    let rushed_id = text(&rushed, "/item/id");
+    let rushed_tree = text(&rushed, "/item/worktreePath");
+    let rushed_branch = text(&rushed, "/item/branch");
+    set_pr(&gh_state, "feature/quick-2", &FakePr::new(716, "OPEN"));
+    git(&rushed_tree, &["branch", "-m", "feature/quick-2"]);
+    let shown_after_rename = pr_number(&client, &rushed_id).await;
+    let old_name_before = fake_gh::calls(&gh_state, &rushed_branch);
+    git(&rushed_tree, &["checkout", "-q", "--detach"]);
+    let shown_detached = pr_number(&client, &rushed_id).await;
+    let old_name_calls = fake_gh::calls(&gh_state, &rushed_branch) - old_name_before;
+    git(&rushed_tree, &["switch", "-q", "feature/quick-2"]);
+    let evidence = json!({
+        "renameRecordedWithoutARead": recorded,
+        "pollsAfterAnEdit": polled_after_edit,
+        "readThenDetachAtOnce": {
+            "afterRename": shown_after_rename,
+            "detached": shown_detached,
+            "ghCallsForTheOldName": old_name_calls,
+        },
+    });
+    j.guard(
+        "a terminal rename is recorded within seconds, an edit asks gh nothing, and a rebase \
+         started right after the sidebar showed the PR keeps it without asking for the old name",
+        evidence
+            == json!({
+                "renameRecordedWithoutARead": { "number": 715, "state": "open" },
+                "pollsAfterAnEdit": 0,
+                "readThenDetachAtOnce": {
+                    "afterRename": 716,
+                    "detached": 716,
+                    "ghCallsForTheOldName": 0,
+                },
+            }),
+        evidence,
+    );
+
     j.step("a merged PR survives a pruned remote branch and a restart");
     let origin = sandbox.root.join("origin.git");
     sandbox.git(
@@ -1251,6 +1537,121 @@ async fn pr_branch_drift() {
                 "pushed": "noPr",
                 "pushedRow": null,
                 "next": { "number": 601, "state": "open" },
+            }),
+        evidence,
+    );
+
+    j.step("archiving mid-rebase deletes the app's branch only for its own PR");
+    let mut kept_on_origin = serde_json::Map::new();
+    for (title, renamed, number, detach) in [
+        ("renamedDetached", Some("feature/arch-1"), 801, true),
+        ("renamed", Some("feature/arch-2"), 802, false),
+        ("ownDetached", None, 803, true),
+    ] {
+        let ws = create_workstream(&mut j, &client, &project, &format!("Archive {title}")).await;
+        let ws_id = text(&ws, "/item/id");
+        let tree = PathBuf::from(text(&ws, "/item/worktreePath"));
+        let app_branch = text(&ws, "/item/branch");
+        sandbox.git(
+            &tree,
+            &["commit", "--quiet", "--allow-empty", "--message", "ours"],
+        );
+        sandbox.git(&tree, &["push", "--quiet", "-u", "origin", &app_branch]);
+        let pr_ref = match renamed {
+            Some(name) => {
+                sandbox.git(&tree, &["branch", "-m", name]);
+                name.to_string()
+            }
+            None => app_branch.clone(),
+        };
+        set_pr(&gh_state, &pr_ref, &FakePr::new(number, "OPEN"));
+        await_observed(
+            &client,
+            &ws_id,
+            json!({ "number": number, "state": "open" }),
+        )
+        .await;
+        set_pr(&gh_state, &pr_ref, &FakePr::new(number, "MERGED"));
+        await_observed(
+            &client,
+            &ws_id,
+            json!({ "number": number, "state": "merged" }),
+        )
+        .await;
+        if detach {
+            sandbox.git(&tree, &["checkout", "--quiet", "--detach"]);
+        }
+        j.call(
+            &client,
+            Request::ArchiveWorkstream {
+                id: ws_id,
+                skip_scripts: true,
+            },
+        )
+        .await
+        .expect("archive_workstream");
+        kept_on_origin.insert(
+            title.into(),
+            json!(remote_has(&sandbox, &repo, &app_branch)),
+        );
+    }
+    let evidence = Value::Object(kept_on_origin);
+    j.guard(
+        "a merged PR on a renamed branch never deletes the app's branch on origin, detached or \
+         not; the app branch's own merged PR still does",
+        evidence == json!({ "renamedDetached": true, "renamed": true, "ownDetached": false }),
+        evidence,
+    );
+
+    j.step("an archive sweep mid-rebase keeps the PR the archive recorded");
+    let swept = create_workstream(&mut j, &client, &project, "Sweep mid rebase").await;
+    let swept_id = text(&swept, "/item/id");
+    let swept_tree = PathBuf::from(text(&swept, "/item/worktreePath"));
+    let swept_branch = text(&swept, "/item/branch");
+    set_pr(&gh_state, "feature/sweep-1", &FakePr::new(713, "OPEN"));
+    sandbox.git(&swept_tree, &["branch", "-m", "feature/sweep-1"]);
+    await_observed(
+        &client,
+        &swept_id,
+        json!({ "number": 713, "state": "open" }),
+    )
+    .await;
+    sandbox.git(&swept_tree, &["checkout", "--quiet", "--detach"]);
+    j.call(
+        &client,
+        Request::ArchiveWorkstream {
+            id: swept_id.clone(),
+            skip_scripts: true,
+        },
+    )
+    .await
+    .expect("archive_workstream");
+    let at_archive = archived_pr(&client, &swept_id).await;
+    let backdated = rusqlite::Connection::open(sandbox.app_data.join("hyprlayer.db"))
+        .expect("open the profile database")
+        .execute(
+            "UPDATE workstream_archives SET pr_checked_at = pr_checked_at - ?2
+             WHERE workstream_id = ?1",
+            rusqlite::params![swept_id, 16.0 * 60_000.0],
+        )
+        .expect("backdate the archive's last PR check");
+    let before = fake_gh::calls(&gh_state, &swept_branch);
+    let _ = client.call(Request::RefreshArchivedWorkstreams {}).await;
+    let evidence = json!({
+        "atArchive": at_archive,
+        "backdated": backdated,
+        "afterSweep": archived_pr(&client, &swept_id).await,
+        "ghCallsForTheOldName": fake_gh::calls(&gh_state, &swept_branch) - before,
+    });
+    j.guard(
+        "the sweep keeps the open PR a mid-rebase archive recorded and asks gh nothing for the \
+         app's old branch name",
+        evidence
+            == json!({
+                "atArchive": { "state": "open", "number": 713 },
+                "backdated": 1,
+                "afterSweep": { "state": "open", "number": 713 },
+                "ghCallsForTheOldName": 0,
             }),
         evidence,
     );

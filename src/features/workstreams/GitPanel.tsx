@@ -38,6 +38,7 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
   const baseShort = shortBranch(view.item.baseBranch);
   const retargeted = prBase !== "" && prBase !== baseShort;
   const detached = isDetachedHead(view);
+  const branch = view.git.branch ?? view.item.branch;
   const choices = (bases.data?.branches ?? [])
     .filter((b) => b.startsWith("origin/"))
     .map((b) => ({ ref: b, label: shortBranch(b) }))
@@ -51,12 +52,14 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
           title={
             detached
               ? `${view.item.branch} , HEAD is detached (rebase or bisect in progress)`
-              : `${view.item.branch} → ${baseShort}`
+              : branch === view.item.branch
+                ? `${branch} → ${baseShort}`
+                : `${branch} (workstream branch ${view.item.branch}) → ${baseShort}`
           }
         >
           <Icon name="branch" size="xs" className={detached ? "text-warn-ink" : "text-ok"} />
           <span className="min-w-0 truncate text-meta text-ink">
-            {detached ? "detached HEAD" : view.item.branch}
+            {detached ? "detached HEAD" : branch}
           </span>
         </span>
         <span className="shrink-0 text-ink-dim">→</span>

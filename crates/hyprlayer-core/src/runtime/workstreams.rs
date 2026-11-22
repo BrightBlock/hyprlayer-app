@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
 use hyprlayer_models::RuntimeEvent;
@@ -30,7 +30,9 @@ use crate::worktree::thoughts_links::{self, LinkStatus};
 use crate::worktree::{self, archive_dir_for, BranchCleanup, CreateMode, CreateSpec, RemovePolicy};
 
 use super::doc_status;
-use super::pr_watcher::{cached_lookup, failure_cause, store_lookup, PrBudget};
+use super::pr_watcher::{
+    cached_lookup, cached_lookup_any_ref, edit_cached_pr, failure_cause, store_lookup, PrBudget,
+};
 use super::HyprlayerRuntime;
 
 pub type WorkstreamGitStatus = worktree::WorktreeStatus;
@@ -399,6 +401,7 @@ impl WorkstreamService<'_> {
         let due: Vec<_> = rows
             .into_iter()
             .filter(|(item, record)| pr_lookup_due(item, record, now))
+            .filter_map(|(item, record)| Some((current_pr_ref(&item)?, item, record)))
             .collect();
         if due.is_empty() {
             return Ok(changed);
@@ -409,12 +412,11 @@ impl WorkstreamService<'_> {
         let overlay = self.runtime.child_env().await;
         let permits = Arc::new(tokio::sync::Semaphore::new(PR_LOOKUPS_AT_ONCE));
         let mut lookups = tokio::task::JoinSet::new();
-        for (item, record) in due {
+        for (pr_ref, item, record) in due {
             let (gh, overlay, permits) = (gh.clone(), overlay.clone(), permits.clone());
             let budget = self.runtime.watchers.pr_budget.clone();
             lookups.spawn(async move {
                 let _permit = permits.acquire_owned().await;
-                let pr_ref = pr_lookup_ref(&item);
                 let found = workstream_pr(&gh, &item, &pr_ref, &overlay, &budget, true).await;
                 (item, record, found)
             });
@@ -552,12 +554,17 @@ impl WorkstreamService<'_> {
             return Err(CoreError::WorkstreamBaseBranchEmpty);
         }
         if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
-            let pr_ref = current_pr_ref(&item).unwrap_or_else(|| pr_lookup_ref(&item));
-            let cached = cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref)
-                .and_then(|lookup| lookup.known().cloned());
-            let known = match cached {
-                Some(pr) => Some(pr),
-                None => self.lookup_and_store(&item, &pr_ref).await.known().cloned(),
+            let pr_ref = current_pr_ref(&item);
+            let cache = &self.runtime.watchers.pr_cache;
+            let cached = match &pr_ref {
+                Some(pr_ref) => cached_lookup(cache, &item.id, pr_ref),
+                None => cached_lookup_any_ref(cache, &item.id).map(|(_, lookup)| lookup),
+            }
+            .and_then(|lookup| lookup.known().cloned());
+            let known = match (cached, &pr_ref) {
+                (Some(pr), _) => Some(pr),
+                (None, Some(pr_ref)) => self.lookup_and_store(&item, pr_ref).await.known().cloned(),
+                (None, None) => None,
             };
             let short = base.strip_prefix("origin/").unwrap_or(&base);
             if let Some(pr) =
@@ -567,9 +574,27 @@ impl WorkstreamService<'_> {
                 let edited =
                     pr::edit_pr_base(&gh, pr_dir(&item), &pr.number.to_string(), &base, &overlay)
                         .await;
-                let fresh = self.lookup_and_store(&item, &pr_ref).await;
+                let still_open = match &pr_ref {
+                    Some(pr_ref) => self
+                        .lookup_and_store(&item, pr_ref)
+                        .await
+                        .known()
+                        .is_some_and(|pr| pr.state == PrState::Open),
+                    None => {
+                        if edited.is_ok() {
+                            edit_cached_pr(cache, &item.id, |pr| {
+                                short.clone_into(&mut pr.base_ref_name)
+                            });
+                            let _ = self.runtime.events.send(RuntimeEvent::PrStatusChanged {
+                                workstream_id: item.id.clone(),
+                                observed_pr_changed: false,
+                            });
+                        }
+                        true
+                    }
+                };
                 if let Err(e) = edited {
-                    if fresh.known().is_some_and(|pr| pr.state == PrState::Open) {
+                    if still_open {
                         return Err(e);
                     }
                 }
@@ -691,13 +716,22 @@ impl WorkstreamService<'_> {
         }
 
         let events = self.runtime.events.clone();
+        let kick = self.runtime.watchers.pr_kick.clone();
         let watched = workstream_id.to_string();
         blocking(move || {
             let git_dir = crate::gitops::git_dir(&path).unwrap_or_else(|| path.join(".git"));
+            let head = std::sync::Mutex::new(crate::gitops::linked_head_branch(&path));
+            let worktree = path.clone();
             crate::index::watcher::watch_worktree(
                 &path,
                 &git_dir,
                 Box::new(move || {
+                    let now = crate::gitops::linked_head_branch(&worktree);
+                    let mut seen = head.lock().unwrap_or_else(PoisonError::into_inner);
+                    if now.is_some() && *seen != now {
+                        kick.kick(&watched);
+                    }
+                    *seen = now;
                     let _ = events.send(RuntimeEvent::WorktreeChanged {
                         workstream_id: watched.clone(),
                     });
@@ -820,8 +854,12 @@ impl WorkstreamService<'_> {
     pub async fn pr_status(&self, req: WorkstreamPrStatusRequest) -> Result<WorkstreamPrStatus> {
         ensure_running(self.runtime)?;
         let item = self.find(&req.id).await?;
-        let pr_ref = current_pr_ref(&item).unwrap_or_else(|| pr_lookup_ref(&item));
-        match cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref) {
+        let cache = &self.runtime.watchers.pr_cache;
+        let Some(pr_ref) = current_pr_ref(&item) else {
+            return Ok(cached_lookup_any_ref(cache, &item.id)
+                .map_or(PrLookup::Unknown, |(_, lookup)| lookup));
+        };
+        match cached_lookup(cache, &item.id, &pr_ref) {
             Some(PrLookup::Found { pr }) if !moved_past(&item, &pr_ref, &pr) => {
                 Ok(PrLookup::Found { pr })
             }
@@ -843,25 +881,46 @@ impl WorkstreamService<'_> {
                 last: last_from_row(item, pr_ref),
             },
         };
-        match store_lookup(
+        let Some((stored, changed)) = store_lookup(
             &watchers.pr_cache,
             &item.id,
             pr_ref,
             next.clone(),
             true,
             started,
-        ) {
-            Some((stored, changed)) => {
-                if changed {
-                    let _ = self.runtime.events.send(RuntimeEvent::PrStatusChanged {
-                        workstream_id: item.id.clone(),
-                        observed_pr_changed: false,
-                    });
-                }
-                stored
+        ) else {
+            return cached_lookup(&watchers.pr_cache, &item.id, pr_ref).unwrap_or(next);
+        };
+        let recorded = match &stored {
+            PrLookup::Found { pr }
+                if pr.state == PrState::Open && item.observed_ref.as_deref() != Some(pr_ref) =>
+            {
+                self.record_open_pr(item, pr_ref, pr).await
             }
-            None => cached_lookup(&watchers.pr_cache, &item.id, pr_ref).unwrap_or(next),
+            _ => false,
+        };
+        if changed || recorded {
+            let _ = self.runtime.events.send(RuntimeEvent::PrStatusChanged {
+                workstream_id: item.id.clone(),
+                observed_pr_changed: recorded,
+            });
         }
+        stored
+    }
+
+    async fn record_open_pr(&self, item: &Workstream, pr_ref: &str, pr: &PrStatus) -> bool {
+        let db = self.runtime.db.clone();
+        let (id, pr_ref, head) = (item.id.clone(), pr_ref.to_string(), pr.head_ref_oid.clone());
+        let observed = ObservedPr {
+            number: pr.number,
+            state: pr.state,
+        };
+        blocking(move || db.record_pr_observation(&id, Some(observed), &pr_ref, Some(&head), None))
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("recording {}'s PR failed: {e}", item.id);
+                false
+            })
     }
 
     pub async fn list_bases(&self, project_path: &str) -> Result<WorkstreamBases> {
@@ -1146,17 +1205,25 @@ impl WorkstreamService<'_> {
         let item = self.find(id).await?;
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
         let auto = self.runtime.settings.get().await.git.automerge;
-        let pr_ref = pr_lookup_ref(&item);
+        let pr_ref = current_pr_ref(&item);
+        let target = match &pr_ref {
+            Some(pr_ref) => pr_ref.clone(),
+            None => cached_lookup_any_ref(&self.runtime.watchers.pr_cache, &item.id)
+                .and_then(|(_, lookup)| lookup.known().map(|pr| pr.number.to_string()))
+                .ok_or(CoreError::PrUnknownWhileDetached)?,
+        };
         pr::merge_pr(
             &gh,
             Path::new(&item.worktree_path),
-            &pr_ref,
+            &target,
             method,
             auto,
             &self.runtime.child_env().await,
         )
         .await?;
-        self.lookup_and_store(&item, &pr_ref).await;
+        if let Some(pr_ref) = pr_ref {
+            self.lookup_and_store(&item, &pr_ref).await;
+        }
         Ok(())
     }
 
@@ -1606,10 +1673,10 @@ impl WorkstreamService<'_> {
         self.runtime.scripts.clear_workstream(&id).await;
 
         // After the kills: no agent of this workstream can write a doc past this point.
-        let moved = moved_head(&item);
-        let pr = self
-            .archive_pr_status(&item, moved.clone().unwrap_or_else(|| item.pr_ref()))
-            .await;
+        let (pr_ref, pr) = self
+            .archive_pr_status(&item, moved_head(&item).unwrap_or_else(|| item.pr_ref()))
+            .await
+            .unzip();
         if let Some(status) = &pr {
             doc_status::settle_workstream(
                 self.runtime.db.clone(),
@@ -1655,7 +1722,7 @@ impl WorkstreamService<'_> {
             .delete_branch_on_archive
             && item.app_owns_branch()
             // A PR found on a renamed or switched branch says nothing about the app's branch.
-            && moved.is_none()
+            && pr_ref.is_some_and(|r| r == item.pr_ref())
             && pr.as_ref().is_some_and(|s| s.state == pr::PrState::Merged)
         {
             if let Err(e) = worktree::delete_remote_branch(
@@ -1769,20 +1836,29 @@ impl WorkstreamService<'_> {
         self.find(&id).await
     }
 
-    async fn archive_pr_status(&self, item: &Workstream, pr_ref: String) -> Option<pr::PrStatus> {
+    async fn archive_pr_status(
+        &self,
+        item: &Workstream,
+        pr_ref: String,
+    ) -> Option<(String, pr::PrStatus)> {
         if !has_own_pr(item) {
             return None;
+        }
+        let cache = &self.runtime.watchers.pr_cache;
+        if current_pr_ref(item).is_none() {
+            let (cached_ref, lookup) = cached_lookup_any_ref(cache, &item.id)?;
+            return Some((cached_ref, lookup.known()?.clone()));
         }
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await.ok()?;
         let overlay = self.runtime.child_env().await;
         let budget = &self.runtime.watchers.pr_budget;
-        match workstream_pr(&gh, item, &pr_ref, &overlay, budget, false).await {
+        let pr = match workstream_pr(&gh, item, &pr_ref, &overlay, budget, false).await {
             PrLookup::Failed { .. } => {
-                cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref)
-                    .and_then(|lookup| lookup.known().cloned())
+                cached_lookup(cache, &item.id, &pr_ref).and_then(|lookup| lookup.known().cloned())
             }
             lookup => lookup.known().cloned(),
-        }
+        };
+        pr.map(|pr| (pr_ref, pr))
     }
 
     pub async fn restore(&self, req: RestoreWorkstreamRequest) -> Result<RestoreWorkstreamResult> {

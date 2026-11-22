@@ -399,6 +399,9 @@ pub enum CoreError {
     #[error(fmt = fmt_pr_not_found)]
     PrNotFound { pr_number: u32, detail: String },
 
+    #[error("HEAD is detached and this workstream's PR isn't known yet, so there is nothing to merge. Finish or abort the rebase first.")]
+    PrUnknownWhileDetached,
+
     #[error("No review comment with id {id}")]
     ReviewCommentNotFound { id: String },
 
@@ -911,6 +914,7 @@ impl CoreError {
             CoreError::WorkstreamFolderNoGit => "folder_no_git",
             CoreError::BranchRenameBlocked { .. } => "branch_rename_blocked",
             CoreError::PrNotFound { .. } => "pr_not_found",
+            CoreError::PrUnknownWhileDetached => "pr_unknown_while_detached",
             CoreError::ReviewCommentNotFound { .. } => "review_comment_not_found",
             CoreError::ReviewNoteNotFound { .. } => "review_note_not_found",
             CoreError::ReviewCommentLocked => "review_comment_locked",

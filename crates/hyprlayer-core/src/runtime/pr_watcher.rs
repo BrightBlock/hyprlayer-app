@@ -60,6 +60,20 @@ pub(crate) fn cached_lookup(cache: &PrCache, id: &str, pr_ref: &str) -> Option<P
         .map(|e| e.lookup.clone())
 }
 
+pub(crate) fn cached_lookup_any_ref(cache: &PrCache, id: &str) -> Option<(String, PrLookup)> {
+    let cache = cache.read().unwrap_or_else(PoisonError::into_inner);
+    cache.get(id).map(|e| (e.pr_ref.clone(), e.lookup.clone()))
+}
+
+pub(crate) fn edit_cached_pr(cache: &PrCache, id: &str, edit: impl FnOnce(&mut PrStatus)) {
+    let mut cache = cache.write().unwrap_or_else(PoisonError::into_inner);
+    if let Some(PrLookup::Found { pr } | PrLookup::Failed { last: Some(pr), .. }) =
+        cache.get_mut(id).map(|e| &mut e.lookup)
+    {
+        edit(pr);
+    }
+}
+
 pub(crate) fn store_lookup(
     cache: &PrCache,
     id: &str,
