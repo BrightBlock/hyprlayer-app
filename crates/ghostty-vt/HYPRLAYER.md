@@ -32,7 +32,7 @@ What changed from herdr:
   `history_pushed`, `history_cleared`, `cursor_shape`, `cursor_x`,
   `cursor_visible`, `for_each_row_cell` (a viewport or history row's cells
   with style and link) and a test; `bindings.rs` gains the three data kinds.
-- The vendored tree keeps only what a lib-vt build reads: 508 of its 1,339 files
+- The vendored tree keeps only what a lib-vt build reads: 507 of its 1,339 files
   are gone (19.6 MB down to 15.2 MB), all of them files that no cold
   `zig build -Demit-lib-vt` for x86_64-linux-gnu, aarch64-linux-gnu,
   aarch64-macos or x86_64-windows-msvc opened (watched with inotify). They are
@@ -40,7 +40,9 @@ What changed from herdr:
   shell integration, shaders and GTK UI files, the `+boo` animation frames,
   font and test fixtures, and C headers of the app's libraries. Every `.zig`
   file stays, opened or not, because a build runner on another host can import
-  more of them; so do the licence files and `.gitignore`. Ghostty's own
+  more of them; so do the licence files and `.gitignore`. The watch ran on
+  Linux, so `src/build/libsystem_override.sh`, which only a macOS host runs for
+  a macOS target, was restored by hand. Ghostty's own
   `zig build test-lib-vt` was not run on the trimmed tree and may miss fixtures.
 
 To regenerate `bindings.rs` after a header change, run herdr's command from the
