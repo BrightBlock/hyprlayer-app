@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 use hyprlayer_models::AgentControlLevel;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::RwLock;
 
 use crate::agents::AgentOverlay;
@@ -101,6 +101,11 @@ impl AppSettings {
                 *model = None;
                 changed = true;
             }
+        }
+
+        if self.agent_control.lead.is_none() {
+            self.agent_control.lead = Some(LeadSettings::default());
+            changed = true;
         }
 
         for model in [&mut self.tab_titles.model, &mut self.goals.evaluator_model] {
@@ -226,6 +231,15 @@ pub struct AgentControlSettings {
     pub max_depth: u32,
     pub max_live_children: u32,
     pub max_agent_hops: u32,
+    // `None` only on a save from a desktop that predates the Lead; the store keeps the stored one.
+    #[serde(default)]
+    pub lead: Option<LeadSettings>,
+}
+
+impl AgentControlSettings {
+    pub fn lead(&self) -> LeadSettings {
+        self.lead.clone().unwrap_or_default()
+    }
 }
 
 impl Default for AgentControlSettings {
@@ -235,7 +249,78 @@ impl Default for AgentControlSettings {
             max_depth: 2,
             max_live_children: 4,
             max_agent_hops: 6,
+            lead: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct LeadSettings {
+    pub enabled: bool,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub max_live_children: u32,
+    pub rules: Vec<GuardrailRule>,
+    pub projects: BTreeMap<String, LeadRuleScope>,
+}
+
+impl Default for LeadSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: None,
+            effort: None,
+            max_live_children: 6,
+            rules: crate::lead::default_rules(),
+            projects: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", default)]
+pub struct GuardrailRule {
+    pub id: String,
+    pub title: String,
+    pub text: String,
+    pub enabled: bool,
+}
+
+impl Default for GuardrailRule {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            title: String::new(),
+            text: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum LeadRuleScope {
+    InheritAndFile,
+    #[default]
+    InheritOnly,
+}
+
+// Tolerant, so one unknown scope cannot fail the whole settings file and reset it.
+impl<'de> Deserialize<'de> for LeadRuleScope {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        Ok(match raw.as_str() {
+            Some("inherit_and_file") => Self::InheritAndFile,
+            Some("inherit_only") => Self::InheritOnly,
+            _ => {
+                tracing::warn!("unknown Lead rule scope {raw}; using Inherit only");
+                Self::default()
+            }
+        })
     }
 }
 
@@ -577,8 +662,15 @@ impl SettingsStore {
         Ok(next)
     }
 
-    pub async fn set(&self, settings: AppSettings) -> Result<()> {
-        self.update(|s| *s = settings).await.map(|_| ())
+    pub async fn set(&self, mut settings: AppSettings) -> Result<()> {
+        self.update(|s| {
+            if settings.agent_control.lead.is_none() {
+                settings.agent_control.lead = s.agent_control.lead.take();
+            }
+            *s = settings;
+        })
+        .await
+        .map(|_| ())
     }
 }
 
@@ -680,6 +772,53 @@ mod tests {
             .collect();
         assert_eq!(aside.len(), 1);
         assert_eq!(std::fs::read_to_string(aside[0].path()).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn a_save_without_lead_keeps_the_stored_lead() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load(dir.path().to_path_buf());
+        assert!(store.get().await.agent_control.lead().enabled);
+        store
+            .update(|s| {
+                s.agent_control.lead = Some(LeadSettings {
+                    enabled: false,
+                    ..LeadSettings::default()
+                })
+            })
+            .await
+            .unwrap();
+
+        let from_an_older_desktop: AppSettings = serde_json::from_str(
+            r#"{"agentControl": {"level": "full", "maxDepth": 2, "maxLiveChildren": 4, "maxAgentHops": 6}}"#,
+        )
+        .unwrap();
+        store.set(from_an_older_desktop).await.unwrap();
+
+        let saved = store.get().await.agent_control;
+        assert_eq!(saved.level, AgentControlLevel::Full);
+        assert!(!saved.lead().enabled);
+    }
+
+    #[test]
+    fn an_unknown_lead_scope_loads_as_inherit_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"agentControl": {"lead": {"enabled": false, "projects": {"/a": "inherit_and_file", "/b": "file_only", "/c": 3}}}}"#,
+        )
+        .unwrap();
+
+        let lead = SettingsStore::load(dir.path().to_path_buf())
+            .cache
+            .into_inner()
+            .agent_control
+            .lead();
+
+        assert!(!lead.enabled, "the rest of the file still loads");
+        assert_eq!(lead.projects["/a"], LeadRuleScope::InheritAndFile);
+        assert_eq!(lead.projects["/b"], LeadRuleScope::InheritOnly);
+        assert_eq!(lead.projects["/c"], LeadRuleScope::InheritOnly);
     }
 
     #[tokio::test]

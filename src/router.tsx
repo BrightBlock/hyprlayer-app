@@ -51,6 +51,7 @@ const onboardingRoute = createRoute({
 
 export type SettingsSearch = {
   section?: string;
+  project?: string;
 };
 
 const settingsRoute = createRoute({
@@ -59,6 +60,7 @@ const settingsRoute = createRoute({
   component: Settings,
   validateSearch: (search: Record<string, unknown>): SettingsSearch => ({
     section: optionalString(search.section),
+    project: optionalString(search.project),
   }),
 });
 

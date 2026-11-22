@@ -1,4 +1,10 @@
-import type { AgentControlSettings, AppSettings, GoalSettings } from "@/lib/bindings";
+import type {
+  AgentControlSettings,
+  AppSettings,
+  GoalSettings,
+  GuardrailRule,
+  LeadSettings,
+} from "@/lib/bindings";
 
 // The server's own defaults (crates/hyprlayer-core/src/settings.rs) for slices a fresh profile omits.
 export function quickSettings(s: AppSettings) {
@@ -36,16 +42,43 @@ export function withGoals(s: AppSettings, next: Partial<GoalSettings>): AppSetti
   return { ...s, goals: { ...goalSettings(s), ...next } };
 }
 
-export function agentControlSettings(s: AppSettings): Required<AgentControlSettings> {
+export function agentControlSettings(s: AppSettings) {
   const a = s.agentControl ?? {};
   return {
     level: a.level ?? "read",
     maxDepth: a.maxDepth ?? 2,
     maxLiveChildren: a.maxLiveChildren ?? 4,
     maxAgentHops: a.maxAgentHops ?? 6,
+    lead: a.lead,
   };
 }
 
 export function withAgentControl(s: AppSettings, next: Partial<AgentControlSettings>): AppSettings {
   return { ...s, agentControl: { ...agentControlSettings(s), ...next } };
+}
+
+export type Lead = Required<Omit<LeadSettings, "rules">> & { rules: Required<GuardrailRule>[] };
+
+// `null` when the server predates the Lead: it would drop any change to it.
+export function leadSettings(s: AppSettings): Lead | null {
+  const l = s.agentControl?.lead;
+  if (!l) return null;
+  return {
+    enabled: l.enabled ?? true,
+    model: l.model ?? null,
+    effort: l.effort ?? null,
+    maxLiveChildren: l.maxLiveChildren ?? 6,
+    rules: (l.rules ?? []).map((r) => ({
+      id: r.id ?? "",
+      title: r.title ?? "",
+      text: r.text ?? "",
+      enabled: r.enabled ?? true,
+    })),
+    projects: l.projects ?? {},
+  };
+}
+
+export function withLead(s: AppSettings, next: Partial<Lead>): AppSettings {
+  const lead = leadSettings(s);
+  return lead ? withAgentControl(s, { lead: { ...lead, ...next } }) : s;
 }

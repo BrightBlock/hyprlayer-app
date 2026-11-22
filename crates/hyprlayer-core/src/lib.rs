@@ -43,6 +43,7 @@ pub mod error;
 pub mod gitops;
 pub mod hyprcli;
 pub mod index;
+pub mod lead;
 pub mod omarchy;
 pub mod opencode;
 pub mod pipeline;

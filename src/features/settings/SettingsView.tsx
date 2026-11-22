@@ -20,10 +20,12 @@ import { SettingsNav } from "./SettingsNav";
 export function SettingsView({
   section,
   onSection,
+  project,
   servers,
 }: {
   section: SettingsSection;
   onSection: (section: SettingsSection) => void;
+  project?: string;
   servers: ReactNode;
 }) {
   const bootstrap = useBootstrap();
@@ -35,7 +37,7 @@ export function SettingsView({
       <SettingsNav section={section} onSection={onSection} serverCount={serverCount} />
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[720px] space-y-3.5 px-8 py-6">
-          <SectionBody section={section} servers={servers} bootstrap={bootstrap} />
+          <SectionBody section={section} project={project} servers={servers} bootstrap={bootstrap} />
         </div>
       </div>
     </div>
@@ -44,10 +46,12 @@ export function SettingsView({
 
 function SectionBody({
   section,
+  project,
   servers,
   bootstrap,
 }: {
   section: SettingsSection;
+  project?: string;
   servers: ReactNode;
   bootstrap: ReturnType<typeof useBootstrap>;
 }) {
@@ -69,7 +73,7 @@ function SectionBody({
     case "goals":
       return <GoalsSettings settings={data.settings} />;
     case "agentControl":
-      return <AgentControlSettings settings={data.settings} />;
+      return <AgentControlSettings settings={data.settings} project={project} />;
     case "keyboard":
       return <KeyboardSettings settings={data.settings} />;
     case "advanced":

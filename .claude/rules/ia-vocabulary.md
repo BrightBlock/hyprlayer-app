@@ -27,6 +27,7 @@ enums or raw `string` types** — use the generated binding.
 | `GoalStatus` / `GoalStep` / `GoalPauseReason` / `GoalEndReason` / `GoalSource` | `crates/hyprlayer-models/src/goal.rs` | `lib/domain/goals.ts` |
 | `SessionOrigin` | `crates/hyprlayer-models/src/session.rs` | `lib/domain/agentControl.ts` |
 | `AgentControlLevel` / `PtyAgentState` | `crates/hyprlayer-models/src/agent_control.rs` | `lib/domain/agentControl.ts` |
+| `LeadRuleScope` | `crates/hyprlayer-core/src/settings.rs` | Direct binding via specta |
 
 SQLite columns stay TEXT. Core `parse()` functions do tolerant parsing so legacy
 rows keep loading.

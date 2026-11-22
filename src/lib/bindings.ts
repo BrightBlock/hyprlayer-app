@@ -456,6 +456,7 @@ export type AgentControlSettings = {
 	maxDepth?: number,
 	maxLiveChildren?: number,
 	maxAgentHops?: number,
+	lead?: LeadSettings | null,
 };
 
 export type AgentFile = {
@@ -1235,6 +1236,13 @@ export type GoalStep = "working" | "checking" | "waiting" | "resuming" | "pausin
 
 export type GoalTarget = { kind: "session"; sessionId: string } | { kind: "new_session"; workstreamId: string; stage: Stage; harness?: Harness | null; model?: string | null; effort?: string | null; permissionMode?: PermissionMode | null; attachedDocs?: string[] };
 
+export type GuardrailRule = {
+	id?: string,
+	title?: string,
+	text?: string,
+	enabled?: boolean,
+};
+
 export type Harness = "claude" | "opencode" | "codex";
 
 export type HarnessCounts = {
@@ -1320,6 +1328,17 @@ export type HostsFile = {
 
 export type KeybindingSettings = {
 	overrides?: { [key in string]: string | null },
+};
+
+export type LeadRuleScope = "inherit_and_file" | "inherit_only";
+
+export type LeadSettings = {
+	enabled?: boolean,
+	model?: string | null,
+	effort?: string | null,
+	maxLiveChildren?: number,
+	rules?: GuardrailRule[],
+	projects?: { [key in string]: LeadRuleScope },
 };
 
 export type LinkStatus = "ok" | "unsupported" | "broken";
