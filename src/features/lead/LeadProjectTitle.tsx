@@ -1,14 +1,16 @@
 import type { LeadView, WorkstreamView } from "@/lib/bindings";
-import { LeadMark } from "./LeadChip";
+import { RepoAvatar } from "@/components/RepoAvatar";
 import { useLeadNeedsYou } from "./lead";
 
 export function LeadProjectTitle({
   lead,
   name,
+  source,
   views,
 }: {
   lead: LeadView;
   name: string;
+  source: string | null;
   views: WorkstreamView[];
 }) {
   const needsYou = useLeadNeedsYou(lead, views);
@@ -16,7 +18,7 @@ export function LeadProjectTitle({
   return (
     <>
       <span className="relative flex shrink-0" title={needsYou > 0 ? `Lead · ${needsYou} needs you` : "Lead"}>
-        <LeadMark className="h-[22px] w-[22px]" />
+        <RepoAvatar source={source} name={name} size={22} className="rounded-md" />
         {needsYou > 0 && (
           <span
             aria-hidden="true"

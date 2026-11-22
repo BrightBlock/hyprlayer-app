@@ -1372,6 +1372,7 @@ export function Root() {
                             <LeadProjectTitle
                               lead={lead}
                               name={p.mappedName}
+                              source={p.originUrl}
                               views={projectViews}
                             />
                           ) : (
