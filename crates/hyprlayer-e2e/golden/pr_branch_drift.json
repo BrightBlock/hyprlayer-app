@@ -544,6 +544,29 @@
       "guards": [
         {
           "evidence": {
+            "merged": {
+              "unpushed": 0,
+              "upstream": null
+            },
+            "pruned": {
+              "unpushed": 2,
+              "upstream": null
+            },
+            "pushed": {
+              "unpushed": 0,
+              "upstream": "origin/hyprlayer/squashed-$SUFFIX"
+            }
+          },
+          "guard": "pushed commits are not unpushed; after a squash merge prunes the branch they are, until the merged PR whose head holds them is recorded",
+          "ok": true
+        }
+      ],
+      "step": "a squash-merged branch whose remote branch was pruned has nothing unpushed"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "next": {
               "number": 601,
               "state": "open"
