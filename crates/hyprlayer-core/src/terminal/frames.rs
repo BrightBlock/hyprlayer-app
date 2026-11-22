@@ -59,12 +59,18 @@ impl Frames {
 
     pub fn render(&mut self, t: &Terminal) -> Option<Frame> {
         let model = Model::read(t).ok()?;
+        // A stream's first frame is the screen alone, so a slow link shows it before history.
+        let history_bytes = match self.client.size {
+            None => 0,
+            Some(_) => FRAME_HISTORY_BYTES,
+        };
         let mut out = Out {
             bytes: Vec::new(),
             client: self.client.clone(),
             cols: model.cols,
             height: model.rows,
             changed: false,
+            history_bytes,
         };
         let resized = out.client.size != Some((model.rows, model.cols));
         out.render(t, &model);
@@ -358,6 +364,7 @@ struct Out {
     cols: u16,
     height: u16,
     changed: bool,
+    history_bytes: usize,
 }
 
 impl Out {
@@ -429,7 +436,7 @@ impl Out {
                 list.push(Row::marker(skipped, model.cols));
             }
             let (mut sent, mut text) = (0, 0);
-            while sent < pending && text < FRAME_HISTORY_BYTES {
+            while sent < pending && text < self.history_bytes {
                 let at = model.held - pending + sent;
                 let Ok(row) = read_row(t, RowAt::History(at as u32)) else {
                     sent = pending;
@@ -589,6 +596,7 @@ impl Out {
             cols: self.cols,
             height: self.height,
             changed: true,
+            history_bytes: self.history_bytes,
         }
     }
 

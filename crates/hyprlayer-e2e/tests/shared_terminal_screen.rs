@@ -67,6 +67,7 @@ struct Log {
     gaps: usize,
     paints: u64,
     painted_at: Option<Instant>,
+    paint_log: Vec<(Instant, u64)>,
     arrivals: Vec<(Instant, usize)>,
     tail: Vec<u8>,
     model: Option<Model>,
@@ -80,6 +81,7 @@ impl Log {
         if let Some(paint) = painted_in(&buf, old).filter(|&paint| paint > self.paints) {
             self.paints = paint;
             self.painted_at = Some(Instant::now());
+            self.paint_log.push((Instant::now(), paint));
         }
         self.tail = buf[buf.len().saturating_sub(16)..].to_vec();
     }
@@ -111,6 +113,7 @@ impl RawDesktop {
                 gaps: 0,
                 paints: 0,
                 painted_at: None,
+                paint_log: Vec::new(),
                 arrivals: Vec::new(),
                 tail: Vec::new(),
                 model: None,
@@ -455,7 +458,9 @@ struct FrameLog {
     frames: usize,
     bytes: usize,
     paints: u64,
+    paint_log: Vec<(Instant, u64)>,
     first_frame: Option<(Instant, usize)>,
+    last_frame: Option<Instant>,
 }
 
 /// A desktop as the app is one: it writes each frame into xterm 5.5 and acks it once handed over.
@@ -514,7 +519,11 @@ impl FrameDesktop {
                         log.frames += 1;
                         log.bytes += bytes.len();
                         log.first_frame.get_or_insert((Instant::now(), bytes.len()));
-                        log.paints = log.paints.max(painted_in(&bytes, 0).unwrap_or(0));
+                        log.last_frame = Some(Instant::now());
+                        if let Some(paint) = painted_in(&bytes, 0).filter(|&p| p > log.paints) {
+                            log.paints = paint;
+                            log.paint_log.push((Instant::now(), paint));
+                        }
                         me.xterm.send(json!({ "write": data }));
                         log.history = offset;
                         let client = me.client.clone();
@@ -1083,6 +1092,87 @@ mod baseline {
         (d.as_secs_f64() * 10_000.0).round() / 10.0
     }
 
+    const ECHOES: u64 = 5;
+
+    // Each key repaints the stub's picker once while its load runs.
+    async fn type_during_load(client: &Arc<RpcClient>, terminal: &str) -> Vec<Instant> {
+        let mut typed = Vec::new();
+        for _ in 0..ECHOES {
+            let (client, terminal) = (client.clone(), terminal.to_string());
+            typed.push(Instant::now());
+            tokio::spawn(async move { client.terminal_write(terminal, keystrokes("k")).await });
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        typed
+    }
+
+    fn reached(paint_log: &[(Instant, u64)], paint: u64) -> Option<Instant> {
+        paint_log
+            .iter()
+            .find(|(_, p)| *p >= paint)
+            .map(|(at, _)| *at)
+    }
+
+    fn echo_ms(paint_log: &[(Instant, u64)], before: u64, typed: &[Instant]) -> Vec<Option<f64>> {
+        (1..)
+            .zip(typed)
+            .map(|(k, at)| reached(paint_log, before + k).map(|seen| ms(seen - *at)))
+            .collect()
+    }
+
+    const HISTORY_SHELL: &str = "seq -f 'history line %04g the quick brown fox jumps over the lazy dog 0123456789' 3000; printf '(paint 1)'; exec sleep 600";
+
+    async fn shell_history(server: &Server, shape: &Shape) -> Value {
+        let raw = server.connect_announcing(RAW_DESKTOP).await;
+        let (terminal, stream_id, opened) = raw
+            .spawn_shell_terminal_stream(HISTORY_SHELL.into(), 120, 40)
+            .await
+            .expect("spawn the shell");
+        let observer = RawDesktop::new(raw.clone(), &terminal);
+        observer.watch(opened);
+        let printed = observer.painted(1).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let (client, _link) = linked(server, shape, Features::ALL).await;
+        let c = FrameDesktop::new(client, &terminal);
+        let asked = Instant::now();
+        let (c_stream, _) = c.attach(None).await;
+        let shown = c.painted(1).await;
+        let screen = c
+            .log
+            .lock()
+            .unwrap()
+            .paint_log
+            .first()
+            .map(|(at, _)| ms(*at - asked));
+        let mut last = (c.received(), Instant::now());
+        while last.1.elapsed() < Duration::from_secs(1) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if c.received() != last.0 {
+                last = (c.received(), Instant::now());
+            }
+        }
+        let (first_frame, history_done) = {
+            let log = c.log.lock().unwrap();
+            (log.first_frame, log.last_frame.map(|at| ms(at - asked)))
+        };
+        let history_rows = c.xterm.dump().await["history"]
+            .as_array()
+            .map_or(0, Vec::len);
+        c.leave(c_stream).await;
+        let _ = raw.cancel_stream(stream_id).await;
+        let _ = raw.terminal_close(terminal).await;
+        json!({
+            "printed": printed && shown,
+            "first_frame_ms": first_frame.map(|(at, _)| ms(at - asked)),
+            "first_frame_bytes": first_frame.map(|(_, bytes)| bytes),
+            "screen_ms": screen,
+            "history_done_ms": history_done,
+            "frames": last.0 .0,
+            "bytes": last.0 .1,
+            "history_rows": history_rows,
+        })
+    }
+
     impl RawDesktop {
         fn received(&self) -> (usize, usize) {
             let log = self.log.lock().unwrap();
@@ -1145,16 +1235,20 @@ mod baseline {
         );
 
         let (events_before, _) = desktop.received();
+        let before_load = desktop.paints();
         desktop.send("Y").await;
         let flowing = eventually(WAIT, || desktop.received().0 > events_before).await;
         tokio::time::sleep(Duration::from_millis(500)).await;
         let (events, payload) = desktop.received();
         let (wire, at) = (link.delivered.load(Relaxed), Instant::now());
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        let typed = type_during_load(&client, &terminal).await;
+        tokio::time::sleep(Duration::from_secs(3).saturating_sub(at.elapsed())).await;
         let window = at.elapsed().as_secs_f64();
         let (events_after, payload_after) = desktop.received();
         let wire_after = link.delivered.load(Relaxed);
-        let loaded = desktop.painted(4).await;
+        let loaded_paint = before_load + ECHOES + 1;
+        let loaded = desktop.painted(loaded_paint).await;
+        let echo = echo_ms(&desktop.log.lock().unwrap().paint_log, before_load, &typed);
         j.guard(
             "the yes-like load streams for its window",
             flowing && loaded && events_after > events,
@@ -1165,7 +1259,7 @@ mod baseline {
         let watcher = RawDesktop::new(watcher_client, &terminal);
         let asked = Instant::now();
         let (watcher_stream, _) = watcher.attach(None).await;
-        let replayed = watcher.painted(4).await;
+        let replayed = watcher.painted(loaded_paint).await;
         let (first_output, full_screen) = {
             let log = watcher.log.lock().unwrap();
             (
@@ -1183,7 +1277,7 @@ mod baseline {
 
         let (ticks, started) = (cpu_ticks(pid), Instant::now());
         desktop.send("R").await;
-        let repainted = desktop.painted(4 + REPAINTS).await;
+        let repainted = desktop.painted(loaded_paint + REPAINTS).await;
         let (wall, cpu) = (started.elapsed(), cpu_ticks(pid) - ticks);
         j.guard(
             "the scripted repaint finishes",
@@ -1228,6 +1322,7 @@ mod baseline {
                 "events_per_s": (events_after - events) as f64 / window,
                 "payload_bytes_per_s": (payload_after - payload) as f64 / window,
                 "wire_bytes_per_s": (wire_after - wire) as f64 / window,
+                "echo_ms": echo,
             },
             "attach": {
                 "first_output_ms": first_output,
@@ -1313,9 +1408,36 @@ mod baseline {
         );
 
         // As the raw run does: the yes-like load, then a second desktop attaches on its own link.
-        let paints = observer.paints();
+        let before_load = observer.paints();
+        let (frames_before, _) = c.received();
         c.send("Y").await;
-        let loaded = observer.painted(paints + 1).await;
+        let flowing = eventually(WAIT, || c.received().0 > frames_before).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let ((frames, payload), wire, at) =
+            (c.received(), link.delivered.load(Relaxed), Instant::now());
+        let typed = type_during_load(&c.client, &terminal).await;
+        tokio::time::sleep(Duration::from_secs(3).saturating_sub(at.elapsed())).await;
+        let window = at.elapsed().as_secs_f64();
+        let ((frames_after, payload_after), wire_after) =
+            (c.received(), link.delivered.load(Relaxed));
+        let loaded_paint = before_load + ECHOES + 1;
+        let loaded = observer.painted(loaded_paint).await && c.painted(loaded_paint).await;
+        let (echo, echo_local, lag) = {
+            let (far, near) = (c.log.lock().unwrap(), observer.log.lock().unwrap());
+            let lag = reached(&far.paint_log, loaded_paint)
+                .zip(reached(&near.paint_log, loaded_paint))
+                .map(|(far, near)| ms(far.saturating_duration_since(near)));
+            (
+                echo_ms(&far.paint_log, before_load, &typed),
+                echo_ms(&near.paint_log, before_load, &typed),
+                lag,
+            )
+        };
+        j.guard(
+            "the yes-like load streams frames for its window",
+            flowing && loaded && frames_after > frames,
+            json!({}),
+        );
         let (watcher_client, _watcher_link) = linked(server, shape, Features::ALL).await;
         let watcher = FrameDesktop::new(watcher_client, &terminal);
         let asked = Instant::now();
@@ -1329,16 +1451,44 @@ mod baseline {
             json!({}),
         );
 
+        let pid = server.pid();
+        let (ticks, started) = (cpu_ticks(pid), Instant::now());
+        c.send("R").await;
+        let repainted = observer.painted(loaded_paint + REPAINTS).await
+            && c.painted(loaded_paint + REPAINTS).await;
+        let (wall, cpu) = (started.elapsed(), cpu_ticks(pid) - ticks);
+        j.guard(
+            "the scripted repaint finishes on the frame client",
+            repainted,
+            json!({ "paints": REPAINTS }),
+        );
+
         c.leave(c_stream).await;
         let _ = raw.cancel_stream(stream_id).await;
         let _ = raw.terminal_close(terminal).await;
         json!({
             "picker_redraw": picker,
             "scroll_60_lines": scroll,
+            "yes_load": {
+                "window_s": window,
+                "frames_per_s": (frames_after - frames) as f64 / window,
+                "payload_bytes_per_s": (payload_after - payload) as f64 / window,
+                "wire_bytes_per_s": (wire_after - wire) as f64 / window,
+                "echo_ms": echo,
+                "echo_local_ms": echo_local,
+                "last_paint_lag_ms": lag,
+            },
             "attach": {
                 "first_frame_ms": first_frame.map(|(at, _)| ms(at - asked)),
                 "first_frame_bytes": first_frame.map(|(_, bytes)| bytes),
             },
+            "scripted_repaint": {
+                "paints": REPAINTS,
+                "wall_ms": ms(wall),
+                "server_cpu_ms": cpu * 1000 / USER_HZ,
+                "server_cpu_pct": (cpu as f64 * 1000.0 / USER_HZ as f64 / wall.as_secs_f64()).round() / 10.0,
+            },
+            "shell_history": shell_history(server, shape).await,
         })
     }
 

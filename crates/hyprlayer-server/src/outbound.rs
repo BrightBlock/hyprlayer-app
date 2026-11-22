@@ -51,7 +51,11 @@ impl Credit {
     }
 
     pub(crate) async fn available(&self) {
-        let _ = self.0.subscribe().wait_for(|left| *left > 0).await;
+        self.at_least(1).await;
+    }
+
+    pub(crate) async fn at_least(&self, bytes: i64) {
+        let _ = self.0.subscribe().wait_for(|left| *left >= bytes).await;
     }
 }
 
@@ -378,6 +382,7 @@ struct Shared {
     /// Wakes the writer.
     wake: Notify,
     gone: Notify,
+    reported: Notify,
 }
 
 #[derive(Clone)]
@@ -397,6 +402,7 @@ impl Outbound {
             calls: Arc::new(Semaphore::new(CALLS_IN_FLIGHT)),
             wake: Notify::new(),
             gone: Notify::new(),
+            reported: Notify::new(),
         }))
     }
 
@@ -553,6 +559,26 @@ impl Outbound {
             link.received(bytes, read, Instant::now());
         }
         self.0.wake.notify_one();
+        self.0.reported.notify_waiters();
+    }
+
+    pub(crate) fn link_written(&self) -> Option<u64> {
+        self.lock().link.as_ref().map(|link| link.written())
+    }
+
+    pub(crate) async fn read_through(&self, offset: u64) {
+        loop {
+            let notified = self.0.reported.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            {
+                let lanes = self.lock();
+                if lanes.closed || lanes.link.as_ref().is_none_or(|l| l.acked() >= offset) {
+                    return;
+                }
+            }
+            notified.await;
+        }
     }
 
     pub fn is_closed(&self) -> bool {
@@ -590,6 +616,7 @@ impl Outbound {
         self.0.calls.close();
         self.0.wake.notify_one();
         self.0.gone.notify_waiters();
+        self.0.reported.notify_waiters();
     }
 
     async fn next(&self) -> Option<Unit> {

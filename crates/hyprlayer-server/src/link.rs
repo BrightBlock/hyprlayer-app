@@ -113,6 +113,14 @@ impl LinkWindow {
         }
     }
 
+    pub(crate) fn written(&self) -> u64 {
+        self.written
+    }
+
+    pub(crate) fn acked(&self) -> u64 {
+        self.acked
+    }
+
     pub(crate) fn has_room(&self) -> bool {
         self.written - self.acked < self.limit()
     }

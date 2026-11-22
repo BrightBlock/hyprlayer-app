@@ -44,6 +44,8 @@ const TERMINAL_READ_BYTES: usize = PART_BYTES - frame::TERMINAL_OUTPUT_HEADER;
 const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// Frames a client that acks may have written to its screen but not yet acked.
 const UNACKED_FRAMES: u64 = 2;
+/// Unread link bytes a new frame may follow, so small frames overlap a round trip.
+const FRAME_LINK_SLACK: u64 = 4 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StreamStartOpts {
@@ -506,6 +508,24 @@ impl StreamTx {
             () = self.outbound.closed() => return None,
         }
         (!self.outbound.is_closed()).then_some(Ready { tx: self })
+    }
+
+    // Waits for the link to read all but the slack of what it held once this stream's queue
+    // drained, other streams' bytes included but not what they write after, so a busy neighbour
+    // delays a frame without starving it.
+    async fn link_read(&self) {
+        let read = async {
+            self.queue.at_least(STREAM_QUEUE_BYTES).await;
+            if let Some(written) = self.outbound.link_written() {
+                self.outbound
+                    .read_through(written.saturating_sub(FRAME_LINK_SLACK))
+                    .await;
+            }
+        };
+        tokio::select! {
+            () = read => {}
+            () = self.outbound.closed() => {}
+        }
     }
 }
 
@@ -1302,6 +1322,11 @@ async fn forward_frames(
             if acks.rx.changed().await.is_err() {
                 break;
             }
+        }
+        // One frame on the link at a time: a slow link then gets the latest screen next,
+        // and nothing else waits behind a queue of frames.
+        if seq > 0 {
+            tx.link_read().await;
         }
         let Some(ready) = tx.ready().await else {
             return "the client stopped reading";

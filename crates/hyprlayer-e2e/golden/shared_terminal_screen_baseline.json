@@ -44,7 +44,19 @@
         },
         {
           "evidence": {},
+          "guard": "the yes-like load streams frames for its window",
+          "ok": true
+        },
+        {
+          "evidence": {},
           "guard": "a desktop attaching after the load gets a frame",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "paints": 580
+          },
+          "guard": "the scripted repaint finishes on the frame client",
           "ok": true
         }
       ],
@@ -93,7 +105,19 @@
         },
         {
           "evidence": {},
+          "guard": "the yes-like load streams frames for its window",
+          "ok": true
+        },
+        {
+          "evidence": {},
           "guard": "a desktop attaching after the load gets a frame",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "paints": 580
+          },
+          "guard": "the scripted repaint finishes on the frame client",
           "ok": true
         }
       ],

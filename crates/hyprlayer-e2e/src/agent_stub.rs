@@ -563,10 +563,17 @@ scroll() {
   i=1; while [ $i -le 60 ]; do printf 'scrolled line %02d · the quick brown fox jumps over the lazy dog\r\n' $i; i=$((i + 1)); done
   paint
 }
+# The load scrolls above the picker, which each key repaints in one write, so echo can be timed.
 load() {
-  printf '\033[%s;1H\033[J' $((rows - 6))
+  printf '\033[1;%sr\033[%s;1H' $((rows - 6)) $((rows - 6))
   yes 'yes-like load 0123456789 abcdefghijklmnopqrstuvwxyz 0123456789' & p=$!
-  sleep 4; kill $p; wait $p 2>/dev/null
+  end=$(($(date +%s) + 5))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    k=$(dd bs=1 count=1 2>/dev/null)
+    [ -z "$k" ] || { drawn=$(paint); n=$((n + 1)); printf '\0337%s\0338' "$drawn"; }
+  done
+  kill $p; wait $p 2>/dev/null
+  printf '\033[r'
   paint
 }
 repaints() { i=0; while [ $i -lt 580 ]; do paint; sleep 0.016; i=$((i + 1)); done; }

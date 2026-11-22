@@ -266,7 +266,26 @@
           "ok": true
         }
       ],
-      "step": "a small call after the link drops its rate still answers in time"
+      "step": "a small call after the link drops its rate still answers in time, beside raw floods"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "every small call after the drop answers in time",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "limit_ms": "$TIME"
+          },
+          "guard": "once the window has cut, small calls land soon",
+          "ok": true
+        }
+      ],
+      "step": "a small call after the link drops its rate still answers in time, beside frame floods"
     }
   ]
 }

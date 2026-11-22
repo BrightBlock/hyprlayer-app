@@ -16,6 +16,7 @@ use hyprlayer_e2e::link::{
     far_phone, far_phone_announcing, phone, uncapped, DEEP_LINK_BYTES, DEEP_UPLINK_BYTES,
 };
 use hyprlayer_e2e::{json, next_output, text, Journey, Sandbox, Server, RAW_DESKTOP};
+use hyprlayer_proto::Features;
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::rpc::WatchedSession;
@@ -970,13 +971,16 @@ async fn transport_fairness() {
         );
     }
 
-    j.step("a small call after the link drops its rate still answers in time");
-    {
-        // ponytail: raw floods. Frame floods hold the link window at its whole target, which
-        // leaves this limit no room; a cap on frames per link lets this step take them.
+    // Raw floods fill the link window, so they test its cut; frames keep one frame on the link.
+    for (floods_of, features, note) in [
+        ("raw", RAW_DESKTOP, "rate_drop"),
+        ("frame", Features::ALL, "rate_drop_frames"),
+    ] {
+        j.step(&format!(
+            "a small call after the link drops its rate still answers in time, beside {floods_of} floods"
+        ));
         let (phone, link) =
-            far_phone_announcing(server.socket(), true, FAR_ONE_WAY, false, Some(RAW_DESKTOP))
-                .await;
+            far_phone_announcing(server.socket(), true, FAR_ONE_WAY, false, Some(features)).await;
         link.down_bps.store(DROP_FROM_BPS, Relaxed);
         // Enough streams that their credit together outruns the window, so the window bounds the wait.
         let mut floods = Vec::new();
@@ -1002,7 +1006,7 @@ async fn transport_fairness() {
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
         j.note(
-            "rate_drop",
+            note,
             json!({
                 "rtt_ms": ms(FAR_ONE_WAY * 2),
                 "from_kib_s": DROP_FROM_BPS / KIB,
@@ -1012,11 +1016,13 @@ async fn transport_fairness() {
                 "small_ms": millis(&small),
             }),
         );
-        j.guard(
-            "the streams used most of the fast link first",
-            fast * 4 >= DROP_FROM_BPS * 3,
-            json!({ "at_least_kib_s": DROP_FROM_BPS * 3 / 4 / KIB }),
-        );
+        if features == RAW_DESKTOP {
+            j.guard(
+                "the streams used most of the fast link first",
+                fast * 4 >= DROP_FROM_BPS * 3,
+                json!({ "at_least_kib_s": DROP_FROM_BPS * 3 / 4 / KIB }),
+            );
+        }
         j.guard(
             "every small call after the drop answers in time",
             within(&small, SMALL_CALL_LIMIT),
