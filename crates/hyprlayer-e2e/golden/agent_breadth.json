@@ -467,6 +467,8 @@
               "liveChildren": 5,
               "projectPath": "$SANDBOX/home/code/demo",
               "projectRules": null,
+              "remoteControl": false,
+              "remoteControlUrl": null,
               "sessionId": "$PROJECT_LEAD",
               "workstreamId": "$MAIN"
             },
