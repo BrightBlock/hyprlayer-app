@@ -17,6 +17,7 @@ use crate::codex::{
     config_sets_developer_instructions, CodexDriver, CollabMode, SpawnConfig as CodexSpawnConfig,
 };
 use crate::error::{CoreError, Result};
+use crate::lead;
 use crate::opencode::runtime::OpenCodeDriver;
 use crate::opencode::support::opencode_model_is_supported;
 use crate::pipeline::{self, Stage};
@@ -79,6 +80,7 @@ pub struct SessionLineage {
     pub parent_session_id: Option<String>,
     /// A spawning terminal and the child's depth; no row can name a terminal, so it is kept in memory.
     pub parent_terminal: Option<(String, u32)>,
+    pub lead: bool,
 }
 
 impl SessionLineage {
@@ -87,14 +89,21 @@ impl SessionLineage {
             origin: SessionOrigin::User,
             parent_session_id: None,
             parent_terminal: None,
+            lead: false,
         }
     }
 
     pub fn goal() -> Self {
         Self {
             origin: SessionOrigin::Goal,
-            parent_session_id: None,
-            parent_terminal: None,
+            ..Self::user()
+        }
+    }
+
+    pub fn lead() -> Self {
+        Self {
+            lead: true,
+            ..Self::user()
         }
     }
 }
@@ -1281,6 +1290,10 @@ impl SessionService<'_> {
                     session.origin = lineage.origin;
                     session.parent_session_id = lineage.parent_session_id;
                 }
+                if lineage.lead {
+                    db.mark_session_lead(&session.id)?;
+                    session.lead = true;
+                }
                 Ok(session)
             })
             .await?
@@ -1710,6 +1723,7 @@ impl SessionService<'_> {
                         launch_mode: Some(policy.permission_mode()),
                         report_only: params.report_only,
                         harness: Some(session.harness),
+                        lead: session.lead,
                     })
                     .await
             }
@@ -1957,13 +1971,18 @@ impl SessionService<'_> {
                     permission_mode,
                     mut allowed_tools,
                     mut disallowed_tools,
-                    agent,
+                    mut agent,
                     review_notes,
                 } = policy
                 else {
                     unreachable!("claude harness yields a claude launch policy")
                 };
                 let settings = self.runtime.settings.get().await;
+                if session.lead {
+                    let lead = settings.agent_control.lead();
+                    let file = lead::rules_in_effect(&lead, project_path);
+                    agent = Some(lead::agent(&lead, file.as_deref()));
+                }
                 let library = &settings.agents;
                 let drafts: Vec<String> = agents::list_agents(
                     Some(std::path::Path::new(project_path)),

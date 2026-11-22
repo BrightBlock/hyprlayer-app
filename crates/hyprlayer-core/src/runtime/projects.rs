@@ -19,6 +19,7 @@ use crate::worktree::seed::{self, SeedReport};
 use crate::worktree::thoughts_links;
 use serde::{Deserialize, Serialize};
 
+use super::workstreams::ArchiveWorkstreamRequest;
 use super::HyprlayerRuntime;
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
@@ -1193,10 +1194,28 @@ impl ProjectService<'_> {
         let active = {
             let key = path.to_string();
             blocking(move || db.list_workstreams(&key, false)).await?
+        };
+        // The sidebar hides main once it holds a Lead, so the Lead's main goes with the project.
+        let mut blocking_count = active.len();
+        if let Some(main) = active.iter().find(|w| w.is_inplace()) {
+            let sessions = self.runtime.sessions().list(&main.id).await?;
+            if sessions.iter().any(|s| s.lead && s.archived_at.is_none()) {
+                blocking_count -= 1;
+                if blocking_count == 0 {
+                    self.runtime
+                        .workstreams()
+                        .archive(ArchiveWorkstreamRequest {
+                            id: main.id.clone(),
+                            skip_scripts: true,
+                        })
+                        .await?;
+                }
+            }
         }
-        .len();
-        if active > 0 {
-            return Err(CoreError::ActiveWorkstreams { count: active });
+        if blocking_count > 0 {
+            return Err(CoreError::ActiveWorkstreams {
+                count: blocking_count,
+            });
         }
 
         // Before the files go: a git archive is purged from inside the repo.

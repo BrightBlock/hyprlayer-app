@@ -35,6 +35,18 @@ impl AgentControlLevel {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct LeadView {
+    pub project_path: String,
+    pub workstream_id: Option<String>,
+    pub session_id: Option<String>,
+    pub driving: Vec<String>,
+    pub live_children: u32,
+    pub project_rules: Option<String>,
+}
+
 /// The agent a control call speaks for: a composer session or a PTY terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

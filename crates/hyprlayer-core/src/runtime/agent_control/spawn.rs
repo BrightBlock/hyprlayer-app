@@ -169,6 +169,7 @@ impl AgentControlService<'_> {
                 origin: SessionOrigin::Agent,
                 parent_session_id,
                 parent_terminal,
+                lead: false,
             },
             _slot: slot,
         })
@@ -176,20 +177,27 @@ impl AgentControlService<'_> {
 
     async fn admit_child(&self, parent: &AgentCaller, whose: &str) -> Result<OwnedMutexGuard<()>> {
         let slot = self.runtime.agent_spawn_locks.acquire(parent.id()).await;
-        let max = self
-            .runtime
-            .settings
-            .get()
-            .await
-            .agent_control
-            .max_live_children;
+        let control = self.runtime.settings.get().await.agent_control;
+        let lead = control.lead();
+        let (max, which) = if lead.enabled && self.is_lead(parent).await {
+            (lead.max_live_children, "the Lead's Max live children")
+        } else {
+            (control.max_live_children, "the Max live children")
+        };
         let live = self.live_children(parent).await?;
         if live >= max as usize {
             return Err(CoreError::AgentLimitReached {
-                detail: format!("{whose} already has {live} live children, the Max live children"),
+                detail: format!("{whose} already has {live} live children, {which}"),
             });
         }
         Ok(slot)
+    }
+
+    async fn is_lead(&self, caller: &AgentCaller) -> bool {
+        let AgentCaller::Session { session_id } = caller else {
+            return false;
+        };
+        matches!(self.runtime.sessions().get(session_id).await, Ok(Some(session)) if session.lead)
     }
 
     /// A session caller's own stage; a terminal, or an unreadable row, counts as General.

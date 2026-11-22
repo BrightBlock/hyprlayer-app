@@ -687,6 +687,22 @@ isn't in bypass. The PTY agent's first turn is the stage prompt the desktop's ap
 (`pty_first_prompt`), with the header after it and the caller's mode passed explicitly so the
 stage's default mode can't outrank it. `agent_spawn_in_cli` is its E2E scenario.
 
+The Lead Engineer: `message_lead(&str, &str, Option<ClientRef>) -> String` refuses with
+`lead_disabled` when `AgentControlSettings::lead.enabled` is off and `lead_needs_git` for a
+folder project. It adopts the project's active in-place workstream ("main"), or creates one
+titled "Lead Engineer" on the checkout's current branch (`lead_needs_branch` for a detached
+or unborn HEAD), then sends the text to the newest unarchived Lead session there, resuming it
+first, or starts one: General, claude, the Lead's model and effort, row `origin = 'lead'`
+(read back as `origin: User, lead: true`). A Lead launch runs as the inline
+`hyprlayer-lead-engineer` agent (`lead::agent`), whose prompt carries the enabled guardrail
+rules and, under `LeadRuleScope::InheritAndFile`, the body of the project's
+`.claude/agents/lead-engineer.md`, read again at every launch and resume. A Lead's identity is
+`full` unless the level is `off`, and its spawns count against `lead.max_live_children`.
+`list_leads() -> Vec<LeadView>` gives each git project's main, Lead session, live children and
+the workstreams it drives (an unarchived `agent` session whose parent is one of the project's
+Lead sessions). Both RPCs are closed to agents. `ProjectService::remove` archives main first
+when it holds a Lead session and no other workstream is active.
+
 PTY agents: `spawn_pty_agent(&AgentIdentity, SpawnPtyAgentRequest) -> PtyAgent` refuses an
 engine id that is neither configured nor builtin, runs the
 spawn checks (bypass only from a bypass caller), launches through `launch_agent` at 120×32,

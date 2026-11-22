@@ -160,6 +160,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::recap_session,
             commands::sessions::set_session_archived,
             commands::sessions::delete_session,
+            commands::sessions::list_leads,
+            commands::sessions::message_lead,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
             commands::attachments::save_clipboard_image,

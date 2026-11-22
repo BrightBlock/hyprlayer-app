@@ -391,6 +391,7 @@ impl TerminalService<'_> {
                 launch_mode: Some(mode),
                 report_only: false,
                 harness: engines::harness_of(&engine.id),
+                lead: false,
             })
             .await;
         let gate = CodexGateCell::new();

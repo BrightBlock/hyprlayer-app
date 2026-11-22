@@ -7,6 +7,7 @@
 #![cfg(unix)]
 
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
+use hyprlayer_e2e::goal_stub::GOAL_CLAUDE;
 use hyprlayer_e2e::{
     events_until, json, text, Journey, Request, RuntimeEvent, Sandbox, Server, Value,
 };
@@ -14,6 +15,7 @@ use hyprlayer_e2e::{
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn project_management() {
     let sandbox = Sandbox::new();
+    sandbox.stage_tool("claude", GOAL_CLAUDE);
     let first = sandbox.fixture_repo("first", &[("README.md", "# first\n")]);
     let second = sandbox.fixture_repo("second", &[("README.md", "# second\n")]);
     let mut j = Journey::new("project_management", &sandbox);
@@ -340,15 +342,31 @@ async fn project_management() {
         .join(hyprlayer_core::worktree::ARCHIVE_SUBDIR)
         .join(text(&parked, "/item/slug"));
     let parked_on_disk = archive_dir.is_dir();
-    j.call(
-        &client,
-        Request::RemoveProject {
-            path: other_path.clone(),
-            delete_files: false,
-        },
-    )
-    .await
-    .expect("remove_project");
+    let lead = j
+        .call(
+            &client,
+            Request::MessageLead {
+                project_path: other_path.clone(),
+                text: "E2E_LEAD".into(),
+            },
+        )
+        .await
+        .expect("message_lead");
+    j.alias(lead.as_str().unwrap_or_default(), "$LEAD_SESSION");
+    let removed = j
+        .call(
+            &client,
+            Request::RemoveProject {
+                path: other_path.clone(),
+                delete_files: false,
+            },
+        )
+        .await;
+    j.guard(
+        "the Lead's main, its only active workstream, does not block removal",
+        lead.is_string() && removed.is_ok(),
+        json!({ "lead": lead.is_string(), "removed": removed.as_ref().err().map(|e| e.message.clone()) }),
+    );
     let left = j
         .call(&client, Request::GetBootstrap {})
         .await

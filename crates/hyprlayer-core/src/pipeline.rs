@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use hyprlayer_models::goal::{
     GoalCheck, GoalCheckKind, GoalCheckOutcome, GoalCheckResult, GoalSource, GoalSpec,
 };
@@ -151,21 +153,23 @@ const SHIP_TOOLS: [&str; 7] = [
     "Bash(gh:*)",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionAgent {
     pub name: &'static str,
     pub description: &'static str,
-    pub prompt: &'static str,
+    pub prompt: Cow<'static, str>,
 }
 
 pub const SHIP_AGENT: SessionAgent = SessionAgent {
     name: "hyprlayer-ship",
     description: "Commits, pushes, and opens the pull request for one workstream branch.",
-    prompt: "You publish one branch: commit the worktree, push it, open the pull request, \
+    prompt: Cow::Borrowed(
+        "You publish one branch: commit the worktree, push it, open the pull request, \
 then write its description. Nothing else. Do not review, refactor, or fix code on the way \
 through, and do not improvise a PR body when a later step will write it.\n\n\
 The two skills you need (`/commit`, `/describe_pr`) are handed to you as slash commands \
 already expanded into the conversation. You cannot invoke skills yourself and never need to.",
+    ),
 };
 
 pub fn agent_for(stage: Stage) -> Option<SessionAgent> {

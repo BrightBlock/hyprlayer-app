@@ -15,6 +15,7 @@ pub struct AgentIdentity {
     pub report_only: bool,
     /// What the caller runs on: its composer harness, or the harness its PTY engine is.
     pub harness: Option<Harness>,
+    pub lead: bool,
 }
 
 /// Std mutex: `TokenGuard::drop` cannot await.

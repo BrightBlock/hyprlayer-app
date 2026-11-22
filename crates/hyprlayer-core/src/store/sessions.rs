@@ -271,8 +271,19 @@ fn is_working(state: SessionState, last_turn_kind: Option<&str>) -> bool {
     }
 }
 
+const LEAD_ORIGIN: &str = "lead";
+
+pub struct LeadLink {
+    pub id: String,
+    pub workstream_id: String,
+    pub lead: bool,
+    pub spawn_parent: Option<String>,
+    pub started_at: f64,
+}
+
 fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
     let state = SessionState::parse(&row.get::<_, String>("state")?);
+    let origin: String = row.get("origin")?;
     let last_turn_kind: Option<String> = row.get("last_turn_kind")?;
     let goal_brief: Option<String> = row.get("goal_brief")?;
     Ok(Session {
@@ -296,12 +307,14 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         goal: goal_brief
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok()),
-        origin: SessionOrigin::parse(&row.get::<_, String>("origin")?),
+        origin: SessionOrigin::parse(&origin),
         parent_session_id: row.get("parent_session_id")?,
         effort: row.get("effort")?,
         requested_permission_mode: row
             .get::<_, Option<String>>("requested_permission_mode")?
             .and_then(|m| PermissionMode::try_parse(&m)),
+        // A Lead is a user's session; `origin = 'lead'` parses as `User` on an older server too.
+        lead: origin == LEAD_ORIGIN,
     })
 }
 
@@ -366,6 +379,7 @@ impl Db {
             parent_session_id: None,
             effort: None,
             requested_permission_mode: None,
+            lead: false,
         };
         self.with(|conn| {
             conn.execute(
@@ -421,6 +435,29 @@ impl Db {
                 let mut session = row_to_session(row)?;
                 session.preview = user_input(row)?.as_deref().and_then(preview_of);
                 Ok(session)
+            })?;
+            rows.collect()
+        })
+    }
+
+    pub fn lead_links(&self, project_path: &str) -> Result<Vec<LeadLink>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT s.id, s.workstream_id, s.origin, s.parent_session_id, s.started_at
+                   FROM sessions s JOIN workstreams w ON w.id = s.workstream_id
+                  WHERE w.project_path = ?1 AND w.status = 'active' AND s.archived_at IS NULL",
+            )?;
+            let rows = stmt.query_map(params![project_path], |row| {
+                let origin: String = row.get("origin")?;
+                let parent: Option<String> = row.get("parent_session_id")?;
+                Ok(LeadLink {
+                    id: row.get("id")?,
+                    workstream_id: row.get("workstream_id")?,
+                    lead: origin == LEAD_ORIGIN,
+                    spawn_parent: parent
+                        .filter(|_| SessionOrigin::parse(&origin) == SessionOrigin::Agent),
+                    started_at: row.get("started_at")?,
+                })
             })?;
             rows.collect()
         })
@@ -576,6 +613,16 @@ impl Db {
             conn.execute(
                 "UPDATE sessions SET origin = ?2, parent_session_id = ?3 WHERE id = ?1",
                 params![id, origin.as_str(), parent_session_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn mark_session_lead(&self, id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET origin = ?2 WHERE id = ?1",
+                params![id, LEAD_ORIGIN],
             )?;
             Ok(())
         })

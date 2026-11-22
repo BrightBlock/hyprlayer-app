@@ -5,7 +5,7 @@ use std::time::Duration;
 use hyprlayer_core::agent::Harness;
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
 use hyprlayer_core::models::session::{LogCursor, QuestionAnswers, SessionLogEntry};
-use hyprlayer_core::models::{ClientRef, SessionRev, SessionTurns};
+use hyprlayer_core::models::{ClientRef, LeadView, SessionRev, SessionTurns};
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::store::Session;
 use hyprlayer_proto::WireError;
@@ -452,6 +452,26 @@ pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> C
     state
         .client()?
         .delete_session(session_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_leads(state: State<'_, AppState>) -> CmdResult<Vec<LeadView>> {
+    state.client()?.list_leads().await.map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn message_lead(
+    state: State<'_, AppState>,
+    project_path: String,
+    text: String,
+) -> CmdResult<String> {
+    state
+        .client()?
+        .message_lead(project_path, text)
         .await
         .map_err(AppError::from)
 }

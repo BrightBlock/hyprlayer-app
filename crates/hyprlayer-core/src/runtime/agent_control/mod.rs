@@ -2,6 +2,7 @@
 
 pub(crate) mod codex_remote;
 pub mod inject;
+mod leads;
 pub(crate) mod links;
 pub mod pty_agents;
 pub mod pty_controls;
@@ -23,6 +24,7 @@ use hyprlayer_models::{
 use super::attribution::DocWriter;
 use super::HyprlayerRuntime;
 use crate::error::{CoreError, Result};
+use crate::settings::AgentControlSettings;
 use pty_agents::PtySnapshot;
 pub use tokens::{AgentIdentity, AgentTokens, TokenGuard};
 
@@ -51,13 +53,15 @@ pub struct AgentControlEndpoint {
 }
 
 pub fn effective_level(
-    level: AgentControlLevel,
+    control: &AgentControlSettings,
     mode: Option<PermissionMode>,
+    lead: bool,
 ) -> AgentControlLevel {
-    match (level, mode) {
+    match (control.level, mode) {
         (AgentControlLevel::Off, _) => AgentControlLevel::Off,
         // Bypass already removed the human; read-only would only stall it.
         (_, Some(PermissionMode::BypassPermissions)) => AgentControlLevel::Full,
+        _ if lead && control.lead().enabled => AgentControlLevel::Full,
         (level, _) => level,
     }
 }
@@ -91,8 +95,9 @@ impl AgentControlService<'_> {
         identity: AgentIdentity,
     ) -> Option<(Vec<(String, String)>, TokenGuard)> {
         let endpoint = self.runtime.agent_control_endpoint.as_ref()?;
-        let level = self.runtime.settings.get().await.agent_control.level;
-        if effective_level(level, identity.launch_mode) == AgentControlLevel::Off {
+        let control = self.runtime.settings.get().await.agent_control;
+        if effective_level(&control, identity.launch_mode, identity.lead) == AgentControlLevel::Off
+        {
             return None;
         }
         let (caller_key, caller_id) = match &identity.caller {
@@ -185,15 +190,15 @@ impl AgentControlService<'_> {
 
     /// Resolved per call, so a session switched into or out of bypass changes level at once.
     pub async fn level_of(&self, identity: &AgentIdentity) -> AgentControlLevel {
-        let level = self.runtime.settings.get().await.agent_control.level;
-        effective_level(level, self.mode_of(identity).await)
+        let control = self.runtime.settings.get().await.agent_control;
+        effective_level(&control, self.mode_of(identity).await, identity.lead)
     }
 
     /// Mutating verbs: `full`, not report-only, and never a codex session whose MCP calls go unasked.
     pub async fn require_full(&self, identity: &AgentIdentity) -> Result<()> {
         let mode = self.mode_of(identity).await;
-        let level = self.runtime.settings.get().await.agent_control.level;
-        if effective_level(level, mode) != AgentControlLevel::Full {
+        let control = self.runtime.settings.get().await.agent_control;
+        if effective_level(&control, mode, identity.lead) != AgentControlLevel::Full {
             return Err(denied("this needs agent control at Full"));
         }
         if identity.report_only {
@@ -347,12 +352,12 @@ impl AgentControlService<'_> {
 
     pub async fn whoami(&self, identity: &AgentIdentity) -> AgentWhoami {
         let permission_mode = self.mode_of(identity).await;
-        let level = self.runtime.settings.get().await.agent_control.level;
+        let control = self.runtime.settings.get().await.agent_control;
         AgentWhoami {
             caller: identity.caller.clone(),
             workstream_id: identity.workstream_id.clone(),
             project_path: identity.project_path.clone(),
-            level: effective_level(level, permission_mode),
+            level: effective_level(&control, permission_mode, identity.lead),
             permission_mode,
             depth: identity.depth,
             parent: identity.parent.clone(),
@@ -734,5 +739,45 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
     match tokio::task::spawn_blocking(f).await {
         Ok(result) => result,
         Err(join_err) => Err(CoreError::Io(std::io::Error::other(join_err.to_string()))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::LeadSettings;
+
+    fn control(level: AgentControlLevel, lead_enabled: bool) -> AgentControlSettings {
+        AgentControlSettings {
+            level,
+            lead: Some(LeadSettings {
+                enabled: lead_enabled,
+                ..LeadSettings::default()
+            }),
+            ..AgentControlSettings::default()
+        }
+    }
+
+    #[test]
+    fn a_lead_is_full_while_the_lead_is_on() {
+        let on = control(AgentControlLevel::Read, true);
+        assert_eq!(effective_level(&on, None, true), AgentControlLevel::Full);
+        assert_eq!(effective_level(&on, None, false), AgentControlLevel::Read);
+    }
+
+    #[test]
+    fn a_lead_turned_off_keeps_only_the_access_level() {
+        let off = control(AgentControlLevel::Read, false);
+        assert_eq!(effective_level(&off, None, true), AgentControlLevel::Read);
+        assert_eq!(
+            effective_level(&off, Some(PermissionMode::Default), true),
+            AgentControlLevel::Read
+        );
+    }
+
+    #[test]
+    fn access_off_wins_over_a_lead() {
+        let none = control(AgentControlLevel::Off, true);
+        assert_eq!(effective_level(&none, None, true), AgentControlLevel::Off);
     }
 }

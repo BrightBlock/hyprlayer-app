@@ -95,9 +95,9 @@ use hyprlayer_core::{
 };
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer,
-    ClaudeWorktreeEvent, ClientRef, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime,
-    SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent,
-    TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
+    ClaudeWorktreeEvent, ClientRef, LeadView, PtyAgent, PtyControlOutcome, RevealTarget,
+    ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
+    SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -2990,6 +2990,18 @@ impl Dispatch for Server {
             ),
         }
         launched.wire()
+    }
+
+    async fn list_leads(&self) -> Result<Vec<LeadView>, WireError> {
+        self.runtime.agent_control().list_leads().await.wire()
+    }
+
+    async fn message_lead(&self, project_path: String, text: String) -> Result<String, WireError> {
+        self.runtime
+            .agent_control()
+            .message_lead(&project_path, &text, self.caller())
+            .await
+            .wire()
     }
 }
 

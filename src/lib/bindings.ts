@@ -161,6 +161,8 @@ export const commands = {
 	recapSession: (sessionId: string) => typedError<string | null, AppError>(__TAURI_INVOKE("recap_session", { sessionId })),
 	setSessionArchived: (sessionId: string, archived: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_session_archived", { sessionId, archived })),
 	deleteSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_session", { sessionId })),
+	listLeads: () => typedError<LeadView[], AppError>(__TAURI_INVOKE("list_leads")),
+	messageLead: (projectPath: string, text: string) => typedError<string, AppError>(__TAURI_INVOKE("message_lead", { projectPath, text })),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
 	/**  `data` is base64; the server decodes it. */
 	saveAttachment: (workstreamId: string, fileName: string, data: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
@@ -1341,6 +1343,15 @@ export type LeadSettings = {
 	projects?: { [key in string]: LeadRuleScope },
 };
 
+export type LeadView = {
+	projectPath: string,
+	workstreamId: string | null,
+	sessionId: string | null,
+	driving: string[],
+	liveChildren: number,
+	projectRules: string | null,
+};
+
 export type LinkStatus = "ok" | "unsupported" | "broken";
 
 export type LocalServer = {
@@ -1987,6 +1998,7 @@ export type Session = {
 	effort?: string | null,
 	/**  The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own. */
 	requestedPermissionMode?: PermissionMode | null,
+	lead?: boolean,
 };
 
 export type SessionEvent = { kind: "init"; claudeSessionId: string; model: string | null; mcpServers?: string[] | null } | { kind: "userMessage"; text: string; stage: string | null; promptName?: string | null; clientMessageId?: string | null; author?: ClientRef | null } | { kind: "partialText"; text: string; parentId: string | null } | { kind: "assistantText"; text: string; parentId: string | null; injected?: boolean; authRequired?: boolean } | { kind: "thinking"; text: string; parentId: string | null } | { kind: "toolUse"; id: string; name: string; input: string; parentId: string | null } | { kind: "toolResult"; toolUseId: string; content: string; isError: boolean; parentId: string | null } | { kind: "permissionAsk"; requestId: string; toolName: string; input: string; toolUseId?: string | null } | { kind: "questionAsk"; requestId: string; questions: Question[] } | { kind: "permissionResolved"; requestId: string; allow: boolean } | { kind: "questionAnswered"; requestId: string } | { kind: "usage"; contextTokens: number; threadTokens?: number | null } | { kind: "contextWindow"; tokens: number } | { kind: "turnDone"; costUsd: number | null; numTurns: number | null; contextTokens: number | null; turnStatus?: string | null; threadTokens?: number | null } | { kind: "compactBoundary"; trigger: string; preTokens: number | null } | { kind: "commandLifecycle"; commandUuid: string; state: string } | { kind: "backgroundTaskUpdate"; taskId: string; toolUseId: string | null; status: string } | { kind: "permissionModeChanged"; mode: PermissionMode } | { kind: "planModeChanged"; active: boolean } | { kind: "relaunched"; quiet?: boolean } | { kind: "rewound" } | { kind: "protocolError"; detail: string; raw: string } | { kind: "exited"; outcome: ExitOutcome; code: number | null; stderrTail: string };

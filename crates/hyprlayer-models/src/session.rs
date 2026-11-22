@@ -366,6 +366,8 @@ pub struct Session {
     /// The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own.
     #[serde(default)]
     pub requested_permission_mode: Option<PermissionMode>,
+    #[serde(default)]
+    pub lead: bool,
 }
 
 impl Session {
@@ -592,6 +594,7 @@ mod tests {
             parent_session_id: None,
             effort: None,
             requested_permission_mode: None,
+            lead: false,
         };
         let value: serde_json::Value = serde_json::to_value(&session).unwrap();
         assert_eq!(value["claudeSessionId"], "abc");

@@ -6,14 +6,17 @@
 #![cfg(unix)]
 
 use hyprlayer_core::models::AgentControlLevel;
+use hyprlayer_core::settings::LeadRuleScope;
 use hyprlayer_core::{Harness, Stage};
 use hyprlayer_e2e::agent_stub::{
     appears, install, launch_log, launch_pty, lines, run_face, set_engine, set_level, type_line,
-    PTY_CLAUDE, PTY_CODEX,
+    update_settings, PTY_CLAUDE, PTY_CODEX,
 };
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::goal_stub::GOAL_CLAUDE;
-use hyprlayer_e2e::{json, text, wait_for_exit, Journey, Request, Sandbox, Server, Value};
+use hyprlayer_e2e::{
+    eventually, json, text, wait_for_exit, Journey, Request, Sandbox, Server, Value,
+};
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::streams::StreamStartOpts;
 
@@ -107,6 +110,68 @@ async fn agent_skill_plugin() {
         json!({ "handshaken": handshaken, "pluginSkills": roots.contains(&skills_root) }),
     );
 
+    j.step("a Lead launches as its own agent with the enabled guardrails");
+    let rules = std::path::Path::new(&project)
+        .join(".claude")
+        .join("agents");
+    std::fs::create_dir_all(&rules).expect("create the project's agents dir");
+    std::fs::write(
+        rules.join("lead-engineer.md"),
+        "---\nname: lead-engineer\n---\n\nE2E_PROJECT_RULE\n",
+    )
+    .expect("write the project's Lead rules");
+    update_settings(&mut j, &c, |s| {
+        let lead = s.agent_control.lead.get_or_insert_with(Default::default);
+        lead.rules[0].enabled = false;
+        lead.projects
+            .insert(project.clone(), LeadRuleScope::InheritAndFile);
+    })
+    .await;
+    let lead = message_lead(&mut j, &c, &project).await;
+    j.alias(&lead, "$LEAD_SESSION");
+    let first = launches(&sandbox, &lead, 1)
+        .await
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    j.guard(
+        "the launch names the Lead agent, its enabled rules and the project's own file",
+        first.contains("--agent hyprlayer-lead-engineer")
+            && first.contains("Git through git and gh")
+            && !first.contains("Merge only after validation")
+            && first.contains("E2E_PROJECT_RULE"),
+        json!({
+            "agent": first.contains("--agent hyprlayer-lead-engineer"),
+            "enabledRule": first.contains("Git through git and gh"),
+            "disabledRule": first.contains("Merge only after validation"),
+            "projectFile": first.contains("E2E_PROJECT_RULE"),
+        }),
+    );
+    update_settings(&mut j, &c, |s| {
+        s.agent_control
+            .lead
+            .get_or_insert_with(Default::default)
+            .projects
+            .insert(project.clone(), LeadRuleScope::InheritOnly);
+    })
+    .await;
+    kill_and_wait(&mut j, &c, &lead).await;
+    let resumed = message_lead(&mut j, &c, &project).await;
+    let second = launches(&sandbox, &lead, 2).await.pop().unwrap_or_default();
+    j.guard(
+        "under Inherit only the resumed Lead keeps its rules and drops the project's file",
+        resumed == lead
+            && second.contains("--resume")
+            && second.contains("Git through git and gh")
+            && !second.contains("E2E_PROJECT_RULE"),
+        json!({
+            "sameSession": resumed == lead,
+            "resumed": second.contains("--resume"),
+            "enabledRule": second.contains("Git through git and gh"),
+            "projectFile": second.contains("E2E_PROJECT_RULE"),
+        }),
+    );
+
     j.step("off omits the plugin");
     set_level(&mut j, &c, AgentControlLevel::Off).await;
     let composer = composer_claude(&mut j, &c, &sandbox, &ws, "$OFF_CLAUDE_SESSION").await;
@@ -195,6 +260,52 @@ async fn composer_claude(
         .first()
         .map(|line| line.split_whitespace().map(str::to_string).collect())
         .unwrap_or_default()
+}
+
+async fn message_lead(j: &mut Journey, c: &RpcClient, project: &str) -> String {
+    let id = j
+        .call(
+            c,
+            Request::MessageLead {
+                project_path: project.to_string(),
+                text: "E2E_LEAD".into(),
+            },
+        )
+        .await
+        .expect("message_lead");
+    id.as_str().unwrap_or_default().to_string()
+}
+
+async fn launches(sandbox: &Sandbox, session_id: &str, count: usize) -> Vec<String> {
+    let log = sandbox
+        .root
+        .join("goal-control")
+        .join(session_id)
+        .join("argv.log");
+    eventually(IO, || lines(&log).len() >= count).await;
+    lines(&log)
+}
+
+async fn kill_and_wait(j: &mut Journey, c: &RpcClient, session_id: &str) {
+    j.call(
+        c,
+        Request::KillSession {
+            session_id: session_id.to_string(),
+        },
+    )
+    .await
+    .expect("kill_session");
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline {
+        let live = c
+            .list_active_sessions()
+            .await
+            .expect("list_active_sessions");
+        if !live.iter().any(|a| a.session.id == session_id) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }
 
 /// Whether a composer codex session finished its handshake, and the extra skill roots it set.

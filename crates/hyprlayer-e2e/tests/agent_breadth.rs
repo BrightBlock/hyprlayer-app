@@ -909,6 +909,77 @@ async fn agent_breadth() {
         json!({ "reveals": reveals }),
     );
 
+    j.step("a Lead's own live-children limit sits above every agent's");
+    let project_lead = j
+        .call(
+            &c,
+            Request::MessageLead {
+                project_path: project.clone(),
+                text: "E2E_PROJECT_LEAD".into(),
+            },
+        )
+        .await
+        .expect("message_lead");
+    let project_lead = project_lead.as_str().unwrap_or_default().to_string();
+    j.alias(&project_lead, "$PROJECT_LEAD");
+    first_turn_done(&c, &project_lead).await;
+    let mut lead_mcp = McpDriver::start(&env_of(&sandbox, &project_lead).await, false);
+    lead_mcp.initialize("2025-06-18").await;
+    let mut lead_children = Vec::new();
+    for n in 1..=5 {
+        let spawned = lead_mcp
+            .call(
+                "spawn_agent",
+                json!({ "prompt": format!("E2E_LEAD_CHILD_{n}"), "title": format!("Lead child {n}"), "harness": "claude" }),
+            )
+            .await;
+        let id = text(&parsed(&spawned), "/sessionId");
+        j.alias(&id, format!("$LEAD_CHILD_{n}"));
+        lead_children.push((refusal(&spawned), id));
+    }
+    let leads = j.call(&c, Request::ListLeads {}).await.expect("list_leads");
+    let listed = leads
+        .as_array()
+        .and_then(|all| all.iter().find(|l| text(l, "/projectPath") == project))
+        .cloned()
+        .unwrap_or(Value::Null);
+    j.alias(text(&listed, "/workstreamId"), "$MAIN");
+    let mut child_mcp = McpDriver::start(&env_of(&sandbox, &lead_children[0].1).await, false);
+    child_mcp.initialize("2025-06-18").await;
+    let mut grandchildren = Vec::new();
+    for n in 1..=5 {
+        let spawned = child_mcp
+            .call(
+                "spawn_agent",
+                json!({ "prompt": format!("E2E_GRANDCHILD_{n}"), "title": format!("Grandchild {n}"), "harness": "claude" }),
+            )
+            .await;
+        j.alias(
+            text(&parsed(&spawned), "/sessionId"),
+            format!("$GRANDCHILD_{n}"),
+        );
+        grandchildren.push(refusal(&spawned));
+    }
+    j.guard(
+        "with Max live children at 4, the Lead holds 5 live children and lists them",
+        lead_children.iter().all(|(r, _)| r == "ok")
+            && text(&listed, "/sessionId") == project_lead
+            && listed["liveChildren"] == json!(5),
+        json!({
+            "spawns": lead_children.iter().map(|(r, _)| r).collect::<Vec<_>>(),
+            "listed": listed,
+        }),
+    );
+    j.guard(
+        "a caller that is not a Lead is still refused its fifth child",
+        grandchildren[..4].iter().all(|r| r == "ok")
+            && grandchildren[4].starts_with("agent_limit_reached: ")
+            && grandchildren[4].contains("already has 4 live children, the Max live children"),
+        json!({ "spawns": grandchildren }),
+    );
+    drop(child_mcp);
+    drop(lead_mcp);
+
     j.step("shutdown");
     drop(mcp);
     let stopped = server.shutdown(&c).await;
@@ -956,10 +1027,15 @@ async fn start_lead(j: &mut Journey, c: &RpcClient, ws: &str) -> String {
     )
     .await
     .expect("launch_and_converse");
+    first_turn_done(c, &session.id).await;
+    session.id
+}
+
+async fn first_turn_done(c: &RpcClient, session_id: &str) {
     let deadline = tokio::time::Instant::now() + IO;
     while tokio::time::Instant::now() < deadline {
         let log = c
-            .get_session_log(session.id.clone())
+            .get_session_log(session_id.to_string())
             .await
             .expect("get_session_log");
         if log
@@ -970,7 +1046,6 @@ async fn start_lead(j: &mut Journey, c: &RpcClient, ws: &str) -> String {
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    session.id
 }
 
 async fn env_of(sandbox: &Sandbox, session_id: &str) -> Vec<(String, String)> {

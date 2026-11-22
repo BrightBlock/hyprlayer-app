@@ -117,6 +117,15 @@ pub enum CoreError {
     #[error("an agent limit was reached: {detail}")]
     AgentLimitReached { detail: String },
 
+    #[error("The Lead Engineer is off.")]
+    LeadDisabled,
+
+    #[error("{path} is a folder project, so it has no Lead Engineer.")]
+    LeadNeedsGit { path: String },
+
+    #[error("The Lead Engineer runs on a branch, and {path} has a detached or unborn HEAD.")]
+    LeadNeedsBranch { path: String },
+
     #[error("{detail}")]
     WakeInvalid { detail: String },
 
@@ -614,6 +623,14 @@ impl CoreError {
                 "Ask the user to step in, or to raise that limit in Settings → Agent control."
                     .into(),
             ),
+            CoreError::LeadDisabled => Some(
+                "Turn on Start a Lead on every project in Settings → Agent control.".into(),
+            ),
+            CoreError::LeadNeedsGit { .. } => None,
+            CoreError::LeadNeedsBranch { .. } => Some(
+                "Check out a branch that has a commit in the project's folder, then message the Lead again."
+                    .into(),
+            ),
             CoreError::NpmMissing => Some(
                 "Install Node.js (it includes npm) and click Refresh, or install OpenCode with \
                  Scoop (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
@@ -835,6 +852,9 @@ impl CoreError {
             CoreError::AgentControlOff => "agent_control_off",
             CoreError::AgentControlDenied { .. } => "agent_control_denied",
             CoreError::AgentLimitReached { .. } => "agent_limit_reached",
+            CoreError::LeadDisabled => "lead_disabled",
+            CoreError::LeadNeedsGit { .. } => "lead_needs_git",
+            CoreError::LeadNeedsBranch { .. } => "lead_needs_branch",
             CoreError::WakeInvalid { .. } => "invalid_arguments",
             CoreError::PtyControlFailed { .. } => "pty_control_failed",
             CoreError::ApiKeyEmpty => "api_key_empty",

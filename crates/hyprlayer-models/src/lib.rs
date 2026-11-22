@@ -21,7 +21,7 @@ pub mod workstream;
 pub use agent::{Harness, PermissionMode, Stage};
 pub use agent_control::{
     AgentCaller, AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami,
-    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, PrWakeUntil, PtyAgent, PtyAgentContext,
+    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, LeadView, PrWakeUntil, PtyAgent, PtyAgentContext,
     PtyAgentState, PtyAgentStatus, PtyControlOutcome, RevealTarget, SpawnPtyAgentRequest,
     SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
