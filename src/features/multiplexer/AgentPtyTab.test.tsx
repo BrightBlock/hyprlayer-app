@@ -33,6 +33,11 @@ const h = vi.hoisted(() => {
     focus() {}
     bind() {}
     refresh() {}
+    park() {}
+    setTheme() {}
+    setFontSize() {
+      return this.fit();
+    }
     dispose() {}
     onInput() {
       return () => {};
@@ -182,5 +187,23 @@ describe("an agent tab's restart", () => {
     await settle();
     const resumed = h.attaches[h.attaches.length - 1];
     expect([resumed.id, resumed.offset]).toEqual(["t4", 4]);
+  });
+});
+
+describe("an agent tab shown again", () => {
+  it("shows its last screen at once and picks its frames up where it left off", async () => {
+    h.launches.push("t5", "t5");
+    mount("t5");
+    await settle();
+    h.attaches[h.attaches.length - 1].ch.onmessage(frame(1, 120, "\x1bcthe agent's screen"));
+    h.screen!.parse();
+
+    cleanup();
+    mount("t5");
+    expect(h.screen!.shown).toBe("the agent's screen");
+
+    await settle();
+    const resumed = h.attaches[h.attaches.length - 1];
+    expect([resumed.id, resumed.offset]).toEqual(["t5", 120]);
   });
 });

@@ -1040,6 +1040,23 @@ async fn shared_terminal_screen() {
         json!({ "answers": answers }),
     );
 
+    j.step("A reattaches and asks for an agent fit at the size the terminal already has");
+    let paints = a.paints();
+    a.fit(96, 30).await;
+    let fitted = a.painted(paints + 1).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let paints = a.paints();
+    a.client
+        .agent_resize(terminal.clone(), 96, 30)
+        .await
+        .expect("agent_resize");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    j.guard(
+        "the program is not resized, so it does not repaint",
+        fitted && a.paints() == paints,
+        json!({ "repaints": a.paints() - paints }),
+    );
+
     a.leave(a_stream).await;
     let _ = server.client().terminal_close(terminal).await;
     j.finish();

@@ -2194,6 +2194,7 @@ impl Dispatch for Server {
                 cols,
                 rows,
                 viewer: self.viewer(),
+                frames: self.renders_frames(),
             })
             .await
             .wire()

@@ -369,6 +369,18 @@
         }
       ],
       "step": "(g) with nobody watching, the program asks for the theme"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "repaints": 0
+          },
+          "guard": "the program is not resized, so it does not repaint",
+          "ok": true
+        }
+      ],
+      "step": "A reattaches and asks for an agent fit at the size the terminal already has"
     }
   ]
 }

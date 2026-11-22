@@ -141,6 +141,7 @@ pub struct ResizeAgentTerminalRequest {
     pub cols: u16,
     pub rows: u16,
     pub viewer: Option<u64>,
+    pub frames: bool,
 }
 
 pub struct CaptureSessionRequest {
@@ -804,7 +805,9 @@ impl TerminalService<'_> {
             return Ok(());
         };
         let nudge = req.rows.saturating_sub(1).max(2);
-        if nudge != req.rows {
+        // A frame viewer needs no repaint to catch up, and every frame viewer would show the nudge's size.
+        let unchanged = req.frames && session.size() == (req.rows, req.cols);
+        if nudge != req.rows && !unchanged {
             session.fit(req.viewer, req.cols, nudge);
             tokio::time::sleep(Duration::from_millis(30)).await;
         }

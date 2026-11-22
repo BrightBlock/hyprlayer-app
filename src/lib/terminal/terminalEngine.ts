@@ -16,6 +16,7 @@ export type TerminalGrid = { cols: number; rows: number };
 
 export interface TerminalEngine {
   mount(host: HTMLElement): void;
+  park(): void;
   /** Ties the engine to a pty, so what its capped replay lost carries over from earlier engines. */
   bind(terminalId: string): void;
   write(data: Uint8Array | string): void;
@@ -89,6 +90,18 @@ function releaseWebglContext(canvas: HTMLCanvasElement | null): void {
     canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
   } catch {
   }
+}
+
+let lot: HTMLElement | undefined;
+
+// In the viewport: xterm stops drawing a terminal it can't see, and WebKit brings its canvas back empty.
+function parkingLot(): HTMLElement {
+  if (!lot) {
+    lot = document.createElement("div");
+    lot.style.cssText = "position:fixed;inset:0;visibility:hidden;pointer-events:none;overflow:hidden;z-index:-1";
+    document.body.append(lot);
+  }
+  return lot;
 }
 
 // The least scroll from `at` that shows `[start, start + size)` in a view `span` long.
@@ -174,12 +187,18 @@ class XtermEngine implements TerminalEngine {
   mount(host: HTMLElement): void {
     if (!this.term) return;
     this.host = host;
-    this.term.open(host);
     host.addEventListener("scroll", () => {
       // Scroll events arrive late, so one from showCursor can land after the cursor moved on.
       if (host.scrollLeft === this.scrolled[0] && host.scrollTop === this.scrolled[1]) return;
       this.onCursor = this.cursorShown();
     });
+    const opened = this.term.element;
+    if (opened) {
+      host.append(opened);
+      this.refresh();
+      return;
+    }
+    this.term.open(host);
     this.term.onCursorMove(() => this.showCursor());
     this.term.onData(() => {
       this.onCursor = true;
@@ -209,6 +228,11 @@ class XtermEngine implements TerminalEngine {
     } catch (e) {
       log.info("terminal", "WebGL unavailable; using the DOM renderer", e);
     }
+  }
+
+  park(): void {
+    const element = this.term?.element;
+    if (element) parkingLot().append(element);
   }
 
   // The addon's own DOM-renderer restore is gated on `_core._store._isDisposed`,

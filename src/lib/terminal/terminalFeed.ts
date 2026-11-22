@@ -25,7 +25,7 @@ export function resumePoint(ev: Output, length: number): number | undefined {
 /** One view's terminal output across the streams it opens, so a reattach asks only for what follows. */
 export class TerminalFeed {
   /** Where the view's output ends; unset until a server that reports offsets sends some. */
-  private next: number | undefined;
+  next: number | undefined;
   private channels: Channel<TerminalEvent>[] = [];
 
   constructor(

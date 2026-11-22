@@ -34,6 +34,10 @@ import { PtySessionControls, type RelaunchKeep } from "./PtySessionControls";
 
 const CAPTURE_INTERVAL_MS = 1500;
 const CAPTURE_TRIES = 20;
+// A tab shown again paints its last screen while it reattaches, not an empty pane.
+// Each parked one keeps a WebGL context, and WebKit drops the oldest past about 16.
+const PARKED_MAX = 4;
+const parked = new Map<string, { eng: TerminalEngine; next: number | undefined }>();
 
 export function AgentPtyTab({
   workstreamId,
@@ -101,13 +105,22 @@ export function AgentPtyTab({
     const host = hostRef.current;
     if (!host) return;
 
-    const eng = createTerminalEngine({
-      fontSize,
-      fontFamily: monoFontStack(),
-      theme: xtermThemeFromCss(),
-      cursorBlink: engine.id !== "codex",
-    });
+    const parkedId = idRef.current;
+    const spare = parkedId ? parked.get(parkedId) : undefined;
+    if (parkedId) parked.delete(parkedId);
+    const eng =
+      spare?.eng ??
+      createTerminalEngine({
+        fontSize,
+        fontFamily: monoFontStack(),
+        theme: xtermThemeFromCss(),
+        cursorBlink: engine.id !== "codex",
+      });
     eng.mount(host);
+    if (spare) {
+      eng.setTheme(xtermThemeFromCss());
+      eng.setFontSize(fontSize);
+    }
     attachTerminalClipboard(eng);
     engineRef.current = eng;
     let lastGrid = eng.fit();
@@ -132,6 +145,7 @@ export function AgentPtyTab({
       undefined,
       setSizeOwner,
     );
+    feed.next = spare?.next;
     const unsubGone = onAgentTerminalGone(workstreamId, shellId, (id) => {
       if (id === idRef.current) showExited(id);
     });
@@ -185,7 +199,9 @@ export function AgentPtyTab({
       onTerminalId(id);
       eng.bind(id);
 
-      streaming = await unwrap(commands.terminalAttach(id, null, feed.channel())).catch(() => false);
+      const { from, channel } =
+        spare && id === parkedId ? feed.resume() : { from: null, channel: feed.channel() };
+      streaming = await unwrap(commands.terminalAttach(id, from, channel)).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
@@ -305,7 +321,18 @@ export function AgentPtyTab({
       unsubGone();
       offReconnect();
       ro.disconnect();
-      eng.dispose();
+      const id = idRef.current;
+      if (id && exitShownFor !== id) {
+        eng.park();
+        parked.set(id, { eng, next: feed.next });
+        for (const [oldId, old] of parked) {
+          if (parked.size <= PARKED_MAX) break;
+          parked.delete(oldId);
+          old.eng.dispose();
+        }
+      } else {
+        eng.dispose();
+      }
       engineRef.current = null;
       feed.release();
     };
