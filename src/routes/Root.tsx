@@ -70,6 +70,8 @@ import {
   usePinStore,
 } from "@/features/workstreams/pinStore";
 import { nestWorkstreams, useProjectTreeStore } from "@/features/projects/projectTreeStore";
+import { mainHiddenByLead, useLeadViews } from "@/features/lead/lead";
+import { LeadProjectTitle } from "@/features/lead/LeadProjectTitle";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { asLibraryBox, LIBRARY_BOXES } from "@/features/library/libraryBoxes";
 import { LibrarySyncButton } from "@/features/library/LibrarySyncButton";
@@ -463,6 +465,7 @@ export function Root() {
   )?.thoughtsProject;
 
   const allWorkstreams = useAllWorkstreams(projects.length > 0);
+  const leads = useLeadViews();
   const itemsByProject = new Map<string, WorkstreamView[]>();
   for (const view of allWorkstreams.data ?? []) {
     const group = itemsByProject.get(view.item.projectPath) ?? [];
@@ -1285,9 +1288,16 @@ export function Root() {
                 )}
 
                 {orderedProjects.map((p, i) => {
-                  const children = itemsByProject.get(p.path) ?? [];
+                  const lead = leads.get(p.path);
+                  const leadMainId = mainHiddenByLead(lead);
+                  const projectViews = itemsByProject.get(p.path) ?? [];
+                  const children = projectViews.filter(
+                    (v) => v.item.id !== leadMainId,
+                  );
                   const isCurrent = currentProjectPath === p.path;
-                  const projectHighlight = isCurrent && !activeWorkstreamId;
+                  const projectHighlight =
+                    isCurrent &&
+                    (!activeWorkstreamId || activeWorkstreamId === leadMainId);
                   const isProjectCollapsed = collapsedProjectPaths.includes(p.path);
                   const isDragging = projectDrag?.path === p.path;
 
@@ -1358,13 +1368,23 @@ export function Root() {
                           }`}
                           title={`${p.mappedName} · ${p.backendKind}${p.profile ? ` · ${p.profile}` : ""}`}
                         >
-                          <RepoAvatar
-                            source={p.originUrl}
-                            name={p.mappedName}
-                            size={22}
-                            className="rounded-md"
-                          />
-                          <span className="truncate">{p.mappedName}</span>
+                          {lead ? (
+                            <LeadProjectTitle
+                              lead={lead}
+                              name={p.mappedName}
+                              views={projectViews}
+                            />
+                          ) : (
+                            <>
+                              <RepoAvatar
+                                source={p.originUrl}
+                                name={p.mappedName}
+                                size={22}
+                                className="rounded-md"
+                              />
+                              <span className="truncate">{p.mappedName}</span>
+                            </>
+                          )}
                           {!p.existsOnDisk && (
                             <span
                               className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn"

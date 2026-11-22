@@ -1,22 +1,48 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { create } from "zustand";
 
-import { events, type LeadView } from "@/lib/bindings";
+import { events, type LeadView, type WorkstreamView } from "@/lib/bindings";
 import type { EventBridge } from "@/lib/events";
 import { log } from "@/lib/log";
 import { useUiStore } from "@/lib/uiStore";
 import { useActiveSessions, useBootstrap, useLeads } from "@/lib/queries";
+import { useFleet } from "@/features/dashboard/fleet";
 import { isStreamingSession, restoreSessionIfNeeded, resumeSession } from "@/features/session/sessionStore";
 import { leadSettings, type Lead } from "@/features/settings/settingsPatches";
 
 export type ProjectLead = { view: LeadView; settings: Lead };
 
-export function useProjectLead(projectPath: string): ProjectLead | null {
+function useEnabledLeadSettings(): Lead | null {
   const appSettings = useBootstrap().data?.settings;
   const settings = appSettings ? leadSettings(appSettings) : null;
-  const enabled = settings?.enabled === true;
-  const view = useLeads(enabled).data?.find((l) => l.projectPath === projectPath);
-  return enabled && settings && view ? { view, settings } : null;
+  return settings?.enabled ? settings : null;
+}
+
+export function useProjectLead(projectPath: string): ProjectLead | null {
+  const settings = useEnabledLeadSettings();
+  const view = useLeads(settings !== null).data?.find((l) => l.projectPath === projectPath);
+  return settings && view ? { view, settings } : null;
+}
+
+export function useLeadViews(): ReadonlyMap<string, LeadView> {
+  const enabled = useEnabledLeadSettings() !== null;
+  const leads = useLeads(enabled).data;
+  return useMemo(
+    () => new Map<string, LeadView>(enabled && leads ? leads.map((l) => [l.projectPath, l]) : []),
+    [enabled, leads],
+  );
+}
+
+export function mainHiddenByLead(view: LeadView | undefined): string | null {
+  return view?.sessionId ? view.workstreamId : null;
+}
+
+export function useLeadNeedsYou(lead: LeadView, views: WorkstreamView[]): number {
+  const fleet = useFleet(views);
+  const mainId = mainHiddenByLead(lead);
+  return fleet.live.filter(
+    (l) => l.activity === "needs-you" && (l.view.item.id !== mainId || l.sessionId === lead.sessionId),
+  ).length;
 }
 
 // Resuming a session that isn't live relaunches it, so the stream attaches only once the server reports it live.
