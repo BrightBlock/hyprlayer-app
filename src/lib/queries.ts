@@ -677,6 +677,14 @@ export function useMessageLead() {
   });
 }
 
+export function useSetLeadRemoteControl() {
+  return useMutation({
+    mutationFn: ({ projectPath, enabled }: { projectPath: string; enabled: boolean }) =>
+      unwrap(commands.setLeadRemoteControl(projectPath, enabled)),
+    onSettled: () => invalidateLeads(),
+  });
+}
+
 // The event names only the project, so an archive made elsewhere shows as an id that left its list.
 export async function refreshProjectWorkstreams(projectPath: string): Promise<void> {
   const ids = () =>

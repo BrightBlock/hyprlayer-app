@@ -284,6 +284,11 @@ fn parse_control_response(v: &Value) -> ParsedLine {
             payload: resp
                 .and_then(|r| r.get("response"))
                 .cloned()
+                .or_else(|| {
+                    resp?
+                        .get("error")
+                        .map(|e| serde_json::json!({ "error": e }))
+                })
                 .unwrap_or(Value::Null),
         },
         None => ParsedLine::System {

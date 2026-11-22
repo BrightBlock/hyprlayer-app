@@ -163,6 +163,7 @@ export const commands = {
 	deleteSession: (sessionId: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_session", { sessionId })),
 	listLeads: () => typedError<LeadView[], AppError>(__TAURI_INVOKE("list_leads")),
 	messageLead: (projectPath: string, text: string) => typedError<string, AppError>(__TAURI_INVOKE("message_lead", { projectPath, text })),
+	setLeadRemoteControl: (projectPath: string, enabled: boolean) => typedError<LeadView, AppError>(__TAURI_INVOKE("set_lead_remote_control", { projectPath, enabled })),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
 	/**  `data` is base64; the server decodes it. */
 	saveAttachment: (workstreamId: string, fileName: string, data: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
@@ -1344,6 +1345,7 @@ export type LeadSettings = {
 	rules?: GuardrailRule[],
 	projects?: { [key in string]: LeadRuleScope },
 	permissionMode?: LeadPermissionMode,
+	remoteControl?: string[],
 };
 
 export type LeadView = {
@@ -1353,6 +1355,8 @@ export type LeadView = {
 	driving: string[],
 	liveChildren: number,
 	projectRules: string | null,
+	remoteControl: boolean,
+	remoteControlUrl: string | null,
 };
 
 export type LinkStatus = "ok" | "unsupported" | "broken";

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use hyprlayer_models::{AgentControlLevel, PermissionMode};
@@ -269,6 +269,7 @@ pub struct LeadSettings {
     pub projects: BTreeMap<String, LeadRuleScope>,
     // `None` reads as Auto, and on a save from a desktop that predates the field keeps the stored one.
     pub permission_mode: LeadPermissionMode,
+    pub remote_control: BTreeSet<String>,
 }
 
 impl LeadSettings {
@@ -304,6 +305,7 @@ impl Default for LeadSettings {
             rules: crate::lead::default_rules(),
             projects: BTreeMap::new(),
             permission_mode: LeadPermissionMode(None),
+            remote_control: BTreeSet::new(),
         }
     }
 }
@@ -694,6 +696,10 @@ impl SettingsStore {
     pub async fn set(&self, mut settings: AppSettings) -> Result<()> {
         self.update(|s| {
             let stored = s.agent_control.lead.take();
+            // Only `set_lead_remote_control` writes it, so a desktop's stale copy never turns one off.
+            if let (Some(lead), Some(stored)) = (&mut settings.agent_control.lead, &stored) {
+                lead.remote_control = stored.remote_control.clone();
+            }
             match &mut settings.agent_control.lead {
                 None => settings.agent_control.lead = stored,
                 Some(lead) if lead.permission_mode.0.is_none() => {

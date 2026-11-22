@@ -144,6 +144,19 @@ pub trait AgentDriver: Send + Sync {
         Box::pin(async { Err(rewind_unsupported()) })
     }
 
+    fn set_remote_control<'a>(
+        &'a self,
+        _enabled: bool,
+        _name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>>> + Send + 'a>> {
+        Box::pin(async {
+            Err(CoreError::OutputParse {
+                program: "agent".into(),
+                detail: "this harness has no Remote Control".into(),
+            })
+        })
+    }
+
     fn kill(&self);
 
     fn kill_detached(&self);
@@ -201,6 +214,13 @@ impl AgentDriver for ClaudeDriver {
         ordinal: usize,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(self.rewind_to_ordinal(ordinal))
+    }
+    fn set_remote_control<'a>(
+        &'a self,
+        enabled: bool,
+        name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>>> + Send + 'a>> {
+        Box::pin(self.set_remote_control(enabled, name))
     }
     fn kill(&self) {
         self.kill()

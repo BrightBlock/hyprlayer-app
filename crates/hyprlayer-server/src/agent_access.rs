@@ -61,9 +61,9 @@ fn descendant(session_id: &str) -> Access {
 pub(crate) fn access(request: &Request) -> Access {
     match request {
         Request::RemoveProject { .. } => Access::Excluded("it removes a project"),
-        Request::ListLeads { .. } | Request::MessageLead { .. } => {
-            Access::Excluded("the Lead is the user's own")
-        }
+        Request::ListLeads { .. }
+        | Request::MessageLead { .. }
+        | Request::SetLeadRemoteControl { .. } => Access::Excluded("the Lead is the user's own"),
         Request::QueryDocs { .. } => Access::Read(Scope::Filtered),
         Request::GetDoc { id, .. } => Access::Read(Scope::Doc(id.clone())),
         Request::SaveDoc { id, .. } => Access::Full(Scope::WritableDoc(id.clone())),

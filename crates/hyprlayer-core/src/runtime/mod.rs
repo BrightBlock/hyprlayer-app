@@ -150,6 +150,7 @@ pub struct HyprlayerRuntime {
     tasks: AsyncMutex<Vec<TrackedTask>>,
     /// Sessions whose harness the last server run left running; only their next relaunch is announced.
     cut_off: std::sync::Mutex<HashSet<String>>,
+    remote_control_urls: std::sync::Mutex<HashMap<String, String>>,
     _profile_lock: ProfileLock,
 }
 
@@ -344,8 +345,28 @@ impl HyprlayerRuntime {
             coordinator: ShutdownCoordinator::new(),
             tasks: AsyncMutex::new(Vec::new()),
             cut_off: std::sync::Mutex::new(cut_off),
+            remote_control_urls: std::sync::Mutex::default(),
             _profile_lock: profile_lock,
         }))
+    }
+
+    pub(crate) fn remote_control_url(&self, session_id: &str) -> Option<String> {
+        self.remote_control_urls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(session_id)
+            .cloned()
+    }
+
+    fn set_remote_control_url(&self, session_id: &str, url: Option<String>) {
+        let mut urls = self
+            .remote_control_urls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match url {
+            Some(url) => urls.insert(session_id.to_string(), url),
+            None => urls.remove(session_id),
+        };
     }
 
     pub(crate) fn take_cut_off(&self, session_id: &str) -> bool {

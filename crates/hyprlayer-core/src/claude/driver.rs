@@ -49,6 +49,7 @@ pub struct SpawnConfig {
 const STDERR_RING_LINES: usize = 200;
 const EVENT_CHANNEL_CAP: usize = 1024;
 const REWIND_TIMEOUT: Duration = Duration::from_secs(20);
+const REMOTE_CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct RewindOutcome {
@@ -433,6 +434,33 @@ impl ClaudeDriver {
             "set_permission_mode",
             json!({ "mode": permission_mode_flag(mode) }),
         ))
+    }
+
+    pub async fn set_remote_control(&self, enabled: bool, name: &str) -> Result<Option<String>> {
+        let payload = self
+            .control(
+                "remote_control",
+                json!({ "enabled": enabled, "name": name }),
+                REMOTE_CONTROL_TIMEOUT,
+            )
+            .await?;
+        if let Some(error) = payload.get("error").and_then(Value::as_str) {
+            return Err(CoreError::OutputParse {
+                program: "claude".into(),
+                detail: format!("Remote Control: {error}"),
+            });
+        }
+        let url = payload
+            .get("session_url")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if enabled && url.is_none() {
+            return Err(CoreError::OutputParse {
+                program: "claude".into(),
+                detail: "Remote Control started without a session URL".into(),
+            });
+        }
+        Ok(url)
     }
 
     pub async fn rewind_to_ordinal(&self, ordinal: usize) -> Result<()> {

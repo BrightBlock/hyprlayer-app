@@ -3003,6 +3003,18 @@ impl Dispatch for Server {
             .await
             .wire()
     }
+
+    async fn set_lead_remote_control(
+        &self,
+        project_path: String,
+        enabled: bool,
+    ) -> Result<LeadView, WireError> {
+        self.runtime
+            .agent_control()
+            .set_lead_remote_control(&project_path, enabled)
+            .await
+            .wire()
+    }
 }
 
 #[cfg(all(test, unix))]

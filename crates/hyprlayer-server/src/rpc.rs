@@ -276,6 +276,7 @@ hyprlayer_proto::commands! {
     LaunchAndConverse: launch_and_converse(session_id: String) -> ();
     ListLeads: list_leads() -> Vec<LeadView>;
     MessageLead: message_lead(project_path: String, text: String) -> String;
+    SetLeadRemoteControl: set_lead_remote_control(project_path: String, enabled: bool) -> LeadView;
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;
     // Attachment bytes are base64: a JSON number array costs 3.6x on the wire.

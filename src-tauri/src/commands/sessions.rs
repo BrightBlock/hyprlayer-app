@@ -478,6 +478,20 @@ pub async fn message_lead(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn set_lead_remote_control(
+    state: State<'_, AppState>,
+    project_path: String,
+    enabled: bool,
+) -> CmdResult<LeadView> {
+    state
+        .client()?
+        .set_lead_remote_control(project_path, enabled)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn respond_permission(
     state: State<'_, AppState>,
     session_id: String,

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -1846,6 +1846,10 @@ impl SessionService<'_> {
             workflow_bridge::recover_workflow_runs(&self.runtime.db, &session_id, &workflow).await;
         }
 
+        if session.lead {
+            self.restore_remote_control(&session_id, &params.project_path);
+        }
+
         spawn_relay(
             rx,
             ingress,
@@ -1855,6 +1859,51 @@ impl SessionService<'_> {
         );
 
         Ok(driver)
+    }
+
+    fn restore_remote_control(&self, session_id: &str, project_path: &str) {
+        let runtime = self.runtime.handle.clone();
+        let (session_id, project_path) = (session_id.to_string(), project_path.to_string());
+        tokio::spawn(async move {
+            let Some(runtime) = runtime.upgrade() else {
+                return;
+            };
+            let lead = runtime.settings.get().await.agent_control.lead();
+            if !lead.remote_control.contains(&project_path) {
+                return;
+            }
+            let applied = runtime
+                .sessions()
+                .apply_remote_control(&session_id, &project_path, true)
+                .await;
+            if let Err(e) = applied {
+                tracing::warn!("session {session_id}: Remote Control did not start: {e}");
+            }
+            let _ = runtime
+                .events
+                .send(RuntimeEvent::WorkstreamsChanged { project_path });
+        });
+    }
+
+    pub(crate) async fn apply_remote_control(
+        &self,
+        session_id: &str,
+        project_path: &str,
+        enabled: bool,
+    ) -> Result<()> {
+        let Some(driver) = self.live_driver(session_id).await else {
+            return Ok(());
+        };
+        let project = Path::new(project_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| project_path.to_string());
+        let url = driver
+            .set_remote_control(enabled, &format!("{project} Lead"))
+            .await?;
+        self.runtime
+            .set_remote_control_url(session_id, url.filter(|_| enabled));
+        Ok(())
     }
 
     async fn spawn_driver(

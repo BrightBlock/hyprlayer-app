@@ -52,6 +52,7 @@ impl AgentControlService<'_> {
             .max_by(|a, b| a.started_at.total_cmp(&b.started_at))
             .map(|l| l.id.clone());
         let lead = self.runtime.settings.get().await.agent_control.lead();
+        let remote_control = lead.remote_control.contains(&project_path);
         let path = project_path.clone();
         let project_rules = blocking(move || {
             Ok(crate::lead::rules_in_effect(&lead, &path).map(|_| {
@@ -70,6 +71,12 @@ impl AgentControlService<'_> {
             }
             None => 0,
         };
+        let remote_control_url = match &session_id {
+            Some(id) if remote_control && self.runtime.sessions().is_live(id).await => {
+                self.runtime.remote_control_url(id)
+            }
+            _ => None,
+        };
         Ok(LeadView {
             workstream_id: main,
             session_id,
@@ -77,7 +84,41 @@ impl AgentControlService<'_> {
             driving,
             live_children,
             project_rules,
+            remote_control,
+            remote_control_url,
         })
+    }
+
+    pub async fn set_lead_remote_control(
+        &self,
+        project_path: &str,
+        enabled: bool,
+    ) -> Result<LeadView> {
+        let remember = |on: bool| {
+            let path = project_path.to_string();
+            self.runtime.settings.update(move |s| {
+                let mut lead = s.agent_control.lead();
+                if on {
+                    lead.remote_control.insert(path);
+                } else {
+                    lead.remote_control.remove(&path);
+                }
+                s.agent_control.lead = Some(lead);
+            })
+        };
+        remember(enabled).await?;
+        if let Some(id) = self.lead_view(project_path.to_string()).await?.session_id {
+            let applied = self
+                .runtime
+                .sessions()
+                .apply_remote_control(&id, project_path, enabled)
+                .await;
+            if let Err(e) = applied {
+                remember(!enabled).await?;
+                return Err(e);
+            }
+        }
+        self.lead_view(project_path.to_string()).await
     }
 
     pub async fn message_lead(

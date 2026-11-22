@@ -45,6 +45,8 @@ pub struct LeadView {
     pub driving: Vec<String>,
     pub live_children: u32,
     pub project_rules: Option<String>,
+    pub remote_control: bool,
+    pub remote_control_url: Option<String>,
 }
 
 /// The agent a control call speaks for: a composer session or a PTY terminal.

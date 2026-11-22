@@ -162,6 +162,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::sessions::delete_session,
             commands::sessions::list_leads,
             commands::sessions::message_lead,
+            commands::sessions::set_lead_remote_control,
             commands::attachments::import_attachment,
             commands::attachments::save_attachment,
             commands::attachments::save_clipboard_image,

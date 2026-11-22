@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
-import { Button, ErrorNote, Spinner } from "@/components/ui";
-import type { WorkstreamView } from "@/lib/bindings";
+import { Button, ErrorNote, IconButton, Spinner, Toggle } from "@/components/ui";
+import type { LeadView, WorkstreamView } from "@/lib/bindings";
+import { openExternalUrl } from "@/lib/browser";
 import { formatCompactAge } from "@/lib/format";
 import { errorMessage } from "@/lib/ipc";
-import { useMessageLead, useWorkstreamSessions } from "@/lib/queries";
+import { useMessageLead, useSetLeadRemoteControl, useWorkstreamSessions } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useSlowNow } from "@/lib/useSlowNow";
@@ -259,6 +260,7 @@ export function LeadDock({
         </span>
         {working && <Spinner size="xs" />}
       </button>
+      <RemoteControl view={lead.view} />
       {sessionId && (
         <button
           ref={expandedHeader ? undefined : expandControl}
@@ -334,6 +336,58 @@ export function LeadDock({
         </div>
       )}
     </>
+  );
+}
+
+function RemoteControl({ view }: { view: LeadView }) {
+  const set = useSetLeadRemoteControl();
+  const { projectPath, remoteControl, remoteControlUrl: url } = view;
+  const toggle = (enabled: boolean) =>
+    set.mutate(
+      { projectPath, enabled },
+      {
+        onError: (e) =>
+          useToast
+            .getState()
+            .show(`Couldn't turn Remote Control ${enabled ? "on" : "off"}`, errorMessage(e), { tone: "bad" }),
+      },
+    );
+  const copy = (link: string) =>
+    void navigator.clipboard.writeText(link).then(() => useToast.getState().show("Remote Control link copied", link));
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      {remoteControl && url && (
+        <>
+          <button
+            type="button"
+            title={url}
+            onClick={() => void openExternalUrl(url)}
+            className="text-meta text-ink-dim hover:text-ink hover:underline"
+          >
+            Open in Claude
+          </button>
+          <IconButton aria-label="Copy the Remote Control link" title="Copy link" onClick={() => copy(url)} className="h-6 w-6">
+            <Icon name="copy" size="xs" />
+          </IconButton>
+        </>
+      )}
+      {remoteControl && !url && !set.isPending && (
+        <span className="text-meta text-ink-4">Link shows while the Lead runs</span>
+      )}
+      {set.isPending && <Spinner size="xs" />}
+      <Toggle
+        checked={remoteControl}
+        disabled={set.isPending}
+        onChange={toggle}
+        aria-label="Remote Control"
+        className="text-meta text-ink-dim"
+      >
+        <span title="Reach this Lead from the Claude app on your phone. It switches on the running Lead, without a restart.">
+          Remote
+        </span>
+      </Toggle>
+    </span>
   );
 }
 
