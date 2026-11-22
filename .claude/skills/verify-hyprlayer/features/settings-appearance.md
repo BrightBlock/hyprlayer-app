@@ -20,7 +20,7 @@ Settings → Appearance lets the user pick a theme from swatch tiles. It also se
 
 Preconditions:
 
-- Any doctor-passed instance. Appearance renders without a server connection or a seed. <!-- src: src/features/settings/SettingsView.tsx:56 -->
+- Any doctor-passed instance. Appearance renders without a server connection or a seed. <!-- src: src/features/settings/SettingsView.tsx:60 -->
 - Before changing anything, save `localStorage.getItem('hyprlayer:theme')`, `'hyprlayer:appearance'` and `'hyprlayer.terminalFontSize'` to the evidence dir. Restore them at the end through the UI: they outlive cleanup in isolated mode too (see Gotchas). <!-- src: src/lib/theme.ts:94 --> <!-- src: src/lib/appearance.ts:92 -->
 
 - **Open.** Click `All settings` in the popover, then `Appearance` in `nav[aria-label="Settings sections"]`. `location.search` is `?section=appearance`. <!-- src: src/features/settings/SettingsNav.tsx:21 -->

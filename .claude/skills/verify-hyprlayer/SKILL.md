@@ -44,7 +44,7 @@ Pick the mode by what the feature needs:
 ```js
 (async () => { await window.__TAURI__.core.invoke('import_local_folder', { path: '<SEED>', directoryName: null }); location.reload(); })()
 ```
-Then click `a[aria-label^="Home"]`. Don't use `location.replace('/')`: on load the router replays `hyprlayer:last-route`, so `/` lands back on the last route. <!-- src: src/router.tsx:201 -->
+Then click `a[aria-label^="Home"]`. Don't use `location.replace('/')`: on load the router replays `hyprlayer:last-route`, so `/` lands back on the last route. <!-- src: src/router.tsx:203 -->
 Use a non-git folder. A git import runs `thoughts init`, which writes the shared CLI config (see the platform table) that every profile uses.
 
 Teardown is `cleanup` (below).
@@ -66,7 +66,7 @@ It is read-only. It checks that `tauri dev` is alive, that the app binary is thi
 3. Prefer stable handles: `aria-label`s (`Settings`, `Add project`, `New workstream in <project>`, `Server: <name>`, `Open manual checks`), `data-testid`s (`plan-goal-action`, `phase-goal-action`, `criterion-outcome`), dialog titles and placeholders. `webview_interact` with `strategy: "text"` clicks by label, and `right-click` opens context menus.
    - Names repeat across the sidebar, the header breadcrumb, the Files pane and the dashboard (`Verify map seed`, `README.md`, `Agent` vs `Agent 2`), so a text selector often needs `nth`. An XPath scoped by role, such as `//*[@role="tab"][normalize-space()="Agent"]`, is steadier.
    - `strategy: "text"` resolves to the nearest interactive ancestor. Text inside a non-interactive `label` can resolve to a whole dialog and click its center; use an XPath like `//div[@role="dialog"]//label[span[normalize-space()="<text>"]]`.
-   - The rail's Home is `a[aria-label^="Home"]`: its label becomes `Home (Multiplexer mode on)`. <!-- src: src/routes/Root.tsx:1081 -->
+   - The rail's Home is `a[aria-label^="Home"]`: its label becomes `Home (Multiplexer mode on)`. <!-- src: src/routes/Root.tsx:1087 -->
 4. `webview_keyboard type` replaces a controlled input's value (it never appends), so retype to change a field. Enter doesn't submit a form under the bridge, so click the submit button.
    - `press` with `modifiers` reaches `window` keydown handlers: `Meta`+`k` on macOS (`Control`+`k` on Linux) and the keybinding recorder work. A synthetic `contextmenu` dispatched from JS doesn't open the sidebar's row menus; use `webview_interact` `right-click`.
    - It can't empty a field: `press Backspace` doesn't edit the value. Type the next value over it, or, as a seed, set it through the native `value` setter and dispatch `input`.

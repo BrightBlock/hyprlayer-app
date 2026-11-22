@@ -22,7 +22,7 @@ A project's Setup, Run and Archive scripts live in `<project>/.hyprlayer/setting
 
 Preconditions:
 
-- **Isolated** instance seeded with `verify-demo` (non-git) and one folder workstream, opened. Folder mode runs Setup on create; in-place and attached modes don't. <!-- src: crates/hyprlayer-server/src/dispatch.rs:822 -->
+- **Isolated** instance seeded with `verify-demo` (non-git) and one folder workstream, opened. Folder mode runs Setup on create; in-place and attached modes don't. <!-- src: crates/hyprlayer-server/src/dispatch.rs:953 -->
 - `document.hidden === false`.
 - Cost: none. Scripts are plain shell.
 
@@ -39,9 +39,9 @@ Preconditions:
   - `invoke('get_script_runtime', { workstreamId })` has `runTerminalId` set, `port` N, and `statuses[{kind:'run', phase:'running'}]`.
   - `invoke('list_running_scripts')` contains the workstream id.
   - `cat hl-run-proof.txt` reads `port=N`.
-  - The attach replay from [terminal-shell-tab.md](./terminal-shell-tab.md) on `runTerminalId` shows the output. <!-- src: src/lib/bindings.ts:250 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:421 -->
-- **Stop.** Click the split button (now `Stop ⌘R`). `[process exited]` is written, `list_running_scripts` drops the id, and `get_script_runtime` reports `runTerminalId: null` and run `failed` (killed is a non-zero exit). <!-- src: src/features/session/ScriptRunView.tsx:80 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:437 -->
-- **Output kept.** `invoke('get_script_output', { workstreamId, kind: 'run' })` returns the captured text. <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:445 -->
+  - The attach replay from [terminal-shell-tab.md](./terminal-shell-tab.md) on `runTerminalId` shows the output. <!-- src: src/lib/bindings.ts:252 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:421 -->
+- **Stop.** Click the split button (now `Stop ⌘R`). `[process exited]` is written, `list_running_scripts` drops the id, and `get_script_runtime` reports `runTerminalId: null` and run `failed` (killed is a non-zero exit). <!-- src: src/features/session/ScriptRunView.tsx:84 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:438 -->
+- **Output kept.** `invoke('get_script_output', { workstreamId, kind: 'run' })` returns the captured text. <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:446 -->
 - **Clear.** Click `button[aria-label="Clear output"]`. The pane empties, and `get_script_output` returns `null`. <!-- src: src/features/session/ScriptDock.tsx:252 -->
 - **Setup on create.** In Project settings, type `echo setup-ran > hl-setup-proof.txt` into `textarea[aria-label="Setup script"]` and wait for `Saved`. Create a second folder workstream. Open its dock and click the `Setup` tab. <!-- src: src/features/session/ScriptDock.tsx:43 -->
   - The header reads `Passed · ran <time>`, with a check on the tab. <!-- src: src/features/session/ScriptDock.tsx:508 -->
@@ -59,5 +59,5 @@ Preconditions:
 - Saving writes `.hyprlayer/` into `verify-demo`, so the workstream-create recipe's `ls -A` shows more than `README.md` afterwards.
 - Port detection reads only `localhost:`/`127.0.0.1:`/`0.0.0.0:`/`[::1]:`/`[::]:` URLs; `listening on http://[::]:<port>` was detected. A bare `port 5173` doesn't count. <!-- src: crates/hyprlayer-core/src/scripts.rs:25 -->
 - `Open :<port>` calls `openUrl`, which opens the system browser. Don't click it in a run.
-- A Run started before a reload reattaches through `runTerminalId`. If that terminal is gone, the view resets instead of replaying. <!-- src: src/features/session/ScriptRunView.tsx:95 -->
-- Occluded window: `ScriptRunView` waits two frames before `script_run`, so nothing starts while `document.hidden`. <!-- src: src/features/session/ScriptRunView.tsx:101 -->
+- A Run started before a reload reattaches through `runTerminalId`. If that terminal is gone, the view resets instead of replaying. <!-- src: src/features/session/ScriptRunView.tsx:102 -->
+- Occluded window: `ScriptRunView` waits two frames before `script_run`, so nothing starts while `document.hidden`. <!-- src: src/features/session/ScriptRunView.tsx:108 -->

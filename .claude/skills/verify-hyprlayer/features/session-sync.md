@@ -31,8 +31,8 @@ Preconditions:
 - **Guard.** Type a draft into A's composer without sending, then send `Reply with exactly SYNC-B-2` from B. A shows the warning card: `This session moved on from another client`, `<device> added 2 turns while you were drafting.`, `Pull 2 turns`, `Send anyway`. `button[aria-label="Send"]` is `disabled`.
 - **Pull.** Click `Pull 2 turns`. B's turn is in A's transcript, the draft is unchanged, and Send is enabled again.
 - **Read back.** `get_session_log` (`{ sessionId }`) lists each `userMessage` once, in order.
-- **Turn time.** After `Load`, A's activity line times the pulled turn by its rows, from its `userMessage` to its `turnDone` (`createdAt`), not by when A pulled it: a turn of a few seconds reads a few seconds. <!-- src: src/features/session/sessionStore.ts:415 --> <!-- src: src/features/session/transcriptSync.ts:373 -->
-- **B's controls.** B's status bar shows the session's own model, effort and permission mode (`Haiku 5.5`, `Low`, `Accept edits` for a session started so in A), not B's defaults. `list_sessions` carries the mode as `requestedPermissionMode`; null is Auto. <!-- src: src/features/session/SessionChat.tsx:634 --> <!-- src: src/features/session/SessionChat.tsx:663 -->
+- **Turn time.** After `Load`, A's activity line times the pulled turn by its rows, from its `userMessage` to its `turnDone` (`createdAt`), not by when A pulled it: a turn of a few seconds reads a few seconds. <!-- src: src/features/session/sessionStore.ts:416 --> <!-- src: src/features/session/transcriptSync.ts:373 -->
+- **B's controls.** B's status bar shows the session's own model, effort and permission mode (`Haiku 5.5`, `Low`, `Accept edits` for a session started so in A), not B's defaults. `list_sessions` carries the mode as `requestedPermissionMode`; null is Auto. <!-- src: src/features/session/SessionChat.tsx:414 --> <!-- src: src/features/session/SessionChat.tsx:443 -->
 - **Teardown.** `driver_session stop` for B's port, then `verify.sh cleanup <B run-dir>`. It removes only B's profile dir, and A keeps running. Doctor A afterwards.
 - **Proof.** Screenshot A's strip, the guard card and the synced transcript. Save the log.
 
