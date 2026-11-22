@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
 import { Icon } from "@/components/Icon";
@@ -9,13 +9,16 @@ import { useActiveSessions, useArchivedWorkstreams, useBootstrap } from "@/lib/q
 import { useSlowNow } from "@/lib/useSlowNow";
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { useFleet } from "@/features/dashboard/fleet";
+import { setLeadDockExpanded, useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
+import { LeadChip } from "@/features/lead/LeadChip";
+import { LeadDock } from "@/features/lead/LeadDock";
 import { selectAgentTab } from "@/features/search/selectAgentTab";
 import { NoWorktreeBlank } from "./NoWorktreeBlank";
 import { mergedToday, PIPELINE_VIEWS, type PipelineLive } from "./pipeline";
 import { sessionsByWorkstream } from "./pipelineData";
 import { usePipelineViewStore } from "./pipelineViewStore";
 import { PipelineBoard } from "./PipelineBoard";
-import type { PipelineCardHandlers } from "./PipelineCard";
+import { LeadCard, type PipelineCardHandlers } from "./PipelineCard";
 import { PipelineTable } from "./PipelineTable";
 import { PipelineTriage } from "./PipelineTriage";
 
@@ -29,6 +32,7 @@ export function ProjectPipeline({
   onSelect,
   onNew,
   onCardContextMenu,
+  leadChat,
 }: {
   projectPath: string;
   projectName: string;
@@ -37,6 +41,7 @@ export function ProjectPipeline({
   onSelect: (id: string) => void;
   onNew: () => void;
   onCardContextMenu?: (view: WorkstreamView, x: number, y: number) => void;
+  leadChat?: ReactNode;
 }) {
   const now = useSlowNow();
   const view = usePipelineViewStore((s) => s.view);
@@ -45,6 +50,11 @@ export function ProjectPipeline({
   const fleet = useFleet(sorted);
   const active = useActiveSessions(views.length > 0);
   const archived = useArchivedWorkstreams();
+  const lead = useProjectLead(projectPath);
+  const mainId = lead?.view.sessionId ? lead.view.workstreamId : null;
+  const shown = useMemo(() => (mainId ? sorted.filter((v) => v.item.id !== mainId) : sorted), [sorted, mainId]);
+  const driven = useMemo(() => new Set(lead?.view.driving), [lead?.view.driving]);
+  const expanded = useLeadDockExpanded(projectPath) && !!lead?.view.sessionId;
 
   const live = useMemo(
     () =>
@@ -59,64 +69,103 @@ export function ProjectPipeline({
     [archived.data, projectPath, now],
   );
 
+  const openSession = (workstreamId: string, sessionId: string | null) => {
+    onSelect(workstreamId);
+    if (sessionId) void selectAgentTab(workstreamId, sessionId);
+  };
   const handlers: PipelineCardHandlers = {
-    onOpen: (v, sessionId) => {
-      onSelect(v.item.id);
-      if (sessionId) void selectAgentTab(v.item.id, sessionId);
-    },
+    onOpen: (v, sessionId) => openSession(v.item.id, sessionId),
     onContextMenu: onCardContextMenu,
   };
+  const expandLead = () => {
+    if (!lead?.view.sessionId || !lead.view.workstreamId) return;
+    void selectAgentTab(lead.view.workstreamId, lead.view.sessionId);
+    setLeadDockExpanded(projectPath, true);
+  };
+  const dock = lead && (
+    <LeadDock
+      lead={lead}
+      expanded={expanded}
+      chat={leadChat}
+      onExpand={expandLead}
+      onMinimize={() => setLeadDockExpanded(projectPath, false)}
+    />
+  );
+
 
   if (views.length === 0) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-surface">
-        <NoWorktreeBlank projectPath={projectPath} folder={folder} onNew={onNew} onRestore={openArchivedWorktrees} />
+      <div className="relative flex h-full min-h-0 flex-col bg-surface">
+        <div inert={expanded} className="min-h-0 flex-1">
+          <NoWorktreeBlank projectPath={projectPath} folder={folder} onNew={onNew} onRestore={openArchivedWorktrees} />
+        </div>
+        {dock}
       </div>
     );
   }
 
+  const mainView = mainId ? sorted.find((v) => v.item.id === mainId) : undefined;
+  const mainLive = mainId ? live.get(mainId) : undefined;
+  const leadWaiting = mainLive?.activity === "needs-you" && mainLive.sessionId === lead?.view.sessionId;
+  const leadCard =
+    mainView && mainLive && leadWaiting ? (
+      <LeadCard view={mainView} live={mainLive} now={now} handlers={handlers} />
+    ) : null;
+
   const branches = views.filter((v) => !isFolderWorkstream(v)).length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
-      <header className="flex flex-wrap items-center gap-x-3.5 gap-y-2 px-6 pt-[18px] pb-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="text-h2 text-ink">Projects</h1>
-          <ProjectPicker projectPath={projectPath} projectName={projectName} />
-        </div>
-        <SegmentedControl
-          aria-label="Pipeline view"
-          variant="bordered"
-          value={view}
-          options={PIPELINE_VIEWS}
-          onChange={setView}
-        />
-        <Button variant="primary" onClick={onNew}>
-          {!folder && <Icon name="branch" size="sm" />}
-          {folder ? "New session" : "New worktree"}
-        </Button>
-      </header>
-      {view === "board" ? (
-        <PipelineBoard
-          views={sorted}
-          live={live}
-          sessions={sessions}
-          merged={merged}
-          now={now}
-          handlers={handlers}
-          onOpenArchived={openArchivedWorktrees}
-        />
-      ) : view === "triage" ? (
-        <PipelineTriage views={sorted} live={live} sessions={sessions} now={now} handlers={handlers} />
-      ) : (
-        <PipelineTable views={sorted} live={live} sessions={sessions} now={now} handlers={handlers} />
-      )}
-      {!folder && (
-        <p className="flex items-center gap-1.5 px-6 pb-3 font-mono text-meta text-ink-dim">
-          <Icon name="branch" size="xs" />
-          {`${branches} ${branches === 1 ? "branch" : "branches"} active`}
-        </p>
-      )}
+    <div className="relative flex h-full min-h-0 flex-col bg-surface">
+      <div inert={expanded} className="contents">
+        <header className="flex flex-wrap items-center gap-x-3.5 gap-y-2 px-6 pt-[18px] pb-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <h1 className="min-w-0 text-h2 text-ink">
+              <ProjectPicker projectPath={projectPath} projectName={projectName} />
+            </h1>
+            {lead && (
+              <LeadChip
+                driving={lead.view.driving.length}
+                of={views.filter((v) => v.item.id !== lead.view.workstreamId).length}
+              />
+            )}
+          </div>
+          <SegmentedControl
+            aria-label="Pipeline view"
+            variant="bordered"
+            value={view}
+            options={PIPELINE_VIEWS}
+            onChange={setView}
+          />
+          <Button variant="primary" onClick={onNew}>
+            {!folder && <Icon name="branch" size="sm" />}
+            {folder ? "New session" : "New worktree"}
+          </Button>
+        </header>
+        {view === "board" ? (
+          <PipelineBoard
+            views={shown}
+            live={live}
+            sessions={sessions}
+            merged={merged}
+            driven={driven}
+            leadCard={leadCard}
+            now={now}
+            handlers={handlers}
+            onOpenArchived={openArchivedWorktrees}
+          />
+        ) : view === "triage" ? (
+          <PipelineTriage views={shown} live={live} sessions={sessions} now={now} handlers={handlers} />
+        ) : (
+          <PipelineTable views={shown} live={live} sessions={sessions} now={now} handlers={handlers} />
+        )}
+        {!folder && (
+          <p className="flex items-center gap-1.5 px-6 pb-3 font-mono text-meta text-ink-dim">
+            <Icon name="branch" size="xs" />
+            {`${branches} ${branches === 1 ? "branch" : "branches"} active`}
+          </p>
+        )}
+      </div>
+      {dock}
     </div>
   );
 }
@@ -136,14 +185,11 @@ function ProjectPicker({ projectPath, projectName }: { projectPath: string; proj
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-[26px] min-w-0 items-center gap-1.5 rounded-control border border-edge bg-panel px-2 text-ui font-semibold text-ink-2 hover:bg-edge/50"
+        className="-mx-1.5 inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-control px-1.5 hover:bg-edge/50 focus-visible:bg-edge/50"
       >
-        <span className="text-ink-dim">
-          <Icon name="folder" size="xs" />
-        </span>
         <span className="truncate">{projectName}</span>
         <span className="text-ink-dim">
-          <Icon name="chevronDown" size="xs" />
+          <Icon name="chevronDown" size="sm" />
         </span>
       </button>
       <Popover

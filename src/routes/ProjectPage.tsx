@@ -147,6 +147,7 @@ import {
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectPipeline } from "@/features/board/ProjectPipeline";
+import { useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
 import { planGoalTarget, usePlanPath } from "@/features/board/pipelineData";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import {
@@ -328,10 +329,15 @@ export function ProjectPage() {
   const navigate = useNavigate({ from: "/projects/$projectPath" });
 
   const selectedId = search.item;
+  const lead = useProjectLead(projectPath);
+  const leadExpanded = useLeadDockExpanded(projectPath);
 
   const tabsByWs = useWorkstreamTabsStore((s) => s.byWs);
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");
-  const activeView = selectedId ? (views.find((v) => v.item.id === selectedId) ?? null) : null;
+  const leadMainId =
+    selectedId === undefined && leadExpanded && lead?.view.sessionId ? lead.view.workstreamId : null;
+  const shownId = selectedId ?? leadMainId;
+  const activeView = shownId ? (views.find((v) => v.item.id === shownId) ?? null) : null;
   const wsId = activeView?.item.id ?? null;
   const multiplexer = useMultiplexer();
   const dockOpen = useScriptsStore((s) => (wsId ? !!s.dock[wsId]?.open : false));
@@ -1321,6 +1327,7 @@ export function ProjectPage() {
   };
 
   if (showBoard) {
+    const leadShell = leadMainId ? shells.find((s) => s.sessionId === lead?.view.sessionId) : undefined;
     return (
       <>
         <ProjectPipeline
@@ -1333,6 +1340,7 @@ export function ProjectPage() {
           onCardContextMenu={
             folderProject ? undefined : (view, x, y) => setCardMenu({ x, y, view })
           }
+          leadChat={leadShell ? renderPaneContent(leadShell) : null}
         />
         {cardMenu && (
           <ContextMenu position={cardMenu} onClose={() => setCardMenu(null)}>

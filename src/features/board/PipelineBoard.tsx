@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { ArchivedWorkstreamView, WorkstreamView } from "@/lib/bindings";
 import { shortBranch } from "@/lib/domain/projects";
 import { PipelineCard, type PipelineCardHandlers } from "./PipelineCard";
@@ -15,6 +17,8 @@ export function PipelineBoard({
   live,
   sessions,
   merged,
+  driven,
+  leadCard,
   now,
   handlers,
   onOpenArchived,
@@ -23,6 +27,8 @@ export function PipelineBoard({
   live: Map<string, PipelineLive>;
   sessions: Map<string, PipelineSession>;
   merged: ArchivedWorkstreamView[];
+  driven: ReadonlySet<string>;
+  leadCard: ReactNode;
   now: number;
   handlers: PipelineCardHandlers;
   onOpenArchived: () => void;
@@ -42,7 +48,8 @@ export function PipelineBoard({
   return (
     <div className="flex min-h-0 flex-1 gap-3.5 overflow-x-auto px-6 pt-3 pb-5">
       {PIPELINE_COLUMNS.map((col) => {
-        const count = grouped[col.key].length + (col.key === "merged" ? merged.length : 0);
+        const extra = col.key === "merged" ? merged.length : col.key === "waiting" && leadCard ? 1 : 0;
+        const count = grouped[col.key].length + extra;
         return (
           <section key={col.key} aria-label={col.label} className="flex min-w-[200px] flex-1 flex-col">
             <div className="mb-2.5 flex items-center gap-2 px-1">
@@ -55,12 +62,14 @@ export function PipelineBoard({
               <span className={`font-mono text-meta ${col.count}`}>{count}</span>
             </div>
             <div role="list" className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+              {col.key === "waiting" && leadCard && <div role="listitem">{leadCard}</div>}
               {grouped[col.key].map((view) => (
                 <div key={view.item.id} role="listitem">
                   <PipelineCard
                     view={view}
                     live={live.get(view.item.id)}
                     session={sessions.get(view.item.id)}
+                    driven={driven.has(view.item.id)}
                     now={now}
                     handlers={handlers}
                   />

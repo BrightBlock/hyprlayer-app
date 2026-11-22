@@ -12,6 +12,7 @@ import { queryClient } from "./queryClient";
 import { refreshOmarchyTheme } from "./theme";
 import {
   invalidateCliBundleState,
+  invalidateLeads,
   invalidateReview,
   invalidateScriptOutput,
   invalidateScriptRuntime,
@@ -146,6 +147,7 @@ export function attachEventListeners(): () => void {
     events.sessionLifecycle.listen(() => {
       void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });
       void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });
+      invalidateLeads();
     }),
     events.scriptRunChanged.listen((event) => {
       const { workstreamId, kind } = event.payload;

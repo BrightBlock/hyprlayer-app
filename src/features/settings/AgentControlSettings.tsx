@@ -4,10 +4,11 @@ import type { AgentControlSettings as Limits, AppSettings, LeadRuleScope } from 
 import type { AgentControlLevel } from "@/lib/domain/agentControl";
 import { claudeModels, effortsForModel, modelOptions } from "@/lib/domain/models";
 import { basename } from "@/lib/path";
-import { useClaudeProbe, useSetAppSettings } from "@/lib/queries";
+import { useClaudeProbe, useLeads, useSetAppSettings } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
 import { SettingsCard, SettingsCardTitle } from "@/components/SettingsCard";
 import {
+  Badge,
   Button,
   Card,
   DropdownSelect,
@@ -205,7 +206,9 @@ function GuardrailsCard({
   onPatch: (next: Partial<Lead>) => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const scope = (project && lead.projects[project]) || "inherit_only";
+  const leads = [...(useLeads().data ?? [])].sort(
+    (a, b) => Number(b.projectPath === project) - Number(a.projectPath === project),
+  );
   const setRule = (id: string, enabled: boolean) =>
     onPatch({ rules: lead.rules.map((r) => (r.id === id ? { ...r, enabled } : r)) });
 
@@ -253,30 +256,60 @@ function GuardrailsCard({
             }}
           />
         )}
-        {project && (
-          <SettingRow
-            title="This project"
-            control={
-              <DropdownSelect
-                aria-label="This project's guardrails"
-                value={scope}
-                onChange={(v) => {
-                  const next = SCOPES.find((s) => s.value === v);
-                  if (next) onPatch({ projects: { ...lead.projects, [project]: next.value } });
-                }}
-                options={SCOPES}
-                className="w-[140px]"
-              />
-            }
-          >
-            {basename(project)}{" "}
-            {scope === "inherit_only"
-              ? "follows these rules and ignores its own file."
-              : "follows these rules plus its own file, if it has one."}
-          </SettingRow>
-        )}
+        {leads.map((l) => (
+          <ProjectScopeRow
+            key={l.projectPath}
+            path={l.projectPath}
+            scope={lead.projects[l.projectPath] ?? "inherit_only"}
+            rulesFile={l.projectRules}
+            onScope={(scope) => onPatch({ projects: { ...lead.projects, [l.projectPath]: scope } })}
+          />
+        ))}
       </div>
     </SettingsCard>
+  );
+}
+
+function ProjectScopeRow({
+  path,
+  scope,
+  rulesFile,
+  onScope,
+}: {
+  path: string;
+  scope: LeadRuleScope;
+  rulesFile: string | null;
+  onScope: (scope: LeadRuleScope) => void;
+}) {
+  const name = basename(path);
+  return (
+    <SettingRow
+      title={name}
+      control={
+        <DropdownSelect
+          aria-label={`${name} guardrails`}
+          value={scope}
+          onChange={(v) => {
+            const next = SCOPES.find((s) => s.value === v);
+            if (next) onScope(next.value);
+          }}
+          options={SCOPES}
+          className="w-[140px]"
+        />
+      }
+    >
+      {scope === "inherit_only"
+        ? "Follows these rules and ignores its own file."
+        : "Follows these rules plus its own file, if it has one."}
+      {rulesFile && (
+        <span className="mt-1.5 flex min-w-0 items-center gap-2">
+          <Badge tone="warn">Project rules active</Badge>
+          <span className="min-w-0 truncate font-mono text-meta text-ink-dim" title={rulesFile}>
+            {rulesFile.startsWith(`${path}/`) ? rulesFile.slice(path.length + 1) : rulesFile}
+          </span>
+        </span>
+      )}
+    </SettingRow>
   );
 }
 

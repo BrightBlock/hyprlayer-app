@@ -8,6 +8,7 @@ import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
 import { isDetachedHead, isFolderWorkstream, isOffBase, shortBranch } from "@/lib/domain/projects";
 import { stageLabel } from "@/lib/domain/stages";
 import { formatCompactAge, formatCompactCount } from "@/lib/format";
+import { LeadMark } from "@/features/lead/LeadChip";
 import { useSessionStore, useWorkstreamGoal } from "@/features/session/sessionStore";
 import { columnDot, pipelineColumnOf, type PipelineLive, type PipelineSession } from "./pipeline";
 import { usePlanProgress, usePrSummary } from "./pipelineData";
@@ -56,12 +57,14 @@ export function PipelineCard({
   view,
   live,
   session,
+  driven,
   now,
   handlers,
 }: {
   view: WorkstreamView;
   live?: PipelineLive;
   session?: PipelineSession;
+  driven: boolean;
   now: number;
   handlers: PipelineCardHandlers;
 }) {
@@ -93,6 +96,11 @@ export function PipelineCard({
           <ActivityDot activity={live.activity} />
         ) : (
           column !== "planning" && <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${columnDot(column)}`} />
+        )}
+        {driven && (
+          <span title="Driven by the Lead" className="shrink-0 font-mono text-meta text-ink-2">
+            ◎
+          </span>
         )}
         <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{item.title}</span>
         {goal && (
@@ -140,6 +148,48 @@ export function PipelineCard({
           ) : (
             session?.model
           )}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+export function LeadCard({
+  view,
+  live,
+  now,
+  handlers,
+}: {
+  view: WorkstreamView;
+  live: PipelineLive;
+  now: number;
+  handlers: PipelineCardHandlers;
+}) {
+  const since = useAwaitingSince(live);
+  const question = useSessionStore((s) =>
+    live.sessionId ? (s.sessions[live.sessionId]?.pendingQuestion?.questions[0]?.question ?? null) : null,
+  );
+  const line = question ?? live.line;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label="Lead Engineer"
+      {...cardEvents(view, live, handlers)}
+      className="block w-full cursor-pointer rounded-card border border-warn/40 bg-q-chip-bg/40 px-3 py-[11px] text-left shadow-sm transition-colors hover:border-warn/70"
+    >
+      <span className="flex items-center gap-2">
+        <LeadMark className="h-4 w-4" />
+        <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">Lead Engineer</span>
+      </span>
+      {line && <span className="mt-1.5 block text-ui-sm text-ink-dim">{line}</span>}
+      <span className="mt-2 flex min-w-0 items-center gap-2">
+        <span className="rounded-control bg-q-chip-bg px-1.5 py-0.5 font-mono text-meta font-semibold text-q-chip-text">
+          {since !== null ? `Waited ${formatCompactAge(since, now)}` : "Waiting"}
+        </span>
+        <span className="ml-auto shrink-0 font-mono text-meta text-ink-dim">
+          {question ? "answer below ↓" : <span className="font-sans font-semibold text-accent">Answer</span>}
         </span>
       </span>
     </div>

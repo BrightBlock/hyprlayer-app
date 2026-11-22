@@ -603,6 +603,7 @@ export function useSetAppSettings() {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
       void queryClient.invalidateQueries({ queryKey: ["branchPrefixes"] });
+      invalidateLeads();
     },
   });
 }
@@ -653,6 +654,27 @@ export function useDefaultUsername() {
 
 export function invalidateWorkstreamLists() {
   void queryClient.invalidateQueries({ queryKey: ["workstreams"] });
+  invalidateLeads();
+}
+
+export function invalidateLeads() {
+  void queryClient.invalidateQueries({ queryKey: ["leads"] });
+}
+
+export function useLeads(enabled = true) {
+  return useQuery({
+    queryKey: ["leads"],
+    queryFn: () => unwrap(commands.listLeads()),
+    enabled,
+  });
+}
+
+export function useMessageLead() {
+  return useMutation({
+    mutationFn: ({ projectPath, text }: { projectPath: string; text: string }) =>
+      unwrap(commands.messageLead(projectPath, text)),
+    onSuccess: () => invalidateWorkstreamLists(),
+  });
 }
 
 // The event names only the project, so an archive made elsewhere shows as an id that left its list.
@@ -660,6 +682,7 @@ export async function refreshProjectWorkstreams(projectPath: string): Promise<vo
   const ids = () =>
     new Set(queryClient.getQueryData<WorkstreamView[]>(["workstreams", projectPath])?.map((w) => w.item.id));
   const before = ids();
+  invalidateLeads();
   await queryClient.invalidateQueries({ queryKey: ["workstreams"] });
   const after = ids();
   for (const id of before) {

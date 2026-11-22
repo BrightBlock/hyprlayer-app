@@ -34,6 +34,8 @@ export type UiStore = {
   setDiffWidth: (width: number) => void;
   tasksCollapsed: boolean;
   toggleTasks: () => void;
+  leadDockExpanded: string[];
+  setLeadDockExpanded: (projectPath: string, expanded: boolean) => void;
   // Persisted raw; readers resolve it against what the focused session offers.
   asideView: AsideView;
   // True once the person picks an aside view this run; auto-open never overrides that choice.
@@ -81,6 +83,12 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
+      leadDockExpanded: [],
+      setLeadDockExpanded: (projectPath, expanded) =>
+        set((state) => {
+          const others = state.leadDockExpanded.filter((p) => p !== projectPath);
+          return { leadDockExpanded: expanded ? [...others, projectPath] : others };
+        }),
       asideView: "changes",
       asideViewChosen: false,
       setAsideView: (view) => set({ asideView: view, asideViewChosen: true }),
@@ -141,11 +149,13 @@ export const useUiStore = create<UiStore>()(
             typeof p.workshopNavCollapsed === "boolean"
               ? p.workshopNavCollapsed
               : agentsCollapsed === true,
+          leadDockExpanded: Array.isArray(p.leadDockExpanded) ? p.leadDockExpanded : [],
         };
       },
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
+        leadDockExpanded: s.leadDockExpanded,
         asideView: s.asideView,
         docsCollapsed: s.docsCollapsed,
         libraryCollapsed: s.libraryCollapsed,

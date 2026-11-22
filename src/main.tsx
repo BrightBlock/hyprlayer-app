@@ -21,6 +21,7 @@ import {
 } from "./features/session/sessionStore";
 import { goalBridge, reconcileGoalBriefs } from "./features/session/goalBridge";
 import { agentControlBridge, reconcileAgentTabs } from "./features/session/agentControlBridge";
+import { leadNoteBridge } from "./features/lead/lead";
 import { ptyAgentBridge, reconcilePtyAgents } from "./features/multiplexer/ptyAgentBridge";
 import { reconcileAgentTerminals } from "./features/multiplexer/agentRuntime";
 import {
@@ -81,6 +82,7 @@ registerEventBridge(transcriptSyncBridge);
 registerEventBridge(goalBridge);
 registerEventBridge(ptyAgentBridge);
 registerEventBridge(agentControlBridge);
+registerEventBridge(leadNoteBridge);
 // Ahead of the reattach, whose folds ask whether the new connection syncs.
 onServerReconnected(transcriptSyncReconnected);
 onServerReconnected(() => {
