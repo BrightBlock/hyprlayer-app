@@ -278,6 +278,21 @@ describe("GitPanel ahead/behind", () => {
     expect(pullButton()).toBeNull();
   });
 
+  it("offers one Pull when the branch is its own base", () => {
+    renderPanel(
+      { kind: "noPr" },
+      withGit({
+        branch: "main",
+        base: { ahead: 0, behind: 1 },
+        upstream: { name: "origin/main", ahead: 0, behind: 1 },
+        unpushed: 0,
+      }),
+    );
+    expect(screen.getByText("↓1 from origin/main")).toBeTruthy();
+    expect(pullButton()).toBeTruthy();
+    expect(updateFromBase()).toBeNull();
+  });
+
   it("shows a fresh, unpushed branch ahead of main with no Pull", () => {
     renderPanel({ kind: "noPr" }, withGit({ base: { ahead: 1, behind: 0 }, upstream: null }));
     expect(screen.getByTitle("1 commit(s) ahead of main").textContent).toBe("↑1");

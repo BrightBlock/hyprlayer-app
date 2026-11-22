@@ -219,7 +219,10 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
     pull.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.item.id]);
-  const behind = view?.git.base.behind ?? 0;
+  const onTrackedBase =
+    !!view?.git.upstream &&
+    (view.git.branch ?? view.item.branch) === shortBranch(view.item.baseBranch);
+  const behind = onTrackedBase ? 0 : (view?.git.base.behind ?? 0);
   const conflicts = pull.data?.kind === "conflicts" ? pull.data : null;
   const refresh = useFetchWorkstreamRemote(view?.item.id ?? "");
 
