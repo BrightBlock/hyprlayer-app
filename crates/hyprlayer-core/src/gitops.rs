@@ -37,12 +37,207 @@ pub(crate) fn common_dir(repo: &git2::Repository) -> PathBuf {
     }
 }
 
+mod renames;
+
 pub(crate) fn status_options() -> git2::StatusOptions {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
-        .recurse_untracked_dirs(false)
-        .exclude_submodules(true);
+        .recurse_untracked_dirs(true)
+        .exclude_submodules(false);
     opts
+}
+
+const WT_ANY: git2::Status = git2::Status::WT_NEW
+    .union(git2::Status::WT_MODIFIED)
+    .union(git2::Status::WT_DELETED)
+    .union(git2::Status::WT_TYPECHANGE)
+    .union(git2::Status::WT_RENAMED);
+
+pub(crate) struct Change {
+    pub(crate) path: String,
+    pub(crate) status: git2::Status,
+    pub(crate) renamed_from: Option<String>,
+    pub(crate) gitlink: bool,
+}
+
+impl Change {
+    fn unstaged(&self) -> bool {
+        self.status.intersects(WT_ANY)
+    }
+
+    pub(crate) fn tracked(&self) -> bool {
+        !(self.status - git2::Status::WT_NEW).is_empty()
+    }
+}
+
+fn is_app_internal(path: &str) -> bool {
+    use crate::repo_settings::{HYPRLAYER_DIR, SETTINGS_FILE};
+    is_hyprlayer_internal(path)
+        && path
+            .strip_prefix(HYPRLAYER_DIR)
+            .and_then(|p| p.strip_prefix('/'))
+            != Some(SETTINGS_FILE)
+}
+
+fn gitlink_mode() -> u32 {
+    u32::from(git2::FileMode::Commit)
+}
+
+fn checked_out_head(worktree: &Path, rel: &str) -> Option<git2::Oid> {
+    git2::Repository::open(worktree.join(rel))
+        .ok()?
+        .head()
+        .ok()?
+        .target()
+}
+
+fn submodule_head_moved(worktree: Option<&Path>, rel: &str, recorded: Option<git2::Oid>) -> bool {
+    worktree
+        .and_then(|w| checked_out_head(w, rel))
+        .is_some_and(|head| Some(head) != recorded)
+}
+
+fn only_dirty_content(delta: &git2::DiffDelta<'_>) -> bool {
+    let gitlink = delta.new_file().mode() == git2::FileMode::Commit
+        || delta.old_file().mode() == git2::FileMode::Commit;
+    gitlink
+        && delta.status() == git2::Delta::Modified
+        && delta.old_file().id() == delta.new_file().id()
+}
+
+fn is_skip_worktree(index: Option<&git2::Index>, rel: &str) -> bool {
+    index
+        .and_then(|i| i.get_path(Path::new(rel), 0))
+        .is_some_and(|e| {
+            git2::IndexEntryExtendedFlag::from_bits_truncate(e.flags_extended).is_skip_worktree()
+        })
+}
+
+pub(crate) fn read_changes(repo: &git2::Repository, show: git2::StatusShow) -> Result<Vec<Change>> {
+    let mut opts = status_options();
+    opts.show(show);
+    let statuses = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| git_err("git2 status", e))?;
+    let index = repo.index().ok();
+    let worktree = repo.workdir().map(Path::to_path_buf);
+    let side = |f: git2::DiffFile<'_>| (f.id(), u32::from(f.mode()));
+
+    let mut changes = Vec::new();
+    let mut heads = Vec::new();
+    let mut staged = Vec::new();
+    for entry in statuses.iter() {
+        let Some(path) = entry.path() else {
+            continue;
+        };
+        if crate::worktree::is_thoughts_path(path) {
+            continue;
+        }
+        let mut status = entry.status();
+        let to_index = entry.head_to_index();
+        let to_workdir = entry.index_to_workdir();
+        let head_side = to_index
+            .as_ref()
+            .filter(|_| !status.contains(git2::Status::INDEX_NEW))
+            .map(|d| side(d.old_file()));
+        let index_side = match &to_index {
+            Some(d) if !status.contains(git2::Status::INDEX_DELETED) => Some(side(d.new_file())),
+            _ => to_workdir
+                .as_ref()
+                .filter(|_| !status.contains(git2::Status::WT_NEW))
+                .map(|d| side(d.old_file())),
+        };
+        let gitlink = [head_side, index_side]
+            .iter()
+            .flatten()
+            .any(|&(_, mode)| mode == gitlink_mode());
+        if is_app_internal(path) {
+            status.remove(git2::Status::WT_NEW);
+        }
+        if status.contains(git2::Status::WT_DELETED) && is_skip_worktree(index.as_ref(), path) {
+            status.remove(git2::Status::WT_DELETED);
+        }
+        if gitlink
+            && status.contains(git2::Status::WT_MODIFIED)
+            && !submodule_head_moved(worktree.as_deref(), path, index_side.map(|(oid, _)| oid))
+        {
+            status.remove(git2::Status::WT_MODIFIED);
+        }
+        if !status.is_empty() {
+            changes.push(Change {
+                path: path.to_string(),
+                status,
+                renamed_from: None,
+                gitlink,
+            });
+            let intent_to_add = status.contains(git2::Status::INDEX_NEW)
+                && index
+                    .as_ref()
+                    .and_then(|i| i.get_path(Path::new(path), 0))
+                    .is_some_and(|e| {
+                        git2::IndexEntryExtendedFlag::from_bits_truncate(e.flags_extended)
+                            .is_intent_to_add()
+                    });
+            heads.push(head_side);
+            staged.push(index_side.filter(|_| !intent_to_add));
+        }
+    }
+    pair_renames(repo, &mut changes, &heads, &staged);
+    Ok(changes)
+}
+
+type Sides = [Option<(git2::Oid, u32)>];
+
+fn pair_renames(repo: &git2::Repository, changes: &mut Vec<Change>, heads: &Sides, staged: &Sides) {
+    let Some(limit) = renames::rename_detection(repo) else {
+        return;
+    };
+    let collect = |flag: git2::Status, sides: &Sides| -> Vec<(usize, git2::Oid, u32)> {
+        changes
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.status.contains(flag))
+            .filter_map(|(i, _)| sides[i].map(|(oid, mode)| (i, oid, mode)))
+            .collect()
+    };
+    let sources = collect(git2::Status::INDEX_DELETED, heads);
+    let targets = collect(git2::Status::INDEX_NEW, staged);
+    if sources.is_empty() || targets.is_empty() {
+        return;
+    }
+    let sides = |list: &[(usize, git2::Oid, u32)]| -> Vec<renames::Side<'_>> {
+        list.iter()
+            .map(|&(i, oid, mode)| renames::Side {
+                path: &changes[i].path,
+                oid,
+                mode,
+            })
+            .collect()
+    };
+    let pairs = renames::pair(repo, &sides(&sources), &sides(&targets), limit);
+    for (s, d) in pairs {
+        let (source, target) = (sources[s].0, targets[d].0);
+        let from = changes[source].path.clone();
+        changes[source].status.remove(git2::Status::INDEX_DELETED);
+        let target = &mut changes[target];
+        target.status.remove(git2::Status::INDEX_NEW);
+        target.status.insert(git2::Status::INDEX_RENAMED);
+        target.renamed_from = Some(from);
+    }
+    changes.retain(|c| !c.status.is_empty());
+}
+
+fn hides_delta(index: Option<&git2::Index>, delta: &git2::DiffDelta<'_>) -> bool {
+    let path = delta
+        .new_file()
+        .path()
+        .or_else(|| delta.old_file().path())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    crate::worktree::is_thoughts_path(&path)
+        || (is_app_internal(&path) && delta.status() == git2::Delta::Untracked)
+        || (delta.status() == git2::Delta::Deleted && is_skip_worktree(index, &path))
+        || only_dirty_content(delta)
 }
 
 pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> Option<git2::Oid> {
@@ -476,19 +671,14 @@ pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
     let Ok(diff) = worktree_diff_raw(repo) else {
         return (0, 0);
     };
+    let index = repo.index().ok();
     let (mut additions, mut deletions) = (0u32, 0u32);
     let _ = diff.foreach(
         &mut |_delta, _progress| true,
         None,
         None,
         Some(&mut |delta, _hunk, line| {
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if crate::worktree::is_thoughts_path(&path) || is_hyprlayer_internal(&path) {
+            if hides_delta(index.as_ref(), &delta) {
                 return true;
             }
             match line.origin() {
@@ -678,10 +868,10 @@ fn staged_change(s: git2::Status) -> Option<&'static str> {
     first_change(
         s,
         &[
+            (git2::Status::INDEX_RENAMED, "renamed"),
             (git2::Status::INDEX_NEW, "added"),
             (git2::Status::INDEX_MODIFIED, "modified"),
             (git2::Status::INDEX_DELETED, "deleted"),
-            (git2::Status::INDEX_RENAMED, "renamed"),
             (git2::Status::INDEX_TYPECHANGE, "typechange"),
         ],
     )
@@ -692,10 +882,10 @@ fn unstaged_change(s: git2::Status) -> Option<&'static str> {
         s,
         &[
             (git2::Status::CONFLICTED, "conflict"),
+            (git2::Status::WT_RENAMED, "renamed"),
             (git2::Status::WT_NEW, "untracked"),
             (git2::Status::WT_MODIFIED, "modified"),
             (git2::Status::WT_DELETED, "deleted"),
-            (git2::Status::WT_RENAMED, "renamed"),
             (git2::Status::WT_TYPECHANGE, "typechange"),
         ],
     )
@@ -720,42 +910,43 @@ pub(crate) fn delta_old_path(delta: &git2::DiffDelta<'_>, new_path: &str) -> Opt
     (old != new_path).then_some(old)
 }
 
-fn included_paths(rels: &[String]) -> Vec<String> {
-    rels.iter().filter(|r| !is_excluded(r)).cloned().collect()
+fn is_tracked(repo: &git2::Repository, rel: &str) -> bool {
+    let p = Path::new(rel);
+    repo.index().is_ok_and(|i| i.get_path(p, 0).is_some())
+        || repo
+            .head()
+            .and_then(|h| h.peel_to_tree())
+            .is_ok_and(|t| t.get_path(p).is_ok())
+}
+
+fn excluded_from_actions(repo: &git2::Repository, rel: &str) -> bool {
+    crate::worktree::is_thoughts_path(rel) || (is_app_internal(rel) && !is_tracked(repo, rel))
+}
+
+fn included_paths(repo: &git2::Repository, rels: &[String]) -> Vec<String> {
+    rels.iter()
+        .filter(|r| !excluded_from_actions(repo, r))
+        .cloned()
+        .collect()
 }
 
 pub fn worktree_git_status(worktree: &Path) -> Result<WorktreeGitStatus> {
     let repo = open_repo(worktree)?;
-    let mut opts = status_options();
-    opts.recurse_untracked_dirs(true);
-    let statuses = repo
-        .statuses(Some(&mut opts))
-        .map_err(|e| git_err("git2 status", e))?;
-
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
-    for entry in statuses.iter() {
-        let path = entry.path().unwrap_or_default().to_string();
-        if path.is_empty() || is_excluded(&path) {
-            continue;
-        }
-        let s = entry.status();
-        if let Some(change) = staged_change(s) {
+    for c in read_changes(&repo, git2::StatusShow::IndexAndWorkdir)? {
+        if let Some(change) = staged_change(c.status) {
             staged.push(GitFileEntry {
-                old_path: entry
-                    .head_to_index()
-                    .and_then(|d| delta_old_path(&d, &path)),
-                path: path.clone(),
+                path: c.path.clone(),
                 change: change.to_string(),
+                old_path: c.renamed_from.clone(),
             });
         }
-        if let Some(change) = unstaged_change(s) {
+        if let Some(change) = unstaged_change(c.status) {
             unstaged.push(GitFileEntry {
-                old_path: entry
-                    .index_to_workdir()
-                    .and_then(|d| delta_old_path(&d, &path)),
-                path,
+                path: c.path,
                 change: change.to_string(),
+                old_path: None,
             });
         }
     }
@@ -766,7 +957,7 @@ pub fn stage_files(worktree: &Path, rels: &[String]) -> Result<()> {
     let repo = open_repo(worktree)?;
     let mut index = repo.index().map_err(|e| git_err("git2 index", e))?;
     for rel in rels {
-        if is_excluded(rel) {
+        if excluded_from_actions(&repo, rel) {
             continue;
         }
         let abs = safe_join(worktree, rel)?;
@@ -785,89 +976,273 @@ pub fn stage_files(worktree: &Path, rels: &[String]) -> Result<()> {
 
 pub fn unstage_files(worktree: &Path, rels: &[String]) -> Result<()> {
     let repo = open_repo(worktree)?;
-    let owned = included_paths(rels);
+    let mut owned = included_paths(&repo, rels);
+    let sources: Vec<String> = read_changes(&repo, git2::StatusShow::Index)?
+        .into_iter()
+        .filter(|c| owned.contains(&c.path))
+        .filter_map(|c| c.renamed_from)
+        .collect();
+    owned.extend(sources);
     if owned.is_empty() {
         return Ok(());
     }
+    reset_index_to_head(&repo, &owned)
+}
+
+fn reset_index_to_head(repo: &git2::Repository, rels: &[String]) -> Result<()> {
     match repo.head().and_then(|h| h.peel(git2::ObjectType::Commit)) {
-        Ok(commit_obj) => {
-            repo.reset_default(Some(&commit_obj), owned.iter().map(|s| s.as_str()))
-                .map_err(|e| git_err("git2 reset", e))?;
-        }
+        Ok(commit_obj) => repo
+            .reset_default(Some(&commit_obj), rels.iter().map(|s| s.as_str()))
+            .map_err(|e| git_err("git2 reset", e)),
         Err(_) => {
             let mut index = repo.index().map_err(|e| git_err("git2 index", e))?;
-            for rel in &owned {
+            for rel in rels {
                 let _ = index.remove_path(Path::new(rel));
             }
-            index.write().map_err(|e| git_err("git2 index write", e))?;
+            index.write().map_err(|e| git_err("git2 index write", e))
+        }
+    }
+}
+
+fn refuse(path: &str, reason: &str) -> CoreError {
+    CoreError::DiscardRefused {
+        path: path.to_string(),
+        reason: reason.to_string(),
+    }
+}
+
+fn is_nested_repo(abs: &Path) -> bool {
+    abs.is_dir() && abs.join(".git").exists()
+}
+
+pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
+    let repo = open_repo(worktree)?;
+    let changes = read_changes(&repo, git2::StatusShow::IndexAndWorkdir)?;
+    let mut picked = Vec::new();
+    for rel in included_paths(&repo, rels) {
+        safe_join(worktree, &rel)?;
+        if let Some(c) = changes.iter().find(|c| c.path == rel) {
+            picked.push(c);
+        }
+    }
+    let (unstaged, staged): (Vec<&Change>, Vec<&Change>) =
+        picked.into_iter().partition(|c| c.unstaged());
+    for c in &unstaged {
+        if c.status.contains(git2::Status::WT_NEW) && is_nested_repo(&worktree.join(&c.path)) {
+            return Err(refuse(
+                &c.path,
+                "it is a git repository of its own; delete it by hand if you mean to",
+            ));
+        }
+    }
+    check_revert(worktree, &staged)?;
+
+    let index = repo.index().map_err(|e| git_err("git2 index", e))?;
+    for c in unstaged.iter().filter(|c| c.gitlink) {
+        if let Some(e) = index.get_path(Path::new(&c.path), 0) {
+            check_out_gitlink(&repo, worktree, &c.path, e.id)?;
+        }
+    }
+    let restore: Vec<&str> = unstaged
+        .iter()
+        .filter(|c| !c.gitlink && !c.status.contains(git2::Status::WT_NEW))
+        .map(|c| c.path.as_str())
+        .collect();
+    if !restore.is_empty() {
+        let mut index = repo.index().map_err(|e| git_err("git2 index", e))?;
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        for path in &restore {
+            checkout.path(path);
+        }
+        repo.checkout_index(Some(&mut index), Some(&mut checkout))
+            .map_err(|e| git_err("git2 checkout", e))?;
+    }
+    for c in unstaged
+        .iter()
+        .filter(|c| c.status.contains(git2::Status::WT_NEW))
+    {
+        remove_untracked(&worktree.join(&c.path))?;
+    }
+    revert_to_head(&repo, worktree, &staged)
+}
+
+fn remove_untracked(abs: &Path) -> Result<()> {
+    if abs.is_dir() {
+        std::fs::remove_dir_all(abs)?;
+    } else if abs.exists() || abs.is_symlink() {
+        std::fs::remove_file(abs)?;
+    }
+    Ok(())
+}
+
+fn check_revert(worktree: &Path, changes: &[&Change]) -> Result<()> {
+    for c in changes {
+        let Some(from) = &c.renamed_from else {
+            continue;
+        };
+        if c.gitlink {
+            return Err(refuse(
+                &c.path,
+                &format!("it is a moved submodule; move it back to {from} with git mv"),
+            ));
+        }
+        let source = worktree.join(from);
+        if source.exists() || source.is_symlink() {
+            return Err(refuse(
+                from,
+                "restoring the renamed file would overwrite it; move it aside first",
+            ));
         }
     }
     Ok(())
 }
 
-pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
-    let repo = open_repo(worktree)?;
-    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-
-    if let Ok(commit_obj) = repo.head().and_then(|h| h.peel(git2::ObjectType::Commit)) {
-        let owned = included_paths(rels);
-        let _ = repo.reset_default(Some(&commit_obj), owned.iter().map(|s| s.as_str()));
+fn revert_to_head(repo: &git2::Repository, worktree: &Path, changes: &[&Change]) -> Result<()> {
+    if changes.is_empty() {
+        return Ok(());
     }
+    let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let in_head = |p: &str| head.as_ref().and_then(|t| t.get_path(Path::new(p)).ok());
+
+    for c in changes.iter().filter(|c| c.gitlink) {
+        if let Some(entry) = in_head(&c.path) {
+            check_out_gitlink(repo, worktree, &c.path, entry.id())?;
+        }
+    }
+    let mut paths: Vec<String> = Vec::new();
+    let mut dropped: Vec<&str> = Vec::new();
+    for c in changes {
+        if c.gitlink && in_head(&c.path).is_none() {
+            dropped.push(&c.path);
+            continue;
+        }
+        paths.push(c.path.clone());
+        paths.extend(c.renamed_from.clone());
+    }
+    if !dropped.is_empty() {
+        let mut index = repo.index().map_err(|e| git_err("git2 index", e))?;
+        for path in &dropped {
+            index
+                .remove_path(Path::new(path))
+                .map_err(|e| git_err("git2 remove", e))?;
+        }
+        index.write().map_err(|e| git_err("git2 index write", e))?;
+    }
+    if paths.is_empty() {
+        return Ok(());
+    }
+    reset_index_to_head(repo, &paths)?;
 
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    let mut any_tracked = false;
-    for rel in rels {
-        if is_excluded(rel) {
-            continue;
-        }
-        let abs = safe_join(worktree, rel)?;
-        let in_head = head_tree
-            .as_ref()
-            .map(|t| t.get_path(Path::new(rel)).is_ok())
-            .unwrap_or(false);
-        if in_head {
-            checkout.path(rel);
-            any_tracked = true;
-        } else if abs.exists() {
-            if abs.is_dir() {
-                std::fs::remove_dir_all(&abs)?;
-            } else {
-                std::fs::remove_file(&abs)?;
+    let mut any = false;
+    for path in &paths {
+        match in_head(path) {
+            Some(entry) if is_gitlink(&entry) => {}
+            Some(_) => {
+                checkout.path(path);
+                any = true;
             }
+            None => remove_untracked(&worktree.join(path))?,
         }
     }
-    if any_tracked {
+    if any {
         repo.checkout_head(Some(&mut checkout))
             .map_err(|e| git_err("git2 checkout", e))?;
     }
     Ok(())
 }
 
-fn dirty_tracked_paths(repo: &git2::Repository) -> Result<Vec<String>> {
-    let statuses = repo
-        .statuses(Some(&mut status_options()))
-        .map_err(|e| git_err("git2 status", e))?;
-    Ok(statuses
-        .iter()
-        .filter(|e| !e.status().intersects(git2::Status::WT_NEW))
-        .filter_map(|e| e.path().map(String::from))
-        .filter(|p| !crate::worktree::is_thoughts_path(p))
-        .collect())
+fn is_gitlink(entry: &git2::TreeEntry<'_>) -> bool {
+    entry.filemode() == i32::from(git2::FileMode::Commit)
+}
+
+fn check_out_gitlink(
+    repo: &git2::Repository,
+    worktree: &Path,
+    rel: &str,
+    oid: git2::Oid,
+) -> Result<()> {
+    let err = |e| git_err("git2 submodule checkout", e);
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe();
+    let sub = match git2::Repository::open(worktree.join(rel)) {
+        Ok(sub) => sub,
+        Err(_) => {
+            checkout.recreate_missing(true);
+            match reattach_submodule_checkout(repo, worktree, rel)? {
+                Some(sub) => sub,
+                None => return Ok(()),
+            }
+        }
+    };
+    let commit = sub.find_commit(oid).map_err(err)?;
+    sub.checkout_tree(commit.as_object(), Some(&mut checkout))
+        .map_err(err)?;
+    sub.set_head_detached(oid).map_err(err)
+}
+
+fn reattach_submodule_checkout(
+    repo: &git2::Repository,
+    worktree: &Path,
+    rel: &str,
+) -> Result<Option<git2::Repository>> {
+    let err = |e| git_err("git2 submodule checkout", e);
+    let abs = worktree.join(rel);
+    let name = repo
+        .find_submodule(rel)
+        .ok()
+        .and_then(|s| s.name().map(str::to_string))
+        .unwrap_or_else(|| rel.to_string());
+    let gitdir = common_dir(repo).join("modules").join(name);
+    std::fs::create_dir_all(&abs)?;
+    if !gitdir.is_dir() {
+        return Ok(None);
+    }
+    let up = "../".repeat(Path::new(rel).components().count());
+    let pointer = gitdir
+        .strip_prefix(worktree)
+        .map(|p| format!("{up}{}", p.display()))
+        .unwrap_or_else(|_| gitdir.display().to_string());
+    std::fs::write(abs.join(".git"), format!("gitdir: {pointer}\n"))?;
+    let sub = git2::Repository::open(&gitdir).map_err(err)?;
+    sub.set_workdir(&abs, false).map_err(err)?;
+    Ok(Some(sub))
+}
+
+fn reverts_on_discard(c: &Change) -> bool {
+    !c.gitlink && c.tracked() && !c.status.contains(git2::Status::WT_NEW)
+}
+
+pub(crate) fn checkout_blockers(worktree: &Path) -> u32 {
+    open_repo(worktree)
+        .and_then(|repo| read_changes(&repo, git2::StatusShow::IndexAndWorkdir))
+        .map(|changes| changes.iter().filter(|c| reverts_on_discard(c)).count() as u32)
+        .unwrap_or(0)
 }
 
 pub fn discard_tracked_changes(worktree: &Path) -> Result<u32> {
     let repo = open_repo(worktree)?;
-    let paths = dirty_tracked_paths(&repo)?;
-    if paths.is_empty() {
+    let changes = read_changes(&repo, git2::StatusShow::IndexAndWorkdir)?;
+    let picked: Vec<&Change> = changes.iter().filter(|c| reverts_on_discard(c)).collect();
+    if picked.is_empty() {
         return Ok(0);
     }
-    discard_files(worktree, &paths)?;
-    Ok(paths.len() as u32)
+    check_revert(worktree, &picked)?;
+    revert_to_head(&repo, worktree, &picked)?;
+    Ok(picked.len() as u32)
+}
+
+fn subproject_text(oid: git2::Oid) -> String {
+    format!("Subproject commit {oid}\n")
 }
 
 fn tree_blob_text(repo: &git2::Repository, tree: &git2::Tree, rel: &Path) -> Option<String> {
     let entry = tree.get_path(rel).ok()?;
+    if is_gitlink(&entry) {
+        return Some(subproject_text(entry.id()));
+    }
     let blob = repo.find_blob(entry.id()).ok()?;
     Some(String::from_utf8_lossy(blob.content()).to_string())
 }
@@ -880,8 +1255,19 @@ fn head_blob_text(repo: &git2::Repository, rel: &Path) -> Option<String> {
 fn index_blob_text(repo: &git2::Repository, rel: &Path) -> Option<String> {
     let index = repo.index().ok()?;
     let entry = index.get_path(rel, 0)?;
+    if entry.mode == u32::from(git2::FileMode::Commit) {
+        return Some(subproject_text(entry.id));
+    }
     let blob = repo.find_blob(entry.id).ok()?;
     Some(String::from_utf8_lossy(blob.content()).to_string())
+}
+
+fn workdir_text(repo: &git2::Repository, abs: &Path, rel: &str) -> Option<String> {
+    if abs.is_dir() {
+        return checked_out_head(repo.workdir()?, rel).map(subproject_text);
+    }
+    let bytes = std::fs::read(abs).ok()?;
+    Some(String::from_utf8_lossy(&bytes).to_string())
 }
 
 pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<FileSides> {
@@ -889,14 +1275,20 @@ pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<F
     let repo = open_repo(worktree)?;
     let p = Path::new(rel);
 
+    let original_path = if staged {
+        read_changes(&repo, git2::StatusShow::Index)?
+            .into_iter()
+            .find(|c| c.path == rel)
+            .and_then(|c| c.renamed_from)
+    } else {
+        None
+    };
     let (original, modified) = if staged {
-        (head_blob_text(&repo, p), index_blob_text(&repo, p))
+        let original_p = original_path.as_deref().map_or(p, Path::new);
+        (head_blob_text(&repo, original_p), index_blob_text(&repo, p))
     } else {
         let original = index_blob_text(&repo, p).or_else(|| head_blob_text(&repo, p));
-        let modified = std::fs::read(&abs)
-            .ok()
-            .map(|b| String::from_utf8_lossy(&b).to_string());
-        (original, modified)
+        (original, workdir_text(&repo, &abs, rel))
     };
 
     Ok(FileSides {
@@ -904,7 +1296,7 @@ pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<F
         modified_exists: modified.is_some(),
         original: original.unwrap_or_default(),
         modified: modified.unwrap_or_default(),
-        original_path: None,
+        original_path,
     })
 }
 
@@ -1055,7 +1447,7 @@ pub fn write_text_file(worktree: &Path, rel: &str, content: &str) -> Result<()> 
 pub fn list_commits(worktree: &Path, base_branch: &str) -> Result<Vec<CommitEntry>> {
     let repo = open_repo(worktree)?;
     let mut walk = repo.revwalk().map_err(|e| git_err("git2 revwalk", e))?;
-    walk.set_sorting(git2::Sort::TIME)
+    walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
         .map_err(|e| git_err("git2 revwalk sort", e))?;
     if walk.push_head().is_err() {
         return Ok(Vec::new());
@@ -1852,6 +2244,76 @@ mod tests {
     }
 
     #[test]
+    fn commits_match_git_log_after_the_base_is_merged_in_and_moves_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (origin, clone) = clone_with_origin(tmp.path());
+        commit(&clone, "feature 1");
+        git_out(
+            tmp.path(),
+            &["clone", "-q", origin.to_str().unwrap(), "mate"],
+        );
+        let mate = tmp.path().join("mate");
+        commit(&mate, "teammate 1");
+        commit(&mate, "teammate 2");
+        git_out(&mate, &["push", "-q", "origin", "main"]);
+        git_out(&clone, &["fetch", "-q", "origin"]);
+        git_out(&clone, &["merge", "-q", "--no-edit", "origin/main"]);
+        commit(&clone, "feature 2");
+
+        let mut ours: Vec<String> = list_commits(&clone, "origin/main")
+            .unwrap()
+            .into_iter()
+            .map(|c| c.subject)
+            .collect();
+        let log = git_out(&clone, &["log", "--format=%s", "origin/main..HEAD"]);
+        let mut git: Vec<String> = log.lines().map(str::to_string).collect();
+        ours.sort();
+        git.sort();
+        assert_eq!(ours, git);
+        assert_eq!(git.len(), 3, "two features and the merge: {git:?}");
+    }
+
+    #[test]
+    fn the_commit_list_stops_at_200_while_the_base_count_keeps_them_all() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_origin, clone) = clone_with_origin(tmp.path());
+        let repo = open_repo(&clone).unwrap();
+        let sig = git2::Signature::now("t", "t@t").unwrap();
+        let tree = repo.head().unwrap().peel_to_tree().unwrap();
+        let mut parent = repo.head().unwrap().peel_to_commit().unwrap();
+        for i in 0..205 {
+            let oid = repo
+                .commit(
+                    Some("HEAD"),
+                    &sig,
+                    &sig,
+                    &format!("c{i}"),
+                    &tree,
+                    &[&parent],
+                )
+                .unwrap();
+            parent = repo.find_commit(oid).unwrap();
+        }
+
+        let listed: Vec<String> = list_commits(&clone, "origin/main")
+            .unwrap()
+            .into_iter()
+            .map(|c| c.subject)
+            .collect();
+        let newest: Vec<String> = (5..205).rev().map(|i| format!("c{i}")).collect();
+        assert_eq!(
+            listed, newest,
+            "the newest 200, newest first, within one second"
+        );
+        assert_eq!(
+            crate::worktree::status(&clone, "origin/main", None)
+                .base
+                .ahead,
+            205
+        );
+    }
+
+    #[test]
     fn commits_are_empty_when_the_base_is_unresolvable() {
         let dir = repo_with_commit();
         assert!(list_commits(dir.path(), "no-such-branch")
@@ -2042,5 +2504,510 @@ mod tests {
         assert!(!root_sides.original_exists);
         assert!(root_sides.modified_exists);
         assert_eq!(root_sides.modified, "one\n");
+    }
+
+    fn rows(entries: &[GitFileEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| format!("{}:{}", e.change, e.path))
+            .collect()
+    }
+
+    fn porcelain(cwd: &Path) -> Vec<String> {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(["status", "--porcelain", "-uall"])
+            .output()
+            .expect("git runs");
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn line_counts(dir: &Path) -> (u32, u32) {
+        worktree_diff_line_counts(&open_repo(dir).unwrap())
+    }
+
+    fn repo_with_submodule(tmp: &Path) -> PathBuf {
+        git_out(tmp, &["init", "-q", "-b", "main", "lib"]);
+        let lib = tmp.join("lib");
+        std::fs::write(lib.join("lib.txt"), "v1\n").unwrap();
+        git_out(&lib, &["add", "."]);
+        commit(&lib, "lib v1");
+        git_out(tmp, &["init", "-q", "-b", "main", "repo"]);
+        let repo = tmp.join("repo");
+        commit(&repo, "init");
+        git_out(
+            &repo,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+        );
+        commit(&repo, "add submodule");
+        repo
+    }
+
+    #[test]
+    fn a_submodule_pointer_bump_is_one_change_with_subproject_sides_and_discard_resets_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        let recorded = git_out(&sub, &["rev-parse", "HEAD"]);
+        let bumped = commit(&sub, "bump");
+
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(rows(&st.unstaged), vec!["modified:vendor/lib"]);
+        assert!(st.staged.is_empty(), "{st:?}");
+        let sides = worktree_file_sides(&repo, "vendor/lib", false).unwrap();
+        assert_eq!(sides.original, format!("Subproject commit {recorded}\n"));
+        assert_eq!(sides.modified, format!("Subproject commit {bumped}\n"));
+        assert!(sides.original_exists && sides.modified_exists);
+        assert_eq!(line_counts(&repo), (1, 1));
+
+        git_out(&repo, &["add", "vendor/lib"]);
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(rows(&st.staged), vec!["modified:vendor/lib"]);
+        assert!(st.unstaged.is_empty(), "{st:?}");
+
+        discard_files(&repo, &["vendor/lib".into()]).unwrap();
+        assert_eq!(git_out(&sub, &["rev-parse", "HEAD"]), recorded);
+        assert_eq!(porcelain(&repo), Vec::<String>::new());
+        let st = worktree_git_status(&repo).unwrap();
+        assert!(st.staged.is_empty() && st.unstaged.is_empty(), "{st:?}");
+    }
+
+    #[test]
+    fn a_commit_that_bumps_a_submodule_diffs_as_its_subproject_lines() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        let recorded = git_out(&sub, &["rev-parse", "HEAD"]);
+        let bumped = commit(&sub, "bump");
+        git_out(&repo, &["add", "vendor/lib"]);
+        let sha = commit(&repo, "bump lib");
+
+        let sides = commit_file_sides(&repo, &sha, "vendor/lib").unwrap();
+        assert_eq!(sides.original, format!("Subproject commit {recorded}\n"));
+        assert_eq!(sides.modified, format!("Subproject commit {bumped}\n"));
+    }
+
+    #[test]
+    fn discarding_a_submodule_bump_never_overwrites_edits_inside_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        std::fs::write(sub.join("lib.txt"), "v2\n").unwrap();
+        git_out(&sub, &["add", "."]);
+        let bumped = commit(&sub, "lib v2");
+        std::fs::write(sub.join("lib.txt"), "wip\n").unwrap();
+
+        assert!(discard_files(&repo, &["vendor/lib".into()]).is_err());
+        assert_eq!(git_out(&sub, &["rev-parse", "HEAD"]), bumped);
+        assert_eq!(
+            std::fs::read_to_string(sub.join("lib.txt")).unwrap(),
+            "wip\n"
+        );
+    }
+
+    #[test]
+    fn dirty_content_inside_a_submodule_is_not_a_change() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        std::fs::write(sub.join("lib.txt"), "edited\n").unwrap();
+        std::fs::write(sub.join("scratch.txt"), "new\n").unwrap();
+
+        let st = worktree_git_status(&repo).unwrap();
+        assert!(st.staged.is_empty() && st.unstaged.is_empty(), "{st:?}");
+        assert_eq!(line_counts(&repo), (0, 0));
+    }
+
+    #[test]
+    fn sparse_and_skip_worktree_files_are_clean_but_a_plain_delete_is_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        git_out(tmp.path(), &["init", "-q", "-b", "main", "repo"]);
+        let repo = tmp.path().join("repo");
+        for f in [
+            "README.md",
+            "apps/web/index.ts",
+            "apps/api/main.rs",
+            "docs/guide.md",
+        ] {
+            std::fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
+            std::fs::write(repo.join(f), "one\ntwo\nthree\n").unwrap();
+        }
+        git_out(&repo, &["add", "."]);
+        commit(&repo, "init");
+
+        let wt = tmp.path().join("wt");
+        git_out(
+            &repo,
+            &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+        );
+        git_out(&wt, &["sparse-checkout", "set", "apps/web"]);
+        assert!(!wt.join("docs/guide.md").exists(), "control: sparse");
+        assert!(porcelain(&wt).is_empty(), "control: git calls it clean");
+        let st = worktree_git_status(&wt).unwrap();
+        assert!(st.staged.is_empty() && st.unstaged.is_empty(), "{st:?}");
+        assert_eq!(line_counts(&wt), (0, 0));
+
+        git_out(&repo, &["update-index", "--skip-worktree", "docs/guide.md"]);
+        std::fs::remove_file(repo.join("docs/guide.md")).unwrap();
+        assert!(porcelain(&repo).is_empty(), "control: git calls it clean");
+        let st = worktree_git_status(&repo).unwrap();
+        assert!(st.staged.is_empty() && st.unstaged.is_empty(), "{st:?}");
+        assert_eq!(line_counts(&repo), (0, 0));
+
+        std::fs::remove_file(repo.join("README.md")).unwrap();
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(rows(&st.unstaged), vec!["deleted:README.md"]);
+        assert_eq!(line_counts(&repo), (0, 3));
+    }
+
+    const RENAMED_BODY: &str = "fn main() {\n    println!(\"a fairly long body\");\n}\n";
+
+    fn repo_with_staged_rename() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        git_out(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("old_name.rs"), RENAMED_BODY).unwrap();
+        git_out(dir.path(), &["add", "."]);
+        commit(dir.path(), "init");
+        git_out(dir.path(), &["mv", "old_name.rs", "new_name.rs"]);
+        dir
+    }
+
+    #[test]
+    fn a_staged_rename_is_one_row_that_diffs_against_its_old_path() {
+        let dir = repo_with_staged_rename();
+
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert_eq!(rows(&st.staged), vec!["renamed:new_name.rs"]);
+        assert_eq!(st.staged[0].old_path.as_deref(), Some("old_name.rs"));
+        assert!(st.unstaged.is_empty(), "{st:?}");
+
+        let sides = worktree_file_sides(dir.path(), "new_name.rs", true).unwrap();
+        assert_eq!(sides.original, RENAMED_BODY);
+        assert_eq!(sides.modified, RENAMED_BODY);
+        assert!(sides.original_exists && sides.modified_exists);
+        assert_eq!(sides.original_path.as_deref(), Some("old_name.rs"));
+    }
+
+    #[test]
+    fn unstaging_or_discarding_a_rename_takes_both_of_its_paths() {
+        let dir = repo_with_staged_rename();
+        unstage_files(dir.path(), &["new_name.rs".into()]).unwrap();
+        assert_eq!(
+            porcelain(dir.path()),
+            vec![" D old_name.rs", "?? new_name.rs"]
+        );
+
+        let dir = repo_with_staged_rename();
+        discard_files(dir.path(), &["new_name.rs".into()]).unwrap();
+        assert_eq!(porcelain(dir.path()), Vec::<String>::new());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("old_name.rs")).unwrap(),
+            RENAMED_BODY
+        );
+
+        let dir = repo_with_staged_rename();
+        discard_tracked_changes(dir.path()).unwrap();
+        assert_eq!(porcelain(dir.path()), Vec::<String>::new());
+        assert!(dir.path().join("old_name.rs").exists());
+        assert!(!dir.path().join("new_name.rs").exists());
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    fn discarding_a_staged_rename_never_overwrites_a_file_recreated_at_its_source() {
+        let dir = repo_with_staged_rename();
+        std::fs::write(dir.path().join("old_name.rs"), "brand new\n").unwrap();
+
+        assert_eq!(
+            discard_files(dir.path(), &["new_name.rs".into()])
+                .unwrap_err()
+                .code(),
+            "discard_refused"
+        );
+        assert_eq!(read(&dir.path().join("old_name.rs")), "brand new\n");
+        assert_eq!(
+            porcelain(dir.path()),
+            vec!["R  old_name.rs -> new_name.rs", "?? old_name.rs"]
+        );
+    }
+
+    #[test]
+    fn discarding_the_unstaged_edit_of_a_renamed_file_keeps_the_rename() {
+        let dir = repo_with_staged_rename();
+        std::fs::write(dir.path().join("new_name.rs"), "edited\n").unwrap();
+
+        discard_files(dir.path(), &["new_name.rs".into()]).unwrap();
+        assert_eq!(porcelain(dir.path()), vec!["R  old_name.rs -> new_name.rs"]);
+        assert_eq!(read(&dir.path().join("new_name.rs")), RENAMED_BODY);
+    }
+
+    #[test]
+    fn discarding_an_added_gitlink_keeps_its_checkout_and_refuses_to_delete_a_nested_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        git_out(&repo, &["reset", "-q", "--soft", "HEAD~1"]);
+        std::fs::write(repo.join("vendor/lib/lib.txt"), "wip\n").unwrap();
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(
+            rows(&st.staged),
+            vec!["added:.gitmodules", "added:vendor/lib"]
+        );
+        assert!(st.unstaged.is_empty(), "edits inside are not a row: {st:?}");
+
+        discard_files(&repo, &["vendor/lib".into()]).unwrap();
+        assert_eq!(read(&repo.join("vendor/lib/lib.txt")), "wip\n");
+        assert_eq!(porcelain(&repo), vec!["A  .gitmodules", "?? vendor/lib/"]);
+        assert_eq!(
+            discard_files(&repo, &["vendor/lib/".into()])
+                .unwrap_err()
+                .code(),
+            "discard_refused"
+        );
+        assert!(repo.join("vendor/lib/lib.txt").exists());
+
+        let tool = repo.join("tool");
+        git_out(&repo, &["init", "-q", "-b", "main", "tool"]);
+        std::fs::write(tool.join("t.txt"), "t\n").unwrap();
+        git_out(&tool, &["add", "."]);
+        commit(&tool, "tool history");
+        std::fs::write(tool.join("wip.txt"), "uncommitted\n").unwrap();
+        git_out(&repo, &["add", "tool"]);
+        discard_files(&repo, &["tool".into()]).unwrap();
+        assert_eq!(read(&tool.join("wip.txt")), "uncommitted\n");
+        assert_eq!(git_out(&tool, &["rev-list", "--count", "HEAD"]), "1");
+    }
+
+    #[test]
+    fn discarding_a_deleted_submodule_restores_its_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        std::fs::remove_dir_all(repo.join("vendor/lib")).unwrap();
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(rows(&st.unstaged), vec!["deleted:vendor/lib"]);
+
+        discard_files(&repo, &["vendor/lib".into()]).unwrap();
+        assert_eq!(read(&repo.join("vendor/lib/lib.txt")), "v1\n");
+        assert_eq!(porcelain(&repo), Vec::<String>::new());
+
+        git_out(&repo, &["rm", "-q", "vendor/lib"]);
+        discard_files(&repo, &["vendor/lib".into()]).unwrap();
+        assert_eq!(read(&repo.join("vendor/lib/lib.txt")), "v1\n");
+        assert_eq!(porcelain(&repo), vec!["M  .gitmodules"]);
+    }
+
+    #[test]
+    fn a_refused_submodule_discard_leaves_the_index_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        std::fs::write(sub.join("lib.txt"), "v2\n").unwrap();
+        git_out(&sub, &["add", "."]);
+        commit(&sub, "lib v2");
+        git_out(&repo, &["add", "vendor/lib"]);
+        std::fs::write(sub.join("lib.txt"), "wip\n").unwrap();
+        let before = porcelain(&repo);
+
+        assert!(discard_files(&repo, &["vendor/lib".into()]).is_err());
+        assert_eq!(porcelain(&repo), before);
+        assert_eq!(read(&sub.join("lib.txt")), "wip\n");
+    }
+
+    #[test]
+    fn dirty_content_beside_a_staged_bump_is_not_an_unstaged_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        let sub = repo.join("vendor/lib");
+        commit(&sub, "bump");
+        git_out(&repo, &["add", "vendor/lib"]);
+        std::fs::write(sub.join("build.log"), "artifact\n").unwrap();
+        std::fs::write(sub.join("lib.txt"), "patched\n").unwrap();
+
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(rows(&st.staged), vec!["modified:vendor/lib"]);
+        assert!(st.unstaged.is_empty(), "{st:?}");
+        assert_eq!(crate::worktree::status(&repo, "main", None).dirty, 1);
+    }
+
+    #[test]
+    fn a_moved_submodule_is_one_renamed_row_that_discard_refuses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = repo_with_submodule(tmp.path());
+        git_out(&repo, &["mv", "vendor/lib", "third_party_lib"]);
+        std::fs::write(repo.join("third_party_lib/lib.txt"), "patched\n").unwrap();
+
+        let st = worktree_git_status(&repo).unwrap();
+        assert_eq!(
+            rows(&st.staged),
+            vec!["modified:.gitmodules", "renamed:third_party_lib"]
+        );
+        assert_eq!(st.staged[1].old_path.as_deref(), Some("vendor/lib"));
+        assert!(st.unstaged.is_empty(), "{st:?}");
+
+        assert_eq!(
+            discard_files(&repo, &["third_party_lib".into()])
+                .unwrap_err()
+                .code(),
+            "discard_refused"
+        );
+        assert_eq!(read(&repo.join("third_party_lib/lib.txt")), "patched\n");
+    }
+
+    #[test]
+    fn a_rename_into_thoughts_still_shows_the_deletion() {
+        let dir = repo_with_commit();
+        std::fs::create_dir_all(dir.path().join("thoughts")).unwrap();
+        git_out(dir.path(), &["mv", "a.md", "thoughts/a.md"]);
+
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert_eq!(rows(&st.staged), vec!["deleted:a.md"]);
+        assert_eq!(crate::worktree::status(dir.path(), "main", None).dirty, 1);
+    }
+
+    #[test]
+    fn team_settings_under_hyprlayer_stay_visible_through_index_changes() {
+        let settings = ".hyprlayer/settings.toml";
+        let dir = repo_with_commit();
+        std::fs::create_dir_all(dir.path().join(".hyprlayer")).unwrap();
+        std::fs::write(dir.path().join(settings), "[worktree]\n").unwrap();
+        std::fs::write(dir.path().join(".hyprlayer/a.png"), "internal\n").unwrap();
+        stage_files(dir.path(), &[settings.into()]).unwrap();
+        unstage_files(dir.path(), &[settings.into()]).unwrap();
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert_eq!(rows(&st.unstaged), vec![format!("untracked:{settings}")]);
+
+        stage_files(dir.path(), &[settings.into()]).unwrap();
+        commit(dir.path(), "settings");
+        git_out(dir.path(), &["rm", "-q", "--cached", settings]);
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert_eq!(rows(&st.staged), vec![format!("deleted:{settings}")]);
+        assert_eq!(rows(&st.unstaged), vec![format!("untracked:{settings}")]);
+        let chip = crate::worktree::status(dir.path(), "main", None);
+        assert_eq!((chip.dirty, chip.untracked, chip.deletions), (1, 1, 1));
+    }
+
+    fn renamed_targets(dir: &Path) -> Vec<String> {
+        let mut ours: Vec<String> = worktree_git_status(dir)
+            .unwrap()
+            .staged
+            .into_iter()
+            .filter(|e| e.change == "renamed")
+            .map(|e| e.path)
+            .collect();
+        ours.sort();
+        ours
+    }
+
+    fn git_renamed_targets(dir: &Path) -> Vec<String> {
+        let mut theirs: Vec<String> = porcelain(dir)
+            .into_iter()
+            .filter_map(|l| Some(l.strip_prefix("R  ")?.split(" -> ").nth(1)?.to_string()))
+            .collect();
+        theirs.sort();
+        theirs
+    }
+
+    #[test]
+    fn rename_detection_follows_git_config() {
+        let dir = repo_with_staged_rename();
+        let both = vec!["deleted:old_name.rs", "added:new_name.rs"];
+        for key in ["status.renames", "diff.renames"] {
+            git_out(dir.path(), &["config", key, "false"]);
+            let st = worktree_git_status(dir.path()).unwrap();
+            let mut staged = rows(&st.staged);
+            staged.sort_by_key(|r| r.starts_with("added"));
+            assert_eq!(staged, both, "{key}=false");
+            git_out(dir.path(), &["config", "--unset", key]);
+        }
+        assert_eq!(renamed_targets(dir.path()), vec!["new_name.rs"]);
+    }
+
+    #[test]
+    fn rename_detection_pairs_what_git_pairs_by_similarity() {
+        let dir = tempfile::tempdir().unwrap();
+        git_out(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("pad.txt"), "pad\n").unwrap();
+        let lines = |tag: &str, n: usize| -> String {
+            (1..=n).map(|i| format!("line {i} of {tag}\n")).collect()
+        };
+        let ks = [6, 8, 9, 10, 11, 12, 14];
+        for k in ks {
+            std::fs::write(
+                dir.path().join(format!("src{k}.txt")),
+                lines(&format!("f{k}"), 20),
+            )
+            .unwrap();
+        }
+        git_out(dir.path(), &["add", "."]);
+        commit(dir.path(), "files");
+        for k in ks {
+            git_out(
+                dir.path(),
+                &["mv", &format!("src{k}.txt"), &format!("dst{k}.txt")],
+            );
+            let kept: String = lines(&format!("f{k}"), 20 - k);
+            let new: String = (1..=k)
+                .map(|i| format!("totally different content number {i} {k}\n"))
+                .collect();
+            std::fs::write(dir.path().join(format!("dst{k}.txt")), kept + &new).unwrap();
+        }
+        git_out(dir.path(), &["add", "-A"]);
+
+        assert_eq!(renamed_targets(dir.path()), git_renamed_targets(dir.path()));
+    }
+
+    #[test]
+    fn an_intent_to_add_file_is_never_a_rename_target() {
+        let dir = tempfile::tempdir().unwrap();
+        git_out(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join("empty.log"), "").unwrap();
+        std::fs::write(dir.path().join("x"), "base\n").unwrap();
+        git_out(dir.path(), &["add", "-A"]);
+        commit(dir.path(), "init");
+        git_out(dir.path(), &["rm", "-q", "empty.log"]);
+        std::fs::write(dir.path().join("notes.md"), "draft\n").unwrap();
+        git_out(dir.path(), &["add", "-N", "notes.md"]);
+
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert!(
+            rows(&st.staged).contains(&"deleted:empty.log".to_string()),
+            "{st:?}"
+        );
+        assert!(renamed_targets(dir.path()).is_empty(), "{st:?}");
+        assert_eq!(crate::worktree::status(dir.path(), "main", None).dirty, 2);
+
+        unstage_files(dir.path(), &["notes.md".into()]).unwrap();
+        assert_eq!(porcelain(dir.path()), vec!["D  empty.log", "?? notes.md"]);
+    }
+
+    #[test]
+    fn a_binary_attribute_keeps_crs_when_scoring_a_rename() {
+        let dir = tempfile::tempdir().unwrap();
+        git_out(dir.path(), &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.path().join(".gitattributes"), "*.dat binary\n").unwrap();
+        let lf: String = (0..40).map(|i| format!("l{i} aaaaaaaaaaa\n")).collect();
+        std::fs::write(dir.path().join("a.dat"), &lf).unwrap();
+        git_out(dir.path(), &["add", "-A"]);
+        commit(dir.path(), "init");
+        git_out(dir.path(), &["rm", "-q", "a.dat"]);
+        std::fs::write(dir.path().join("b.dat"), lf.replace('\n', "\r\n")).unwrap();
+        git_out(dir.path(), &["add", "b.dat"]);
+
+        assert_eq!(git_renamed_targets(dir.path()), Vec::<String>::new());
+        assert_eq!(renamed_targets(dir.path()), git_renamed_targets(dir.path()));
     }
 }

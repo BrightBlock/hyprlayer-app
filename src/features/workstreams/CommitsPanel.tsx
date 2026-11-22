@@ -83,20 +83,33 @@ function CommitRow({
   );
 }
 
+const LISTED_COMMITS = 200;
+
 export function CommitsPanel({
   id,
   commits,
+  total = null,
+  base = null,
   onOpenDiff,
 }: {
   id: string;
   commits: CommitEntry[];
+  total?: number | null;
+  base?: string | null;
   onOpenDiff: (path: string, staged: boolean, sha?: string) => void;
 }) {
+  const truncated = commits.length === LISTED_COMMITS && total !== null && total > LISTED_COMMITS;
   return (
     <div>
       {commits.map((commit) => (
         <CommitRow key={commit.sha} id={id} commit={commit} onOpenDiff={onOpenDiff} />
       ))}
+      {truncated && (
+        <p className="px-1.5 py-2 text-ui leading-prose text-ink-dim">
+          Showing the newest {LISTED_COMMITS} of {total} commits.{" "}
+          <span className="font-mono">git log {base ?? "<base>"}..HEAD</span> lists the rest.
+        </p>
+      )}
     </div>
   );
 }

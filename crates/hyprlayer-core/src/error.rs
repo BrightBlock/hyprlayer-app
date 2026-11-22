@@ -146,6 +146,9 @@ pub enum CoreError {
     #[error("the project checkout has {count} uncommitted change(s)")]
     CheckoutDirty { count: u32 },
 
+    #[error("won't discard `{path}`: {reason}")]
+    DiscardRefused { path: String, reason: String },
+
     #[error("branch `{branch}` has {count} unpushed/unmerged commit(s)")]
     WorktreeUnpushed { branch: String, count: u32 },
 
@@ -829,6 +832,7 @@ impl CoreError {
             CoreError::Db(_) => "db",
             CoreError::WorktreeDirty(_) => "worktree_dirty",
             CoreError::CheckoutDirty { .. } => "checkout_dirty",
+            CoreError::DiscardRefused { .. } => "discard_refused",
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",

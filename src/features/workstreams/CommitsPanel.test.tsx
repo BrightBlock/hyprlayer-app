@@ -90,6 +90,36 @@ describe("CommitsPanel", () => {
     expect(onOpenDiff).toHaveBeenCalledWith("src/new-name.ts", false, SHA);
   });
 
+  describe("a list cut at 200 commits", () => {
+    const commits = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        commit({ sha: i.toString(16).padStart(40, "0"), subject: `c${i}` }),
+      );
+    const marker = /Showing the newest 200 of/;
+
+    it("says how many more the branch has", () => {
+      q.useCommitFiles.mockReturnValue(filesResult(undefined));
+      render(
+        <CommitsPanel id="ws1" commits={commits(200)} total={205} base="origin/main" onOpenDiff={vi.fn()} />,
+      );
+      expect(screen.getByText(marker).textContent).toBe(
+        "Showing the newest 200 of 205 commits. git log origin/main..HEAD lists the rest.",
+      );
+    });
+
+    it("says nothing when 200 is all of them", () => {
+      q.useCommitFiles.mockReturnValue(filesResult(undefined));
+      render(<CommitsPanel id="ws1" commits={commits(200)} total={200} base="main" onOpenDiff={vi.fn()} />);
+      expect(screen.queryByText(marker)).toBeNull();
+    });
+
+    it("says nothing when the list stopped at the merge base before 200", () => {
+      q.useCommitFiles.mockReturnValue(filesResult(undefined));
+      render(<CommitsPanel id="ws1" commits={commits(150)} total={205} base="main" onOpenDiff={vi.fn()} />);
+      expect(screen.queryByText(marker)).toBeNull();
+    });
+  });
+
   it("opens the sha-addressed diff with the full sha when a file is clicked", () => {
     q.useCommitFiles.mockReturnValue(filesResult([file("src/a.ts", "modified")]));
     const onOpenDiff = vi.fn();

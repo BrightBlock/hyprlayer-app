@@ -1865,6 +1865,7 @@ export function ProjectPage() {
                       onOpenReview={reviewable ? openReview : undefined}
                       filesOnly={folderProject}
                       baseBranch={activeView?.item.baseBranch ?? null}
+                      aheadOfBase={activeView?.git.base.ahead ?? null}
                     />
                   </div>
                   <SidebarTasksPanel sessionId={focusedShell?.sessionId} />

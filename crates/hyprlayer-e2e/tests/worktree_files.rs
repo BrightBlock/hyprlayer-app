@@ -198,6 +198,62 @@ async fn worktree_files() {
         json!({ "changed": changed_paths(&after_discard) }),
     );
 
+    j.step("a staged rename is one row with its old path, and Unstage takes both");
+    sandbox.git(Path::new(&worktree), &["mv", "src/keep.rs", "src/kept.rs"]);
+    let renamed = j
+        .call(&client, Request::WorktreeGitStatus { id: id.clone() })
+        .await
+        .expect("worktree_git_status");
+    j.guard(
+        "the rename is one staged row naming its old path",
+        rows(&renamed, "/staged") == vec!["renamed:src/kept.rs<-src/keep.rs".to_string()]
+            && rows(&renamed, "/unstaged").is_empty(),
+        json!({ "staged": rows(&renamed, "/staged"), "unstaged": rows(&renamed, "/unstaged") }),
+    );
+    j.call(
+        &client,
+        Request::WorktreeUnstage {
+            id: id.clone(),
+            paths: vec!["src/kept.rs".into()],
+        },
+    )
+    .await
+    .expect("worktree_unstage");
+    let unstaged = j
+        .call(&client, Request::WorktreeGitStatus { id: id.clone() })
+        .await
+        .expect("worktree_git_status");
+    let index_vs_head = sandbox.git(Path::new(&worktree), &["diff", "--cached", "--name-only"]);
+    j.guard(
+        "unstaging the new path puts the old one back in the index",
+        index_vs_head.is_empty()
+            && staged_paths(&unstaged).is_empty()
+            && rows(&unstaged, "/unstaged")
+                == vec![
+                    "deleted:src/keep.rs".to_string(),
+                    "untracked:src/kept.rs".to_string(),
+                ],
+        json!({ "unstaged": rows(&unstaged, "/unstaged"), "git_staged": index_vs_head }),
+    );
+    j.call(
+        &client,
+        Request::WorktreeDiscard {
+            id: id.clone(),
+            paths: vec!["src/keep.rs".into(), "src/kept.rs".into()],
+        },
+    )
+    .await
+    .expect("worktree_discard");
+    let restored = j
+        .call(&client, Request::WorktreeGitStatus { id: id.clone() })
+        .await
+        .expect("worktree_git_status");
+    j.guard(
+        "discarding both paths restores the tree",
+        changed_paths(&restored).is_empty(),
+        json!({ "changed": changed_paths(&restored) }),
+    );
+
     j.step("commit and read the commit back");
     j.call(
         &client,
@@ -320,6 +376,22 @@ fn strings_at(value: &Value, pointer: &str) -> Vec<String> {
     value
         .as_array()
         .map(|items| items.iter().map(|i| text(i, pointer)).collect())
+        .unwrap_or_default()
+}
+
+fn rows(status: &Value, side: &str) -> Vec<String> {
+    status
+        .pointer(side)
+        .and_then(Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|e| match e.pointer("/oldPath").and_then(Value::as_str) {
+                    Some(old) => format!("{}:{}<-{old}", text(e, "/change"), text(e, "/path")),
+                    None => format!("{}:{}", text(e, "/change"), text(e, "/path")),
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 

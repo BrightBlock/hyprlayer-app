@@ -89,6 +89,39 @@
       "guards": [
         {
           "evidence": {
+            "staged": [
+              "renamed:src/kept.rs<-src/keep.rs"
+            ],
+            "unstaged": []
+          },
+          "guard": "the rename is one staged row naming its old path",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "git_staged": "",
+            "unstaged": [
+              "deleted:src/keep.rs",
+              "untracked:src/kept.rs"
+            ]
+          },
+          "guard": "unstaging the new path puts the old one back in the index",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "changed": []
+          },
+          "guard": "discarding both paths restores the tree",
+          "ok": true
+        }
+      ],
+      "step": "a staged rename is one row with its old path, and Unstage takes both"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "subject": "Keep it"
           },
           "guard": "the new commit tops the workstream's list",

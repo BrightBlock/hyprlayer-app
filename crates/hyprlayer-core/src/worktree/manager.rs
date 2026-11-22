@@ -275,7 +275,7 @@ impl WorktreeManager {
                 let already_here = crate::gitops::current_branch(&spec.project_repo).as_deref()
                     == Some(branch.as_str());
                 if !already_here {
-                    let dirty = status(&spec.project_repo, branch, None).dirty;
+                    let dirty = crate::gitops::checkout_blockers(&spec.project_repo);
                     if dirty > 0 {
                         return Err(CoreError::CheckoutDirty { count: dirty });
                     }
@@ -894,15 +894,12 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
     };
 
     let (mut dirty, mut untracked) = (0u32, 0u32);
-    if let Ok(statuses) = repo.statuses(Some(&mut crate::gitops::status_options())) {
-        for entry in statuses.iter() {
-            let path = entry.path().unwrap_or_default();
-            if super::is_thoughts_path(path) {
-                continue;
-            }
-            if entry.status().intersects(git2::Status::WT_NEW) {
+    if let Ok(changes) = crate::gitops::read_changes(&repo, git2::StatusShow::IndexAndWorkdir) {
+        for change in &changes {
+            if change.status.intersects(git2::Status::WT_NEW) {
                 untracked += 1;
-            } else {
+            }
+            if change.tracked() {
                 dirty += 1;
             }
         }
@@ -2030,5 +2027,176 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.stdout, "/tmp/git-in-overlay-probe.sock");
+    }
+
+    fn panel_rows(dir: &Path) -> usize {
+        let st = crate::gitops::worktree_git_status(dir).unwrap();
+        st.staged.len() + st.unstaged.len()
+    }
+
+    #[test]
+    fn the_chip_counts_what_the_changes_panel_lists() {
+        let (_guard, repo) = fixture_repo();
+        for f in ["newdir/a.txt", "newdir/b.txt", "newdir/sub/c.txt"] {
+            std::fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
+            std::fs::write(repo.join(f), "x\n").unwrap();
+        }
+        let st = status(&repo, "main", None);
+        assert_eq!((st.dirty, st.untracked), (0, 3));
+        assert_eq!(panel_rows(&repo), 3);
+
+        std::fs::remove_dir_all(repo.join("newdir")).unwrap();
+        sh(&repo, &["mv", "README.md", "README.txt"]);
+        let st = status(&repo, "main", None);
+        assert_eq!((st.dirty, st.untracked), (1, 0), "a rename is one change");
+        assert_eq!(panel_rows(&repo), 1);
+    }
+
+    #[test]
+    fn a_tracked_hyprlayer_file_shows_in_chip_and_panel_and_stages() {
+        let (_guard, repo) = fixture_repo();
+        std::fs::create_dir_all(repo.join(".hyprlayer")).unwrap();
+        std::fs::write(repo.join(".hyprlayer/settings.toml"), "[worktree]\n").unwrap();
+        sh(&repo, &["add", ".hyprlayer/settings.toml"]);
+        sh(&repo, &["commit", "-m", "repo settings"]);
+
+        std::fs::write(
+            repo.join(".hyprlayer/settings.toml"),
+            "[worktree]\ncopy = [\".env\"]\n",
+        )
+        .unwrap();
+        std::fs::write(repo.join(".hyprlayer/a.png"), "app internal\n").unwrap();
+        let st = status(&repo, "main", None);
+        assert_eq!((st.dirty, st.untracked), (1, 0));
+        assert_eq!((st.additions, st.deletions), (1, 0));
+        assert_eq!(panel_rows(&repo), 1);
+
+        crate::gitops::stage_files(
+            &repo,
+            &[".hyprlayer/settings.toml".into(), ".hyprlayer/a.png".into()],
+        )
+        .unwrap();
+        let staged: Vec<String> = crate::gitops::worktree_git_status(&repo)
+            .unwrap()
+            .staged
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
+        assert_eq!(staged, vec![".hyprlayer/settings.toml"]);
+    }
+
+    #[test]
+    fn a_sparse_checkout_reads_clean_in_the_chip() {
+        let (_guard, repo) = fixture_repo();
+        for f in ["apps/web/index.ts", "apps/api/main.rs", "docs/guide.md"] {
+            std::fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
+            std::fs::write(repo.join(f), "x\ny\n").unwrap();
+        }
+        sh(&repo, &["add", "."]);
+        sh(&repo, &["commit", "-m", "apps"]);
+        sh(&repo, &["sparse-checkout", "set", "apps/web"]);
+        assert!(!repo.join("docs/guide.md").exists(), "control: sparse");
+
+        let st = status(&repo, "main", None);
+        assert_eq!(
+            (st.dirty, st.untracked, st.additions, st.deletions),
+            (0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn only_a_submodule_pointer_bump_makes_the_worktree_dirty() {
+        let (guard, repo) = fixture_repo();
+        let lib = guard.path().join("lib");
+        std::fs::create_dir(&lib).unwrap();
+        sh(&lib, &["init", "-b", "main"]);
+        sh(&lib, &["commit", "--allow-empty", "-m", "lib"]);
+        sh(
+            &repo,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+        );
+        sh(&repo, &["commit", "-m", "add submodule"]);
+        let sub = repo.join("vendor/lib");
+
+        std::fs::write(sub.join("scratch.txt"), "wip\n").unwrap();
+        let st = status(&repo, "main", None);
+        assert_eq!((st.dirty, st.untracked), (0, 0));
+        ensure_removable(&repo, "main", "main").unwrap();
+
+        sh(&sub, &["commit", "--allow-empty", "-m", "bump"]);
+        let sub_head = || {
+            git2::Repository::open(&sub)
+                .unwrap()
+                .head()
+                .unwrap()
+                .target()
+        };
+        let bumped = sub_head();
+        assert_eq!(status(&repo, "main", None).dirty, 1);
+
+        assert_eq!(crate::gitops::discard_tracked_changes(&repo).unwrap(), 0);
+        assert_eq!(
+            sub_head(),
+            bumped,
+            "archive leaves the submodule's checkout alone"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_submodule_pointer_bump_does_not_block_an_in_place_switch() {
+        let (guard, repo) = fixture_repo();
+        let wt_root = tempfile::tempdir().unwrap();
+        let manager = WorktreeManager::new(wt_root.path().to_path_buf());
+        let git = which::which("git").unwrap();
+        let lib = guard.path().join("lib");
+        std::fs::create_dir(&lib).unwrap();
+        sh(&lib, &["init", "-b", "main"]);
+        sh(&lib, &["commit", "--allow-empty", "-m", "lib"]);
+        sh(
+            &repo,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+        );
+        sh(&repo, &["commit", "-m", "add submodule"]);
+        sh(&repo, &["branch", "other"]);
+        sh(
+            &repo.join("vendor/lib"),
+            &["commit", "--allow-empty", "-m", "newer lib commit"],
+        );
+
+        let created = manager
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Switch away".into(),
+                    base_override: None,
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::InPlace {
+                        branch: "other".into(),
+                    },
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(created.branch, "other");
+        assert_eq!(
+            crate::gitops::current_branch(&repo).as_deref(),
+            Some("other")
+        );
     }
 }

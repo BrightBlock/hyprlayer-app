@@ -515,6 +515,7 @@ type Props = {
   onOpenReview?: () => void;
   filesOnly?: boolean;
   baseBranch: string | null;
+  aheadOfBase?: number | null;
 };
 
 export const ChangesPanel = memo(function ChangesPanel({
@@ -525,6 +526,7 @@ export const ChangesPanel = memo(function ChangesPanel({
   onOpenReview,
   filesOnly = false,
   baseBranch,
+  aheadOfBase = null,
 }: Props) {
   const [rawTab, setTab] = useState<"changes" | "commits" | "files" | "memory">("changes");
   const tab = filesOnly && rawTab !== "memory" ? "files" : rawTab;
@@ -639,7 +641,13 @@ export const ChangesPanel = memo(function ChangesPanel({
               </p>
             </div>
           ) : (
-            <CommitsPanel id={id} commits={commits.data ?? []} onOpenDiff={onOpenDiff} />
+            <CommitsPanel
+              id={id}
+              commits={commits.data ?? []}
+              total={aheadOfBase}
+              base={baseBranch}
+              onOpenDiff={onOpenDiff}
+            />
           )
         ) : tab === "memory" ? (
           <MemoryList memory={memory} onOpenDoc={onOpenDoc} />
