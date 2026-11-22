@@ -2483,6 +2483,8 @@ export type Workstream = {
 	createdAt: number | null,
 	updatedAt: number | null,
 	archivedAt: number | null,
+	/**  The workstream whose agent created this one; the app's own creates have none. */
+	parentWorkstreamId?: string | null,
 };
 
 export type WorkstreamBases = {

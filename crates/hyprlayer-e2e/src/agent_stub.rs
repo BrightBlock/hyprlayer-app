@@ -28,8 +28,11 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `approve` (the asked tool's `PostToolUse`, then `Stop`), `clear` (`SessionEnd`, then
 /// `SessionStart` as `<id>-cleared`), `bad` (malformed, non-object and empty payloads), `fail`
 /// (`StopFailure` for an expired login, in place of `Stop`), `exit` (`SessionEnd`, then exit),
-/// `write <path>` (writes it, then a `Write`'s `PostToolUse` with the relative path and `cwd`) and
-/// `shell <path> <branch> [date]` (a plan naming `branch`, through a redirect, so no hook fires).
+/// `write <path>` (writes it, then a `Write`'s `PostToolUse` with the relative path and `cwd`),
+/// `shell <path> <branch> [date]` (a plan naming `branch`, through a redirect, so no hook fires),
+/// `cd <dir>`, and `worktree <name>...` (one `WorktreeCreate` per name, all at once, each cut off
+/// at its configured timeout and logged as `WorktreeCreate <name> exit=<code> path=<last stdout
+/// line>`; for a single name the stub then moves into that path and logs `cwd <dir>`).
 /// Without `--stub-tui` it paints claude's empty input box at launch and after each line, a
 /// permission or question prompt after `ask` or `question`, the `/model` picker after `picker`, and
 /// nothing after `tools`. The statusLine
@@ -90,6 +93,21 @@ hook() {
   printf '%s exit=%s\n' "$1" "$?" >> "$dir/hooks.log"
 }
 ev() { printf '{"session_id":"%s","hook_event_name":"%s"%s}' "$sid" "$1" "$2"; }
+worktree_create() {
+  cmd=$(hook_command WorktreeCreate)
+  [ -n "$cmd" ] || return 0
+  secs=$(sed -n 's/.*"command":"[^"]*hook claude WorktreeCreate","timeout":\([0-9]*\).*/\1/p' "$settings")
+  out="$dir/worktree-$1.out"
+  ev WorktreeCreate ",\"cwd\":\"$PWD\",\"name\":\"$1\"" | sh -c "$cmd" > "$out" 2>/dev/null &
+  pid=$!
+  # Off the PTY, so a sleeping watchdog never holds the terminal open.
+  ( sleep "${secs:-600}"; kill "$pid" ) </dev/null >/dev/null 2>&1 &
+  dog=$!
+  wait "$pid"
+  code=$?
+  kill "$dog" 2>/dev/null
+  printf 'WorktreeCreate %s exit=%s path=%s\n' "$1" "$code" "$(tail -n 1 "$out")" >> "$dir/hooks.log"
+}
 model="claude-haiku-5-5"; effort="low"; mode=0; moded=""; used=""; esc=$(printf '\033')
 footer() {
   case $mode in
@@ -133,6 +151,14 @@ run_line() {
       mkdir -p "$(dirname "$1")"
       dated=""; [ -n "$3" ] && dated="date: $3\n"
       printf -- "---\ntype: plan\nstatus: draft\n${dated}branch: %s\n---\n\n# Written through a shell redirect\n" "$2" > "$1" ;;
+    cd\ *) cd "${1#cd }" ;;
+    worktree\ *)
+      set -- ${1#worktree }
+      for name in "$@"; do worktree_create "$name" & done
+      wait
+      if [ $# -eq 1 ] && cd "$(tail -n 1 "$dir/worktree-$1.out")" 2>/dev/null; then
+        printf 'cwd %s\n' "$PWD" >> "$dir/hooks.log"
+      fi ;;
     "$esc[Z") mode=$(( (mode + 1) % 4 )); moded=1; statusline ;;
     switch)
       hook PostModelSwitch "$(ev PostModelSwitch ',"from_model":"claude-haiku-5-5","to_model":"claude-sonnet-5-5","source":"picker"')"

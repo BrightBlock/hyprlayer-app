@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use hyprlayer_core::models::{
-    AgentControlLevel, PermissionMode, PtyAgentState, PtyLaunchSession, UiRequest,
+    AgentControlLevel, PermissionMode, PtyAgentState, PtyLaunchSession, UiRequest, WorktreeMode,
 };
 use hyprlayer_core::runtime::agent_control::inject::{CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS};
 use hyprlayer_core::runtime::agent_control::AGENT_ENV;
@@ -145,7 +145,7 @@ async fn pty_hook_signals() {
     expected.sort();
     let status_line = text(&settings, "/statusLine/command");
     j.guard(
-        "the settings file runs `<ctl> hook claude <Event>` for all 11 events, and `<ctl> statusline claude`",
+        "the settings file runs `<ctl> hook claude <Event>` for all 12 events, and `<ctl> statusline claude`",
         events == expected
             && hooks.iter().all(|(_, ok)| *ok)
             && status_line == format!("{quoted} statusline claude"),
@@ -832,6 +832,253 @@ async fn pty_hook_signals() {
     );
 
     j.finish();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claude_worktree_create() {
+    let sandbox = Sandbox::new();
+    let pty_claude = install(&sandbox, "pty-claude", PTY_CLAUDE);
+    let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
+    let other = sandbox.fixture_repo("other", &[("README.md", "# other\n")]);
+    let mut j = Journey::new("pty_claude_worktrees", &sandbox);
+    let server = Server::start(&sandbox).await;
+    let c = server.client();
+    let project = onboard_and_import(&mut j, &c, &sandbox, &repo).await;
+    let view = create_workstream(&mut j, &c, &project, "Lead").await;
+    let lead = text(&view, "/item/id");
+    let lead_tree = text(&view, "/item/worktreePath");
+    j.alias(&lead, "$LEAD");
+    set_engine(&mut j, &c, "claude-code", &pty_claude, &[]).await;
+    set_level(&mut j, &c, AgentControlLevel::Full).await;
+    let (launched, mut stream) = launch_pty(&c, &lead, "claude-code").await;
+    let term = launched.terminal_id.clone();
+    j.alias(&term, "$TERMINAL");
+    j.alias(
+        launched.provider_session_id.clone().unwrap_or_default(),
+        "$SESSION",
+    );
+    let hooks = launch_log(&sandbox, &term).join("hooks.log");
+    appears(&hooks).await;
+    let worktree = |line: &str| {
+        let (c, term, hooks) = (&c, &term, &hooks);
+        let line = line.to_string();
+        async move {
+            let names = line.split_whitespace().skip(1).count();
+            let before = count(hooks, "WorktreeCreate ");
+            type_line(c, term, &line).await;
+            eventually(IO, || count(hooks, "WorktreeCreate ") >= before + names).await;
+        }
+    };
+    let active = || async {
+        c.list_workstreams(project.clone(), false)
+            .await
+            .expect("list_workstreams")
+            .into_iter()
+            .map(|view| view.item)
+            .collect::<Vec<_>>()
+    };
+
+    j.step("at Full, a claude worktree is a workstream at its name's path");
+    worktree("worktree foo").await;
+    let (exit, foo) = created(&hooks, "foo");
+    let rows = active().await;
+    let row = rows.iter().find(|w| w.worktree_path == foo);
+    let moved_in = lines(&hooks).contains(&format!("cwd {foo}"));
+    j.guard(
+        "the hook prints the workstream's worktree, on its claude branch, nested under the lead, and claude moves in",
+        exit == "0"
+            && foo.ends_with("/worktrees/demo/foo")
+            && row.is_some_and(|w| {
+                w.title == "foo"
+                    && w.branch == "hyprlayer/claude/foo"
+                    && w.worktree_mode == WorktreeMode::Isolated
+                    && w.parent_workstream_id.as_deref() == Some(lead.as_str())
+            })
+            && moved_in,
+        json!({
+            "exit": exit,
+            "path": foo,
+            "branch": row.map(|w| w.branch.clone()),
+            "nestedUnderLead": row.map(|w| w.parent_workstream_id.as_deref() == Some(lead.as_str())),
+            "movedIn": moved_in,
+        }),
+    );
+
+    j.step("the same name again finds the same worktree");
+    worktree("worktree foo").await;
+    let (exit, again) = created(&hooks, "foo");
+    let named_foo = active().await.iter().filter(|w| w.title == "foo").count();
+    j.guard(
+        "the second create returns the first's path and adds no workstream",
+        exit == "0" && again == foo && named_foo == 1,
+        json!({ "exit": exit, "samePath": again == foo, "workstreamsNamedFoo": named_foo }),
+    );
+
+    j.step("three subagents at once get three workstreams");
+    worktree("worktree agent-a1 agent-b2 agent-c3").await;
+    let agents = ["agent-a1", "agent-b2", "agent-c3"].map(|name| created(&hooks, name));
+    let rows = active().await;
+    let mut paths: Vec<&str> = agents.iter().map(|(_, p)| p.as_str()).collect();
+    paths.sort();
+    paths.dedup();
+    let all_rows = agents
+        .iter()
+        .all(|(_, p)| rows.iter().any(|w| &w.worktree_path == p));
+    j.guard(
+        "each create exits 0 with its own path, and each path is a workstream",
+        agents.iter().all(|(exit, _)| exit == "0") && paths.len() == 3 && all_rows,
+        json!({
+            "exits": agents.iter().map(|(exit, _)| exit.clone()).collect::<Vec<_>>(),
+            "distinctPaths": paths.len(),
+            "allWorkstreams": all_rows,
+        }),
+    );
+
+    j.step("a cwd in another repo gets claude's own layout there");
+    let before = active().await.len();
+    type_line(&c, &term, &format!("cd {}", other.display())).await;
+    worktree("worktree bar").await;
+    let (exit, bar) = created(&hooks, "bar");
+    let after = active().await.len();
+    let branch = sandbox.branch_exists(&other, "worktree-bar");
+    j.guard(
+        "the fallback is `<other>/.claude/worktrees/bar` on `worktree-bar`, with no workstream",
+        exit == "0" && bar.ends_with("/other/.claude/worktrees/bar") && branch && after == before,
+        json!({ "exit": exit, "path": bar, "branch": branch, "workstreamsAdded": after - before }),
+    );
+
+    j.step("a name recreated after its archive takes the next free slug");
+    type_line(&c, &term, &format!("cd {lead_tree}")).await;
+    let old = active()
+        .await
+        .into_iter()
+        .find(|w| w.title == "foo")
+        .expect("foo's workstream");
+    c.archive_workstream(old.id.clone(), true)
+        .await
+        .expect("archive foo");
+    worktree("worktree foo").await;
+    let (exit, recreated) = created(&hooks, "foo");
+    let row = active()
+        .await
+        .into_iter()
+        .find(|w| w.worktree_path == recreated);
+    j.guard(
+        "the create lands at `foo-2` on `claude/foo-2`: the archived row keeps slug `foo` and its branch",
+        exit == "0"
+            && recreated.ends_with("/worktrees/demo/foo-2")
+            && row
+                .as_ref()
+                .is_some_and(|w| w.id != old.id && w.branch == "hyprlayer/claude/foo-2"),
+        json!({ "exit": exit, "path": recreated, "branch": row.map(|w| w.branch) }),
+    );
+
+    j.step("a restored claude workstream answers its name again");
+    worktree("worktree baz").await;
+    let (_, baz) = created(&hooks, "baz");
+    let baz_id = active()
+        .await
+        .into_iter()
+        .find(|w| w.worktree_path == baz)
+        .expect("baz's workstream")
+        .id;
+    c.archive_workstream(baz_id.clone(), true)
+        .await
+        .expect("archive baz");
+    c.restore_workstream(baz_id.clone(), None)
+        .await
+        .expect("restore baz");
+    let before = c
+        .list_workstreams(project.clone(), true)
+        .await
+        .expect("list_workstreams")
+        .len();
+    worktree("worktree baz").await;
+    let (exit, again) = created(&hooks, "baz");
+    let after = c
+        .list_workstreams(project.clone(), true)
+        .await
+        .expect("list_workstreams")
+        .len();
+    let answered = active()
+        .await
+        .into_iter()
+        .find(|w| w.worktree_path == again)
+        .map(|w| w.id);
+    j.guard(
+        "the create after the restore returns baz's original path and adds no workstream",
+        exit == "0"
+            && again == baz
+            && answered.as_deref() == Some(baz_id.as_str())
+            && after == before,
+        json!({
+            "exit": exit,
+            "path": again,
+            "samePath": again == baz,
+            "sameWorkstream": answered.as_deref() == Some(baz_id.as_str()),
+            "workstreamsAdded": after - before,
+        }),
+    );
+
+    j.step("at Read, claude makes its own worktree");
+    set_level(&mut j, &c, AgentControlLevel::Read).await;
+    type_line(&c, &term, &format!("cd {lead_tree}")).await;
+    let before = active().await.len();
+    worktree("worktree foo").await;
+    let (exit, native) = created(&hooks, "foo");
+    let after = active().await.len();
+    j.guard(
+        "the hook prints `<cwd>/.claude/worktrees/foo` and no workstream is added",
+        exit == "0" && native == format!("{lead_tree}/.claude/worktrees/foo") && after == before,
+        json!({ "exit": exit, "path": native, "workstreamsAdded": after - before }),
+    );
+    type_line(&c, &term, "exit").await;
+    wait_for_exit(&mut stream, IO).await;
+
+    j.step("with the server gone, the hook still makes a worktree at once");
+    let token = env_var(&agent_env(&sandbox, &term), "HYPRLAYER_AGENT_TOKEN").to_string();
+    server.shutdown(&c).await;
+    let dead_env = vec![
+        ("HYPRLAYER_AGENT_TOKEN".to_string(), token),
+        (
+            "HYPRLAYER_SOCKET".to_string(),
+            sandbox.socket().display().to_string(),
+        ),
+    ];
+    let payload = json!({ "session_id": "dead", "cwd": repo, "name": "dead" }).to_string();
+    let dead = run_face(
+        &["hook", "claude", "WorktreeCreate"],
+        &dead_env,
+        payload.as_bytes(),
+    )
+    .await;
+    let path = dead.stdout.trim();
+    j.guard(
+        "it prints `<repo>/.claude/worktrees/dead` and exits 0 in under a second",
+        dead.code == Some(0)
+            && path.ends_with("/demo/.claude/worktrees/dead")
+            && Path::new(path).is_dir()
+            && dead.elapsed < Duration::from_secs(1),
+        json!({
+            "exit": dead.code,
+            "path": path,
+            "underASecond": dead.elapsed < Duration::from_secs(1),
+        }),
+    );
+
+    j.finish();
+}
+
+fn created(hooks: &Path, name: &str) -> (String, String) {
+    let prefix = format!("WorktreeCreate {name} exit=");
+    lines(hooks)
+        .iter()
+        .rev()
+        .find_map(|line| {
+            let (exit, path) = line.strip_prefix(&prefix)?.split_once(" path=")?;
+            Some((exit.to_string(), path.to_string()))
+        })
+        .unwrap_or_default()
 }
 
 /// `PtyAgentChanged`s for `terminal` until `stop` matches one, or `IO` passes.

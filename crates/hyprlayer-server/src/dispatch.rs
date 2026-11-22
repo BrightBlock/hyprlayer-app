@@ -94,9 +94,10 @@ use hyprlayer_core::{
     SessionLogEntry, Stage, Workstream, WorkstreamDoc, WorktreeMode,
 };
 use hyprlayer_models::{
-    AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClientRef, PtyAgent,
-    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
+    AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer,
+    ClaudeWorktreeEvent, ClientRef, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime,
+    SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent,
+    TerminalTheme, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -905,6 +906,10 @@ impl Dispatch for Server {
         branch_prefix: Option<String>,
     ) -> Result<WorkstreamView, WireError> {
         let runs_setup = !matches!(mode, WorktreeMode::Inplace | WorktreeMode::Attached);
+        let parent_workstream_id = self
+            .agent_token()
+            .and_then(|token| self.runtime.agent_control().identify(&token).ok())
+            .map(|identity| identity.workstream_id);
         let result = self
             .runtime
             .workstreams()
@@ -915,6 +920,7 @@ impl Dispatch for Server {
                 mode,
                 branch,
                 branch_prefix,
+                parent_workstream_id,
             })
             .await
             .wire()?;
@@ -2271,6 +2277,53 @@ impl Dispatch for Server {
 
     async fn model_switch_pending(&self, token: String) -> Result<bool, WireError> {
         Ok(self.runtime.agent_control().model_switch_pending(&token))
+    }
+
+    async fn claude_worktree(
+        &self,
+        token: String,
+        event: ClaudeWorktreeEvent,
+    ) -> Result<ClaudeWorktreeAnswer, WireError> {
+        let ClaudeWorktreeEvent::Create {
+            name,
+            cwd,
+            session_id,
+        } = event;
+        let created = match self.runtime.agent_control().identify(&token) {
+            Ok(identity) => {
+                self.runtime
+                    .workstreams()
+                    .create_for_claude(&identity, name, &cwd, session_id)
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        let created = match created {
+            Ok(created) => created,
+            Err(e) => {
+                tracing::info!("claude makes its own worktree from {cwd}: {e}");
+                return Ok(ClaudeWorktreeAnswer::Fallback);
+            }
+        };
+        if !created.reused {
+            // claude waits on the hook, and a setup script can take minutes.
+            let runtime = self.runtime.clone();
+            let workstream = created.item.clone();
+            tokio::spawn(async move {
+                let id = workstream.id.clone();
+                if let Err(e) = runtime
+                    .scripts()
+                    .run_lifecycle(RunLifecycleRequest {
+                        workstream,
+                        kind: ScriptKind::Setup,
+                    })
+                    .await
+                {
+                    tracing::warn!("setup script for workstream {id} did not run: {e}");
+                }
+            });
+        }
+        Ok(ClaudeWorktreeAnswer::Path(created.item.worktree_path))
     }
 
     async fn pty_agent_set_model(

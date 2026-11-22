@@ -22,13 +22,14 @@ use crate::runtime::script_registry::RunPhase;
 use crate::runtime::scripts::RunLifecycleRequest;
 use crate::scripts::ScriptKind;
 use crate::store::{
-    now_ms, ArchiveRecord, Db, NewWorkstream, ObservedPr, Workstream, WorkstreamDoc,
-    WorkstreamStatus, WorktreeMode,
+    now_ms, ArchiveRecord, Db, NewClaudeWorktree, NewWorkstream, ObservedPr, Workstream,
+    WorkstreamDoc, WorkstreamStatus, WorktreeMode,
 };
 use crate::worktree::seed::SeedReport;
 use crate::worktree::thoughts_links::{self, LinkStatus};
 use crate::worktree::{self, archive_dir_for, BranchCleanup, CreateMode, CreateSpec, RemovePolicy};
 
+use super::agent_control::AgentIdentity;
 use super::doc_status;
 use super::pr_watcher::{
     cached_lookup, cached_lookup_any_ref, edit_cached_pr, failure_cause, store_lookup, PrBudget,
@@ -65,12 +66,47 @@ pub struct CreateWorkstreamRequest {
     pub mode: WorktreeMode,
     pub branch: Option<String>,
     pub branch_prefix: Option<String>,
+    pub parent_workstream_id: Option<String>,
+}
+
+struct ClaudeName {
+    name: String,
+    harness_session_id: Option<String>,
+}
+
+fn same_repo(a: &Path, b: &Path) -> bool {
+    let common = |path: &Path| {
+        let repo = git2::Repository::discover(path).ok()?;
+        dunce::canonicalize(crate::gitops::common_dir(&repo)).ok()
+    };
+    matches!((common(a), common(b)), (Some(a), Some(b)) if a == b)
+}
+
+/// Archive, restore and delete find an archive by its slug, so no two rows of a project share one.
+fn free_slug(db: &Db, project_path: &str, stem: &str) -> Result<String> {
+    for n in 1u32.. {
+        let slug = match n {
+            1 => stem.to_string(),
+            n => format!("{stem}-{n}"),
+        };
+        if !db.workstream_slug_taken(project_path, &slug)? {
+            return Ok(slug);
+        }
+    }
+    unreachable!("some stem-N is free")
+}
+
+fn head_of(worktree: &Path) -> Option<String> {
+    let repo = git2::Repository::open(worktree).ok()?;
+    let head = repo.head().ok()?.target()?;
+    Some(head.to_string())
 }
 
 pub struct CreateWorkstreamResult {
     pub item: Workstream,
     pub link: Option<LinkStatus>,
     pub seed: Option<SeedReport>,
+    pub reused: bool,
 }
 
 pub struct RenameWorkstreamRequest {
@@ -1344,6 +1380,7 @@ impl WorkstreamService<'_> {
             item,
             link: None,
             seed: None,
+            reused: false,
         })
     }
 
@@ -1398,13 +1435,56 @@ impl WorkstreamService<'_> {
     }
 
     pub async fn create(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
+        self.create_logged(req, None).await
+    }
+
+    pub async fn create_for_claude(
+        &self,
+        identity: &AgentIdentity,
+        name: String,
+        cwd: &str,
+        session_id: Option<String>,
+    ) -> Result<CreateWorkstreamResult> {
+        self.runtime.agent_control().require_full(identity).await?;
+        let project = identity.project_path.clone();
+        let (from, to) = (PathBuf::from(cwd), PathBuf::from(&project));
+        if !blocking(move || Ok(same_repo(&from, &to))).await? {
+            return Err(CoreError::AgentControlDenied {
+                detail: format!("{cwd} is not a checkout of {project}"),
+            });
+        }
+        let req = CreateWorkstreamRequest {
+            project_path: project,
+            title: name.clone(),
+            base: None,
+            mode: WorktreeMode::Isolated,
+            branch: None,
+            branch_prefix: None,
+            parent_workstream_id: Some(identity.workstream_id.clone()),
+        };
+        let claude = ClaudeName {
+            name,
+            harness_session_id: session_id,
+        };
+        self.create_logged(req, Some(claude)).await
+    }
+
+    async fn create_logged(
+        &self,
+        req: CreateWorkstreamRequest,
+        claude: Option<ClaudeName>,
+    ) -> Result<CreateWorkstreamResult> {
         let started = std::time::Instant::now();
         let what = format!(
             "create {:?} in {} ({:?})",
             req.title, req.project_path, req.mode
         );
-        let result = self.create_inner(req).await;
+        let result = self.create_inner(req, claude).await;
         match &result {
+            Ok(created) if created.reused => tracing::info!(
+                "{what}: claude's worktree {} already exists",
+                created.item.worktree_path
+            ),
             Ok(created) => {
                 tracing::info!(
                     "{what}: workstream {} on {} at {} in {:?}",
@@ -1426,7 +1506,11 @@ impl WorkstreamService<'_> {
         });
     }
 
-    async fn create_inner(&self, req: CreateWorkstreamRequest) -> Result<CreateWorkstreamResult> {
+    async fn create_inner(
+        &self,
+        req: CreateWorkstreamRequest,
+        claude: Option<ClaudeName>,
+    ) -> Result<CreateWorkstreamResult> {
         ensure_running(self.runtime)?;
         let CreateWorkstreamRequest {
             project_path,
@@ -1435,6 +1519,7 @@ impl WorkstreamService<'_> {
             mode,
             branch,
             branch_prefix: branch_prefix_req,
+            parent_workstream_id,
         } = req;
         let title = title.trim().to_string();
         if title.is_empty() {
@@ -1448,6 +1533,11 @@ impl WorkstreamService<'_> {
             .await
             .is_git()
         {
+            if claude.is_some() {
+                return Err(CoreError::AgentControlDenied {
+                    detail: format!("{project_path} is a folder project, with no worktrees"),
+                });
+            }
             return self.create_folder(project_path, title).await;
         }
 
@@ -1502,6 +1592,21 @@ impl WorkstreamService<'_> {
         if let CreateMode::Attached { path, .. } = &create_mode {
             self.ensure_unattached(&project_path, path).await?;
         }
+        if let Some(claude) = &claude {
+            let (pp, name, db) = (
+                project_path.clone(),
+                claude.name.clone(),
+                self.runtime.db.clone(),
+            );
+            if let Some(item) = blocking(move || db.active_claude_worktree(&pp, &name)).await? {
+                return Ok(CreateWorkstreamResult {
+                    item,
+                    link: None,
+                    seed: None,
+                    reused: true,
+                });
+            }
+        }
 
         let effective = self.effective_for(&project_path).await?;
         let mapped = effective
@@ -1515,7 +1620,7 @@ impl WorkstreamService<'_> {
         let picked = branch_prefix_req
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty());
-        let branch_prefix = match picked {
+        let mut branch_prefix = match picked {
             Some(p) => p,
             None => self
                 .runtime
@@ -1525,6 +1630,15 @@ impl WorkstreamService<'_> {
                 .git
                 .effective_branch_prefix(),
         };
+        let claude_slug = match &claude {
+            Some(claude) => {
+                let (db, pp) = (self.runtime.db.clone(), project_path.clone());
+                let stem = worktree::slug_stem(&claude.name);
+                branch_prefix.push_str("claude/");
+                Some(blocking(move || free_slug(&db, &pp, &stem)).await?)
+            }
+            None => None,
+        };
         if matches!(create_mode, CreateMode::Isolated) {
             branch_prefix::validate_prefix(&branch_prefix)?;
         }
@@ -1532,7 +1646,7 @@ impl WorkstreamService<'_> {
         let created = self
             .runtime
             .worktrees
-            .create(
+            .create_named(
                 &git,
                 &CreateSpec {
                     project_repo: PathBuf::from(&project_path),
@@ -1542,6 +1656,7 @@ impl WorkstreamService<'_> {
                     branch_prefix,
                     mode: create_mode,
                 },
+                claude_slug.as_deref(),
             )
             .await?;
 
@@ -1639,16 +1754,30 @@ impl WorkstreamService<'_> {
         };
         let db = self.runtime.db.clone();
         let worktree_left = new_item.worktree_path.clone();
-        let item = blocking(move || db.insert_workstream(new_item))
-            .await
-            .inspect_err(|e| {
-                tracing::error!("not recorded, so {worktree_left} is left on disk untracked: {e}")
-            })?;
+        let item = blocking(move || {
+            let item = db.insert_child_workstream(new_item, parent_workstream_id)?;
+            if let Some(claude) = claude {
+                db.insert_claude_worktree(NewClaudeWorktree {
+                    workstream_id: item.id.clone(),
+                    project_path: item.project_path.clone(),
+                    agent_id: claude.name.strip_prefix("agent-").map(str::to_string),
+                    name: claude.name,
+                    harness_session_id: claude.harness_session_id,
+                    created_head: head_of(Path::new(&item.worktree_path)),
+                })?;
+            }
+            Ok(item)
+        })
+        .await
+        .inspect_err(|e| {
+            tracing::error!("not recorded, so {worktree_left} is left on disk untracked: {e}")
+        })?;
 
         Ok(CreateWorkstreamResult {
             item,
             link: Some(link),
             seed,
+            reused: false,
         })
     }
 

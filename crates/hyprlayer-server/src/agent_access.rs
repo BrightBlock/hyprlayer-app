@@ -333,6 +333,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::ReportAgentSignal { .. }
         | Request::ReportAgentStatus { .. }
         | Request::ModelSwitchPending { .. }
+        | Request::ClaudeWorktree { .. }
         | Request::PtyAgentSetModel { .. }
         | Request::PtyAgentSetEffort { .. }
         | Request::PtyAgentSetPermissionMode { .. }

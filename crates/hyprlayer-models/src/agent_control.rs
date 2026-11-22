@@ -203,6 +203,24 @@ pub struct AgentSignal {
     pub written_paths: Vec<String>,
 }
 
+/// A claude worktree hook, which the server answers rather than folds into its agent's state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all_fields = "camelCase")]
+pub enum ClaudeWorktreeEvent {
+    Create {
+        name: String,
+        cwd: String,
+        session_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ClaudeWorktreeAnswer {
+    Path(String),
+    /// The hook makes claude's own worktree instead.
+    Fallback,
+}
+
 /// What `announce_agent` tells an agent about itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

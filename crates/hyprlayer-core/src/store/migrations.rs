@@ -293,6 +293,18 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE workstreams ADD COLUMN observed_pr_head TEXT;
     ALTER TABLE workstreams ADD COLUMN observed_pr_tip TEXT;
     ",
+    "
+    ALTER TABLE workstreams ADD COLUMN parent_workstream_id TEXT;
+    CREATE TABLE claude_worktrees (
+        workstream_id      TEXT PRIMARY KEY REFERENCES workstreams(id) ON DELETE CASCADE,
+        project_path       TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        harness_session_id TEXT,
+        agent_id           TEXT,
+        created_head       TEXT
+    );
+    CREATE INDEX idx_claude_worktrees_name ON claude_worktrees(project_path, name);
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

@@ -1,0 +1,126 @@
+{
+  "scenario": "pty_claude_worktrees",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branch": "hyprlayer/claude/foo",
+            "exit": "0",
+            "movedIn": true,
+            "nestedUnderLead": true,
+            "path": "$SANDBOX/home/hyprlayer/worktrees/demo/foo"
+          },
+          "guard": "the hook prints the workstream's worktree, on its claude branch, nested under the lead, and claude moves in",
+          "ok": true
+        }
+      ],
+      "step": "at Full, a claude worktree is a workstream at its name's path"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": "0",
+            "samePath": true,
+            "workstreamsNamedFoo": 1
+          },
+          "guard": "the second create returns the first's path and adds no workstream",
+          "ok": true
+        }
+      ],
+      "step": "the same name again finds the same worktree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "allWorkstreams": true,
+            "distinctPaths": 3,
+            "exits": [
+              "0",
+              "0",
+              "0"
+            ]
+          },
+          "guard": "each create exits 0 with its own path, and each path is a workstream",
+          "ok": true
+        }
+      ],
+      "step": "three subagents at once get three workstreams"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branch": true,
+            "exit": "0",
+            "path": "$SANDBOX/home/code/other/.claude/worktrees/bar",
+            "workstreamsAdded": 0
+          },
+          "guard": "the fallback is `<other>/.claude/worktrees/bar` on `worktree-bar`, with no workstream",
+          "ok": true
+        }
+      ],
+      "step": "a cwd in another repo gets claude's own layout there"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "branch": "hyprlayer/claude/foo-2",
+            "exit": "0",
+            "path": "$SANDBOX/home/hyprlayer/worktrees/demo/foo-2"
+          },
+          "guard": "the create lands at `foo-2` on `claude/foo-2`: the archived row keeps slug `foo` and its branch",
+          "ok": true
+        }
+      ],
+      "step": "a name recreated after its archive takes the next free slug"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": "0",
+            "path": "$SANDBOX/home/hyprlayer/worktrees/demo/baz",
+            "samePath": true,
+            "sameWorkstream": true,
+            "workstreamsAdded": 0
+          },
+          "guard": "the create after the restore returns baz's original path and adds no workstream",
+          "ok": true
+        }
+      ],
+      "step": "a restored claude workstream answers its name again"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": "0",
+            "path": "$SANDBOX/home/hyprlayer/worktrees/demo/lead-$SUFFIX/.claude/worktrees/foo",
+            "workstreamsAdded": 0
+          },
+          "guard": "the hook prints `<cwd>/.claude/worktrees/foo` and no workstream is added",
+          "ok": true
+        }
+      ],
+      "step": "at Read, claude makes its own worktree"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "path": "$SANDBOX/home/code/demo/.claude/worktrees/dead",
+            "underASecond": true
+          },
+          "guard": "it prints `<repo>/.claude/worktrees/dead` and exits 0 in under a second",
+          "ok": true
+        }
+      ],
+      "step": "with the server gone, the hook still makes a worktree at once"
+    }
+  ]
+}

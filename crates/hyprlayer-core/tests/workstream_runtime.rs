@@ -234,6 +234,7 @@ fn isolated_request(project_path: &Path, title: &str) -> CreateWorkstreamRequest
         mode: WorktreeMode::Isolated,
         branch: None,
         branch_prefix: None,
+        parent_workstream_id: None,
     }
 }
 
@@ -245,6 +246,7 @@ fn inplace_request(project_path: &Path, title: &str) -> CreateWorkstreamRequest 
         mode: WorktreeMode::Inplace,
         branch: Some("main".into()),
         branch_prefix: None,
+        parent_workstream_id: None,
     }
 }
 
@@ -662,6 +664,7 @@ async fn purge_deletes_the_branch_only_when_the_app_owns_it() {
             mode: WorktreeMode::Existing,
             branch: Some("adopted-feature".into()),
             branch_prefix: None,
+            parent_workstream_id: None,
         })
         .await
         .unwrap();

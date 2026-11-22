@@ -53,13 +53,23 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         archived_at: row.get("archived_at")?,
+        parent_workstream_id: row.get("parent_workstream_id")?,
     })
 }
 
 const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_branch, \
                     worktree_mode, stage, status, pr_number, observed_pr_number, observed_pr_state, \
                     observed_ref, observed_pr_head, observed_pr_tip, \
-                    created_at, updated_at, archived_at";
+                    created_at, updated_at, archived_at, parent_workstream_id";
+
+pub struct NewClaudeWorktree {
+    pub workstream_id: String,
+    pub project_path: String,
+    pub name: String,
+    pub harness_session_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub created_head: Option<String>,
+}
 
 const DAY_MS: f64 = 86_400_000.0;
 /// An archive is purged this long after it was archived, unless kept.
@@ -108,6 +118,14 @@ fn qualified_cols() -> String {
 
 impl Db {
     pub fn insert_workstream(&self, new: NewWorkstream) -> Result<Workstream> {
+        self.insert_child_workstream(new, None)
+    }
+
+    pub fn insert_child_workstream(
+        &self,
+        new: NewWorkstream,
+        parent_workstream_id: Option<String>,
+    ) -> Result<Workstream> {
         let now = now_ms();
         let item = Workstream {
             id: uuid::Uuid::new_v4().to_string(),
@@ -128,13 +146,14 @@ impl Db {
             created_at: now,
             updated_at: now,
             archived_at: None,
+            parent_workstream_id,
         };
         self.with(|conn| {
             conn.execute(
                 "INSERT INTO workstreams (id, project_path, title, slug, branch, worktree_path,
                                          base_branch, worktree_mode, stage, status, pr_number,
-                                         created_at, updated_at, archived_at)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                                         created_at, updated_at, archived_at, parent_workstream_id)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
                 params![
                     item.id,
                     item.project_path,
@@ -150,11 +169,68 @@ impl Db {
                     item.created_at,
                     item.updated_at,
                     item.archived_at,
+                    item.parent_workstream_id,
                 ],
             )?;
             Ok(())
         })?;
         Ok(item)
+    }
+
+    /// Any status: an archived row still owns its slug's archive dir.
+    pub fn workstream_slug_taken(&self, project_path: &str, slug: &str) -> Result<bool> {
+        self.with(|conn| {
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM workstreams WHERE project_path = ?1 AND slug = ?2)",
+                params![project_path, slug],
+                |row| row.get(0),
+            )
+        })
+    }
+
+    pub fn insert_claude_worktree(&self, row: NewClaudeWorktree) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "INSERT INTO claude_worktrees (workstream_id, project_path, name,
+                                               harness_session_id, agent_id, created_head)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    row.workstream_id,
+                    row.project_path,
+                    row.name,
+                    row.harness_session_id,
+                    row.agent_id,
+                    row.created_head,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Archive keeps the row so a restore finds it again. A restored archive and a
+    /// later create of the same name can both be active; the newer create wins.
+    pub fn active_claude_worktree(
+        &self,
+        project_path: &str,
+        name: &str,
+    ) -> Result<Option<Workstream>> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!(
+                    "SELECT {} FROM claude_worktrees c JOIN workstreams w ON w.id = c.workstream_id
+                     WHERE c.project_path = ?1 AND c.name = ?2 AND w.status = 'active'
+                     ORDER BY c.rowid DESC",
+                    qualified_cols()
+                ),
+                params![project_path, name],
+                row_to_item,
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+        })
     }
 
     pub fn get_workstream(&self, id: &str) -> Result<Option<Workstream>> {

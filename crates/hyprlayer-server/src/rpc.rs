@@ -75,9 +75,9 @@ use hyprlayer_core::{
     WorkstreamDoc, WorktreeMode,
 };
 use hyprlayer_models::{
-    AgentSignal, AgentStatusReport, AgentWhoami, PtyAgent, PtyControlOutcome, RevealTarget,
-    ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
-    SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
+    AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer, ClaudeWorktreeEvent,
+    PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns,
+    SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -334,6 +334,7 @@ hyprlayer_proto::commands! {
     ReportAgentSignal: report_agent_signal(token: String, signal: AgentSignal) -> ();
     ReportAgentStatus: report_agent_status(token: String, report: AgentStatusReport) -> ();
     ModelSwitchPending: model_switch_pending(token: String) -> bool;
+    ClaudeWorktree: claude_worktree(token: String, event: ClaudeWorktreeEvent) -> ClaudeWorktreeAnswer;
     PtyAgentSetModel: pty_agent_set_model(terminal_id: String, model: String) -> PtyControlOutcome;
     PtyAgentSetEffort: pty_agent_set_effort(terminal_id: String, effort: String) -> ();
     PtyAgentSetPermissionMode: pty_agent_set_permission_mode(terminal_id: String, mode: String) -> ();

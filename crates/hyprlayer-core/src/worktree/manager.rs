@@ -204,7 +204,17 @@ impl WorktreeManager {
     }
 
     pub async fn create(&self, git: &Path, spec: &CreateSpec) -> Result<CreatedWorktree> {
-        let slug = unique_slug(&spec.title);
+        self.create_named(git, spec, None).await
+    }
+
+    pub async fn create_named(
+        &self,
+        git: &Path,
+        spec: &CreateSpec,
+        slug: Option<&str>,
+    ) -> Result<CreatedWorktree> {
+        let named = slug.is_some();
+        let slug = slug.map_or_else(|| unique_slug(&spec.title), str::to_string);
         let overlay = self.child_env().await;
 
         // Best effort: offline still creates, from whatever refs are local.
@@ -228,17 +238,23 @@ impl WorktreeManager {
 
         match &spec.mode {
             CreateMode::Isolated => {
-                let branch = format!("{}{slug}", spec.branch_prefix);
                 let path = self.prepare_worktree_dir(&spec.mapped_name, &slug)?;
                 let base = match &spec.base_override {
                     Some(b) => b.clone(),
                     None => detect_base_branch(git, &spec.project_repo, &overlay).await?,
                 };
+                let stem = format!("{}{slug}", spec.branch_prefix);
+                let (branch, reset) = if named {
+                    claim_branch(&spec.project_repo, &base, &stem)?
+                } else {
+                    (stem, false)
+                };
+                let flag = if reset { "-B" } else { "-b" };
                 self.worktree_add(
                     git,
                     &spec.project_repo,
                     &path,
-                    &["--no-track", "-b", &branch],
+                    &["--no-track", flag, &branch],
                     &base,
                 )
                 .await?;
@@ -1035,6 +1051,41 @@ pub fn status(
         thoughts: thoughts.unwrap_or(LinkStatus::Ok),
         unreadable,
     }
+}
+
+/// `stem`, or the first free `stem-N`. An existing branch no worktree holds and that `base`
+/// already contains is reused (`true`): resetting it to `base` loses no commit.
+fn claim_branch(repo_path: &Path, base: &str, stem: &str) -> Result<(String, bool)> {
+    let held: std::collections::HashSet<String> = crate::gitops::branch_worktrees(repo_path)?
+        .into_iter()
+        .map(|(branch, _)| branch)
+        .chain(crate::gitops::current_branch(repo_path))
+        .collect();
+    let git_err = |e: git2::Error| CoreError::OutputParse {
+        program: "git2 claim branch".into(),
+        detail: e.message().to_string(),
+    };
+    let repo = crate::gitops::open_repo(repo_path)?;
+    let base = repo
+        .revparse_single(base)
+        .and_then(|o| o.peel_to_commit())
+        .map_err(git_err)?
+        .id();
+    for n in 1u32.. {
+        let name = match n {
+            1 => stem.to_string(),
+            n => format!("{stem}-{n}"),
+        };
+        let Ok(existing) = repo.find_branch(&name, git2::BranchType::Local) else {
+            return Ok((name, false));
+        };
+        let tip = existing.get().peel_to_commit().map_err(git_err)?.id();
+        let merged = tip == base || repo.graph_descendant_of(base, tip).map_err(git_err)?;
+        if merged && !held.contains(&name) {
+            return Ok((name, true));
+        }
+    }
+    unreachable!("some stem-N is free")
 }
 
 pub fn unique_slug(title: &str) -> String {

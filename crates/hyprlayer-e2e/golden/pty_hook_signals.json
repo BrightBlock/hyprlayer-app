@@ -35,11 +35,12 @@
               "SessionStart",
               "Stop",
               "StopFailure",
-              "UserPromptSubmit"
+              "UserPromptSubmit",
+              "WorktreeCreate"
             ],
             "statusLine": "'$CTL' statusline claude"
           },
-          "guard": "the settings file runs `<ctl> hook claude <Event>` for all 11 events, and `<ctl> statusline claude`",
+          "guard": "the settings file runs `<ctl> hook claude <Event>` for all 12 events, and `<ctl> statusline claude`",
           "ok": true
         },
         {

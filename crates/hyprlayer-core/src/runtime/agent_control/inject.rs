@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-pub const CLAUDE_HOOK_EVENTS: [&str; 11] = [
+pub const CLAUDE_HOOK_EVENTS: [&str; 12] = [
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
@@ -16,6 +16,8 @@ pub const CLAUDE_HOOK_EVENTS: [&str; 11] = [
     "PostModelSwitch",
     // Asks the server rather than reports: it answers claude's "Switch model?" dialog for the bar.
     "PreModelSwitch",
+    // Answers with a path: the server's workstream, else claude's own layout, made by the face.
+    "WorktreeCreate",
 ];
 
 pub const CODEX_HOOK_EVENTS: [&str; 8] = [
@@ -33,6 +35,8 @@ pub const CODEX_HOOK_EVENTS: [&str; 8] = [
 pub const CODEX_HOOKS_MIN: [u64; 3] = [0, 164, 0];
 
 const HOOK_TIMEOUT_SECS: u32 = 5;
+/// Above the face's 90 s budget for the server's create plus its local fallback.
+const WORKTREE_CREATE_TIMEOUT_SECS: u32 = 120;
 
 const MCP_SERVER: &str = "hyprlayer";
 /// Above the 600 s cap on a wait, so codex never cuts one short.
@@ -122,7 +126,10 @@ pub fn claude_settings(ctl: &Path) -> serde_json::Value {
             let hook = serde_json::json!([{ "hooks": [{
                 "type": "command",
                 "command": format!("{ctl} hook claude {event}"),
-                "timeout": HOOK_TIMEOUT_SECS,
+                "timeout": match *event {
+                    "WorktreeCreate" => WORKTREE_CREATE_TIMEOUT_SECS,
+                    _ => HOOK_TIMEOUT_SECS,
+                },
             }] }]);
             (event.to_string(), hook)
         })

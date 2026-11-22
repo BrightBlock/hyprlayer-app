@@ -4,13 +4,15 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use hyprlayer_models::AgentSignal;
+use hyprlayer_models::{AgentSignal, ClaudeWorktreeAnswer, ClaudeWorktreeEvent};
 use serde_json::Value;
 
 use crate::client::RpcClient;
 
 /// A slow or hung server must never stall the agent's turn.
 const REPORT_BUDGET: Duration = Duration::from_millis(500);
+/// Leaves 30 s of claude's 120 s `WorktreeCreate` timeout for the local fallback.
+const CREATE_BUDGET: Duration = Duration::from_secs(90);
 const TOOL_TARGET_CHARS: usize = 80;
 const LAST_REPLY_BYTES: usize = 4 * 1024;
 const PROMPT_BYTES: usize = 2 * 1024;
@@ -34,7 +36,8 @@ impl HookEngine {
     }
 }
 
-/// Never logs and always exits 0: a failing hook would surface in the agent's TUI.
+/// Never logs, and exits 0 unless `WorktreeCreate` can make no worktree at all: a failing hook
+/// would surface in the agent's TUI.
 pub async fn run_hook(engine: HookEngine, event: Option<String>) -> i32 {
     // codex parses stdout as JSON after exit 0; a closed stdout must not panic.
     let ack = || {
@@ -43,6 +46,10 @@ pub async fn run_hook(engine: HookEngine, event: Option<String>) -> i32 {
         }
     };
     let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
+    // claude takes the last stdout line as the worktree, so even a tokenless hook must answer.
+    if engine == HookEngine::Claude && event.as_deref() == Some("WorktreeCreate") {
+        return create_worktree(env("HYPRLAYER_SOCKET"), env("HYPRLAYER_AGENT_TOKEN")).await;
+    }
     let (Some(token), Some(socket)) = (env("HYPRLAYER_AGENT_TOKEN"), env("HYPRLAYER_SOCKET"))
     else {
         ack();
@@ -80,6 +87,69 @@ async fn allow_driven_switch(socket: PathBuf, token: String) -> i32 {
         let _ = writeln!(std::io::stdout(), "{ALLOW_SWITCH}");
     }
     0
+}
+
+async fn create_worktree(socket: Option<String>, token: Option<String>) -> i32 {
+    let payload: Option<Value> = read_stdin().and_then(|raw| serde_json::from_slice(&raw).ok());
+    let text = |key: &str| payload.as_ref()?.get(key)?.as_str().map(str::to_string);
+    let (Some(name), Some(cwd)) = (text("name"), text("cwd")) else {
+        eprintln!("hyprlayer: the WorktreeCreate payload has no name or cwd");
+        return 1;
+    };
+    let event = ClaudeWorktreeEvent::Create {
+        name: name.clone(),
+        cwd: cwd.clone(),
+        session_id: text("session_id"),
+    };
+    let ask = async {
+        let client = RpcClient::connect_socket(Path::new(&socket?)).await.ok()?;
+        drop(client.take_events());
+        client.claude_worktree(token?, event).await.ok()
+    };
+    let path = match tokio::time::timeout(CREATE_BUDGET, ask).await {
+        Ok(Some(ClaudeWorktreeAnswer::Path(path))) => path,
+        _ => match claude_layout_worktree(Path::new(&cwd), &name) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("{e}");
+                return 1;
+            }
+        },
+    };
+    let _ = writeln!(std::io::stdout(), "{path}");
+    0
+}
+
+/// The worktree claude makes with no hook installed: `worktree-<name>` off the origin default.
+fn claude_layout_worktree(cwd: &Path, name: &str) -> Result<String, String> {
+    let git = |dir: &Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .map_err(|e| format!("git: {e}"))?;
+        match out.status.success() {
+            true => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),
+            false => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+        }
+    };
+    let top = PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"])?);
+    let path = top.join(".claude").join("worktrees").join(name);
+    let path_str = path.to_string_lossy().into_owned();
+    if path.is_dir() {
+        return Ok(path_str);
+    }
+    let branch = format!("worktree-{name}");
+    let base =
+        git(&top, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).unwrap_or_else(|_| "HEAD".into());
+    let local = format!("refs/heads/{branch}");
+    let add: Vec<&str> = match git(&top, &["rev-parse", "--verify", "--quiet", &local]) {
+        Ok(_) => vec!["worktree", "add", &path_str, &branch],
+        Err(_) => vec!["worktree", "add", "-b", &branch, &path_str, &base],
+    };
+    git(&top, &add)?;
+    Ok(path_str)
 }
 
 pub(crate) fn read_stdin() -> Option<Vec<u8>> {

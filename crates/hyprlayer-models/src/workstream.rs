@@ -125,6 +125,9 @@ pub struct Workstream {
     pub created_at: f64,
     pub updated_at: f64,
     pub archived_at: Option<f64>,
+    /// The workstream whose agent created this one; the app's own creates have none.
+    #[serde(default)]
+    pub parent_workstream_id: Option<String>,
 }
 
 impl Workstream {
@@ -208,6 +211,7 @@ mod tests {
             created_at: 0.0,
             updated_at: 0.0,
             archived_at: None,
+            parent_workstream_id: None,
         }
     }
 
