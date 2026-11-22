@@ -28,6 +28,15 @@ pub fn git_dir(worktree: &Path) -> Option<PathBuf> {
     Some(open_repo(worktree).ok()?.path().to_path_buf())
 }
 
+/// A linked worktree's git dir names the shared one in its `commondir` file; git2 0.19 has no accessor.
+pub(crate) fn common_dir(repo: &git2::Repository) -> PathBuf {
+    let git_dir = repo.path();
+    match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(shared) => git_dir.join(shared.trim()),
+        Err(_) => git_dir.to_path_buf(),
+    }
+}
+
 pub(crate) fn status_options() -> git2::StatusOptions {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
@@ -43,25 +52,71 @@ pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> O
         .and_then(|u| u.get().target())
 }
 
-pub(crate) fn pushed_ref(
-    repo: &git2::Repository,
+pub(crate) fn remote_ref_parts(repo: &git2::Repository, refname: &str) -> Option<(String, String)> {
+    let remote = repo.branch_remote_name(refname).ok()?;
+    let remote = remote.as_str()?;
+    let branch = refname.strip_prefix(&format!("refs/remotes/{remote}/"))?;
+    Some((remote.to_string(), branch.to_string()))
+}
+
+fn is_base_ref(repo: &git2::Repository, upstream: &git2::Reference, base: &str) -> bool {
+    let base_branch = remote_ref_parts(repo, &format!("refs/remotes/{base}"))
+        .map_or_else(|| base.to_string(), |(_, branch)| branch);
+    upstream
+        .name()
+        .and_then(|name| remote_ref_parts(repo, name))
+        .is_some_and(|(_, branch)| branch == base_branch)
+}
+
+pub(crate) fn pushed_ref<'r>(
+    repo: &'r git2::Repository,
     branch: &str,
     base: &str,
-) -> Option<(String, git2::Oid)> {
-    let is_base = |r: &git2::Reference| {
-        r.shorthand()
-            .is_some_and(|s| s == base || s == format!("origin/{base}"))
-    };
+) -> Option<git2::Reference<'r>> {
     repo.find_branch(branch, git2::BranchType::Local)
         .ok()
         .and_then(|b| b.upstream().ok())
         .map(git2::Branch::into_reference)
-        .filter(|r| !is_base(r))
+        .filter(|r| r.is_remote() && !is_base_ref(repo, r, base))
         .or_else(|| {
             repo.find_reference(&format!("refs/remotes/origin/{branch}"))
                 .ok()
         })
-        .and_then(|r| Some((r.shorthand()?.to_string(), r.target()?)))
+}
+
+pub(crate) fn untrack_base(dir: &Path, branch: &str, base: &str) -> Result<bool> {
+    let repo = open_repo(dir)?;
+    let Ok(mut local) = repo.find_branch(branch, git2::BranchType::Local) else {
+        return Ok(false);
+    };
+    let tracks_base = local
+        .upstream()
+        .is_ok_and(|u| is_base_ref(&repo, u.get(), base));
+    if tracks_base {
+        local
+            .set_upstream(None)
+            .map_err(|e| git_err("git2 branch --unset-upstream", e))?;
+    }
+    Ok(tracks_base)
+}
+
+pub(crate) fn fetch_remote_for(dir: &Path, base: Option<&str>) -> Option<String> {
+    let repo = open_repo(dir).ok()?;
+    let configured = |base: &str| {
+        remote_ref_parts(&repo, &format!("refs/remotes/{base}"))
+            .map(|(remote, _)| remote)
+            .or_else(|| {
+                let remote = repo
+                    .branch_upstream_remote(&format!("refs/heads/{base}"))
+                    .ok()?;
+                remote.as_str().filter(|r| *r != ".").map(String::from)
+            })
+    };
+    base.and_then(configured).or_else(|| {
+        repo.find_remote("origin")
+            .ok()
+            .map(|_| "origin".to_string())
+    })
 }
 
 fn branch_tip(repo: &git2::Repository, branch: &str) -> Option<git2::Oid> {
@@ -85,7 +140,7 @@ pub(crate) fn pr_head_is_ours(
     let oid = git2::Oid::from_str(head_oid).ok()?;
     let contains =
         |tip: git2::Oid| tip == oid || repo.graph_descendant_of(tip, oid).unwrap_or(false);
-    let pushed = pushed_ref(&repo, branch, base).map(|(_, oid)| oid);
+    let pushed = pushed_ref(&repo, branch, base).and_then(|r| r.target());
     Some(branch_tip(&repo, branch).is_some_and(contains) || pushed.is_some_and(contains))
 }
 
@@ -1355,6 +1410,26 @@ mod tests {
         assert!(wt.join(".git").is_file());
         assert!(main.join(".git").is_dir());
         assert!(git_dir(&main).unwrap().ends_with(".git"));
+    }
+
+    #[test]
+    fn common_dir_of_a_linked_worktree_is_the_main_git_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir(&main).unwrap();
+        let repo = git2::Repository::init(&main).unwrap();
+        let sig = git2::Signature::now("t", "t@t.t").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let wt = tmp.path().join("wt");
+        repo.worktree("feat", &wt, None).unwrap();
+
+        let main_git = main.join(".git").canonicalize().unwrap();
+        let linked = open_repo(&wt).unwrap();
+        assert_eq!(common_dir(&linked).canonicalize().unwrap(), main_git);
+        assert_eq!(common_dir(&repo).canonicalize().unwrap(), main_git);
     }
 
     #[test]

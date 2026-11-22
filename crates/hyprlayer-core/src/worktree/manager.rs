@@ -80,10 +80,25 @@ pub struct WorktreeStatus {
     pub additions: u32,
     pub deletions: u32,
     pub untracked: u32,
+    pub base: Divergence,
+    pub upstream: Option<Upstream>,
+    pub unpushed: u32,
+    pub thoughts: LinkStatus,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct Divergence {
     pub ahead: u32,
     pub behind: u32,
-    pub ahead_of_base: u32,
-    pub thoughts: LinkStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct Upstream {
+    pub name: String,
+    pub ahead: u32,
+    pub behind: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +142,7 @@ pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
     ArchiveScan {
         size_bytes: Some(size as f64),
         uncommitted: git.as_ref().map(|s| s.dirty + s.untracked),
-        unpushed: git.as_ref().map(|s| s.ahead),
+        unpushed: git.as_ref().map(|s| s.unpushed),
     }
 }
 
@@ -214,8 +229,14 @@ impl WorktreeManager {
                     Some(b) => b.clone(),
                     None => detect_base_branch(git, &spec.project_repo, &overlay).await?,
                 };
-                self.worktree_add(git, &spec.project_repo, &path, &["-b", &branch], &base)
-                    .await?;
+                self.worktree_add(
+                    git,
+                    &spec.project_repo,
+                    &path,
+                    &["--no-track", "-b", &branch],
+                    &base,
+                )
+                .await?;
                 self.windows_longpaths(git, &path).await;
                 Ok(CreatedWorktree {
                     path: path.display().to_string(),
@@ -543,10 +564,10 @@ pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Res
     if status.dirty + status.untracked > 0 {
         return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
     }
-    if status.ahead > 0 {
+    if status.unpushed > 0 {
         return Err(CoreError::WorktreeUnpushed {
             branch: branch.to_string(),
-            count: status.ahead,
+            count: status.unpushed,
         });
     }
     Ok(())
@@ -626,8 +647,96 @@ pub async fn pull_base(
     })
 }
 
-pub async fn fetch_remote(git: &Path, worktree: &Path, overlay: &[(String, String)]) -> Result<()> {
-    git_in(git, worktree, &["fetch", "--prune", "origin"], overlay)
+pub async fn pull_upstream(
+    git: &Path,
+    worktree: &Path,
+    base: &str,
+    overlay: &[(String, String)],
+) -> Result<PullOutcome> {
+    let (refname, remote, branch) = crate::gitops::current_branch(worktree)
+        .and_then(|branch| {
+            let repo = crate::gitops::open_repo(worktree).ok()?;
+            let refname = crate::gitops::pushed_ref(&repo, &branch, base)?
+                .name()?
+                .to_string();
+            let (remote, branch) = crate::gitops::remote_ref_parts(&repo, &refname)?;
+            Some((refname, remote, branch))
+        })
+        .ok_or_else(|| CoreError::Exec {
+            program: "git pull".into(),
+            exit: None,
+            stderr_tail: "this branch has not been pushed".into(),
+        })?;
+
+    if let Err(e) = git_in(git, worktree, &["fetch", &remote, &branch], overlay)
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await
+    {
+        tracing::warn!("fetching {remote}/{branch} failed; merging the local {refname}: {e}");
+    }
+
+    let out = git_in(git, worktree, &["merge", "--ff-only", &refname], overlay)
+        .timeout(Duration::from_secs(120))
+        .run_unchecked()
+        .await?;
+    if out.exit_code != Some(0) {
+        return Err(CoreError::Exec {
+            program: "git merge --ff-only".into(),
+            exit: out.exit_code,
+            stderr_tail: out.stderr.trim().to_string(),
+        });
+    }
+    Ok(if out.stdout.contains("Already up to date") {
+        PullOutcome::UpToDate
+    } else {
+        PullOutcome::Merged
+    })
+}
+
+pub async fn fetch_remote(
+    git: &Path,
+    worktree: &Path,
+    base: Option<&str>,
+    overlay: &[(String, String)],
+) -> Result<()> {
+    let Some(remote) = crate::gitops::fetch_remote_for(worktree, base) else {
+        return Ok(());
+    };
+    git_in(git, worktree, &["fetch", "--prune", &remote], overlay)
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
+pub async fn fetch_unattended(
+    git: &Path,
+    repo: &Path,
+    remotes: &[String],
+    overlay: &[(String, String)],
+) -> Result<()> {
+    let mut args = vec![
+        "-c",
+        "core.askPass=",
+        "-c",
+        "credential.interactive=never",
+        "fetch",
+        "--prune",
+        "--no-write-fetch-head",
+        "--multiple",
+    ];
+    args.extend(remotes.iter().map(String::as_str));
+    let no_prompts = [
+        ("GIT_TERMINAL_PROMPT", "0"),
+        ("GIT_ASKPASS", ""),
+        ("SSH_ASKPASS", ""),
+        ("SSH_ASKPASS_REQUIRE", "never"),
+        ("GCM_INTERACTIVE", "never"),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()));
+    let env: Vec<(String, String)> = overlay.iter().cloned().chain(no_prompts).collect();
+    git_in(git, repo, &args, &env)
         .timeout(Duration::from_secs(60))
         .run()
         .await?;
@@ -757,9 +866,9 @@ pub fn folder_status(dir: &Path) -> WorktreeStatus {
         additions: 0,
         deletions: 0,
         untracked: 0,
-        ahead: 0,
-        behind: 0,
-        ahead_of_base: 0,
+        base: Divergence::default(),
+        upstream: None,
+        unpushed: 0,
         thoughts: LinkStatus::Unsupported,
     }
 }
@@ -772,9 +881,9 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         additions: 0,
         deletions: 0,
         untracked: 0,
-        ahead: 0,
-        behind: 0,
-        ahead_of_base: 0,
+        base: Divergence::default(),
+        upstream: None,
+        unpushed: 0,
         thoughts: thoughts.unwrap_or(LinkStatus::Broken),
     };
     if !worktree.exists() {
@@ -808,36 +917,32 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         .and_then(|h| h.shorthand())
         .map(String::from);
 
-    let (ahead, behind) = (|| -> Option<(u32, u32)> {
-        let head_ref = head.as_ref()?;
-        let local = head_ref.target()?;
-        let target = match crate::gitops::upstream_oid(&repo, head_ref) {
-            Some(oid) => oid,
-            None => repo
-                .revparse_single(base_branch)
-                .ok()?
-                .peel_to_commit()
-                .ok()?
-                .id(),
-        };
-        let (a, b) = repo.graph_ahead_behind(local, target).ok()?;
-        Some((a as u32, b as u32))
-    })()
-    .unwrap_or((0, 0));
-
-    let ahead_of_base = (|| -> Option<u32> {
-        let head_ref = head.as_ref()?;
-        let local = head_ref.target()?;
-        let base = repo
-            .revparse_single(base_branch)
-            .ok()?
-            .peel_to_commit()
-            .ok()?
-            .id();
-        let (a, _) = repo.graph_ahead_behind(local, base).ok()?;
-        Some(a as u32)
-    })()
-    .unwrap_or(0);
+    let local = head.as_ref().and_then(|h| h.target());
+    let divergence = |target: git2::Oid| -> Option<Divergence> {
+        let (ahead, behind) = repo.graph_ahead_behind(local?, target).ok()?;
+        Some(Divergence {
+            ahead: ahead as u32,
+            behind: behind as u32,
+        })
+    };
+    let base = repo
+        .revparse_single(base_branch)
+        .ok()
+        .and_then(|o| o.peel_to_commit().ok())
+        .and_then(|c| divergence(c.id()))
+        .unwrap_or_default();
+    let upstream = branch
+        .as_deref()
+        .and_then(|b| crate::gitops::pushed_ref(&repo, b, base_branch))
+        .and_then(|r| {
+            let d = divergence(r.target()?)?;
+            Some(Upstream {
+                name: r.shorthand()?.to_string(),
+                ahead: d.ahead,
+                behind: d.behind,
+            })
+        });
+    let unpushed = upstream.as_ref().map_or(base.ahead, |u| u.ahead);
 
     WorktreeStatus {
         exists: true,
@@ -846,9 +951,9 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         additions,
         deletions,
         untracked,
-        ahead,
-        behind,
-        ahead_of_base,
+        base,
+        upstream,
+        unpushed,
         thoughts: thoughts.unwrap_or(LinkStatus::Ok),
     }
 }
@@ -893,7 +998,10 @@ mod tests {
         let st = folder_status(&notes);
         assert!(st.exists);
         assert_eq!(st.branch, None);
-        assert_eq!((st.dirty, st.untracked, st.ahead, st.behind), (0, 0, 0, 0));
+        assert_eq!(
+            (st.dirty, st.untracked, st.base, st.upstream, st.unpushed),
+            (0, 0, Divergence::default(), None, 0)
+        );
         assert_eq!(st.thoughts, LinkStatus::Unsupported);
 
         assert!(!folder_status(&dir.path().join("gone")).exists);
@@ -1043,7 +1151,7 @@ mod tests {
 
         let st = status(&wt, &created.base_branch, None);
         assert!(st.exists);
-        assert_eq!((st.dirty, st.untracked, st.ahead), (0, 0, 0));
+        assert_eq!((st.dirty, st.untracked, st.unpushed), (0, 0, 0));
 
         std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
         let err = manager
@@ -1083,7 +1191,7 @@ mod tests {
         sh(&wt, &["add", "README.md"]);
         sh(&wt, &["commit", "-m", "wip"]);
         let st = status(&wt, &created.base_branch, None);
-        assert_eq!((st.dirty, st.ahead, st.ahead_of_base), (0, 1, 1));
+        assert_eq!((st.dirty, st.unpushed, st.base.ahead), (0, 1, 1));
         assert_eq!(st.untracked, 0, "thoughts/ must not count");
         let err = manager
             .remove(
@@ -1156,17 +1264,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ahead_of_base_survives_push_while_ahead_zeroes() {
-        let (guard, repo) = fixture_repo();
+    fn divergence(ahead: u32, behind: u32) -> Divergence {
+        Divergence { ahead, behind }
+    }
 
+    fn upstream(name: &str, ahead: u32, behind: u32) -> Option<Upstream> {
+        Some(Upstream {
+            name: name.into(),
+            ahead,
+            behind,
+        })
+    }
+
+    fn commit_file(repo: &Path, name: &str) {
+        std::fs::write(repo.join(name), format!("{name}\n")).unwrap();
+        sh(repo, &["add", name]);
+        sh(repo, &["commit", "-m", name]);
+    }
+
+    #[test]
+    fn base_and_upstream_diverge_independently() {
+        let (guard, repo) = fixture_repo();
         sh(&repo, &["checkout", "-b", "feature/x"]);
-        std::fs::write(repo.join("feature.txt"), "work\n").unwrap();
-        sh(&repo, &["add", "."]);
-        sh(&repo, &["commit", "-m", "feature work"]);
+        commit_file(&repo, "feature.txt");
 
         let before = status(&repo, "main", None);
-        assert_eq!((before.ahead, before.ahead_of_base), (1, 1));
+        assert_eq!(before.upstream, None);
+        assert_eq!((before.base, before.unpushed), (divergence(1, 0), 1));
 
         let remote = guard.path().join("remote.git");
         sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
@@ -1177,11 +1301,320 @@ mod tests {
         sh(&repo, &["push", "-u", "origin", "feature/x"]);
 
         let after = status(&repo, "main", None);
-        assert_eq!(after.ahead, 0, "pushed: nothing left to push vs upstream");
-        assert_eq!(
-            after.ahead_of_base, 1,
-            "pushed: still a commit to ship vs base, Ship must stay visible",
+        assert_eq!(after.upstream, upstream("origin/feature/x", 0, 0));
+        assert_eq!((after.base, after.unpushed), (divergence(1, 0), 0));
+
+        sh(&repo, &["checkout", "main"]);
+        commit_file(&repo, "main-1.txt");
+        commit_file(&repo, "main-2.txt");
+        sh(&repo, &["checkout", "feature/x"]);
+
+        let moved = status(&repo, "main", None);
+        assert_eq!(moved.base, divergence(1, 2));
+        assert_eq!(moved.upstream, upstream("origin/feature/x", 0, 0));
+    }
+
+    #[tokio::test]
+    async fn a_fresh_workstream_off_origin_main_has_no_upstream_until_pushed() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
         );
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        sh(&repo, &["push", "origin", "main:release"]);
+        let wt_root = tempfile::tempdir().unwrap();
+        let git = which::which("git").expect("git on PATH");
+
+        let created = WorktreeManager::new(wt_root.path().to_path_buf())
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "Fresh".into(),
+                    base_override: Some("origin/main".into()),
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
+                },
+            )
+            .await
+            .unwrap();
+        let wt = PathBuf::from(&created.path);
+        let configured = std::process::Command::new(&git)
+            .arg("-C")
+            .arg(&wt)
+            .args(["rev-parse", "--abbrev-ref"])
+            .arg(format!("{}@{{upstream}}", created.branch))
+            .output()
+            .unwrap();
+        assert!(
+            !configured.status.success(),
+            "the new branch tracks nothing"
+        );
+        assert_eq!(status(&wt, "origin/main", None).upstream, None);
+        assert_eq!(status(&wt, "origin/release", None).upstream, None);
+        assert!(pull_upstream(&git, &wt, "origin/release", NO_OVERLAY)
+            .await
+            .is_err());
+
+        sh(&wt, &["push", "-u", "origin", &created.branch]);
+        assert_eq!(
+            status(&wt, "origin/main", None).upstream,
+            upstream(&format!("origin/{}", created.branch), 0, 0)
+        );
+    }
+
+    #[test]
+    fn a_branch_renamed_after_push_keeps_its_upstream() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["checkout", "-b", "hyprlayer/feat"]);
+        commit_file(&repo, "feature.txt");
+        sh(&repo, &["push", "-u", "origin", "hyprlayer/feat"]);
+        sh(&repo, &["branch", "-m", "feature/renamed"]);
+
+        let st = status(&repo, "main", None);
+        assert_eq!(st.upstream, upstream("origin/hyprlayer/feat", 0, 0));
+        assert_eq!(st.unpushed, 0);
+        ensure_removable(&repo, "main", "feature/renamed").unwrap();
+    }
+
+    #[test]
+    fn only_a_remote_ref_that_is_not_the_base_counts_as_pushed() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("upstream.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "upstream", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "upstream", "main"]);
+
+        sh(&repo, &["checkout", "-b", "off-upstream", "upstream/main"]);
+        commit_file(&repo, "off-upstream.txt");
+        assert_eq!(status(&repo, "main", None).upstream, None);
+
+        sh(&repo, &["checkout", "-b", "dev", "main"]);
+        commit_file(&repo, "dev.txt");
+        sh(&repo, &["checkout", "-b", "feat"]);
+        sh(&repo, &["branch", "--set-upstream-to=dev"]);
+        assert_eq!(status(&repo, "main", None).upstream, None);
+        sh(&repo, &["branch", "--set-upstream-to=main"]);
+        assert_eq!(status(&repo, "upstream/main", None).upstream, None);
+    }
+
+    #[tokio::test]
+    async fn pull_merges_the_remote_ref_when_a_local_branch_shares_its_name() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "pushed.txt");
+        sh(&repo, &["push", "-u", "origin", "feat"]);
+        sh(&repo, &["reset", "--hard", "main"]);
+        sh(&repo, &["checkout", "-b", "origin/feat"]);
+        commit_file(&repo, "decoy.txt");
+        sh(&repo, &["checkout", "feat"]);
+
+        let git = which::which("git").expect("git on PATH");
+        pull_upstream(&git, &repo, "main", NO_OVERLAY)
+            .await
+            .unwrap();
+        let rev = |r: &str| {
+            std::process::Command::new(&git)
+                .arg("-C")
+                .arg(&repo)
+                .args(["rev-parse", r])
+                .output()
+                .unwrap()
+                .stdout
+        };
+        assert_eq!(rev("HEAD"), rev("refs/remotes/origin/feat"));
+    }
+
+    #[tokio::test]
+    async fn fetch_remote_fetches_the_remote_the_base_lives_on() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("upstream.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "upstream", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "upstream", "main"]);
+        let teammate = guard.path().join("teammate");
+        sh(
+            guard.path(),
+            &[
+                "clone",
+                "-b",
+                "main",
+                remote.to_str().unwrap(),
+                teammate.to_str().unwrap(),
+            ],
+        );
+        commit_file(&teammate, "theirs.txt");
+        sh(&teammate, &["push", "origin", "main"]);
+
+        let git = which::which("git").expect("git on PATH");
+        fetch_remote(&git, &repo, Some("upstream/main"), NO_OVERLAY)
+            .await
+            .unwrap();
+        assert_eq!(status(&repo, "upstream/main", None).base.behind, 1);
+
+        let (_other_guard, no_remote) = fixture_repo();
+        fetch_remote(&git, &no_remote, None, NO_OVERLAY)
+            .await
+            .unwrap();
+    }
+
+    #[test]
+    fn push_u_to_another_name_counts_that_ref() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "feature.txt");
+        sh(&repo, &["push", "-u", "origin", "HEAD:other"]);
+
+        let st = status(&repo, "main", None);
+        assert_eq!(st.upstream, upstream("origin/other", 0, 0));
+        assert_eq!(st.unpushed, 0);
+    }
+
+    #[tokio::test]
+    async fn a_teammate_push_to_the_branch_is_behind_upstream_not_base() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "origin", "main"]);
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "feature.txt");
+        sh(&repo, &["push", "-u", "origin", "feat"]);
+
+        let teammate = guard.path().join("teammate");
+        sh(
+            guard.path(),
+            &[
+                "clone",
+                "-b",
+                "feat",
+                remote.to_str().unwrap(),
+                teammate.to_str().unwrap(),
+            ],
+        );
+        commit_file(&teammate, "theirs.txt");
+        sh(&teammate, &["push", "origin", "feat"]);
+        sh(&repo, &["fetch", "origin"]);
+
+        let st = status(&repo, "main", None);
+        assert_eq!(st.upstream, upstream("origin/feat", 0, 1));
+        assert_eq!(st.base, divergence(1, 0));
+
+        let git = which::which("git").expect("git on PATH");
+        let pulled = pull_upstream(&git, &repo, "main", NO_OVERLAY)
+            .await
+            .unwrap();
+        assert!(matches!(pulled, PullOutcome::Merged), "{pulled:?}");
+        assert_eq!(
+            status(&repo, "main", None).upstream,
+            upstream("origin/feat", 0, 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn pull_follows_the_counted_ref_when_pushed_without_u() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        let wt_root = tempfile::tempdir().unwrap();
+        let git = which::which("git").expect("git on PATH");
+        let created = WorktreeManager::new(wt_root.path().to_path_buf())
+            .create(
+                &git,
+                &CreateSpec {
+                    project_repo: repo.clone(),
+                    mapped_name: "proj".into(),
+                    title: "No u".into(),
+                    base_override: Some("origin/main".into()),
+                    branch_prefix: "hyprlayer/".into(),
+                    mode: CreateMode::Isolated,
+                },
+            )
+            .await
+            .unwrap();
+        let (wt, branch) = (PathBuf::from(&created.path), created.branch);
+        commit_file(&wt, "feature.txt");
+        sh(&wt, &["push", "origin", "HEAD"]);
+
+        let teammate = guard.path().join("teammate");
+        sh(
+            guard.path(),
+            &[
+                "clone",
+                "-b",
+                &branch,
+                remote.to_str().unwrap(),
+                teammate.to_str().unwrap(),
+            ],
+        );
+        commit_file(&teammate, "theirs.txt");
+        sh(&teammate, &["push", "origin", &branch]);
+        let theirs = std::process::Command::new(&git)
+            .arg("-C")
+            .arg(&teammate)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        sh(&teammate, &["checkout", "main"]);
+        commit_file(&teammate, "main-moved.txt");
+        sh(&teammate, &["push", "origin", "main"]);
+        sh(&wt, &["fetch", "origin"]);
+
+        let counted = format!("origin/{branch}");
+        let before = status(&wt, "origin/main", None);
+        assert_eq!(before.upstream, upstream(&counted, 0, 1));
+        assert_eq!(before.base.behind, 1);
+
+        pull_upstream(&git, &wt, "origin/main", NO_OVERLAY)
+            .await
+            .unwrap();
+        let head = std::process::Command::new(&git)
+            .arg("-C")
+            .arg(&wt)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert_eq!(head.stdout, theirs.stdout);
+        let after = status(&wt, "origin/main", None);
+        assert_eq!(after.upstream, upstream(&counted, 0, 0));
+        assert_eq!(after.base.behind, 1, "the base was not merged");
     }
 
     #[tokio::test]

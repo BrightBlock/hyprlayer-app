@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GitPanel } from "./GitPanel";
-import type { PrLookup, PrStatus, WorkstreamView } from "@/lib/bindings";
+import { WorkstreamGitChip } from "./WorkstreamGitChip";
+import type { PrLookup, PrStatus, WorkstreamView, WorktreeStatus } from "@/lib/bindings";
 
 const q = vi.hoisted(() => {
   const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), reset: vi.fn(), isPending: false, isError: false });
@@ -14,6 +15,7 @@ const q = vi.hoisted(() => {
     useFetchWorkstreamRemote: vi.fn(mutation),
     useSetWorkstreamBase: vi.fn(mutation),
     useUpdateFromBase: vi.fn(mutation),
+    usePullWorkstreamBranch: vi.fn(mutation),
     useWorkstreamBases: vi.fn(() => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() })),
     useWorkstreamSessions: vi.fn(() => ({ data: [] })),
     useWorktreeGitStatus: vi.fn(() => ({ data: { staged: [], unstaged: [] } })),
@@ -44,7 +46,16 @@ const VIEW = {
     baseBranch: "origin/main",
     worktreeMode: "isolated",
   },
-  git: { exists: true, branch: "feat", ahead: 1, behind: 0, aheadOfBase: 1 },
+  git: {
+    exists: true,
+    branch: "feat",
+    additions: 0,
+    deletions: 0,
+    dirty: 0,
+    base: { ahead: 1, behind: 0 },
+    upstream: null,
+    unpushed: 1,
+  },
 } as unknown as WorkstreamView;
 
 function pr(overrides: Partial<PrStatus> = {}): PrStatus {
@@ -77,9 +88,13 @@ beforeEach(() => {
   });
 });
 
-function renderPanel(lookup: PrLookup) {
+function withGit(git: Partial<WorktreeStatus>): WorkstreamView {
+  return { ...VIEW, git: { ...VIEW.git, ...git } };
+}
+
+function renderPanel(lookup: PrLookup, view: WorkstreamView = VIEW) {
   q.useWorkstreamPr.mockReturnValue({ data: lookup });
-  render(<GitPanel view={VIEW} />);
+  render(<GitPanel view={view} />);
 }
 
 const ship = () => screen.queryByRole("button", { name: "Ship" }) as HTMLButtonElement | null;
@@ -155,5 +170,87 @@ describe("GitPanel base row", () => {
   it("shows no mismatch when the PR targets the workstream's base", () => {
     renderPanel({ kind: "found", pr: pr({ baseRefName: "main" }) });
     expect(screen.queryByRole("button", { name: /^Use origin\// })).toBeNull();
+  });
+});
+
+describe("GitPanel ahead/behind", () => {
+  const updateFromBase = () => screen.queryByRole("button", { name: "Update from origin/main" });
+  const pullButton = () => screen.queryByRole("button", { name: /^Pull origin\// });
+
+  it("labels the header with the branch it measures against, never 'base'", () => {
+    renderPanel({ kind: "noPr" }, withGit({ base: { ahead: 1, behind: 0 } }));
+    expect(screen.getByTitle("1 commit(s) ahead of main")).toBeTruthy();
+    expect(screen.getByTitle("0 commit(s) behind main")).toBeTruthy();
+    expect(screen.queryByTitle(/ base$/)).toBeNull();
+  });
+
+  it("offers Pull, not Update from base, for a teammate's push to the branch", () => {
+    const pull = vi.fn();
+    q.usePullWorkstreamBranch.mockReturnValueOnce({
+      mutate: pull,
+      mutateAsync: vi.fn(),
+      reset: vi.fn(),
+      isPending: false,
+      isError: false,
+    });
+    renderPanel(
+      { kind: "noPr" },
+      withGit({
+        base: { ahead: 1, behind: 0 },
+        upstream: { name: "origin/feat", ahead: 0, behind: 1 },
+        unpushed: 0,
+      }),
+    );
+    expect(screen.getByText("↓1 from origin/feat")).toBeTruthy();
+    expect(updateFromBase()).toBeNull();
+    fireEvent.click(pullButton()!);
+    expect(pull).toHaveBeenCalled();
+  });
+
+  it("shows a diverged branch without a Pull that could only fail", () => {
+    renderPanel(
+      { kind: "noPr" },
+      withGit({
+        base: { ahead: 2, behind: 0 },
+        upstream: { name: "origin/feat", ahead: 1, behind: 1 },
+        unpushed: 1,
+      }),
+    );
+    expect(pullButton()).toBeNull();
+    expect(
+      screen.getByTitle("Diverged from origin/feat; rebase or merge in a terminal").textContent,
+    ).toBe("↑1 ↓1 vs origin/feat");
+  });
+
+  it("offers Update from base once origin/main moves past a pushed branch", () => {
+    renderPanel(
+      { kind: "noPr" },
+      withGit({
+        base: { ahead: 1, behind: 2 },
+        upstream: { name: "origin/feat", ahead: 0, behind: 0 },
+        unpushed: 0,
+      }),
+    );
+    expect(updateFromBase()).toBeTruthy();
+    expect(screen.getByTitle("2 commit(s) behind main").textContent).toBe("↓2");
+    expect(pullButton()).toBeNull();
+  });
+
+  it("shows a fresh, unpushed branch ahead of main with no Pull", () => {
+    renderPanel({ kind: "noPr" }, withGit({ base: { ahead: 1, behind: 0 }, upstream: null }));
+    expect(screen.getByTitle("1 commit(s) ahead of main").textContent).toBe("↑1");
+    expect(pullButton()).toBeNull();
+    expect(screen.queryByText(/from origin\//)).toBeNull();
+  });
+});
+
+describe("WorkstreamGitChip", () => {
+  it("counts unpushed commits, not commits ahead of the base", () => {
+    const { container, rerender } = render(
+      <WorkstreamGitChip view={withGit({ unpushed: 2, base: { ahead: 2, behind: 0 } })} />,
+    );
+    expect(container.textContent).toBe("↑2");
+    rerender(<WorkstreamGitChip view={withGit({ unpushed: 0, base: { ahead: 3, behind: 0 } })} />);
+    expect(container.textContent).toBe("");
   });
 });

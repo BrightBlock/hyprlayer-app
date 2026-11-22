@@ -1,23 +1,25 @@
 export function AheadBehind({
   ahead,
   behind,
+  against,
   className = "",
 }: {
   ahead: number;
   behind: number;
+  against: string;
   className?: string;
 }) {
   return (
     <span className={`flex items-center gap-2 text-meta tabular-nums ${className}`}>
       <span
         className={ahead > 0 ? "text-accent" : "text-ink-dim/60"}
-        title={`${ahead} commit(s) ahead of base`}
+        title={`${ahead} commit(s) ahead of ${against}`}
       >
         ↑{ahead}
       </span>
       <span
         className={behind > 0 ? "text-warn-ink" : "text-ink-dim/60"}
-        title={`${behind} commit(s) behind base`}
+        title={`${behind} commit(s) behind ${against}`}
       >
         ↓{behind}
       </span>

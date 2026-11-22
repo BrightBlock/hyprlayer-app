@@ -195,6 +195,7 @@ hyprlayer_proto::commands! {
     RenameWorkstreamBranch: rename_workstream_branch(id: String, title: String) -> ();
     SetWorkstreamBaseBranch: set_workstream_base_branch(id: String, base: String) -> ();
     UpdateWorkstreamFromBase: update_workstream_from_base(id: String) -> PullOutcome;
+    PullWorkstreamBranch: pull_workstream_branch(id: String) -> PullOutcome;
     FetchWorkstreamRemote: fetch_workstream_remote(id: String) -> ();
     SetWorkstreamStage: set_workstream_stage(id: String, stage: Stage) -> ();
     AttachWorkstreamDoc: attach_workstream_doc(id: String, doc_path: String, role: String) -> Vec<WorkstreamDoc>;

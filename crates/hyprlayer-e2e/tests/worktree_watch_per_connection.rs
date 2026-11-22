@@ -150,6 +150,29 @@ async fn worktree_watch_per_connection() {
         json!({ "desktop_heard": desktop_heard.0.len() }),
     );
 
+    j.step("a terminal push reaches the watching device");
+    sandbox.git(
+        &sandbox.root,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            "origin.git",
+        ],
+    );
+    let origin = sandbox.root.join("origin.git").display().to_string();
+    sandbox.git(&repo, &["remote", "add", "origin", &origin]);
+    settle(&mut [&mut laptop_rx]).await;
+    sandbox.git(Path::new(&a_path), &["push", "--quiet", "origin", "HEAD"]);
+    let laptop_heard = heard(&mut laptop_rx, &a).await;
+    j.guard(
+        "a push from A's worktree, which changes only the shared refs, reaches the device watching A",
+        laptop_heard.has(&a),
+        json!({ "laptop_heard_a": laptop_heard.has(&a) }),
+    );
+
     j.finish();
 }
 

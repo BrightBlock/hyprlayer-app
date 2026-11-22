@@ -231,8 +231,9 @@ export function defaultPreviewTarget(
 }
 
 export function worktreeStatusLine(git: WorktreeStatus, baseBranch: string): string {
-  const line = `${plural(git.dirty + git.untracked, "file")} changed · ${plural(git.aheadOfBase, "commit")} ahead of ${shortBranch(baseBranch)}`;
-  return git.behind > 0 ? `${line} · ${git.behind} behind upstream` : line;
+  const line = `${plural(git.dirty + git.untracked, "file")} changed · ${plural(git.base.ahead, "commit")} ahead of ${shortBranch(baseBranch)}`;
+  const behind = git.upstream?.behind ?? 0;
+  return behind > 0 ? `${line} · ${behind} behind upstream` : line;
 }
 
 export function usedVars(body: string): typeof PROMPT_VARS {

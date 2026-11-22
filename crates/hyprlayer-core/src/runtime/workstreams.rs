@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use hyprlayer_models::RuntimeEvent;
 use serde::{Deserialize, Serialize};
@@ -242,6 +243,39 @@ pub struct ArchivedWorkstream {
 
 const PR_RECHECK_MS: f64 = 15.0 * 60_000.0;
 const PR_LOOKUPS_AT_ONCE: usize = 4;
+const FETCHES_AT_ONCE: usize = 2;
+const FETCH_BACKOFF: Duration = Duration::from_secs(30 * 60);
+const REFOCUS_FETCH_GAP: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+pub(crate) struct FetchHistory {
+    attempted: HashMap<String, Instant>,
+    failing_until: HashMap<String, Instant>,
+}
+
+impl FetchHistory {
+    fn due(&self, project: &str, now: Instant, regained: bool) -> bool {
+        if regained {
+            self.attempted
+                .get(project)
+                .is_none_or(|at| now.duration_since(*at) >= REFOCUS_FETCH_GAP)
+        } else {
+            self.failing_until
+                .get(project)
+                .is_none_or(|until| *until <= now)
+        }
+    }
+
+    fn record(&mut self, project: String, at: Instant, fetched: bool) {
+        if fetched {
+            self.failing_until.remove(&project);
+        } else {
+            self.failing_until
+                .insert(project.clone(), at + FETCH_BACKOFF);
+        }
+        self.attempted.insert(project, at);
+    }
+}
 
 pub struct WorkstreamService<'a> {
     runtime: &'a HyprlayerRuntime,
@@ -543,7 +577,18 @@ impl WorkstreamService<'_> {
         }
         let db = self.runtime.db.clone();
         let id = id.to_string();
-        blocking(move || db.update_workstream_base_branch(&id, &base)).await
+        blocking(move || {
+            if !item.is_folder() && item.base_branch != base {
+                let worktree = Path::new(&item.worktree_path);
+                if let Err(e) =
+                    crate::gitops::untrack_base(worktree, &item.branch, &item.base_branch)
+                {
+                    tracing::warn!("{} still tracks {}: {e}", item.branch, item.base_branch);
+                }
+            }
+            db.update_workstream_base_branch(&id, &base)
+        })
+        .await
     }
 
     pub async fn set_pr(&self, id: &str, pr_number: Option<u32>) -> Result<()> {
@@ -871,6 +916,7 @@ impl WorkstreamService<'_> {
         worktree::fetch_remote(
             &git,
             Path::new(project_path),
+            None,
             &self.runtime.child_env().await,
         )
         .await
@@ -889,6 +935,69 @@ impl WorkstreamService<'_> {
         .await
     }
 
+    pub async fn pull_branch(&self, id: &str) -> Result<worktree::PullOutcome> {
+        ensure_running(self.runtime)?;
+        let item = self.find(id).await?;
+        let git = self.runtime.binaries.require(BinaryKind::Git).await?;
+        worktree::pull_upstream(
+            &git,
+            Path::new(&item.worktree_path),
+            &item.base_branch,
+            &self.runtime.child_env().await,
+        )
+        .await
+    }
+
+    pub(crate) async fn fetch_active_remotes(&self, history: &mut FetchHistory, regained: bool) {
+        let Ok(git) = self.runtime.binaries.require(BinaryKind::Git).await else {
+            return;
+        };
+        let db = self.runtime.db.clone();
+        let Ok(mut targets) = blocking(move || {
+            let mut targets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for item in db.list_active_workstreams()? {
+                if item.is_folder() || item.status != WorkstreamStatus::Active {
+                    continue;
+                }
+                let project = Path::new(&item.project_path);
+                if let Some(remote) =
+                    crate::gitops::fetch_remote_for(project, Some(&item.base_branch))
+                {
+                    targets.entry(item.project_path).or_default().insert(remote);
+                }
+            }
+            Ok(targets)
+        })
+        .await
+        else {
+            return;
+        };
+        let now = Instant::now();
+        targets.retain(|project, _| history.due(project, now, regained));
+        let overlay = self.runtime.child_env().await;
+        let permits = Arc::new(tokio::sync::Semaphore::new(FETCHES_AT_ONCE));
+        let mut fetches = tokio::task::JoinSet::new();
+        for (project, remotes) in targets {
+            let (git, overlay, permits) = (git.clone(), overlay.clone(), permits.clone());
+            fetches.spawn(async move {
+                let _permit = permits.acquire_owned().await;
+                let remotes: Vec<String> = remotes.into_iter().collect();
+                let fetched =
+                    worktree::fetch_unattended(&git, Path::new(&project), &remotes, &overlay).await;
+                (project, fetched)
+            });
+        }
+        while let Some(joined) = fetches.join_next().await {
+            let Ok((project, fetched)) = joined else {
+                continue;
+            };
+            if let Err(e) = &fetched {
+                tracing::debug!("background fetch in {project} failed: {e}");
+            }
+            history.record(project, Instant::now(), fetched.is_ok());
+        }
+    }
+
     pub async fn fetch_remote(&self, id: &str) -> Result<()> {
         ensure_running(self.runtime)?;
         let item = self.find(id).await?;
@@ -897,6 +1006,7 @@ impl WorkstreamService<'_> {
         worktree::fetch_remote(
             &git,
             Path::new(&item.worktree_path),
+            Some(&item.base_branch),
             &self.runtime.child_env().await,
         )
         .await
@@ -1184,7 +1294,7 @@ impl WorkstreamService<'_> {
             }
             let git = self.runtime.binaries.require(BinaryKind::Git).await?;
             let overlay = self.runtime.child_env().await;
-            if let Err(e) = worktree::fetch_remote(&git, &repo, &overlay).await {
+            if let Err(e) = worktree::fetch_remote(&git, &repo, Some(&branch), &overlay).await {
                 tracing::warn!("fetch before tracking {branch} failed; using the local ref: {e}");
             }
             worktree::create_tracking_branch(&git, &repo, &local, &branch, &overlay).await?;
@@ -2398,6 +2508,18 @@ fn created_day(created_at_ms: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refocus_fetches_past_a_failure_but_at_most_every_30_seconds() {
+        let mut history = FetchHistory::default();
+        let start = Instant::now();
+        history.record("/p".into(), start, false);
+        assert!(!history.due("/p", start + Duration::from_secs(60), false));
+        assert!(!history.due("/p", start + Duration::from_secs(29), true));
+        assert!(history.due("/p", start + REFOCUS_FETCH_GAP, true));
+        assert!(history.due("/p", start + FETCH_BACKOFF, false));
+        assert!(history.due("/other", start, true) && history.due("/other", start, false));
+    }
 
     #[test]
     fn clean_gh_stderr_strips_graphql_decoration() {

@@ -963,6 +963,16 @@ export function useUpdateFromBase(id: string) {
   });
 }
 
+export function usePullWorkstreamBranch(id: string) {
+  return useMutation({
+    mutationFn: () => unwrap(commands.pullWorkstreamBranch(id)),
+    onSuccess: () => {
+      invalidateWorktreeGit(id);
+      invalidateWorkstream(id);
+    },
+  });
+}
+
 export function useFetchWorkstreamRemote(id: string) {
   return useMutation({
     mutationFn: () => unwrap(commands.fetchWorkstreamRemote(id)),

@@ -312,6 +312,76 @@
       "guards": [
         {
           "evidence": {
+            "baseBranch": "origin/main"
+          },
+          "guard": "the workstream starts from origin/main",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "base": {
+              "ahead": 0,
+              "behind": 2
+            },
+            "upstream": null
+          },
+          "guard": "refocusing the window fetches, and the base reads 2 behind",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "fetch_head_is_the_users": true
+          },
+          "guard": "the background fetch leaves the user's FETCH_HEAD alone",
+          "ok": true
+        }
+      ],
+      "step": "a teammate's push to the base shows without the Fetch button"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "askpass_ran": false,
+            "failed": true
+          },
+          "guard": "the fetch fails without running the askpass program",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "base": {
+              "ahead": 0,
+              "behind": 2
+            },
+            "upstream": {
+              "ahead": 0,
+              "behind": 1,
+              "name": "origin/hyprlayer/track-origin-$SUFFIX"
+            }
+          },
+          "guard": "after the failure, the next refocus still fetches: the branch reads 1 behind its pushed ref, base unchanged",
+          "ok": true
+        }
+      ],
+      "step": "a remote that wants a password neither prompts nor holds back the next refocus"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "upstream": null
+          },
+          "guard": "a never-pushed branch that tracked its old base reads no pushed ref",
+          "ok": true
+        }
+      ],
+      "step": "changing the base stops a branch tracking the old one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0
           },
           "guard": "shutdown stops the server cleanly",

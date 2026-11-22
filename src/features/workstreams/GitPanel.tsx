@@ -5,6 +5,7 @@ import type { PrLookup, WorkstreamView } from "@/lib/bindings";
 import {
   useBootstrap,
   useFetchWorkstreamRemote,
+  usePullWorkstreamBranch,
   useSetWorkstreamBase,
   useUpdateFromBase,
   useWorkstreamBases,
@@ -27,6 +28,8 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
   const setBase = useSetWorkstreamBase(view.item.id);
   const bases = useWorkstreamBases(view.item.projectPath, open);
   const fetchRemote = useFetchWorkstreamRemote(view.item.id);
+  const pullBranch = usePullWorkstreamBranch(view.item.id);
+  const upstream = view.git.upstream;
   const refreshBranches = async () => {
     await fetchRemote.mutateAsync().catch(() => {});
     await bases.refetch();
@@ -131,6 +134,40 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
           )}
         </div>
       </div>
+      {upstream && upstream.behind > 0 && (
+        <div className="flex items-center gap-2 px-1 text-ui-sm text-warn-ink">
+          {upstream.ahead > 0 ? (
+            <span
+              className="min-w-0 flex-1 truncate tabular-nums"
+              title={`Diverged from ${upstream.name}; rebase or merge in a terminal`}
+              aria-label={`Diverged from ${upstream.name}; rebase or merge in a terminal`}
+            >
+              ↑{upstream.ahead} ↓{upstream.behind} vs {upstream.name}
+            </span>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1 truncate tabular-nums">
+                ↓{upstream.behind} from {upstream.name}
+              </span>
+              <button
+                type="button"
+                disabled={pullBranch.isPending}
+                onClick={() => pullBranch.mutate()}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-edge bg-panel text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
+                title={`Pull ${upstream.name}, fast-forwarding ${upstream.behind} commit${
+                  upstream.behind === 1 ? "" : "s"
+                } in`}
+                aria-label={`Pull ${upstream.name}`}
+              >
+                {pullBranch.isPending ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {pullBranch.isError && (
+        <ErrorNote error={pullBranch.error} onDismiss={() => pullBranch.reset()} />
+      )}
       {retargeted && (
         <div className="flex items-center gap-2 px-1 text-ui-sm text-warn-ink">
           <span className="min-w-0 flex-1 truncate">
@@ -179,7 +216,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
     pull.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.item.id]);
-  const behind = view?.git.behind ?? 0;
+  const behind = view?.git.base.behind ?? 0;
   const conflicts = pull.data?.kind === "conflicts" ? pull.data : null;
   const refresh = useFetchWorkstreamRemote(view?.item.id ?? "");
 
@@ -190,7 +227,11 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
           <span className="text-label text-ink-dim">Git</span>
           {view && (
             <div className="flex items-center gap-1.5">
-              <AheadBehind ahead={view.git.ahead} behind={view.git.behind} />
+              <AheadBehind
+                ahead={view.git.base.ahead}
+                behind={view.git.base.behind}
+                against={shortBranch(view.item.baseBranch)}
+              />
               <IconButton
                 onClick={() => refresh.mutate()}
                 disabled={refresh.isPending}

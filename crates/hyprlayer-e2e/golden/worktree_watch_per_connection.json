@@ -98,6 +98,18 @@
         }
       ],
       "step": "a device that stops watching hears nothing"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "laptop_heard_a": true
+          },
+          "guard": "a push from A's worktree, which changes only the shared refs, reaches the device watching A",
+          "ok": true
+        }
+      ],
+      "step": "a terminal push reaches the watching device"
     }
   ]
 }

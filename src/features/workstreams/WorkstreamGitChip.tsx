@@ -2,7 +2,7 @@
 import type { WorkstreamView } from "@/lib/bindings";
 
 export function WorkstreamGitChip({ view }: { view: WorkstreamView }) {
-  const { additions, deletions, dirty, ahead } = view.git;
+  const { additions, deletions, dirty, unpushed } = view.git;
   if (additions > 0 || deletions > 0) {
     return (
       <span className="flex shrink-0 items-center gap-1 text-meta font-medium">
@@ -14,8 +14,8 @@ export function WorkstreamGitChip({ view }: { view: WorkstreamView }) {
   if (dirty > 0) {
     return <span className="shrink-0 text-ui font-medium text-ink-dim">●{dirty}</span>;
   }
-  if (ahead > 0) {
-    return <span className="shrink-0 text-ui font-medium text-accent">↑{ahead}</span>;
+  if (unpushed > 0) {
+    return <span className="shrink-0 text-ui font-medium text-accent">↑{unpushed}</span>;
   }
   return null;
 }

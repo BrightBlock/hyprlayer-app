@@ -2,14 +2,18 @@
 //! a staged edit, archive, restore and purge against the real server.
 #![cfg(unix)]
 
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use hyprlayer_core::runtime::projects::ThoughtsSource;
 use hyprlayer_core::WorktreeMode;
 use hyprlayer_e2e::{
-    json, keystrokes, read_until, text, wait_for_exit, Journey, Request, Sandbox, Server, Value,
+    eventually, json, keystrokes, read_until, text, wait_for_exit, Journey, Request, Sandbox,
+    Server, Value,
 };
+use hyprlayer_server::client::RpcClient;
 
 const SETTINGS: &str = r#"[scripts]
 setup = 'pwd > "$HOME/e2e-setup-ran"'
@@ -17,10 +21,22 @@ archive = 'pwd > "$HOME/e2e-archive-ran"'
 "#;
 
 const IO: Duration = Duration::from_secs(15);
+const REFOCUS_GAP: Duration = Duration::from_secs(31);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn workstream_lifecycle() {
-    let sandbox = Sandbox::new();
+    let mut sandbox = Sandbox::new();
+    let askpass = sandbox.home.join("askpass.sh");
+    let asked = sandbox.home.join("askpass.log");
+    std::fs::write(
+        &askpass,
+        format!("#!/bin/sh\necho \"$*\" >> '{}'\n", asked.display()),
+    )
+    .expect("write the askpass");
+    std::fs::set_permissions(&askpass, std::fs::Permissions::from_mode(0o755))
+        .expect("make the askpass executable");
+    sandbox.set_env("GIT_ASKPASS", askpass.clone());
+    sandbox.set_env("SSH_ASKPASS", askpass);
     let repo = sandbox.fixture_repo(
         "demo",
         &[
@@ -391,6 +407,171 @@ async fn workstream_lifecycle() {
         json!({ "deleteBranchOnArchive": delete_branch, "branch_exists": branch_left }),
     );
 
+    j.step("a teammate's push to the base shows without the Fetch button");
+    sandbox.git(
+        &sandbox.home,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            "origin.git",
+        ],
+    );
+    let origin = sandbox.home.join("origin.git").display().to_string();
+    sandbox.git(&repo, &["remote", "add", "origin", &origin]);
+    sandbox.git(&repo, &["push", "--quiet", "-u", "origin", "main"]);
+    let tracking = j
+        .call(
+            &client,
+            Request::CreateWorkstream {
+                project_path: registered.clone(),
+                title: "Track origin".into(),
+                base: Some("origin/main".into()),
+                mode: WorktreeMode::Isolated,
+                branch: None,
+                branch_prefix: None,
+            },
+        )
+        .await
+        .expect("create_workstream");
+    let tracking_id = text(&tracking, "/item/id");
+    let tracking_branch = text(&tracking, "/item/branch");
+    let tracking_tree = PathBuf::from(text(&tracking, "/item/worktreePath"));
+    j.alias(&tracking_id, "$WS_TRACKING");
+    if let Some((stem, _)) = text(&tracking, "/item/slug").rsplit_once('-') {
+        j.alias(text(&tracking, "/item/slug"), format!("{stem}-$SUFFIX"));
+    }
+    j.guard(
+        "the workstream starts from origin/main",
+        text(&tracking, "/item/baseBranch") == "origin/main",
+        json!({ "baseBranch": tracking["item"]["baseBranch"] }),
+    );
+    sandbox.git(&sandbox.home, &["clone", "--quiet", &origin, "teammate"]);
+    let teammate = sandbox.home.join("teammate");
+    for message in ["teammate one", "teammate two"] {
+        sandbox.git(
+            &teammate,
+            &["commit", "--quiet", "--allow-empty", "--message", message],
+        );
+    }
+    sandbox.git(&teammate, &["push", "--quiet", "origin", "main"]);
+    sandbox.git(&teammate, &["switch", "--quiet", "-c", "review"]);
+    sandbox.git(
+        &teammate,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "for review",
+        ],
+    );
+    sandbox.git(&teammate, &["push", "--quiet", "origin", "review"]);
+    sandbox.git(&repo, &["fetch", "--quiet", "origin", "review"]);
+    let review = sandbox.git(&repo, &["rev-parse", "FETCH_HEAD"]);
+    let git = refocused_git(&client, &registered, &tracking_id, |git| {
+        git["base"]["behind"] == json!(2)
+    })
+    .await;
+    let fetched_at = tokio::time::Instant::now();
+    j.guard(
+        "refocusing the window fetches, and the base reads 2 behind",
+        git["base"]["behind"] == json!(2) && git["upstream"].is_null(),
+        json!({ "base": git["base"], "upstream": git["upstream"] }),
+    );
+    let kept = sandbox.git(&repo, &["rev-parse", "FETCH_HEAD"]) == review;
+    j.guard(
+        "the background fetch leaves the user's FETCH_HEAD alone",
+        kept,
+        json!({ "fetch_head_is_the_users": kept }),
+    );
+
+    j.step("a remote that wants a password neither prompts nor holds back the next refocus");
+    let unauthorized = unauthorized_remote();
+    sandbox.git(&repo, &["remote", "set-url", "origin", &unauthorized]);
+    tokio::time::sleep_until(fetched_at + REFOCUS_GAP).await;
+    let failures = || sandbox.server_log().matches("background fetch in").count();
+    let before = failures();
+    refocus(&client).await;
+    let failed = eventually(IO, || failures() > before).await;
+    let failed_at = tokio::time::Instant::now();
+    sandbox.git(&repo, &["remote", "set-url", "origin", &origin]);
+    j.guard(
+        "the fetch fails without running the askpass program",
+        failed && !asked.exists(),
+        json!({ "failed": failed, "askpass_ran": asked.exists() }),
+    );
+    sandbox.git(
+        &tracking_tree,
+        &["push", "--quiet", "-u", "origin", &tracking_branch],
+    );
+    sandbox.git(&teammate, &["fetch", "--quiet", "origin"]);
+    sandbox.git(&teammate, &["switch", "--quiet", &tracking_branch]);
+    sandbox.git(
+        &teammate,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "on the branch",
+        ],
+    );
+    sandbox.git(&teammate, &["push", "--quiet", "origin", &tracking_branch]);
+    tokio::time::sleep_until(failed_at + REFOCUS_GAP).await;
+    let git = refocused_git(&client, &registered, &tracking_id, |git| {
+        git["upstream"]["behind"] == json!(1)
+    })
+    .await;
+    j.guard(
+        "after the failure, the next refocus still fetches: the branch reads 1 behind its pushed ref, base unchanged",
+        git["upstream"]["behind"] == json!(1) && git["base"]["behind"] == json!(2),
+        json!({ "base": git["base"], "upstream": git["upstream"] }),
+    );
+
+    j.step("changing the base stops a branch tracking the old one");
+    sandbox.git(&repo, &["push", "--quiet", "origin", "main:release"]);
+    sandbox.git(
+        &repo,
+        &["branch", "--quiet", "--track", "tracks-base", "origin/main"],
+    );
+    let existing = j
+        .call(
+            &client,
+            Request::CreateWorkstream {
+                project_path: registered.clone(),
+                title: "Tracks base".into(),
+                base: None,
+                mode: WorktreeMode::Existing,
+                branch: Some("tracks-base".into()),
+                branch_prefix: None,
+            },
+        )
+        .await
+        .expect("create_workstream");
+    let existing_id = text(&existing, "/item/id");
+    j.alias(&existing_id, "$WS_EXISTING");
+    if let Some((stem, _)) = text(&existing, "/item/slug").rsplit_once('-') {
+        j.alias(text(&existing, "/item/slug"), format!("{stem}-$SUFFIX"));
+    }
+    j.call(
+        &client,
+        Request::SetWorkstreamBaseBranch {
+            id: existing_id.clone(),
+            base: "origin/release".into(),
+        },
+    )
+    .await
+    .expect("set_workstream_base_branch");
+    let git = git_of(&client, &registered, &existing_id).await;
+    j.guard(
+        "a never-pushed branch that tracked its old base reads no pushed ref",
+        git["upstream"].is_null(),
+        json!({ "upstream": git["upstream"] }),
+    );
+
     j.step("shutdown");
     let stopped = server.shutdown(&client).await;
     j.guard(
@@ -423,4 +604,58 @@ fn find(items: &Value, pointer: &str, id: &str) -> Value {
         .and_then(|items| items.iter().find(|item| text(item, pointer) == id))
         .cloned()
         .unwrap_or(Value::Null)
+}
+
+async fn refocus(client: &RpcClient) {
+    for foreground in [false, true] {
+        client
+            .call(Request::SetForeground { foreground })
+            .await
+            .expect("set_foreground");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+fn unauthorized_remote() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a local port");
+    let port = listener.local_addr().expect("local address").port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let _ = stream.write_all(
+                b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"e2e\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    format!("http://127.0.0.1:{port}/demo.git")
+}
+
+async fn refocused_git(
+    client: &RpcClient,
+    project: &str,
+    id: &str,
+    done: impl Fn(&Value) -> bool,
+) -> Value {
+    refocus(client).await;
+    let deadline = tokio::time::Instant::now() + IO;
+    loop {
+        let git = git_of(client, project, id).await;
+        if done(&git) || tokio::time::Instant::now() >= deadline {
+            return git;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn git_of(client: &RpcClient, project: &str, id: &str) -> Value {
+    let listed = client
+        .call(Request::ListWorkstreams {
+            project_path: project.to_string(),
+            include_archived: false,
+        })
+        .await
+        .expect("list_workstreams");
+    let listed = serde_json::to_value(&listed).expect("serialize the list");
+    find(&listed["list_workstreams"], "/item/id", id)["git"].clone()
 }

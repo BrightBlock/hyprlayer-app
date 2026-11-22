@@ -236,6 +236,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::RenameWorkstreamBranch { .. }
         | Request::SetWorkstreamBaseBranch { .. }
         | Request::UpdateWorkstreamFromBase { .. }
+        | Request::PullWorkstreamBranch { .. }
         | Request::FetchWorkstreamRemote { .. }
         | Request::ListProjectMemory { .. }
         | Request::SaveProjectMemoryFile { .. }

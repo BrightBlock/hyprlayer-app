@@ -257,6 +257,19 @@ pub async fn update_workstream_from_base(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn pull_workstream_branch(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<PullOutcome> {
+    state
+        .client()?
+        .pull_workstream_branch(id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn fetch_workstream_remote(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     state
         .client()?

@@ -1033,6 +1033,10 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn pull_workstream_branch(&self, id: String) -> Result<PullOutcome, WireError> {
+        self.runtime.workstreams().pull_branch(&id).await.wire()
+    }
+
     async fn fetch_workstream_remote(&self, id: String) -> Result<(), WireError> {
         self.runtime.workstreams().fetch_remote(&id).await.wire()
     }

@@ -1,12 +1,12 @@
 //! The agent's review notes: a JSON Lines file per workstream, git-excluded and read by byte offset.
 
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use hyprlayer_models::review::ReviewNoteKind;
 use serde::Deserialize;
 
-use crate::gitops::{is_excluded, safe_join};
+use crate::gitops::{common_dir, is_excluded, safe_join};
 use crate::pipeline::review_notes_path;
 
 const REVIEW_RULE: &str = "/.hyprlayer/review/";
@@ -28,15 +28,6 @@ struct RawNote {
     body: String,
     #[serde(default)]
     task: Option<String>,
-}
-
-/// A linked worktree's git dir names the shared one in its `commondir` file; git2 0.19 has no accessor.
-fn common_dir(repo: &git2::Repository) -> PathBuf {
-    let git_dir = repo.path();
-    match std::fs::read_to_string(git_dir.join("commondir")) {
-        Ok(shared) => git_dir.join(shared.trim()),
-        Err(_) => git_dir.to_path_buf(),
-    }
 }
 
 /// Never `/.hyprlayer/`: `settings.toml` is tracked.

@@ -1011,11 +1011,12 @@ export function Root() {
             {currentProject &&
               !diffShown &&
               activeWorkstream &&
-              (activeWorkstream.git.ahead > 0 ||
-                activeWorkstream.git.behind > 0) && (
+              (activeWorkstream.git.base.ahead > 0 ||
+                activeWorkstream.git.base.behind > 0) && (
                 <AheadBehind
-                  ahead={activeWorkstream.git.ahead}
-                  behind={activeWorkstream.git.behind}
+                  ahead={activeWorkstream.git.base.ahead}
+                  behind={activeWorkstream.git.base.behind}
+                  against={shortBranch(activeWorkstream.item.baseBranch)}
                   className="px-1"
                 />
               )}

@@ -66,7 +66,7 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
 
   const canCommit = enabled && changedCount > 0 && !shipBusy && !shipping;
   const hasWork = Boolean(
-    enabled && view && !hasLivePr && (changedCount > 0 || view.git.aheadOfBase > 0),
+    enabled && view && !hasLivePr && (changedCount > 0 || view.git.base.ahead > 0),
   );
   const shippable = hasWork && prBlocked === null;
   const canShip = shippable && !implementWorking;

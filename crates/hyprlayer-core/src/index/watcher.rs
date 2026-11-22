@@ -72,6 +72,39 @@ pub fn watch_worktree(
     git_dir: &Path,
     on_change: Box<dyn Fn() + Send + Sync>,
 ) -> Result<WatchHandle> {
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let worktree = canonical(worktree);
+    let repo = git2::Repository::open(&worktree).ok();
+    let tracked_at_open = repo.as_ref().map(tracked_paths).unwrap_or_default();
+    let roots = Roots {
+        git_dir: canonical(git_dir),
+        common: canonical(
+            &repo
+                .as_ref()
+                .map_or_else(|| git_dir.to_path_buf(), crate::gitops::common_dir),
+        ),
+        worktree,
+    };
+
+    let prune =
+        |dir: &Path| prunes_worktree_dir(&roots.worktree, repo.as_ref(), &tracked_at_open, dir);
+    let mut plan = watch_plan(&roots.worktree, &prune);
+    let mut extras = Vec::new();
+    if roots.worktree.join(".git").is_file() {
+        extras.push((roots.git_dir.clone(), RecursiveMode::Recursive));
+    }
+    extras.push((roots.common.join("refs"), RecursiveMode::Recursive));
+    extras.push((roots.common.clone(), RecursiveMode::NonRecursive));
+    for (path, mode) in extras {
+        let covered = plan.iter().any(|(p, m)| match m {
+            RecursiveMode::Recursive => path.starts_with(p),
+            RecursiveMode::NonRecursive => *p == path && mode == RecursiveMode::NonRecursive,
+        });
+        if path.is_dir() && !covered {
+            plan.push((path, mode));
+        }
+    }
+
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
         None,
@@ -81,7 +114,7 @@ pub fn watch_worktree(
                     .iter()
                     .filter(|e| signals_change(&e.kind))
                     .flat_map(|e| e.paths.iter())
-                    .any(|p| is_relevant_change(p));
+                    .any(|p| is_relevant_change(&roots, &tracked_at_open, p));
                 if relevant {
                     on_change();
                 }
@@ -89,18 +122,16 @@ pub fn watch_worktree(
         },
     )
     .map_err(notify_to_core)?;
-    let repo = git2::Repository::open(worktree).ok();
-    let tracked = repo.as_ref().map(tracked_dirs).unwrap_or_default();
-    let prune = |dir: &Path| prunes_worktree_dir(worktree, repo.as_ref(), &tracked, dir);
-    apply_plan(&mut debouncer, watch_plan(worktree, &prune))?;
-    if worktree.join(".git").is_file() && git_dir.is_dir() {
-        debouncer
-            .watch(git_dir, RecursiveMode::Recursive)
-            .map_err(notify_to_core)?;
-    }
+    apply_plan(&mut debouncer, plan)?;
     Ok(WatchHandle {
         _debouncer: debouncer,
     })
+}
+
+struct Roots {
+    worktree: PathBuf,
+    git_dir: PathBuf,
+    common: PathBuf,
 }
 
 type Watches = Vec<(PathBuf, RecursiveMode)>;
@@ -183,24 +214,28 @@ fn prunes_worktree_dir(
     is_build_noise(rel) || repo.is_some_and(|r| r.is_path_ignored(dir).unwrap_or(false))
 }
 
-fn tracked_dirs(repo: &git2::Repository) -> HashSet<PathBuf> {
-    let mut dirs = HashSet::new();
+fn tracked_paths(repo: &git2::Repository) -> HashSet<PathBuf> {
+    let mut paths = HashSet::new();
     let Ok(index) = repo.index() else {
-        return dirs;
+        return paths;
     };
     for entry in index.iter() {
         let Ok(path) = std::str::from_utf8(&entry.path) else {
             continue;
         };
-        let mut cur = Path::new(path).parent();
+        let path = Path::new(path);
+        if is_build_noise(path) {
+            paths.insert(path.to_path_buf());
+        }
+        let mut cur = path.parent();
         while let Some(dir) = cur.filter(|d| !d.as_os_str().is_empty()) {
-            if !dirs.insert(dir.to_path_buf()) {
+            if !paths.insert(dir.to_path_buf()) {
                 break;
             }
             cur = dir.parent();
         }
     }
-    dirs
+    paths
 }
 
 pub(crate) fn signals_change(kind: &EventKind) -> bool {
@@ -212,12 +247,29 @@ pub(crate) fn signals_change(kind: &EventKind) -> bool {
     )
 }
 
-fn is_relevant_change(path: &Path) -> bool {
-    if is_git_meta(path) {
-        is_git_status_signal(path)
-    } else {
-        !is_build_noise(path)
+fn is_relevant_change(roots: &Roots, tracked_at_open: &HashSet<PathBuf>, path: &Path) -> bool {
+    if let Ok(rel) = path.strip_prefix(&roots.git_dir) {
+        return is_git_status_signal(rel) || is_shared_ref(rel);
     }
+    if let Ok(rel) = path.strip_prefix(&roots.common) {
+        return is_shared_ref(rel);
+    }
+    let rel = path.strip_prefix(&roots.worktree).unwrap_or(path);
+    if is_git_meta(rel) {
+        return is_git_status_signal(rel);
+    }
+    !is_build_noise(rel)
+        || tracked_at_open.contains(rel)
+        || rel
+            .parent()
+            .is_some_and(|dir| tracked_at_open.contains(dir))
+}
+
+fn is_shared_ref(rel: &Path) -> bool {
+    rel.extension().is_none_or(|ext| ext != "lock")
+        && (rel == Path::new("packed-refs")
+            || rel.starts_with("refs/heads")
+            || rel.starts_with("refs/remotes"))
 }
 
 fn is_git_meta(path: &Path) -> bool {
@@ -498,7 +550,7 @@ mod tests {
             .expect("force-add");
         index.write().unwrap();
 
-        let tracked = tracked_dirs(&repo);
+        let tracked = tracked_paths(&repo);
         assert!(tracked.contains(Path::new("vendor")));
         assert!(!tracked.contains(Path::new("node_modules")));
 
@@ -524,7 +576,7 @@ mod tests {
         assert!(!is_build_noise(Path::new("vendor")));
         assert!(!is_build_noise(Path::new(".venv")));
 
-        let tracked = tracked_dirs(&repo);
+        let tracked = tracked_paths(&repo);
         let prune = |dir: &Path| prunes_worktree_dir(&wt, Some(&repo), &tracked, dir);
         let plan = plan_of(&wt, &prune);
         assert!(plan.contains(&("src".to_string(), true)), "{plan:?}");
@@ -536,35 +588,61 @@ mod tests {
         );
     }
 
+    fn main_checkout() -> Roots {
+        Roots {
+            worktree: "/wt".into(),
+            git_dir: "/wt/.git".into(),
+            common: "/wt/.git".into(),
+        }
+    }
+
+    fn linked() -> Roots {
+        Roots {
+            worktree: "/wt".into(),
+            git_dir: "/repo/.git/worktrees/feat".into(),
+            common: "/repo/.git".into(),
+        }
+    }
+
+    fn relevant(roots: &Roots, path: &str) -> bool {
+        is_relevant_change(roots, &HashSet::new(), Path::new(path))
+    }
+
     #[test]
     fn relevant_change_fires_on_working_tree_edits() {
-        assert!(is_relevant_change(Path::new("/wt/src/main.rs")));
-        assert!(is_relevant_change(Path::new("/wt/README.md")));
-        assert!(is_relevant_change(Path::new("/wt/src/index")));
+        for roots in [main_checkout(), linked()] {
+            assert!(relevant(&roots, "/wt/src/main.rs"));
+            assert!(relevant(&roots, "/wt/README.md"));
+            assert!(relevant(&roots, "/wt/src/index"));
+        }
     }
 
     #[test]
     fn relevant_change_ignores_build_and_dependency_churn() {
-        assert!(!is_relevant_change(Path::new("/wt/target/debug/app")));
-        assert!(!is_relevant_change(Path::new(
-            "/wt/node_modules/x/index.js"
-        )));
-        assert!(!is_relevant_change(Path::new("/wt/dist/bundle.js")));
+        let roots = main_checkout();
+        assert!(!relevant(&roots, "/wt/target/debug/app"));
+        assert!(!relevant(&roots, "/wt/node_modules/x/index.js"));
+        assert!(!relevant(&roots, "/wt/dist/bundle.js"));
     }
 
     #[test]
     fn relevant_change_fires_on_stage_commit_signals() {
-        assert!(is_relevant_change(Path::new("/wt/.git/index")));
-        assert!(is_relevant_change(Path::new("/wt/.git/HEAD")));
-        assert!(is_relevant_change(Path::new("/wt/.git/logs/HEAD")));
-        assert!(is_relevant_change(Path::new("/wt/.git/ORIG_HEAD")));
-        assert!(is_relevant_change(Path::new("/wt/.git/MERGE_HEAD")));
-        assert!(is_relevant_change(Path::new(
-            "/repo/.git/worktrees/feat/index"
-        )));
-        assert!(is_relevant_change(Path::new(
-            "/repo/.git/worktrees/feat/logs/HEAD"
-        )));
+        let main = main_checkout();
+        for path in ["index", "HEAD", "logs/HEAD", "ORIG_HEAD", "MERGE_HEAD"] {
+            assert!(relevant(&main, &format!("/wt/.git/{path}")), "{path}");
+        }
+        let linked = linked();
+        assert!(relevant(&linked, "/repo/.git/worktrees/feat/index"));
+        assert!(relevant(&linked, "/repo/.git/worktrees/feat/logs/HEAD"));
+    }
+
+    #[test]
+    fn relevant_change_fires_on_shared_refs() {
+        for (roots, git) in [(main_checkout(), "/wt/.git"), (linked(), "/repo/.git")] {
+            for path in ["packed-refs", "refs/remotes/origin/main", "refs/heads/feat"] {
+                assert!(relevant(&roots, &format!("{git}/{path}")), "{git}/{path}");
+            }
+        }
     }
 
     #[test]
@@ -605,19 +683,191 @@ mod tests {
 
     #[test]
     fn relevant_change_ignores_git_noise() {
-        assert!(!is_relevant_change(Path::new(
-            "/wt/.git/objects/ab/cdef123"
-        )));
-        assert!(!is_relevant_change(Path::new("/wt/.git/packed-refs")));
-        assert!(!is_relevant_change(Path::new("/wt/.git/COMMIT_EDITMSG")));
-        assert!(!is_relevant_change(Path::new("/wt/.git/FETCH_HEAD")));
-        assert!(!is_relevant_change(Path::new(
-            "/wt/.git/refs/remotes/origin/main"
-        )));
-        assert!(!is_relevant_change(Path::new(
-            "/wt/.git/logs/refs/heads/feat"
-        )));
-        assert!(!is_relevant_change(Path::new("/wt/.git/index.lock")));
-        assert!(!is_relevant_change(Path::new("/wt/.git/HEAD.lock")));
+        for (roots, git) in [(main_checkout(), "/wt/.git"), (linked(), "/repo/.git")] {
+            for path in [
+                "objects/ab/cdef123",
+                "COMMIT_EDITMSG",
+                "FETCH_HEAD",
+                "logs/refs/heads/feat",
+                "refs/heads/feat.lock",
+                "packed-refs.lock",
+                "index.lock",
+                "HEAD.lock",
+            ] {
+                assert!(!relevant(&roots, &format!("{git}/{path}")), "{git}/{path}");
+            }
+        }
+        let linked = linked();
+        assert!(!relevant(&linked, "/repo/.git/HEAD"));
+        assert!(!relevant(&linked, "/repo/.git/index"));
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(["-c", "commit.gpgsign=false", "-C"])
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn committed_repo(dir: &Path, files: &[&str]) {
+        std::fs::create_dir_all(dir).unwrap();
+        git(dir, &["init", "-b", "main"]);
+        for file in files {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "v1\n").unwrap();
+        }
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-m", "init"]);
+    }
+
+    fn pushed_to_a_bare_remote(root: &Path) -> (PathBuf, PathBuf) {
+        let (repo, remote) = (root.join("repo"), root.join("remote.git"));
+        committed_repo(&repo, &["README.md"]);
+        git(
+            root,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        git(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        git(&repo, &["push", "-u", "origin", "main"]);
+        (repo, remote)
+    }
+
+    fn teammate_pushes_main(root: &Path, remote: &Path) {
+        let clone = root.join("teammate");
+        git(
+            root,
+            &["clone", remote.to_str().unwrap(), clone.to_str().unwrap()],
+        );
+        std::fs::write(clone.join("theirs.txt"), "theirs\n").unwrap();
+        git(&clone, &["add", "."]);
+        git(&clone, &["commit", "-m", "theirs"]);
+        git(&clone, &["push", "origin", "main"]);
+    }
+
+    fn counting_watch(worktree: &Path) -> (WatchHandle, Arc<std::sync::atomic::AtomicUsize>) {
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = hits.clone();
+        let git_dir = crate::gitops::git_dir(worktree).unwrap();
+        let handle = watch_worktree(
+            worktree,
+            &git_dir,
+            Box::new(move || {
+                seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .unwrap();
+        (handle, hits)
+    }
+
+    fn fires(hits: &std::sync::atomic::AtomicUsize, act: impl FnOnce()) -> bool {
+        use std::sync::atomic::Ordering;
+        std::thread::sleep(Duration::from_millis(800));
+        hits.store(0, Ordering::SeqCst);
+        act();
+        (0..100).any(|_| {
+            if hits.load(Ordering::SeqCst) > 0 {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            false
+        })
+    }
+
+    #[test]
+    fn watcher_fires_on_push_and_fetch_in_a_linked_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, remote) = pushed_to_a_bare_remote(tmp.path());
+        let wt = tmp.path().join("wt");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feat",
+                wt.to_str().unwrap(),
+                "main",
+            ],
+        );
+        std::fs::write(wt.join("feat.txt"), "feat\n").unwrap();
+        git(&wt, &["add", "."]);
+        git(&wt, &["commit", "-m", "feat"]);
+        let (_handle, hits) = counting_watch(&wt);
+
+        assert!(
+            fires(&hits, || git(&wt, &["push", "origin", "feat"])),
+            "push"
+        );
+        teammate_pushes_main(tmp.path(), &remote);
+        assert!(fires(&hits, || git(&wt, &["fetch", "origin"])), "fetch");
+    }
+
+    #[test]
+    fn watcher_fires_on_push_and_fetch_in_the_main_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (repo, remote) = pushed_to_a_bare_remote(tmp.path());
+        git(&repo, &["checkout", "-b", "feat"]);
+        let (_handle, hits) = counting_watch(&repo);
+
+        assert!(
+            fires(&hits, || git(&repo, &["push", "origin", "feat"])),
+            "push"
+        );
+        teammate_pushes_main(tmp.path(), &remote);
+        assert!(fires(&hits, || git(&repo, &["fetch", "origin"])), "fetch");
+    }
+
+    #[test]
+    fn editing_a_tracked_file_under_build_fires() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        committed_repo(&repo, &["build/release.sh"]);
+        let (_handle, hits) = counting_watch(&repo);
+
+        assert!(fires(&hits, || std::fs::write(
+            repo.join("build/release.sh"),
+            "v2\n"
+        )
+        .unwrap()));
+    }
+
+    #[test]
+    fn a_tracked_root_level_file_named_build_fires() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        committed_repo(&repo, &["build", "src/main.rs"]);
+        let (_handle, hits) = counting_watch(&repo);
+
+        assert!(fires(&hits, || std::fs::write(repo.join("build"), "v2\n")
+            .unwrap()));
+    }
+
+    #[test]
+    fn a_worktree_under_a_dir_named_dist_fires_on_edits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("dist").join("repo");
+        committed_repo(&repo, &["src/main.rs"]);
+        let (_handle, hits) = counting_watch(&repo);
+
+        assert!(fires(&hits, || std::fs::write(
+            repo.join("src/main.rs"),
+            "v2\n"
+        )
+        .unwrap()));
     }
 }

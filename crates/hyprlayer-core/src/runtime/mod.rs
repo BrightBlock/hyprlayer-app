@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, watch, Mutex as AsyncMutex, Notify};
 
@@ -69,6 +69,7 @@ use terminal_registry::TerminalRegistry;
 const EVENT_CAP: usize = 256;
 const CONFIG_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const MISSING_BINARY_POLL: Duration = Duration::from_secs(3);
+const BACKGROUND_FETCH: Duration = Duration::from_secs(5 * 60);
 const ARCHIVE_SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const PROVIDER_HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const ORPHAN_EXIT_WAIT: Duration = Duration::from_secs(2);
@@ -504,6 +505,39 @@ impl HyprlayerRuntime {
             }
         });
 
+        let fetcher = Arc::downgrade(self);
+        let focused = self.focused.clone();
+        let focus_changed = self.focus_changed.clone();
+        let fetch_task = TrackedTask::spawn(move |stop| async move {
+            let mut was_focused = focused.load(Ordering::Relaxed);
+            let mut last_fetch = Instant::now();
+            let mut history = workstreams::FetchHistory::default();
+            loop {
+                let changed = focus_changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let now = focused.load(Ordering::Relaxed);
+                let regained = now && !was_focused;
+                was_focused = now;
+                if now && (regained || last_fetch.elapsed() >= BACKGROUND_FETCH) {
+                    let Some(runtime) = fetcher.upgrade() else {
+                        return;
+                    };
+                    let workstreams = runtime.workstreams();
+                    tokio::select! {
+                        _ = workstreams.fetch_active_remotes(&mut history, regained) => {}
+                        _ = stop.notified() => return,
+                    }
+                    last_fetch = Instant::now();
+                }
+                tokio::select! {
+                    _ = changed => {}
+                    _ = tokio::time::sleep(BACKGROUND_FETCH) => {}
+                    _ = stop.notified() => return,
+                }
+            }
+        });
+
         self.tasks.lock().await.extend([
             startup_task,
             config_task,
@@ -513,6 +547,7 @@ impl HyprlayerRuntime {
             title_task,
             goal_task,
             rescan_task,
+            fetch_task,
         ]);
 
         Ok(())

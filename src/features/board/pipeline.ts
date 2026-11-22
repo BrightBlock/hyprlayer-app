@@ -27,7 +27,7 @@ export const MERGED_VISIBLE = 2;
 
 // Untracked files don't count: a worktree's .envrc and thoughts/ would mark every one as started.
 function hasBranchChanges(view: WorkstreamView): boolean {
-  return view.git.dirty > 0 || view.git.aheadOfBase > 0;
+  return view.git.dirty > 0 || view.git.base.ahead > 0;
 }
 
 // A live question outranks everything, then the PR, then the stage; a closed PR didn't ship.

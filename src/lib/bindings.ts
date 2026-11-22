@@ -54,6 +54,7 @@ export const commands = {
 	renameWorkstreamBranch: (id: string, title: string) => typedError<null, AppError>(__TAURI_INVOKE("rename_workstream_branch", { id, title })),
 	setWorkstreamBaseBranch: (id: string, base: string) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_base_branch", { id, base })),
 	updateWorkstreamFromBase: (id: string) => typedError<PullOutcome, AppError>(__TAURI_INVOKE("update_workstream_from_base", { id })),
+	pullWorkstreamBranch: (id: string) => typedError<PullOutcome, AppError>(__TAURI_INVOKE("pull_workstream_branch", { id })),
 	fetchWorkstreamRemote: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("fetch_workstream_remote", { id })),
 	setWorkstreamStage: (id: string, stage: Stage) => typedError<null, AppError>(__TAURI_INVOKE("set_workstream_stage", { id, stage })),
 	attachWorkstreamDoc: (id: string, docPath: string, role: string) => typedError<WorkstreamDoc[], AppError>(__TAURI_INVOKE("attach_workstream_doc", { id, docPath, role })),
@@ -910,6 +911,11 @@ export type DirListing = {
 	path: string,
 	parent: string | null,
 	entries: DirBrowseEntry[],
+};
+
+export type Divergence = {
+	ahead: number,
+	behind: number,
 };
 
 /**  The newest harness session that wrote a doc. */
@@ -2426,6 +2432,12 @@ export type UiRequested = {
 	request: UiRequest,
 };
 
+export type Upstream = {
+	name: string,
+	ahead: number,
+	behind: number,
+};
+
 export type ValidationCheck = {
 	text: string,
 	outcome?: CheckOutcome | null,
@@ -2519,9 +2531,9 @@ export type WorktreeStatus = {
 	additions: number,
 	deletions: number,
 	untracked: number,
-	ahead: number,
-	behind: number,
-	aheadOfBase: number,
+	base: Divergence,
+	upstream: Upstream | null,
+	unpushed: number,
 	thoughts: LinkStatus,
 };
 
