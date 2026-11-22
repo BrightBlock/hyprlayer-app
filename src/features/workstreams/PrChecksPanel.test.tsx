@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrChecksPanel } from "./PrChecksPanel";
@@ -7,7 +7,8 @@ import type { PrChecks, PrLookup, PrStatus, WorkstreamView } from "@/lib/binding
 
 const q = vi.hoisted(() => ({ useWorkstreamPr: vi.fn() }));
 vi.mock("@/lib/queries", () => q);
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 
 afterEach(cleanup);
 
@@ -62,6 +63,22 @@ describe("PrChecksPanel review surfacing", () => {
     expect(screen.getByText("Merge conflict")).toBeTruthy();
     expect(screen.getByText("Review required")).toBeTruthy();
     expect(screen.getByText("conflict")).toBeTruthy();
+  });
+});
+
+describe("PrChecksPanel check links", () => {
+  it("opens a check's log when its row is clicked", () => {
+    const url = "https://github.com/o/r/actions/runs/1";
+    renderPanel(
+      makePr({
+        checks: {
+          state: "failing", total: 1, passed: 0, failed: 1, pending: 0, skipped: 0, cancelled: 0,
+          list: [{ name: "build", bucket: "fail", url }],
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("build"));
+    expect(opener.openUrl).toHaveBeenCalledWith(url);
   });
 });
 

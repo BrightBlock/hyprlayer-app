@@ -12,7 +12,8 @@ const q = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/queries", () => q);
 vi.mock("@/features/session/sessionStore", () => ({ addressPrFeedback: vi.fn() }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
+const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
+vi.mock("@tauri-apps/plugin-opener", () => opener);
 
 afterEach(cleanup);
 
@@ -47,6 +48,14 @@ function renderLookup(lookup: PrLookup, automerge = false) {
 }
 
 const mergeBtn = () => screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement;
+
+describe("PrStatusBar PR link", () => {
+  it("opens the PR on GitHub when the PR pill is clicked", () => {
+    renderBar(makePr());
+    fireEvent.click(screen.getByText("PR #42"));
+    expect(opener.openUrl).toHaveBeenCalledWith("https://github.com/o/r/pull/42");
+  });
+});
 
 describe("PrStatusBar merge gate", () => {
   it("enables Merge when checks pass and no review is required", () => {
