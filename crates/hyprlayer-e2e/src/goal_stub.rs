@@ -11,7 +11,8 @@ use crate::Sandbox;
 /// for the reply; `ask` streams a parallel call's second `tool_use` and a subagent's text and
 /// tool result while pending), `crash` / `crash-once` (`exit 1` mid-turn; `-once` deletes itself),
 /// `crash-after` (`exit 1` after the turn's result).
-/// `slow-exit` is read at launch; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
+/// `slow-exit` is read at launch, and so is `noinit`, under which the launch reports no init and
+/// answers nothing; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
 /// and, on an optional second line, the turn that ticks every box in it. Launches log to `argv.log`
 /// and `DISPLAY` to `env.log`; the latest launch's `HYPRLAYER_*` goes to `agent-env`. One-shots
 /// answer from `evaluator` (its prompts append to `evaluator.log`), `validation-summary` and a
@@ -107,6 +108,7 @@ result() {
     "$1" "$2" "$sid" "$3" $((cents / 100)) $((cents % 100)) "$4"
 }
 ctl slow-exit && trap 'sleep 2; exit 143' TERM
+ctl noinit && { cat >/dev/null; exit 0; }
 printf '{"type":"system","subtype":"init","session_id":"%s","model":"claude-e2e","tools":[]}\n' "$sid"
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$log"

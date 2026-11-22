@@ -6,7 +6,7 @@ use std::time::Duration;
 use hyprlayer_models::{
     AgentCaller, ClientRef, Goal, Harness, PermissionMode, PtyAgent, PtyAgentState, PtyFirstPrompt,
     PtyLaunchSession, RuntimeEvent, SessionEvent, SessionOrigin, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil,
+    SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil, WorkstreamStatus,
 };
 use tokio::sync::OwnedMutexGuard;
 use tokio::time::Instant;
@@ -14,6 +14,7 @@ use tokio::time::Instant;
 use super::pty_agents::{asking, PtyAgents, PtySnapshot};
 use super::pty_controls::{self, composing};
 use super::{blocking, denied, in_project, AgentControlService, AgentIdentity};
+use crate::capability::launch_policy;
 use crate::claude::driver::permission_mode_flag;
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
@@ -131,19 +132,7 @@ impl AgentControlService<'_> {
                 ),
             });
         }
-        let slot = self
-            .runtime
-            .agent_spawn_locks
-            .acquire(identity.caller.id())
-            .await;
-        let live = self.live_children(identity).await?;
-        if live >= limits.max_live_children as usize {
-            return Err(CoreError::AgentLimitReached {
-                detail: format!(
-                    "this agent already has {live} live children, the Max live children"
-                ),
-            });
-        }
+        let slot = self.admit_child(&identity.caller, "this agent").await?;
         let own = self
             .mode_of(identity)
             .await
@@ -183,6 +172,24 @@ impl AgentControlService<'_> {
             },
             _slot: slot,
         })
+    }
+
+    async fn admit_child(&self, parent: &AgentCaller, whose: &str) -> Result<OwnedMutexGuard<()>> {
+        let slot = self.runtime.agent_spawn_locks.acquire(parent.id()).await;
+        let max = self
+            .runtime
+            .settings
+            .get()
+            .await
+            .agent_control
+            .max_live_children;
+        let live = self.live_children(parent).await?;
+        if live >= max as usize {
+            return Err(CoreError::AgentLimitReached {
+                detail: format!("{whose} already has {live} live children, the Max live children"),
+            });
+        }
+        Ok(slot)
     }
 
     /// A session caller's own stage; a terminal, or an unreadable row, counts as General.
@@ -346,6 +353,56 @@ impl AgentControlService<'_> {
         self.check_message_rank(identity, &target).await?;
         self.admit_hop(session_id, &target.workstream_id, &session_label(&target))
             .await?;
+        if !sessions.is_live(session_id).await {
+            let workstream = self
+                .runtime
+                .workstreams()
+                .find(&target.workstream_id)
+                .await?;
+            if workstream.status == WorkstreamStatus::Archived {
+                return Err(denied("that session's workstream is archived"));
+            }
+            let parent = self
+                .runtime
+                .agent_links
+                .get(session_id)
+                .map(|link| link.parent)
+                .or_else(|| {
+                    target.spawn_parent().map(|id| AgentCaller::Session {
+                        session_id: id.to_string(),
+                    })
+                });
+            let _slot = match parent {
+                Some(parent) if parent == identity.caller => {
+                    Some(self.admit_child(&parent, "this agent").await?)
+                }
+                Some(parent) => Some(
+                    self.admit_child(&parent, "the agent that spawned it")
+                        .await?,
+                ),
+                None => None,
+            };
+            let op = sessions.op_lock(session_id).await;
+            let guard = op.lock().await;
+            let session =
+                sessions
+                    .get(session_id)
+                    .await?
+                    .ok_or_else(|| CoreError::SessionNotFound {
+                        session_id: session_id.to_string(),
+                    })?;
+            if session.archived_at.is_some() {
+                return Err(denied("that session is archived"));
+            }
+            if session.provider_session_id.is_none() {
+                return Err(denied(
+                    "that session never started a conversation to resume",
+                ));
+            }
+            sessions
+                .resume_if_exited_held(session, workstream.project_path, &guard)
+                .await?;
+        }
         let label = self.caller_label(identity).await;
         let text = format!("{}\n\n{text}", header(identity, &label));
         sessions
@@ -378,7 +435,12 @@ impl AgentControlService<'_> {
             .await
         {
             Some(mode) => mode,
-            None => pipeline::policy_for(target.stage).permission_mode,
+            None => launch_policy(
+                target.harness,
+                target.stage,
+                target.requested_permission_mode,
+            )
+            .permission_mode(),
         };
         if rank(theirs) <= rank(own)
             || self

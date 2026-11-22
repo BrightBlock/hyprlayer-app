@@ -267,6 +267,66 @@
       "guards": [
         {
           "evidence": {
+            "delivered": true,
+            "live": true,
+            "oneResumedLaunch": true,
+            "outcome": {
+              "lastReply": "counter is 13",
+              "stalled": false,
+              "state": "idle",
+              "timedOut": false
+            }
+          },
+          "guard": "prompt_and_wait into the partner the lead killed resumes its harness, delivers the message and returns the reply",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "childToBypassSibling": "agent_control_denied: agent control refused this: that session runs in bypass mode, which outranks this agent's default",
+            "killedAgain": true,
+            "relaunched": false
+          },
+          "guard": "the child cannot revive its dead sibling recorded in bypass, above its own default",
+          "ok": true
+        }
+      ],
+      "step": "a message revives a dead session"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "agent_limit_reached: an agent limit was reached: this agent already has 1 live children, the Max live children",
+            "relaunched": false
+          },
+          "guard": "with the child live, Max live children 1 refuses the revive of the lead's dead partner",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: that session's workstream is archived",
+            "relaunched": false,
+            "stopped": true
+          },
+          "guard": "a session in an archived workstream is not revived",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "killed": true,
+            "refusal": "agent_control_denied: agent control refused this: that session never started a conversation to resume",
+            "relaunched": false
+          },
+          "guard": "a dead session whose harness never started is not revived as a new conversation",
+          "ok": true
+        }
+      ],
+      "step": "a revive is refused past the cap, into an archived workstream, or with no conversation"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "rowsUnchanged": true,
             "spawnAgent": "agent_control_denied: agent control refused this: a child cannot run in bypass mode, above this agent's own default",
             "startGoal": "agent_control_denied: agent control refused this: a child cannot run in bypass mode, above this agent's own default"

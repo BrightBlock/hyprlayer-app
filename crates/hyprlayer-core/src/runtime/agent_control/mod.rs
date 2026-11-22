@@ -266,18 +266,18 @@ impl AgentControlService<'_> {
         }
     }
 
-    /// Live agents the caller spawned directly: persisted session children plus in-memory links.
-    async fn live_children(&self, identity: &AgentIdentity) -> Result<usize> {
+    /// Live agents `parent` spawned directly: persisted session children plus in-memory links.
+    async fn live_children(&self, parent: &AgentCaller) -> Result<usize> {
         let live = self.runtime.session_registry.live_ids().await;
         // A session's link outlives its harness; a PTY's ends with it.
         let linked = self
             .runtime
             .agent_links
-            .children_of(identity.caller.id())
+            .children_of(parent.id())
             .into_iter()
             .filter(|id| live.contains(id) || self.runtime.pty_agents.snapshot(id).is_some())
             .count();
-        let AgentCaller::Session { session_id: me } = &identity.caller else {
+        let AgentCaller::Session { session_id: me } = parent else {
             return Ok(linked);
         };
         let (db, me) = (self.runtime.db.clone(), me.clone());

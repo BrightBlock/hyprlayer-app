@@ -383,6 +383,175 @@ async fn agent_spawn_and_message() {
         json!({ "kill": tool_text(&own), "gone": partner_gone }),
     );
 
+    j.step("a message revives a dead session");
+    let launches = || {
+        std::fs::read_to_string(
+            sandbox
+                .root
+                .join("goal-control")
+                .join(&partner)
+                .join("argv.log"),
+        )
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>()
+    };
+    let before = launches().len();
+    let revived = outcome(
+        &lead_mcp
+            .call(
+                "prompt_and_wait",
+                json!({ "session_id": partner, "text": "E2E_REVIVE", "timeout_sec": WAIT_SECS }),
+            )
+            .await,
+    );
+    let after = launches();
+    let resumed = after.len() == before + 1 && after.last().is_some_and(|l| l.contains("--resume"));
+    let delivered = stub_user_lines(&sandbox, &partner)
+        .last()
+        .is_some_and(|w| w.starts_with(&header) && w.ends_with("E2E_REVIVE"));
+    let revived_live = live(&c, &partner).await;
+    j.guard(
+        "prompt_and_wait into the partner the lead killed resumes its harness, delivers the message and returns the reply",
+        revived["state"] == json!("idle")
+            && revived["lastReply"] == json!("counter is 13")
+            && resumed
+            && delivered
+            && revived_live,
+        json!({
+            "outcome": revived,
+            "oneResumedLaunch": resumed,
+            "delivered": delivered,
+            "live": revived_live,
+        }),
+    );
+    j.call(
+        &c,
+        Request::SetSessionPermissionMode {
+            session_id: partner.clone(),
+            mode: Some(PermissionMode::BypassPermissions),
+        },
+    )
+    .await
+    .expect("raise the partner to bypass");
+    let killed = lead_mcp
+        .call("kill_agent", json!({ "session_id": partner }))
+        .await;
+    let killed = !tool_failed(&killed) && gone(&c, &partner).await;
+    let before = launches().len();
+    let to_sibling = refusal(
+        &child_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": partner, "text": "E2E_SIBLING" }),
+            )
+            .await,
+    );
+    let relaunched = launches().len() != before || live(&c, &partner).await;
+    j.guard(
+        "the child cannot revive its dead sibling recorded in bypass, above its own default",
+        killed
+            && to_sibling.starts_with("agent_control_denied: ")
+            && to_sibling.contains("runs in bypass mode, which outranks this agent's default")
+            && !relaunched,
+        json!({ "killedAgain": killed, "childToBypassSibling": to_sibling, "relaunched": relaunched }),
+    );
+
+    j.step(
+        "a revive is refused past the cap, into an archived workstream, or with no conversation",
+    );
+    let launched = |id: &str| {
+        std::fs::read_to_string(sandbox.root.join("goal-control").join(id).join("argv.log"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    update_settings(&mut j, &c, |s| s.agent_control.max_live_children = 1).await;
+    let before = launched(&partner);
+    let crowded = refusal(
+        &lead_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": partner, "text": "E2E_CROWDED_REVIVE" }),
+            )
+            .await,
+    );
+    update_settings(&mut j, &c, |s| s.agent_control.max_live_children = 4).await;
+    let relaunched = launched(&partner) != before || live(&c, &partner).await;
+    j.guard(
+        "with the child live, Max live children 1 refuses the revive of the lead's dead partner",
+        crowded.starts_with("agent_limit_reached: ")
+            && crowded.contains("this agent already has 1 live children, the Max live children")
+            && !relaunched,
+        json!({ "refusal": crowded, "relaunched": relaunched }),
+    );
+    let shelf = create_workstream(&mut j, &c, &project, "Shelved").await;
+    let shelf = text(&shelf, "/item/id");
+    let shelved = start_session(&mut j, &c, &shelf, "Shelved", "$SHELVED").await;
+    j.call(
+        &c,
+        Request::ArchiveWorkstream {
+            id: shelf.clone(),
+            skip_scripts: true,
+        },
+    )
+    .await
+    .expect("archive_workstream");
+    let stopped = gone(&c, &shelved).await;
+    let before = launched(&shelved);
+    let archived = refusal(
+        &lead_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": shelved, "text": "E2E_ARCHIVED_REVIVE" }),
+            )
+            .await,
+    );
+    let relaunched = launched(&shelved) != before || live(&c, &shelved).await;
+    j.guard(
+        "a session in an archived workstream is not revived",
+        stopped
+            && archived.starts_with("agent_control_denied: ")
+            && archived.contains("that session's workstream is archived")
+            && !relaunched,
+        json!({ "stopped": stopped, "refusal": archived, "relaunched": relaunched }),
+    );
+    control(&sandbox, "noinit", "");
+    let spawned = lead_mcp
+        .call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_UNSTARTED", "title": "Unstarted" }),
+        )
+        .await;
+    clear(&sandbox, "noinit");
+    let unstarted = text(&parsed(&spawned), "/sessionId");
+    j.alias(&unstarted, "$UNSTARTED");
+    open_tab(&mut rx, &unstarted).await;
+    let killed = lead_mcp
+        .call("kill_agent", json!({ "session_id": unstarted }))
+        .await;
+    let killed = !tool_failed(&killed) && gone(&c, &unstarted).await;
+    let before = launched(&unstarted);
+    let unresumable = refusal(
+        &lead_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": unstarted, "text": "E2E_UNSTARTED_REVIVE" }),
+            )
+            .await,
+    );
+    let relaunched = launched(&unstarted) != before || live(&c, &unstarted).await;
+    j.guard(
+        "a dead session whose harness never started is not revived as a new conversation",
+        killed
+            && unresumable.starts_with("agent_control_denied: ")
+            && unresumable.contains("never started a conversation to resume")
+            && !relaunched,
+        json!({ "killed": killed, "refusal": unresumable, "relaunched": relaunched }),
+    );
+    drain(&mut rx);
+
     j.step("no escalation");
     let rows_before = session_count(&c, &ws).await;
     let spawn_up = refusal(
