@@ -2659,7 +2659,7 @@ mod tests {
             "the newest 200, newest first, within one second"
         );
         assert_eq!(
-            crate::worktree::status(&clone, "origin/main", None)
+            crate::worktree::status(&clone, "origin/main", None, None)
                 .base
                 .ahead,
             205
@@ -2880,7 +2880,7 @@ mod tests {
     }
 
     fn line_counts(dir: &Path) -> (u32, u32) {
-        let chip = crate::worktree::status(dir, "main", None);
+        let chip = crate::worktree::status(dir, "main", None, None);
         (chip.additions, chip.deletions)
     }
 
@@ -3053,7 +3053,7 @@ mod tests {
             worktree_git_status(&wt).unwrap_err().code(),
             "sparse_index_unsupported"
         );
-        let chip = crate::worktree::status(&wt, "main", None);
+        let chip = crate::worktree::status(&wt, "main", None, None);
         assert!(chip.unreadable.is_some(), "{chip:?}");
         assert_eq!(
             crate::worktree::ensure_removable(&wt, "main", "feat")
@@ -3385,7 +3385,7 @@ mod tests {
         let st = worktree_git_status(&repo).unwrap();
         assert_eq!(rows(&st.staged), vec!["modified:vendor/lib"]);
         assert!(st.unstaged.is_empty(), "{st:?}");
-        assert_eq!(crate::worktree::status(&repo, "main", None).dirty, 1);
+        assert_eq!(crate::worktree::status(&repo, "main", None, None).dirty, 1);
     }
 
     #[test]
@@ -3420,7 +3420,10 @@ mod tests {
 
         let st = worktree_git_status(dir.path()).unwrap();
         assert_eq!(rows(&st.staged), vec!["deleted:a.md"]);
-        assert_eq!(crate::worktree::status(dir.path(), "main", None).dirty, 1);
+        assert_eq!(
+            crate::worktree::status(dir.path(), "main", None, None).dirty,
+            1
+        );
     }
 
     #[test]
@@ -3441,7 +3444,7 @@ mod tests {
         let st = worktree_git_status(dir.path()).unwrap();
         assert_eq!(rows(&st.staged), vec![format!("deleted:{settings}")]);
         assert_eq!(rows(&st.unstaged), vec![format!("untracked:{settings}")]);
-        let chip = crate::worktree::status(dir.path(), "main", None);
+        let chip = crate::worktree::status(dir.path(), "main", None, None);
         assert_eq!((chip.dirty, chip.untracked, chip.deletions), (1, 1, 1));
     }
 
@@ -3533,7 +3536,10 @@ mod tests {
             "{st:?}"
         );
         assert!(renamed_targets(dir.path()).is_empty(), "{st:?}");
-        assert_eq!(crate::worktree::status(dir.path(), "main", None).dirty, 2);
+        assert_eq!(
+            crate::worktree::status(dir.path(), "main", None, None).dirty,
+            2
+        );
 
         unstage_files(dir.path(), &["notes.md".into()]).unwrap();
         assert_eq!(porcelain(dir.path()), vec!["D  empty.log", "?? notes.md"]);

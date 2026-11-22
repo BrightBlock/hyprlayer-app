@@ -344,7 +344,7 @@ fn item_view(item: Workstream, link: Option<LinkStatus>) -> WorkstreamView {
     let git = if item.is_folder() {
         worktree::folder_status(dir)
     } else {
-        worktree::status(dir, &item.base_branch, link)
+        worktree::status(dir, &item.base_branch, item.merged_pr_head(), link)
     };
     WorkstreamView {
         item,

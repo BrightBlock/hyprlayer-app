@@ -135,6 +135,12 @@ impl Workstream {
         }
     }
 
+    pub fn merged_pr_head(&self) -> Option<&str> {
+        self.observed_pr
+            .filter(|o| o.state == PrState::Merged)
+            .and(self.observed_pr_head.as_deref())
+    }
+
     pub fn is_inplace(&self) -> bool {
         self.worktree_mode == WorktreeMode::Inplace
     }

@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 use std::time::Duration;
 
-use notify::event::{AccessKind, AccessMode, ModifyKind};
+use notify::event::{AccessKind, AccessMode, ModifyKind, RemoveKind};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{
     new_debouncer, DebounceEventResult, DebouncedEvent, Debouncer, RecommendedCache,
@@ -20,8 +20,10 @@ pub enum IndexEvent {
     Rescanned,
 }
 
+type FsDebouncer = Debouncer<RecommendedWatcher, RecommendedCache>;
+
 pub struct WatchHandle {
-    _debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+    _debouncer: Arc<Mutex<FsDebouncer>>,
 }
 
 impl std::fmt::Debug for WatchHandle {
@@ -63,7 +65,7 @@ pub fn watch_roots(
     }
 
     Ok(WatchHandle {
-        _debouncer: debouncer,
+        _debouncer: Arc::new(Mutex::new(debouncer)),
     })
 }
 
@@ -75,7 +77,7 @@ pub fn watch_worktree(
     let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let worktree = canonical(worktree);
     let repo = git2::Repository::open(&worktree).ok();
-    let tracked_at_open = repo.as_ref().map(tracked_paths).unwrap_or_default();
+    let mut tracked = repo.as_ref().map(tracked_paths).unwrap_or_default();
     let roots = Roots {
         git_dir: canonical(git_dir),
         common: canonical(
@@ -86,8 +88,7 @@ pub fn watch_worktree(
         worktree,
     };
 
-    let prune =
-        |dir: &Path| prunes_worktree_dir(&roots.worktree, repo.as_ref(), &tracked_at_open, dir);
+    let prune = |dir: &Path| prunes_worktree_dir(&roots.worktree, repo.as_ref(), &tracked, dir);
     let mut plan = watch_plan(&roots.worktree, &prune);
     let mut extras = Vec::new();
     if roots.worktree.join(".git").is_file() {
@@ -96,35 +97,112 @@ pub fn watch_worktree(
     extras.push((roots.common.join("refs"), RecursiveMode::Recursive));
     extras.push((roots.common.clone(), RecursiveMode::NonRecursive));
     for (path, mode) in extras {
-        let covered = plan.iter().any(|(p, m)| match m {
-            RecursiveMode::Recursive => path.starts_with(p),
-            RecursiveMode::NonRecursive => *p == path && mode == RecursiveMode::NonRecursive,
-        });
-        if path.is_dir() && !covered {
+        if path.is_dir() && !covers(&plan, &path, mode) {
             plan.push((path, mode));
         }
     }
 
+    // The handler adds watches through the debouncer that owns it; a strong ref would be a cycle.
+    let slot: Arc<OnceLock<Weak<Mutex<FsDebouncer>>>> = Arc::default();
+    let own = slot.clone();
+    let mut watched = plan.clone();
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
         None,
         move |result: DebounceEventResult| {
-            if let Ok(events) = result {
-                let relevant = events
-                    .iter()
-                    .filter(|e| signals_change(&e.kind))
-                    .flat_map(|e| e.paths.iter())
-                    .any(|p| is_relevant_change(&roots, &tracked_at_open, p));
-                if relevant {
-                    on_change();
-                }
+            let Ok(events) = result else {
+                return;
+            };
+            if let (Some(repo), Some(debouncer)) =
+                (repo.as_ref(), own.get().and_then(Weak::upgrade))
+            {
+                follow_tracked(
+                    &events,
+                    repo,
+                    &roots,
+                    &mut tracked,
+                    &mut watched,
+                    &debouncer,
+                );
+            }
+            let relevant = events
+                .iter()
+                .filter(|e| signals_change(&e.kind))
+                .flat_map(|e| e.paths.iter())
+                .any(|p| is_relevant_change(&roots, &tracked, p));
+            if relevant {
+                on_change();
             }
         },
     )
     .map_err(notify_to_core)?;
     apply_plan(&mut debouncer, plan)?;
+    let debouncer = Arc::new(Mutex::new(debouncer));
+    let _ = slot.set(Arc::downgrade(&debouncer));
     Ok(WatchHandle {
         _debouncer: debouncer,
+    })
+}
+
+fn follow_tracked(
+    events: &[DebouncedEvent],
+    repo: &git2::Repository,
+    roots: &Roots,
+    tracked: &mut HashSet<PathBuf>,
+    watched: &mut Watches,
+    debouncer: &Mutex<FsDebouncer>,
+) {
+    let paths = |kind: fn(&EventKind) -> bool| {
+        events
+            .iter()
+            .filter(move |e| kind(&e.kind))
+            .flat_map(|e| e.paths.iter())
+    };
+    let created = |k: &EventKind| {
+        matches!(
+            k,
+            EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
+        )
+    };
+    let mut dirs: Vec<PathBuf> = paths(created)
+        .filter(|p| {
+            p.strip_prefix(&roots.worktree)
+                .is_ok_and(|rel| tracked.contains(rel))
+        })
+        .cloned()
+        .collect();
+    let removed_dir = |k: &EventKind| matches!(k, EventKind::Remove(r) if *r != RemoveKind::File);
+    for gone in paths(removed_dir).chain(&dirs) {
+        watched.retain(|(w, _)| !w.starts_with(gone));
+    }
+    let index = roots.git_dir.join("index");
+    if paths(signals_change).any(|p| *p == index) {
+        let now = tracked_paths(repo);
+        dirs.extend(now.difference(tracked).map(|rel| roots.worktree.join(rel)));
+        *tracked = now;
+    }
+    if dirs.is_empty() {
+        return;
+    }
+    let prune = |dir: &Path| prunes_worktree_dir(&roots.worktree, Some(repo), tracked, dir);
+    let mut debouncer = debouncer.lock().unwrap_or_else(PoisonError::into_inner);
+    dirs.sort_by_key(|d| d.components().count());
+    for dir in dirs {
+        if !dir.is_dir() || covers(watched, &dir, RecursiveMode::NonRecursive) {
+            continue;
+        }
+        for (path, mode) in watch_plan(&dir, &prune) {
+            if !covers(watched, &path, mode) && debouncer.watch(&path, mode).is_ok() {
+                watched.push((path, mode));
+            }
+        }
+    }
+}
+
+fn covers(watches: &Watches, path: &Path, mode: RecursiveMode) -> bool {
+    watches.iter().any(|(p, m)| match m {
+        RecursiveMode::Recursive => path.starts_with(p),
+        RecursiveMode::NonRecursive => p == path && mode == RecursiveMode::NonRecursive,
     })
 }
 
@@ -188,10 +266,7 @@ fn plan_dir(dir: &Path, prune: &dyn Fn(&Path) -> bool, out: &mut Watches) -> boo
     false
 }
 
-fn apply_plan(
-    debouncer: &mut Debouncer<RecommendedWatcher, RecommendedCache>,
-    plan: Watches,
-) -> Result<()> {
+fn apply_plan(debouncer: &mut FsDebouncer, plan: Watches) -> Result<()> {
     for (path, mode) in plan {
         debouncer.watch(&path, mode).map_err(notify_to_core)?;
     }
@@ -216,9 +291,10 @@ fn prunes_worktree_dir(
 
 fn tracked_paths(repo: &git2::Repository) -> HashSet<PathBuf> {
     let mut paths = HashSet::new();
-    let Ok(index) = repo.index() else {
+    let Ok(mut index) = repo.index() else {
         return paths;
     };
+    let _ = index.read(false);
     for entry in index.iter() {
         let Ok(path) = std::str::from_utf8(&entry.path) else {
             continue;
@@ -247,7 +323,7 @@ pub(crate) fn signals_change(kind: &EventKind) -> bool {
     )
 }
 
-fn is_relevant_change(roots: &Roots, tracked_at_open: &HashSet<PathBuf>, path: &Path) -> bool {
+fn is_relevant_change(roots: &Roots, tracked: &HashSet<PathBuf>, path: &Path) -> bool {
     if let Ok(rel) = path.strip_prefix(&roots.git_dir) {
         return is_git_status_signal(rel) || is_shared_ref(rel);
     }
@@ -259,10 +335,8 @@ fn is_relevant_change(roots: &Roots, tracked_at_open: &HashSet<PathBuf>, path: &
         return is_git_status_signal(rel);
     }
     !is_build_noise(rel)
-        || tracked_at_open.contains(rel)
-        || rel
-            .parent()
-            .is_some_and(|dir| tracked_at_open.contains(dir))
+        || tracked.contains(rel)
+        || rel.parent().is_some_and(|dir| tracked.contains(dir))
 }
 
 fn is_shared_ref(rel: &Path) -> bool {
@@ -844,6 +918,60 @@ mod tests {
             "v2\n"
         )
         .unwrap()));
+    }
+
+    #[test]
+    fn a_build_file_tracked_after_the_watch_opened_fires_on_edits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        committed_repo(&repo, &["README.md"]);
+        let (_handle, hits) = counting_watch(&repo);
+        std::fs::create_dir(repo.join("build")).unwrap();
+        std::fs::write(repo.join("build/release.sh"), "v1\n").unwrap();
+        git(&repo, &["add", "build/release.sh"]);
+        git(&repo, &["commit", "-m", "track build"]);
+
+        assert!(fires(&hits, || std::fs::write(
+            repo.join("build/release.sh"),
+            "v2\n"
+        )
+        .unwrap()));
+    }
+
+    #[test]
+    fn a_tracked_directory_deleted_and_recreated_fires_on_edits() {
+        let settle = || std::thread::sleep(Duration::from_millis(800));
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        committed_repo(&repo, &["gen/x.txt"]);
+        std::fs::write(repo.join(".gitignore"), "out/\n").unwrap();
+        let (_handle, hits) = counting_watch(&repo);
+
+        std::fs::remove_dir_all(repo.join("gen")).unwrap();
+        settle();
+        std::fs::create_dir(repo.join("gen")).unwrap();
+        std::fs::write(repo.join("gen/x.txt"), "v2\n").unwrap();
+        assert!(
+            fires(&hits, || std::fs::write(repo.join("gen/x.txt"), "v3\n")
+                .unwrap()),
+            "tracked when the watch opened"
+        );
+
+        std::fs::create_dir(repo.join("out")).unwrap();
+        std::fs::write(repo.join("out/a.txt"), "v1\n").unwrap();
+        git(&repo, &["add", "-f", "out/a.txt"]);
+        settle();
+        git(&repo, &["rm", "-r", "-q", "--cached", "out"]);
+        std::fs::remove_dir_all(repo.join("out")).unwrap();
+        settle();
+        std::fs::create_dir(repo.join("out")).unwrap();
+        std::fs::write(repo.join("out/a.txt"), "v2\n").unwrap();
+        git(&repo, &["add", "-f", "out/a.txt"]);
+        assert!(
+            fires(&hits, || std::fs::write(repo.join("out/a.txt"), "v3\n")
+                .unwrap()),
+            "tracked after the watch opened"
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -126,7 +127,7 @@ pub struct ArchiveScan {
 }
 
 /// Symlinks are not followed, so the thoughts links never count.
-pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
+pub fn scan_archive(dir: &Path, base_branch: &str, merged_head: Option<&str>) -> ArchiveScan {
     if !dir.is_dir() {
         return ArchiveScan::default();
     }
@@ -138,7 +139,7 @@ pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
         .map(|meta| meta.len())
         .sum();
     let git = is_live_worktree(dir)
-        .then(|| status(dir, base_branch, None))
+        .then(|| status(dir, base_branch, merged_head, None))
         .filter(|s| s.exists);
     ArchiveScan {
         size_bytes: Some(size as f64),
@@ -564,7 +565,7 @@ pub fn is_live_worktree(path: &Path) -> bool {
 }
 
 pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Result<()> {
-    let status = status(worktree, base_branch, None);
+    let status = status(worktree, base_branch, None, None);
     if let Some(detail) = status.unreadable {
         return Err(CoreError::WorktreeUnreadable { detail });
     }
@@ -614,21 +615,8 @@ pub async fn pull_base(
         tracing::warn!("fetching {branch} failed; merging the local origin/{branch}: {e}");
     }
 
-    let remote_ref = format!("origin/{branch}");
-    let merge_ref = if git_in(
-        git,
-        worktree,
-        &["rev-parse", "--verify", "--quiet", &remote_ref],
-        overlay,
-    )
-    .run()
-    .await
-    .is_ok()
-    {
-        remote_ref
-    } else {
-        base.to_string()
-    };
+    let merge_ref = crate::gitops::open_repo(worktree)
+        .map_or_else(|_| base.to_string(), |repo| update_ref(&repo, base));
 
     let out = git_in(git, worktree, &["merge", "--no-edit", &merge_ref], overlay)
         .timeout(Duration::from_secs(120))
@@ -881,7 +869,78 @@ pub fn folder_status(dir: &Path) -> WorktreeStatus {
     }
 }
 
-pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) -> WorktreeStatus {
+fn update_ref(repo: &git2::Repository, base: &str) -> String {
+    let remote = format!("origin/{}", base.strip_prefix("origin/").unwrap_or(base));
+    if repo
+        .find_reference(&format!("refs/remotes/{remote}"))
+        .is_ok()
+    {
+        remote
+    } else {
+        base.to_string()
+    }
+}
+
+fn commit_of(repo: &git2::Repository, rev: &str) -> Option<git2::Oid> {
+    let commit = repo.revparse_single(rev).ok()?.peel_to_commit().ok()?;
+    Some(commit.id())
+}
+
+// Hiding 5,000 remote tips costs ~20 ms per walk, and status() runs on every watcher event; the
+// count is a pure function of these oids, so repeat reads skip the walk.
+static LOCAL_ONLY: Mutex<BTreeMap<u64, u32>> = Mutex::new(BTreeMap::new());
+
+fn local_only(
+    repo: &git2::Repository,
+    head: git2::Oid,
+    base_tip: Option<git2::Oid>,
+    merged: Option<git2::Oid>,
+) -> Option<u32> {
+    let mut tips: Vec<git2::Oid> = repo
+        .references_glob("refs/remotes/*")
+        .ok()?
+        .flatten()
+        .filter_map(|r| r.target())
+        .collect();
+    tips.sort_unstable();
+    tips.dedup();
+    // With no remote-tracking ref, `--not --remotes` hides nothing: count past the base.
+    let floor = if tips.is_empty() { base_tip } else { None };
+    let hidden: Vec<git2::Oid> = tips.into_iter().chain(floor).chain(merged).collect();
+    let key = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (head, &hidden).hash(&mut hasher);
+        hasher.finish()
+    };
+    if let Some(&count) = LOCAL_ONLY
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+    {
+        return Some(count);
+    }
+    let mut walk = repo.revwalk().ok()?;
+    walk.push(head).ok()?;
+    for oid in &hidden {
+        let _ = walk.hide(*oid);
+    }
+    let count = walk.count() as u32;
+    let mut memo = LOCAL_ONLY.lock().unwrap_or_else(PoisonError::into_inner);
+    if memo.len() >= 4096 {
+        memo.clear();
+    }
+    memo.insert(key, count);
+    Some(count)
+}
+
+/// `merged_head` is the head of the branch's merged PR: a squash merge delivered the commits it
+/// reaches under other ids, so they are not unpushed.
+pub fn status(
+    worktree: &Path,
+    base_branch: &str,
+    merged_head: Option<&str>,
+    thoughts: Option<LinkStatus>,
+) -> WorktreeStatus {
     let missing = WorktreeStatus {
         exists: false,
         branch: None,
@@ -934,12 +993,9 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
             behind: behind as u32,
         })
     };
-    let base = repo
-        .revparse_single(base_branch)
-        .ok()
-        .and_then(|o| o.peel_to_commit().ok())
-        .and_then(|c| divergence(c.id()))
-        .unwrap_or_default();
+    let base_ref = update_ref(&repo, base_branch);
+    let base_tip = commit_of(&repo, &base_ref);
+    let base = base_tip.and_then(divergence).unwrap_or_default();
     let upstream = branch
         .as_deref()
         .and_then(|b| crate::gitops::pushed_ref(&repo, b, base_branch))
@@ -951,7 +1007,20 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
                 behind: d.behind,
             })
         });
-    let unpushed = upstream.as_ref().map_or(base.ahead, |u| u.ahead);
+    let base_is_remote = repo
+        .find_reference(&format!("refs/remotes/{base_ref}"))
+        .is_ok();
+    let all_pushed = upstream.as_ref().is_some_and(|u| u.ahead == 0)
+        || (base_is_remote && base_tip.is_some() && base.ahead == 0);
+    let unpushed = match local {
+        Some(head) if !all_pushed => {
+            let merged = merged_head
+                .and_then(|h| git2::Oid::from_str(h).ok())
+                .filter(|oid| repo.odb().is_ok_and(|odb| odb.exists(*oid)));
+            local_only(&repo, head, base_tip, merged).unwrap_or(base.ahead)
+        }
+        _ => 0,
+    };
 
     WorktreeStatus {
         exists: true,
@@ -1003,7 +1072,7 @@ mod tests {
         std::fs::create_dir(&notes).unwrap();
         std::fs::write(notes.join("todo.md"), "hi\n").unwrap();
 
-        assert!(!status(&notes, "", None).exists);
+        assert!(!status(&notes, "", None, None).exists);
 
         let st = folder_status(&notes);
         assert!(st.exists);
@@ -1105,7 +1174,7 @@ mod tests {
             .unwrap();
         assert_eq!(created.branch, "linux-support");
         assert_eq!(
-            status(Path::new(&created.path), "main", None)
+            status(Path::new(&created.path), "main", None, None)
                 .branch
                 .as_deref(),
             Some("linux-support")
@@ -1159,7 +1228,7 @@ mod tests {
         assert_eq!(created.base_branch, "main");
         assert!(created.branch.starts_with("hyprlayer/auth-work-"));
 
-        let st = status(&wt, &created.base_branch, None);
+        let st = status(&wt, &created.base_branch, None, None);
         assert!(st.exists);
         assert_eq!((st.dirty, st.untracked, st.unpushed), (0, 0, 0));
 
@@ -1180,7 +1249,7 @@ mod tests {
         std::fs::remove_file(wt.join("scratch.txt")).unwrap();
 
         std::fs::write(wt.join("README.md"), "changed\n").unwrap();
-        let st = status(&wt, &created.base_branch, None);
+        let st = status(&wt, &created.base_branch, None, None);
         assert_eq!(st.dirty, 1);
         let err = manager
             .remove(
@@ -1200,7 +1269,7 @@ mod tests {
         std::fs::write(wt.join("thoughts/sub/x.md"), "ignored").unwrap();
         sh(&wt, &["add", "README.md"]);
         sh(&wt, &["commit", "-m", "wip"]);
-        let st = status(&wt, &created.base_branch, None);
+        let st = status(&wt, &created.base_branch, None, None);
         assert_eq!((st.dirty, st.unpushed, st.base.ahead), (0, 1, 1));
         assert_eq!(st.untracked, 0, "thoughts/ must not count");
         let err = manager
@@ -1267,7 +1336,7 @@ mod tests {
             created.branch
         );
         assert_eq!(
-            status(Path::new(&created.path), "main", None)
+            status(Path::new(&created.path), "main", None, None)
                 .branch
                 .as_deref(),
             Some(created.branch.as_str())
@@ -1298,7 +1367,7 @@ mod tests {
         sh(&repo, &["checkout", "-b", "feature/x"]);
         commit_file(&repo, "feature.txt");
 
-        let before = status(&repo, "main", None);
+        let before = status(&repo, "main", None, None);
         assert_eq!(before.upstream, None);
         assert_eq!((before.base, before.unpushed), (divergence(1, 0), 1));
 
@@ -1310,7 +1379,7 @@ mod tests {
         );
         sh(&repo, &["push", "-u", "origin", "feature/x"]);
 
-        let after = status(&repo, "main", None);
+        let after = status(&repo, "main", None, None);
         assert_eq!(after.upstream, upstream("origin/feature/x", 0, 0));
         assert_eq!((after.base, after.unpushed), (divergence(1, 0), 0));
 
@@ -1319,7 +1388,7 @@ mod tests {
         commit_file(&repo, "main-2.txt");
         sh(&repo, &["checkout", "feature/x"]);
 
-        let moved = status(&repo, "main", None);
+        let moved = status(&repo, "main", None, None);
         assert_eq!(moved.base, divergence(1, 2));
         assert_eq!(moved.upstream, upstream("origin/feature/x", 0, 0));
     }
@@ -1364,15 +1433,15 @@ mod tests {
             !configured.status.success(),
             "the new branch tracks nothing"
         );
-        assert_eq!(status(&wt, "origin/main", None).upstream, None);
-        assert_eq!(status(&wt, "origin/release", None).upstream, None);
+        assert_eq!(status(&wt, "origin/main", None, None).upstream, None);
+        assert_eq!(status(&wt, "origin/release", None, None).upstream, None);
         assert!(pull_upstream(&git, &wt, "origin/release", NO_OVERLAY)
             .await
             .is_err());
 
         sh(&wt, &["push", "-u", "origin", &created.branch]);
         assert_eq!(
-            status(&wt, "origin/main", None).upstream,
+            status(&wt, "origin/main", None, None).upstream,
             upstream(&format!("origin/{}", created.branch), 0, 0)
         );
     }
@@ -1391,10 +1460,170 @@ mod tests {
         sh(&repo, &["push", "-u", "origin", "hyprlayer/feat"]);
         sh(&repo, &["branch", "-m", "feature/renamed"]);
 
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!(st.upstream, upstream("origin/hyprlayer/feat", 0, 0));
         assert_eq!(st.unpushed, 0);
         ensure_removable(&repo, "main", "feature/renamed").unwrap();
+    }
+
+    #[test]
+    fn a_push_without_u_stays_pushed_after_a_rename_or_to_another_remote() {
+        let (guard, repo) = fixture_repo();
+        for name in ["origin", "fork"] {
+            let remote = guard.path().join(format!("{name}.git"));
+            sh(&repo, &["init", "--bare", remote.to_str().unwrap()]);
+            sh(&repo, &["remote", "add", name, remote.to_str().unwrap()]);
+        }
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        sh(&repo, &["checkout", "-b", "hyprlayer/feat"]);
+        commit_file(&repo, "feature.txt");
+        sh(&repo, &["push", "origin", "HEAD"]);
+        sh(&repo, &["branch", "-m", "feature/renamed"]);
+
+        assert_eq!(status(&repo, "origin/main", None, None).unpushed, 0);
+        ensure_removable(&repo, "origin/main", "feature/renamed").unwrap();
+
+        sh(&repo, &["checkout", "-b", "forked"]);
+        commit_file(&repo, "forked.txt");
+        sh(&repo, &["push", "fork", "HEAD"]);
+        assert_eq!(status(&repo, "origin/main", None, None).unpushed, 0);
+
+        commit_file(&repo, "local.txt");
+        assert_eq!(status(&repo, "origin/main", None, None).unpushed, 1);
+    }
+
+    #[test]
+    fn unpushed_matches_git_wherever_the_commits_live() {
+        let git_count = |repo: &Path| -> u32 {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(["rev-list", "--count", "HEAD", "--not", "--remotes"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().parse().unwrap()
+        };
+        let with_origin = || {
+            let (guard, repo) = fixture_repo();
+            let remote = guard.path().join("origin.git");
+            sh(
+                &repo,
+                &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+            );
+            sh(
+                &repo,
+                &["remote", "add", "origin", remote.to_str().unwrap()],
+            );
+            sh(&repo, &["push", "-u", "origin", "main"]);
+            let teammate = guard.path().join("teammate");
+            sh(
+                guard.path(),
+                &[
+                    "clone",
+                    remote.to_str().unwrap(),
+                    teammate.to_str().unwrap(),
+                ],
+            );
+            (guard, repo, remote, teammate)
+        };
+        let unpushed = |repo: &Path, base: &str| {
+            let counted = status(repo, base, None, None).unpushed;
+            assert_eq!(counted, git_count(repo), "base {base}");
+            counted
+        };
+
+        let (_guard, repo, _remote, teammate) = with_origin();
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "a.txt");
+        commit_file(&repo, "b.txt");
+        sh(&repo, &["push", "origin", "HEAD:review"]);
+        sh(&teammate, &["fetch", "origin"]);
+        sh(&teammate, &["checkout", "-b", "review", "origin/review"]);
+        commit_file(&teammate, "theirs.txt");
+        sh(&teammate, &["push", "origin", "review"]);
+        sh(&repo, &["fetch", "origin"]);
+        assert_eq!(unpushed(&repo, "origin/main"), 0, "a teammate built on it");
+
+        let (guard, repo, _remote, _teammate) = with_origin();
+        let fork = guard.path().join("fork.git");
+        sh(&repo, &["init", "--bare", fork.to_str().unwrap()]);
+        sh(&repo, &["remote", "add", "fork", fork.to_str().unwrap()]);
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "a.txt");
+        sh(&repo, &["push", "-u", "origin", "feat"]);
+        commit_file(&repo, "b.txt");
+        commit_file(&repo, "c.txt");
+        sh(&repo, &["push", "fork", "HEAD:feat"]);
+        assert_eq!(unpushed(&repo, "origin/main"), 0, "the rest is on a fork");
+
+        let (_guard, repo, remote, teammate) = with_origin();
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "mine.txt");
+        sh(&teammate, &["push", "origin", "main:trunk"]);
+        sh(&remote, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+        sh(&teammate, &["push", "origin", ":main"]);
+        sh(&repo, &["fetch", "--prune", "origin"]);
+        assert_eq!(unpushed(&repo, "origin/main"), 1, "the base was renamed");
+
+        let (_guard, repo, _remote, _teammate) = with_origin();
+        commit_file(&repo, "l1.txt");
+        commit_file(&repo, "l2.txt");
+        assert_eq!(unpushed(&repo, "main"), 2, "HEAD is on the base");
+        assert_eq!(unpushed(&repo, "origin/main"), 2);
+    }
+
+    fn head_of(repo: &Path) -> String {
+        let repo = git2::Repository::open(repo).unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        head.to_string()
+    }
+
+    #[test]
+    fn a_squash_merged_branch_counts_only_work_past_its_merged_pr() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(
+            &repo,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        sh(&repo, &["checkout", "-b", "feat"]);
+        commit_file(&repo, "one.txt");
+        commit_file(&repo, "two.txt");
+        sh(&repo, &["push", "-u", "origin", "feat"]);
+        let merged = head_of(&repo);
+        let teammate = guard.path().join("teammate");
+        sh(
+            guard.path(),
+            &[
+                "clone",
+                remote.to_str().unwrap(),
+                teammate.to_str().unwrap(),
+            ],
+        );
+        sh(&teammate, &["merge", "--squash", "origin/feat"]);
+        sh(&teammate, &["commit", "-m", "squash"]);
+        sh(&teammate, &["push", "origin", "main", ":feat"]);
+        sh(&repo, &["fetch", "--prune", "origin"]);
+
+        assert_eq!(status(&repo, "origin/main", None, None).unpushed, 2);
+        assert_eq!(
+            status(&repo, "origin/main", Some(&merged), None).unpushed,
+            0
+        );
+        commit_file(&repo, "after.txt");
+        assert_eq!(
+            status(&repo, "origin/main", Some(&merged), None).unpushed,
+            1
+        );
+        assert_eq!(
+            scan_archive(&repo, "origin/main", Some(&merged)).unpushed,
+            Some(1)
+        );
     }
 
     #[test]
@@ -1410,15 +1639,15 @@ mod tests {
 
         sh(&repo, &["checkout", "-b", "off-upstream", "upstream/main"]);
         commit_file(&repo, "off-upstream.txt");
-        assert_eq!(status(&repo, "main", None).upstream, None);
+        assert_eq!(status(&repo, "main", None, None).upstream, None);
 
         sh(&repo, &["checkout", "-b", "dev", "main"]);
         commit_file(&repo, "dev.txt");
         sh(&repo, &["checkout", "-b", "feat"]);
         sh(&repo, &["branch", "--set-upstream-to=dev"]);
-        assert_eq!(status(&repo, "main", None).upstream, None);
+        assert_eq!(status(&repo, "main", None, None).upstream, None);
         sh(&repo, &["branch", "--set-upstream-to=main"]);
-        assert_eq!(status(&repo, "upstream/main", None).upstream, None);
+        assert_eq!(status(&repo, "upstream/main", None, None).upstream, None);
     }
 
     #[tokio::test]
@@ -1483,12 +1712,47 @@ mod tests {
         fetch_remote(&git, &repo, Some("upstream/main"), NO_OVERLAY)
             .await
             .unwrap();
-        assert_eq!(status(&repo, "upstream/main", None).base.behind, 1);
+        assert_eq!(status(&repo, "upstream/main", None, None).base.behind, 1);
 
         let (_other_guard, no_remote) = fixture_repo();
         fetch_remote(&git, &no_remote, None, NO_OVERLAY)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_local_base_counts_what_update_from_base_merges() {
+        let (guard, repo) = fixture_repo();
+        let remote = guard.path().join("remote.git");
+        sh(
+            &repo,
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        sh(
+            &repo,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        sh(&repo, &["push", "-u", "origin", "main"]);
+        sh(&repo, &["checkout", "-b", "feat"]);
+        let teammate = guard.path().join("teammate");
+        sh(
+            guard.path(),
+            &[
+                "clone",
+                remote.to_str().unwrap(),
+                teammate.to_str().unwrap(),
+            ],
+        );
+        commit_file(&teammate, "theirs-1.txt");
+        commit_file(&teammate, "theirs-2.txt");
+        sh(&teammate, &["push", "origin", "main"]);
+        sh(&repo, &["fetch", "origin"]);
+
+        assert_eq!(status(&repo, "main", None, None).base, divergence(0, 2));
+        let git = which::which("git").expect("git on PATH");
+        let pulled = pull_base(&git, &repo, "main", NO_OVERLAY).await.unwrap();
+        assert!(matches!(pulled, PullOutcome::Merged), "{pulled:?}");
+        assert_eq!(status(&repo, "main", None, None).base, divergence(0, 0));
     }
 
     #[test]
@@ -1504,7 +1768,7 @@ mod tests {
         commit_file(&repo, "feature.txt");
         sh(&repo, &["push", "-u", "origin", "HEAD:other"]);
 
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!(st.upstream, upstream("origin/other", 0, 0));
         assert_eq!(st.unpushed, 0);
     }
@@ -1538,7 +1802,7 @@ mod tests {
         sh(&teammate, &["push", "origin", "feat"]);
         sh(&repo, &["fetch", "origin"]);
 
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!(st.upstream, upstream("origin/feat", 0, 1));
         assert_eq!(st.base, divergence(1, 0));
 
@@ -1548,7 +1812,7 @@ mod tests {
             .unwrap();
         assert!(matches!(pulled, PullOutcome::Merged), "{pulled:?}");
         assert_eq!(
-            status(&repo, "main", None).upstream,
+            status(&repo, "main", None, None).upstream,
             upstream("origin/feat", 0, 0)
         );
     }
@@ -1608,7 +1872,7 @@ mod tests {
         sh(&wt, &["fetch", "origin"]);
 
         let counted = format!("origin/{branch}");
-        let before = status(&wt, "origin/main", None);
+        let before = status(&wt, "origin/main", None, None);
         assert_eq!(before.upstream, upstream(&counted, 0, 1));
         assert_eq!(before.base.behind, 1);
 
@@ -1622,7 +1886,7 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(head.stdout, theirs.stdout);
-        let after = status(&wt, "origin/main", None);
+        let after = status(&wt, "origin/main", None, None);
         assert_eq!(after.upstream, upstream(&counted, 0, 0));
         assert_eq!(after.base.behind, 1, "the base was not merged");
     }
@@ -1656,7 +1920,7 @@ mod tests {
         assert_eq!(created.branch, "feature-x");
         let wt = PathBuf::from(&created.path);
         assert!(wt.join("README.md").exists());
-        let st = status(&wt, &created.base_branch, None);
+        let st = status(&wt, &created.base_branch, None, None);
         assert_eq!(st.branch.as_deref(), Some("feature-x"));
     }
 
@@ -1705,16 +1969,19 @@ mod tests {
     #[test]
     fn status_branch_follows_head_and_reports_none_when_detached() {
         let (_guard, repo) = fixture_repo();
-        assert_eq!(status(&repo, "main", None).branch.as_deref(), Some("main"));
+        assert_eq!(
+            status(&repo, "main", None, None).branch.as_deref(),
+            Some("main")
+        );
 
         sh(&repo, &["checkout", "-b", "feature/x"]);
         assert_eq!(
-            status(&repo, "main", None).branch.as_deref(),
+            status(&repo, "main", None, None).branch.as_deref(),
             Some("feature/x")
         );
 
         sh(&repo, &["checkout", "--detach"]);
-        assert_eq!(status(&repo, "main", None).branch, None);
+        assert_eq!(status(&repo, "main", None, None).branch, None);
     }
 
     #[tokio::test]
@@ -1865,7 +2132,7 @@ mod tests {
             std::fs::read_to_string(wt.join("scratch.txt")).unwrap(),
             "wip\n"
         );
-        let st = status(&wt, &created.base_branch, None);
+        let st = status(&wt, &created.base_branch, None, None);
         assert_eq!((st.dirty, st.untracked), (1, 1));
     }
 
@@ -2054,13 +2321,13 @@ mod tests {
             std::fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
             std::fs::write(repo.join(f), "x\n").unwrap();
         }
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!((st.dirty, st.untracked), (0, 3));
         assert_eq!(panel_rows(&repo), 3);
 
         std::fs::remove_dir_all(repo.join("newdir")).unwrap();
         sh(&repo, &["mv", "README.md", "README.txt"]);
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!((st.dirty, st.untracked), (1, 0), "a rename is one change");
         assert_eq!(panel_rows(&repo), 1);
     }
@@ -2079,7 +2346,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(repo.join(".hyprlayer/a.png"), "app internal\n").unwrap();
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!((st.dirty, st.untracked), (1, 0));
         assert_eq!((st.additions, st.deletions), (1, 0));
         assert_eq!(panel_rows(&repo), 1);
@@ -2110,7 +2377,7 @@ mod tests {
         sh(&repo, &["sparse-checkout", "set", "apps/web"]);
         assert!(!repo.join("docs/guide.md").exists(), "control: sparse");
 
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!(
             (st.dirty, st.untracked, st.additions, st.deletions),
             (0, 0, 0, 0)
@@ -2139,7 +2406,7 @@ mod tests {
         let sub = repo.join("vendor/lib");
 
         std::fs::write(sub.join("scratch.txt"), "wip\n").unwrap();
-        let st = status(&repo, "main", None);
+        let st = status(&repo, "main", None, None);
         assert_eq!((st.dirty, st.untracked), (0, 0));
         ensure_removable(&repo, "main", "main").unwrap();
 
@@ -2152,7 +2419,7 @@ mod tests {
                 .target()
         };
         let bumped = sub_head();
-        assert_eq!(status(&repo, "main", None).dirty, 1);
+        assert_eq!(status(&repo, "main", None, None).dirty, 1);
 
         assert_eq!(crate::gitops::discard_tracked_changes(&repo).unwrap(), 0);
         assert_eq!(

@@ -115,6 +115,16 @@ async fn observed_pr(client: &RpcClient, id: &str) -> Value {
         .unwrap_or(Value::Null)
 }
 
+async fn git_counts(client: &RpcClient, id: &str) -> Value {
+    let listed = client
+        .call(Request::ListAllWorkstreams {})
+        .await
+        .expect("list_all_workstreams");
+    let listed = serde_json::to_value(&listed).expect("serialize the list");
+    let git = find_in(&listed, id).map_or(Value::Null, |v| v["git"].clone());
+    json!({ "unpushed": git["unpushed"], "upstream": git["upstream"]["name"] })
+}
+
 /// Changing the focused workstream makes it due on the watcher's next tick, and the foreground
 /// call wakes that tick; a plain wait would sit out a 60s cadence.
 async fn poke_watcher(client: &RpcClient, id: &str, round: u32) {
@@ -1504,6 +1514,72 @@ async fn pr_branch_drift() {
             == json!({
                 "afterRestart": { "number": 391, "state": "open" },
                 "thenMerged": { "number": 391, "state": "merged" },
+            }),
+        evidence,
+    );
+
+    j.step("a squash-merged branch whose remote branch was pruned has nothing unpushed");
+    let squashed = create_workstream(&mut j, &client, &project, "Squashed").await;
+    let squashed_id = text(&squashed, "/item/id");
+    let squashed_tree = PathBuf::from(text(&squashed, "/item/worktreePath"));
+    let squashed_branch = text(&squashed, "/item/branch");
+    for message in ["one", "two"] {
+        sandbox.git(
+            &squashed_tree,
+            &["commit", "--quiet", "--allow-empty", "--message", message],
+        );
+    }
+    sandbox.git(
+        &squashed_tree,
+        &["push", "--quiet", "-u", "origin", &squashed_branch],
+    );
+    let pushed = git_counts(&client, &squashed_id).await;
+    sandbox.git(
+        &sandbox.root,
+        &["clone", "--quiet", "origin.git", "squasher"],
+    );
+    let squasher = sandbox.root.join("squasher");
+    sandbox.git(
+        &squasher,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "Squashed (#372)",
+        ],
+    );
+    sandbox.git(&squasher, &["push", "--quiet", "origin", "main"]);
+    sandbox.git(
+        &squasher,
+        &["push", "--quiet", "origin", "--delete", &squashed_branch],
+    );
+    sandbox.git(&squashed_tree, &["fetch", "--quiet", "--prune", "origin"]);
+    let pruned = git_counts(&client, &squashed_id).await;
+    set_pr(
+        &gh_state,
+        &squashed_branch,
+        &FakePr {
+            head_oid: Some(sandbox.git(&squashed_tree, &["rev-parse", "HEAD"])),
+            ..FakePr::new(372, "MERGED")
+        },
+    );
+    await_observed(
+        &client,
+        &squashed_id,
+        json!({ "number": 372, "state": "merged" }),
+    )
+    .await;
+    let merged = git_counts(&client, &squashed_id).await;
+    let evidence = json!({ "pushed": pushed, "pruned": pruned, "merged": merged });
+    j.guard(
+        "pushed commits are not unpushed; after a squash merge prunes the branch they are, until \
+         the merged PR whose head holds them is recorded",
+        evidence
+            == json!({
+                "pushed": { "unpushed": 0, "upstream": format!("origin/{squashed_branch}") },
+                "pruned": { "unpushed": 2, "upstream": null },
+                "merged": { "unpushed": 0, "upstream": null },
             }),
         evidence,
     );

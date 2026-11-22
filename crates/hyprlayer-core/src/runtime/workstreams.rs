@@ -388,10 +388,12 @@ impl WorkstreamService<'_> {
         {
             let dir = archive_dir_for(Path::new(&item.project_path), &item.slug);
             let base = item.base_branch.clone();
+            let merged = item.merged_pr_head().map(String::from);
             let id = item.id.clone();
             let db = self.runtime.db.clone();
             blocking(move || {
-                db.cache_archive_scan(&id, &worktree::scan_archive(&dir, &base), now_ms())
+                let scan = worktree::scan_archive(&dir, &base, merged.as_deref());
+                db.cache_archive_scan(&id, &scan, now_ms())
             })
             .await?;
             changed += 1;
@@ -757,7 +759,7 @@ impl WorkstreamService<'_> {
             Ok(if item.is_folder() {
                 worktree::folder_status(&dir)
             } else {
-                worktree::status(&dir, &item.base_branch, link)
+                worktree::status(&dir, &item.base_branch, item.merged_pr_head(), link)
             })
         })
         .await
@@ -1826,12 +1828,17 @@ impl WorkstreamService<'_> {
 
         let scan_dir = moved.then(|| archive_path.clone());
         let base = item.base_branch.clone();
+        let merged = pr
+            .as_ref()
+            .filter(|s| s.state == pr::PrState::Merged)
+            .map(|s| s.head_ref_oid.clone())
+            .or_else(|| item.merged_pr_head().map(String::from));
         let db = self.runtime.db.clone();
         let aid = id.clone();
         let found = pr.map(|s| (s.number, s.state));
         blocking(move || {
             // Scanned once: nothing writes to an archive after this.
-            let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base));
+            let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base, merged.as_deref()));
             db.archive_workstream(&aid)?;
             cache_found_pr(&db, &aid, found)?;
             match scan {
