@@ -4,6 +4,7 @@ import { closeReview, currentAppLocation } from "@/lib/appNav";
 import type { Session, WorkstreamView } from "@/lib/bindings";
 import { harnessLabel } from "@/lib/domain/harnessing";
 import { isFolderWorkstream } from "@/lib/domain/projects";
+import { knownPr, prFailureText } from "@/lib/domain/pr";
 import { useWorkstreamPr, useWorkstreamSessions, useWorktreeGitStatus } from "@/lib/queries";
 import {
   commitWorkstream,
@@ -53,14 +54,25 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
 
   const changedCount =
     (status.data?.staged.length ?? 0) + (status.data?.unstaged.length ?? 0);
-  const hasLivePr = pr.data?.state === "open" || pr.data?.state === "merged";
+  const lookup = pr.data;
+  const known = knownPr(lookup);
+  const hasLivePr = known?.state === "open" || known?.state === "merged";
+  const prBlocked =
+    lookup?.kind === "failed"
+      ? `PR status unknown: ${prFailureText(lookup.cause)}`
+      : lookup === undefined || lookup.kind === "unknown"
+        ? "Checking GitHub for this branch's PR"
+        : null;
 
   const canCommit = enabled && changedCount > 0 && !shipBusy && !shipping;
-  const shippable = Boolean(
+  const hasWork = Boolean(
     enabled && view && !hasLivePr && (changedCount > 0 || view.git.aheadOfBase > 0),
   );
+  const shippable = hasWork && prBlocked === null;
   const canShip = shippable && !implementWorking;
-  const shipBlocked = shippable && implementWorking ? `Ship unlocks when ${implementLabel} finishes` : null;
+  const shipBlocked = hasWork
+    ? (prBlocked ?? (implementWorking ? `Ship unlocks when ${implementLabel} finishes` : null))
+    : null;
 
   const doCommit = () => {
     if (!view) return;
@@ -80,6 +92,7 @@ export function useWorkstreamGitActions(view: WorkstreamView | null) {
 
   return {
     changedCount,
+    prLookup: lookup,
     hasLivePr,
     canCommit,
     canShip,

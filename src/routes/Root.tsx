@@ -50,6 +50,7 @@ import {
   isOffBase,
   shortBranch,
 } from "@/lib/domain/projects";
+import { knownPr } from "@/lib/domain/pr";
 import {
   drawerWidth,
   NAV_RAIL_WIDTH,
@@ -595,9 +596,10 @@ export function Root() {
     activeWorkstreamId ?? "",
     Boolean(activeWorkstream && !isFolderWorkstream(activeWorkstream)),
   );
+  const activePrState = knownPr(activePr.data)?.state;
   useEffect(() => {
     if (!archiveOnMerge || !activeWorkstream) return;
-    if (activePr.data?.state !== "merged") return;
+    if (activePrState !== "merged") return;
     const id = activeWorkstream.item.id;
     if (autoArchivedRef.current.has(id)) return;
     autoArchivedRef.current.add(id);
@@ -609,7 +611,7 @@ export function Root() {
   }, [
     archiveOnMerge,
     activeWorkstream,
-    activePr.data?.state,
+    activePrState,
     autoArchive,
     dismissToProject,
   ]);

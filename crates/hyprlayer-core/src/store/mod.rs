@@ -86,6 +86,26 @@ pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (era * 400 + yoe + i64::from(month <= 2), month, day)
 }
 
+// Howard Hinnant's days_from_civil, the inverse of civil_from_days.
+pub fn epoch_ms_of_utc(s: &str) -> Option<f64> {
+    let (date, time) = s.strip_suffix('Z')?.split_once('T')?;
+    let num = |p: Option<&str>| p?.parse::<i64>().ok();
+    let mut d = date.split('-');
+    let (y, m, day) = (num(d.next())?, num(d.next())?, num(d.next())?);
+    let mut t = time.split(':');
+    let (h, min, sec) = (num(t.next())?, num(t.next())?, num(t.next())?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&day) || d.next().is_some() {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((m + 9) % 12) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(((days * 86_400 + h * 3_600 + min * 60 + sec) * 1_000) as f64)
+}
+
 /// `YYYY-MM-DD` in UTC.
 pub fn utc_date(epoch_secs: u64) -> String {
     let (year, month, day) = civil_from_days((epoch_secs / 86_400) as i64);

@@ -82,6 +82,22 @@
       "guards": [
         {
           "evidence": {
+            "afterKick": "draft",
+            "idlePolls": 0,
+            "idleStatus": "draft",
+            "kickPolls": 1,
+            "kicked": true
+          },
+          "guard": "a settled merge is not polled and leaves a later doc alone; one Fetch polls it once and still leaves the doc alone",
+          "ok": true
+        }
+      ],
+      "step": "a doc written after the merge stays draft"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "abandoned": "active",
             "handedOn": "active",
             "pr42": "archived"
@@ -91,6 +107,37 @@
         }
       ],
       "step": "a PR closed unmerged archives its record and nothing else"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "handoff": "active",
+            "lookup": "noPr",
+            "polled": true,
+            "research": "complete"
+          },
+          "guard": "an old merged PR with the branch's name, whose head it never held, settles nothing",
+          "ok": true
+        }
+      ],
+      "step": "pushing a reused branch name does not settle its docs"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "handoff": "archived",
+            "lookup": "noPr",
+            "research": "implemented",
+            "sawOpen": true,
+            "settled": true
+          },
+          "guard": "the first sight of the merge settles its docs; the unpushed commit then offers Ship",
+          "ok": true
+        }
+      ],
+      "step": "a merge seen with an unpushed local commit settles the docs"
     },
     {
       "guards": [

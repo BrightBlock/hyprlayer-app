@@ -27,7 +27,7 @@ use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
-use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
+use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::{self, ScriptSettings};
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
@@ -1510,7 +1510,7 @@ impl Dispatch for Server {
         self.sync_worktree_watch().await
     }
 
-    async fn workstream_pr_status(&self, id: String) -> Result<Option<PrStatus>, WireError> {
+    async fn workstream_pr_status(&self, id: String) -> Result<PrLookup, WireError> {
         self.runtime
             .workstreams()
             .pr_status(WorkstreamPrStatusRequest { id })

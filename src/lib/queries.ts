@@ -889,7 +889,7 @@ export function useWorkstreamPr(id: string, enabled = true, pollMs?: number) {
     staleTime: 8000,
     refetchInterval: (query) => {
       if (query.state.status === "error") return PR_ERROR_RETRY_MS;
-      return pollMs && !query.state.data ? pollMs : false;
+      return pollMs && query.state.data?.kind !== "found" ? pollMs : false;
     },
   });
 }

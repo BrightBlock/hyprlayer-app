@@ -4,6 +4,7 @@ import { openExternalUrl } from "@/lib/browser";
 import { Icon } from "@/components/Icon";
 import { Button, IconButton } from "@/components/ui";
 import { liveGoalForPlan, workstreamGoalLabel } from "@/lib/domain/goals";
+import { knownPr } from "@/lib/domain/pr";
 import { plural } from "@/lib/format";
 import { useGoals, useReview, useWorkstreamPr } from "@/lib/queries";
 import type { WorkstreamView } from "@/lib/bindings";
@@ -255,7 +256,7 @@ function Stages({
   const plan = usePlanTracker(implementId);
   const flow = useValidateFlow(view, implementId, plan);
   const review = useReview(wsId, plan.tracker?.tasksDone ?? false).data;
-  const pr = useWorkstreamPr(wsId).data;
+  const pr = knownPr(useWorkstreamPr(wsId).data);
   const goals = useGoals(wsId).data;
   const goal = plan.key ? liveGoalForPlan(goals, plan.key) : null;
 

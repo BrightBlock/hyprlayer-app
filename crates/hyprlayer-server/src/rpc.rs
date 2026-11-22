@@ -28,7 +28,7 @@ use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
 use hyprlayer_core::opencode::config::OpencodeAuthEntry;
-use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
+use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
 use hyprlayer_core::repos::{GithubRepo, RepoPathStatus};
@@ -244,7 +244,7 @@ hyprlayer_proto::commands! {
     WorktreeCommitFiles: worktree_commit_files(id: String, sha: String) -> Vec<GitFileEntry>;
     WorktreeCommitFileSides: worktree_commit_file_sides(id: String, sha: String, path: String) -> FileSides;
     WatchWorktree: watch_worktree(workstream_id: Option<String>) -> ();
-    WorkstreamPrStatus: workstream_pr_status(id: String) -> Option<PrStatus>;
+    WorkstreamPrStatus: workstream_pr_status(id: String) -> PrLookup;
     ListWorkstreamOpenPrs: list_workstream_open_prs(id: String, query: String) -> Vec<PrSummary>;
     PreviewWorkstreamPr: preview_workstream_pr(id: String, pr_number: u32) -> Option<PrSummary>;
     AttachWorkstreamPr: attach_workstream_pr(id: String, pr_number: u32) -> Option<PrStatus>;

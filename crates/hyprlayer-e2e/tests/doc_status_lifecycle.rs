@@ -13,7 +13,7 @@ use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::fake_gh::{self, set_pr, FakePr};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server, Value};
+use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server, Value};
 use hyprlayer_server::client::{EventStream, RpcClient};
 use hyprlayer_server::streams::StreamStartOpts;
 
@@ -204,6 +204,29 @@ async fn drain_turn(events: &mut EventStream<SessionEvent>) {
     .await;
 }
 
+async fn tick_watching(client: &RpcClient, id: &str, rounds: u32) {
+    for round in 0..rounds {
+        let _ = client
+            .call(Request::WatchWorktree {
+                workstream_id: (!round.is_multiple_of(2)).then(|| id.to_string()),
+            })
+            .await;
+        let _ = client
+            .call(Request::SetForeground { foreground: true })
+            .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn lookup_kind(client: &RpcClient, id: &str) -> Value {
+    let status = client
+        .call(Request::WorkstreamPrStatus { id: id.to_string() })
+        .await
+        .expect("workstream_pr_status");
+    serde_json::to_value(&status).expect("serialize the PR status")["workstream_pr_status"]["kind"]
+        .take()
+}
+
 fn statuses(named: &[(&str, &Path)]) -> Value {
     Value::Object(
         named
@@ -221,6 +244,7 @@ async fn doc_status_lifecycle() {
     std::fs::create_dir_all(&gh_state).expect("create the gh state dir");
     sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
+    sandbox.git(&repo, &["remote", "add", "github", fake_gh::GITHUB_REMOTE]);
     let mut j = Journey::new("doc_status_lifecycle", &sandbox);
     let server = Server::start(&sandbox).await;
     let client = server.client();
@@ -423,6 +447,63 @@ async fn doc_status_lifecycle() {
         json!({ "pr41": status_of(&record_41), "bodyIntact": record_text == record(41, "implemented") }),
     );
 
+    j.step("a doc written after the merge stays draft");
+    let after_merge = doc("research/after-merge.md");
+    agent_writes(
+        &mut j,
+        &client,
+        &sandbox,
+        &w1_id,
+        &[(after_merge.as_path(), LATE_RESEARCH)],
+    )
+    .await;
+    let before = fake_gh::calls(&gh_state, &w1_branch);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut round = 0u32;
+    while tokio::time::Instant::now() < deadline {
+        let _ = client
+            .call(Request::WatchWorktree {
+                workstream_id: (round % 2 == 1).then(|| w1_id.clone()),
+            })
+            .await;
+        let _ = client
+            .call(Request::SetForeground { foreground: true })
+            .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        round += 1;
+    }
+    let idle_polls = fake_gh::calls(&gh_state, &w1_branch) - before;
+    let idle_status = status_of(&after_merge);
+    let _ = client
+        .call(Request::FetchWorkstreamRemote { id: w1_id.clone() })
+        .await;
+    let kicked = eventually(Duration::from_secs(5), || {
+        fake_gh::calls(&gh_state, &w1_branch) > before + idle_polls
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let kick_polls = fake_gh::calls(&gh_state, &w1_branch) - before - idle_polls;
+    let evidence = json!({
+        "idleStatus": idle_status,
+        "idlePolls": idle_polls,
+        "kicked": kicked,
+        "kickPolls": kick_polls,
+        "afterKick": status_of(&after_merge),
+    });
+    j.guard(
+        "a settled merge is not polled and leaves a later doc alone; one Fetch polls it once and \
+         still leaves the doc alone",
+        evidence
+            == json!({
+                "idleStatus": "draft",
+                "idlePolls": 0,
+                "kicked": true,
+                "kickPolls": 1,
+                "afterKick": "draft",
+            }),
+        evidence,
+    );
+
     j.step("a PR closed unmerged archives its record and nothing else");
     let record_42 = doc("prs/42_description.md");
     std::fs::write(record_42.as_path(), record(42, "active")).expect("write record 42");
@@ -447,6 +528,144 @@ async fn doc_status_lifecycle() {
             && after_close
                 == json!({ "pr42": "archived", "abandoned": "active", "handedOn": "active" }),
         after_close,
+    );
+
+    j.step("pushing a reused branch name does not settle its docs");
+    sandbox.git(
+        &sandbox.root,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            "origin.git",
+        ],
+    );
+    let origin = sandbox.root.join("origin.git");
+    sandbox.git(
+        &repo,
+        &["remote", "add", "origin", &origin.display().to_string()],
+    );
+    sandbox.git(&repo, &["push", "--quiet", "origin", "main"]);
+    let w4 = create_workstream(&mut j, &client, &project, "Reused name").await;
+    let w4_id = text(&w4, "/item/id");
+    let w4_branch = text(&w4, "/item/branch");
+    let w4_tree = PathBuf::from(text(&w4, "/item/worktreePath"));
+    let (reused_research, reused_handoff) = (doc("research/reused.md"), doc("handoffs/reused.md"));
+    agent_writes(
+        &mut j,
+        &client,
+        &sandbox,
+        &w4_id,
+        &[
+            (reused_research.as_path(), RESEARCH),
+            (reused_handoff.as_path(), HANDOFF),
+        ],
+    )
+    .await;
+    sandbox.git(
+        &w4_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "new work",
+        ],
+    );
+    set_pr(
+        &gh_state,
+        &w4_branch,
+        &FakePr {
+            head_oid: Some("1111111111111111111111111111111111111111".into()),
+            ..FakePr::new(600, "MERGED")
+        },
+    );
+    sandbox.git(&w4_tree, &["push", "--quiet", "-u", "origin", &w4_branch]);
+    let before = fake_gh::calls(&gh_state, &w4_branch);
+    tick_watching(&client, &w4_id, 12).await;
+    let reused = json!({
+        "polled": fake_gh::calls(&gh_state, &w4_branch) > before,
+        "lookup": lookup_kind(&client, &w4_id).await,
+        "research": status_of(&reused_research),
+        "handoff": status_of(&reused_handoff),
+    });
+    j.guard(
+        "an old merged PR with the branch's name, whose head it never held, settles nothing",
+        reused
+            == json!({ "polled": true, "lookup": "noPr", "research": "complete", "handoff": "active" }),
+        reused,
+    );
+
+    j.step("a merge seen with an unpushed local commit settles the docs");
+    let w5 = create_workstream(&mut j, &client, &project, "Unpushed").await;
+    let w5_id = text(&w5, "/item/id");
+    let w5_branch = text(&w5, "/item/branch");
+    let w5_tree = PathBuf::from(text(&w5, "/item/worktreePath"));
+    let (late_research, late_handoff) = (doc("research/unpushed.md"), doc("handoffs/unpushed.md"));
+    agent_writes(
+        &mut j,
+        &client,
+        &sandbox,
+        &w5_id,
+        &[
+            (late_research.as_path(), RESEARCH),
+            (late_handoff.as_path(), HANDOFF),
+        ],
+    )
+    .await;
+    sandbox.git(
+        &w5_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "the PR's head",
+        ],
+    );
+    let head = sandbox.git(&w5_tree, &["rev-parse", "HEAD"]);
+    let pr = |state| FakePr {
+        head_oid: Some(head.clone()),
+        ..FakePr::new(610, state)
+    };
+    set_pr(&gh_state, &w5_branch, &pr("OPEN"));
+    let before = fake_gh::calls(&gh_state, &w5_branch);
+    tick_watching(&client, &w5_id, 12).await;
+    let saw_open = fake_gh::calls(&gh_state, &w5_branch) > before;
+    sandbox.git(
+        &w5_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "a follow-up nobody pushed",
+        ],
+    );
+    set_pr(&gh_state, &w5_branch, &pr("MERGED"));
+    tick_watching(&client, &w5_id, 2).await;
+    let settled = await_status(&client, &late_research, "implemented").await
+        && await_status(&client, &late_handoff, "archived").await;
+    let unpushed = json!({
+        "sawOpen": saw_open,
+        "settled": settled,
+        "research": status_of(&late_research),
+        "handoff": status_of(&late_handoff),
+        "lookup": lookup_kind(&client, &w5_id).await,
+    });
+    j.guard(
+        "the first sight of the merge settles its docs; the unpushed commit then offers Ship",
+        unpushed
+            == json!({
+                "sawOpen": true,
+                "settled": true,
+                "research": "implemented",
+                "handoff": "archived",
+                "lookup": "noPr",
+            }),
+        unpushed,
     );
 
     j.step("archiving settles a merge the watcher never saw");

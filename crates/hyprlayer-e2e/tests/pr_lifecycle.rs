@@ -117,8 +117,8 @@ async fn pr_lifecycle() {
         .expect("workstream_pr_status");
     j.guard(
         "before attaching, the branch's open PR is found by branch name",
-        by_branch.pointer("/number").and_then(Value::as_u64) == Some(number as u64),
-        json!({ "state": by_branch.pointer("/state") }),
+        by_branch.pointer("/pr/number").and_then(Value::as_u64) == Some(number as u64),
+        json!({ "kind": by_branch.pointer("/kind"), "state": by_branch.pointer("/pr/state") }),
     );
     let attached = j
         .call(
@@ -141,10 +141,21 @@ async fn pr_lifecycle() {
         .call(&client, Request::WorkstreamPrStatus { id: id.clone() })
         .await
         .expect("workstream_pr_status");
+    let has_merge_state = status
+        .pointer("/pr/mergeState")
+        .is_some_and(|m| !m.is_null());
     j.guard(
-        "an open PR reports itself open and unmerged",
-        text(&status, "/state") == "open",
-        json!({ "state": status.pointer("/state"), "mergeable": status.pointer("/mergeable") }),
+        "an open PR reports itself open, not a draft, against the fixture's default branch",
+        text(&status, "/pr/state") == "open"
+            && status.pointer("/pr/isDraft") == Some(&json!(false))
+            && text(&status, "/pr/baseRefName") == "main"
+            && has_merge_state,
+        json!({
+            "state": status.pointer("/pr/state"),
+            "isDraft": status.pointer("/pr/isDraft"),
+            "baseRefName": status.pointer("/pr/baseRefName"),
+            "hasMergeState": has_merge_state,
+        }),
     );
     let preview = j
         .call(
@@ -211,8 +222,8 @@ async fn pr_lifecycle() {
         .expect("workstream_pr_status");
     j.guard(
         "the app sees the merge too",
-        text(&after, "/state") == "merged",
-        json!({ "state": after.pointer("/state") }),
+        text(&after, "/pr/state") == "merged",
+        json!({ "state": after.pointer("/pr/state") }),
     );
 
     j.step("clean up the branch");

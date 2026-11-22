@@ -35,10 +35,11 @@
       "guards": [
         {
           "evidence": {
+            "cached": 339,
             "pr": 340,
             "switched": true
           },
-          "guard": "after `git switch -c` the new branch's PR is found",
+          "guard": "after `git switch -c` the new branch's PR is found, not the old branch's cached one",
           "ok": true
         }
       ],
@@ -251,6 +252,263 @@
         }
       ],
       "step": "an archive looks up the branch it was archived on"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterCommit": "noPr",
+            "cleared": null,
+            "merged": {
+              "number": 500,
+              "state": "merged"
+            },
+            "next": {
+              "number": 501,
+              "state": "open"
+            },
+            "open": {
+              "number": 500,
+              "state": "open"
+            },
+            "settledPolls": 0,
+            "toldClients": true
+          },
+          "guard": "a merged PR is not polled; a commit past its head offers Ship, and the next PR on the branch reaches the row and the clients",
+          "ok": true
+        }
+      ],
+      "step": "a new PR on a merged branch reaches the row and an event"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lookup": "noPr",
+            "row": null
+          },
+          "guard": "an old merged PR reusing the branch name, whose head this branch never held, reads as no PR",
+          "ok": true
+        }
+      ],
+      "step": "a merged PR whose head is not in the branch is not this branch's"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "baseRefName": "release",
+            "isDraft": true,
+            "kind": "found"
+          },
+          "guard": "the lookup carries the draft flag and the PR's own base",
+          "ok": true
+        }
+      ],
+      "step": "a draft reads as a draft with its base"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "mergeState": "clean",
+            "seen": {
+              "number": 530,
+              "state": "open"
+            },
+            "toldWithin5s": true
+          },
+          "guard": "an unwatched open PR, polled every 5 min, picks up its new merge state from one Fetch",
+          "ok": true
+        }
+      ],
+      "step": "Fetch refreshes PR status"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "inFlight": true,
+            "open": {
+              "number": 701,
+              "state": "open"
+            },
+            "row": {
+              "number": 701,
+              "state": "merged"
+            },
+            "statesAfterMerge": [
+              "merged"
+            ]
+          },
+          "guard": "the watcher's slower answer from before the merge never replaces the merged PR",
+          "ok": true
+        }
+      ],
+      "step": "a merge with a watcher lookup in flight stays merged"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterFetch": {
+              "number": 800,
+              "state": "open"
+            },
+            "beforeFetch": {
+              "number": 800,
+              "state": "closed"
+            },
+            "closed": {
+              "number": 800,
+              "state": "closed"
+            },
+            "idlePolls": 0
+          },
+          "guard": "a closed PR is not polled while idle; one Fetch sees it reopened",
+          "ok": true
+        }
+      ],
+      "step": "a closed PR stays settled until Fetch sees it reopened"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterTicks": "notGitHub",
+            "first": "notGitHub",
+            "ghCalls": 0
+          },
+          "guard": "the lookup says the repository is not on GitHub, without asking gh",
+          "ok": true
+        }
+      ],
+      "step": "a repository without a GitHub remote has no PR and is not polled"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "lookup": {
+              "kind": "found",
+              "state": "merged"
+            },
+            "merged": {
+              "number": 370,
+              "state": "merged"
+            },
+            "opened": {
+              "number": 370,
+              "state": "open"
+            },
+            "pruned": true,
+            "restarted": true,
+            "row": {
+              "number": 370,
+              "state": "merged"
+            },
+            "watcherPolled": false
+          },
+          "guard": "a PR merged after a teammate's unfetched push stays merged across a prune and a restart, and the restarted watcher does not poll it",
+          "ok": true
+        }
+      ],
+      "step": "a merged PR survives a pruned remote branch and a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "failed": {
+              "kind": "failed",
+              "last": {
+                "number": 380,
+                "state": "merged"
+              }
+            },
+            "recovered": {
+              "kind": "found",
+              "state": "merged"
+            },
+            "watcherRetried": true
+          },
+          "guard": "the failure shows the merged PR the row recorded, and the watcher retries until gh answers",
+          "ok": true
+        }
+      ],
+      "step": "a failed lookup after a restart keeps the merged PR and is retried"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterRestart": {
+              "number": 391,
+              "state": "open"
+            },
+            "thenMerged": {
+              "number": 391,
+              "state": "merged"
+            }
+          },
+          "guard": "a commit made while the server was stopped wakes the settled PR, and the new PR is recorded and followed to its merge",
+          "ok": true
+        }
+      ],
+      "step": "new work and a new PR while the server was down reach the row"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "next": {
+              "number": 601,
+              "state": "open"
+            },
+            "pushed": "noPr",
+            "pushedRow": null,
+            "unpushed": "noPr"
+          },
+          "guard": "an old merged PR whose head the branch never held stays someone else's after a push, and the branch's own new PR is found",
+          "ok": true
+        }
+      ],
+      "step": "pushing a branch does not claim an old merged PR with its name"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "limited": {
+              "cause": {
+                "kind": "other"
+              },
+              "kind": "failed"
+            },
+            "next": "noPr"
+          },
+          "guard": "a secondary limit is no quota hold: the next lookup goes through",
+          "ok": true
+        }
+      ],
+      "step": "a secondary rate limit holds only the watcher"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cause": {
+              "kind": "rateLimited",
+              "resumesAt": "$TIME"
+            },
+            "kind": "failed",
+            "last": null
+          },
+          "guard": "a rate-limited lookup reads as failed, with the reset GitHub reported and no last PR",
+          "ok": true
+        }
+      ],
+      "step": "a failed lookup with nothing cached is not 'no PR'"
     },
     {
       "guards": [

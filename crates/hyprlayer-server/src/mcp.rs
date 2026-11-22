@@ -185,7 +185,7 @@ const TOOLS: [Tool; 31] = [
     },
     Tool {
         name: READ_TOOLS[6],
-        description: "The pull request status of a workstream's branch.",
+        description: "The pull request status of a workstream's branch: `kind` is `found` (with `pr`), `noPr`, `notGitHub` (the repository has no GitHub remote), `failed` (with `cause`, and the last known PR as `last`), or `unknown`.",
         read_only: true,
         schema: workstream_arg,
     },

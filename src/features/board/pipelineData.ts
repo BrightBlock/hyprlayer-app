@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import type { ActiveSessionView, WorkstreamView } from "@/lib/bindings";
 import { modelDisplayName } from "@/lib/domain/models";
+import { knownPr } from "@/lib/domain/pr";
 import type { GoalSheetTarget } from "@/lib/goalSheet";
 import { useDoc, useWorkstreamPr } from "@/lib/queries";
 import { parsePlanDoc, phaseRows } from "@/features/plan/planDoc";
@@ -67,7 +68,7 @@ export function usePrSummary(view: WorkstreamView, enabled: boolean): string | n
   const pr = useWorkstreamPr(view.item.id, enabled && view.item.prNumber != null);
   const number = prNumberOf(view);
   if (number == null) return null;
-  const status = pr.data;
+  const status = knownPr(pr.data);
   if (!status) return `PR #${number}`;
   const parts = [`PR #${status.number}`];
   if (status.checks.state === "passing") parts.push("checks ✓");

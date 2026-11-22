@@ -2,9 +2,11 @@
 //! and observed PR follow the workstream from its first session through merge and onto a new branch.
 #![cfg(unix)]
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
+use hyprlayer_core::pr::MergeMethod;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::fake_gh::{self, set_pr, FakePr};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
@@ -17,6 +19,7 @@ use hyprlayer_server::streams::StreamStartOpts;
 const IO: Duration = Duration::from_secs(20);
 /// Longer than the watcher's 20s poll of a focused open PR.
 const WATCHER: Duration = Duration::from_secs(30);
+const NEVER_FETCHED: &str = "1111111111111111111111111111111111111111";
 
 const FAKE_CLAUDE: &str = r##"#!/bin/sh
 sid=""
@@ -125,12 +128,17 @@ async fn poke_watcher(client: &RpcClient, id: &str, round: u32) {
 }
 
 async fn await_observed(client: &RpcClient, id: &str, want: Value) -> Value {
+    let seen = observed_within(client, id, &want).await;
+    assert_eq!(seen, want, "the watcher never recorded this PR state");
+    seen
+}
+
+async fn observed_within(client: &RpcClient, id: &str, want: &Value) -> Value {
     let deadline = tokio::time::Instant::now() + WATCHER;
     let mut round = 0;
     loop {
         let seen = observed_pr(client, id).await;
-        if seen == want || tokio::time::Instant::now() >= deadline {
-            assert_eq!(seen, want, "the watcher never recorded this PR state");
+        if seen == *want || tokio::time::Instant::now() >= deadline {
             return seen;
         }
         poke_watcher(client, id, round).await;
@@ -191,13 +199,31 @@ async fn set_stage(j: &mut Journey, client: &RpcClient, id: &str, stage: Stage) 
     stage_of(client, id).await
 }
 
-async fn pr_number(client: &RpcClient, id: &str) -> Value {
+async fn lookup(client: &RpcClient, id: &str) -> Value {
     let status = client
         .call(Request::WorkstreamPrStatus { id: id.to_string() })
         .await
         .expect("workstream_pr_status");
-    let status = serde_json::to_value(&status).expect("serialize the PR status");
-    first_number(&status)
+    serde_json::to_value(&status).expect("serialize the PR status")["workstream_pr_status"].take()
+}
+
+async fn pr_number(client: &RpcClient, id: &str) -> Value {
+    first_number(&lookup(client, id).await)
+}
+
+async fn await_unwatched(client: &RpcClient, id: &str, want: Value) -> Value {
+    let deadline = tokio::time::Instant::now() + WATCHER;
+    loop {
+        let seen = observed_pr(client, id).await;
+        if seen == want || tokio::time::Instant::now() >= deadline {
+            assert_eq!(seen, want, "the watcher never recorded this PR state");
+            return seen;
+        }
+        let _ = client
+            .call(Request::SetForeground { foreground: true })
+            .await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 fn first_number(value: &Value) -> Value {
@@ -219,6 +245,7 @@ async fn pr_branch_drift() {
     std::fs::create_dir_all(&gh_state).expect("create the gh state dir");
     sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
+    sandbox.git(&repo, &["remote", "add", "github", fake_gh::GITHUB_REMOTE]);
     let mut j = Journey::new("pr_branch_drift", &sandbox);
     let server = Server::start(&sandbox).await;
     let client = server.client();
@@ -276,12 +303,13 @@ async fn pr_branch_drift() {
 
     j.step("a switched branch follows HEAD");
     set_pr(&gh_state, "feature/csp-2", &FakePr::new(340, "OPEN"));
+    let cached = pr_number(&client, &id).await;
     let switched = git(&worktree, &["switch", "-q", "-c", "feature/csp-2"]);
     let followed = pr_number(&client, &id).await;
     j.guard(
-        "after `git switch -c` the new branch's PR is found",
-        switched && followed == json!(340),
-        json!({ "switched": switched, "pr": followed }),
+        "after `git switch -c` the new branch's PR is found, not the old branch's cached one",
+        cached == json!(339) && switched && followed == json!(340),
+        json!({ "cached": cached, "switched": switched, "pr": followed }),
     );
 
     j.step("an attached PR wins over HEAD");
@@ -312,7 +340,7 @@ async fn pr_branch_drift() {
         &gh_state,
         "feature/csp-2",
         &FakePr {
-            mergeable: "MERGEABLE",
+            merge_state: "CLEAN",
             ..FakePr::new(340, "OPEN")
         },
     );
@@ -622,6 +650,645 @@ async fn pr_branch_drift() {
         "the archive sweep reads HEAD from the archived worktree and records #340 merged",
         pr.to_string().contains("340") && pr.to_string().to_lowercase().contains("merged"),
         pr,
+    );
+
+    j.step("a new PR on a merged branch reaches the row and an event");
+    let reuse = create_workstream(&mut j, &client, &project, "Reuse").await;
+    let reuse_id = text(&reuse, "/item/id");
+    let reuse_tree = PathBuf::from(text(&reuse, "/item/worktreePath"));
+    let reuse_branch = text(&reuse, "/item/branch");
+    set_pr(&gh_state, &reuse_branch, &FakePr::new(500, "OPEN"));
+    let open = await_observed(
+        &client,
+        &reuse_id,
+        json!({ "number": 500, "state": "open" }),
+    )
+    .await;
+    let tip = sandbox.git(&reuse_tree, &["rev-parse", "HEAD"]);
+    set_pr(
+        &gh_state,
+        &reuse_branch,
+        &FakePr {
+            head_oid: Some(tip),
+            ..FakePr::new(500, "MERGED")
+        },
+    );
+    let merged = await_observed(
+        &client,
+        &reuse_id,
+        json!({ "number": 500, "state": "merged" }),
+    )
+    .await;
+    let before = fake_gh::calls(&gh_state, &reuse_branch);
+    let_watcher_tick(&client, &reuse_id).await;
+    let settled_polls = fake_gh::calls(&gh_state, &reuse_branch) - before;
+    sandbox.git(
+        &reuse_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "more work",
+        ],
+    );
+    let after_commit = lookup(&client, &reuse_id).await["kind"].clone();
+    let cleared = await_observed(&client, &reuse_id, Value::Null).await;
+    while events_rx.try_recv().is_ok() {}
+    set_pr(&gh_state, &reuse_branch, &FakePr::new(501, "OPEN"));
+    let next = await_observed(
+        &client,
+        &reuse_id,
+        json!({ "number": 501, "state": "open" }),
+    )
+    .await;
+    let mut told_clients = false;
+    while let Ok(event) = events_rx.try_recv() {
+        told_clients |= matches!(
+            event,
+            RuntimeEvent::PrStatusChanged { workstream_id, observed_pr_changed: true }
+                if workstream_id == reuse_id
+        );
+    }
+    let evidence = json!({
+        "open": open,
+        "merged": merged,
+        "settledPolls": settled_polls,
+        "afterCommit": after_commit,
+        "cleared": cleared,
+        "next": next,
+        "toldClients": told_clients,
+    });
+    j.guard(
+        "a merged PR is not polled; a commit past its head offers Ship, and the next PR on the \
+         branch reaches the row and the clients",
+        evidence
+            == json!({
+                "open": { "number": 500, "state": "open" },
+                "merged": { "number": 500, "state": "merged" },
+                "settledPolls": 0,
+                "afterCommit": "noPr",
+                "cleared": null,
+                "next": { "number": 501, "state": "open" },
+                "toldClients": true,
+            }),
+        evidence,
+    );
+
+    j.step("a merged PR whose head is not in the branch is not this branch's");
+    let stray = create_workstream(&mut j, &client, &project, "Stray").await;
+    let stray_id = text(&stray, "/item/id");
+    let stray_tree = PathBuf::from(text(&stray, "/item/worktreePath"));
+    let tree = sandbox.git(&stray_tree, &["rev-parse", "HEAD^{tree}"]);
+    let elsewhere = sandbox.git(&stray_tree, &["commit-tree", &tree, "-m", "elsewhere"]);
+    sandbox.git(&stray_tree, &["branch", "throwaway", &elsewhere]);
+    set_pr(
+        &gh_state,
+        &text(&stray, "/item/branch"),
+        &FakePr {
+            head_oid: Some(elsewhere),
+            ..FakePr::new(510, "MERGED")
+        },
+    );
+    let stray_lookup = lookup(&client, &stray_id).await["kind"].clone();
+    let_watcher_tick(&client, &stray_id).await;
+    let evidence = json!({ "lookup": stray_lookup, "row": observed_pr(&client, &stray_id).await });
+    j.guard(
+        "an old merged PR reusing the branch name, whose head this branch never held, reads as no PR",
+        evidence == json!({ "lookup": "noPr", "row": null }),
+        evidence,
+    );
+
+    j.step("a draft reads as a draft with its base");
+    let draft = create_workstream(&mut j, &client, &project, "Draft").await;
+    set_pr(
+        &gh_state,
+        &text(&draft, "/item/branch"),
+        &FakePr {
+            is_draft: true,
+            base: "release",
+            ..FakePr::new(520, "OPEN")
+        },
+    );
+    let found = lookup(&client, &text(&draft, "/item/id")).await;
+    let evidence = json!({
+        "kind": found["kind"],
+        "isDraft": found.pointer("/pr/isDraft"),
+        "baseRefName": found.pointer("/pr/baseRefName"),
+    });
+    j.guard(
+        "the lookup carries the draft flag and the PR's own base",
+        evidence == json!({ "kind": "found", "isDraft": true, "baseRefName": "release" }),
+        evidence,
+    );
+
+    j.step("Fetch refreshes PR status");
+    let _ = client
+        .call(Request::WatchWorktree {
+            workstream_id: None,
+        })
+        .await;
+    let fetched = create_workstream(&mut j, &client, &project, "Fetch me").await;
+    let fetched_id = text(&fetched, "/item/id");
+    let fetched_branch = text(&fetched, "/item/branch");
+    set_pr(&gh_state, &fetched_branch, &FakePr::new(530, "OPEN"));
+    let seen = await_unwatched(
+        &client,
+        &fetched_id,
+        json!({ "number": 530, "state": "open" }),
+    )
+    .await;
+    while events_rx.try_recv().is_ok() {}
+    set_pr(
+        &gh_state,
+        &fetched_branch,
+        &FakePr {
+            merge_state: "CLEAN",
+            ..FakePr::new(530, "OPEN")
+        },
+    );
+    let _ = client
+        .call(Request::FetchWorkstreamRemote {
+            id: fetched_id.clone(),
+        })
+        .await;
+    let is_status = |e: &RuntimeEvent| matches!(e, RuntimeEvent::PrStatusChanged { workstream_id, .. } if *workstream_id == fetched_id);
+    let told = !events_until(&mut events_rx, Duration::from_secs(5), is_status)
+        .await
+        .iter()
+        .filter(|e| is_status(e))
+        .collect::<Vec<_>>()
+        .is_empty();
+    let merge_state = lookup(&client, &fetched_id)
+        .await
+        .pointer("/pr/mergeState")
+        .cloned();
+    let evidence = json!({ "seen": seen, "toldWithin5s": told, "mergeState": merge_state });
+    j.guard(
+        "an unwatched open PR, polled every 5 min, picks up its new merge state from one Fetch",
+        evidence
+            == json!({
+                "seen": { "number": 530, "state": "open" },
+                "toldWithin5s": true,
+                "mergeState": "clean",
+            }),
+        evidence,
+    );
+
+    j.step("a merge with a watcher lookup in flight stays merged");
+    let race = create_workstream(&mut j, &client, &project, "Race").await;
+    let race_id = text(&race, "/item/id");
+    let race_branch = text(&race, "/item/branch");
+    set_pr(&gh_state, &race_branch, &FakePr::new(701, "OPEN"));
+    let open = await_observed(&client, &race_id, json!({ "number": 701, "state": "open" })).await;
+    let slow_once = gh_state.join("SLOW_ONCE");
+    std::fs::write(&slow_once, &race_branch).expect("slow the next lookup");
+    let deadline = tokio::time::Instant::now() + WATCHER;
+    let mut round = 0;
+    while slow_once.exists() && tokio::time::Instant::now() < deadline {
+        poke_watcher(&client, &race_id, round).await;
+        round += 1;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let in_flight = !slow_once.exists();
+    j.call(
+        &client,
+        Request::MergeWorkstreamPr {
+            id: race_id.clone(),
+            method: MergeMethod::Squash,
+        },
+    )
+    .await
+    .expect("merge_workstream_pr");
+    let mut states = std::collections::BTreeSet::new();
+    for _ in 0..9 {
+        let state = lookup(&client, &race_id).await;
+        states.insert(
+            state
+                .pointer("/pr/state")
+                .and_then(Value::as_str)
+                .unwrap_or("none")
+                .to_string(),
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    let row = observed_within(
+        &client,
+        &race_id,
+        &json!({ "number": 701, "state": "merged" }),
+    )
+    .await;
+    let evidence =
+        json!({ "open": open, "inFlight": in_flight, "statesAfterMerge": states, "row": row });
+    j.guard(
+        "the watcher's slower answer from before the merge never replaces the merged PR",
+        evidence
+            == json!({
+                "open": { "number": 701, "state": "open" },
+                "inFlight": true,
+                "statesAfterMerge": ["merged"],
+                "row": { "number": 701, "state": "merged" },
+            }),
+        evidence,
+    );
+
+    j.step("a closed PR stays settled until Fetch sees it reopened");
+    let reopened = create_workstream(&mut j, &client, &project, "Reopened").await;
+    let reopened_id = text(&reopened, "/item/id");
+    let reopened_branch = text(&reopened, "/item/branch");
+    set_pr(&gh_state, &reopened_branch, &FakePr::new(800, "OPEN"));
+    await_observed(
+        &client,
+        &reopened_id,
+        json!({ "number": 800, "state": "open" }),
+    )
+    .await;
+    set_pr(&gh_state, &reopened_branch, &FakePr::new(800, "CLOSED"));
+    let closed = await_observed(
+        &client,
+        &reopened_id,
+        json!({ "number": 800, "state": "closed" }),
+    )
+    .await;
+    set_pr(&gh_state, &reopened_branch, &FakePr::new(800, "OPEN"));
+    let before = fake_gh::calls(&gh_state, &reopened_branch);
+    let_watcher_tick(&client, &reopened_id).await;
+    let idle_polls = fake_gh::calls(&gh_state, &reopened_branch) - before;
+    let still = observed_pr(&client, &reopened_id).await;
+    let _ = client
+        .call(Request::FetchWorkstreamRemote {
+            id: reopened_id.clone(),
+        })
+        .await;
+    let after_fetch = await_unwatched(
+        &client,
+        &reopened_id,
+        json!({ "number": 800, "state": "open" }),
+    )
+    .await;
+    let evidence = json!({
+        "closed": closed,
+        "idlePolls": idle_polls,
+        "beforeFetch": still,
+        "afterFetch": after_fetch,
+    });
+    j.guard(
+        "a closed PR is not polled while idle; one Fetch sees it reopened",
+        evidence
+            == json!({
+                "closed": { "number": 800, "state": "closed" },
+                "idlePolls": 0,
+                "beforeFetch": { "number": 800, "state": "closed" },
+                "afterFetch": { "number": 800, "state": "open" },
+            }),
+        evidence,
+    );
+
+    j.step("a repository without a GitHub remote has no PR and is not polled");
+    let local = sandbox.fixture_repo("local-only", &[("README.md", "# local\n")]);
+    let local_project = j
+        .call(
+            &client,
+            Request::ImportProject {
+                path: sandbox.as_given(&local).display().to_string(),
+                branch: None,
+                directory_name: None,
+                thoughts_dir: None,
+                profile: None,
+                bootstrap_user: None,
+            },
+        )
+        .await
+        .expect("import_project");
+    let local_ws = create_workstream(
+        &mut j,
+        &client,
+        &text(&local_project, "/path"),
+        "Local only",
+    )
+    .await;
+    let local_id = text(&local_ws, "/item/id");
+    let local_branch = text(&local_ws, "/item/branch");
+    let first = lookup(&client, &local_id).await["kind"].clone();
+    let_watcher_tick(&client, &local_id).await;
+    let evidence = json!({
+        "first": first,
+        "ghCalls": fake_gh::calls(&gh_state, &local_branch),
+        "afterTicks": lookup(&client, &local_id).await["kind"],
+    });
+    j.guard(
+        "the lookup says the repository is not on GitHub, without asking gh",
+        evidence == json!({ "first": "notGitHub", "ghCalls": 0, "afterTicks": "notGitHub" }),
+        evidence,
+    );
+
+    j.step("a merged PR survives a pruned remote branch and a restart");
+    let origin = sandbox.root.join("origin.git");
+    sandbox.git(
+        &sandbox.root,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            "origin.git",
+        ],
+    );
+    sandbox.git(
+        &repo,
+        &["remote", "add", "origin", &origin.display().to_string()],
+    );
+    sandbox.git(&repo, &["push", "--quiet", "origin", "main"]);
+    let kept = create_workstream(&mut j, &client, &project, "Pruned").await;
+    let kept_id = text(&kept, "/item/id");
+    let kept_tree = PathBuf::from(text(&kept, "/item/worktreePath"));
+    let kept_branch = text(&kept, "/item/branch");
+    sandbox.git(
+        &kept_tree,
+        &["commit", "--quiet", "--allow-empty", "--message", "ours"],
+    );
+    sandbox.git(
+        &kept_tree,
+        &["push", "--quiet", "-u", "origin", &kept_branch],
+    );
+    set_pr(&gh_state, &kept_branch, &FakePr::new(370, "OPEN"));
+    let opened = await_observed(&client, &kept_id, json!({ "number": 370, "state": "open" })).await;
+    sandbox.git(
+        &sandbox.root,
+        &[
+            "clone",
+            "--quiet",
+            "--branch",
+            &kept_branch,
+            "origin.git",
+            "mate",
+        ],
+    );
+    let mate = sandbox.root.join("mate");
+    sandbox.git(
+        &mate,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "teammate",
+        ],
+    );
+    let teammate_head = sandbox.git(&mate, &["rev-parse", "HEAD"]);
+    sandbox.git(&mate, &["push", "--quiet", "origin", &kept_branch]);
+    set_pr(
+        &gh_state,
+        &kept_branch,
+        &FakePr {
+            head_oid: Some(teammate_head),
+            ..FakePr::new(370, "MERGED")
+        },
+    );
+    let merged = await_observed(
+        &client,
+        &kept_id,
+        json!({ "number": 370, "state": "merged" }),
+    )
+    .await;
+    sandbox.git(
+        &mate,
+        &["push", "--quiet", "origin", "--delete", &kept_branch],
+    );
+    sandbox.git(&kept_tree, &["fetch", "--quiet", "--prune", "origin"]);
+    let pruned = !sandbox
+        .git(
+            &kept_tree,
+            &[
+                "branch",
+                "--remotes",
+                "--list",
+                &format!("origin/{kept_branch}"),
+            ],
+        )
+        .contains(&kept_branch);
+
+    let stuck = create_workstream(&mut j, &client, &project, "Stuck").await;
+    let stuck_id = text(&stuck, "/item/id");
+    let stuck_branch = text(&stuck, "/item/branch");
+    set_pr(&gh_state, &stuck_branch, &FakePr::new(380, "MERGED"));
+    await_observed(
+        &client,
+        &stuck_id,
+        json!({ "number": 380, "state": "merged" }),
+    )
+    .await;
+
+    let down = create_workstream(&mut j, &client, &project, "Down").await;
+    let down_id = text(&down, "/item/id");
+    let down_tree = PathBuf::from(text(&down, "/item/worktreePath"));
+    let down_branch = text(&down, "/item/branch");
+    set_pr(&gh_state, &down_branch, &FakePr::new(390, "OPEN"));
+    await_observed(&client, &down_id, json!({ "number": 390, "state": "open" })).await;
+    set_pr(
+        &gh_state,
+        &down_branch,
+        &FakePr {
+            head_oid: Some(NEVER_FETCHED.into()),
+            ..FakePr::new(390, "MERGED")
+        },
+    );
+    await_observed(
+        &client,
+        &down_id,
+        json!({ "number": 390, "state": "merged" }),
+    )
+    .await;
+
+    let stopped = server.shutdown(&client).await;
+    sandbox.git(
+        &down_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "new work while the server was down",
+        ],
+    );
+    set_pr(&gh_state, &down_branch, &FakePr::new(391, "OPEN"));
+    let server = Server::start(&sandbox).await;
+    let client = server.client();
+    let before = fake_gh::calls(&gh_state, &kept_branch);
+    let_watcher_tick(&client, &kept_id).await;
+    let watcher_polled = fake_gh::calls(&gh_state, &kept_branch) > before;
+    let row = observed_pr(&client, &kept_id).await;
+    let found = lookup(&client, &kept_id).await;
+    let evidence = json!({
+        "opened": opened,
+        "merged": merged,
+        "pruned": pruned,
+        "restarted": stopped.status.success(),
+        "watcherPolled": watcher_polled,
+        "row": row,
+        "lookup": { "kind": found["kind"], "state": found.pointer("/pr/state") },
+    });
+    j.guard(
+        "a PR merged after a teammate's unfetched push stays merged across a prune and a restart, \
+         and the restarted watcher does not poll it",
+        evidence
+            == json!({
+                "opened": { "number": 370, "state": "open" },
+                "merged": { "number": 370, "state": "merged" },
+                "pruned": true,
+                "restarted": true,
+                "watcherPolled": false,
+                "row": { "number": 370, "state": "merged" },
+                "lookup": { "kind": "found", "state": "merged" },
+            }),
+        evidence,
+    );
+
+    j.step("a failed lookup after a restart keeps the merged PR and is retried");
+    std::fs::write(gh_state.join("FAIL"), "").expect("make gh fail");
+    let failed = lookup(&client, &stuck_id).await;
+    std::fs::remove_file(gh_state.join("FAIL")).expect("let gh succeed");
+    let before = fake_gh::calls(&gh_state, &stuck_branch);
+    let_watcher_tick(&client, &stuck_id).await;
+    let watcher_retried = fake_gh::calls(&gh_state, &stuck_branch) > before;
+    let recovered = lookup(&client, &stuck_id).await;
+    let evidence = json!({
+        "failed": {
+            "kind": failed["kind"],
+            "last": { "number": failed.pointer("/last/number"), "state": failed.pointer("/last/state") },
+        },
+        "watcherRetried": watcher_retried,
+        "recovered": { "kind": recovered["kind"], "state": recovered.pointer("/pr/state") },
+    });
+    j.guard(
+        "the failure shows the merged PR the row recorded, and the watcher retries until gh answers",
+        evidence
+            == json!({
+                "failed": { "kind": "failed", "last": { "number": 380, "state": "merged" } },
+                "watcherRetried": true,
+                "recovered": { "kind": "found", "state": "merged" },
+            }),
+        evidence,
+    );
+
+    j.step("new work and a new PR while the server was down reach the row");
+    let reached = observed_within(
+        &client,
+        &down_id,
+        &json!({ "number": 391, "state": "open" }),
+    )
+    .await;
+    set_pr(&gh_state, &down_branch, &FakePr::new(391, "MERGED"));
+    let merged = observed_within(
+        &client,
+        &down_id,
+        &json!({ "number": 391, "state": "merged" }),
+    )
+    .await;
+    let evidence = json!({ "afterRestart": reached, "thenMerged": merged });
+    j.guard(
+        "a commit made while the server was stopped wakes the settled PR, and the new PR is \
+         recorded and followed to its merge",
+        evidence
+            == json!({
+                "afterRestart": { "number": 391, "state": "open" },
+                "thenMerged": { "number": 391, "state": "merged" },
+            }),
+        evidence,
+    );
+
+    j.step("pushing a branch does not claim an old merged PR with its name");
+    let reused = create_workstream(&mut j, &client, &project, "Reused name").await;
+    let reused_id = text(&reused, "/item/id");
+    let reused_tree = PathBuf::from(text(&reused, "/item/worktreePath"));
+    let reused_branch = text(&reused, "/item/branch");
+    sandbox.git(
+        &reused_tree,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--message",
+            "new work",
+        ],
+    );
+    set_pr(
+        &gh_state,
+        &reused_branch,
+        &FakePr {
+            head_oid: Some(NEVER_FETCHED.into()),
+            ..FakePr::new(600, "MERGED")
+        },
+    );
+    let unpushed = lookup(&client, &reused_id).await["kind"].clone();
+    sandbox.git(
+        &reused_tree,
+        &["push", "--quiet", "-u", "origin", &reused_branch],
+    );
+    let pushed = lookup(&client, &reused_id).await["kind"].clone();
+    let_watcher_tick(&client, &reused_id).await;
+    let pushed_row = observed_pr(&client, &reused_id).await;
+    set_pr(&gh_state, &reused_branch, &FakePr::new(601, "OPEN"));
+    let next = observed_within(
+        &client,
+        &reused_id,
+        &json!({ "number": 601, "state": "open" }),
+    )
+    .await;
+    let evidence = json!({
+        "unpushed": unpushed,
+        "pushed": pushed,
+        "pushedRow": pushed_row,
+        "next": next,
+    });
+    j.guard(
+        "an old merged PR whose head the branch never held stays someone else's after a push, \
+         and the branch's own new PR is found",
+        evidence
+            == json!({
+                "unpushed": "noPr",
+                "pushed": "noPr",
+                "pushedRow": null,
+                "next": { "number": 601, "state": "open" },
+            }),
+        evidence,
+    );
+
+    j.step("a secondary rate limit holds only the watcher");
+    let secondary = create_workstream(&mut j, &client, &project, "Secondary").await;
+    let secondary_id = text(&secondary, "/item/id");
+    std::fs::write(gh_state.join("SECONDARY"), "").expect("trip the secondary limit");
+    let limited = lookup(&client, &secondary_id).await;
+    std::fs::remove_file(gh_state.join("SECONDARY")).expect("clear the secondary limit");
+    let after = lookup(&client, &secondary_id).await;
+    let evidence = json!({
+        "limited": { "kind": limited["kind"], "cause": limited["cause"] },
+        "next": after["kind"],
+    });
+    j.guard(
+        "a secondary limit is no quota hold: the next lookup goes through",
+        evidence
+            == json!({
+                "limited": { "kind": "failed", "cause": { "kind": "other" } },
+                "next": "noPr",
+            }),
+        evidence,
+    );
+
+    j.step("a failed lookup with nothing cached is not 'no PR'");
+    let quota = create_workstream(&mut j, &client, &project, "Quota").await;
+    std::fs::write(gh_state.join("RATE_LIMITED"), "").expect("rate-limit gh");
+    let failed = lookup(&client, &text(&quota, "/item/id")).await;
+    j.guard(
+        "a rate-limited lookup reads as failed, with the reset GitHub reported and no last PR",
+        failed
+            == json!({
+                "kind": "failed",
+                "cause": { "kind": "rateLimited", "resumesAt": 4_070_908_800_000.0 },
+                "last": null,
+            }),
+        failed,
     );
 
     j.step("shutdown");

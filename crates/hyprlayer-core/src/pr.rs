@@ -23,20 +23,62 @@ pub enum ChecksState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(rename_all = "camelCase")]
-pub enum MergeableState {
-    Mergeable,
-    Conflicting,
+pub enum MergeState {
+    Clean,
+    Blocked,
+    Behind,
+    Dirty,
+    Unstable,
+    HasHooks,
+    Draft,
     Unknown,
 }
 
-impl MergeableState {
+impl MergeState {
     fn parse(raw: &str) -> Self {
-        match raw {
-            s if s.eq_ignore_ascii_case("MERGEABLE") => MergeableState::Mergeable,
-            s if s.eq_ignore_ascii_case("CONFLICTING") => MergeableState::Conflicting,
-            _ => MergeableState::Unknown,
+        match raw.to_ascii_uppercase().as_str() {
+            "CLEAN" => MergeState::Clean,
+            "BLOCKED" => MergeState::Blocked,
+            "BEHIND" => MergeState::Behind,
+            "DIRTY" => MergeState::Dirty,
+            "UNSTABLE" => MergeState::Unstable,
+            "HAS_HOOKS" => MergeState::HasHooks,
+            "DRAFT" => MergeState::Draft,
+            _ => MergeState::Unknown,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewState {
+    Approved,
+    ChangesRequested,
+    Commented,
+    Dismissed,
+    Pending,
+}
+
+impl ReviewState {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.to_ascii_uppercase().as_str() {
+            "APPROVED" => Some(ReviewState::Approved),
+            "CHANGES_REQUESTED" => Some(ReviewState::ChangesRequested),
+            "COMMENTED" => Some(ReviewState::Commented),
+            "DISMISSED" => Some(ReviewState::Dismissed),
+            "PENDING" => Some(ReviewState::Pending),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct PrReview {
+    pub author: String,
+    pub state: ReviewState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,16 +175,92 @@ pub struct PrStatus {
     pub url: String,
     pub title: String,
     pub state: PrState,
-    pub mergeable: bool,
-    pub mergeable_state: MergeableState,
+    pub is_draft: bool,
+    pub base_ref_name: String,
+    pub head_ref_oid: String,
+    pub merge_state: MergeState,
     pub checks: PrChecks,
     pub review_decision: Option<ReviewDecision>,
+    pub reviews: Vec<PrReview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PrLookup {
+    Unknown,
+    NoPr,
+    NotGitHub,
+    Found {
+        pr: PrStatus,
+    },
+    Failed {
+        cause: PrLookupFailure,
+        last: Option<PrStatus>,
+    },
+}
+
+impl PrStatus {
+    pub(crate) fn recorded(number: u32, state: PrState, url: String, head_ref_oid: String) -> Self {
+        PrStatus {
+            number,
+            url,
+            title: String::new(),
+            state,
+            is_draft: false,
+            base_ref_name: String::new(),
+            head_ref_oid,
+            merge_state: MergeState::Unknown,
+            checks: summarize(Vec::new()),
+            review_decision: None,
+            reviews: Vec::new(),
+        }
+    }
+}
+
+impl PrLookup {
+    pub fn known(&self) -> Option<&PrStatus> {
+        match self {
+            PrLookup::Found { pr } => Some(pr),
+            PrLookup::Failed { last, .. } => last.as_ref(),
+            PrLookup::Unknown | PrLookup::NoPr | PrLookup::NotGitHub => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PrLookupFailure {
+    GhMissing,
+    SignedOut,
+    RateLimited { resumes_at: Option<f64> },
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Quota {
+    pub limit: u32,
+    pub remaining: u32,
+    pub reset_at: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrAnswer {
+    pub pr: Option<PrStatus>,
+    pub quota: Option<Quota>,
 }
 
 macro_rules! pr_fragment {
     () => {
         "fragment Pr on PullRequest {
-  number url title state mergeable reviewDecision headRefName isCrossRepository
+  number url title state reviewDecision headRefName isCrossRepository
+  isDraft baseRefName headRefOid mergeStateStatus
+  latestReviews(first: 50) { nodes { author { login } state } }
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes { __typename
@@ -206,7 +324,28 @@ struct Named {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawRate {
+    limit: u32,
+    remaining: u32,
+    reset_at: String,
+}
+
+impl From<RawRate> for Quota {
+    fn from(r: RawRate) -> Self {
+        Quota {
+            limit: r.limit,
+            remaining: r.remaining,
+            reset_at: crate::store::epoch_ms_of_utc(&r.reset_at),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ByNumberData {
+    #[serde(default)]
+    rate_limit: Option<RawRate>,
     repository: Option<RawRepoByNumber>,
 }
 
@@ -217,7 +356,10 @@ struct RawRepoByNumber {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ByBranchData {
+    #[serde(default)]
+    rate_limit: Option<RawRate>,
     repository: RawRepoByBranch,
 }
 
@@ -237,15 +379,36 @@ struct RawPr {
     title: String,
     state: String,
     #[serde(default)]
-    mergeable: String,
-    #[serde(default)]
     review_decision: Option<String>,
     #[serde(default)]
     head_ref_name: String,
     #[serde(default)]
     is_cross_repository: bool,
     #[serde(default)]
+    is_draft: bool,
+    #[serde(default)]
+    base_ref_name: String,
+    #[serde(default)]
+    head_ref_oid: String,
+    #[serde(default)]
+    merge_state_status: String,
+    #[serde(default)]
+    latest_reviews: Nodes<RawReview>,
+    #[serde(default)]
     commits: Nodes<RawCommitNode>,
+}
+
+#[derive(Deserialize)]
+struct RawReview {
+    #[serde(default)]
+    author: Option<RawLogin>,
+    #[serde(default)]
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct RawLogin {
+    login: String,
 }
 
 #[derive(Deserialize)]
@@ -483,13 +646,27 @@ fn parse_pr(mut raw: RawPr) -> PrStatus {
         .review_decision
         .as_deref()
         .and_then(ReviewDecision::parse);
+    let reviews = raw
+        .latest_reviews
+        .nodes
+        .into_iter()
+        .filter_map(|r| {
+            Some(PrReview {
+                state: ReviewState::parse(&r.state)?,
+                author: r.author.map_or_else(|| "ghost".into(), |a| a.login),
+            })
+        })
+        .collect();
     PrStatus {
         number: raw.number,
         state: parse_state(&raw.state),
-        mergeable: raw.mergeable.eq_ignore_ascii_case("MERGEABLE"),
-        mergeable_state: MergeableState::parse(&raw.mergeable),
+        is_draft: raw.is_draft,
+        base_ref_name: raw.base_ref_name,
+        head_ref_oid: raw.head_ref_oid,
+        merge_state: MergeState::parse(&raw.merge_state_status),
         checks,
         review_decision,
+        reviews,
         url: raw.url,
         title: raw.title,
     }
@@ -515,14 +692,20 @@ fn graphql_data<T: DeserializeOwned>(stdout: &str) -> Result<T> {
     serde_json::from_value(body.data.unwrap_or_default()).map_err(graphql_parse_error)
 }
 
-fn pr_by_number(stdout: &str) -> Result<Option<RawPr>> {
+fn pr_by_number(stdout: &str) -> Result<(Option<RawPr>, Option<Quota>)> {
     let data: ByNumberData = graphql_data(stdout)?;
-    Ok(data.repository.and_then(|r| r.pull_request))
+    Ok((
+        data.repository.and_then(|r| r.pull_request),
+        data.rate_limit.map(Quota::from),
+    ))
 }
 
-fn pr_for_branch(stdout: &str, branch: &str) -> Result<Option<RawPr>> {
+fn pr_for_branch(stdout: &str, branch: &str) -> Result<(Option<RawPr>, Option<Quota>)> {
     let data: ByBranchData = graphql_data(stdout)?;
-    Ok(pick_for_branch(data.repository, branch))
+    Ok((
+        pick_for_branch(data.repository, branch),
+        data.rate_limit.map(Quota::from),
+    ))
 }
 
 fn pick_for_branch(repo: RawRepoByBranch, branch: &str) -> Option<RawPr> {
@@ -581,8 +764,8 @@ pub async fn pr_status(
     worktree: &Path,
     pr_ref: &str,
     overlay: &[(String, String)],
-) -> Result<Option<PrStatus>> {
-    let first = if pr_ref.parse::<u32>().is_ok() {
+) -> Result<PrAnswer> {
+    let (first, mut quota) = if pr_ref.parse::<u32>().is_ok() {
         let vars = [("-F", format!("number={pr_ref}"))];
         pr_by_number(&graphql(gh, worktree, BY_NUMBER, &vars, overlay).await?)?
     } else {
@@ -593,7 +776,7 @@ pub async fn pr_status(
         )?
     };
     let Some(mut pr) = first else {
-        return Ok(None);
+        return Ok(PrAnswer { pr: None, quota });
     };
     while let Some(after) = pr.next_page() {
         let vars = [
@@ -601,9 +784,14 @@ pub async fn pr_status(
             ("-f", format!("after={after}")),
         ];
         let out = graphql(gh, worktree, BY_NUMBER, &vars, overlay).await?;
-        pr.append_page(pr_by_number(&out)?);
+        let (page, page_quota) = pr_by_number(&out)?;
+        pr.append_page(page);
+        quota = page_quota.or(quota);
     }
-    Ok(Some(parse_pr(pr)))
+    Ok(PrAnswer {
+        pr: Some(parse_pr(pr)),
+        quota,
+    })
 }
 
 /// Just the PR's state, for sweeps that need nothing else; `None` when the number resolves to no PR.
@@ -826,10 +1014,10 @@ mod tests {
     const BLACK_5590: (&str, &str) = capture!("psf-black-5590");
 
     fn status_from_pages(pages: &[String]) -> PrStatus {
-        let mut pr = pr_by_number(&pages[0]).unwrap().unwrap();
+        let mut pr = pr_by_number(&pages[0]).unwrap().0.unwrap();
         for page in &pages[1..] {
             assert!(pr.next_page().is_some());
-            pr.append_page(pr_by_number(page).unwrap());
+            pr.append_page(pr_by_number(page).unwrap().0);
         }
         assert_eq!(pr.next_page(), None);
         parse_pr(pr)
@@ -888,7 +1076,7 @@ mod tests {
     fn pr_node(number: u32, state: &str, head: &str, nodes: Value) -> Value {
         json!({
             "number": number, "url": format!("https://github.com/o/r/pull/{number}"),
-            "title": "t", "state": state, "mergeable": "MERGEABLE", "reviewDecision": "",
+            "title": "t", "state": state, "reviewDecision": "",
             "headRefName": head, "isCrossRepository": false,
             "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "contexts": {
                 "pageInfo": { "hasNextPage": false, "endCursor": null },
@@ -1048,6 +1236,7 @@ mod tests {
         let pick = |prs: Vec<Value>, branch: &str| {
             pr_for_branch(&by_branch(prs), branch)
                 .unwrap()
+                .0
                 .map(|p| p.number)
         };
         let merged = pr_node(2, "MERGED", "feat", json!([]));
@@ -1083,8 +1272,141 @@ mod tests {
             .contains("Could not resolve to a PullRequest"));
         assert!(matches!(
             pr_for_branch(&by_branch(vec![]), "feat"),
-            Ok(None)
+            Ok((None, _))
         ));
+    }
+
+    #[test]
+    fn a_rate_limited_body_is_an_error_the_watcher_recognises() {
+        let body = r#"{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit already exceeded for user ID 1."}]}"#;
+        let err = pr_for_branch(body, "feat").err().unwrap();
+        assert!(crate::runtime::pr_watcher::is_rate_limited(
+            &err.to_string()
+        ));
+    }
+
+    #[test]
+    fn rate_limit_reads_as_quota() {
+        let body = json!({ "data": {
+            "rateLimit": { "limit": 5000, "remaining": 4935, "resetAt": "2099-01-01T00:00:00Z" },
+            "repository": { "pullRequest": pr_node(1, "OPEN", "feat", json!([])) },
+        } });
+        let (_, quota) = pr_by_number(&body.to_string()).unwrap();
+        assert_eq!(
+            quota,
+            Some(Quota {
+                limit: 5000,
+                remaining: 4935,
+                reset_at: Some(4_070_908_800_000.0),
+            })
+        );
+        assert_eq!(
+            crate::store::epoch_ms_of_utc("2099-01-01T00:00:00Z"),
+            Some(4_070_908_800_000.0)
+        );
+        assert_eq!(
+            crate::store::epoch_ms_of_utc("2026-11-21T18:13:01Z"),
+            Some(1_795_284_781_000.0)
+        );
+        assert_eq!(crate::store::epoch_ms_of_utc("soon"), None);
+    }
+
+    #[test]
+    fn a_draft_pr_is_reported_as_a_draft_with_its_base() {
+        let status = from_capture(SURICATA_15352);
+        assert!(status.is_draft);
+        assert_eq!(status.base_ref_name, "main");
+        assert_eq!(status.merge_state, MergeState::Blocked);
+        assert_eq!(
+            status.head_ref_oid,
+            "3c639c38d43fe3376c0de536fcb442fcb767fe6b"
+        );
+        let reviews = from_capture(CLI_14927).reviews;
+        assert_eq!(
+            reviews,
+            vec![PrReview {
+                author: "copilot-pull-request-reviewer".into(),
+                state: ReviewState::Commented,
+            }]
+        );
+    }
+
+    #[test]
+    fn merge_state_and_reviews_parse_tolerantly() {
+        let merge_state = |raw: Option<&str>| {
+            let mut pr = pr_node(1, "OPEN", "feat", json!([]));
+            if let Some(raw) = raw {
+                pr["mergeStateStatus"] = json!(raw);
+            }
+            status_from_pages(&[by_number(pr)]).merge_state
+        };
+        for (raw, want) in [
+            ("CLEAN", MergeState::Clean),
+            ("blocked", MergeState::Blocked),
+            ("BEHIND", MergeState::Behind),
+            ("DIRTY", MergeState::Dirty),
+            ("UNSTABLE", MergeState::Unstable),
+            ("HAS_HOOKS", MergeState::HasHooks),
+            ("DRAFT", MergeState::Draft),
+            ("SOMETHING_NEW", MergeState::Unknown),
+        ] {
+            assert_eq!(merge_state(Some(raw)), want, "{raw}");
+        }
+        assert_eq!(merge_state(None), MergeState::Unknown);
+
+        let mut pr = pr_node(1, "OPEN", "feat", json!([]));
+        pr["latestReviews"] = json!({ "nodes": [
+            { "author": null, "state": "APPROVED" },
+            { "author": { "login": "a" }, "state": "CHANGES_REQUESTED" },
+            { "author": { "login": "b" }, "state": "SOMETHING_NEW" },
+        ] });
+        let status = status_from_pages(&[by_number(pr)]);
+        assert_eq!(
+            status.reviews,
+            vec![
+                PrReview {
+                    author: "ghost".into(),
+                    state: ReviewState::Approved
+                },
+                PrReview {
+                    author: "a".into(),
+                    state: ReviewState::ChangesRequested
+                },
+            ]
+        );
+        assert!(!status.is_draft);
+        assert_eq!(status.base_ref_name, "");
+    }
+
+    #[test]
+    fn a_lookup_serialises_with_its_kind() {
+        assert_eq!(
+            serde_json::to_value(PrLookup::NoPr).unwrap(),
+            json!({ "kind": "noPr" })
+        );
+        assert_eq!(
+            serde_json::to_value(PrLookup::NotGitHub).unwrap(),
+            json!({ "kind": "notGitHub" })
+        );
+        let failed = PrLookup::Failed {
+            cause: PrLookupFailure::RateLimited {
+                resumes_at: Some(1.0),
+            },
+            last: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&failed).unwrap(),
+            json!({ "kind": "failed", "cause": { "kind": "rateLimited", "resumesAt": 1.0 }, "last": null })
+        );
+        let found = PrLookup::Found {
+            pr: checks_of(json!([])),
+        };
+        let encoded = serde_json::to_value(&found).unwrap();
+        assert_eq!(encoded["kind"], "found");
+        assert_eq!(encoded["pr"]["number"], 1);
+        assert_eq!(serde_json::from_value::<PrLookup>(encoded).unwrap(), found);
+        assert_eq!(found.known().map(|p| p.number), Some(1));
+        assert_eq!(failed.known(), None);
     }
 
     #[test]
@@ -1135,8 +1457,6 @@ mod tests {
         let c = &status.checks;
         assert_eq!(c.state, ChecksState::Passing);
         assert_eq!((c.total, c.passed, c.skipped), (3, 2, 1));
-        assert!(status.mergeable);
-        assert_eq!(status.mergeable_state, MergeableState::Mergeable);
         assert_eq!(status.review_decision, Some(ReviewDecision::Approved));
     }
 
@@ -1155,13 +1475,12 @@ mod tests {
             "feat",
             json!([build, context("coverage", "ERROR", "https://x/cov")]),
         );
-        pr["mergeable"] = json!("CONFLICTING");
+        pr["mergeStateStatus"] = json!("DIRTY");
         let status = status_from_pages(&[by_number(pr)]);
         let c = &status.checks;
         assert_eq!(c.state, ChecksState::Failing);
         assert_eq!((c.passed, c.failed), (1, 1));
-        assert!(!status.mergeable);
-        assert_eq!(status.mergeable_state, MergeableState::Conflicting);
+        assert_eq!(status.merge_state, MergeState::Dirty);
         assert_eq!(status.review_decision, None);
 
         assert_eq!(c.list.len(), 2);
@@ -1208,20 +1527,6 @@ mod tests {
         );
         assert_eq!(check_run_id("https://github.com/o/r/runs/42"), None);
         assert_eq!(check_run_id("https://ext.example/build"), None);
-    }
-
-    #[test]
-    fn mergeable_state_parses_all_arms() {
-        assert_eq!(
-            MergeableState::parse("MERGEABLE"),
-            MergeableState::Mergeable
-        );
-        assert_eq!(
-            MergeableState::parse("conflicting"),
-            MergeableState::Conflicting
-        );
-        assert_eq!(MergeableState::parse("UNKNOWN"), MergeableState::Unknown);
-        assert_eq!(MergeableState::parse(""), MergeableState::Unknown);
     }
 
     #[test]

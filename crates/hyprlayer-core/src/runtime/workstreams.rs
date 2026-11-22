@@ -14,7 +14,7 @@ use crate::error::{CoreError, Result};
 use crate::hyprcli::HyprCli;
 use crate::index::watcher::WatchHandle;
 use crate::pipeline::Stage;
-use crate::pr::{self, MergeMethod, PrStatus, PrSummary};
+use crate::pr::{self, MergeMethod, PrLookup, PrLookupFailure, PrState, PrStatus, PrSummary};
 use crate::process::binaries::BinaryKind;
 use crate::repo_settings;
 use crate::runtime::script_registry::RunPhase;
@@ -29,10 +29,11 @@ use crate::worktree::thoughts_links::{self, LinkStatus};
 use crate::worktree::{self, archive_dir_for, BranchCleanup, CreateMode, CreateSpec, RemovePolicy};
 
 use super::doc_status;
+use super::pr_watcher::{cached_lookup, failure_cause, store_lookup, PrBudget};
 use super::HyprlayerRuntime;
 
 pub type WorkstreamGitStatus = worktree::WorktreeStatus;
-pub type WorkstreamPrStatus = Option<PrStatus>;
+pub type WorkstreamPrStatus = PrLookup;
 pub use crate::claude::memory::{MemoryFile, MemoryKeyCheck};
 
 fn ensure_running(runtime: &HyprlayerRuntime) -> Result<()> {
@@ -376,10 +377,11 @@ impl WorkstreamService<'_> {
         let mut lookups = tokio::task::JoinSet::new();
         for (item, record) in due {
             let (gh, overlay, permits) = (gh.clone(), overlay.clone(), permits.clone());
+            let budget = self.runtime.watchers.pr_budget.clone();
             lookups.spawn(async move {
                 let _permit = permits.acquire_owned().await;
-                let found =
-                    pr::pr_status(&gh, pr_dir(&item), &pr_lookup_ref(&item), &overlay).await;
+                let pr_ref = pr_lookup_ref(&item);
+                let found = workstream_pr(&gh, &item, &pr_ref, &overlay, &budget, true).await;
                 (item, record, found)
             });
         }
@@ -388,7 +390,7 @@ impl WorkstreamService<'_> {
                 continue;
             };
             let id = item.id;
-            if let Ok(Some(status)) = &found {
+            if let PrLookup::Found { pr: status } = &found {
                 doc_status::settle_workstream(
                     self.runtime.db.clone(),
                     &self.runtime.config,
@@ -399,13 +401,12 @@ impl WorkstreamService<'_> {
                 )
                 .await;
             }
-            let cached = match found {
-                Ok(Some(status)) => Some((Some(status.number), status.state.as_str())),
-                Ok(None) => Some((None, "none")),
-                Err(e) => {
-                    tracing::debug!("PR lookup for archived workstream {id} failed: {e}");
-                    None
+            let cached = match &found {
+                PrLookup::Found { pr: status } => {
+                    Some((Some(status.number), status.state.as_str()))
                 }
+                PrLookup::NoPr | PrLookup::NotGitHub => Some((None, "none")),
+                PrLookup::Failed { .. } | PrLookup::Unknown => None,
             };
             if cached.is_some_and(|(number, state)| {
                 record.pr_number != number || record.pr_state.as_deref() != Some(state)
@@ -517,14 +518,26 @@ impl WorkstreamService<'_> {
             return Err(CoreError::WorkstreamBaseBranchEmpty);
         }
         if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
-            let dir = pr_dir(&item);
-            let pr_ref = pr_lookup_ref(&item);
-            if let Ok(Some(status)) =
-                pr::pr_status(&gh, dir, &pr_ref, &self.runtime.child_env().await).await
+            let pr_ref = current_pr_ref(&item).unwrap_or_else(|| pr_lookup_ref(&item));
+            let cached = cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref)
+                .and_then(|lookup| lookup.known().cloned());
+            let known = match cached {
+                Some(pr) => Some(pr),
+                None => self.lookup_and_store(&item, &pr_ref).await.known().cloned(),
+            };
+            let short = base.strip_prefix("origin/").unwrap_or(&base);
+            if let Some(pr) =
+                known.filter(|pr| pr.state == PrState::Open && pr.base_ref_name != short)
             {
-                if status.state == pr::PrState::Open {
-                    pr::edit_pr_base(&gh, dir, &pr_ref, &base, &self.runtime.child_env().await)
-                        .await?;
+                let overlay = self.runtime.child_env().await;
+                let edited =
+                    pr::edit_pr_base(&gh, pr_dir(&item), &pr.number.to_string(), &base, &overlay)
+                        .await;
+                let fresh = self.lookup_and_store(&item, &pr_ref).await;
+                if let Err(e) = edited {
+                    if fresh.known().is_some_and(|pr| pr.state == PrState::Open) {
+                        return Err(e);
+                    }
                 }
             }
         }
@@ -762,27 +775,47 @@ impl WorkstreamService<'_> {
     pub async fn pr_status(&self, req: WorkstreamPrStatusRequest) -> Result<WorkstreamPrStatus> {
         ensure_running(self.runtime)?;
         let item = self.find(&req.id).await?;
-        let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await else {
-            return Ok(None);
-        };
-        let dir = pr_dir(&item);
-        let pr_ref = pr_lookup_ref(&item);
-        match pr::pr_status(&gh, dir, &pr_ref, &self.runtime.child_env().await).await {
-            Ok(status) => Ok(status),
-            // An error, not "no PR": the client keeps the last known PR and
-            // backs off, where `None` made a spent GraphQL quota erase it.
-            Err(e) => {
-                let text = e.to_string().to_lowercase();
-                let cause = if text.contains("rate limit") {
-                    "the GitHub API quota is spent"
-                } else if crate::repos::is_github_auth_failure(&text) {
-                    "gh is not signed in"
-                } else {
-                    "gh failed"
-                };
-                tracing::debug!("PR status for {pr_ref} unavailable: {cause}: {e}");
-                Err(e)
+        let pr_ref = current_pr_ref(&item).unwrap_or_else(|| pr_lookup_ref(&item));
+        match cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref) {
+            Some(PrLookup::Found { pr }) if !moved_past(&item, &pr_ref, &pr) => {
+                Ok(PrLookup::Found { pr })
             }
+            _ => Ok(self.lookup_and_store(&item, &pr_ref).await),
+        }
+    }
+
+    async fn lookup_and_store(&self, item: &Workstream, pr_ref: &str) -> PrLookup {
+        let started = std::time::Instant::now();
+        let watchers = &self.runtime.watchers;
+        let next = match self.runtime.binaries.require(BinaryKind::Gh).await {
+            _ if not_github(item) => PrLookup::NotGitHub,
+            Ok(gh) => {
+                let overlay = self.runtime.child_env().await;
+                workstream_pr(&gh, item, pr_ref, &overlay, &watchers.pr_budget, false).await
+            }
+            Err(_) => PrLookup::Failed {
+                cause: PrLookupFailure::GhMissing,
+                last: last_from_row(item, pr_ref),
+            },
+        };
+        match store_lookup(
+            &watchers.pr_cache,
+            &item.id,
+            pr_ref,
+            next.clone(),
+            true,
+            started,
+        ) {
+            Some((stored, changed)) => {
+                if changed {
+                    let _ = self.runtime.events.send(RuntimeEvent::PrStatusChanged {
+                        workstream_id: item.id.clone(),
+                        observed_pr_changed: false,
+                    });
+                }
+                stored
+            }
+            None => cached_lookup(&watchers.pr_cache, &item.id, pr_ref).unwrap_or(next),
         }
     }
 
@@ -859,6 +892,7 @@ impl WorkstreamService<'_> {
     pub async fn fetch_remote(&self, id: &str) -> Result<()> {
         ensure_running(self.runtime)?;
         let item = self.find(id).await?;
+        self.runtime.watchers.pr_kick.kick(id);
         let git = self.runtime.binaries.require(BinaryKind::Git).await?;
         worktree::fetch_remote(
             &git,
@@ -915,32 +949,86 @@ impl WorkstreamService<'_> {
 
     pub async fn attach_pr(&self, id: &str, pr_number: u32) -> Result<Option<PrStatus>> {
         ensure_running(self.runtime)?;
+        let started = std::time::Instant::now();
         let item = self.find(id).await?;
         if item.is_folder() {
             return Err(CoreError::WorkstreamFolderNoGit);
         }
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
-        let status = match pr::pr_status(
-            &gh,
-            pr_dir(&item),
-            &pr_number.to_string(),
-            &self.runtime.child_env().await,
-        )
-        .await
-        {
-            Ok(Some(status)) => status,
-            Ok(None) => return Err(pr_not_found(pr_number, None)),
-            Err(e) => return Err(pr_not_found(pr_number, Some(e))),
-        };
+        let budget = &self.runtime.watchers.pr_budget;
+        if let Some(resumes) = budget.held(now_ms(), false) {
+            let minutes = ((resumes - now_ms()) / 60_000.0).ceil().max(1.0);
+            return Err(pr_not_found(
+                pr_number,
+                Some(CoreError::Exec {
+                    program: "gh".into(),
+                    exit: None,
+                    stderr_tail: format!(
+                        "GitHub API quota is low; lookups resume in {minutes} min"
+                    ),
+                }),
+            ));
+        }
+        let pr_ref = pr_number.to_string();
+        let status =
+            match pr::pr_status(&gh, pr_dir(&item), &pr_ref, &self.runtime.child_env().await).await
+            {
+                Ok(answer) => {
+                    if let Some(quota) = answer.quota {
+                        budget.record(quota);
+                    }
+                    answer.pr.ok_or_else(|| pr_not_found(pr_number, None))?
+                }
+                Err(e) => {
+                    failure_cause(&e, budget);
+                    return Err(pr_not_found(pr_number, Some(e)));
+                }
+            };
         self.set_pr(id, Some(pr_number)).await?;
-        let (db, wid) = (self.runtime.db.clone(), id.to_string());
+        self.record_and_settle(&item, &pr_ref, &status).await?;
+        store_lookup(
+            &self.runtime.watchers.pr_cache,
+            id,
+            &pr_ref,
+            PrLookup::Found { pr: status.clone() },
+            true,
+            started,
+        );
+        let _ = self.runtime.events.send(RuntimeEvent::PrStatusChanged {
+            workstream_id: id.to_string(),
+            observed_pr_changed: true,
+        });
+        Ok(Some(status))
+    }
+
+    async fn record_and_settle(
+        &self,
+        item: &Workstream,
+        pr_ref: &str,
+        status: &PrStatus,
+    ) -> Result<()> {
+        let (db, wid, reference) = (self.runtime.db.clone(), item.id.clone(), pr_ref.to_string());
         let observed = ObservedPr {
             number: status.number,
             state: status.state,
         };
-        blocking(move || db.record_pr_observation(&wid, Some(observed), &pr_number.to_string()))
-            .await?;
-        Ok(Some(status))
+        let head = status.head_ref_oid.clone();
+        blocking(move || {
+            db.record_pr_observation(&wid, Some(observed), &reference, Some(&head), None)
+        })
+        .await?;
+        if status.state != PrState::Open && has_own_pr(item) {
+            doc_status::settle_workstream(
+                self.runtime.db.clone(),
+                &self.runtime.config,
+                &item.id,
+                &item.project_path,
+                status.number,
+                status.state,
+            )
+            .await;
+        }
+        Ok(())
     }
 
     pub async fn merge_pr(&self, id: &str, method: MergeMethod) -> Result<()> {
@@ -948,15 +1036,18 @@ impl WorkstreamService<'_> {
         let item = self.find(id).await?;
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
         let auto = self.runtime.settings.get().await.git.automerge;
+        let pr_ref = pr_lookup_ref(&item);
         pr::merge_pr(
             &gh,
             Path::new(&item.worktree_path),
-            &pr_lookup_ref(&item),
+            &pr_ref,
             method,
             auto,
             &self.runtime.child_env().await,
         )
-        .await
+        .await?;
+        self.lookup_and_store(&item, &pr_ref).await;
+        Ok(())
     }
 
     pub async fn rename(&self, req: RenameWorkstreamRequest) -> Result<Workstream> {
@@ -1573,12 +1664,15 @@ impl WorkstreamService<'_> {
             return None;
         }
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await.ok()?;
-        pr::pr_status(&gh, pr_dir(item), &pr_ref, &self.runtime.child_env().await)
-            .await
-            .unwrap_or_else(|e| {
-                tracing::debug!("archive of {}: PR lookup failed: {e}", item.id);
-                None
-            })
+        let overlay = self.runtime.child_env().await;
+        let budget = &self.runtime.watchers.pr_budget;
+        match workstream_pr(&gh, item, &pr_ref, &overlay, budget, false).await {
+            PrLookup::Failed { .. } => {
+                cached_lookup(&self.runtime.watchers.pr_cache, &item.id, &pr_ref)
+                    .and_then(|lookup| lookup.known().cloned())
+            }
+            lookup => lookup.known().cloned(),
+        }
     }
 
     pub async fn restore(&self, req: RestoreWorkstreamRequest) -> Result<RestoreWorkstreamResult> {
@@ -2046,6 +2140,94 @@ fn branch_rename(item: &Workstream, title: &str) -> Option<BranchRename> {
 /// What `gh` should look up: the attached number, else the branch the worktree is really on.
 pub(crate) fn pr_lookup_ref(item: &Workstream) -> String {
     moved_head(item).unwrap_or_else(|| item.pr_ref())
+}
+
+pub(crate) async fn workstream_pr(
+    gh: &Path,
+    item: &Workstream,
+    pr_ref: &str,
+    overlay: &[(String, String)],
+    budget: &PrBudget,
+    background: bool,
+) -> PrLookup {
+    if not_github(item) {
+        return PrLookup::NotGitHub;
+    }
+    if let Some(resumes) = budget.held(now_ms(), background) {
+        return PrLookup::Failed {
+            cause: PrLookupFailure::RateLimited {
+                resumes_at: Some(resumes),
+            },
+            last: last_from_row(item, pr_ref),
+        };
+    }
+    match pr::pr_status(gh, pr_dir(item), pr_ref, overlay).await {
+        Ok(answer) => {
+            if let Some(quota) = answer.quota {
+                budget.record(quota);
+            }
+            match answer.pr {
+                Some(pr) if !moved_past(item, pr_ref, &pr) && owns(item, pr_ref, &pr) => {
+                    PrLookup::Found { pr }
+                }
+                _ => PrLookup::NoPr,
+            }
+        }
+        Err(e) if gh_found_no_github_remote(&e.to_string()) => PrLookup::NotGitHub,
+        Err(e) => {
+            tracing::debug!("PR lookup for {pr_ref} failed: {e}");
+            PrLookup::Failed {
+                cause: failure_cause(&e, budget),
+                last: last_from_row(item, pr_ref),
+            }
+        }
+    }
+}
+
+fn not_github(item: &Workstream) -> bool {
+    !crate::gitops::has_web_remote(pr_dir(item))
+}
+
+fn gh_found_no_github_remote(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains(
+        "none of the git remotes configured for this repository point to a known github host",
+    ) || s.contains("no git remotes found")
+}
+
+fn owns(item: &Workstream, pr_ref: &str, pr: &PrStatus) -> bool {
+    item.pr_number.is_some()
+        || pr.state == PrState::Open
+        || observed_on_row(item, pr_ref, pr.number).is_some()
+        || crate::gitops::pr_head_is_ours(pr_dir(item), pr_ref, &item.base_branch, &pr.head_ref_oid)
+            .unwrap_or(true)
+}
+
+fn observed_on_row(item: &Workstream, pr_ref: &str, number: u32) -> Option<ObservedPr> {
+    item.observed_pr
+        .filter(|o| o.number == number && item.observed_ref.as_deref() == Some(pr_ref))
+}
+
+fn moved_past(item: &Workstream, pr_ref: &str, pr: &PrStatus) -> bool {
+    item.pr_number.is_none()
+        && pr.state != PrState::Open
+        && observed_on_row(item, pr_ref, pr.number).is_some_and(|o| o.state != PrState::Open)
+        && crate::gitops::has_work_past(pr_dir(item), pr_ref, &pr.head_ref_oid, None)
+}
+
+fn last_from_row(item: &Workstream, pr_ref: &str) -> Option<PrStatus> {
+    let observed = item
+        .observed_pr
+        .filter(|o| o.state != PrState::Open && item.observed_ref.as_deref() == Some(pr_ref))?;
+    let url = crate::gitops::base_remote_web_url(pr_dir(item))
+        .map(|web| format!("{web}/pull/{}", observed.number))
+        .unwrap_or_default();
+    Some(PrStatus::recorded(
+        observed.number,
+        observed.state,
+        url,
+        item.observed_pr_head.clone().unwrap_or_default(),
+    ))
 }
 
 /// The ref to look up, or `None` while HEAD has left its branch (a rebase, or the base branch):

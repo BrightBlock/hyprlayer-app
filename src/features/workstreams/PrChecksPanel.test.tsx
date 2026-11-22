@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrChecksPanel } from "./PrChecksPanel";
-import type { PrChecks, PrStatus, WorkstreamView } from "@/lib/bindings";
+import type { PrChecks, PrLookup, PrStatus, WorkstreamView } from "@/lib/bindings";
 
 const q = vi.hoisted(() => ({ useWorkstreamPr: vi.fn() }));
 vi.mock("@/lib/queries", () => q);
@@ -19,16 +19,20 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     url: "https://github.com/o/r/pull/42",
     title: "My PR",
     state: "open",
-    mergeable: true,
-    mergeableState: "mergeable",
+    isDraft: false,
+    baseRefName: "main",
+    headRefOid: "abc",
+    mergeState: "clean",
     checks: { state: "none", total: 0, passed: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0, list: [] },
     reviewDecision: null,
+    reviews: [],
     ...overrides,
   };
 }
 
 function renderPanel(pr: PrStatus) {
-  q.useWorkstreamPr.mockReturnValue({ data: pr });
+  const lookup: PrLookup = { kind: "found", pr };
+  q.useWorkstreamPr.mockReturnValue({ data: lookup });
   render(<PrChecksPanel view={VIEW} />);
 }
 
@@ -53,7 +57,7 @@ describe("PrChecksPanel review surfacing", () => {
 
   it("keeps a merge conflict red-precedent over a pending review", () => {
     renderPanel(
-      makePr({ mergeable: false, mergeableState: "conflicting", reviewDecision: "reviewRequired" }),
+      makePr({ mergeState: "dirty", reviewDecision: "reviewRequired" }),
     );
     expect(screen.getByText("Merge conflict")).toBeTruthy();
     expect(screen.getByText("Review required")).toBeTruthy();

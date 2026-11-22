@@ -118,6 +118,10 @@ pub struct Workstream {
     /// The ref that observation came from, kept even when it found no PR.
     #[serde(default)]
     pub observed_ref: Option<String>,
+    #[serde(skip)]
+    pub observed_pr_head: Option<String>,
+    #[serde(skip)]
+    pub observed_pr_tip: Option<String>,
     pub created_at: f64,
     pub updated_at: f64,
     pub archived_at: Option<f64>,
@@ -193,6 +197,8 @@ mod tests {
             pr_number: None,
             observed_pr: None,
             observed_ref: None,
+            observed_pr_head: None,
+            observed_pr_tip: None,
             created_at: 0.0,
             updated_at: 0.0,
             archived_at: None,

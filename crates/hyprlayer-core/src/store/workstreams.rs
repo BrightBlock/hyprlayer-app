@@ -48,6 +48,8 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
             row.get("observed_pr_state")?,
         ),
         observed_ref: row.get("observed_ref")?,
+        observed_pr_head: row.get("observed_pr_head")?,
+        observed_pr_tip: row.get("observed_pr_tip")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         archived_at: row.get("archived_at")?,
@@ -56,7 +58,7 @@ fn row_to_item(row: &Row<'_>) -> rusqlite::Result<Workstream> {
 
 const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_branch, \
                     worktree_mode, stage, status, pr_number, observed_pr_number, observed_pr_state, \
-                    observed_ref, \
+                    observed_ref, observed_pr_head, observed_pr_tip, \
                     created_at, updated_at, archived_at";
 
 const DAY_MS: f64 = 86_400_000.0;
@@ -121,6 +123,8 @@ impl Db {
             pr_number: None,
             observed_pr: None,
             observed_ref: None,
+            observed_pr_head: None,
+            observed_pr_tip: None,
             created_at: now,
             updated_at: now,
             archived_at: None,
@@ -242,7 +246,9 @@ impl Db {
             if let Some(now) = moved_to {
                 tx.execute(
                     "UPDATE workstreams SET stage = ?2, observed_ref = ?3, observed_pr_number = NULL,
-                        observed_pr_state = NULL, updated_at = ?4 WHERE id = ?1",
+                        observed_pr_state = NULL, observed_pr_head = NULL, observed_pr_tip = NULL,
+                        updated_at = ?4
+                     WHERE id = ?1",
                     params![id, stage.as_str(), now, now_ms()],
                 )?;
             } else if pipeline_rank(Stage::parse(&from)).is_none_or(|rank| rank < to) {
@@ -290,7 +296,8 @@ impl Db {
         self.with(|conn| {
             conn.execute(
                 "UPDATE workstreams SET pr_number = ?2, observed_pr_number = NULL,
-                    observed_pr_state = NULL, observed_ref = NULL, updated_at = ?3 WHERE id = ?1",
+                    observed_pr_state = NULL, observed_ref = NULL, observed_pr_head = NULL,
+                    observed_pr_tip = NULL, updated_at = ?3 WHERE id = ?1",
                 params![id, pr_number, now_ms()],
             )?;
             Ok(())
@@ -304,19 +311,26 @@ impl Db {
         id: &str,
         observed: Option<ObservedPr>,
         pr_ref: &str,
+        head: Option<&str>,
+        tip: Option<&str>,
     ) -> Result<bool> {
         self.with(|conn| {
             let tx = conn.unchecked_transaction()?;
-            let (number, state, seen): (Option<u32>, Option<String>, Option<String>) = tx
-                .query_row(
-                    "SELECT observed_pr_number, observed_pr_state, observed_ref
-                     FROM workstreams WHERE id = ?1",
-                    params![id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )?;
+            let (number, state, seen, same_marks): (
+                Option<u32>,
+                Option<String>,
+                Option<String>,
+                bool,
+            ) = tx.query_row(
+                "SELECT observed_pr_number, observed_pr_state, observed_ref,
+                    observed_pr_head IS ?2 AND observed_pr_tip IS ?3
+                 FROM workstreams WHERE id = ?1",
+                params![id, head, tip],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
             let moved = seen.as_deref().is_some_and(|s| s != pr_ref);
             let changed = moved || observed_pr(number, state) != observed;
-            if !changed && seen.is_some() {
+            if !changed && seen.is_some() && same_marks {
                 return Ok(false);
             }
             if moved && observed.is_none_or(|now| now.state != PrState::Merged) {
@@ -327,12 +341,14 @@ impl Db {
             }
             tx.execute(
                 "UPDATE workstreams SET observed_pr_number = ?2, observed_pr_state = ?3,
-                    observed_ref = ?4 WHERE id = ?1",
+                    observed_ref = ?4, observed_pr_head = ?5, observed_pr_tip = ?6 WHERE id = ?1",
                 params![
                     id,
                     observed.map(|o| o.number),
                     observed.map(|o| o.state.as_str()),
-                    pr_ref
+                    pr_ref,
+                    head,
+                    tip
                 ],
             )?;
             tx.commit()?;
@@ -391,7 +407,11 @@ impl Db {
             // What the archive learned is newer than the row; `none` may only mean a failed lookup.
             tx.execute(
                 "UPDATE workstreams SET
-                    observed_pr_number = a.pr_number, observed_pr_state = a.pr_state
+                    observed_pr_number = a.pr_number, observed_pr_state = a.pr_state,
+                    observed_pr_head = CASE WHEN workstreams.observed_pr_number IS a.pr_number
+                        THEN workstreams.observed_pr_head END,
+                    observed_pr_tip = CASE WHEN workstreams.observed_pr_number IS a.pr_number
+                        THEN workstreams.observed_pr_tip END
                  FROM workstream_archives a
                  WHERE workstreams.id = ?1 AND a.workstream_id = ?1 AND a.pr_number IS NOT NULL
                     AND a.pr_state IN ('open', 'merged', 'closed')",
@@ -770,6 +790,63 @@ mod tests {
 
         db.update_workstream_title(&a.id, "renamed").unwrap();
         assert!(db.get_workstream(&a.id).unwrap().unwrap().updated_at >= before);
+    }
+
+    #[test]
+    fn the_observed_pr_head_is_written_read_back_and_cleared() {
+        let db = Db::open_in_memory().unwrap();
+        let a = item(&db, "auth");
+        let merged = Some(ObservedPr {
+            number: 7,
+            state: PrState::Merged,
+        });
+        let marks = |db: &Db| {
+            let row = db.get_workstream(&a.id).unwrap().unwrap();
+            (row.observed_pr_head, row.observed_pr_tip)
+        };
+        let some = |h: &str, t: &str| (Some(h.to_string()), Some(t.to_string()));
+
+        assert!(db
+            .record_pr_observation(&a.id, merged, &a.branch, Some("h1"), Some("t1"))
+            .unwrap());
+        assert_eq!(marks(&db), some("h1", "t1"));
+        assert!(!db
+            .record_pr_observation(&a.id, merged, &a.branch, Some("h2"), Some("t1"))
+            .unwrap());
+        assert_eq!(marks(&db), some("h2", "t1"));
+        assert!(!db
+            .record_pr_observation(&a.id, merged, &a.branch, Some("h2"), Some("t2"))
+            .unwrap());
+        assert_eq!(marks(&db), some("h2", "t2"));
+
+        db.set_workstream_pr(&a.id, Some(9)).unwrap();
+        assert_eq!(marks(&db), (None, None));
+    }
+
+    #[test]
+    fn a_restore_keeps_the_head_only_for_the_pr_it_was_recorded_for() {
+        let db = Db::open_in_memory().unwrap();
+        let a = item(&db, "auth");
+        let restored_head = |archived_pr: u32| {
+            let observed = Some(ObservedPr {
+                number: 7,
+                state: PrState::Merged,
+            });
+            db.record_pr_observation(&a.id, observed, &a.branch, Some("h7"), Some("t7"))
+                .unwrap();
+            db.archive_workstream(&a.id).unwrap();
+            db.cache_archive_pr(&a.id, Some((Some(archived_pr), "merged")), now_ms())
+                .unwrap();
+            db.unarchive_workstream(&a.id).unwrap();
+            let got = db.get_workstream(&a.id).unwrap().unwrap();
+            assert_eq!(got.observed_pr.map(|o| o.number), Some(archived_pr));
+            (got.observed_pr_head, got.observed_pr_tip)
+        };
+        assert_eq!(
+            restored_head(7),
+            (Some("h7".to_string()), Some("t7".to_string()))
+        );
+        assert_eq!(restored_head(8), (None, None));
     }
 
     #[test]

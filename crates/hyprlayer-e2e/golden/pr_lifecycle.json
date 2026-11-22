@@ -9,6 +9,7 @@
       "guards": [
         {
           "evidence": {
+            "kind": "found",
             "state": "open"
           },
           "guard": "before attaching, the branch's open PR is found by branch name",
@@ -29,10 +30,12 @@
       "guards": [
         {
           "evidence": {
-            "mergeable": true,
+            "baseRefName": "main",
+            "hasMergeState": true,
+            "isDraft": false,
             "state": "open"
           },
-          "guard": "an open PR reports itself open and unmerged",
+          "guard": "an open PR reports itself open, not a draft, against the fixture's default branch",
           "ok": true
         },
         {

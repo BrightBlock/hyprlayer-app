@@ -58,7 +58,7 @@ use agent_control::{AgentControlEndpoint, AgentHops, AgentTokens, SpawnLocks};
 use attribution::DocAttribution;
 use operation_locks::{SkillLocks, WorkstreamLocks};
 use ports::{CliConfigCli, ConfigCli, LifecycleRunner, ProviderHttp, ReqwestProviderHttp};
-use pr_watcher::{PrWatcherContext, WorktreeWatch};
+use pr_watcher::{PrBudget, PrCache, PrKick, PrWatcherContext, WorktreeWatch};
 use profile_lock::ProfileLock;
 use script_registry::ScriptRegistry;
 use sessions::registry::SessionRegistry;
@@ -99,6 +99,9 @@ impl RuntimeOptions {
 struct Watchers {
     index_watch: AsyncMutex<Option<WatchHandle>>,
     worktree_watch: WorktreeWatch,
+    pr_cache: PrCache,
+    pr_kick: Arc<PrKick>,
+    pr_budget: Arc<PrBudget>,
 }
 
 pub struct HyprlayerRuntime {
@@ -315,6 +318,9 @@ impl HyprlayerRuntime {
             watchers: Watchers {
                 index_watch: AsyncMutex::new(None),
                 worktree_watch: Arc::default(),
+                pr_cache: Arc::default(),
+                pr_kick: Arc::default(),
+                pr_budget: Arc::default(),
             },
             focused: Arc::new(AtomicBool::new(true)),
             indexed_docs: AtomicU32::new(u32::MAX),
@@ -405,6 +411,9 @@ impl HyprlayerRuntime {
             focus_changed: self.focus_changed.clone(),
             events: self.events.clone(),
             env_overlay: self.environment.env_overlay.clone(),
+            pr_cache: self.watchers.pr_cache.clone(),
+            kick: self.watchers.pr_kick.clone(),
+            budget: self.watchers.pr_budget.clone(),
         });
 
         // A `Weak` for the same reason as startup; a stop mid-sweep drops it

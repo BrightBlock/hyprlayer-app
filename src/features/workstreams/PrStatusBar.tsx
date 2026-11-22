@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 
 import { openExternalUrl } from "@/lib/browser";
 import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
+import { knownPr, prFailureText } from "@/lib/domain/pr";
 import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
 import { addressPrFeedback } from "@/features/session/sessionStore";
 import { MenuItem, Popover, Spinner } from "@/components/ui";
@@ -28,6 +29,14 @@ function PillButton({
   );
 }
 
+export function QuotaLow({ text }: { text: string }) {
+  return (
+    <span role="img" title={text} aria-label={text} className="inline-flex shrink-0 text-warn-ink">
+      <Icon name="quotaLow" size="sm" />
+    </span>
+  );
+}
+
 const MERGE_OPTIONS: { method: MergeMethod; label: string }[] = [
   { method: "squash", label: "Squash and merge" },
   { method: "merge", label: "Create a merge commit" },
@@ -49,9 +58,10 @@ export function PrStatusBar({
   const [mergeOpen, setMergeOpen] = useState(false);
   const mergeBtnRef = useRef<HTMLButtonElement>(null);
 
-  const data = pr.data;
+  const data = knownPr(pr.data);
   if (!view || !data) return null;
 
+  const failure = pr.data?.kind === "failed" ? pr.data.cause : null;
   const isMerged = data.state === "merged";
   const isOpen = data.state === "open";
   const reviewRequired = data.reviewDecision === "reviewRequired";
@@ -59,19 +69,27 @@ export function PrStatusBar({
   const reviewBlocks = reviewRequired || changesRequested;
   const checks = data.checks.state;
   const checksOk = checks === "passing" || checks === "none";
-  const directOk = checksOk && !reviewBlocks;
+  const directOk = checksOk && !reviewBlocks && data.mergeState !== "blocked";
   const queuesAuto =
     automerge && checks !== "failing" && (checks === "pending" || reviewRequired);
-  const canMerge = isOpen && data.mergeable && (directOk || queuesAuto) && !merge.isPending;
+  const mergeable =
+    !data.isDraft && !["dirty", "behind", "unknown", "draft"].includes(data.mergeState);
+  const canMerge = isOpen && mergeable && (directOk || queuesAuto) && !merge.isPending;
+  const base = data.baseRefName || "the base branch";
 
   const mergeTitle = () => {
+    if (data.isDraft || data.mergeState === "draft")
+      return "Draft PRs can't be merged. Mark it ready for review on GitHub";
+    if (data.mergeState === "dirty") return `Merge conflicts with ${base}. Resolve them before merging`;
+    if (data.mergeState === "behind") return `This branch is behind ${base}. Update it before merging`;
+    if (data.mergeState === "unknown") return "GitHub is still computing whether this can merge";
     if (queuesAuto) return "Queue auto-merge. GitHub merges once requirements are met";
     if (canMerge) return "Merge this pull request";
     if (checks === "pending") return "Waiting for checks to finish";
     if (checks === "failing") return "Fix the failing checks before merging";
     if (reviewRequired) return "Waiting for a required review before this can merge";
     if (changesRequested) return "A reviewer requested changes. Address them before merging";
-    if (!data.mergeable) return "GitHub reports this PR is not mergeable (conflicts or branch protection)";
+    if (data.mergeState === "blocked") return "GitHub reports the merge is blocked by branch protection";
     return "Merge unavailable";
   };
 
@@ -86,6 +104,18 @@ export function PrStatusBar({
         <Icon name="pullRequest" size="sm" />
         PR #{data.number}
       </button>
+      {data.state === "closed" && (
+        <span className={`${pill} border-edge bg-panel text-ink-dim`}>Closed</span>
+      )}
+      {failure?.kind === "rateLimited" ? (
+        <QuotaLow text={prFailureText(failure)} />
+      ) : (
+        failure && (
+          <span className="text-ui-sm text-warn-ink" title="The last PR status GitHub returned">
+            Stale: {prFailureText(failure)}
+          </span>
+        )
+      )}
 
       {isOpen && checks === "failing" && (
         <PillButton

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { openExternalUrl } from "@/lib/browser";
 import type { CheckBucket, ChecksState, PrChecks, ReviewDecision, WorkstreamView } from "@/lib/bindings";
+import { knownPr } from "@/lib/domain/pr";
 import { useWorkstreamPr } from "@/lib/queries";
 import { Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
@@ -88,10 +89,10 @@ export function PrChecksPanel({ view }: { view: WorkstreamView | null }) {
   const pr = useWorkstreamPr(id, view !== null);
   const [collapsed, setCollapsed] = useState(false);
 
-  const data = pr.data;
+  const data = knownPr(pr.data);
   if (!view || !data || data.state !== "open") return null;
 
-  const isConflicting = data.mergeableState === "conflicting";
+  const isConflicting = data.mergeState === "dirty";
   const reviewBlock =
     data.reviewDecision === "reviewRequired" || data.reviewDecision === "changesRequested"
       ? data.reviewDecision

@@ -43,6 +43,77 @@ pub(crate) fn upstream_oid(repo: &git2::Repository, head: &git2::Reference) -> O
         .and_then(|u| u.get().target())
 }
 
+pub(crate) fn pushed_ref(
+    repo: &git2::Repository,
+    branch: &str,
+    base: &str,
+) -> Option<(String, git2::Oid)> {
+    let is_base = |r: &git2::Reference| {
+        r.shorthand()
+            .is_some_and(|s| s == base || s == format!("origin/{base}"))
+    };
+    repo.find_branch(branch, git2::BranchType::Local)
+        .ok()
+        .and_then(|b| b.upstream().ok())
+        .map(git2::Branch::into_reference)
+        .filter(|r| !is_base(r))
+        .or_else(|| {
+            repo.find_reference(&format!("refs/remotes/origin/{branch}"))
+                .ok()
+        })
+        .and_then(|r| Some((r.shorthand()?.to_string(), r.target()?)))
+}
+
+fn branch_tip(repo: &git2::Repository, branch: &str) -> Option<git2::Oid> {
+    repo.find_branch(branch, git2::BranchType::Local)
+        .ok()
+        .and_then(|b| b.get().target())
+        .or_else(|| repo.head().ok()?.target())
+}
+
+fn has_object(repo: &git2::Repository, oid: git2::Oid) -> bool {
+    repo.odb().is_ok_and(|odb| odb.exists(oid))
+}
+
+pub(crate) fn pr_head_is_ours(
+    dir: &Path,
+    branch: &str,
+    base: &str,
+    head_oid: &str,
+) -> Option<bool> {
+    let repo = open_repo(dir).ok()?;
+    let oid = git2::Oid::from_str(head_oid).ok()?;
+    let contains =
+        |tip: git2::Oid| tip == oid || repo.graph_descendant_of(tip, oid).unwrap_or(false);
+    let pushed = pushed_ref(&repo, branch, base).map(|(_, oid)| oid);
+    Some(branch_tip(&repo, branch).is_some_and(contains) || pushed.is_some_and(contains))
+}
+
+pub(crate) fn local_tip(dir: &Path, branch: &str) -> Option<String> {
+    branch_tip(&open_repo(dir).ok()?, branch).map(|o| o.to_string())
+}
+
+pub(crate) fn has_work_past(
+    dir: &Path,
+    branch: &str,
+    head_oid: &str,
+    tip_then: Option<&str>,
+) -> bool {
+    let Ok(repo) = open_repo(dir) else {
+        return false;
+    };
+    let Some(tip) = branch_tip(&repo, branch) else {
+        return false;
+    };
+    match git2::Oid::from_str(head_oid)
+        .ok()
+        .filter(|h| has_object(&repo, *h))
+    {
+        Some(head) => tip != head && !repo.graph_descendant_of(head, tip).unwrap_or(false),
+        None => tip_then.is_some_and(|then| then != tip.to_string()),
+    }
+}
+
 pub fn list_branches(repo_path: &Path) -> Result<Vec<String>> {
     let repo = open_repo(repo_path)?;
     let branches = repo.branches(None).map_err(|e| CoreError::OutputParse {
@@ -204,11 +275,11 @@ pub fn remote_to_web_url(raw: &str) -> Option<String> {
     Some(format!("https://{host}/{path}"))
 }
 
-pub(crate) fn gh_api_hostname(dir: &Path) -> Option<String> {
+fn remotes_of(dir: &Path) -> Option<Vec<(String, String, bool)>> {
     let repo = git2::Repository::discover(dir).ok()?;
     let config = repo.config().ok()?;
     let names = repo.remotes().ok()?;
-    let remotes: Vec<(String, String, bool)> = names
+    let remotes = names
         .iter()
         .flatten()
         .filter_map(|name| {
@@ -219,21 +290,40 @@ pub(crate) fn gh_api_hostname(dir: &Path) -> Option<String> {
             Some((name.to_string(), url, resolved))
         })
         .collect();
-    base_remote_api_host(&remotes)
+    Some(remotes)
 }
 
-fn base_remote_api_host(remotes: &[(String, String, bool)]) -> Option<String> {
+pub(crate) fn gh_api_hostname(dir: &Path) -> Option<String> {
+    base_remote_api_host(&remotes_of(dir)?)
+}
+
+pub(crate) fn has_web_remote(dir: &Path) -> bool {
+    remotes_of(dir).is_some_and(|remotes| {
+        remotes
+            .iter()
+            .any(|(_, url, _)| remote_to_web_url(url).is_some())
+    })
+}
+
+pub(crate) fn base_remote_web_url(dir: &Path) -> Option<String> {
+    remote_to_web_url(&base_remote(&remotes_of(dir)?)?.1)
+}
+
+fn base_remote(remotes: &[(String, String, bool)]) -> Option<&(String, String, bool)> {
     let rank = |name: &str| match name.to_ascii_lowercase().as_str() {
         "upstream" => 0,
         "github" => 1,
         "origin" => 2,
         _ => 3,
     };
-    let (_, url, _) = remotes
+    remotes
         .iter()
         .find(|r| r.2)
-        .or_else(|| remotes.iter().min_by_key(|r| rank(&r.0)))?;
-    let web = remote_to_web_url(url)?;
+        .or_else(|| remotes.iter().min_by_key(|r| rank(&r.0)))
+}
+
+fn base_remote_api_host(remotes: &[(String, String, bool)]) -> Option<String> {
+    let web = remote_to_web_url(&base_remote(remotes)?.1)?;
     let host = web
         .strip_prefix("https://")?
         .split('/')
@@ -1082,6 +1172,143 @@ mod tests {
         let all = list_branches(&repo_dir).unwrap();
         assert!(all.contains(&"main".to_string()));
         assert!(all.contains(&"origin/linux-support".to_string()));
+    }
+
+    fn git_out(cwd: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn commit(cwd: &Path, message: &str) -> String {
+        git_out(cwd, &["commit", "-q", "--allow-empty", "-m", message]);
+        git_out(cwd, &["rev-parse", "HEAD"])
+    }
+
+    fn clone_with_origin(tmp: &Path) -> (PathBuf, PathBuf) {
+        let origin = tmp.join("origin.git");
+        let clone = tmp.join("clone");
+        git_out(tmp, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+        git_out(tmp, &["init", "-q", "-b", "main", "clone"]);
+        commit(&clone, "init");
+        git_out(
+            &clone,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git_out(&clone, &["push", "-q", "origin", "main"]);
+        git_out(
+            &clone,
+            &["switch", "-q", "-c", "feat", "--track", "origin/main"],
+        );
+        (origin, clone)
+    }
+
+    const NEVER_FETCHED: &str = "1111111111111111111111111111111111111111";
+
+    #[test]
+    fn a_pr_head_is_ours_when_the_branch_or_its_pushed_ref_holds_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (origin, clone) = clone_with_origin(tmp.path());
+        let ours = |oid: &str| pr_head_is_ours(&clone, "feat", "origin/main", oid) == Some(true);
+        let older = commit(&clone, "a");
+        let tip = commit(&clone, "b");
+        assert!(ours(&tip) && ours(&older));
+
+        let tree = git_out(&clone, &["rev-parse", "HEAD^{tree}"]);
+        let unrelated = git_out(&clone, &["commit-tree", &tree, "-m", "elsewhere"]);
+        assert!(!ours(&unrelated));
+        assert!(!ours(NEVER_FETCHED), "a never-pushed branch reusing a name");
+        assert_eq!(pr_head_is_ours(&clone, "feat", "origin/main", ""), None);
+
+        git_out(&clone, &["push", "-q", "-u", "origin", "feat"]);
+        assert!(
+            !ours(NEVER_FETCHED),
+            "pushing a reused branch name does not claim a head it never held"
+        );
+
+        let mate = tmp.path().join("mate");
+        git_out(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                "-b",
+                "feat",
+                origin.to_str().unwrap(),
+                "mate",
+            ],
+        );
+        let pushed = commit(&mate, "c");
+        git_out(&mate, &["push", "-q", "origin", "feat"]);
+        git_out(&clone, &["fetch", "-q", "origin"]);
+        assert!(ours(&pushed), "a teammate's push, fetched but not pulled");
+
+        git_out(&mate, &["push", "-q", "origin", "--delete", "feat"]);
+        git_out(&clone, &["fetch", "-q", "--prune", "origin"]);
+        assert!(!ours(&pushed), "the pushed ref is gone");
+    }
+
+    #[test]
+    fn only_a_remote_with_a_web_url_can_be_github() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_origin, clone) = clone_with_origin(tmp.path());
+        assert!(!has_web_remote(&clone), "a local-path origin");
+        assert_eq!(base_remote_web_url(&clone), None);
+        git_out(
+            &clone,
+            &["remote", "add", "github", "git@github.com:o/r.git"],
+        );
+        assert!(has_web_remote(&clone));
+        assert_eq!(
+            base_remote_web_url(&clone).as_deref(),
+            Some("https://github.com/o/r")
+        );
+    }
+
+    #[test]
+    fn work_past_a_pr_head_is_a_local_commit_it_does_not_hold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (origin, clone) = clone_with_origin(tmp.path());
+        let past = |head: &str, then: Option<&str>| has_work_past(&clone, "feat", head, then);
+        let head = commit(&clone, "a");
+        assert!(!past(&head, None));
+
+        git_out(&clone, &["push", "-q", "-u", "origin", "feat"]);
+        let mate = tmp.path().join("mate");
+        git_out(
+            tmp.path(),
+            &[
+                "clone",
+                "-q",
+                "-b",
+                "feat",
+                origin.to_str().unwrap(),
+                "mate",
+            ],
+        );
+        let ahead = commit(&mate, "b");
+        git_out(&mate, &["push", "-q", "origin", "feat"]);
+        git_out(&clone, &["fetch", "-q", "origin"]);
+        assert!(!past(&ahead, None), "the PR's head is ahead of the tip");
+
+        let tip = commit(&clone, "c");
+        assert!(past(&head, None));
+        assert!(!past(NEVER_FETCHED, Some(&tip)));
+        assert!(past(NEVER_FETCHED, Some(&head)));
     }
 
     #[test]

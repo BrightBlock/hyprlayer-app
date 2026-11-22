@@ -85,16 +85,7 @@ export const commands = {
 	worktreeCommitFiles: (id: string, sha: string) => typedError<GitFileEntry[], AppError>(__TAURI_INVOKE("worktree_commit_files", { id, sha })),
 	worktreeCommitFileSides: (id: string, sha: string, path: string) => typedError<FileSides, AppError>(__TAURI_INVOKE("worktree_commit_file_sides", { id, sha, path })),
 	watchWorktree: (workstreamId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("watch_worktree", { workstreamId })),
-	workstreamPrStatus: (id: string) => typedError<{
-	number: number,
-	url: string,
-	title: string,
-	state: PrState,
-	mergeable: boolean,
-	mergeableState: MergeableState,
-	checks: PrChecks,
-	reviewDecision: ReviewDecision | null,
-} | null, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
+	workstreamPrStatus: (id: string) => typedError<PrLookup, AppError>(__TAURI_INVOKE("workstream_pr_status", { id })),
 	listWorkstreamOpenPrs: (id: string, query: string) => typedError<PrSummary[], AppError>(__TAURI_INVOKE("list_workstream_open_prs", { id, query })),
 	previewWorkstreamPr: (id: string, prNumber: number) => typedError<{
 	number: number,
@@ -108,10 +99,13 @@ export const commands = {
 	url: string,
 	title: string,
 	state: PrState,
-	mergeable: boolean,
-	mergeableState: MergeableState,
+	isDraft: boolean,
+	baseRefName: string,
+	headRefOid: string,
+	mergeState: MergeState,
 	checks: PrChecks,
 	reviewDecision: ReviewDecision | null,
+	reviews: PrReview[],
 } | null, AppError>(__TAURI_INVOKE("attach_workstream_pr", { id, prNumber })),
 	detachWorkstreamPr: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("detach_workstream_pr", { id })),
 	mergeWorkstreamPr: (id: string, method: MergeMethod) => typedError<null, AppError>(__TAURI_INVOKE("merge_workstream_pr", { id, method })),
@@ -1345,7 +1339,7 @@ export type MemoryKeyCheck = "verified" | "unverified" | "mismatch";
 
 export type MergeMethod = "squash" | "merge" | "rebase";
 
-export type MergeableState = "mergeable" | "conflicting" | "unknown";
+export type MergeState = "clean" | "blocked" | "behind" | "dirty" | "unstable" | "hasHooks" | "draft" | "unknown";
 
 export type MultiplexerSettings = {
 	enabled?: boolean,
@@ -1446,6 +1440,15 @@ export type PrChecks = {
 	list: PrCheck[],
 };
 
+export type PrLookup = { kind: "unknown" } | { kind: "noPr" } | { kind: "notGitHub" } | { kind: "found"; pr: PrStatus } | { kind: "failed"; cause: PrLookupFailure; last: PrStatus | null };
+
+export type PrLookupFailure = { kind: "ghMissing" } | { kind: "signedOut" } | { kind: "rateLimited"; resumesAt: number | null } | { kind: "other" };
+
+export type PrReview = {
+	author: string,
+	state: ReviewState,
+};
+
 export type PrState = "open" | "merged" | "closed";
 
 export type PrStatus = {
@@ -1453,10 +1456,13 @@ export type PrStatus = {
 	url: string,
 	title: string,
 	state: PrState,
-	mergeable: boolean,
-	mergeableState: MergeableState,
+	isDraft: boolean,
+	baseRefName: string,
+	headRefOid: string,
+	mergeState: MergeState,
 	checks: PrChecks,
 	reviewDecision: ReviewDecision | null,
+	reviews: PrReview[],
 };
 
 export type PrStatusChanged = {
@@ -1831,6 +1837,8 @@ export type ReviewRound = {
 };
 
 export type ReviewSide = "original" | "modified";
+
+export type ReviewState = "approved" | "changesRequested" | "commented" | "dismissed" | "pending";
 
 export type ReviewStatus = "in_progress" | "changes_requested" | "approved";
 

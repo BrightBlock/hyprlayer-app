@@ -2,6 +2,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
+// A GitHub-looking remote that never resolves; Fetch only fetches `origin`.
+pub const GITHUB_REMOTE: &str = "https://github.invalid/e2e/demo.git";
+
 pub fn script(state_dir: &Path) -> String {
     format!(
         r##"#!/bin/sh
@@ -9,6 +12,10 @@ dir="{dir}"
 {{ printf '%s ' "$@" | tr '\n' ' '; echo; }} >> "$dir/calls.log"
 [ "$1" = "--version" ] && {{ echo "gh version 2.81.0 (2026-01-01)"; exit 0; }}
 [ -f "$dir/FAIL" ] && {{ echo "HTTP 502: Bad Gateway" >&2; exit 1; }}
+if [ -f "$dir/SECONDARY" ]; then
+  echo "gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again." >&2
+  exit 1
+fi
 if [ -f "$dir/RATE_LIMITED" ]; then
   echo '{{"data":null,"errors":[{{"type":"RATE_LIMITED","message":"API rate limit already exceeded for user ID 1."}}]}}'
   echo "gh: API rate limit already exceeded for user ID 1." >&2
@@ -40,7 +47,16 @@ if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
     exit 1
   fi
   node=$(node_for "$branch") || node=""
+  if [ -f "$dir/SLOW_ONCE" ] && [ "$(cat "$dir/SLOW_ONCE")" = "$branch" ]; then
+    rm -f "$dir/SLOW_ONCE"
+    sleep 6
+  fi
   printf '{{"data":{{"rateLimit":%s,"repository":{{"defaultBranchRef":{{"name":"main"}},"pullRequests":{{"nodes":[%s]}}}}}}}}\n' "$rate" "$node"
+  exit 0
+fi
+if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  key=$(printf '%s' "$3" | tr '/' '_')
+  sed 's/"state":"OPEN"/"state":"MERGED"/' "$dir/$key.json" > "$dir/$key.merging" && mv "$dir/$key.merging" "$dir/$key.json"
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
@@ -59,7 +75,6 @@ exit 1
 pub struct FakePr {
     pub number: u32,
     pub state: &'static str,
-    pub mergeable: &'static str,
     pub is_draft: bool,
     pub base: &'static str,
     pub merge_state: &'static str,
@@ -72,7 +87,6 @@ impl FakePr {
         FakePr {
             number,
             state,
-            mergeable: "UNKNOWN",
             is_draft: false,
             base: "main",
             merge_state: "UNKNOWN",
@@ -93,7 +107,6 @@ pub fn set_pr(dir: &Path, reference: &str, pr: &FakePr) {
         "url": format!("https://github.com/e2e/demo/pull/{}", pr.number),
         "title": format!("E2E #{}", pr.number),
         "state": pr.state,
-        "mergeable": pr.mergeable,
         "reviewDecision": "",
         "isDraft": pr.is_draft,
         "baseRefName": pr.base,

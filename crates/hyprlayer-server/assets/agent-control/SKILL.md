@@ -34,6 +34,8 @@ Read tools work at agent control Read or Full:
 | `notify_user` | `ctl notify <title> <body>` |
 | `request_attention` | `ctl attention <reason>` |
 
+`pr_status` answers with a `kind`: `found` (the PR is in `pr`), `noPr`, `notGitHub` (no GitHub remote), `failed` (`cause` says why, `last` is the last known PR or null), or `unknown`.
+
 These need Full. You get it when the user sets agent control to Full, or when you run in bypass permissions mode:
 
 | MCP tool | ctl |

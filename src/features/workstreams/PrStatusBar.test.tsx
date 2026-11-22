@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PrStatusBar } from "./PrStatusBar";
-import type { PrStatus, WorkstreamView } from "@/lib/bindings";
+import type { PrLookup, PrStatus, WorkstreamView } from "@/lib/bindings";
 
 const q = vi.hoisted(() => ({
   useWorkstreamPr: vi.fn(),
@@ -24,16 +24,23 @@ function makePr(overrides: Partial<PrStatus> = {}): PrStatus {
     url: "https://github.com/o/r/pull/42",
     title: "My PR",
     state: "open",
-    mergeable: true,
-    mergeableState: "mergeable",
+    isDraft: false,
+    baseRefName: "main",
+    headRefOid: "abc",
+    mergeState: "clean",
     checks: { state: "passing", total: 1, passed: 1, failed: 0, pending: 0, skipped: 0, cancelled: 0, list: [] },
     reviewDecision: null,
+    reviews: [],
     ...overrides,
   };
 }
 
 function renderBar(pr: PrStatus, automerge = false) {
-  q.useWorkstreamPr.mockReturnValue({ data: pr });
+  renderLookup({ kind: "found", pr }, automerge);
+}
+
+function renderLookup(lookup: PrLookup, automerge = false) {
+  q.useWorkstreamPr.mockReturnValue({ data: lookup });
   q.useMergePr.mockReturnValue({ mutate: vi.fn(), isPending: false });
   q.useBootstrap.mockReturnValue({ data: { settings: { git: { automerge } } } });
   render(<PrStatusBar view={VIEW} onArchive={vi.fn()} />);
@@ -105,6 +112,65 @@ describe("PrStatusBar checks", () => {
     expect(screen.getByText("Fix CI")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Auto-merge" })).toBeNull();
     expect(mergeBtn().disabled).toBe(true);
+  });
+});
+
+describe("PrStatusBar merge state", () => {
+  it("disables Merge on a draft like OISF/suricata#15352 and says why", () => {
+    renderBar(makePr({ isDraft: true, mergeState: "blocked", reviewDecision: "reviewRequired" }), true);
+    const btn = screen.getByRole("button", { name: /merge/i }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute("title")).toMatch(/^Draft/);
+  });
+
+  it("gives blocked, behind and conflicting PRs their own reason", () => {
+    const titleFor = (pr: PrStatus) => {
+      renderBar(pr);
+      const title = mergeBtn().getAttribute("title");
+      expect(mergeBtn().disabled).toBe(true);
+      cleanup();
+      return title;
+    };
+    expect(titleFor(makePr({ mergeState: "dirty" }))).toBe(
+      "Merge conflicts with main. Resolve them before merging",
+    );
+    expect(titleFor(makePr({ mergeState: "behind", baseRefName: "release" }))).toBe(
+      "This branch is behind release. Update it before merging",
+    );
+    expect(titleFor(makePr({ mergeState: "blocked" }))).toBe(
+      "GitHub reports the merge is blocked by branch protection",
+    );
+    expect(titleFor(makePr({ mergeState: "unknown" }))).toBe(
+      "GitHub is still computing whether this can merge",
+    );
+  });
+});
+
+describe("PrStatusBar quota icon", () => {
+  const quotaIcon = () => screen.queryByRole("img", { name: /^GitHub quota low/ });
+
+  it("marks a PR held by a low quota with an icon that says when it refreshes", () => {
+    const resumesAt = Date.now() + 60_000;
+    renderLookup({ kind: "failed", cause: { kind: "rateLimited", resumesAt }, last: makePr() });
+    const at = new Date(resumesAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    expect(quotaIcon()?.getAttribute("title")).toBe(`GitHub quota low, refreshing at ${at}`);
+    expect(quotaIcon()?.getAttribute("aria-label")).toBe(`GitHub quota low, refreshing at ${at}`);
+    expect(screen.queryByText(/Stale:/)).toBeNull();
+  });
+
+  it("says only that the quota is low when GitHub gave no reset time", () => {
+    renderLookup({ kind: "failed", cause: { kind: "rateLimited", resumesAt: null }, last: makePr() });
+    expect(quotaIcon()?.getAttribute("title")).toBe("GitHub quota low");
+  });
+
+  it("uses text, not the icon, for other failures and none for a fresh lookup", () => {
+    renderLookup({ kind: "failed", cause: { kind: "signedOut" }, last: makePr() });
+    expect(quotaIcon()).toBeNull();
+    expect(screen.getByText("Stale: gh is not signed in")).toBeTruthy();
+    cleanup();
+    renderBar(makePr());
+    expect(quotaIcon()).toBeNull();
+    expect(screen.queryByText(/Stale:/)).toBeNull();
   });
 });
 

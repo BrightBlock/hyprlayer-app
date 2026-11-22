@@ -1,7 +1,7 @@
 use hyprlayer_core::branch_prefix::{BranchPrefix, PrefixSource};
 use hyprlayer_core::gitops::{CommitEntry, DirEntry, FileSides, GitFileEntry, WorktreeGitStatus};
 use hyprlayer_core::pipeline::Stage;
-use hyprlayer_core::pr::{MergeMethod, PrStatus, PrSummary};
+use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
 use hyprlayer_core::runtime::workstreams as core_workstreams;
 use hyprlayer_core::skills::SlashCommand;
@@ -743,10 +743,7 @@ pub async fn worktree_search_files(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn workstream_pr_status(
-    state: State<'_, AppState>,
-    id: String,
-) -> CmdResult<Option<PrStatus>> {
+pub async fn workstream_pr_status(state: State<'_, AppState>, id: String) -> CmdResult<PrLookup> {
     state
         .client()?
         .workstream_pr_status(id)

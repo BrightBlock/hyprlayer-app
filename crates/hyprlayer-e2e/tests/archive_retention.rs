@@ -52,6 +52,7 @@ async fn archive_retention() {
     sandbox.stage_tool("gh", &fake_gh::script(&gh_state));
     sandbox.stage_tool("claude", FAKE_CLAUDE);
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
+    sandbox.git(&repo, &["remote", "add", "github", fake_gh::GITHUB_REMOTE]);
     let mut j = Journey::new("archive_retention", &sandbox);
     let server = Server::start(&sandbox).await;
     let client = server.client();

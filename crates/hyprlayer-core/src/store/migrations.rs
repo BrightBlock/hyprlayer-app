@@ -289,6 +289,10 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN requested_permission_mode TEXT;
     ",
+    "
+    ALTER TABLE workstreams ADD COLUMN observed_pr_head TEXT;
+    ALTER TABLE workstreams ADD COLUMN observed_pr_tip TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

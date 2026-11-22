@@ -8,6 +8,7 @@ import { plural } from "@/lib/format";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
+import { knownPr } from "@/lib/domain/pr";
 import { useBootstrap, useWorkstreamPr } from "@/lib/queries";
 import { isInlinePlanKey } from "@/features/session/planPresentation";
 import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
@@ -93,7 +94,7 @@ export function ReviewHeader({
   const submitRef = useRef<HTMLButtonElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const submitRequested = useSubmitRequested(view.item.id);
-  const pr = useWorkstreamPr(view.item.id).data;
+  const pr = knownPr(useWorkstreamPr(view.item.id).data);
   const prNumber = pr && (pr.state === "open" || pr.state === "merged") ? pr.number : null;
   const unsent = review?.comments.filter((c) => c.state === "pending" || c.state === "saved").length ?? 0;
   const latest = review?.rounds[review.rounds.length - 1];

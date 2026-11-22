@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import type { WorkstreamView } from "@/lib/bindings";
+import type { PrLookup, WorkstreamView } from "@/lib/bindings";
 import {
   useBootstrap,
   useFetchWorkstreamRemote,
@@ -10,6 +10,7 @@ import {
   useWorkstreamBases,
 } from "@/lib/queries";
 import { isDetachedHead, shortBranch } from "@/lib/domain/projects";
+import { knownPr, prFailureText } from "@/lib/domain/pr";
 import { IS_MACOS } from "@/lib/platform";
 import { formatChord } from "@/lib/keybindings/chord";
 import { effectiveChord } from "@/lib/keybindings/resolve";
@@ -17,11 +18,11 @@ import { ErrorNote, IconButton, Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 import { useWorkstreamGitActions } from "./useGitActions";
 import { AheadBehind } from "./AheadBehind";
-import { PrStatusBar } from "./PrStatusBar";
+import { PrStatusBar, QuotaLow } from "./PrStatusBar";
 import { AttachPrDialog } from "./AttachPrDialog";
 import { ArchiveWorkstreamDialog } from "./ArchiveWorkstreamDialog";
 
-function BranchTargetRow({ view }: { view: WorkstreamView }) {
+function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: string }) {
   const [open, setOpen] = useState(false);
   const setBase = useSetWorkstreamBase(view.item.id);
   const bases = useWorkstreamBases(view.item.projectPath, open);
@@ -32,6 +33,7 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
   };
   const refreshing = fetchRemote.isPending || bases.isFetching;
   const baseShort = shortBranch(view.item.baseBranch);
+  const retargeted = prBase !== "" && prBase !== baseShort;
   const detached = isDetachedHead(view);
   const choices = (bases.data?.branches ?? [])
     .filter((b) => b.startsWith("origin/"))
@@ -61,11 +63,17 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
             onClick={() => setOpen((o) => !o)}
             disabled={setBase.isPending}
             className="inline-flex items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 text-meta text-ink hover:bg-edge/50 disabled:opacity-60"
-            title={`Merge target: ${view.item.baseBranch} , click to change`}
+            title={
+              retargeted
+                ? `The PR targets ${prBase}; this workstream targets ${view.item.baseBranch} , click to change`
+                : `Merge target: ${view.item.baseBranch} , click to change`
+            }
             aria-label="Change target branch"
           >
             {setBase.isPending && <Spinner size="xs" />}
-            <span className="max-w-[110px] truncate">{baseShort}</span>
+            <span className={`max-w-[110px] truncate ${retargeted ? "text-warn-ink" : ""}`}>
+              {retargeted ? prBase : baseShort}
+            </span>
             <Icon name="chevronDown" size="xs" className="text-ink-dim" />
           </button>
           {open && (
@@ -123,8 +131,36 @@ function BranchTargetRow({ view }: { view: WorkstreamView }) {
           )}
         </div>
       </div>
+      {retargeted && (
+        <div className="flex items-center gap-2 px-1 text-ui-sm text-warn-ink">
+          <span className="min-w-0 flex-1 truncate">
+            The PR targets {prBase}, not {baseShort}
+          </span>
+          <button
+            type="button"
+            disabled={setBase.isPending}
+            onClick={() => setBase.mutate(`origin/${prBase}`)}
+            className="shrink-0 font-medium text-accent hover:underline disabled:opacity-60"
+          >
+            Use origin/{prBase}
+          </button>
+        </div>
+      )}
       {setBase.isError && <ErrorNote error={setBase.error} onDismiss={() => setBase.reset()} />}
     </div>
+  );
+}
+
+function PrUnknown({ lookup }: { lookup: PrLookup }) {
+  if (lookup.kind === "failed" && lookup.cause.kind === "rateLimited") {
+    return <QuotaLow text={prFailureText(lookup.cause)} />;
+  }
+  return (
+    <p className="text-ui text-ink-dim">
+      {lookup.kind === "failed"
+        ? `PR status unknown: ${prFailureText(lookup.cause)}`
+        : "PR status unknown"}
+    </p>
   );
 }
 
@@ -173,12 +209,10 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               <div className="text-label text-ink-dim">
                 Pull Request
               </div>
-              <BranchTargetRow view={view} />
+              <BranchTargetRow view={view} prBase={knownPr(actions.prLookup)?.baseRefName ?? ""} />
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  {actions.hasLivePr ? (
-                    <PrStatusBar view={view} onArchive={setArchiveTarget} />
-                  ) : (
+                  {actions.prLookup?.kind === "noPr" ? (
                     <button
                       type="button"
                       onClick={() => setAttachTarget(view)}
@@ -186,7 +220,11 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     >
                       Attach an existing PR…
                     </button>
-                  )}
+                  ) : knownPr(actions.prLookup) ? (
+                    <PrStatusBar view={view} onArchive={setArchiveTarget} />
+                  ) : actions.prLookup && actions.prLookup.kind !== "notGitHub" ? (
+                    <PrUnknown lookup={actions.prLookup} />
+                  ) : null}
                 </div>
                 {behind > 0 && !conflicts && (
                   <button
