@@ -295,4 +295,11 @@ describe("WorkstreamGitChip", () => {
     rerender(<WorkstreamGitChip view={withGit({ unpushed: 0, base: { ahead: 3, behind: 0 } })} />);
     expect(container.textContent).toBe("");
   });
+
+  it("never reads as clean when the checkout's changes can't be read", () => {
+    const reason = "this checkout uses a sparse index, which Hyprlayer can't read";
+    const { container } = render(<WorkstreamGitChip view={withGit({ unpushed: 0, unreadable: reason })} />);
+    expect(container.textContent).toBe("?");
+    expect(screen.getByTitle(reason)).toBeDefined();
+  });
 });

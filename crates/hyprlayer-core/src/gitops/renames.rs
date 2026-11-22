@@ -18,27 +18,45 @@ pub(crate) struct Side<'a> {
     pub(crate) path: &'a str,
     pub(crate) oid: Oid,
     pub(crate) mode: u32,
+    pub(crate) stays: bool,
 }
 
-pub(crate) fn rename_detection(repo: &Repository) -> Option<u64> {
+pub(crate) struct Detection {
+    pub(crate) limit: u64,
+    pub(crate) copies: bool,
+}
+
+pub(crate) struct Pair {
+    pub(crate) src: usize,
+    pub(crate) dst: usize,
+    pub(crate) copy: bool,
+}
+
+pub(crate) fn rename_detection(repo: &Repository) -> Option<Detection> {
     let Some(config) = repo.config().and_then(|mut c| c.snapshot()).ok() else {
-        return Some(DEFAULT_LIMIT as u64);
+        return Some(Detection {
+            limit: DEFAULT_LIMIT as u64,
+            copies: false,
+        });
     };
     let string = |key: &str| config.get_string(key).ok();
-    let detect = string("status.renames").or_else(|| string("diff.renames"));
-    if detect.is_some_and(|v| {
-        matches!(
-            v.to_ascii_lowercase().as_str(),
-            "false" | "no" | "off" | "0" | ""
-        )
-    }) {
+    let detect = string("status.renames")
+        .or_else(|| string("diff.renames"))
+        .map(|v| v.to_ascii_lowercase());
+    if detect
+        .as_deref()
+        .is_some_and(|v| matches!(v, "false" | "no" | "off" | "0" | ""))
+    {
         return None;
     }
     let limit = config
         .get_i64("status.renameLimit")
         .or_else(|_| config.get_i64("diff.renameLimit"))
         .unwrap_or(DEFAULT_LIMIT);
-    Some(if limit <= 0 { u64::MAX } else { limit as u64 })
+    Some(Detection {
+        limit: if limit <= 0 { u64::MAX } else { limit as u64 },
+        copies: matches!(detect.as_deref(), Some("copies" | "copy")),
+    })
 }
 
 fn is_regular(mode: u32) -> bool {
@@ -135,6 +153,26 @@ fn similarity(src: &Counted, dst: &Counted, minimum: u64) -> u64 {
     copied(&src.spans, &dst.spans) * MAX_SCORE / max
 }
 
+pub(crate) fn still_similar(
+    repo: &Repository,
+    source: &str,
+    (oid, mode): (Oid, u32),
+    target: &str,
+) -> bool {
+    let Some(abs) = repo.workdir().map(|w| w.join(target)) else {
+        return false;
+    };
+    if !is_regular(mode) || !std::fs::symlink_metadata(&abs).is_ok_and(|m| m.is_file()) {
+        return false;
+    }
+    let (Ok(blob), Ok(bytes)) = (repo.find_blob(oid), std::fs::read(&abs)) else {
+        return false;
+    };
+    let src = count_spans(blob.content(), is_binary(repo, source, blob.content()));
+    let dst = count_spans(&bytes, is_binary(repo, target, &bytes));
+    similarity(&src, &dst, MIN_SCORE) >= MIN_SCORE
+}
+
 type Cache<'a> = HashMap<(Oid, &'a str), Option<Counted>>;
 
 fn load<'a>(cache: &mut Cache<'a>, repo: &Repository, side: &Side<'a>) -> bool {
@@ -195,9 +233,10 @@ pub(crate) fn pair(
     repo: &Repository,
     sources: &[Side<'_>],
     targets: &[Side<'_>],
-    limit: u64,
-) -> Vec<(usize, usize)> {
-    let mut used = vec![false; sources.len()];
+    detect: &Detection,
+) -> Vec<Pair> {
+    let copies = detect.copies;
+    let mut used: Vec<u32> = sources.iter().map(|s| u32::from(s.stays)).collect();
     let mut done = vec![false; targets.len()];
     let mut pairs = Vec::new();
 
@@ -213,18 +252,19 @@ pub(crate) fn pair(
             .copied()
             .filter(|&s| {
                 let source = &sources[s];
-                !used[s]
+                (copies || used[s] == 0)
                     && (source.mode == target.mode
                         || (is_regular(source.mode) && is_regular(target.mode)))
             })
             .max_by_key(|&s| {
                 (
-                    basename(sources[s].path) == basename(target.path),
+                    u8::from(used[s] == 0)
+                        + u8::from(basename(sources[s].path) == basename(target.path)),
                     Reverse(s),
                 )
             });
         if let Some(s) = best {
-            used[s] = true;
+            used[s] += 1;
             done[d] = true;
             pairs.push((s, d));
         }
@@ -247,7 +287,7 @@ pub(crate) fn pair(
 
     let src_names = unique_names(
         (0..sources.len())
-            .filter(|&s| !used[s])
+            .filter(|&s| !copies && used[s] == 0)
             .map(|s| (basename(sources[s].path), s)),
     );
     let dst_names = unique_names(
@@ -258,18 +298,20 @@ pub(crate) fn pair(
     for (name, &s) in &src_names {
         if let Some(&d) = dst_names.get(name) {
             if score(s, d, BASENAME_MIN_SCORE) >= BASENAME_MIN_SCORE {
-                used[s] = true;
+                used[s] += 1;
                 done[d] = true;
                 pairs.push((s, d));
             }
         }
     }
 
-    let srcs: Vec<usize> = (0..sources.len()).filter(|&s| !used[s]).collect();
+    let srcs: Vec<usize> = (0..sources.len())
+        .filter(|&s| copies || used[s] == 0)
+        .collect();
     let dsts: Vec<usize> = (0..targets.len()).filter(|&d| !done[d]).collect();
     let cells = (srcs.len() as u64).saturating_mul(dsts.len() as u64);
-    if srcs.is_empty() || dsts.is_empty() || cells > limit.saturating_mul(limit) {
-        return pairs;
+    if srcs.is_empty() || dsts.is_empty() || cells > detect.limit.saturating_mul(detect.limit) {
+        return resolve(pairs, used);
     }
 
     let mut matrix: Vec<Option<Candidate>> = Vec::with_capacity(dsts.len() * CANDIDATES_PER_TARGET);
@@ -287,16 +329,35 @@ pub(crate) fn pair(
         matrix.extend(slots);
     }
     matrix.sort_by(rank);
-    for candidate in matrix
+    let usable: Vec<Candidate> = matrix
         .into_iter()
         .map_while(|c| c.filter(|c| c.score >= MIN_SCORE))
-    {
-        if done[candidate.dst] || used[candidate.src] {
-            continue;
+        .collect();
+    let passes: &[bool] = if copies { &[false, true] } else { &[false] };
+    for &reuse in passes {
+        for c in &usable {
+            if done[c.dst] || (!reuse && used[c.src] > 0) {
+                continue;
+            }
+            used[c.src] += 1;
+            done[c.dst] = true;
+            pairs.push((c.src, c.dst));
         }
-        used[candidate.src] = true;
-        done[candidate.dst] = true;
-        pairs.push((candidate.src, candidate.dst));
     }
+    resolve(pairs, used)
+}
+
+fn resolve(mut pairs: Vec<(usize, usize)>, mut used: Vec<u32>) -> Vec<Pair> {
+    pairs.sort_unstable_by_key(|&(_, d)| d);
     pairs
+        .into_iter()
+        .map(|(src, dst)| {
+            used[src] -= 1;
+            Pair {
+                src,
+                dst,
+                copy: used[src] > 0,
+            }
+        })
+        .collect()
 }

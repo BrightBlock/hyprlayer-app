@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -57,12 +58,21 @@ pub(crate) struct Change {
     pub(crate) path: String,
     pub(crate) status: git2::Status,
     pub(crate) renamed_from: Option<String>,
+    pub(crate) copied_from: Option<String>,
     pub(crate) gitlink: bool,
+    head: Option<Side>,
+    staged: Option<Side>,
 }
+
+type Side = (git2::Oid, u32);
 
 impl Change {
     fn unstaged(&self) -> bool {
         self.status.intersects(WT_ANY)
+    }
+
+    fn old_path(&self) -> Option<&str> {
+        self.renamed_from.as_deref().or(self.copied_from.as_deref())
     }
 
     pub(crate) fn tracked(&self) -> bool {
@@ -124,8 +134,6 @@ pub(crate) fn read_changes(repo: &git2::Repository, show: git2::StatusShow) -> R
     let side = |f: git2::DiffFile<'_>| (f.id(), u32::from(f.mode()));
 
     let mut changes = Vec::new();
-    let mut heads = Vec::new();
-    let mut staged = Vec::new();
     for entry in statuses.iter() {
         let Some(path) = entry.path() else {
             continue;
@@ -164,12 +172,6 @@ pub(crate) fn read_changes(repo: &git2::Repository, show: git2::StatusShow) -> R
             status.remove(git2::Status::WT_MODIFIED);
         }
         if !status.is_empty() {
-            changes.push(Change {
-                path: path.to_string(),
-                status,
-                renamed_from: None,
-                gitlink,
-            });
             let intent_to_add = status.contains(git2::Status::INDEX_NEW)
                 && index
                     .as_ref()
@@ -178,30 +180,40 @@ pub(crate) fn read_changes(repo: &git2::Repository, show: git2::StatusShow) -> R
                         git2::IndexEntryExtendedFlag::from_bits_truncate(e.flags_extended)
                             .is_intent_to_add()
                     });
-            heads.push(head_side);
-            staged.push(index_side.filter(|_| !intent_to_add));
+            changes.push(Change {
+                path: path.to_string(),
+                status,
+                renamed_from: None,
+                copied_from: None,
+                gitlink,
+                head: head_side.filter(|(oid, _)| !oid.is_zero()),
+                staged: index_side.filter(|_| !intent_to_add),
+            });
         }
     }
-    pair_renames(repo, &mut changes, &heads, &staged);
+    pair_renames(repo, &mut changes);
     Ok(changes)
 }
 
-type Sides = [Option<(git2::Oid, u32)>];
-
-fn pair_renames(repo: &git2::Repository, changes: &mut Vec<Change>, heads: &Sides, staged: &Sides) {
-    let Some(limit) = renames::rename_detection(repo) else {
+fn pair_renames(repo: &git2::Repository, changes: &mut Vec<Change>) {
+    let Some(detect) = renames::rename_detection(repo) else {
         return;
     };
-    let collect = |flag: git2::Status, sides: &Sides| -> Vec<(usize, git2::Oid, u32)> {
-        changes
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.status.contains(flag))
-            .filter_map(|(i, _)| sides[i].map(|(oid, mode)| (i, oid, mode)))
-            .collect()
-    };
-    let sources = collect(git2::Status::INDEX_DELETED, heads);
-    let targets = collect(git2::Status::INDEX_NEW, staged);
+    let mut source_flags = git2::Status::INDEX_DELETED;
+    if detect.copies {
+        source_flags |= git2::Status::INDEX_MODIFIED | git2::Status::INDEX_TYPECHANGE;
+    }
+    let collect =
+        |flags: git2::Status, side: fn(&Change) -> Option<Side>| -> Vec<(usize, git2::Oid, u32)> {
+            changes
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.status.intersects(flags))
+                .filter_map(|(i, c)| side(c).map(|(oid, mode)| (i, oid, mode)))
+                .collect()
+        };
+    let sources = collect(source_flags, |c| c.head);
+    let targets = collect(git2::Status::INDEX_NEW, |c| c.staged);
     if sources.is_empty() || targets.is_empty() {
         return;
     }
@@ -211,13 +223,19 @@ fn pair_renames(repo: &git2::Repository, changes: &mut Vec<Change>, heads: &Side
                 path: &changes[i].path,
                 oid,
                 mode,
+                stays: !changes[i].status.contains(git2::Status::INDEX_DELETED),
             })
             .collect()
     };
-    let pairs = renames::pair(repo, &sides(&sources), &sides(&targets), limit);
-    for (s, d) in pairs {
-        let (source, target) = (sources[s].0, targets[d].0);
+    let pairs = renames::pair(repo, &sides(&sources), &sides(&targets), &detect);
+    for pair in pairs {
+        let (source, target) = (sources[pair.src].0, targets[pair.dst].0);
         let from = changes[source].path.clone();
+        changes[target].head = changes[source].head;
+        if pair.copy {
+            changes[target].copied_from = Some(from);
+            continue;
+        }
         changes[source].status.remove(git2::Status::INDEX_DELETED);
         let target = &mut changes[target];
         target.status.remove(git2::Status::INDEX_NEW);
@@ -227,13 +245,17 @@ fn pair_renames(repo: &git2::Repository, changes: &mut Vec<Change>, heads: &Side
     changes.retain(|c| !c.status.is_empty());
 }
 
-fn hides_delta(index: Option<&git2::Index>, delta: &git2::DiffDelta<'_>) -> bool {
-    let path = delta
+fn delta_path(delta: &git2::DiffDelta<'_>) -> String {
+    delta
         .new_file()
         .path()
         .or_else(|| delta.old_file().path())
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+fn hides_delta(index: Option<&git2::Index>, delta: &git2::DiffDelta<'_>) -> bool {
+    let path = delta_path(delta);
     crate::worktree::is_thoughts_path(&path)
         || (is_app_internal(&path) && delta.status() == git2::Delta::Untracked)
         || (delta.status() == git2::Delta::Deleted && is_skip_worktree(index, &path))
@@ -730,29 +752,88 @@ fn worktree_diff_raw(repo: &git2::Repository) -> Result<git2::Diff<'_>> {
         })
 }
 
-pub fn worktree_diff_line_counts(repo: &git2::Repository) -> (u32, u32) {
+pub(crate) fn worktree_diff_line_counts(repo: &git2::Repository, changes: &[Change]) -> (u32, u32) {
     let Ok(diff) = worktree_diff_raw(repo) else {
         return (0, 0);
     };
     let index = repo.index().ok();
-    let (mut additions, mut deletions) = (0u32, 0u32);
-    let _ = diff.foreach(
-        &mut |_delta, _progress| true,
-        None,
-        None,
-        Some(&mut |delta, _hunk, line| {
-            if hides_delta(index.as_ref(), &delta) {
-                return true;
+    let mut against_head: Vec<(Option<Side>, &str)> = Vec::new();
+    let mut skipped: HashSet<&str> = HashSet::new();
+    for c in changes {
+        let edited = c.status.intersects(WT_ANY);
+        match (c.old_path(), c.head) {
+            (Some(from), Some(head)) => {
+                if edited && !renames::still_similar(repo, from, head, &c.path) {
+                    continue;
+                }
+                skipped.extend(c.renamed_from.as_deref());
+                if edited || c.staged.map(|(oid, _)| oid) != Some(head.0) {
+                    against_head.push((Some(head), &c.path));
+                }
             }
-            match line.origin() {
-                '+' => additions += 1,
-                '-' => deletions += 1,
-                _ => {}
+            (None, head) if c.status.contains(git2::Status::CONFLICTED) => {
+                against_head.push((head, &c.path));
             }
-            true
-        }),
-    );
-    (additions, deletions)
+            _ => continue,
+        }
+        skipped.insert(&c.path);
+    }
+
+    let tally = |diff: &git2::Diff<'_>, skipped: &HashSet<&str>| -> (usize, usize) {
+        diff.deltas()
+            .enumerate()
+            .filter(|(_, d)| {
+                !hides_delta(index.as_ref(), d) && !skipped.contains(delta_path(d).as_str())
+            })
+            .filter_map(|(i, _)| git2::Patch::from_diff(diff, i).ok().flatten())
+            .filter_map(|patch| patch.line_stats().ok())
+            .fold((0, 0), |(a, d), (_, x, y)| (a + x, d + y))
+    };
+    let (mut additions, mut deletions) = tally(&diff, &skipped);
+    if let Some(diff) = diff_from_head_at(repo, &against_head) {
+        let (a, d) = tally(&diff, &HashSet::new());
+        (additions, deletions) = (additions + a, deletions + d);
+    }
+    (additions as u32, deletions as u32)
+}
+
+fn diff_from_head_at<'r>(
+    repo: &'r git2::Repository,
+    entries: &[(Option<Side>, &str)],
+) -> Option<git2::Diff<'r>> {
+    if entries.is_empty() {
+        return None;
+    }
+    let mut index = git2::Index::new().ok()?;
+    let mut opts = git2::DiffOptions::new();
+    opts.disable_pathspec_match(true)
+        .include_untracked(true)
+        .show_untracked_content(true);
+    let zero = git2::IndexTime::new(0, 0);
+    for &(head, path) in entries {
+        opts.pathspec(path);
+        let Some((id, mode)) = head else {
+            continue;
+        };
+        index
+            .add(&git2::IndexEntry {
+                ctime: zero,
+                mtime: zero,
+                dev: 0,
+                ino: 0,
+                mode,
+                uid: 0,
+                gid: 0,
+                file_size: 0,
+                id,
+                flags: 0,
+                flags_extended: 0,
+                path: path.as_bytes().to_vec(),
+            })
+            .ok()?;
+    }
+    repo.diff_index_to_workdir(Some(&index), Some(&mut opts))
+        .ok()
 }
 
 pub fn worktree_diff(worktree: &Path) -> Result<Vec<FileDiff>> {
@@ -812,33 +893,36 @@ pub fn prompt_git_vars(
             .and_then(|c| c.summary().map(str::to_string))
             .unwrap_or_default();
     }
-    if want_changed || want_diff {
-        let files = worktree_diff(worktree).unwrap_or_default();
-        if want_changed {
-            let (adds, dels) = worktree_diff_line_counts(&repo);
-            let n = files.len();
-            let plural = if n == 1 { "" } else { "s" };
-            vars.changed_files = format!("{n} file{plural} (+{adds} −{dels})");
-        }
-        if want_diff {
-            let mut out = String::new();
-            for f in &files {
-                if out.len() + f.patch.len() > MAX_PROMPT_DIFF_CHARS {
-                    if out.is_empty() {
-                        let mut end = MAX_PROMPT_DIFF_CHARS;
-                        while !f.patch.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        out.push_str(&f.patch[..end]);
-                        out.push('\n');
-                    }
-                    out.push_str("… (diff truncated)");
-                    break;
-                }
-                out.push_str(&f.patch);
+    if want_changed {
+        vars.changed_files = match read_changes(&repo, git2::StatusShow::IndexAndWorkdir) {
+            Ok(changes) => {
+                let (adds, dels) = worktree_diff_line_counts(&repo, &changes);
+                let n = changes.len();
+                let plural = if n == 1 { "" } else { "s" };
+                format!("{n} file{plural} (+{adds} −{dels})")
             }
-            vars.diff = out;
+            Err(e) => format!("unknown: {e}"),
+        };
+    }
+    if want_diff {
+        let files = worktree_diff(worktree).unwrap_or_default();
+        let mut out = String::new();
+        for f in &files {
+            if out.len() + f.patch.len() > MAX_PROMPT_DIFF_CHARS {
+                if out.is_empty() {
+                    let mut end = MAX_PROMPT_DIFF_CHARS;
+                    while !f.patch.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    out.push_str(&f.patch[..end]);
+                    out.push('\n');
+                }
+                out.push_str("… (diff truncated)");
+                break;
+            }
+            out.push_str(&f.patch);
         }
+        vars.diff = out;
     }
     vars
 }
@@ -897,6 +981,9 @@ pub(crate) fn is_excluded(path: &str) -> bool {
 }
 
 pub(crate) fn git_err(program: &str, e: git2::Error) -> CoreError {
+    if e.class() == git2::ErrorClass::Index && e.message().contains("extension: 'sdir'") {
+        return CoreError::SparseIndexUnsupported;
+    }
     CoreError::OutputParse {
         program: program.to_string(),
         detail: e.message().to_string(),
@@ -999,10 +1086,15 @@ pub fn worktree_git_status(worktree: &Path) -> Result<WorktreeGitStatus> {
     let mut unstaged = Vec::new();
     for c in read_changes(&repo, git2::StatusShow::IndexAndWorkdir)? {
         if let Some(change) = staged_change(c.status) {
+            let change = if c.copied_from.is_some() {
+                "copied"
+            } else {
+                change
+            };
             staged.push(GitFileEntry {
                 path: c.path.clone(),
                 change: change.to_string(),
-                old_path: c.renamed_from.clone(),
+                old_path: c.old_path().map(str::to_string),
             });
         }
         if let Some(change) = unstaged_change(c.status) {
@@ -1020,6 +1112,7 @@ pub fn stage_files(worktree: &Path, rels: &[String]) -> Result<()> {
     let repo = open_repo(worktree)?;
     let mut index = repo.index().map_err(|e| git_err("git2 index", e))?;
     for rel in rels {
+        let rel = rel.trim_end_matches('/');
         if excluded_from_actions(&repo, rel) {
             continue;
         }
@@ -1116,6 +1209,7 @@ pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force();
         for path in &restore {
+            unlink_symlinks(worktree, path)?;
             checkout.path(path);
         }
         repo.checkout_index(Some(&mut index), Some(&mut checkout))
@@ -1125,15 +1219,46 @@ pub fn discard_files(worktree: &Path, rels: &[String]) -> Result<()> {
         .iter()
         .filter(|c| c.status.contains(git2::Status::WT_NEW))
     {
-        remove_untracked(&worktree.join(&c.path))?;
+        remove_untracked(worktree, &c.path)?;
     }
     revert_to_head(&repo, worktree, &staged)
 }
 
-fn remove_untracked(abs: &Path) -> Result<()> {
+fn remove_untracked(worktree: &Path, rel: &str) -> Result<()> {
+    if symlinked_ancestor(worktree, rel).is_some() {
+        return Ok(());
+    }
+    let abs = &worktree.join(rel);
     if abs.is_dir() {
         std::fs::remove_dir_all(abs)?;
     } else if abs.exists() || abs.is_symlink() {
+        std::fs::remove_file(abs)?;
+    }
+    Ok(())
+}
+
+fn symlinked_ancestor(worktree: &Path, rel: &str) -> Option<PathBuf> {
+    let mut abs = worktree.to_path_buf();
+    let mut parts = Path::new(rel).components().peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            break;
+        }
+        abs.push(part);
+        if abs.is_symlink() {
+            return Some(abs);
+        }
+    }
+    None
+}
+
+// libgit2's forced checkout writes through a symlink at the path or at one of its parents.
+fn unlink_symlinks(worktree: &Path, rel: &str) -> Result<()> {
+    if let Some(link) = symlinked_ancestor(worktree, rel) {
+        std::fs::remove_file(link)?;
+    }
+    let abs = worktree.join(rel);
+    if abs.is_symlink() {
         std::fs::remove_file(abs)?;
     }
     Ok(())
@@ -1204,10 +1329,11 @@ fn revert_to_head(repo: &git2::Repository, worktree: &Path, changes: &[&Change])
         match in_head(path) {
             Some(entry) if is_gitlink(&entry) => {}
             Some(_) => {
+                unlink_symlinks(worktree, path)?;
                 checkout.path(path);
                 any = true;
             }
-            None => remove_untracked(&worktree.join(path))?,
+            None => remove_untracked(worktree, path)?,
         }
     }
     if any {
@@ -1278,11 +1404,9 @@ fn reverts_on_discard(c: &Change) -> bool {
     !c.gitlink && c.tracked() && !c.status.contains(git2::Status::WT_NEW)
 }
 
-pub(crate) fn checkout_blockers(worktree: &Path) -> u32 {
-    open_repo(worktree)
-        .and_then(|repo| read_changes(&repo, git2::StatusShow::IndexAndWorkdir))
-        .map(|changes| changes.iter().filter(|c| reverts_on_discard(c)).count() as u32)
-        .unwrap_or(0)
+pub(crate) fn checkout_blockers(worktree: &Path) -> Result<u32> {
+    let changes = read_changes(&open_repo(worktree)?, git2::StatusShow::IndexAndWorkdir)?;
+    Ok(changes.iter().filter(|c| reverts_on_discard(c)).count() as u32)
 }
 
 pub fn discard_tracked_changes(worktree: &Path) -> Result<u32> {
@@ -1342,7 +1466,7 @@ pub fn worktree_file_sides(worktree: &Path, rel: &str, staged: bool) -> Result<F
         read_changes(&repo, git2::StatusShow::Index)?
             .into_iter()
             .find(|c| c.path == rel)
-            .and_then(|c| c.renamed_from)
+            .and_then(|c| c.old_path().map(str::to_string))
     } else {
         None
     };
@@ -1516,16 +1640,12 @@ pub fn list_commits(worktree: &Path, base_branch: &str) -> Result<Vec<CommitEntr
         return Ok(Vec::new());
     }
 
-    let Some(base) = (|| -> Option<git2::Oid> {
-        let head = repo.head().ok()?.target()?;
-        let base = repo
-            .revparse_single(base_branch)
-            .ok()?
-            .peel_to_commit()
-            .ok()?
-            .id();
-        repo.merge_base(head, base).ok()
-    })() else {
+    let Some(base) = repo
+        .revparse_single(base_branch)
+        .and_then(|o| o.peel_to_commit())
+        .ok()
+        .map(|c| c.id())
+    else {
         return Ok(Vec::new());
     };
     if walk.hide(base).is_err() {
@@ -2027,8 +2147,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("thoughts/jt")).unwrap();
         std::fs::write(dir.path().join("thoughts/jt/x.md"), "skip\nskip\n").unwrap();
 
-        let (additions, deletions) = worktree_diff_line_counts(&repo);
-        assert_eq!((additions, deletions), (4, 1));
+        assert_eq!(line_counts(dir.path()), (4, 1));
     }
 
     #[test]
@@ -2474,6 +2593,40 @@ mod tests {
     }
 
     #[test]
+    fn commits_after_a_criss_cross_merge_match_git_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        git_out(d, &["init", "-q", "-b", "main"]);
+        commit(d, "root");
+        git_out(d, &["switch", "-q", "-c", "feat"]);
+        commit(d, "f1");
+        git_out(d, &["switch", "-q", "main"]);
+        commit(d, "m1");
+        git_out(d, &["branch", "-q", "m1tip"]);
+        let merge = |into: &str, from: &str, message: &str| {
+            git_out(d, &["switch", "-q", into]);
+            git_out(d, &["merge", "-q", "--no-ff", "-m", message, from]);
+        };
+        merge("main", "feat", "main merges f1");
+        merge("feat", "m1tip", "feat merges m1");
+        commit(d, "f3");
+        let bases = git_out(d, &["merge-base", "--all", "main", "HEAD"]);
+        assert_eq!(bases.lines().count(), 2, "control: a criss-cross");
+
+        let mut ours: Vec<String> = list_commits(d, "main")
+            .unwrap()
+            .into_iter()
+            .map(|c| c.subject)
+            .collect();
+        let log = git_out(d, &["log", "--format=%s", "main..HEAD"]);
+        let mut git: Vec<String> = log.lines().map(str::to_string).collect();
+        ours.sort();
+        git.sort();
+        assert_eq!(ours, git);
+        assert_eq!(git, vec!["f3", "feat merges m1"]);
+    }
+
+    #[test]
     fn the_commit_list_stops_at_200_while_the_base_count_keeps_them_all() {
         let tmp = tempfile::tempdir().unwrap();
         let (_origin, clone) = clone_with_origin(tmp.path());
@@ -2727,7 +2880,8 @@ mod tests {
     }
 
     fn line_counts(dir: &Path) -> (u32, u32) {
-        worktree_diff_line_counts(&open_repo(dir).unwrap())
+        let chip = crate::worktree::status(dir, "main", None);
+        (chip.additions, chip.deletions)
     }
 
     fn repo_with_submodule(tmp: &Path) -> PathBuf {
@@ -2872,6 +3026,49 @@ mod tests {
         assert_eq!(line_counts(&repo), (0, 3));
     }
 
+    #[test]
+    fn a_sparse_index_is_an_error_and_never_a_clean_chip() {
+        let tmp = tempfile::tempdir().unwrap();
+        git_out(tmp.path(), &["init", "-q", "-b", "main", "repo"]);
+        let repo = tmp.path().join("repo");
+        for f in ["README.md", "apps/web/index.ts", "docs/guide.md"] {
+            std::fs::create_dir_all(repo.join(f).parent().unwrap()).unwrap();
+            std::fs::write(repo.join(f), "one\n").unwrap();
+        }
+        git_out(&repo, &["add", "."]);
+        commit(&repo, "init");
+        let wt = tmp.path().join("wt");
+        git_out(
+            &repo,
+            &["worktree", "add", "-q", "-b", "feat", wt.to_str().unwrap()],
+        );
+        git_out(
+            &wt,
+            &["sparse-checkout", "set", "--sparse-index", "apps/web"],
+        );
+        std::fs::write(wt.join("apps/web/index.ts"), "edited\n").unwrap();
+        assert_eq!(porcelain(&wt), vec![" M apps/web/index.ts"], "control");
+
+        assert_eq!(
+            worktree_git_status(&wt).unwrap_err().code(),
+            "sparse_index_unsupported"
+        );
+        let chip = crate::worktree::status(&wt, "main", None);
+        assert!(chip.unreadable.is_some(), "{chip:?}");
+        assert_eq!(
+            crate::worktree::ensure_removable(&wt, "main", "feat")
+                .unwrap_err()
+                .code(),
+            "worktree_unreadable"
+        );
+        assert_eq!(
+            checkout_blockers(&wt).unwrap_err().code(),
+            "sparse_index_unsupported"
+        );
+        let prompt = prompt_git_vars(&wt, true, false, false).changed_files;
+        assert!(prompt.starts_with("unknown: "), "{prompt}");
+    }
+
     const RENAMED_BODY: &str = "fn main() {\n    println!(\"a fairly long body\");\n}\n";
 
     fn repo_with_staged_rename() -> tempfile::TempDir {
@@ -2898,6 +3095,67 @@ mod tests {
         assert_eq!(sides.modified, RENAMED_BODY);
         assert!(sides.original_exists && sides.modified_exists);
         assert_eq!(sides.original_path.as_deref(), Some("old_name.rs"));
+    }
+
+    #[test]
+    fn the_chip_counts_a_rename_against_its_old_path_as_git_does() {
+        let dir = repo_with_staged_rename();
+        let numstat = || git_out(dir.path(), &["diff", "--numstat", "HEAD"]);
+        assert_eq!(numstat(), "0\t0\told_name.rs => new_name.rs");
+        assert_eq!(line_counts(dir.path()), (0, 0));
+        assert_eq!(
+            prompt_git_vars(dir.path(), true, false, false).changed_files,
+            "1 file (+0 −0)"
+        );
+
+        let edited = format!("{RENAMED_BODY}// one more line\n");
+        std::fs::write(dir.path().join("new_name.rs"), edited).unwrap();
+        assert_eq!(numstat(), "1\t0\told_name.rs => new_name.rs");
+        assert_eq!(line_counts(dir.path()), (1, 0));
+
+        let rewritten = "nothing\nlike\nthe\nold one\n";
+        std::fs::write(dir.path().join("new_name.rs"), rewritten).unwrap();
+        assert_eq!(numstat(), "4\t0\tnew_name.rs\n0\t3\told_name.rs");
+        assert_eq!(line_counts(dir.path()), (4, 3));
+    }
+
+    #[test]
+    fn a_merge_conflict_counts_its_lines_against_head_as_git_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        git_out(d, &["init", "-q", "-b", "main"]);
+        std::fs::write(d.join("f.txt"), "a\nb\n").unwrap();
+        git_out(d, &["add", "."]);
+        commit(d, "init");
+        git_out(d, &["switch", "-q", "-c", "other"]);
+        std::fs::write(d.join("f.txt"), "a\nOTHER\n").unwrap();
+        git_out(d, &["commit", "-qam", "other"]);
+        git_out(d, &["switch", "-q", "main"]);
+        std::fs::write(d.join("f.txt"), "a\nMAIN\n").unwrap();
+        git_out(d, &["commit", "-qam", "main"]);
+        let merge = || {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(d)
+                .args(["merge", "-q", "other"])
+                .output()
+                .unwrap();
+            assert!(!out.status.success(), "control: the merge conflicts");
+        };
+        merge();
+
+        let st = worktree_git_status(d).unwrap();
+        assert_eq!(rows(&st.unstaged), vec!["conflict:f.txt"]);
+        assert_eq!(git_out(d, &["diff", "--numstat", "HEAD"]), "4\t0\tf.txt");
+        assert_eq!(line_counts(d), (4, 0));
+
+        git_out(d, &["merge", "--abort"]);
+        git_out(d, &["rm", "-q", "f.txt"]);
+        git_out(d, &["commit", "-qm", "delete"]);
+        merge();
+        assert_eq!(porcelain(d), vec!["DU f.txt"], "control: deleted by us");
+        assert_eq!(git_out(d, &["diff", "--numstat", "HEAD"]), "2\t0\tf.txt");
+        assert_eq!(line_counts(d), (2, 0));
     }
 
     #[test]
@@ -2956,6 +3214,74 @@ mod tests {
         assert_eq!(read(&dir.path().join("new_name.rs")), RENAMED_BODY);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn discarding_a_file_replaced_by_a_symlink_restores_the_file_and_spares_the_target() {
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("target.txt");
+        let dir = repo_with_commit();
+        let file = dir.path().join("a.md");
+        for staged in [false, true] {
+            std::fs::write(&target, "outside the repo\n").unwrap();
+            std::fs::remove_file(&file).unwrap();
+            std::os::unix::fs::symlink(&target, &file).unwrap();
+            if staged {
+                git_out(dir.path(), &["add", "a.md"]);
+            }
+
+            discard_files(dir.path(), &["a.md".into()]).unwrap();
+            assert!(!file.is_symlink(), "staged={staged}");
+            assert_eq!(read(&file), "one\n");
+            assert_eq!(read(&target), "outside the repo\n", "staged={staged}");
+            assert_eq!(porcelain(dir.path()), Vec::<String>::new());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discard_never_writes_or_deletes_through_a_symlinked_directory() {
+        let outside = tempfile::tempdir().unwrap();
+        let out = outside.path();
+        std::fs::write(out.join("x"), "precious\n").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        git_out(d, &["init", "-q", "-b", "main"]);
+        std::fs::create_dir(d.join("d")).unwrap();
+        std::fs::write(d.join("d/x"), "orig\n").unwrap();
+        git_out(d, &["add", "."]);
+        commit(d, "init");
+        let link = |rel: &str| {
+            std::fs::remove_dir_all(d.join(rel)).unwrap();
+            std::os::unix::fs::symlink(out, d.join(rel)).unwrap();
+        };
+
+        for stage_all in [false, true] {
+            link("d");
+            if stage_all {
+                git_out(d, &["add", "-A"]);
+            }
+            discard_files(d, &["d/x".into()]).unwrap();
+            assert_eq!(read(&out.join("x")), "precious\n", "stage_all={stage_all}");
+            assert!(!d.join("d").is_symlink());
+            assert_eq!(read(&d.join("d/x")), "orig\n");
+            assert_eq!(porcelain(d), Vec::<String>::new());
+        }
+
+        std::fs::create_dir(d.join("n")).unwrap();
+        std::fs::write(d.join("n/y"), "new\n").unwrap();
+        git_out(d, &["add", "n/y"]);
+        link("n");
+        discard_files(d, &["n/y".into()]).unwrap();
+        assert!(!out.join("y").exists());
+        assert_eq!(porcelain(d), vec!["A  n/y"]);
+
+        std::fs::write(out.join("y"), "precious\n").unwrap();
+        link("n");
+        discard_tracked_changes(d).unwrap();
+        assert_eq!(read(&out.join("y")), "precious\n");
+        assert_eq!(read(&out.join("x")), "precious\n");
+    }
+
     #[test]
     fn discarding_an_added_gitlink_keeps_its_checkout_and_refuses_to_delete_a_nested_repo() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2990,6 +3316,25 @@ mod tests {
         discard_files(&repo, &["tool".into()]).unwrap();
         assert_eq!(read(&tool.join("wip.txt")), "uncommitted\n");
         assert_eq!(git_out(&tool, &["rev-list", "--count", "HEAD"]), "1");
+    }
+
+    #[test]
+    fn staging_an_untracked_nested_repo_adds_its_head_as_git_add_does() {
+        let dir = repo_with_commit();
+        let nested = dir.path().join("nested");
+        git_out(dir.path(), &["init", "-q", "-b", "main", "nested"]);
+        std::fs::write(nested.join("n.txt"), "n\n").unwrap();
+        git_out(&nested, &["add", "."]);
+        let head = commit(&nested, "n");
+        let st = worktree_git_status(dir.path()).unwrap();
+        assert_eq!(rows(&st.unstaged), vec!["untracked:nested/"]);
+
+        stage_files(dir.path(), &["nested/".into()]).unwrap();
+        assert_eq!(porcelain(dir.path()), vec!["A  nested"]);
+        assert_eq!(
+            git_out(dir.path(), &["ls-files", "--stage", "nested"]),
+            format!("160000 {head} 0\tnested")
+        );
     }
 
     #[test]
@@ -3209,5 +3554,59 @@ mod tests {
 
         assert_eq!(git_renamed_targets(dir.path()), Vec::<String>::new());
         assert_eq!(renamed_targets(dir.path()), git_renamed_targets(dir.path()));
+    }
+
+    #[test]
+    fn a_copies_config_shows_copied_rows_whose_actions_leave_the_source_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        git_out(d, &["init", "-q", "-b", "main"]);
+        git_out(d, &["config", "status.renames", "copies"]);
+        let lines =
+            |from: u32| -> String { (from..from + 100).map(|i| format!("{i}\n")).collect() };
+        let (body, edited) = (lines(1), lines(200) + "edited\n");
+        std::fs::write(d.join("a"), &body).unwrap();
+        std::fs::write(d.join("m"), lines(200)).unwrap();
+        git_out(d, &["add", "."]);
+        commit(d, "init");
+        std::fs::copy(d.join("a"), d.join("b")).unwrap();
+        git_out(d, &["mv", "a", "c"]);
+        std::fs::write(d.join("m"), &edited).unwrap();
+        std::fs::write(d.join("n"), &edited).unwrap();
+        git_out(d, &["add", "-A"]);
+        assert_eq!(
+            porcelain(d),
+            vec!["C  a -> b", "R  a -> c", "M  m", "C  m -> n"],
+            "control"
+        );
+
+        let st = worktree_git_status(d).unwrap();
+        let staged: Vec<String> = st
+            .staged
+            .iter()
+            .map(|e| {
+                format!(
+                    "{}:{}<-{}",
+                    e.change,
+                    e.path,
+                    e.old_path.as_deref().unwrap_or("")
+                )
+            })
+            .collect();
+        assert_eq!(
+            staged,
+            vec!["copied:b<-a", "renamed:c<-a", "modified:m<-", "copied:n<-m"]
+        );
+        assert_eq!(line_counts(d), (2, 0));
+        let sides = worktree_file_sides(d, "b", true).unwrap();
+        assert_eq!(sides.original_path.as_deref(), Some("a"));
+        assert_eq!(sides.original, body);
+
+        unstage_files(d, &["b".into()]).unwrap();
+        assert_eq!(porcelain(d), vec!["R  a -> c", "M  m", "C  m -> n", "?? b"]);
+        stage_files(d, &["b".into()]).unwrap();
+        discard_files(d, &["b".into(), "n".into()]).unwrap();
+        assert_eq!(porcelain(d), vec!["R  a -> c", "M  m"]);
+        assert!(!d.join("b").exists() && !d.join("n").exists());
     }
 }

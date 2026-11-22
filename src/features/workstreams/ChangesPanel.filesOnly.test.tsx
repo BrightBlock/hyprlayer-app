@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChangesPanel } from "./ChangesPanel";
+import type { GitFileEntry } from "@/lib/bindings";
 
 const q = vi.hoisted(() => ({
   useWorktreeGitStatus: vi.fn(),
@@ -23,10 +24,10 @@ vi.mock("@/features/session/sessionStore", () => ({
 
 afterEach(cleanup);
 
-function setup(filesOnly: boolean) {
+function setup(filesOnly: boolean, staged: GitFileEntry[] = []) {
   const mutation = () => ({ mutate: vi.fn(), isPending: false });
   q.useWorktreeGitStatus.mockReturnValue({
-    data: { staged: [], unstaged: [] },
+    data: { staged, unstaged: [] },
     isLoading: false,
     isError: false,
     isFetching: false,
@@ -85,6 +86,12 @@ describe("ChangesPanel filesOnly (folder projects)", () => {
     expect(screen.getByRole("button", { name: "files" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Project memory" })).toBeDefined();
     expect(q.useWorktreeGitStatus).toHaveBeenCalledWith("ws1", true);
+  });
+
+  it("marks a copied row with its own glyph and names the file it was copied from", () => {
+    setup(false, [{ path: "src/copy.ts", change: "copied", oldPath: "src/original.ts" }]);
+    expect(screen.getByTitle("copied").textContent).toBe("C");
+    expect(screen.getByTitle("src/original.ts → src/copy.ts")).toBeDefined();
   });
 
   it("shows the empty-commits card naming the base branch", () => {

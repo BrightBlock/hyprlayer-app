@@ -143,11 +143,17 @@ pub enum CoreError {
     #[error("worktree has {0} uncommitted change(s)")]
     WorktreeDirty(u32),
 
+    #[error("can't check the worktree for uncommitted changes: {detail}")]
+    WorktreeUnreadable { detail: String },
+
     #[error("the project checkout has {count} uncommitted change(s)")]
     CheckoutDirty { count: u32 },
 
     #[error("won't discard `{path}`: {reason}")]
     DiscardRefused { path: String, reason: String },
+
+    #[error("this checkout uses a sparse index, which Hyprlayer can't read")]
+    SparseIndexUnsupported,
 
     #[error("branch `{branch}` has {count} unpushed/unmerged commit(s)")]
     WorktreeUnpushed { branch: String, count: u32 },
@@ -534,6 +540,9 @@ impl CoreError {
             CoreError::WorktreeDirty(_) => Some(
                 "Commit or discard the changes in the worktree first, or archive with 'discard changes'.".into(),
             ),
+            CoreError::SparseIndexUnsupported => Some(
+                "Run `git sparse-checkout reapply --no-sparse-index` in the checkout. It keeps the sparse checkout and turns off only the sparse index.".into(),
+            ),
             CoreError::CheckoutDirty { .. } => Some(
                 "Commit or discard the changes in the project checkout first, or start this workstream in a dedicated worktree instead.".into(),
             ),
@@ -831,8 +840,10 @@ impl CoreError {
             CoreError::RuntimeMigrationLedgerTooNew { .. } => "runtime_migration_ledger_too_new",
             CoreError::Db(_) => "db",
             CoreError::WorktreeDirty(_) => "worktree_dirty",
+            CoreError::WorktreeUnreadable { .. } => "worktree_unreadable",
             CoreError::CheckoutDirty { .. } => "checkout_dirty",
             CoreError::DiscardRefused { .. } => "discard_refused",
+            CoreError::SparseIndexUnsupported => "sparse_index_unsupported",
             CoreError::WorktreeUnpushed { .. } => "worktree_unpushed",
             CoreError::InvalidPath { .. } => "invalid_path",
             CoreError::RepoSettingsParse { .. } => "repo_settings_parse",

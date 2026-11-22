@@ -32,6 +32,7 @@ function makeView(id: string, projectPath = "/project"): WorkstreamView {
       upstream: null,
       unpushed: 0,
       thoughts: "ok",
+      unreadable: null,
     },
     seed: null,
   };

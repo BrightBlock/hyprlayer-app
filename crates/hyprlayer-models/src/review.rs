@@ -8,6 +8,7 @@ pub enum FileChangeKind {
     Modified,
     Deleted,
     Renamed,
+    Copied,
     Typechange,
     Other,
 }
@@ -19,6 +20,7 @@ impl FileChangeKind {
             "modified" => Some(FileChangeKind::Modified),
             "deleted" => Some(FileChangeKind::Deleted),
             "renamed" => Some(FileChangeKind::Renamed),
+            "copied" => Some(FileChangeKind::Copied),
             "typechange" => Some(FileChangeKind::Typechange),
             "other" => Some(FileChangeKind::Other),
             _ => None,
@@ -35,6 +37,7 @@ impl FileChangeKind {
             FileChangeKind::Modified => "modified",
             FileChangeKind::Deleted => "deleted",
             FileChangeKind::Renamed => "renamed",
+            FileChangeKind::Copied => "copied",
             FileChangeKind::Typechange => "typechange",
             FileChangeKind::Other => "other",
         }

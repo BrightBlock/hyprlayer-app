@@ -92,6 +92,7 @@ function makeView(
       upstream: null,
       unpushed: 0,
       thoughts: "ok",
+      unreadable: null,
     },
     seed: null,
   };

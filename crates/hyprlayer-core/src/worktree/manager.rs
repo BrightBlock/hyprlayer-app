@@ -84,6 +84,7 @@ pub struct WorktreeStatus {
     pub upstream: Option<Upstream>,
     pub unpushed: u32,
     pub thoughts: LinkStatus,
+    pub unreadable: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -141,7 +142,10 @@ pub fn scan_archive(dir: &Path, base_branch: &str) -> ArchiveScan {
         .filter(|s| s.exists);
     ArchiveScan {
         size_bytes: Some(size as f64),
-        uncommitted: git.as_ref().map(|s| s.dirty + s.untracked),
+        uncommitted: git
+            .as_ref()
+            .filter(|s| s.unreadable.is_none())
+            .map(|s| s.dirty + s.untracked),
         unpushed: git.as_ref().map(|s| s.unpushed),
     }
 }
@@ -275,7 +279,7 @@ impl WorktreeManager {
                 let already_here = crate::gitops::current_branch(&spec.project_repo).as_deref()
                     == Some(branch.as_str());
                 if !already_here {
-                    let dirty = crate::gitops::checkout_blockers(&spec.project_repo);
+                    let dirty = crate::gitops::checkout_blockers(&spec.project_repo)?;
                     if dirty > 0 {
                         return Err(CoreError::CheckoutDirty { count: dirty });
                     }
@@ -561,6 +565,9 @@ pub fn is_live_worktree(path: &Path) -> bool {
 
 pub fn ensure_removable(worktree: &Path, base_branch: &str, branch: &str) -> Result<()> {
     let status = status(worktree, base_branch, None);
+    if let Some(detail) = status.unreadable {
+        return Err(CoreError::WorktreeUnreadable { detail });
+    }
     if status.dirty + status.untracked > 0 {
         return Err(CoreError::WorktreeDirty(status.dirty + status.untracked));
     }
@@ -870,6 +877,7 @@ pub fn folder_status(dir: &Path) -> WorktreeStatus {
         upstream: None,
         unpushed: 0,
         thoughts: LinkStatus::Unsupported,
+        unreadable: None,
     }
 }
 
@@ -885,6 +893,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         upstream: None,
         unpushed: 0,
         thoughts: thoughts.unwrap_or(LinkStatus::Broken),
+        unreadable: None,
     };
     if !worktree.exists() {
         return missing;
@@ -893,19 +902,22 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         return missing;
     };
 
+    let (changes, unreadable) =
+        match crate::gitops::read_changes(&repo, git2::StatusShow::IndexAndWorkdir) {
+            Ok(changes) => (changes, None),
+            Err(e) => (Vec::new(), Some(e.to_string())),
+        };
     let (mut dirty, mut untracked) = (0u32, 0u32);
-    if let Ok(changes) = crate::gitops::read_changes(&repo, git2::StatusShow::IndexAndWorkdir) {
-        for change in &changes {
-            if change.status.intersects(git2::Status::WT_NEW) {
-                untracked += 1;
-            }
-            if change.tracked() {
-                dirty += 1;
-            }
+    for change in &changes {
+        if change.status.intersects(git2::Status::WT_NEW) {
+            untracked += 1;
+        }
+        if change.tracked() {
+            dirty += 1;
         }
     }
 
-    let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo);
+    let (additions, deletions) = crate::gitops::worktree_diff_line_counts(&repo, &changes);
 
     let head = repo.head().ok();
     let branch = head
@@ -952,6 +964,7 @@ pub fn status(worktree: &Path, base_branch: &str, thoughts: Option<LinkStatus>) 
         upstream,
         unpushed,
         thoughts: thoughts.unwrap_or(LinkStatus::Ok),
+        unreadable,
     }
 }
 

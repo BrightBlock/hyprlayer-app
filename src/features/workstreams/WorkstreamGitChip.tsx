@@ -2,7 +2,14 @@
 import type { WorkstreamView } from "@/lib/bindings";
 
 export function WorkstreamGitChip({ view }: { view: WorkstreamView }) {
-  const { additions, deletions, dirty, unpushed } = view.git;
+  const { additions, deletions, dirty, unpushed, unreadable } = view.git;
+  if (unreadable) {
+    return (
+      <span className="shrink-0 text-ui font-medium text-warn-ink" title={unreadable}>
+        ?
+      </span>
+    );
+  }
   if (additions > 0 || deletions > 0) {
     return (
       <span className="flex shrink-0 items-center gap-1 text-meta font-medium">

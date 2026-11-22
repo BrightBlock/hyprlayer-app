@@ -1009,7 +1009,7 @@ export type EventsMissed = null;
 
 export type ExitOutcome = "completed" | "interrupted" | "crashed" | "killed" | "detached" | "spawn_failed";
 
-export type FileChangeKind = "added" | "modified" | "deleted" | "renamed" | "typechange" | "other";
+export type FileChangeKind = "added" | "modified" | "deleted" | "renamed" | "copied" | "typechange" | "other";
 
 export type FileSides = {
 	original: string,
@@ -2540,6 +2540,7 @@ export type WorktreeStatus = {
 	upstream: Upstream | null,
 	unpushed: number,
 	thoughts: LinkStatus,
+	unreadable: string | null,
 };
 
 /* Tauri Specta runtime */

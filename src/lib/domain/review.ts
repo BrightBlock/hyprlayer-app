@@ -9,6 +9,7 @@ export const CHANGE_GLYPH: Record<FileChangeKind, ChangeGlyph> = {
   modified: { ch: "M", cls: "text-accent", label: "modified" },
   deleted: { ch: "−", cls: "text-bad", label: "deleted" },
   renamed: { ch: "R", cls: "text-warn-ink", label: "renamed" },
+  copied: { ch: "C", cls: "text-warn-ink", label: "copied" },
   typechange: { ch: "T", cls: "text-warn-ink", label: "typechange" },
   other: { ch: "?", cls: "text-ink-dim", label: "other" },
 };
