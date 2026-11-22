@@ -161,6 +161,19 @@ pub async fn terminal_focus(state: State<'_, AppState>, terminal_id: String) -> 
         .map_err(AppError::from)
 }
 
+/// A terminal shared with another desktop takes this one's size, and keeps it until another takes it.
+#[tauri::command]
+#[specta::specta]
+pub async fn terminal_take_size(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {
+    let client = state.client()?;
+    if !client.server_features().size_owner {
+        return Ok(());
+    }
+    // server-compat: gated on size_owner
+    let taken = client.terminal_take_size(terminal_id).await;
+    taken.map_err(AppError::from)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn terminal_close(state: State<'_, AppState>, terminal_id: String) -> CmdResult<()> {

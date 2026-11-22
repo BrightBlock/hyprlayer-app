@@ -158,6 +158,91 @@
         }
       ],
       "step": "focusing a desktop gives it the size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "the opener's size stands and every desktop learns it",
+          "ok": true
+        }
+      ],
+      "step": "desktops that ask for the size: the first to attach owns it, the others' fits are advice"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "typing and focusing move nothing",
+          "ok": true
+        }
+      ],
+      "step": "B types and focuses, which leaves the size alone"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              80,
+              24
+            ]
+          },
+          "guard": "the terminal takes B's fit",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "size": [
+              120,
+              40
+            ]
+          },
+          "guard": "and A's when A takes it",
+          "ok": true
+        }
+      ],
+      "step": "B takes the size, then A takes it back"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              100,
+              30
+            ]
+          },
+          "guard": "C's fit takes over, not B's older one",
+          "ok": true
+        }
+      ],
+      "step": "A detaches, and the desktop whose fit came last owns the size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "size": [
+              90,
+              20
+            ]
+          },
+          "guard": "the old desktop's fit takes over",
+          "ok": true
+        }
+      ],
+      "step": "a desktop from before size ownership still takes the size by typing"
     }
   ]
 }

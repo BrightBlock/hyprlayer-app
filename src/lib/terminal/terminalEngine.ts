@@ -21,7 +21,8 @@ export interface TerminalEngine {
   write(data: Uint8Array | string): void;
   writeFrame(data: Uint8Array, written: () => void): void;
   clipboard(data: string): void;
-  /** Renders at the pty's size from here in the output on, and stops fitting its host. */
+  /** Renders at the pty's size from here in the output on, and stops fitting its host.
+   *  A size bigger than the host scrolls in it, kept on the cursor until the user scrolls away. */
   follow(grid: TerminalGrid): void;
   onInput(cb: (data: string) => void): () => void;
   onKey(cb: (e: { key: string; domEvent: KeyboardEvent }) => void): () => void;
@@ -74,6 +75,7 @@ type XtermCore = {
     _renderService: {
       setRenderer: (renderer: unknown) => void;
       handleResize: (cols: number, rows: number) => void;
+      dimensions?: { css: { cell: { width: number; height: number } } };
     };
   };
 };
@@ -87,6 +89,11 @@ function releaseWebglContext(canvas: HTMLCanvasElement | null): void {
     canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext();
   } catch {
   }
+}
+
+// The least scroll from `at` that shows `[start, start + size)` in a view `span` long.
+function scrolledTo(at: number, span: number, start: number, size: number): number {
+  return Math.min(Math.max(at, start + size - span), start);
 }
 
 class XtermEngine implements TerminalEngine {
@@ -106,6 +113,10 @@ class XtermEngine implements TerminalEngine {
   private following = false;
   private fitted: TerminalGrid | null = null;
   private frames = false;
+  private host?: HTMLElement;
+  private cropped = false;
+  private onCursor = true;
+  private scrolled = [0, 0];
 
   constructor(opts: {
     fontSize: number;
@@ -162,7 +173,18 @@ class XtermEngine implements TerminalEngine {
 
   mount(host: HTMLElement): void {
     if (!this.term) return;
+    this.host = host;
     this.term.open(host);
+    host.addEventListener("scroll", () => {
+      // Scroll events arrive late, so one from showCursor can land after the cursor moved on.
+      if (host.scrollLeft === this.scrolled[0] && host.scrollTop === this.scrolled[1]) return;
+      this.onCursor = this.cursorShown();
+    });
+    this.term.onCursorMove(() => this.showCursor());
+    this.term.onData(() => {
+      this.onCursor = true;
+      this.showCursor();
+    });
     const noteGesture = () => {
       this.lastGesture = performance.now();
     };
@@ -250,7 +272,7 @@ class XtermEngine implements TerminalEngine {
     this.term.write("", () => {
       this.term?.resize(grid.cols, grid.rows);
       this.measurePane();
-      this.showWhole();
+      this.crop();
     });
   }
 
@@ -265,17 +287,46 @@ class XtermEngine implements TerminalEngine {
     }
   }
 
-  // A grid bigger than the pane is scaled down to show whole, without resizing anything.
-  private showWhole(): void {
-    const el = this.term?.element;
-    if (!el || !this.term || !this.fitted) return;
-    const scale = Math.min(
-      1,
-      this.fitted.cols / this.term.cols,
-      this.fitted.rows / this.term.rows,
+  // A grid bigger than the pane scrolls in it at 1:1; one that fits sits at the top left.
+  private crop(): void {
+    const host = this.host;
+    if (!host || !this.term || !this.fitted) return;
+    this.cropped = this.term.cols > this.fitted.cols || this.term.rows > this.fitted.rows;
+    host.style.overflow = this.cropped ? "auto" : "";
+    if (this.cropped) return this.showCursor();
+    this.onCursor = true;
+    host.scrollLeft = 0;
+    host.scrollTop = 0;
+  }
+
+  private cursorBox(): { left: number; top: number; width: number; height: number } | null {
+    if (!this.term) return null;
+    // xterm 5.5 gives a cell's size only on its render service.
+    const cell = (this.term as unknown as XtermCore)._core?._renderService?.dimensions?.css.cell;
+    if (!cell?.width || !cell.height) return null;
+    const { cursorX, cursorY } = this.term.buffer.active;
+    return { left: cursorX * cell.width, top: cursorY * cell.height, ...cell };
+  }
+
+  private cursorShown(): boolean {
+    const host = this.host;
+    const box = this.cursorBox();
+    if (!host || !box) return true;
+    return (
+      box.left >= host.scrollLeft &&
+      box.left + box.width <= host.scrollLeft + host.clientWidth &&
+      box.top >= host.scrollTop &&
+      box.top + box.height <= host.scrollTop + host.clientHeight
     );
-    el.style.transformOrigin = "0 0";
-    el.style.transform = scale < 1 ? `scale(${scale})` : "";
+  }
+
+  private showCursor(): void {
+    const host = this.host;
+    const box = this.cursorBox();
+    if (!this.cropped || !this.onCursor || !host || !box) return;
+    host.scrollLeft = scrolledTo(host.scrollLeft, host.clientWidth, box.left, box.width);
+    host.scrollTop = scrolledTo(host.scrollTop, host.clientHeight, box.top, box.height);
+    this.scrolled = [host.scrollLeft, host.scrollTop];
   }
 
   private userJustActed(): boolean {
@@ -302,7 +353,7 @@ class XtermEngine implements TerminalEngine {
     if (!this.fitAddon) return EMPTY_GRID;
     if (this.following) {
       this.measurePane();
-      this.showWhole();
+      this.crop();
       return this.fitted ?? this.grid();
     }
     try {

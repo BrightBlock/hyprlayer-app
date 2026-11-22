@@ -275,12 +275,14 @@ impl RingInner {
 }
 
 /// A client watching a pty. One that `follows` renders at the pty's size; an older one
-/// renders at its own fit, so each fit it sends takes the size. One that renders `frames`
-/// leaves the program's queries to the screen; any other answers them itself.
+/// renders at its own fit, so each fit it sends takes the size. One that `takes` the size
+/// gets it only by asking; an older one also gets it by typing or focusing. One that renders
+/// `frames` leaves the program's queries to the screen; any other answers them itself.
 #[derive(Debug, Clone, Copy)]
 pub struct Viewer {
     pub id: u64,
     pub follows: bool,
+    pub takes: bool,
     pub frames: bool,
     pub theme: Option<TerminalTheme>,
 }
@@ -291,7 +293,8 @@ struct Seat {
     fit: Option<Size>,
 }
 
-/// A pty's viewers, the most recently active first: the pty takes that one's fit.
+/// A pty's viewers, the size's owner first, then the rest by how recently they reported a fit:
+/// the pty takes the owner's fit, and when the owner leaves the next one owns it.
 #[derive(Default)]
 struct Viewers(Vec<Seat>);
 
@@ -326,17 +329,31 @@ impl Viewers {
             return false;
         };
         self.0[i].fit = Some(size);
-        if !self.0[i].viewer.follows {
-            self.claim(id);
+        if !self.0[i].viewer.follows || self.0[0].fit.is_none() {
+            self.take(id);
+        } else if i > 1 {
+            let seat = self.0.remove(i);
+            self.0.insert(1, seat);
         }
         true
     }
 
+    /// Typing or focusing, which moves the size only for a viewer that can't ask for it.
     fn claim(&mut self, id: u64) {
+        if self.find(id).is_some_and(|i| !self.0[i].viewer.takes) {
+            self.take(id);
+        }
+    }
+
+    fn take(&mut self, id: u64) {
         if let Some(i) = self.find(id) {
             let seat = self.0.remove(i);
             self.0.insert(0, seat);
         }
+    }
+
+    fn owner(&self) -> Option<u64> {
+        Some(self.0.first()?.viewer.id)
     }
 
     fn wanted(&self) -> Option<Size> {
@@ -368,8 +385,13 @@ struct Sizing {
 impl Sizing {
     fn update(&self, change: impl FnOnce(&mut Viewers)) {
         let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+        let owner = viewers.owner();
         change(&mut viewers);
         self.settle(&viewers);
+        if viewers.owner() != owner {
+            // A new owner at the same size changes no output, so its readers are woken to tell their clients.
+            self.ring.tail_tx.send_modify(|_| {});
+        }
     }
 
     fn settle(&self, viewers: &Viewers) {
@@ -400,13 +422,13 @@ impl Sizing {
     }
 
     fn fit(&self, viewer: Option<u64>, size: Size) {
-        let mut viewers = self.viewers.lock().unwrap_or_else(PoisonError::into_inner);
-        if viewer.is_some_and(|id| viewers.fit(id, size)) {
-            self.settle(&viewers);
-        } else if viewers.0.is_empty() {
-            // No viewer to weigh it against, as for an in-process caller: the fit stands.
-            self.set(size);
-        }
+        self.update(|viewers| {
+            let seated = viewer.is_some_and(|id| viewers.fit(id, size));
+            if !seated && viewers.0.is_empty() {
+                // No viewer to weigh it against, as for an in-process caller: the fit stands.
+                self.set(size);
+            }
+        });
     }
 }
 
@@ -522,7 +544,7 @@ impl RingReader {
             .viewers
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        let owner = viewers.0.first().map(|seat| seat.viewer.id);
+        let owner = viewers.owner();
         self.seat
             .as_ref()
             .is_some_and(|seat| owner == Some(seat.id))
@@ -747,9 +769,13 @@ impl PtySession {
         }
     }
 
-    /// `viewer` typed or focused, so the pty takes its fit.
+    /// `viewer` typed or focused, so the pty takes its fit if it is a viewer that can't ask.
     pub fn claim(&self, viewer: u64) {
         self.sizing.update(|viewers| viewers.claim(viewer));
+    }
+
+    pub fn take_size(&self, viewer: u64) {
+        self.sizing.update(|viewers| viewers.take(viewer));
     }
 
     pub fn set_theme(&self, viewer: u64, theme: TerminalTheme) {
@@ -1160,6 +1186,7 @@ mod tests {
         Viewer {
             id,
             follows: true,
+            takes: true,
             frames,
             theme,
         }
@@ -1204,7 +1231,7 @@ mod tests {
         );
 
         let before = heard(&s).len();
-        s.claim(2);
+        s.take_size(2);
         settled(&s, |s| {
             heard(s)[before..].concat().contains("1b5b3f3939373b326e")
         })

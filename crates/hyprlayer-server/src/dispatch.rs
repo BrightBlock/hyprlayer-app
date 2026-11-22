@@ -228,6 +228,7 @@ impl Server {
             Some(id) => live.view(Viewer {
                 id,
                 follows: self.clients.terminal_size(id),
+                takes: self.clients.size_owner(id),
                 frames: self.clients.screen_frames(id),
                 theme: self.clients.terminal_theme(id),
             }),
@@ -2140,6 +2141,18 @@ impl Dispatch for Server {
         self.runtime
             .terminals()
             .focus(FocusTerminalRequest {
+                terminal_id,
+                viewer,
+            })
+            .await
+            .wire()
+    }
+
+    async fn terminal_take_size(&self, terminal_id: String) -> Result<(), WireError> {
+        let viewer = connection("terminal_take_size")?;
+        self.runtime
+            .terminals()
+            .take_size(FocusTerminalRequest {
                 terminal_id,
                 viewer,
             })

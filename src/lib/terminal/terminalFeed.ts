@@ -32,6 +32,7 @@ export class TerminalFeed {
     private screen: Screen,
     private onExited: (code: number | null) => void,
     private onOutput?: () => void,
+    private onOwner?: (owner: boolean) => void,
   ) {}
 
   /** A stream onto an empty screen: a mount's attach or a fresh terminal. */
@@ -63,7 +64,10 @@ export class TerminalFeed {
     let first = true;
     channel.onmessage = (ev) => {
       if (ev.kind === "exited") return this.onExited(ev.code);
-      if (ev.kind === "resized") return this.screen.follow(ev);
+      if (ev.kind === "resized") {
+        if (ev.owner != null) this.onOwner?.(ev.owner);
+        return this.screen.follow(ev);
+      }
       if (ev.kind === "clipboard") return this.screen.clipboard(ev.data);
       const bytes = b64ToBytes(ev.data);
       this.next = resumePoint(ev, bytes.length);

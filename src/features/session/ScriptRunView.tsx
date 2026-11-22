@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { TakeSizeButton } from "@/components/TakeSizeButton";
 import { monoFontStack } from "@/lib/appearance";
 import { commands, type ScriptKind } from "@/lib/bindings";
 import { onServerReconnected } from "@/lib/events";
@@ -41,6 +42,7 @@ export function ScriptRunView({
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(undefined);
+  const [sizeOwner, setSizeOwner] = useState<boolean | null>(null);
   useTerminalThemeSync(engineRef);
   useTerminalFontSync(engineRef, idRef);
   const attachRef = useRef(attachId);
@@ -75,11 +77,16 @@ export function ScriptRunView({
     // A reconnect resumes only a stream this mount opened, and not once its process ended.
     let streaming = false;
     let ended = false;
-    const feed = new TerminalFeed(engine, () => {
-      ended = true;
-      engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
-      onExitRef.current?.();
-    });
+    const feed = new TerminalFeed(
+      engine,
+      () => {
+        ended = true;
+        engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n\x1b[?25l");
+        onExitRef.current?.();
+      },
+      undefined,
+      setSizeOwner,
+    );
 
     void (async () => {
       if (id) {
@@ -181,6 +188,7 @@ export function ScriptRunView({
   return (
     <div className="relative min-h-0 min-w-0 flex-1 bg-surface">
       <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
+      {sizeOwner === false && <TakeSizeButton terminalId={() => idRef.current} />}
     </div>
   );
 }

@@ -232,6 +232,8 @@ export const commands = {
 	terminalResize: (terminalId: string, cols: number, rows: number) => typedError<null, AppError>(__TAURI_INVOKE("terminal_resize", { terminalId, cols, rows })),
 	/**  The user is at this terminal: a terminal shared with another desktop takes this one's size. */
 	terminalFocus: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_focus", { terminalId })),
+	/**  A terminal shared with another desktop takes this one's size, and keeps it until another takes it. */
+	terminalTakeSize: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_take_size", { terminalId })),
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
 	/**  Ends the server streams behind channels the webview released; their terminals and sessions keep running. */
 	terminalRelease: (channelIds: number[]) => typedError<null, AppError>(__TAURI_INVOKE("terminal_release", { channelIds })),
@@ -2361,7 +2363,9 @@ frame?: number | null } |
 /**  Text the program copied (OSC 52), base64, sent to the frame stream of the client that owns the size. */
 { kind: "clipboard"; data: string } | 
 /**  The terminal's size from here on: a viewer renders at it, not at its own fit. */
-{ kind: "resized"; cols: number; rows: number } | { kind: "exited"; code: number | null };
+{ kind: "resized"; cols: number; rows: number; 
+/**  Whether this client owns the size; `None` from a server without `size_owner`. */
+owner?: boolean | null } | { kind: "exited"; code: number | null };
 
 export type TerminalTheme = {
 	foreground: Rgb,

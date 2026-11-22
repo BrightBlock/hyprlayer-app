@@ -28,6 +28,9 @@ pub enum TerminalEvent {
     Resized {
         cols: u16,
         rows: u16,
+        /// Whether this client owns the size; `None` from a server without `size_owner`.
+        #[serde(default)]
+        owner: Option<bool>,
     },
     Exited {
         code: Option<i32>,

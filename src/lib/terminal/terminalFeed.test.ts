@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Ways following the pty's size through the feed could fail:
 // - a size event is dropped, or reaches the screen out of order with the output around it;
 // - a resume treats its leading size event as the replay and skips the start-over check;
-// - a size event moves the offset a reattach resumes from.
+// - a size event moves the offset a reattach resumes from;
+// - the view never hears whether this desktop owns the size, or hears it from an older server
+//   that doesn't say.
 // Ways rendering the server's frames could fail:
 // - a frame is acked before the screen has it, so the server outruns the webview;
 // - a frame resume asks from a byte count, or starts over when the server already did;
@@ -68,6 +70,17 @@ beforeEach(() => {
 });
 
 describe("TerminalFeed sizes", () => {
+  it("tells the view whether this desktop owns the size, when the server says", () => {
+    const s = screen();
+    const owners: boolean[] = [];
+    const send = sender(new TerminalFeed(s, () => {}, undefined, (owner) => owners.push(owner)).channel());
+    send({ kind: "resized", cols: 120, rows: 40 });
+    send({ kind: "resized", cols: 120, rows: 40, owner: false });
+    send({ kind: "resized", cols: 80, rows: 24, owner: true });
+    expect(owners).toEqual([false, true]);
+    expect(s.calls).toEqual(["follow:120x40", "follow:120x40", "follow:80x24"]);
+  });
+
   it("hands each size to the screen in order with the output", () => {
     const s = screen();
     const send = sender(new TerminalFeed(s, () => {}).channel());

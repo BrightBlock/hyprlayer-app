@@ -140,7 +140,7 @@ impl RawDesktop {
                     return;
                 }
                 match event {
-                    TerminalEvent::Resized { cols, rows } => {
+                    TerminalEvent::Resized { cols, rows, .. } => {
                         if let Some(model) = &log.model {
                             model.resize(cols, rows);
                         }
@@ -507,7 +507,7 @@ impl FrameDesktop {
                     return;
                 }
                 match event {
-                    TerminalEvent::Resized { cols, rows } => {
+                    TerminalEvent::Resized { cols, rows, .. } => {
                         me.xterm.send(json!({ "resize": [cols, rows] }))
                     }
                     TerminalEvent::Output {
@@ -575,6 +575,13 @@ impl FrameDesktop {
             .terminal_focus(self.terminal.clone())
             .await
             .expect("terminal_focus");
+    }
+
+    async fn take(&self) {
+        self.client
+            .terminal_take_size(self.terminal.clone())
+            .await
+            .expect("terminal_take_size");
     }
 
     fn copies(&self) -> Vec<String> {
@@ -764,15 +771,27 @@ async fn shared_terminal_screen() {
     show(&mut j, "attach", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
-    j.step("(a) A resizes");
+    j.step("(a) A resizes, and B's typing and focus leave the size with A");
     a.fit(100, 30).await;
     let ok = drawn(&tap, &a, &b, 2).await;
-    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    b.focus().await;
+    b.send("j").await;
+    let kept = drawn(&tap, &a, &b, 3).await && tap.settled(Duration::from_millis(1500)).await;
+    let (a_view, b_view) = (a.xterm.dump().await, b.xterm.dump().await);
+    let size = |view: &Value| json!([view["cols"], view["rows"]]);
+    j.guard(
+        DREW,
+        ok && kept && size(&a_view) == json!([100, 30]) && size(&b_view) == json!([100, 30]),
+        with(
+            compare(&a, &b, 0).await,
+            json!({ "size": size(&b_view), "paints": tap.paints() }),
+        ),
+    );
     show(&mut j, "(a)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
-    j.step("(b) B types, which gives it the size, then resizes");
-    b.send("j").await;
+    j.step("(b) B takes the size, then resizes");
+    b.take().await;
     let typed = drawn(&tap, &a, &b, 4).await;
     b.fit(90, 28).await;
     let ok = typed && drawn(&tap, &a, &b, 5).await;
@@ -867,6 +886,7 @@ async fn shared_terminal_screen() {
     j.step("frames: C draws a row of emoji, CJK and a flag on a coloured picker row");
     let paints = tap.paints();
     c.fit(110, 32).await;
+    c.take().await;
     c.send("E").await;
     let settled = tap.repainted(paints).await;
     let evidence = c.shows(&model).await;
@@ -953,6 +973,7 @@ async fn shared_terminal_screen() {
     let (d_stream, _) = d.attach(None).await;
     d.fit(72, 40).await;
     c.fit(124, 40).await;
+    c.take().await;
     let paints = tap.paints();
     c.send("C").await;
     let settled = tap.repainted(paints).await;
@@ -970,16 +991,16 @@ async fn shared_terminal_screen() {
         json!({ "owner_copied": owner, "other_copied": others, "c": c_shows, "d": d_shows }),
     );
 
-    j.step("frames: focus flips between C at 124 and D at 72 columns, the program redrawing everything each time");
+    j.step("frames: the size flips between C at 124 and D at 72 columns, the program redrawing everything each time");
     let paints = tap.paints();
     c.send("W").await;
     let mut redrawn = tap.repainted(paints).await;
     let flips = 20;
     for flip in 0..flips {
         if flip % 2 == 0 {
-            d.focus().await
+            d.take().await
         } else {
-            c.focus().await
+            c.take().await
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

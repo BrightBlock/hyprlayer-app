@@ -23,11 +23,17 @@ function parseQueued() {
   }
 }
 
+const terminals: FakeTerminal[] = [];
+
 class FakeTerminal {
   cols = 80;
   rows = 24;
   options: Record<string, unknown> = {};
   element: HTMLElement | null = null;
+  buffer = { active: { cursorX: 0, cursorY: 0 } };
+  _core = { _renderService: { dimensions: { css: { cell: { width: 10, height: 20 } } } } };
+  private cursorMoved: (() => void)[] = [];
+  private typed: ((data: string) => void)[] = [];
   parser = {
     registerCsiHandler: (id: { prefix?: string; final: string }, handler: CsiHandler) => {
       csi.set(`${id.prefix ?? ""}${id.final}`, handler);
@@ -37,13 +43,28 @@ class FakeTerminal {
   };
   private selection = "";
 
+  constructor() {
+    terminals.push(this);
+  }
+  moveCursor(x: number, y: number) {
+    this.buffer.active = { cursorX: x, cursorY: y };
+    this.cursorMoved.forEach((cb) => cb());
+  }
+  type(data: string) {
+    this.typed.forEach((cb) => cb(data));
+  }
+  onCursorMove(cb: () => void) {
+    this.cursorMoved.push(cb);
+    return { dispose() {} };
+  }
   loadAddon(addon: { activate?: (t: FakeTerminal) => void }) {
     addon.activate?.(this);
   }
   open(host: HTMLElement) {
     this.element = host;
   }
-  onData() {
+  onData(cb: (data: string) => void) {
+    this.typed.push(cb);
     return { dispose: () => disposeCalls.push("onData") };
   }
   onKey() {
@@ -140,6 +161,7 @@ beforeEach(() => {
   writes.length = 0;
   disposeCalls.length = 0;
   fitAddons.length = 0;
+  terminals.length = 0;
   parsed.length = 0;
   queued = [];
   proposal = undefined;
@@ -251,72 +273,116 @@ describe("XtermEngine following the pty's size", () => {
   });
 });
 
-// Ways showing a followed grid in a pane that doesn't match it could fail:
-// - a grid bigger than the pane is clipped, so the watcher can't see the prompt;
-// - it is scaled by different factors across and down, distorting it;
-// - a grid that fits is scaled, or moved off the top-left corner;
-// - the scale goes stale when the pane or the grid changes;
-// - a terminal fitted to its own pane is ever scaled.
+// Ways showing another desktop's grid in a pane that doesn't match it could fail:
+// - it is scaled, so its text is unreadable at a small pane's size;
+// - a grid bigger than the pane is clipped with no way to scroll to the rest;
+// - the program's cursor scrolls out of sight while the user isn't looking elsewhere;
+// - the view drags the user back to the cursor while they read another part of the grid;
+// - it never goes back to the cursor once they scroll back to it or type;
+// - a grid that fits, or a terminal fitted to its own pane, scrolls or moves off the top left.
 describe("XtermEngine showing a followed grid", () => {
-  function mounted() {
+  const CELL = { width: 10, height: 20 };
+
+  function mounted(pane: { width: number; height: number }) {
     const host = document.createElement("div");
+    Object.defineProperty(host, "clientWidth", { value: pane.width });
+    Object.defineProperty(host, "clientHeight", { value: pane.height });
+    Object.defineProperty(host, "scrollLeft", { value: 0, writable: true });
+    Object.defineProperty(host, "scrollTop", { value: 0, writable: true });
     const engine = newEngine();
     engine.mount(host);
-    return { engine, host };
+    proposal = { cols: pane.width / CELL.width, rows: pane.height / CELL.height };
+    return { engine, host, term: terminals[terminals.length - 1] };
   }
 
-  function scale(host: HTMLElement): number {
-    const m = /^scale\(([\d.]+)\)$/.exec(host.style.transform);
-    return m ? Number(m[1]) : 1;
-  }
+  const scroll = (host: HTMLElement) => [host.scrollLeft, host.scrollTop];
 
-  it("scales a grid bigger than its pane down to show whole, the same both ways", () => {
-    const { engine, host } = mounted();
-    proposal = { cols: 80, rows: 16 };
+  it("shows a grid bigger than its pane at 1:1, scrollable both ways", () => {
+    const { engine, host } = mounted({ width: 800, height: 320 });
     engine.follow({ cols: 104, rows: 31 });
     parseQueued();
-    expect(scale(host)).toBeCloseTo(16 / 31);
-    expect(host.style.transform).toMatch(/^scale\([\d.]+\)$/);
-    expect(["0 0", "0px 0px", "left top"]).toContain(host.style.transformOrigin);
+    expect(host.style.transform).toBe("");
+    expect(host.style.overflow).toBe("auto");
     expect(engine.grid()).toEqual({ cols: 104, rows: 31 });
   });
 
-  it("shows a grid that fits at 1:1", () => {
-    const { engine, host } = mounted();
-    proposal = { cols: 120, rows: 40 };
+  it("keeps the program's cursor in view as it moves", () => {
+    const { engine, host, term } = mounted({ width: 800, height: 320 });
     engine.follow({ cols: 104, rows: 31 });
     parseQueued();
-    expect(host.style.transform).toBe("");
+    term.moveCursor(100, 30);
+    expect(scroll(host)).toEqual([1010 - 800, 620 - 320]);
+    term.moveCursor(2, 0);
+    expect(scroll(host)).toEqual([20, 0]);
   });
 
-  it("rescales when the pane changes", () => {
-    const { engine, host } = mounted();
-    proposal = { cols: 52, rows: 31 };
+  it("leaves the view where the user scrolled it, until they scroll back to the cursor", () => {
+    const { engine, host, term } = mounted({ width: 800, height: 320 });
     engine.follow({ cols: 104, rows: 31 });
     parseQueued();
-    expect(scale(host)).toBeCloseTo(0.5);
-    proposal = { cols: 120, rows: 40 };
-    engine.fit();
-    expect(host.style.transform).toBe("");
+    term.moveCursor(100, 30);
+    host.scrollLeft = 0;
+    host.scrollTop = 0;
+    host.dispatchEvent(new Event("scroll"));
+    term.moveCursor(101, 30);
+    expect(scroll(host)).toEqual([0, 0]);
+    host.scrollLeft = 300;
+    host.scrollTop = 300;
+    host.dispatchEvent(new Event("scroll"));
+    term.moveCursor(2, 30);
+    expect(scroll(host)).toEqual([20, 300]);
   });
 
-  it("rescales once the grid changes, not before", () => {
-    const { engine, host } = mounted();
-    proposal = { cols: 80, rows: 24 };
-    engine.follow({ cols: 160, rows: 24 });
+  it("keeps following when its own scroll's event lands after the cursor moved on", () => {
+    const { engine, host, term } = mounted({ width: 800, height: 320 });
+    engine.follow({ cols: 104, rows: 31 });
     parseQueued();
-    expect(scale(host)).toBeCloseTo(0.5);
-    engine.follow({ cols: 80, rows: 24 });
-    expect(scale(host)).toBeCloseTo(0.5);
-    parseQueued();
-    expect(host.style.transform).toBe("");
+    term.moveCursor(100, 30);
+    term.buffer.active = { cursorX: 2, cursorY: 0 };
+    host.dispatchEvent(new Event("scroll"));
+    term.moveCursor(2, 0);
+    expect(scroll(host)).toEqual([20, 0]);
   });
 
-  it("never scales a terminal fitted to its own pane", () => {
-    const { engine, host } = mounted();
-    proposal = { cols: 90, rows: 20 };
-    engine.fit();
+  it("goes back to the cursor on the next input", () => {
+    const { engine, host, term } = mounted({ width: 800, height: 320 });
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    term.moveCursor(100, 30);
+    host.scrollLeft = 0;
+    host.scrollTop = 0;
+    host.dispatchEvent(new Event("scroll"));
+    term.type("j");
+    expect(scroll(host)).toEqual([1010 - 800, 620 - 320]);
+  });
+
+  it("shows a grid that fits at 1:1 from the top left, with no scrolling", () => {
+    const { engine, host, term } = mounted({ width: 1200, height: 800 });
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    term.moveCursor(100, 30);
     expect(host.style.transform).toBe("");
+    expect(host.style.overflow).toBe("");
+    expect(scroll(host)).toEqual([0, 0]);
+  });
+
+  it("stops scrolling once the grid fits the pane", () => {
+    const { engine, host, term } = mounted({ width: 800, height: 320 });
+    engine.follow({ cols: 104, rows: 31 });
+    parseQueued();
+    term.moveCursor(100, 30);
+    engine.follow({ cols: 80, rows: 16 });
+    parseQueued();
+    expect(host.style.overflow).toBe("");
+    expect(scroll(host)).toEqual([0, 0]);
+  });
+
+  it("never scrolls a terminal fitted to its own pane", () => {
+    const { engine, host, term } = mounted({ width: 900, height: 400 });
+    engine.fit();
+    term.moveCursor(89, 19);
+    expect(host.style.overflow).toBe("");
+    expect(scroll(host)).toEqual([0, 0]);
   });
 });
 

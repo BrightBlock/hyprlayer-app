@@ -1,6 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { TakeSizeButton } from "@/components/TakeSizeButton";
 import { monoFontStack } from "@/lib/appearance";
 import { commands } from "@/lib/bindings";
 import { onServerReconnected } from "@/lib/events";
@@ -33,6 +34,7 @@ export function TerminalTab({
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<TerminalEngine | null>(null);
   const idRef = useRef<string | undefined>(terminalId);
+  const [sizeOwner, setSizeOwner] = useState<boolean | null>(null);
 
   const fontSize = useTerminalZoom(engineRef, idRef);
   useTerminalThemeSync(engineRef);
@@ -61,7 +63,7 @@ export function TerminalTab({
       engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
     };
     // Tauri Channels are single-use, including failed attach attempts.
-    const feed = new TerminalFeed(engine, exited, noteActivity);
+    const feed = new TerminalFeed(engine, exited, noteActivity, setSizeOwner);
 
     let disposed = false;
     let id = terminalId;
@@ -172,6 +174,7 @@ export function TerminalTab({
   return (
     <div className="relative min-h-0 min-w-0 flex-1 bg-surface">
       <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
+      {sizeOwner === false && <TakeSizeButton terminalId={() => idRef.current} />}
     </div>
   );
 }

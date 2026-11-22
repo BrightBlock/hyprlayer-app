@@ -323,6 +323,7 @@ hyprlayer_proto::commands! {
     TerminalWrite: terminal_write(terminal_id: String, data: String) -> ();
     TerminalResize: terminal_resize(terminal_id: String, cols: u16, rows: u16) -> ();
     TerminalFocus: terminal_focus(terminal_id: String) -> ();
+    TerminalTakeSize: terminal_take_size(terminal_id: String) -> ();
     TerminalTheme: terminal_theme(theme: TerminalTheme) -> ();
     TerminalFrameAck: terminal_frame_ack(stream_id: u64, seq: u64) -> ();
     TerminalClose: terminal_close(terminal_id: String) -> ();

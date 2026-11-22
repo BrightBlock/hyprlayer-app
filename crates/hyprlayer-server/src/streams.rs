@@ -559,10 +559,21 @@ impl Ready<'_> {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum JsonTerminalEvent {
-    Output { data: String },
-    Clipboard { data: String },
-    Resized { cols: u16, rows: u16 },
-    Exited { code: Option<i32> },
+    Output {
+        data: String,
+    },
+    Clipboard {
+        data: String,
+    },
+    Resized {
+        cols: u16,
+        rows: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        owner: Option<bool>,
+    },
+    Exited {
+        code: Option<i32>,
+    },
 }
 
 pub(crate) enum StreamSource {
@@ -1280,9 +1291,14 @@ async fn forward_terminal(stream_id: u64, mut live: RingReader, tx: &StreamTx) -
                     data: B64.encode(bytes),
                 },
             ),
-            TerminalChunk::Resized { cols, rows } => {
-                ready.send(stream_id, &JsonTerminalEvent::Resized { cols, rows })
-            }
+            TerminalChunk::Resized { cols, rows } => ready.send(
+                stream_id,
+                &JsonTerminalEvent::Resized {
+                    cols,
+                    rows,
+                    owner: None,
+                },
+            ),
             TerminalChunk::Exited { code } => {
                 ready.send(stream_id, &JsonTerminalEvent::Exited { code })
             }
@@ -1305,6 +1321,7 @@ async fn forward_frames(
     let screen = live.screen();
     let mut copies = screen.copies();
     let (mut seq, mut sent_at, mut owed) = (0u64, None::<Instant>, false);
+    let (mut shown, mut owned) = (None::<(u16, u16)>, None::<bool>);
     loop {
         // History still owed follows as fast as the link takes it, as raw output would.
         if let Some(at) = sent_at.filter(|_| !owed) {
@@ -1336,14 +1353,22 @@ async fn forward_frames(
         let rendered = screen.render(&mut frames);
         // A program that printed and quit is shown whole before its exit.
         let exited = exited.filter(|_| !frames.catching_up());
+        let owner = live.owns_size();
+        let resized = rendered.as_ref().and_then(|frame| frame.resized);
+        shown = resized.or(shown);
+        if let Some((cols, rows)) = shown.filter(|_| resized.is_some() || owned != Some(owner)) {
+            owned = Some(owner);
+            events.push(json_event(
+                stream_id,
+                &JsonTerminalEvent::Resized {
+                    cols,
+                    rows,
+                    owner: Some(owner),
+                },
+            ));
+        }
         if let Some(frame) = &rendered {
             seq += 1;
-            if let Some((cols, rows)) = frame.resized {
-                events.push(json_event(
-                    stream_id,
-                    &JsonTerminalEvent::Resized { cols, rows },
-                ));
-            }
             events.push(frame::encode_terminal_frame(
                 stream_id,
                 seq,
@@ -1351,7 +1376,6 @@ async fn forward_frames(
                 &frame.bytes,
             ));
         }
-        let owner = live.owns_size();
         for copy in screen.copies_since(&mut copies) {
             if owner {
                 let data = B64.encode(copy);

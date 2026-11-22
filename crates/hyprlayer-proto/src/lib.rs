@@ -33,6 +33,11 @@ pub const TERMINAL_SIZE: &str = "terminal_size";
 /// the program's queries for it. A server that lists it takes `terminal_theme`.
 pub const SCREEN_FRAMES: &str = "screen_frames";
 
+/// A hello feature: a shared terminal's size has one owner, which typing doesn't move. A client
+/// that lists it asks for the size with `terminal_take_size`; a server that lists it takes that,
+/// and tells each frame stream's client whether it owns the size (`resized.owner`).
+pub const SIZE_OWNER: &str = "size_owner";
+
 /// The hello features a peer announced.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Features {
@@ -42,6 +47,7 @@ pub struct Features {
     pub heartbeat: bool,
     pub terminal_size: bool,
     pub screen_frames: bool,
+    pub size_owner: bool,
 }
 
 impl Features {
@@ -52,6 +58,7 @@ impl Features {
         heartbeat: true,
         terminal_size: true,
         screen_frames: true,
+        size_owner: true,
     };
 
     /// Unknown names are a newer peer's, so they are ignored.
@@ -64,6 +71,7 @@ impl Features {
             heartbeat: has(HEARTBEAT),
             terminal_size: has(TERMINAL_SIZE),
             screen_frames: has(SCREEN_FRAMES),
+            size_owner: has(SIZE_OWNER),
         }
     }
 
@@ -75,6 +83,7 @@ impl Features {
             (self.heartbeat, HEARTBEAT),
             (self.terminal_size, TERMINAL_SIZE),
             (self.screen_frames, SCREEN_FRAMES),
+            (self.size_owner, SIZE_OWNER),
         ]
         .into_iter()
         .filter(|&(on, _)| on)

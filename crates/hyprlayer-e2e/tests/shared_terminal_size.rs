@@ -1,6 +1,8 @@
 //! Two raw desktops on one terminal agree on its size: each renders the output at the
 //! size it was written for, a watching desktop's own fit leaves the terminal alone,
 //! and when the active desktop leaves, the size goes to the one still watching.
+//! Desktops that announce `size_owner` keep the size with its owner until another takes it,
+//! and a desktop from before them still takes it by typing.
 //! Desktops that render frames are `shared_terminal_screen`'s.
 #![cfg(unix)]
 
@@ -10,10 +12,16 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use hyprlayer_e2e::{eventually, json, keystrokes, Journey, Sandbox, Server, Value, RAW_DESKTOP};
+use hyprlayer_proto::Features;
 use hyprlayer_server::client::TerminalStream;
 use tokio::time::Instant;
 
 const WAIT: Duration = Duration::from_secs(10);
+/// A raw desktop that asks for the size, so the lines the shell printed stay readable.
+const TAKER: Features = Features {
+    size_owner: true,
+    ..RAW_DESKTOP
+};
 /// Long enough for the trap below to have printed a resize that happened.
 const SETTLE: Duration = Duration::from_millis(1000);
 /// Prints the pty's size on every resize, and on each line typed draws a picker
@@ -359,7 +367,121 @@ async fn shared_terminal_size() {
         returned,
         json!({ "size": [120, 40] }),
     );
-
     let _ = wide.terminal_close(terminal).await;
+
+    j.step(
+        "desktops that ask for the size: the first to attach owns it, the others' fits are advice",
+    );
+    let (a, b, c) = (
+        server.connect_announcing(TAKER).await,
+        server.connect_announcing(TAKER).await,
+        server.connect_announcing(TAKER).await,
+    );
+    let (owned, a_stream, opened) = a
+        .spawn_shell_terminal_stream(SHELL.into(), 120, 40)
+        .await
+        .expect("spawn the terminal");
+    let a_seen = Timeline::record(opened);
+    let ready = a_seen.wait_for("READY").await;
+    a.terminal_resize(owned.clone(), 120, 40)
+        .await
+        .expect("the opener reports its fit");
+    let watch = |client: &Arc<hyprlayer_server::client::RpcClient>| {
+        let owned = owned.clone();
+        let client = client.clone();
+        async move {
+            let attached = client
+                .terminal_attach_stream(owned, None)
+                .await
+                .expect("terminal_attach")
+                .expect("a live terminal");
+            Timeline::record(attached.events)
+        }
+    };
+    let b_seen = watch(&b).await;
+    b.terminal_resize(owned.clone(), 80, 24)
+        .await
+        .expect("B reports its fit");
+    let c_seen = watch(&c).await;
+    c.terminal_resize(owned.clone(), 100, 30)
+        .await
+        .expect("C reports its fit");
+    tokio::time::sleep(SETTLE).await;
+    j.guard(
+        "the opener's size stands and every desktop learns it",
+        ready
+            && !a_seen.text().contains("SIZE")
+            && [&a_seen, &b_seen, &c_seen]
+                .iter()
+                .all(|seen| seen.sizes().last() == Some(&[120, 40])),
+        json!({ "size": [120, 40] }),
+    );
+
+    j.step("B types and focuses, which leaves the size alone");
+    b.terminal_write(owned.clone(), keystrokes("\r"))
+        .await
+        .expect("type into the terminal");
+    b.terminal_focus(owned.clone()).await.expect("focus B");
+    tokio::time::sleep(SETTLE).await;
+    j.guard(
+        "typing and focusing move nothing",
+        a_seen.wait_for("PICKED").await
+            && !a_seen.text().contains("SIZE")
+            && b_seen.sizes().last() == Some(&[120, 40]),
+        json!({ "size": [120, 40] }),
+    );
+
+    j.step("B takes the size, then A takes it back");
+    b.terminal_take_size(owned.clone())
+        .await
+        .expect("B takes the size");
+    let taken = a_seen.wait_for("SIZE 24 80").await && b_seen.wait_for_size([80, 24]).await;
+    j.guard(
+        "the terminal takes B's fit",
+        taken && b_seen.size_at("SIZE 24 80") == Some([80, 24]),
+        json!({ "size": [80, 24] }),
+    );
+    a.terminal_take_size(owned.clone())
+        .await
+        .expect("A takes the size back");
+    let back = a_seen.wait_for("SIZE 40 120").await && b_seen.wait_for_size([120, 40]).await;
+    j.guard(
+        "and A's when A takes it",
+        back && c_seen.size_at("SIZE 40 120") == Some([120, 40]),
+        json!({ "size": [120, 40] }),
+    );
+
+    j.step("A detaches, and the desktop whose fit came last owns the size");
+    c.terminal_resize(owned.clone(), 100, 30)
+        .await
+        .expect("C reports its fit again");
+    tokio::time::sleep(SETTLE).await;
+    let quiet = !a_seen.text().contains("SIZE 30 100");
+    a.cancel_stream(a_stream).await.expect("detach A");
+    let handed = c_seen.wait_for("SIZE 30 100").await && c_seen.wait_for_size([100, 30]).await;
+    j.guard(
+        "C's fit takes over, not B's older one",
+        quiet && handed && b_seen.size_at("SIZE 30 100") == Some([100, 30]),
+        json!({ "size": [100, 30] }),
+    );
+
+    j.step("a desktop from before size ownership still takes the size by typing");
+    let old = watch(&narrow).await;
+    narrow
+        .terminal_resize(owned.clone(), 90, 20)
+        .await
+        .expect("the old desktop reports its fit");
+    narrow
+        .terminal_write(owned.clone(), keystrokes(" "))
+        .await
+        .expect("the old desktop types");
+    let typed = c_seen.wait_for("SIZE 20 90").await && old.wait_for_size([90, 20]).await;
+    j.guard(
+        "the old desktop's fit takes over",
+        typed && old.size_at("SIZE 20 90") == Some([90, 20]),
+        json!({ "size": [90, 20] }),
+    );
+
+    let _ = c.terminal_close(owned).await;
     j.finish();
 }

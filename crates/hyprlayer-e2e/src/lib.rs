@@ -25,6 +25,7 @@ pub use terminal::{keystrokes, next_output, read_until, wait_for_exit};
 /// printed takes it too: a frame of the screen doesn't keep them as written.
 pub const RAW_DESKTOP: hyprlayer_proto::Features = hyprlayer_proto::Features {
     screen_frames: false,
+    size_owner: false,
     ..hyprlayer_proto::Features::ALL
 };
 

@@ -31,7 +31,12 @@
           "evidence": {
             "answers_seen": 0,
             "grids_match": true,
-            "mismatched_cells": 0
+            "mismatched_cells": 0,
+            "paints": 3,
+            "size": [
+              100,
+              30
+            ]
           },
           "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
@@ -47,7 +52,7 @@
           "ok": true
         }
       ],
-      "step": "(a) A resizes"
+      "step": "(a) A resizes, and B's typing and focus leave the size with A"
     },
     {
       "guards": [
@@ -71,7 +76,7 @@
           "ok": true
         }
       ],
-      "step": "(b) B types, which gives it the size, then resizes"
+      "step": "(b) B takes the size, then resizes"
     },
     {
       "guards": [
@@ -346,7 +351,7 @@
           "ok": true
         }
       ],
-      "step": "frames: focus flips between C at 124 and D at 72 columns, the program redrawing everything each time"
+      "step": "frames: the size flips between C at 124 and D at 72 columns, the program redrawing everything each time"
     },
     {
       "guards": [

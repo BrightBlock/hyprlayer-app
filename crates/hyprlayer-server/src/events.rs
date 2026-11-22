@@ -200,6 +200,12 @@ impl Clients {
             .is_some_and(|c| c.outbound.screen_frames())
     }
 
+    pub fn size_owner(&self, conn: u64) -> bool {
+        self.lock()
+            .get(&conn)
+            .is_some_and(|c| c.outbound.size_owner())
+    }
+
     pub fn terminal_theme(&self, conn: u64) -> Option<TerminalTheme> {
         self.lock().get(&conn)?.terminal_theme
     }

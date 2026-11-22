@@ -277,6 +277,14 @@ impl TerminalService<'_> {
         Ok(())
     }
 
+    pub async fn take_size(&self, req: FocusTerminalRequest) -> Result<()> {
+        ensure_running(self.runtime)?;
+        if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
+            s.take_size(req.viewer);
+        }
+        Ok(())
+    }
+
     /// A terminal this viewer joins later takes the theme from its seat.
     pub async fn set_theme(&self, viewer: u64, theme: TerminalTheme) {
         for session in self.runtime.terminals.all().await {

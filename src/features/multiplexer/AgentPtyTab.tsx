@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { TakeSizeButton } from "@/components/TakeSizeButton";
 import { Spinner } from "@/components/ui";
 import { monoFontStack } from "@/lib/appearance";
 import { commands } from "@/lib/bindings";
@@ -93,6 +94,7 @@ export function AgentPtyTab({
   const startedSeed = startedProp ?? !!terminalId;
   const markedStartedRef = useRef(startedSeed);
   const [minting, setMinting] = useState(false);
+  const [sizeOwner, setSizeOwner] = useState<boolean | null>(null);
   const dockOpen = useScriptsStore((s) => !!s.dock[workstreamId]?.open);
 
   useEffect(() => {
@@ -122,9 +124,14 @@ export function AgentPtyTab({
     // A reconnect resumes only a stream this mount or restart opened.
     let streaming = false;
     // Only the current terminal's streams are live, so an exit is that terminal's.
-    const feed = new TerminalFeed(eng, () => {
-      if (idRef.current) showExited(idRef.current);
-    });
+    const feed = new TerminalFeed(
+      eng,
+      () => {
+        if (idRef.current) showExited(idRef.current);
+      },
+      undefined,
+      setSizeOwner,
+    );
     const unsubGone = onAgentTerminalGone(workstreamId, shellId, (id) => {
       if (id === idRef.current) showExited(id);
     });
@@ -387,6 +394,7 @@ export function AgentPtyTab({
       />
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
+        {sizeOwner === false && <TakeSizeButton terminalId={() => idRef.current} />}
         {minting && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 backdrop-blur-[1px]">
             <span className="inline-flex items-center gap-2 text-meta text-ink-dim">
