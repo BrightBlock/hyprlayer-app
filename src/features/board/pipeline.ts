@@ -95,3 +95,54 @@ export function triageKeyOf(live: PipelineLive | undefined): TriageKey {
       return "idle";
   }
 }
+
+export type BoardChild = { view: WorkstreamView; column: PipelineKey };
+
+export type BoardCard = BoardChild & { parent: WorkstreamView | null; children: BoardChild[] };
+
+export function boardColumns(
+  views: WorkstreamView[],
+  columnOf: (view: WorkstreamView) => PipelineKey,
+  keepCard: (view: WorkstreamView) => boolean = () => false,
+): Record<PipelineKey, BoardCard[]> {
+  const byId = new Map(views.filter((v) => v.item.status === "active").map((v) => [v.item.id, v]));
+  const parentOf = (v: WorkstreamView): WorkstreamView | null => {
+    const parent = v.item.status === "active" ? byId.get(v.item.parentWorkstreamId ?? "") : undefined;
+    return parent && parent !== v && parent.item.projectPath === v.item.projectPath ? parent : null;
+  };
+  const standsAlone = (v: WorkstreamView) => {
+    if (keepCard(v)) return true;
+    const parent = parentOf(v);
+    return !parent || columnOf(parent) !== columnOf(v);
+  };
+  // The nearest ancestor that has a card; a cycle in the parent links has none.
+  const foldHostOf = (v: WorkstreamView): WorkstreamView | null => {
+    const seen = new Set([v]);
+    for (let p = parentOf(v); p && !seen.has(p); p = parentOf(p)) {
+      if (standsAlone(p)) return p;
+      seen.add(p);
+    }
+    return null;
+  };
+
+  const cards = new Map<WorkstreamView, BoardCard>();
+  const hosts = new Map<WorkstreamView, WorkstreamView>();
+  for (const v of views) {
+    const host = foldHostOf(v);
+    if (host) hosts.set(v, host);
+    if (!host || standsAlone(v)) {
+      cards.set(v, { view: v, column: columnOf(v), parent: host ? parentOf(v) : null, children: [] });
+    }
+  }
+  for (const [child, host] of hosts) cards.get(host)?.children.push({ view: child, column: columnOf(child) });
+
+  const grouped: Record<PipelineKey, BoardCard[]> = {
+    planning: [],
+    implementing: [],
+    waiting: [],
+    review: [],
+    merged: [],
+  };
+  for (const card of cards.values()) grouped[card.column].push(card);
+  return grouped;
+}

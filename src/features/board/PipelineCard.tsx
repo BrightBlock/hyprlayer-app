@@ -1,7 +1,7 @@
-import type { KeyboardEvent, MouseEvent } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 
 import { ActivityDot } from "@/components/ActivityDot";
-import { Badge, cx } from "@/components/ui";
+import { Badge } from "@/components/ui";
 import type { WorkstreamView } from "@/lib/bindings";
 import { workstreamGoalLabel } from "@/lib/domain/goals";
 import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
@@ -63,6 +63,8 @@ export function PipelineCard({
   ask,
   now,
   handlers,
+  parentTitle,
+  fold,
 }: {
   view: WorkstreamView;
   live?: PipelineLive;
@@ -71,6 +73,8 @@ export function PipelineCard({
   ask?: LeadAsk;
   now: number;
   handlers: PipelineCardHandlers;
+  parentTitle?: string;
+  fold?: ReactNode;
 }) {
   const { item, git } = view;
   const waiting = ask !== undefined || live?.activity === "needs-you";
@@ -91,90 +95,87 @@ export function PipelineCard({
   const harness = harnessLabel(session);
   const goal = useWorkstreamGoal(item.id);
 
-  const card = (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={item.title}
-      {...cardEvents(view, live, handlers)}
-      title={inplace ? `${item.title} · main checkout (base: ${shortBranch(item.baseBranch)})` : item.title}
-      className={cx(
-        "block w-full cursor-pointer text-left",
-        archive ? "px-3 pt-[11px]" : `rounded-card border px-3 py-[11px] shadow-sm transition-colors ${frame}`,
-      )}
-    >
-      <span className="flex items-center gap-2">
-        {live && !waiting ? (
-          <ActivityDot activity={live.activity} />
-        ) : (
-          column !== "planning" && <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${columnDot(column)}`} />
-        )}
-        {driven && (
-          <span title="Driven by the Lead" className="shrink-0 font-mono text-meta text-ink-2">
-            ◎
-          </span>
-        )}
-        <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{item.title}</span>
-        {goal && (
-          <span data-testid="board-goal-badge" className="shrink-0">
-            <Badge tone="dim">{workstreamGoalLabel(goal)}</Badge>
-          </span>
-        )}
-      </span>
-      <span className="mt-1 flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 truncate font-mono text-meta text-ink-4">
-          {[workstreamPlace(view), harness].filter(Boolean).join(" · ")}
-        </span>
-        {inplace && <Badge tone="dim">no worktree</Badge>}
-        {offBase && <Badge tone="dim">off base</Badge>}
-      </span>
-      {line && <span className="mt-1.5 block text-ui-sm text-ink-dim">{line}</span>}
-      {percent !== null && (
-        <span className="mt-2.5 block h-1 overflow-hidden rounded-full bg-panel-2">
-          <span className="block h-full bg-accent" style={{ width: `${percent}%` }} />
-        </span>
-      )}
-      <span className="mt-2 flex min-w-0 items-center gap-2">
-        {waiting ? (
-          <span className="rounded-control bg-q-chip-bg px-1.5 py-0.5 font-mono text-meta font-semibold text-q-chip-text">
-            {since !== null ? `Waited ${formatCompactAge(since, now)}` : "Waiting"}
-          </span>
-        ) : (
-          <>
-            {git.additions > 0 && (
-              <span className="font-mono text-meta text-diff-add">+{formatCompactCount(git.additions)}</span>
-            )}
-            {git.deletions > 0 && (
-              <span className="font-mono text-meta text-diff-del">−{formatCompactCount(git.deletions)}</span>
-            )}
-            <span className="min-w-0 truncate font-mono text-meta text-ink-dim">
-              {pr ?? live?.line ?? (column === "planning" ? stageLabel(item.stage) : null)}
-            </span>
-          </>
-        )}
-        <span className="ml-auto shrink-0 font-mono text-meta text-ink-4">
-          {ask ? (
-            !archive && <span className="text-ink-dim">answer below ↓</span>
-          ) : waiting ? (
-            <span className="font-sans font-semibold text-accent">Answer</span>
-          ) : percent !== null ? (
-            `${percent}%`
-          ) : (
-            session?.model
-          )}
-        </span>
-      </span>
-    </div>
-  );
-  if (!ask || !archive) return card;
-
-  // Archive and Later sit outside the role="button", so they stay reachable and don't open the card.
+  // Archive, Later and the fold sit outside the role="button", so they stay reachable and don't open the card.
   return (
     <div className={`rounded-card border shadow-sm transition-colors ${frame}`}>
-      {card}
-      <span className="flex justify-end px-3 pt-2 pb-[11px]">
-        <ArchiveOrLater ask={ask} workstream={view} />
-      </span>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={item.title}
+        {...cardEvents(view, live, handlers)}
+        title={inplace ? `${item.title} · main checkout (base: ${shortBranch(item.baseBranch)})` : item.title}
+        className="block w-full cursor-pointer rounded-card px-3 py-[11px] text-left"
+      >
+        <span className="flex items-center gap-2">
+          {live && !waiting ? (
+            <ActivityDot activity={live.activity} />
+          ) : (
+            column !== "planning" && <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${columnDot(column)}`} />
+          )}
+          {driven && (
+            <span title="Driven by the Lead" className="shrink-0 font-mono text-meta text-ink-2">
+              ◎
+            </span>
+          )}
+          <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{item.title}</span>
+          {goal && (
+            <span data-testid="board-goal-badge" className="shrink-0">
+              <Badge tone="dim">{workstreamGoalLabel(goal)}</Badge>
+            </span>
+          )}
+        </span>
+        <span className="mt-1 flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate font-mono text-meta text-ink-4">
+            {[parentTitle && `↳ ${parentTitle}`, workstreamPlace(view), harness]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+          {inplace && <Badge tone="dim">no worktree</Badge>}
+          {offBase && <Badge tone="dim">off base</Badge>}
+        </span>
+        {line && <span className="mt-1.5 block text-ui-sm text-ink-dim">{line}</span>}
+        {percent !== null && (
+          <span className="mt-2.5 block h-1 overflow-hidden rounded-full bg-panel-2">
+            <span className="block h-full bg-accent" style={{ width: `${percent}%` }} />
+          </span>
+        )}
+        <span className="mt-2 flex min-w-0 items-center gap-2">
+          {waiting ? (
+            <span className="rounded-control bg-q-chip-bg px-1.5 py-0.5 font-mono text-meta font-semibold text-q-chip-text">
+              {since !== null ? `Waited ${formatCompactAge(since, now)}` : "Waiting"}
+            </span>
+          ) : (
+            <>
+              {git.additions > 0 && (
+                <span className="font-mono text-meta text-diff-add">+{formatCompactCount(git.additions)}</span>
+              )}
+              {git.deletions > 0 && (
+                <span className="font-mono text-meta text-diff-del">−{formatCompactCount(git.deletions)}</span>
+              )}
+              <span className="min-w-0 truncate font-mono text-meta text-ink-dim">
+                {pr ?? live?.line ?? (column === "planning" ? stageLabel(item.stage) : null)}
+              </span>
+            </>
+          )}
+          <span className="ml-auto shrink-0 font-mono text-meta text-ink-4">
+            {ask ? (
+              !archive && <span className="text-ink-dim">answer below ↓</span>
+            ) : waiting ? (
+              <span className="font-sans font-semibold text-accent">Answer</span>
+            ) : percent !== null ? (
+              `${percent}%`
+            ) : (
+              session?.model
+            )}
+          </span>
+        </span>
+      </div>
+      {ask && archive && (
+        <span className="flex justify-end px-3 pb-[11px]">
+          <ArchiveOrLater ask={ask} workstream={view} />
+        </span>
+      )}
+      {fold}
     </div>
   );
 }
