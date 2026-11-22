@@ -69,7 +69,7 @@ import {
   selectPinnedViews,
   usePinStore,
 } from "@/features/workstreams/pinStore";
-import { useProjectTreeStore } from "@/features/projects/projectTreeStore";
+import { nestWorkstreams, useProjectTreeStore } from "@/features/projects/projectTreeStore";
 import { useLibraryScope } from "@/features/library/libraryScope";
 import { asLibraryBox, LIBRARY_BOXES } from "@/features/library/libraryBoxes";
 import { LibrarySyncButton } from "@/features/library/LibrarySyncButton";
@@ -163,6 +163,7 @@ const EMPTY_OVERRIDES: Overrides = {};
 
 // Unregistering would let ⌘, reach the native menu and Ctrl+P reach WebView2's print UI; only a running handler preventDefaults.
 const SWALLOW = () => {};
+const NESTED_INDENT = 16;
 
 const LEFT_CLUSTER_ICON = 28;
 const LEFT_CLUSTER_GAP = 4;
@@ -504,6 +505,8 @@ export function Root() {
   const togglePin = usePinStore((state) => state.togglePin);
   const collapsedProjectPaths = useProjectTreeStore((state) => state.collapsedPaths);
   const toggleProjectCollapsed = useProjectTreeStore((state) => state.toggleCollapsed);
+  const collapsedParentIds = useProjectTreeStore((state) => state.collapsedParentIds);
+  const toggleParentCollapsed = useProjectTreeStore((state) => state.toggleParentCollapsed);
   const togglePinnedSection = usePinStore((state) => state.toggleCollapsed);
   const pinnedViews = selectPinnedViews(pinnedIds, allWorkstreams.data ?? []);
   const projectByPath = new Map(
@@ -1391,16 +1394,34 @@ export function Root() {
                       </div>
 
                       {!isProjectCollapsed &&
-                        children.map((view) => {
+                        nestWorkstreams(children, collapsedParentIds).map(({ view, depth, childCount }) => {
                           const isActiveItem =
                             isCurrent && activeWorkstreamId === view.item.id;
                         const inplace = view.item.worktreeMode === "inplace";
                         const folder = isFolderWorkstream(view);
                         const detached = isDetachedHead(view);
                         const branchedInPlace = inplace && !detached && isOffBase(view);
+                        const childrenHidden = collapsedParentIds.includes(view.item.id);
                         return (
+                          <div key={view.item.id} className="relative">
+                          {childCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleParentCollapsed(view.item.id)}
+                              aria-expanded={!childrenHidden}
+                              aria-label={`${childrenHidden ? "Expand" : "Collapse"} ${view.item.title}`}
+                              title={childrenHidden ? "Expand" : "Collapse"}
+                              className="absolute top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded text-ink-dim hover:text-ink"
+                              style={{ left: 22 + depth * NESTED_INDENT }}
+                            >
+                              <Icon
+                                name="chevronDown"
+                                size="xs"
+                                className={`transition-transform ${childrenHidden ? "-rotate-90" : ""}`}
+                              />
+                            </button>
+                          )}
                           <Link
-                            key={view.item.id}
                             to="/projects/$projectPath"
                             params={{ projectPath: p.path }}
                             search={{ item: view.item.id }}
@@ -1417,7 +1438,7 @@ export function Root() {
                                 isActiveItem ? "text-ink" : "text-ink-dim hover:text-ink"
                               }`,
                             })}
-                            style={{ paddingLeft: 40 }}
+                            style={{ paddingLeft: 40 + depth * NESTED_INDENT }}
                             title={
                               folder
                                 ? `${view.item.title} · project folder`
@@ -1440,6 +1461,14 @@ export function Root() {
                             <span className="min-w-0 flex-1 truncate">
                               {view.item.title}
                             </span>
+                            {childrenHidden && (
+                              <span
+                                className="shrink-0 text-meta text-ink-dim/70"
+                                title={`${childCount} hidden`}
+                              >
+                                {childCount}
+                              </span>
+                            )}
                             <span
                               className="flex shrink-0 items-center text-ink-dim/70"
                               title={
@@ -1470,6 +1499,7 @@ export function Root() {
                               }
                             />
                           </Link>
+                          </div>
                         );
                       })}
                     </div>
