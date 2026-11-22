@@ -278,18 +278,56 @@ describe("GitPanel ahead/behind", () => {
     expect(pullButton()).toBeNull();
   });
 
-  it("offers one Pull when the branch is its own base", () => {
+  it("says behind once and fast-forwards the upstream when the branch is its own base", () => {
+    const pull = vi.fn();
+    const merge = vi.fn();
+    q.usePullWorkstreamBranch.mockReturnValueOnce({
+      mutate: pull,
+      mutateAsync: vi.fn(),
+      reset: vi.fn(),
+      isPending: false,
+      isError: false,
+    });
+    q.useUpdateFromBase.mockReturnValueOnce({
+      mutate: merge,
+      mutateAsync: vi.fn(),
+      reset: vi.fn(),
+      isPending: false,
+      isError: false,
+    });
     renderPanel(
       { kind: "noPr" },
       withGit({
         branch: "main",
-        base: { ahead: 0, behind: 1 },
-        upstream: { name: "origin/main", ahead: 0, behind: 1 },
+        base: { ahead: 0, behind: 2 },
+        upstream: { name: "origin/main", ahead: 0, behind: 2 },
         unpushed: 0,
       }),
     );
-    expect(screen.getByText("↓1 from origin/main")).toBeTruthy();
-    expect(pullButton()).toBeTruthy();
+    expect(screen.getByTitle("2 commit(s) behind main").textContent).toBe("↓2");
+    expect(screen.queryByText(/from origin\/main/)).toBeNull();
+    expect(updateFromBase()).toBeNull();
+    const buttons = screen.getAllByRole("button", { name: /^Pull origin\// });
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].getAttribute("title")).toBe("Pull origin/main, fast-forwarding 2 commits in");
+    expect(buttons[0].getAttribute("aria-label")).toBe(buttons[0].getAttribute("title"));
+    fireEvent.click(buttons[0]);
+    expect(pull).toHaveBeenCalled();
+    expect(merge).not.toHaveBeenCalled();
+  });
+
+  it("keeps the diverged line, with no Pull, when the branch is its own base", () => {
+    renderPanel(
+      { kind: "noPr" },
+      withGit({
+        branch: "main",
+        base: { ahead: 1, behind: 1 },
+        upstream: { name: "origin/main", ahead: 1, behind: 1 },
+        unpushed: 1,
+      }),
+    );
+    expect(screen.getByText("↑1 ↓1 vs origin/main")).toBeTruthy();
+    expect(pullButton()).toBeNull();
     expect(updateFromBase()).toBeNull();
   });
 

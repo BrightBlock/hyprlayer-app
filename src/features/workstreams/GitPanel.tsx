@@ -23,12 +23,23 @@ import { PrStatusBar, QuotaLow } from "./PrStatusBar";
 import { AttachPrDialog } from "./AttachPrDialog";
 import { ArchiveWorkstreamDialog } from "./ArchiveWorkstreamDialog";
 
-function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: string }) {
+function fastForwardLabel(upstream: string, behind: number): string {
+  return `Pull ${upstream}, fast-forwarding ${behind} commit${behind === 1 ? "" : "s"} in`;
+}
+
+function BranchTargetRow({
+  view,
+  prBase,
+  pullBranch,
+}: {
+  view: WorkstreamView;
+  prBase: string;
+  pullBranch: ReturnType<typeof usePullWorkstreamBranch>;
+}) {
   const [open, setOpen] = useState(false);
   const setBase = useSetWorkstreamBase(view.item.id);
   const bases = useWorkstreamBases(view.item.projectPath, open);
   const fetchRemote = useFetchWorkstreamRemote(view.item.id);
-  const pullBranch = usePullWorkstreamBranch(view.item.id);
   const upstream = view.git.upstream;
   const refreshBranches = async () => {
     await fetchRemote.mutateAsync().catch(() => {});
@@ -137,7 +148,7 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
           )}
         </div>
       </div>
-      {upstream && upstream.behind > 0 && (
+      {upstream && upstream.behind > 0 && (upstream.ahead > 0 || branch !== baseShort) && (
         <div className="flex items-center gap-2 px-1 text-ui-sm text-warn-ink">
           {upstream.ahead > 0 ? (
             <span
@@ -157,9 +168,7 @@ function BranchTargetRow({ view, prBase }: { view: WorkstreamView; prBase: strin
                 disabled={pullBranch.isPending}
                 onClick={() => pullBranch.mutate()}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-edge bg-panel text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
-                title={`Pull ${upstream.name}, fast-forwarding ${upstream.behind} commit${
-                  upstream.behind === 1 ? "" : "s"
-                } in`}
+                title={fastForwardLabel(upstream.name, upstream.behind)}
                 aria-label={`Pull ${upstream.name}`}
               >
                 {pullBranch.isPending ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
@@ -219,10 +228,15 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
     pull.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.item.id]);
-  const onTrackedBase =
-    !!view?.git.upstream &&
-    (view.git.branch ?? view.item.branch) === shortBranch(view.item.baseBranch);
-  const behind = onTrackedBase ? 0 : (view?.git.base.behind ?? 0);
+  const pullBranch = usePullWorkstreamBranch(view?.item.id ?? "");
+  const baseUpstream =
+    view?.git.upstream &&
+    (view.git.branch ?? view.item.branch) === shortBranch(view.item.baseBranch)
+      ? view.git.upstream
+      : null;
+  const fastForward = baseUpstream?.ahead === 0 ? baseUpstream : null;
+  const behind = baseUpstream ? (fastForward?.behind ?? 0) : (view?.git.base.behind ?? 0);
+  const pulling = fastForward ? pullBranch.isPending : pull.isPending;
   const conflicts = pull.data?.kind === "conflicts" ? pull.data : null;
   const refresh = useFetchWorkstreamRemote(view?.item.id ?? "");
 
@@ -256,7 +270,11 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
               <div className="text-label text-ink-dim">
                 Pull Request
               </div>
-              <BranchTargetRow view={view} prBase={knownPr(actions.prLookup)?.baseRefName ?? ""} />
+              <BranchTargetRow
+                view={view}
+                prBase={knownPr(actions.prLookup)?.baseRefName ?? ""}
+                pullBranch={pullBranch}
+              />
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                   {actions.prLookup?.kind === "noPr" ? (
@@ -276,15 +294,23 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                 {behind > 0 && !conflicts && (
                   <button
                     type="button"
-                    disabled={pull.isPending}
-                    onClick={() => pull.mutate()}
+                    disabled={pulling}
+                    onClick={() => (fastForward ? pullBranch.mutate() : pull.mutate())}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-edge bg-panel text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
-                    title={`Update from ${view.item.baseBranch} , pulling ${behind} new commit${
-                      behind === 1 ? "" : "s"
-                    } in`}
-                    aria-label={`Update from ${view.item.baseBranch}`}
+                    title={
+                      fastForward
+                        ? fastForwardLabel(fastForward.name, behind)
+                        : `Update from ${view.item.baseBranch} , pulling ${behind} new commit${
+                            behind === 1 ? "" : "s"
+                          } in`
+                    }
+                    aria-label={
+                      fastForward
+                        ? fastForwardLabel(fastForward.name, behind)
+                        : `Update from ${view.item.baseBranch}`
+                    }
                   >
-                    {pull.isPending ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
+                    {pulling ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
                   </button>
                 )}
               </div>
