@@ -212,12 +212,19 @@ pub enum ClaudeWorktreeEvent {
         cwd: String,
         session_id: Option<String>,
     },
+    Remove {
+        worktree_path: String,
+    },
+    SubagentStop {
+        agent_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClaudeWorktreeAnswer {
+    /// Hyprlayer's workstream holds the worktree at this path.
     Path(String),
-    /// The hook makes claude's own worktree instead.
+    /// Not hyprlayer's: the hook does what claude would have done with no hook installed.
     Fallback,
 }
 

@@ -32,7 +32,10 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `shell <path> <branch> [date]` (a plan naming `branch`, through a redirect, so no hook fires),
 /// `cd <dir>`, and `worktree <name>...` (one `WorktreeCreate` per name, all at once, each cut off
 /// at its configured timeout and logged as `WorktreeCreate <name> exit=<code> path=<last stdout
-/// line>`; for a single name the stub then moves into that path and logs `cwd <dir>`).
+/// line>`; for a single name the stub then moves into that path and logs `cwd <dir>`),
+/// `worktree-remove` (back to the launch dir, then `WorktreeRemove` for the worktree it left) and
+/// `subagent-stop <id> [dirty]` (`SubagentStop` for `agent-<id>`'s worktree, after writing
+/// `changed.txt` there when `dirty`).
 /// Without `--stub-tui` it paints claude's empty input box at launch and after each line, a
 /// permission or question prompt after `ask` or `question`, the `/model` picker after `picker`, and
 /// nothing after `tools`. The statusLine
@@ -78,6 +81,7 @@ for a in "$@"; do
 done
 dir="$base/${HYPRLAYER_TERMINAL_ID:-session-$sid}"
 mkdir -p "$dir"
+home="$PWD"
 for a in "$@"; do printf '%s\n' "$a"; done > "$dir/argv"
 env | grep '^HYPRLAYER_' > "$dir/env"
 # The exit watcher deletes the launch dir, so keep what it held.
@@ -152,6 +156,15 @@ run_line() {
       dated=""; [ -n "$3" ] && dated="date: $3\n"
       printf -- "---\ntype: plan\nstatus: draft\n${dated}branch: %s\n---\n\n# Written through a shell redirect\n" "$2" > "$1" ;;
     cd\ *) cd "${1#cd }" ;;
+    worktree-remove)
+      wt="$PWD"
+      cd "$home"
+      hook WorktreeRemove "$(ev WorktreeRemove ",\"cwd\":\"$PWD\",\"worktree_path\":\"$wt\"")" ;;
+    subagent-stop\ *)
+      set -- ${1#subagent-stop }
+      wt=$(tail -n 1 "$dir/worktree-agent-$1.out" 2>/dev/null)
+      [ "$2" = dirty ] && [ -n "$wt" ] && printf 'changed\n' > "$wt/changed.txt"
+      hook SubagentStop "$(ev SubagentStop ",\"agent_id\":\"$1\",\"agent_type\":\"general-purpose\",\"cwd\":\"$wt\"")" ;;
     worktree\ *)
       set -- ${1#worktree }
       for name in "$@"; do worktree_create "$name" & done

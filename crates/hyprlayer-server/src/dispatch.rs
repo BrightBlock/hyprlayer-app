@@ -383,6 +383,51 @@ where
 }
 
 impl Server {
+    /// claude waits on its hook, and a setup script can take minutes.
+    fn setup_detached(&self, workstream: Workstream) {
+        let runtime = self.runtime.clone();
+        tokio::spawn(async move {
+            let id = workstream.id.clone();
+            let request = RunLifecycleRequest {
+                workstream,
+                kind: ScriptKind::Setup,
+            };
+            if let Err(e) = runtime.scripts().run_lifecycle(request).await {
+                tracing::warn!("setup script for workstream {id} did not run: {e}");
+            }
+        });
+    }
+
+    /// An archive can run `gh` and the archive script, past claude's 5 s hook timeout.
+    fn archive_detached(
+        &self,
+        found: hyprlayer_core::Result<Option<Workstream>>,
+    ) -> ClaudeWorktreeAnswer {
+        let workstream = match found {
+            Ok(Some(workstream)) => workstream,
+            Ok(None) => return ClaudeWorktreeAnswer::Fallback,
+            Err(e) => {
+                tracing::info!("claude's worktree stays: {e}");
+                return ClaudeWorktreeAnswer::Fallback;
+            }
+        };
+        let path = workstream.worktree_path.clone();
+        let runtime = self.runtime.clone();
+        tokio::spawn(async move {
+            let request = ArchiveWorkstreamRequest {
+                id: workstream.id.clone(),
+                skip_scripts: false,
+            };
+            if let Err(e) = runtime.workstreams().archive(request).await {
+                tracing::warn!(
+                    "archive of claude's workstream {} failed: {e}",
+                    workstream.id
+                );
+            }
+        });
+        ClaudeWorktreeAnswer::Path(path)
+    }
+
     async fn adopt_head_branches(&self, mut views: Vec<WorkstreamView>) -> Vec<WorkstreamView> {
         let observed = views
             .iter()
@@ -2284,46 +2329,44 @@ impl Dispatch for Server {
         token: String,
         event: ClaudeWorktreeEvent,
     ) -> Result<ClaudeWorktreeAnswer, WireError> {
-        let ClaudeWorktreeEvent::Create {
-            name,
-            cwd,
-            session_id,
-        } = event;
-        let created = match self.runtime.agent_control().identify(&token) {
-            Ok(identity) => {
-                self.runtime
-                    .workstreams()
-                    .create_for_claude(&identity, name, &cwd, session_id)
-                    .await
-            }
-            Err(e) => Err(e),
-        };
-        let created = match created {
-            Ok(created) => created,
+        let identity = match self.runtime.agent_control().identify(&token) {
+            Ok(identity) => identity,
             Err(e) => {
-                tracing::info!("claude makes its own worktree from {cwd}: {e}");
+                tracing::info!("claude's {event:?} is not hyprlayer's: {e}");
                 return Ok(ClaudeWorktreeAnswer::Fallback);
             }
         };
-        if !created.reused {
-            // claude waits on the hook, and a setup script can take minutes.
-            let runtime = self.runtime.clone();
-            let workstream = created.item.clone();
-            tokio::spawn(async move {
-                let id = workstream.id.clone();
-                if let Err(e) = runtime
-                    .scripts()
-                    .run_lifecycle(RunLifecycleRequest {
-                        workstream,
-                        kind: ScriptKind::Setup,
-                    })
-                    .await
-                {
-                    tracing::warn!("setup script for workstream {id} did not run: {e}");
+        let workstreams = self.runtime.workstreams();
+        let answer = match event {
+            ClaudeWorktreeEvent::Create {
+                name,
+                cwd,
+                session_id,
+            } => match workstreams
+                .create_for_claude(&identity, name, &cwd, session_id)
+                .await
+            {
+                Ok(created) => {
+                    if !created.reused {
+                        self.setup_detached(created.item.clone());
+                    }
+                    ClaudeWorktreeAnswer::Path(created.item.worktree_path)
                 }
-            });
-        }
-        Ok(ClaudeWorktreeAnswer::Path(created.item.worktree_path))
+                Err(e) => {
+                    tracing::info!("claude makes its own worktree from {cwd}: {e}");
+                    ClaudeWorktreeAnswer::Fallback
+                }
+            },
+            ClaudeWorktreeEvent::Remove { worktree_path } => {
+                self.archive_detached(workstreams.claude_removed(&identity, worktree_path).await)
+            }
+            ClaudeWorktreeEvent::SubagentStop { agent_id } => self.archive_detached(
+                workstreams
+                    .claude_subagent_stopped(&identity, agent_id)
+                    .await,
+            ),
+        };
+        Ok(answer)
     }
 
     async fn pty_agent_set_model(

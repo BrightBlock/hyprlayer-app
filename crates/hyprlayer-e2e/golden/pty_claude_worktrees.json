@@ -82,6 +82,41 @@
       "guards": [
         {
           "evidence": {
+            "archiveKept": true,
+            "archived": true,
+            "worktreeMoved": true
+          },
+          "guard": "the row leaves the active list and its worktree moves under `archived-contexts/`",
+          "ok": true
+        }
+      ],
+      "step": "WorktreeRemove archives the workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "committedKept": true,
+            "dirtyKept": true,
+            "workstreamsRemoved": 1
+          },
+          "guard": "a written file and a commit each keep the workstream, and an unknown agent changes nothing",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": true
+          },
+          "guard": "the subagent that changed nothing has its workstream archived",
+          "ok": true
+        }
+      ],
+      "step": "a subagent that changed its worktree keeps its workstream"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": "0",
             "path": "$SANDBOX/home/hyprlayer/worktrees/demo/baz",
             "samePath": true,
@@ -89,6 +124,13 @@
             "workstreamsAdded": 0
           },
           "guard": "the create after the restore returns baz's original path and adds no workstream",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": true
+          },
+          "guard": "WorktreeRemove archives the restored workstream",
           "ok": true
         }
       ],
@@ -103,6 +145,14 @@
             "workstreamsAdded": 0
           },
           "guard": "the hook prints `<cwd>/.claude/worktrees/foo` and no workstream is added",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "branchLeft": false,
+            "worktreeLeft": false
+          },
+          "guard": "WorktreeRemove of claude's own worktree removes it and its merged branch",
           "ok": true
         }
       ],

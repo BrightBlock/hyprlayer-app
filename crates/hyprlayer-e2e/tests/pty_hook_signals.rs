@@ -145,7 +145,7 @@ async fn pty_hook_signals() {
     expected.sort();
     let status_line = text(&settings, "/statusLine/command");
     j.guard(
-        "the settings file runs `<ctl> hook claude <Event>` for all 12 events, and `<ctl> statusline claude`",
+        "the settings file runs `<ctl> hook claude <Event>` for all 14 events, and `<ctl> statusline claude`",
         events == expected
             && hooks.iter().all(|(_, ok)| *ok)
             && status_line == format!("{quoted} statusline claude"),
@@ -877,6 +877,32 @@ async fn claude_worktree_create() {
             .map(|view| view.item)
             .collect::<Vec<_>>()
     };
+    let fire = |event: &'static str, line: String| {
+        let (c, term, hooks) = (&c, &term, &hooks);
+        async move {
+            let prefix = format!("{event} exit=");
+            let before = count(hooks, &prefix);
+            type_line(c, term, &line).await;
+            eventually(IO, || count(hooks, &prefix) > before).await;
+        }
+    };
+    let archived = |id: String| {
+        let (c, project) = (&c, &project);
+        async move {
+            let gone = || async {
+                !c.list_workstreams(project.clone(), false)
+                    .await
+                    .expect("list_workstreams")
+                    .iter()
+                    .any(|view| view.item.id == id)
+            };
+            let deadline = Instant::now() + IO;
+            while !gone().await && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            gone().await
+        }
+    };
 
     j.step("at Full, a claude worktree is a workstream at its name's path");
     worktree("worktree foo").await;
@@ -970,7 +996,57 @@ async fn claude_worktree_create() {
             && row
                 .as_ref()
                 .is_some_and(|w| w.id != old.id && w.branch == "hyprlayer/claude/foo-2"),
-        json!({ "exit": exit, "path": recreated, "branch": row.map(|w| w.branch) }),
+        json!({ "exit": exit, "path": recreated, "branch": row.as_ref().map(|w| w.branch.clone()) }),
+    );
+
+    j.step("WorktreeRemove archives the workstream");
+    let foo_2 = row.expect("foo-2's workstream").id;
+    fire("WorktreeRemove", "worktree-remove".into()).await;
+    let gone = archived(foo_2).await;
+    let kept = Path::new(&project).join("archived-contexts").join("foo-2");
+    j.guard(
+        "the row leaves the active list and its worktree moves under `archived-contexts/`",
+        gone && !Path::new(&recreated).exists() && kept.is_dir(),
+        json!({ "archived": gone, "worktreeMoved": !Path::new(&recreated).exists(), "archiveKept": kept.is_dir() }),
+    );
+
+    j.step("a subagent that changed its worktree keeps its workstream");
+    let id_of = |rows: &[hyprlayer_core::models::Workstream], name: &str| {
+        rows.iter().find(|w| w.title == name).map(|w| w.id.clone())
+    };
+    let rows = active().await;
+    let (a1, b2, c3) = (
+        id_of(&rows, "agent-a1"),
+        id_of(&rows, "agent-b2"),
+        id_of(&rows, "agent-c3"),
+    );
+    let before = rows.len();
+    fire("SubagentStop", "subagent-stop b2 dirty".into()).await;
+    sandbox.git(
+        Path::new(&agents[2].1),
+        &[
+            "commit",
+            "--allow-empty",
+            "--quiet",
+            "--message",
+            "subagent work",
+        ],
+    );
+    fire("SubagentStop", "subagent-stop c3".into()).await;
+    fire("SubagentStop", "subagent-stop zz".into()).await;
+    fire("SubagentStop", "subagent-stop a1".into()).await;
+    let clean_gone = archived(a1.expect("agent-a1's workstream")).await;
+    let rows = active().await;
+    let still = |id: &Option<String>| rows.iter().any(|w| Some(&w.id) == id.as_ref());
+    j.guard(
+        "a written file and a commit each keep the workstream, and an unknown agent changes nothing",
+        still(&b2) && still(&c3) && rows.len() == before - 1,
+        json!({ "dirtyKept": still(&b2), "committedKept": still(&c3), "workstreamsRemoved": before - rows.len() }),
+    );
+    j.guard(
+        "the subagent that changed nothing has its workstream archived",
+        clean_gone,
+        json!({ "archived": clean_gone }),
     );
 
     j.step("a restored claude workstream answers its name again");
@@ -1019,6 +1095,13 @@ async fn claude_worktree_create() {
             "workstreamsAdded": after - before,
         }),
     );
+    fire("WorktreeRemove", "worktree-remove".into()).await;
+    let removed = archived(baz_id).await;
+    j.guard(
+        "WorktreeRemove archives the restored workstream",
+        removed,
+        json!({ "archived": removed }),
+    );
 
     j.step("at Read, claude makes its own worktree");
     set_level(&mut j, &c, AgentControlLevel::Read).await;
@@ -1031,6 +1114,14 @@ async fn claude_worktree_create() {
         "the hook prints `<cwd>/.claude/worktrees/foo` and no workstream is added",
         exit == "0" && native == format!("{lead_tree}/.claude/worktrees/foo") && after == before,
         json!({ "exit": exit, "path": native, "workstreamsAdded": after - before }),
+    );
+    fire("WorktreeRemove", "worktree-remove".into()).await;
+    let lead_repo = Path::new(&lead_tree);
+    let branch = sandbox.branch_exists(lead_repo, "worktree-foo");
+    j.guard(
+        "WorktreeRemove of claude's own worktree removes it and its merged branch",
+        !Path::new(&native).exists() && !branch,
+        json!({ "worktreeLeft": Path::new(&native).exists(), "branchLeft": branch }),
     );
     type_line(&c, &term, "exit").await;
     wait_for_exit(&mut stream, IO).await;

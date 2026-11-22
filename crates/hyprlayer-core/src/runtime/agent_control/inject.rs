@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-pub const CLAUDE_HOOK_EVENTS: [&str; 12] = [
+pub const CLAUDE_HOOK_EVENTS: [&str; 14] = [
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
@@ -18,6 +18,9 @@ pub const CLAUDE_HOOK_EVENTS: [&str; 12] = [
     "PreModelSwitch",
     // Answers with a path: the server's workstream, else claude's own layout, made by the face.
     "WorktreeCreate",
+    // Archive the workstream claude is done with: on a remove, or a subagent that changed nothing.
+    "WorktreeRemove",
+    "SubagentStop",
 ];
 
 pub const CODEX_HOOK_EVENTS: [&str; 8] = [

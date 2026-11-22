@@ -22,8 +22,8 @@ use crate::runtime::script_registry::RunPhase;
 use crate::runtime::scripts::RunLifecycleRequest;
 use crate::scripts::ScriptKind;
 use crate::store::{
-    now_ms, ArchiveRecord, Db, NewClaudeWorktree, NewWorkstream, ObservedPr, Workstream,
-    WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+    now_ms, ArchiveRecord, ClaudeWorktree, Db, NewClaudeWorktree, NewWorkstream, ObservedPr,
+    Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
 };
 use crate::worktree::seed::SeedReport;
 use crate::worktree::thoughts_links::{self, LinkStatus};
@@ -94,6 +94,17 @@ fn free_slug(db: &Db, project_path: &str, stem: &str) -> Result<String> {
         }
     }
     unreachable!("some stem-N is free")
+}
+
+fn untouched(claude: &ClaudeWorktree) -> bool {
+    let path = Path::new(&claude.workstream.worktree_path);
+    let status = worktree::status(path, &claude.workstream.base_branch, None, None);
+    let head = head_of(path);
+    status.exists
+        && status.unreadable.is_none()
+        && status.dirty + status.untracked == 0
+        && head.is_some()
+        && head == claude.created_head
 }
 
 fn head_of(worktree: &Path) -> Option<String> {
@@ -1469,6 +1480,33 @@ impl WorkstreamService<'_> {
         self.create_logged(req, Some(claude)).await
     }
 
+    pub async fn claude_removed(
+        &self,
+        identity: &AgentIdentity,
+        worktree_path: String,
+    ) -> Result<Option<Workstream>> {
+        self.runtime.agent_control().require_full(identity).await?;
+        let (db, project) = (self.runtime.db.clone(), identity.project_path.clone());
+        let found =
+            blocking(move || db.active_claude_worktree_at(&project, &worktree_path)).await?;
+        Ok(found.map(|claude| claude.workstream))
+    }
+
+    /// A stopped subagent's workstream, only if it left the worktree exactly as it was made.
+    pub async fn claude_subagent_stopped(
+        &self,
+        identity: &AgentIdentity,
+        agent_id: String,
+    ) -> Result<Option<Workstream>> {
+        self.runtime.agent_control().require_full(identity).await?;
+        let (db, project) = (self.runtime.db.clone(), identity.project_path.clone());
+        blocking(move || {
+            let found = db.active_claude_worktree(&project, &format!("agent-{agent_id}"))?;
+            Ok(found.filter(untouched).map(|claude| claude.workstream))
+        })
+        .await
+    }
+
     async fn create_logged(
         &self,
         req: CreateWorkstreamRequest,
@@ -1598,9 +1636,9 @@ impl WorkstreamService<'_> {
                 claude.name.clone(),
                 self.runtime.db.clone(),
             );
-            if let Some(item) = blocking(move || db.active_claude_worktree(&pp, &name)).await? {
+            if let Some(found) = blocking(move || db.active_claude_worktree(&pp, &name)).await? {
                 return Ok(CreateWorkstreamResult {
-                    item,
+                    item: found.workstream,
                     link: None,
                     seed: None,
                     reused: true,
@@ -2731,6 +2769,38 @@ fn created_day(created_at_ms: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_worktree_is_not_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        let tree = repo
+            .find_tree(repo.index().unwrap().write_tree().unwrap())
+            .unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        let workstream = Db::open_in_memory()
+            .unwrap()
+            .insert_workstream(NewWorkstream {
+                project_path: "/repo".into(),
+                title: "t".into(),
+                slug: "t".into(),
+                branch: "t".into(),
+                worktree_path: dir.path().display().to_string(),
+                base_branch: "HEAD".into(),
+                worktree_mode: WorktreeMode::Isolated,
+            })
+            .unwrap();
+        let claude = ClaudeWorktree {
+            workstream,
+            created_head: Some(head.to_string()),
+        };
+        assert!(untouched(&claude));
+        std::fs::write(dir.path().join(".git/index"), "not an index").unwrap();
+        assert!(!untouched(&claude));
+    }
 
     #[test]
     fn a_refocus_fetches_past_a_failure_but_at_most_every_30_seconds() {

@@ -62,6 +62,11 @@ const COLS: &str = "id, project_path, title, slug, branch, worktree_path, base_b
                     observed_ref, observed_pr_head, observed_pr_tip, \
                     created_at, updated_at, archived_at, parent_workstream_id";
 
+pub struct ClaudeWorktree {
+    pub workstream: Workstream,
+    pub created_head: Option<String>,
+}
+
 pub struct NewClaudeWorktree {
     pub workstream_id: String,
     pub project_path: String,
@@ -213,17 +218,40 @@ impl Db {
         &self,
         project_path: &str,
         name: &str,
-    ) -> Result<Option<Workstream>> {
+    ) -> Result<Option<ClaudeWorktree>> {
+        self.claude_worktree_where(project_path, "c.name", name)
+    }
+
+    pub fn active_claude_worktree_at(
+        &self,
+        project_path: &str,
+        worktree_path: &str,
+    ) -> Result<Option<ClaudeWorktree>> {
+        self.claude_worktree_where(project_path, "w.worktree_path", worktree_path)
+    }
+
+    fn claude_worktree_where(
+        &self,
+        project_path: &str,
+        column: &str,
+        value: &str,
+    ) -> Result<Option<ClaudeWorktree>> {
         self.with(|conn| {
             conn.query_row(
                 &format!(
-                    "SELECT {} FROM claude_worktrees c JOIN workstreams w ON w.id = c.workstream_id
-                     WHERE c.project_path = ?1 AND c.name = ?2 AND w.status = 'active'
+                    "SELECT {}, c.created_head FROM claude_worktrees c
+                     JOIN workstreams w ON w.id = c.workstream_id
+                     WHERE c.project_path = ?1 AND {column} = ?2 AND w.status = 'active'
                      ORDER BY c.rowid DESC",
                     qualified_cols()
                 ),
-                params![project_path, name],
-                row_to_item,
+                params![project_path, value],
+                |row| {
+                    Ok(ClaudeWorktree {
+                        workstream: row_to_item(row)?,
+                        created_head: row.get("created_head")?,
+                    })
+                },
             )
             .map(Some)
             .or_else(|e| match e {

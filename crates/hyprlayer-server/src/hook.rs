@@ -46,12 +46,18 @@ pub async fn run_hook(engine: HookEngine, event: Option<String>) -> i32 {
         }
     };
     let env = |key: &str| std::env::var(key).ok().filter(|v| !v.is_empty());
-    // claude takes the last stdout line as the worktree, so even a tokenless hook must answer.
-    if engine == HookEngine::Claude && event.as_deref() == Some("WorktreeCreate") {
-        return create_worktree(env("HYPRLAYER_SOCKET"), env("HYPRLAYER_AGENT_TOKEN")).await;
+    let (socket, token) = (env("HYPRLAYER_SOCKET"), env("HYPRLAYER_AGENT_TOKEN"));
+    match (engine, event.as_deref()) {
+        // claude takes the last stdout line as the worktree, so even a tokenless hook must answer.
+        (HookEngine::Claude, Some("WorktreeCreate")) => {
+            return create_worktree(socket, token).await
+        }
+        (HookEngine::Claude, Some(done @ ("WorktreeRemove" | "SubagentStop"))) => {
+            return worktree_done(done, socket, token).await;
+        }
+        _ => {}
     }
-    let (Some(token), Some(socket)) = (env("HYPRLAYER_AGENT_TOKEN"), env("HYPRLAYER_SOCKET"))
-    else {
+    let (Some(token), Some(socket)) = (token, socket) else {
         ack();
         return 0;
     };
@@ -101,11 +107,7 @@ async fn create_worktree(socket: Option<String>, token: Option<String>) -> i32 {
         cwd: cwd.clone(),
         session_id: text("session_id"),
     };
-    let ask = async {
-        let client = RpcClient::connect_socket(Path::new(&socket?)).await.ok()?;
-        drop(client.take_events());
-        client.claude_worktree(token?, event).await.ok()
-    };
+    let ask = ask_worktree(socket, token, event);
     let path = match tokio::time::timeout(CREATE_BUDGET, ask).await {
         Ok(Some(ClaudeWorktreeAnswer::Path(path))) => path,
         _ => match claude_layout_worktree(Path::new(&cwd), &name) {
@@ -120,20 +122,77 @@ async fn create_worktree(socket: Option<String>, token: Option<String>) -> i32 {
     0
 }
 
+async fn worktree_done(event: &str, socket: Option<String>, token: Option<String>) -> i32 {
+    let payload: Option<Value> = read_stdin().and_then(|raw| serde_json::from_slice(&raw).ok());
+    let text = |key: &str| payload.as_ref()?.get(key)?.as_str().map(str::to_string);
+    let (event, removed) = match (event, text("worktree_path"), text("agent_id")) {
+        ("WorktreeRemove", Some(worktree_path), _) => (
+            ClaudeWorktreeEvent::Remove {
+                worktree_path: worktree_path.clone(),
+            },
+            Some(worktree_path),
+        ),
+        ("SubagentStop", _, Some(agent_id)) => {
+            (ClaudeWorktreeEvent::SubagentStop { agent_id }, None)
+        }
+        _ => return 0,
+    };
+    let ask = ask_worktree(socket, token, event);
+    let answer = tokio::time::timeout(REPORT_BUDGET, ask)
+        .await
+        .ok()
+        .flatten();
+    if let Some(path) = removed.filter(|_| !matches!(answer, Some(ClaudeWorktreeAnswer::Path(_)))) {
+        remove_claude_layout(Path::new(&path));
+    }
+    0
+}
+
+async fn ask_worktree(
+    socket: Option<String>,
+    token: Option<String>,
+    event: ClaudeWorktreeEvent,
+) -> Option<ClaudeWorktreeAnswer> {
+    let client = RpcClient::connect_socket(Path::new(&socket?)).await.ok()?;
+    drop(client.take_events());
+    client.claude_worktree(token?, event).await.ok()
+}
+
+fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git: {e}"))?;
+    match out.status.success() {
+        true => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),
+        false => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+    }
+}
+
+/// With a create hook installed claude removes neither the worktree nor its branch; `-d` keeps an
+/// unmerged branch.
+fn remove_claude_layout(path: &Path) {
+    let layout = path.parent().filter(|p| p.ends_with(".claude/worktrees"));
+    let (Some(top), Some(name)) = (layout.and_then(|p| p.parent()?.parent()), path.file_name())
+    else {
+        return;
+    };
+    let path = path.to_string_lossy();
+    let _ = git(top, &["worktree", "remove", "--force", &path]);
+    let _ = git(
+        top,
+        &[
+            "branch",
+            "-d",
+            &format!("worktree-{}", name.to_string_lossy()),
+        ],
+    );
+}
+
 /// The worktree claude makes with no hook installed: `worktree-<name>` off the origin default.
 fn claude_layout_worktree(cwd: &Path, name: &str) -> Result<String, String> {
-    let git = |dir: &Path, args: &[&str]| {
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()
-            .map_err(|e| format!("git: {e}"))?;
-        match out.status.success() {
-            true => Ok(String::from_utf8_lossy(&out.stdout).trim().to_string()),
-            false => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
-        }
-    };
     let top = PathBuf::from(git(cwd, &["rev-parse", "--show-toplevel"])?);
     let path = top.join(".claude").join("worktrees").join(name);
     let path_str = path.to_string_lossy().into_owned();
