@@ -458,6 +458,93 @@
       "guards": [
         {
           "evidence": {
+            "afterTwoSeconds": true,
+            "clientId": "agent:hyprlayer",
+            "pending": [],
+            "text": "[from hyprlayer · wake $TIMER_WAKE]\n\ntimer up: 2 s passed",
+            "wire": "[from hyprlayer · wake $TIMER_WAKE]"
+          },
+          "guard": "after 2 s the caller's harness reads a turn headed by the wake, authored agent:hyprlayer, and nothing stays pending",
+          "ok": true
+        }
+      ],
+      "step": "wake_when wakes its caller when the timer is up"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "atTheDeadline": true,
+            "text": "[from hyprlayer · wake $EXIT_WAKE]\n\ntimed out after 2 s waiting for session $SLEEPER to exit"
+          },
+          "guard": "waiting 2 s for an idle child to exit wakes the caller as timed out, at the deadline",
+          "ok": true
+        }
+      ],
+      "step": "a wake whose condition never holds times out"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "atOnce": true,
+            "text": "[from hyprlayer · wake $IDLE_WAKE]\n\nsession $SLEEPER \"Sleeper\" is idle"
+          },
+          "guard": "a session wake on a child already idle fires at once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "text": "[from hyprlayer · wake $ANY_WAKE]\n\nsession $SLEEPER \"Sleeper\" is idle",
+            "whileHeld": "working",
+            "wokeEarly": false
+          },
+          "guard": "an any_agent wake holds while the child works, then names it once it goes idle",
+          "ok": true
+        }
+      ],
+      "step": "agent-state wakes"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "text": "[from hyprlayer · wake $REF_WAKE]\n\norigin/$PUSHER_BRANCH moved $TIP_WAS → $TIP_NOW",
+            "withinSeconds": true
+          },
+          "guard": "a push from another workstream's worktree wakes the caller within seconds, naming the move",
+          "ok": true
+        }
+      ],
+      "step": "a ref wake rides the worktree watch"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "delivered": false,
+            "notifies": [
+              {
+                "body": "Waker got 5 agent messages in a row. Reply to it to let agents continue.",
+                "kind": "notify",
+                "sessionId": null,
+                "terminalId": null,
+                "title": "An agent needs you",
+                "workstreamId": "$WS"
+              }
+            ],
+            "pending": []
+          },
+          "guard": "after five wakes with no human turn, a sixth at a limit of 5 is dropped and the user is told once",
+          "ok": true
+        }
+      ],
+      "step": "a wake past the hop limit is dropped"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

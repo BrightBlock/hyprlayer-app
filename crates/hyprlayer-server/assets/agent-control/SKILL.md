@@ -12,6 +12,7 @@ You run inside hyprlayer. Its `hyprlayer` MCP server and the `"$HYPRLAYER_CTL" c
 - **Stay in your workstream.** Leave `workstream_id` out unless the user named another one. Create a workstream only for separate work on its own branch.
 - **Spawn background agents.** A spawned agent opens as a background tab on the user's desktops and runs no higher than your own permission mode, in a stage that pre-approves no tool yours doesn't. Give it a self-contained prompt and a title.
 - **Use `prompt_and_wait` rather than polling.** It sends, then blocks until the agent finishes its turn, needs a person, or exits, and returns the agent's last reply. Do not loop on `read_agent` or `list_agents`. A `stalled` result means an idle agent did not move; do not just call it again.
+- **Use `wake_when` to wait on anything else, then end your turn.** Don't run shell `sleep` or poll loops, or call `pr_status`, `git_status` or `list_agents` again and again. hyprlayer sends you a message marked `[from hyprlayer · wake <id>]` when the condition holds or its timeout passes, and that starts your next turn.
 - **Never stop, kill or archive an agent you didn't spawn.** The user owns those.
 - **Say why in `notify_user` and `request_attention`.** The user reads the body away from your transcript, so state the reason and what you need.
 
@@ -33,6 +34,7 @@ Read tools work at agent control Read or Full:
 | `script_output` | `ctl script-output <kind>` |
 | `notify_user` | `ctl notify <title> <body>` |
 | `request_attention` | `ctl attention <reason>` |
+| `wake_when` | `ctl wake-when <condition-json>`; `--cancel <id>`, or no argument to list |
 
 `pr_status` answers with a `kind`: `found` (the PR is in `pr`), `noPr`, `notGitHub` (no GitHub remote), `failed` (`cause` says why, `last` is the last known PR or null), or `unknown`.
 
@@ -79,4 +81,4 @@ A refusal carries a code, a message and a remedy. Don't retry it: change course,
   - a goal has a command check and you are not in bypass mode;
   - the session you message runs in a higher permission mode than yours and is not one you spawned;
   - the PTY engine is not one the user configured.
-- `agent_limit_reached`: a child would be more than 2 agents deep, you already have 4 live children, or an agent got 6 agent messages with no human turn in between. Ask the user to step in; they can raise these limits in Settings → Agent control.
+- `agent_limit_reached`: a child would be more than 2 agents deep, you already have 4 live children, or an agent got 6 agent messages with no human turn in between. Ask the user to step in; they can raise these limits in Settings → Agent control. It also comes when you already have 8 pending wakes; cancel one first. A wake counts as an agent message, so one past the hop limit is dropped.

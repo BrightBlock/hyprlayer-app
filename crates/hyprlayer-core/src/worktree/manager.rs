@@ -738,6 +738,42 @@ pub async fn fetch_unattended(
         "--multiple",
     ];
     args.extend(remotes.iter().map(String::as_str));
+    git_in(git, repo, &args, &unattended(overlay))
+        .timeout(Duration::from_secs(60))
+        .run()
+        .await?;
+    Ok(())
+}
+
+pub async fn ls_remote_unattended(
+    git: &Path,
+    repo: &Path,
+    remote: &str,
+    branch: &str,
+    overlay: &[(String, String)],
+) -> Result<Option<String>> {
+    let pattern = format!("refs/heads/{branch}");
+    let args = [
+        "-c",
+        "core.askPass=",
+        "-c",
+        "credential.interactive=never",
+        "ls-remote",
+        remote,
+        &pattern,
+    ];
+    let out = git_in(git, repo, &args, &unattended(overlay))
+        .timeout(Duration::from_secs(20))
+        .run()
+        .await?;
+    Ok(out
+        .stdout
+        .lines()
+        .find_map(|line| line.split_once('\t').filter(|(_, name)| *name == pattern))
+        .map(|(oid, _)| oid.to_string()))
+}
+
+fn unattended(overlay: &[(String, String)]) -> Vec<(String, String)> {
     let no_prompts = [
         ("GIT_TERMINAL_PROMPT", "0"),
         ("GIT_ASKPASS", ""),
@@ -746,12 +782,7 @@ pub async fn fetch_unattended(
         ("GCM_INTERACTIVE", "never"),
     ]
     .map(|(k, v)| (k.to_string(), v.to_string()));
-    let env: Vec<(String, String)> = overlay.iter().cloned().chain(no_prompts).collect();
-    git_in(git, repo, &args, &env)
-        .timeout(Duration::from_secs(60))
-        .run()
-        .await?;
-    Ok(())
+    overlay.iter().cloned().chain(no_prompts).collect()
 }
 
 pub async fn create_tracking_branch(

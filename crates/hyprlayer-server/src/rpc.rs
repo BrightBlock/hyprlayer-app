@@ -78,6 +78,7 @@ use hyprlayer_models::{
     AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer, ClaudeWorktreeEvent,
     PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns,
     SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
+    Wake, WakeCondition,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -353,6 +354,9 @@ hyprlayer_proto::commands! {
     InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();
     KillPtyAgent: kill_pty_agent(terminal_id: String) -> ();
     RequestReveal: request_reveal(target: RevealTarget) -> ();
+    WakeWhen: wake_when(condition: WakeCondition, timeout_ms: Option<u32>) -> Wake;
+    ListWakes: list_wakes() -> Vec<Wake>;
+    CancelWake: cancel_wake(wake_id: String) -> ();
 
     GetScripts: get_scripts(project_path: String) -> ScriptSettings;
     SetScripts: set_scripts(project_path: String, scripts: ScriptSettings) -> ();

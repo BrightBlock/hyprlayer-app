@@ -118,6 +118,9 @@ pub enum CoreError {
     AgentLimitReached { detail: String },
 
     #[error("{detail}")]
+    WakeInvalid { detail: String },
+
+    #[error("{detail}")]
     PtyControlFailed { detail: String },
 
     #[error("enter an API key first")]
@@ -832,6 +835,7 @@ impl CoreError {
             CoreError::AgentControlOff => "agent_control_off",
             CoreError::AgentControlDenied { .. } => "agent_control_denied",
             CoreError::AgentLimitReached { .. } => "agent_limit_reached",
+            CoreError::WakeInvalid { .. } => "invalid_arguments",
             CoreError::PtyControlFailed { .. } => "pty_control_failed",
             CoreError::ApiKeyEmpty => "api_key_empty",
             CoreError::TitleGenerationEmpty { .. } => "title_generation_empty",

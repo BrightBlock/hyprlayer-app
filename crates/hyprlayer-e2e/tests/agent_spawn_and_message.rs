@@ -32,6 +32,7 @@ const GOAL_WAIT: Duration = Duration::from_secs(90);
 /// Under `McpDriver`'s 30 s reply wait, so a slow wait never wedges the driver.
 const WAIT_SECS: u64 = 20;
 const CHECK: &str = "test -f counter.txt";
+const WATCH_ARMS: Duration = Duration::from_secs(1);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_spawn_and_message() {
@@ -775,6 +776,234 @@ async fn agent_spawn_and_message() {
         json!({ "restarted": stopped.status.success(), "rows": after, "lead": read(&lead) }),
     );
 
+    j.step("wake_when wakes its caller when the timer is up");
+    let waker = start_session(&mut j, &c, &ws, "Waker", "$WAKER").await;
+    let mut waker_mcp = driver(&mut j, &sandbox, &waker, "$WAKER_TOKEN").await;
+    let started = Instant::now();
+    let timer = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({ "condition": { "kind": "after", "secs": 2 } }),
+        "$TIMER_WAKE",
+    )
+    .await;
+    let turn = woken(&c, &waker, &timer).await;
+    let elapsed = started.elapsed();
+    let header = format!("[from hyprlayer · wake {timer}]");
+    eventually(IO, || {
+        stub_user_lines(&sandbox, &waker)
+            .iter()
+            .any(|w| w.starts_with(&header))
+    })
+    .await;
+    let wire = stub_user_lines(&sandbox, &waker);
+    let pending = parsed(&waker_mcp.call("wake_when", json!({})).await)["pending"].clone();
+    j.guard(
+        "after 2 s the caller's harness reads a turn headed by the wake, authored agent:hyprlayer, and nothing stays pending",
+        turn.0 == "agent:hyprlayer"
+            && turn.1 == format!("{header}\n\ntimer up: 2 s passed")
+            && wire.iter().any(|w| w.starts_with(&header))
+            && elapsed >= Duration::from_secs(2)
+            && pending == json!([]),
+        json!({
+            "clientId": turn.0,
+            "text": turn.1,
+            "wire": wire.iter().find(|w| w.starts_with(&header)).and_then(|w| w.lines().next()),
+            "afterTwoSeconds": elapsed >= Duration::from_secs(2),
+            "pending": pending,
+        }),
+    );
+
+    j.step("a wake whose condition never holds times out");
+    let spawned = waker_mcp
+        .call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_SLEEPER", "title": "Sleeper" }),
+        )
+        .await;
+    let sleeper = text(&parsed(&spawned), "/sessionId");
+    j.alias(&sleeper, "$SLEEPER");
+    wait_idle(&mut waker_mcp, &sleeper).await;
+    let started = Instant::now();
+    let exit = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({
+            "condition": { "kind": "session", "sessionId": sleeper, "until": "exited" },
+            "timeout_sec": 2,
+        }),
+        "$EXIT_WAKE",
+    )
+    .await;
+    let turn = woken(&c, &waker, &exit).await;
+    let elapsed = started.elapsed();
+    j.guard(
+        "waiting 2 s for an idle child to exit wakes the caller as timed out, at the deadline",
+        turn.1
+            == format!(
+                "[from hyprlayer · wake {exit}]\n\ntimed out after 2 s waiting for session {sleeper} to exit"
+            )
+            && elapsed >= Duration::from_secs(2),
+        json!({ "text": turn.1, "atTheDeadline": elapsed >= Duration::from_secs(2) }),
+    );
+
+    j.step("agent-state wakes");
+    let started = Instant::now();
+    let idle = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({ "condition": { "kind": "session", "sessionId": sleeper, "until": "idle" } }),
+        "$IDLE_WAKE",
+    )
+    .await;
+    let turn = woken(&c, &waker, &idle).await;
+    let elapsed = started.elapsed();
+    j.guard(
+        "a session wake on a child already idle fires at once",
+        turn.1
+            == format!("[from hyprlayer · wake {idle}]\n\nsession {sleeper} \"Sleeper\" is idle")
+            && elapsed < Duration::from_secs(5),
+        json!({ "text": turn.1, "atOnce": elapsed < Duration::from_secs(5) }),
+    );
+    control_for(&sandbox, &sleeper, "hold", "2");
+    let sent = waker_mcp
+        .call(
+            "message_agent",
+            json!({ "session_id": sleeper, "text": "E2E_HOLD" }),
+        )
+        .await;
+    let any = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({ "condition": { "kind": "any_agent", "until": "idle" } }),
+        "$ANY_WAKE",
+    )
+    .await;
+    let held = outcome(
+        &waker_mcp
+            .call(
+                "wait_agent",
+                json!({ "session_id": sleeper, "timeout_sec": 2 }),
+            )
+            .await,
+    );
+    let any_header = format!("[from hyprlayer · wake {any}]");
+    let early = user_turns(&c, &waker)
+        .await
+        .iter()
+        .any(|t| t.2.starts_with(&any_header));
+    control(&sandbox, "release", "");
+    let turn = woken(&c, &waker, &any).await;
+    clear(&sandbox, "release");
+    j.guard(
+        "an any_agent wake holds while the child works, then names it once it goes idle",
+        !tool_failed(&sent)
+            && held["state"] == json!("working")
+            && !early
+            && turn.1 == format!("{any_header}\n\nsession {sleeper} \"Sleeper\" is idle"),
+        json!({ "whileHeld": held["state"], "wokeEarly": early, "text": turn.1 }),
+    );
+
+    j.step("a ref wake rides the worktree watch");
+    sandbox.git(
+        &sandbox.root,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch",
+            "main",
+            "origin.git",
+        ],
+    );
+    let origin = sandbox.root.join("origin.git").display().to_string();
+    sandbox.git(&repo, &["remote", "add", "origin", &origin]);
+    let pusher = create_workstream(&mut j, &c, &project, "Pusher").await;
+    let tree = std::path::PathBuf::from(text(&pusher, "/item/worktreePath"));
+    let branch = text(&pusher, "/item/branch");
+    j.alias(&branch, "$PUSHER_BRANCH");
+    sandbox.git(
+        &tree,
+        &["commit", "--quiet", "--allow-empty", "--message", "first"],
+    );
+    sandbox.git(&tree, &["push", "--quiet", "-u", "origin", &branch]);
+    let was = sandbox.git(&tree, &["rev-parse", "--short=7", "HEAD"]);
+    sandbox.git(
+        &tree,
+        &["commit", "--quiet", "--allow-empty", "--message", "second"],
+    );
+    let now = sandbox.git(&tree, &["rev-parse", "--short=7", "HEAD"]);
+    j.alias(&was, "$TIP_WAS");
+    j.alias(&now, "$TIP_NOW");
+    j.call(
+        &c,
+        Request::WatchWorktree {
+            workstream_id: Some(ws.clone()),
+        },
+    )
+    .await
+    .expect("watch_worktree");
+    tokio::time::sleep(WATCH_ARMS).await;
+    let moved = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({ "condition": { "kind": "ref", "branch": branch } }),
+        "$REF_WAKE",
+    )
+    .await;
+    let started = Instant::now();
+    sandbox.git(&tree, &["push", "--quiet", "origin", &branch]);
+    let turn = woken(&c, &waker, &moved).await;
+    let elapsed = started.elapsed();
+    j.guard(
+        "a push from another workstream's worktree wakes the caller within seconds, naming the move",
+        turn.1
+            == format!("[from hyprlayer · wake {moved}]\n\norigin/{branch} moved {was} → {now}")
+            && elapsed < Duration::from_secs(15),
+        json!({ "text": turn.1, "withinSeconds": elapsed < Duration::from_secs(15) }),
+    );
+    j.step("a wake past the hop limit is dropped");
+    let mut rx = c
+        .take_events()
+        .expect("the restarted desktop's runtime events");
+    j.call(
+        &c,
+        Request::AnnounceClient {
+            client_id: "desktop-a".into(),
+            device: "device-a".into(),
+            capabilities: TARGETED_EVENTS.iter().map(|k| k.to_string()).collect(),
+        },
+    )
+    .await
+    .expect("announce_client");
+    update_settings(&mut j, &c, |s| s.agent_control.max_agent_hops = 5).await;
+    let capped = wake_when(
+        &mut j,
+        &mut waker_mcp,
+        json!({ "condition": { "kind": "after", "secs": 1 } }),
+        "$CAPPED_WAKE",
+    )
+    .await;
+    let notes = notifies(&mut rx, Duration::from_secs(4)).await;
+    let capped_header = format!("[from hyprlayer · wake {capped}]");
+    let delivered = user_turns(&c, &waker)
+        .await
+        .iter()
+        .any(|t| t.2.starts_with(&capped_header));
+    let pending = parsed(&waker_mcp.call("wake_when", json!({})).await)["pending"].clone();
+    update_settings(&mut j, &c, |s| s.agent_control.max_agent_hops = 6).await;
+    j.guard(
+        "after five wakes with no human turn, a sixth at a limit of 5 is dropped and the user is told once",
+        !delivered
+            && pending == json!([])
+            && notes.len() == 1
+            && notes[0]["body"]
+                .as_str()
+                .is_some_and(|b| b.contains("Waker got 5 agent messages in a row")),
+        json!({ "delivered": delivered, "pending": pending, "notifies": notes }),
+    );
+    drop(waker_mcp);
+
     j.step("shutdown");
     let stopped = server.shutdown(&c).await;
     j.guard(
@@ -960,6 +1189,34 @@ async fn crowd(mcp: &mut McpDriver) -> String {
         )
         .await,
     )
+}
+
+async fn wake_when(j: &mut Journey, mcp: &mut McpDriver, args: Value, alias: &str) -> String {
+    let result = mcp.call("wake_when", args).await;
+    assert!(
+        !tool_failed(&result),
+        "wake_when refused: {}",
+        tool_text(&result)
+    );
+    let id = text(&parsed(&result), "/wake/id");
+    j.alias(&id, alias);
+    id
+}
+
+async fn woken(c: &RpcClient, session_id: &str, wake_id: &str) -> (String, String) {
+    let header = format!("[from hyprlayer · wake {wake_id}]");
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline {
+        if let Some((author, _, text)) = user_turns(c, session_id)
+            .await
+            .into_iter()
+            .find(|t| t.2.starts_with(&header))
+        {
+            return (author, text);
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Default::default()
 }
 
 async fn whoami(mcp: &mut McpDriver) -> Value {

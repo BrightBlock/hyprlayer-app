@@ -8,6 +8,7 @@ pub mod pty_controls;
 mod rollout;
 pub mod spawn;
 pub mod tokens;
+pub(crate) mod wake;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

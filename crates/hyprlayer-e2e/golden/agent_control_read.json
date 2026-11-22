@@ -30,6 +30,7 @@
               "read_terminal",
               "request_attention",
               "script_output",
+              "wake_when",
               "whoami"
             ]
           },
@@ -105,24 +106,25 @@
               "read_terminal",
               "request_attention",
               "script_output",
+              "wake_when",
               "whoami"
             ]
           },
-          "guard": "at read only the 12 read tools are listed, each marked read-only",
+          "guard": "at read only the 13 read tools are listed, each marked read-only",
           "ok": true
         },
         {
           "evidence": {
             "call": "not_an_agent: not inside a hyprlayer agent: HYPRLAYER_SOCKET and HYPRLAYER_AGENT_TOKEN are unset",
-            "tools": 12
+            "tools": 13
           },
           "guard": "with no agent env it still lists the read tools and refuses a call as not_an_agent",
           "ok": true
         },
         {
           "evidence": {
-            "full": 31,
-            "readOnly": 12
+            "full": 32,
+            "readOnly": 13
           },
           "guard": "at full every tool is listed; --read-only still lists only the read tools",
           "ok": true

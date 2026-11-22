@@ -65,6 +65,11 @@ pub(crate) fn cached_lookup_any_ref(cache: &PrCache, id: &str) -> Option<(String
     cache.get(id).map(|e| (e.pr_ref.clone(), e.lookup.clone()))
 }
 
+pub(crate) fn cached_age(cache: &PrCache, id: &str) -> Option<Duration> {
+    let cache = cache.read().unwrap_or_else(PoisonError::into_inner);
+    cache.get(id).map(|e| e.written.elapsed())
+}
+
 pub(crate) fn edit_cached_pr(cache: &PrCache, id: &str, edit: impl FnOnce(&mut PrStatus)) {
     let mut cache = cache.write().unwrap_or_else(PoisonError::into_inner);
     if let Some(PrLookup::Found { pr } | PrLookup::Failed { last: Some(pr), .. }) =

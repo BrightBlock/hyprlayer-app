@@ -22,7 +22,7 @@ use crate::runtime::sessions::goal_loop::{is_idle, Watch};
 use crate::runtime::sessions::{SendContext, SessionLineage, StartStageSessionRequest};
 use crate::runtime::terminals::{CloseTerminalRequest, LaunchAgentRequest, PtyLineage};
 use crate::store::{Session, Workstream};
-use crate::terminal::{engines, text, PtySession};
+use crate::terminal::{engines, text, PtySession, RingReader};
 
 /// A wait's caller may be gone; the request task still runs to its end, so the end is bounded.
 const WAIT_CAP: Duration = Duration::from_secs(600);
@@ -36,7 +36,7 @@ const PROMPT_WAIT: Duration = Duration::from_secs(60);
 /// An unhooked TUI reports no ready state; this much quiet output stands in for one.
 const PROMPT_QUIET: Duration = Duration::from_secs(3);
 /// A paste the TUI swallowed never submits; past this a wait stops counting it as pending.
-const PROMPT_ACK: Duration = Duration::from_secs(10);
+pub(super) const PROMPT_ACK: Duration = Duration::from_secs(10);
 /// The TUI must see the paste end before the Enter, or the Enter joins the paste.
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 const READ_LINES_CAP: u32 = 500;
@@ -54,7 +54,7 @@ pub struct SpawnCheck {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Observed {
+pub(super) enum Observed {
     Working,
     NeedsYou,
     Idle,
@@ -62,7 +62,7 @@ enum Observed {
 }
 
 impl Observed {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Observed::Working => "working",
             Observed::NeedsYou => "needs_you",
@@ -72,7 +72,7 @@ impl Observed {
     }
 
     /// A wait stops at its state or any later one: an asking child never reaches idle on its own.
-    fn reaches(self, until: WaitUntil) -> bool {
+    pub(super) fn reaches(self, until: WaitUntil) -> bool {
         match until {
             WaitUntil::Idle => self != Observed::Working,
             WaitUntil::NeedsYou => matches!(self, Observed::NeedsYou | Observed::Exited),
@@ -97,9 +97,9 @@ struct PtyChild {
     session_fallback: bool,
 }
 
-struct LastTurn {
-    asking: bool,
-    reply: Option<String>,
+pub(super) struct LastTurn {
+    pub(super) asking: bool,
+    pub(super) reply: Option<String>,
 }
 
 impl AgentControlService<'_> {
@@ -850,7 +850,7 @@ impl AgentControlService<'_> {
         }
     }
 
-    async fn observe(&self, session_id: &str, asking: bool) -> Observed {
+    pub(super) async fn observe(&self, session_id: &str, asking: bool) -> Observed {
         if !self.runtime.sessions().is_live(session_id).await {
             Observed::Exited
         } else if asking {
@@ -878,7 +878,7 @@ impl AgentControlService<'_> {
     }
 
     /// Only the latest turn's rows: its open ask and its last top-level reply.
-    async fn last_turn(&self, session_id: &str) -> Result<LastTurn> {
+    pub(super) async fn last_turn(&self, session_id: &str) -> Result<LastTurn> {
         let (db, id) = (self.runtime.db.clone(), session_id.to_string());
         let tail = blocking(move || {
             let turns = db.count_user_messages(&id)?;
@@ -905,7 +905,11 @@ impl AgentControlService<'_> {
     }
 
     /// An unhooked PTY reports no prompt, so typed input could answer one; only a bypass caller may risk it.
-    async fn check_unhooked_input(&self, identity: &AgentIdentity, hooked: bool) -> Result<()> {
+    pub(super) async fn check_unhooked_input(
+        &self,
+        identity: &AgentIdentity,
+        hooked: bool,
+    ) -> Result<()> {
         if hooked || self.mode_of(identity).await == Some(PermissionMode::BypassPermissions) {
             return Ok(());
         }
@@ -946,7 +950,7 @@ fn author(identity: &AgentIdentity, label: String) -> ClientRef {
     }
 }
 
-fn session_label(session: &Session) -> String {
+pub(super) fn session_label(session: &Session) -> String {
     session
         .title
         .clone()
@@ -954,7 +958,7 @@ fn session_label(session: &Session) -> String {
 }
 
 /// `exited` while still registered is a session ending inside a live process, as `/clear` does.
-fn observe_pty(state: PtyAgentState) -> Observed {
+pub(super) fn observe_pty(state: PtyAgentState) -> Observed {
     match state {
         PtyAgentState::Idle => Observed::Idle,
         PtyAgentState::AwaitingPermission | PtyAgentState::AwaitingQuestion => Observed::NeedsYou,
@@ -965,7 +969,7 @@ fn observe_pty(state: PtyAgentState) -> Observed {
 }
 
 /// Why a paste now would answer the agent's prompt or send a person's draft; `None` when it may go.
-fn paste_refusal(agents: &PtyAgents, terminal_id: &str) -> Option<&'static str> {
+pub(super) fn paste_refusal(agents: &PtyAgents, terminal_id: &str) -> Option<&'static str> {
     let Some(now) = agents.snapshot(terminal_id) else {
         return Some("that agent is no longer running");
     };
@@ -977,7 +981,12 @@ fn paste_refusal(agents: &PtyAgents, terminal_id: &str) -> Option<&'static str> 
 
 /// Bracketed paste, then Enter on its own: a CR inside the paste is a newline to the TUI. Call it
 /// under the input lock once `paste_refusal` passes.
-async fn paste(agents: &PtyAgents, terminal_id: &str, pty: &PtySession, text: &str) -> Result<()> {
+pub(super) async fn paste(
+    agents: &PtyAgents,
+    terminal_id: &str,
+    pty: &PtySession,
+    text: &str,
+) -> Result<()> {
     // An ESC in the text could end the paste early and type the rest as keys.
     let text = text.replace('\x1b', "");
     pty.write_input(format!("\x1b[200~{text}\x1b[201~").as_bytes())?;
@@ -1044,16 +1053,10 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
             .flatten()
     } else {
         let mut reader = launch.session.subscribe();
-        let quiet = async {
-            loop {
-                match tokio::time::timeout(PROMPT_QUIET, reader.skip()).await {
-                    Err(_) => return true,
-                    Ok(false) => return false,
-                    Ok(true) => {}
-                }
-            }
-        };
-        if matches!(tokio::time::timeout(PROMPT_WAIT, quiet).await, Ok(true)) {
+        if matches!(
+            tokio::time::timeout(PROMPT_WAIT, quiet_spell(&mut reader)).await,
+            Ok(true)
+        ) {
             let _input = launch.input.lock().await;
             Some(send().await)
         } else {
@@ -1070,6 +1073,17 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
             tracing::warn!(
                 "terminal {terminal_id}: its first prompt was dropped; the agent never became ready"
             );
+        }
+    }
+}
+
+/// `false` once the PTY has ended.
+pub(super) async fn quiet_spell(reader: &mut RingReader) -> bool {
+    loop {
+        match tokio::time::timeout(PROMPT_QUIET, reader.skip()).await {
+            Err(_) => return true,
+            Ok(false) => return false,
+            Ok(true) => {}
         }
     }
 }

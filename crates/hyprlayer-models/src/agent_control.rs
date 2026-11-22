@@ -394,3 +394,61 @@ pub struct SpawnPtyAgentRequest {
     #[serde(default)]
     pub title: Option<String>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum WakeCondition {
+    After {
+        secs: u32,
+    },
+    At {
+        unix_secs: u64,
+    },
+    /// The branch's tip on the remote moves from where it was when the wait began.
+    Ref {
+        branch: String,
+        #[serde(default)]
+        remote: Option<String>,
+    },
+    Pr {
+        workstream_id: String,
+        until: PrWakeUntil,
+    },
+    Session {
+        session_id: String,
+        until: WaitUntil,
+    },
+    Terminal {
+        terminal_id: String,
+        until: WaitUntil,
+    },
+    /// Any other agent in the caller's project reaching `until` from a state before it.
+    AnyAgent {
+        until: WaitUntil,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum PrWakeUntil {
+    Opened,
+    Merged,
+    /// Merged counts too.
+    Closed,
+    ChecksDone,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct Wake {
+    pub id: String,
+    pub condition: WakeCondition,
+    pub deadline_ms: f64,
+}

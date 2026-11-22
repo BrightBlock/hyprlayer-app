@@ -97,7 +97,7 @@ use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer,
     ClaudeWorktreeEvent, ClientRef, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime,
     SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent,
-    TerminalTheme, WaitOutcome, WaitUntil,
+    TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -2545,6 +2545,32 @@ impl Dispatch for Server {
         let identity = self.agent_identity("request_reveal")?;
         self.runtime.agent_control().reveal(&identity, target);
         Ok(())
+    }
+
+    async fn wake_when(
+        &self,
+        condition: WakeCondition,
+        timeout_ms: Option<u32>,
+    ) -> Result<Wake, WireError> {
+        let identity = self.agent_identity("wake_when")?;
+        self.runtime
+            .agent_control()
+            .wake_when(&identity, condition, timeout_ms)
+            .await
+            .wire()
+    }
+
+    async fn list_wakes(&self) -> Result<Vec<Wake>, WireError> {
+        let identity = self.agent_identity("list_wakes")?;
+        Ok(self.runtime.agent_control().list_wakes(&identity))
+    }
+
+    async fn cancel_wake(&self, wake_id: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("cancel_wake")?;
+        self.runtime
+            .agent_control()
+            .cancel_wake(&identity, &wake_id)
+            .wire()
     }
 
     async fn get_scripts(&self, project_path: String) -> Result<ScriptSettings, WireError> {

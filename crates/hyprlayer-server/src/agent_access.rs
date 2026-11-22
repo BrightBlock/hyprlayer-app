@@ -6,7 +6,7 @@ use hyprlayer_core::index::QueryResult;
 use hyprlayer_core::runtime::agent_control::{AgentControlService, AgentIdentity, ProjectScope};
 use hyprlayer_core::runtime::goals::GoalTarget;
 use hyprlayer_core::{CoreError, Result};
-use hyprlayer_models::{RevealTarget, ScriptKind};
+use hyprlayer_models::{RevealTarget, ScriptKind, WakeCondition};
 
 use crate::rpc::{Request, Response};
 
@@ -163,6 +163,18 @@ pub(crate) fn access(request: &Request) -> Access {
         }
         Request::KillPtyAgent { terminal_id } => Access::Full(Scope::Terminal(terminal_id.clone())),
         Request::RequestReveal { target } => Access::Full(Scope::Reveal(target.clone())),
+        Request::WakeWhen { condition, .. } => Access::Read(match condition {
+            WakeCondition::Pr { workstream_id, .. } => Scope::Workstream(workstream_id.clone()),
+            WakeCondition::Session { session_id, .. } => Scope::Session(session_id.clone()),
+            WakeCondition::Terminal { terminal_id, .. } => Scope::Terminal(terminal_id.clone()),
+            // These resolve against the caller's own project.
+            WakeCondition::After { .. }
+            | WakeCondition::At { .. }
+            | WakeCondition::Ref { .. }
+            | WakeCondition::AnyAgent { .. } => Scope::Caller,
+        }),
+        Request::ListWakes { .. } => Access::Read(Scope::Caller),
+        Request::CancelWake { .. } => Access::Read(Scope::Caller),
         Request::ScriptStart {
             kind: ScriptKind::Archive,
             ..

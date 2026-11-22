@@ -1,5 +1,6 @@
 //! `hyprlayer-server ctl <verb>`: the agent control plane from a shell, over the same tools as `mcp`.
 
+use hyprlayer_core::store::now_ms;
 use serde_json::{json, Map, Value};
 
 use crate::mcp::{call_tool, describe, not_an_agent, AgentEnv};
@@ -21,6 +22,8 @@ verbs:
   script-output <kind> [--workstream id]  the last setup, run or archive script output
   notify <title> <body>                   a desktop notification
   attention <reason>                      tell the user this agent needs them
+  wake-when [<condition-json>] [--timeout secs] [--cancel id]
+                                          wake this agent when the condition holds; lists pending wakes
 
 At agent control Full:
   spawn-agent <prompt> [--workstream id] [--stage s] [--harness h] [--model m] [--effort e]
@@ -69,7 +72,7 @@ enum FlagValue {
     Switch,
 }
 
-const FLAGS: [(&str, &str, FlagValue); 25] = [
+const FLAGS: [(&str, &str, FlagValue); 26] = [
     ("--limit", "limit", FlagValue::Number),
     ("--workstream", "workstream_id", FlagValue::Text),
     ("--stage", "stage", FlagValue::Text),
@@ -95,6 +98,7 @@ const FLAGS: [(&str, &str, FlagValue); 25] = [
     ("--side", "side", FlagValue::Text),
     ("--anchor", "anchor_text", FlagValue::Text),
     ("--reply-to", "parent_id", FlagValue::Text),
+    ("--cancel", "cancel", FlagValue::Text),
 ];
 
 const TEXT: FlagValue = FlagValue::Text;
@@ -204,6 +208,8 @@ fn parse(argv: Vec<String>) -> Result<Parsed, String> {
         "script-output" => ("script_output", &[("kind", TEXT)]),
         "notify" => ("notify_user", &[("title", TEXT), ("body", TEXT)]),
         "attention" => ("request_attention", &[("reason", TEXT)]),
+        "wake-when" if operands.is_empty() => ("wake_when", &[]),
+        "wake-when" => ("wake_when", &[("condition", FlagValue::Json)]),
         "spawn-agent" => ("spawn_agent", &[("prompt", TEXT)]),
         "wait-agent" => ("wait_agent", &[SESSION]),
         "message-agent" => ("message_agent", &[SESSION, ("text", TEXT)]),
@@ -314,6 +320,21 @@ fn human(tool: &str, value: &Value) -> String {
             }
         }
         "read_doc" => text(value, "content"),
+        "wake_when" => value["pending"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|wake| {
+                let left = wake["deadlineMs"].as_f64().unwrap_or(0.0) - now_ms();
+                format!(
+                    "{}\t{}\tin {} s",
+                    text(wake, "id"),
+                    text(&wake["condition"], "kind"),
+                    (left / 1000.0).max(0.0).round()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
         _ => match value {
             Value::String(s) => s.clone(),
             other => serde_json::to_string_pretty(other).unwrap_or_default(),

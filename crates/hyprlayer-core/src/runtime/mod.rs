@@ -145,6 +145,7 @@ pub struct HyprlayerRuntime {
     agent_spawn_locks: SpawnLocks,
     agent_links: Arc<AgentLinks>,
     pty_agents: Arc<PtyAgents>,
+    wakes: agent_control::wake::Wakes,
     coordinator: ShutdownCoordinator,
     tasks: AsyncMutex<Vec<TrackedTask>>,
     /// Sessions whose harness the last server run left running; only their next relaunch is announced.
@@ -302,6 +303,7 @@ impl HyprlayerRuntime {
             agent_spawn_locks: SpawnLocks::default(),
             agent_links,
             pty_agents,
+            wakes: agent_control::wake::Wakes::default(),
             config,
             binaries,
             settings,

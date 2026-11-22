@@ -33,7 +33,7 @@ use tokio::sync::mpsc::Receiver;
 const IO: Duration = Duration::from_secs(30);
 /// The settle needs 2 s of quiet; the plan allows it 4.
 const SETTLE_BOUND: Duration = Duration::from_secs(4);
-const READ_TOOL_RULES: usize = 12;
+const READ_TOOL_RULES: usize = 13;
 
 #[derive(Debug, Clone)]
 struct Change {
@@ -164,7 +164,7 @@ async fn pty_hook_signals() {
         })
         .unwrap_or_default();
     j.guard(
-        "the same file allows the 12 hyprlayer read tools, read_terminal included",
+        "the same file allows the 13 hyprlayer read tools, read_terminal included",
         allow.len() == READ_TOOL_RULES
             && allow.iter().all(|r| r.starts_with("mcp__hyprlayer__"))
             && allow.iter().any(|r| r == "mcp__hyprlayer__read_terminal"),

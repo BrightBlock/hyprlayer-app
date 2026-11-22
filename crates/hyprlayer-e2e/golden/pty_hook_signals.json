@@ -59,10 +59,11 @@
               "mcp__hyprlayer__script_output",
               "mcp__hyprlayer__notify_user",
               "mcp__hyprlayer__request_attention",
-              "mcp__hyprlayer__read_terminal"
+              "mcp__hyprlayer__read_terminal",
+              "mcp__hyprlayer__wake_when"
             ]
           },
-          "guard": "the same file allows the 12 hyprlayer read tools, read_terminal included",
+          "guard": "the same file allows the 13 hyprlayer read tools, read_terminal included",
           "ok": true
         },
         {

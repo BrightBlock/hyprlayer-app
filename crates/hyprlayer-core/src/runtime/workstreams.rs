@@ -612,7 +612,11 @@ impl WorkstreamService<'_> {
             .and_then(|lookup| lookup.known().cloned());
             let known = match (cached, &pr_ref) {
                 (Some(pr), _) => Some(pr),
-                (None, Some(pr_ref)) => self.lookup_and_store(&item, pr_ref).await.known().cloned(),
+                (None, Some(pr_ref)) => self
+                    .lookup_and_store(&item, pr_ref, false)
+                    .await
+                    .known()
+                    .cloned(),
                 (None, None) => None,
             };
             let short = base.strip_prefix("origin/").unwrap_or(&base);
@@ -625,7 +629,7 @@ impl WorkstreamService<'_> {
                         .await;
                 let still_open = match &pr_ref {
                     Some(pr_ref) => self
-                        .lookup_and_store(&item, pr_ref)
+                        .lookup_and_store(&item, pr_ref, false)
                         .await
                         .known()
                         .is_some_and(|pr| pr.state == PrState::Open),
@@ -912,18 +916,28 @@ impl WorkstreamService<'_> {
             Some(PrLookup::Found { pr }) if !moved_past(&item, &pr_ref, &pr) => {
                 Ok(PrLookup::Found { pr })
             }
-            _ => Ok(self.lookup_and_store(&item, &pr_ref).await),
+            _ => Ok(self.lookup_and_store(&item, &pr_ref, false).await),
         }
     }
 
-    async fn lookup_and_store(&self, item: &Workstream, pr_ref: &str) -> PrLookup {
+    pub(crate) async fn refresh_pr_in_background(&self, item: &Workstream) -> Option<PrLookup> {
+        let pr_ref = current_pr_ref(item)?;
+        Some(self.lookup_and_store(item, &pr_ref, true).await)
+    }
+
+    async fn lookup_and_store(
+        &self,
+        item: &Workstream,
+        pr_ref: &str,
+        background: bool,
+    ) -> PrLookup {
         let started = std::time::Instant::now();
         let watchers = &self.runtime.watchers;
         let next = match self.runtime.binaries.require(BinaryKind::Gh).await {
             _ if not_github(item) => PrLookup::NotGitHub,
             Ok(gh) => {
                 let overlay = self.runtime.child_env().await;
-                workstream_pr(&gh, item, pr_ref, &overlay, &watchers.pr_budget, false).await
+                workstream_pr(&gh, item, pr_ref, &overlay, &watchers.pr_budget, background).await
             }
             Err(_) => PrLookup::Failed {
                 cause: PrLookupFailure::GhMissing,
@@ -1259,7 +1273,7 @@ impl WorkstreamService<'_> {
         let lookup = match &pr_ref {
             Some(pr_ref) => Some(match cached_lookup(cache, &item.id, pr_ref) {
                 Some(lookup) => lookup,
-                None => self.lookup_and_store(&item, pr_ref).await,
+                None => self.lookup_and_store(&item, pr_ref, false).await,
             }),
             None => cached_lookup_any_ref(cache, &item.id).map(|(_, lookup)| lookup),
         };
@@ -1278,7 +1292,7 @@ impl WorkstreamService<'_> {
         )
         .await?;
         if let Some(pr_ref) = pr_ref {
-            self.lookup_and_store(&item, &pr_ref).await;
+            self.lookup_and_store(&item, &pr_ref, false).await;
         }
         Ok(())
     }

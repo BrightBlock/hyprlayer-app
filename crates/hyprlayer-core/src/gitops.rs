@@ -365,6 +365,14 @@ pub(crate) fn local_tip(dir: &Path, branch: &str) -> Option<String> {
     branch_tip(&open_repo(dir).ok()?, branch).map(|o| o.to_string())
 }
 
+pub(crate) fn remote_tip(dir: &Path, remote: &str, branch: &str) -> Option<String> {
+    let repo = open_repo(dir).ok()?;
+    let oid = repo
+        .refname_to_id(&format!("refs/remotes/{remote}/{branch}"))
+        .ok()?;
+    Some(oid.to_string())
+}
+
 pub(crate) fn has_work_past(
     dir: &Path,
     branch: &str,

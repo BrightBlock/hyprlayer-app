@@ -46,7 +46,7 @@ const MCP_SERVER: &str = "hyprlayer";
 const MCP_TOOL_TIMEOUT_SECS: u32 = 610;
 
 /// Tools that only read, or only reach the user; safe to allow without a prompt.
-pub const READ_TOOLS: [&str; 12] = [
+pub const READ_TOOLS: [&str; 13] = [
     "whoami",
     "list_workstreams",
     "list_agents",
@@ -59,6 +59,7 @@ pub const READ_TOOLS: [&str; 12] = [
     "notify_user",
     "request_attention",
     "read_terminal",
+    "wake_when",
 ];
 
 /// claude permission rules naming every read tool of the `hyprlayer` server.

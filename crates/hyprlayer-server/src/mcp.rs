@@ -14,7 +14,7 @@ use hyprlayer_core::{ScriptKind, Stage, WorktreeMode};
 use hyprlayer_models::{
     AgentCaller, AgentControlLevel, AgentWhoami, GoalLimits, GoalSource, GoalSpec, PtyAgent,
     RevealTarget, ReviewSide, SessionEvent, SpawnPtyAgentRequest, SpawnSessionRequest,
-    SpawnedAgent, WaitUntil,
+    SpawnedAgent, WaitUntil, WakeCondition,
 };
 use hyprlayer_proto::WireError;
 use serde_json::{json, Value};
@@ -30,6 +30,7 @@ const DEFAULT_LINES: u32 = 100;
 const DEFAULT_WAIT_SECS: u64 = 300;
 /// The server caps a wait at this too; codex's tool timeout sits just above it.
 const MAX_WAIT_SECS: u64 = 600;
+const MAX_WAKE_SECS: u64 = 86_400;
 
 /// Where the agent's identity says the server is; `None` outside a hyprlayer agent.
 pub(crate) struct AgentEnv {
@@ -135,7 +136,7 @@ fn with_props(mut base: Value, extra: Value) -> Value {
     base
 }
 
-const TOOLS: [Tool; 31] = [
+const TOOLS: [Tool; 32] = [
     Tool {
         name: READ_TOOLS[0],
         description: "Who this agent is to hyprlayer: its session or terminal, workstream, project and control level.",
@@ -235,6 +236,18 @@ const TOOLS: [Tool; 31] = [
             json!({ "type": "object", "required": ["terminal_id"], "properties": {
                 "terminal_id": { "type": "string" },
                 "lines": { "type": "integer", "minimum": 1, "maximum": 500, "description": "100 by default." },
+            } })
+        },
+    },
+    Tool {
+        name: READ_TOOLS[12],
+        description: "Wakes this agent with a message from hyprlayer when a condition holds or its timeout passes; use it, then end your turn, rather than polling. With `cancel` it drops a pending wake; with neither it lists them. Every result lists `pending`.",
+        read_only: true,
+        schema: || {
+            json!({ "type": "object", "properties": {
+                "condition": { "type": "object", "description": "One of {kind:'after',secs}, {kind:'at',unixSecs}, {kind:'ref',branch,remote?} (the remote branch moves; origin by default), {kind:'pr',workstreamId,until:'opened'|'merged'|'closed'|'checks_done'}, {kind:'session',sessionId,until}, {kind:'terminal',terminalId,until}, or {kind:'any_agent',until} (another agent in this project gets there). until is idle, needs_you or exited." },
+                "timeout_sec": { "type": "integer", "minimum": 1, "maximum": MAX_WAKE_SECS, "description": "When a condition that is not a timer gives up and wakes you as timed out; 3600 by default." },
+                "cancel": { "type": "string", "description": "A pending wake's id." },
             } })
         },
     },
@@ -664,6 +677,31 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             let (title, body) = (required(args, "title")?, required(args, "body")?);
             client.notify_user(title.into(), body.into()).await?;
             Ok(json!("sent"))
+        }
+        "wake_when" => {
+            let condition: Option<WakeCondition> = parsed(args, "condition")?;
+            let wake = match (condition, arg(args, "cancel")) {
+                (Some(_), Some(_)) => {
+                    return Err(bad_args("give `condition` or `cancel`, not both"))
+                }
+                (Some(condition), None) => {
+                    let timeout_ms = args
+                        .get("timeout_sec")
+                        .and_then(Value::as_u64)
+                        .map(|secs| (secs.min(MAX_WAKE_SECS) * 1000) as u32);
+                    Some(client.wake_when(condition, timeout_ms).await?)
+                }
+                (None, Some(id)) => {
+                    client.cancel_wake(id.into()).await?;
+                    None
+                }
+                (None, None) => None,
+            };
+            let mut result = json!({ "pending": encode(client.list_wakes().await?)? });
+            if let Some(wake) = wake {
+                result["wake"] = encode(wake)?;
+            }
+            Ok(result)
         }
         "request_attention" => {
             client

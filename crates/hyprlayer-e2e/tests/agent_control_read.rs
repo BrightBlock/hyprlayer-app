@@ -213,7 +213,7 @@ async fn agent_control_read() {
     );
     let listed = tool_list(&mut mcp).await;
     j.guard(
-        "at read only the 12 read tools are listed, each marked read-only",
+        "at read only the 13 read tools are listed, each marked read-only",
         listed.names == sorted(READ_TOOLS.map(str::to_string).to_vec()) && listed.all_read_only,
         json!({ "tools": listed.names, "allReadOnly": listed.all_read_only }),
     );
@@ -244,7 +244,7 @@ async fn agent_control_read() {
     set_level(&mut j, &c, AgentControlLevel::Read).await;
     j.guard(
         "at full every tool is listed; --read-only still lists only the read tools",
-        full_list.names.len() == 31
+        full_list.names.len() == 32
             && full_list.names.iter().any(|n| n == "spawn_agent")
             && read_only_list.names == listed.names,
         json!({ "full": full_list.names.len(), "readOnly": read_only_list.names.len() }),
