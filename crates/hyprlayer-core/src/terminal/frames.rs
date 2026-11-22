@@ -5,6 +5,9 @@ use ghostty_vt::{ActiveScreen, CellColor, CellRead, CellStyle, CellWide, Error, 
 const ATTACH_ROWS: u64 = 1000;
 /// The desktop's own scrollback: more catch-up rows than it keeps would only cost bytes.
 const CATCH_UP_ROWS: u64 = 5000;
+/// History text one frame carries; the rest goes in the frames after it. A flood then still
+/// crosses a 16 KiB/s link a frame every 3 s or so.
+const FRAME_HISTORY_BYTES: usize = 48 * 1024;
 
 /// Modes xterm encodes keys, mouse, focus and paste by, and reverse video. All are off by default.
 const MODES: [u16; 12] = [
@@ -33,15 +36,9 @@ impl Frames {
         let alt = t.active_screen().ok() == Some(ActiveScreen::Alternate);
         let held = held(t, alt);
         let resumed = resume.is_some_and(|h| h <= pushed && (alt || pushed - h <= held));
-        // A resize moves rows into history too, uncounted, so a fresh client's backlog is what is held.
-        let (history, backlog) = match resume.filter(|_| resumed) {
-            Some(h) => (h, 0),
-            None => (pushed, held.min(ATTACH_ROWS)),
-        };
         let client = Client {
             fresh: !resumed,
-            history,
-            backlog,
+            history: resume.filter(|_| resumed).unwrap_or(pushed),
             cleared: t.history_cleared().unwrap_or(0),
             ..Client::default()
         };
@@ -52,6 +49,12 @@ impl Frames {
         if let Some(next) = self.next.take() {
             self.client = next;
         }
+    }
+
+    /// After the latest frame, history is still owed and the main screen is up to take it.
+    pub fn catching_up(&self) -> bool {
+        let client = self.next.as_ref().unwrap_or(&self.client);
+        client.backlog > 0 && client.alt == Some(false)
     }
 
     pub fn render(&mut self, t: &Terminal) -> Option<Frame> {
@@ -65,7 +68,7 @@ impl Frames {
         };
         let resized = out.client.size != Some((model.rows, model.cols));
         out.render(t, &model);
-        let history = out.client.history;
+        let history = out.client.history.saturating_sub(out.client.backlog);
         self.next = Some(out.client);
         out.changed.then(|| Frame {
             bytes: out.bytes,
@@ -373,8 +376,14 @@ impl Out {
             self.client.autowrap = Some(true);
             self.client.rows = vec![Some(Row::blank(model.cols)); usize::from(model.rows)];
             self.client.size = Some(size);
+            // A resize moves rows into history too, uncounted, so a fresh client's backlog is
+            // what is held, counted here: a resize since the attach has reflowed it.
+            self.client.history = model.pushed;
+            self.client.backlog = model.held.min(ATTACH_ROWS);
             self.changed = true;
         }
+        // A reflow renumbers the model's history, so history still owed can't be found by count.
+        let rewind = self.client.backlog > 0 && self.client.size != Some(size);
         if self.client.size != Some(size) {
             self.client.size = Some(size);
             self.client.rows = vec![None; usize::from(model.rows)];
@@ -394,6 +403,12 @@ impl Out {
         // waits while the model shows the alternate screen.
         if !model.alt {
             self.alt(false);
+            if rewind {
+                self.pen(Style::default());
+                self.bytes.extend_from_slice(b"\x1b[3J");
+                self.client.history = model.pushed;
+                self.client.backlog = model.held.min(ATTACH_ROWS);
+            }
             let mut pending =
                 model.pushed.saturating_sub(self.client.history) + self.client.backlog;
             self.client.backlog = 0;
@@ -413,13 +428,19 @@ impl Out {
             if skipped > 0 {
                 list.push(Row::marker(skipped, model.cols));
             }
-            for i in model.held - pending..model.held {
-                match read_row(t, RowAt::History(i as u32)) {
-                    Ok(row) => list.push(row),
-                    Err(_) => break,
-                }
+            let (mut sent, mut text) = (0, 0);
+            while sent < pending && text < FRAME_HISTORY_BYTES {
+                let at = model.held - pending + sent;
+                let Ok(row) = read_row(t, RowAt::History(at as u32)) else {
+                    sent = pending;
+                    break;
+                };
+                text += row.text.len();
+                list.push(row);
+                sent += 1;
             }
             self.push(&list);
+            self.client.backlog = pending - sent;
             self.client.history = model.pushed;
         }
         if model.alt {

@@ -1,16 +1,26 @@
 import { Channel } from "@tauri-apps/api/core";
 
-import type { TerminalEvent } from "@/lib/bindings";
+import { commands, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "./channelRelease";
 import { b64ToBytes } from "./terminalCodec";
 
 /** A full reset (RIS) that waits behind the output already queued, which `Terminal.reset()` does not. */
 const START_OVER = "\x1bc";
 
+type Output = Extract<TerminalEvent, { kind: "output" }>;
+
 type Screen = {
   write(data: Uint8Array | string): void;
+  writeFrame(data: Uint8Array, written: () => void): void;
   follow(grid: { cols: number; rows: number }): void;
+  clipboard(data: string): void;
 };
+
+/** Where a reattach picks up after `ev`: the end of raw output, or a frame's history count. */
+export function resumePoint(ev: Output, length: number): number | undefined {
+  if (ev.offset == null) return undefined;
+  return ev.frame == null ? ev.offset + length : ev.offset;
+}
 
 /** One view's terminal output across the streams it opens, so a reattach asks only for what follows. */
 export class TerminalFeed {
@@ -20,7 +30,7 @@ export class TerminalFeed {
 
   constructor(
     private screen: Screen,
-    private onExited: () => void,
+    private onExited: (code: number | null) => void,
     private onOutput?: () => void,
   ) {}
 
@@ -52,16 +62,21 @@ export class TerminalFeed {
     const channel = new Channel<TerminalEvent>();
     let first = true;
     channel.onmessage = (ev) => {
-      if (ev.kind === "exited") return this.onExited();
+      if (ev.kind === "exited") return this.onExited(ev.code);
       if (ev.kind === "resized") return this.screen.follow(ev);
-      if (ev.kind === "clipboard") return;
+      if (ev.kind === "clipboard") return this.screen.clipboard(ev.data);
       const bytes = b64ToBytes(ev.data);
-      const at = ev.offset ?? undefined;
-      // Only a resume's first output can be a replay; a live stream's gap keeps writing, as it always has.
-      if (first && from !== undefined && at !== from) this.screen.write(START_OVER);
+      this.next = resumePoint(ev, bytes.length);
+      const seq = ev.frame;
+      if (seq != null) {
+        // The server starts a frame stream it can't resume over itself.
+        this.screen.writeFrame(bytes, () => void commands.terminalFrameAck(channel.id, seq));
+      } else {
+        // Only a resume's first output can be a replay; a live stream's gap keeps writing, as it always has.
+        if (first && from !== undefined && ev.offset !== from) this.screen.write(START_OVER);
+        this.screen.write(bytes);
+      }
       first = false;
-      this.next = at === undefined ? undefined : at + bytes.length;
-      this.screen.write(bytes);
       this.onOutput?.();
     };
     this.channels.push(channel);

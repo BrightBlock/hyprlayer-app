@@ -9,7 +9,7 @@
             "grids_match": true,
             "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -33,7 +33,7 @@
             "grids_match": true,
             "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -57,7 +57,7 @@
             "grids_match": true,
             "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -81,7 +81,7 @@
             "grids_match": true,
             "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -102,16 +102,16 @@
         {
           "evidence": {
             "active": "light",
-            "answers_seen": 2,
+            "answers_seen": 1,
             "grids_match": true,
             "mismatched_cells": 0,
-            "scheme_answers": 2,
+            "scheme_answers": 1,
             "themes_heard": {
-              "dark": 1,
+              "dark": 0,
               "light": 1
             }
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -137,7 +137,7 @@
             "grids_match": true,
             "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -158,11 +158,10 @@
         {
           "evidence": {
             "answers_seen": 0,
-            "b_skipped_output": true,
-            "grids_match": false,
-            "mismatched_cells": 37
+            "grids_match": true,
+            "mismatched_cells": 0
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {
@@ -183,11 +182,11 @@
         {
           "evidence": {
             "answers_seen": 0,
-            "grids_match": false,
-            "mismatched_cells": 452,
-            "resumed": false
+            "grids_match": true,
+            "mismatched_cells": 0,
+            "resumed": true
           },
-          "guard": "A saw every byte and both desktops drew the repaint",
+          "guard": "the tap saw every byte and both desktops drew the repaint",
           "ok": true
         },
         {

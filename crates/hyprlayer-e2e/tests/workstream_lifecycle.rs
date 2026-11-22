@@ -11,7 +11,7 @@ use hyprlayer_core::runtime::projects::ThoughtsSource;
 use hyprlayer_core::WorktreeMode;
 use hyprlayer_e2e::{
     eventually, json, keystrokes, read_until, text, wait_for_exit, Journey, Request, Sandbox,
-    Server, Value,
+    Server, Value, RAW_DESKTOP,
 };
 use hyprlayer_server::client::RpcClient;
 
@@ -48,7 +48,7 @@ async fn workstream_lifecycle() {
 
     j.step("start");
     let server = Server::start(&sandbox).await;
-    let client = server.client();
+    let client = server.connect_announcing(RAW_DESKTOP).await;
     j.guard(
         "a fresh profile starts and listens",
         true,

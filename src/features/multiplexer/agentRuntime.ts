@@ -8,6 +8,7 @@ import { log } from "@/lib/log";
 import { notifyNeedsAttention } from "@/lib/notifications";
 import { releaseChannels } from "@/lib/terminal/channelRelease";
 import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { resumePoint } from "@/lib/terminal/terminalFeed";
 import { bindPtyTabTerminal } from "@/features/session/workstreamTabs";
 import { StateCoalescer } from "./coalesce";
 import { detectState, stripAnsi, type AgentState } from "./engineState";
@@ -102,7 +103,7 @@ function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
       return;
     }
     const bytes = b64ToBytes(ev.data);
-    rt.next = ev.offset == null ? undefined : ev.offset + bytes.length;
+    rt.next = resumePoint(ev, bytes.length);
     rt.tail = (rt.tail + stripAnsi(rt.decoder.decode(bytes, { stream: true }))).slice(-TAIL_CAP);
     recompute(rt, false);
     if (rt.quietTimer) clearTimeout(rt.quietTimer);

@@ -105,6 +105,21 @@ impl ChannelStreams {
         }
     }
 
+    pub async fn ack_frame(&self, channel_id: u32, seq: u64) -> Result<(), WireError> {
+        let stream = self
+            .lock()
+            .open
+            .get(&channel_id)
+            .map(|s| (s.client.clone(), s.stream_id));
+        // A frame drawn after its channel closed has nothing left to pace.
+        let Some((client, stream_id)) = stream else {
+            return Ok(());
+        };
+        // Only a server whose hello lists the feature sends frames, and so seqs to ack.
+        // server-compat: gated on screen_frames
+        client.terminal_frame_ack(stream_id, seq).await
+    }
+
     fn finished(&self, channel_id: u32, stream_id: u64) {
         let mut guard = self.lock();
         if guard

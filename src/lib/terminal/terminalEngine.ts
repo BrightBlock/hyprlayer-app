@@ -19,6 +19,8 @@ export interface TerminalEngine {
   /** Ties the engine to a pty, so what its capped replay lost carries over from earlier engines. */
   bind(terminalId: string): void;
   write(data: Uint8Array | string): void;
+  writeFrame(data: Uint8Array, written: () => void): void;
+  clipboard(data: string): void;
   /** Renders at the pty's size from here in the output on, and stops fitting its host. */
   follow(grid: TerminalGrid): void;
   onInput(cb: (data: string) => void): () => void;
@@ -103,6 +105,7 @@ class XtermEngine implements TerminalEngine {
   private lastGesture = -Infinity;
   private following = false;
   private fitted: TerminalGrid | null = null;
+  private frames = false;
 
   constructor(opts: {
     fontSize: number;
@@ -145,11 +148,16 @@ class XtermEngine implements TerminalEngine {
     });
     // How a TUI that owns the mouse copies, and claude's only way over ssh. Only a write the user
     // just asked for lands: not one replayed on remount, not a program's own. Reads are refused.
+    // A frame stream carries the server's copies as `clipboard` events, through the same gate.
     parser.registerOscHandler(CLIPBOARD_OSC, (data) => {
       const payload = data.slice(data.indexOf(";") + 1);
-      if (payload && payload !== "?" && this.userJustActed()) copyFromProgram(payload);
+      if (payload && payload !== "?") this.clipboard(payload);
       return true;
     });
+  }
+
+  clipboard(data: string): void {
+    if (this.userJustActed()) copyFromProgram(data);
   }
 
   mount(host: HTMLElement): void {
@@ -225,6 +233,14 @@ class XtermEngine implements TerminalEngine {
       // The theme may have flipped while no engine showed this pty.
       if (this.reportsTheme) this.reportColorScheme();
     });
+  }
+
+  // A frame carries no replayed copy, so the gesture gate opens at once.
+  writeFrame(data: Uint8Array, written: () => void): void {
+    if (!this.term) return;
+    this.frames = true;
+    this.replay = null;
+    this.term.write(data, written);
   }
 
   follow(grid: TerminalGrid): void {
@@ -354,8 +370,9 @@ class XtermEngine implements TerminalEngine {
     else themeReporting.delete(this.terminalId);
   }
 
-  // 1 is dark, 2 is light.
+  // 1 is dark, 2 is light. A frame stream's program hears the server, in the active desktop's theme.
   private reportColorScheme(): void {
+    if (this.frames) return;
     this.term?.input(`\x1b[?997;${this.dark ? 1 : 2}n`, false);
   }
 

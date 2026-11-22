@@ -13,6 +13,10 @@ const h = vi.hoisted(() => {
     write(data: Uint8Array | string) {
       this.queued.push(typeof data === "string" ? data : new TextDecoder().decode(data));
     }
+    writeFrame(data: Uint8Array) {
+      this.write(data);
+    }
+    clipboard() {}
     parse() {
       for (const data of this.queued.splice(0)) {
         const ris = data.lastIndexOf("\x1bc");
@@ -39,7 +43,7 @@ const h = vi.hoisted(() => {
   }
   const attaches: Array<{ id: string; offset: number | null; ch: FakeChannel }> = [];
   const reconnects: Array<() => void> = [];
-  const launches = ["t1", "t2"];
+  const launches = ["t1", "t2", "t3", "t4"];
   const ok = <T,>(data: T) => ({ status: "ok" as const, data });
   const controls: { onRestart?: (keep: object) => void } = {};
   return { FakeChannel, FakeScreen, attaches, reconnects, launches, ok, controls, screen: undefined as FakeScreen | undefined };
@@ -57,6 +61,7 @@ vi.mock("@/lib/bindings", () => ({
     }),
     agentResize: vi.fn(async () => h.ok(null)),
     terminalRelease: vi.fn(async () => h.ok(null)),
+    terminalFrameAck: vi.fn(async () => h.ok(null)),
   },
 }));
 vi.mock("@/lib/events", () => ({
@@ -105,24 +110,34 @@ globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => setTimeout(() 
 const { AgentPtyTab } = await import("./AgentPtyTab");
 
 const output = (offset: number, text: string) => ({ kind: "output", data: btoa(text), offset });
+const frame = (seq: number, history: number, text: string) => ({
+  kind: "output",
+  data: btoa(text),
+  offset: history,
+  frame: seq,
+});
 const settle = () => act(() => new Promise((r) => setTimeout(r, 10)));
+
+function mount(terminalId: string) {
+  render(
+    <AgentPtyTab
+      workstreamId="ws"
+      shellId={1}
+      engine={{ id: "claude-code", label: "Claude" } as never}
+      projectPath="/p"
+      workstreamTitle="t"
+      terminalId={terminalId}
+      onTerminalId={() => {}}
+      notifyOnBlocked={false}
+    />,
+  );
+}
 
 afterEach(cleanup);
 
 describe("an agent tab's restart", () => {
   it("leaves the new agent's screen and resume point to the new agent", async () => {
-    render(
-      <AgentPtyTab
-        workstreamId="ws"
-        shellId={1}
-        engine={{ id: "claude-code", label: "Claude" } as never}
-        projectPath="/p"
-        workstreamTitle="t"
-        terminalId="t1"
-        onTerminalId={() => {}}
-        notifyOnBlocked={false}
-      />,
-    );
+    mount("t1");
     await settle();
     const old = h.attaches[h.attaches.length - 1];
     old.ch.onmessage(output(0, "old agent "));
@@ -143,5 +158,29 @@ describe("an agent tab's restart", () => {
     await settle();
     const resumed = h.attaches[h.attaches.length - 1];
     expect([resumed.id, resumed.offset]).toEqual(["t2", 25]);
+  });
+
+  it("resumes the new agent's frames from that agent's history count", async () => {
+    mount("t3");
+    await settle();
+    const old = h.attaches[h.attaches.length - 1];
+    old.ch.onmessage(frame(1, 300, "old agent "));
+    h.screen!.parse();
+
+    await act(async () => h.controls.onRestart?.({}));
+    await settle();
+    const fresh = h.attaches[h.attaches.length - 1];
+    fresh.ch.onmessage(frame(1, 0, "\x1bcnew agent"));
+    old.ch.onmessage(frame(2, 310, "old tail"));
+    fresh.ch.onmessage(frame(2, 4, " ready"));
+    h.screen!.parse();
+
+    expect(fresh.id).toBe("t4");
+    expect(h.screen!.shown).toBe("new agent ready");
+
+    await act(async () => h.reconnects.forEach((fn) => fn()));
+    await settle();
+    const resumed = h.attaches[h.attaches.length - 1];
+    expect([resumed.id, resumed.offset]).toEqual(["t4", 4]);
   });
 });

@@ -21,6 +21,13 @@ pub use serde_json::{json, Value};
 pub use server::{server_binary, Server, Stopped};
 pub use terminal::{keystrokes, next_output, read_until, wait_for_exit};
 
+/// What a desktop from before screen frames announces. A test that reads the lines a shell
+/// printed takes it too: a frame of the screen doesn't keep them as written.
+pub const RAW_DESKTOP: hyprlayer_proto::Features = hyprlayer_proto::Features {
+    screen_frames: false,
+    ..hyprlayer_proto::Features::ALL
+};
+
 /// Polls `check` until it holds or `within` passes.
 pub async fn eventually(within: std::time::Duration, mut check: impl FnMut() -> bool) -> bool {
     let deadline = tokio::time::Instant::now() + within;

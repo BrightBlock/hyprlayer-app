@@ -219,6 +219,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::terminal::terminal_focus,
             commands::terminal::terminal_close,
             commands::terminal::terminal_release,
+            commands::terminal::terminal_frame_ack,
             commands::terminal::spawn_cli_terminal,
             commands::terminal::spawn_shell_terminal,
             commands::terminal::default_shell_name,

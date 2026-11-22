@@ -1,6 +1,7 @@
-//! Two desktops on one terminal agree on its size: each renders the output at the
+//! Two raw desktops on one terminal agree on its size: each renders the output at the
 //! size it was written for, a watching desktop's own fit leaves the terminal alone,
 //! and when the active desktop leaves, the size goes to the one still watching.
+//! Desktops that render frames are `shared_terminal_screen`'s.
 #![cfg(unix)]
 
 use std::sync::{Arc, Mutex};
@@ -8,7 +9,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use hyprlayer_e2e::{eventually, json, keystrokes, Journey, Sandbox, Server, Value};
+use hyprlayer_e2e::{eventually, json, keystrokes, Journey, Sandbox, Server, Value, RAW_DESKTOP};
 use hyprlayer_server::client::TerminalStream;
 use tokio::time::Instant;
 
@@ -167,8 +168,8 @@ async fn shared_terminal_size() {
     let sandbox = Sandbox::new();
     let mut j = Journey::new("shared_terminal_size", &sandbox);
     let server = Server::start(&sandbox).await;
-    let wide = server.client();
-    let narrow = server.connect().await;
+    let wide = server.connect_announcing(RAW_DESKTOP).await;
+    let narrow = server.connect_announcing(RAW_DESKTOP).await;
 
     j.step("two desktops attach at different sizes");
     let (terminal, _, opened) = wide

@@ -1284,9 +1284,10 @@ async fn forward_frames(
 ) -> &'static str {
     let screen = live.screen();
     let mut copies = screen.copies();
-    let (mut seq, mut sent_at) = (0u64, None::<Instant>);
+    let (mut seq, mut sent_at, mut owed) = (0u64, None::<Instant>, false);
     loop {
-        if let Some(at) = sent_at {
+        // History still owed follows as fast as the link takes it, as raw output would.
+        if let Some(at) = sent_at.filter(|_| !owed) {
             if !live.changed().await {
                 return "the terminal closed";
             }
@@ -1308,6 +1309,8 @@ async fn forward_frames(
         let exited = live.exited();
         let mut events = Vec::new();
         let rendered = screen.render(&mut frames);
+        // A program that printed and quit is shown whole before its exit.
+        let exited = exited.filter(|_| !frames.catching_up());
         if let Some(frame) = &rendered {
             seq += 1;
             if let Some((cols, rows)) = frame.resized {
@@ -1342,6 +1345,7 @@ async fn forward_frames(
         if rendered.is_some() {
             frames.commit();
         }
+        owed = rendered.is_some() && frames.catching_up();
         sent_at = Some(Instant::now());
         if exited.is_some() {
             return "the terminal exited";

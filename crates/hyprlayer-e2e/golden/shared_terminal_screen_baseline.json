@@ -41,6 +41,11 @@
           "evidence": {},
           "guard": "a picker redraw and a 60-line scroll arrive as frames",
           "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "a desktop attaching after the load gets a frame",
+          "ok": true
         }
       ],
       "step": "screen frames on a 11 ms RTT, 30 MB/s link"
@@ -84,6 +89,11 @@
         {
           "evidence": {},
           "guard": "a picker redraw and a 60-line scroll arrive as frames",
+          "ok": true
+        },
+        {
+          "evidence": {},
+          "guard": "a desktop attaching after the load gets a frame",
           "ok": true
         }
       ],

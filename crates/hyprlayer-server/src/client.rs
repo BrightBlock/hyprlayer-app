@@ -54,11 +54,6 @@ struct Inbox {
 
 /// Covers an SSH connect, a remote relay starting `serve`, and its first open.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
-/// What this client announces: it renders raw output until it renders the server's frames.
-const ANNOUNCED: Features = Features {
-    screen_frames: false,
-    ..Features::ALL
-};
 /// A call still unanswered this long is logged, then left to finish: some
 /// (a workstream's Setup script, a first agent turn) legitimately take minutes.
 const STILL_PENDING: Duration = Duration::from_secs(30);
@@ -130,7 +125,7 @@ impl RpcClient {
     where
         S: AsyncRead + AsyncWrite + Send + 'static,
     {
-        Self::connect_announcing(stream, ANNOUNCED).await
+        Self::connect_announcing(stream, Features::ALL).await
     }
 
     pub async fn connect_announcing<S>(

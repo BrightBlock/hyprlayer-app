@@ -12,8 +12,10 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::link::{far_phone, phone, uncapped, DEEP_LINK_BYTES, DEEP_UPLINK_BYTES};
-use hyprlayer_e2e::{json, next_output, text, Journey, Sandbox, Server};
+use hyprlayer_e2e::link::{
+    far_phone, far_phone_announcing, phone, uncapped, DEEP_LINK_BYTES, DEEP_UPLINK_BYTES,
+};
+use hyprlayer_e2e::{json, next_output, text, Journey, Sandbox, Server, RAW_DESKTOP};
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::rpc::WatchedSession;
@@ -970,7 +972,11 @@ async fn transport_fairness() {
 
     j.step("a small call after the link drops its rate still answers in time");
     {
-        let (phone, link) = far_phone(server.socket(), true, FAR_ONE_WAY, false).await;
+        // ponytail: raw floods. Frame floods hold the link window at its whole target, which
+        // leaves this limit no room; a cap on frames per link lets this step take them.
+        let (phone, link) =
+            far_phone_announcing(server.socket(), true, FAR_ONE_WAY, false, Some(RAW_DESKTOP))
+                .await;
         link.down_bps.store(DROP_FROM_BPS, Relaxed);
         // Enough streams that their credit together outruns the window, so the window bounds the wait.
         let mut floods = Vec::new();

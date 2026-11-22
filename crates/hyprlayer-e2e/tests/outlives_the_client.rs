@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{
-    eventually, json, keystrokes, read_until, text, Journey, Request, Sandbox, Server,
+    eventually, json, keystrokes, read_until, text, Journey, Request, Sandbox, Server, RAW_DESKTOP,
 };
 use hyprlayer_server::client::RpcClient;
 
@@ -27,7 +27,7 @@ async fn work_outlives_the_client() {
 
     j.step("set up a workstream");
     let server = Server::start(&sandbox).await;
-    let client = server.client();
+    let client = server.connect_announcing(RAW_DESKTOP).await;
     let project = onboard_and_import(&mut j, &client, &sandbox, &repo).await;
     let view = create_workstream(&mut j, &client, &project, "Long running").await;
     let id = text(&view, "/item/id");
@@ -162,7 +162,7 @@ async fn work_outlives_the_client() {
         json!({ "exit": stopped.status.code(), "listening": stopped.still_listening }),
     );
     let server = Server::start(&sandbox).await;
-    let client = server.client();
+    let client = server.connect_announcing(RAW_DESKTOP).await;
     j.guard(
         "a second server binds the same profile",
         true,
@@ -255,9 +255,12 @@ async fn on_a_client_that_goes_away(socket: PathBuf, workstream: String) -> (Str
                 .build()
                 .expect("build the first client's runtime");
             let outcome = runtime.block_on(async {
-                let client = RpcClient::connect_socket(&socket)
+                let stream = tokio::net::UnixStream::connect(&socket)
                     .await
                     .expect("connect the first client");
+                let client = RpcClient::connect_announcing(stream, RAW_DESKTOP)
+                    .await
+                    .expect("the first client's hello");
                 let (terminal, _, mut events) = client
                     .terminal_open_stream(workstream, 80, 24)
                     .await

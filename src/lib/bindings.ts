@@ -235,6 +235,7 @@ export const commands = {
 	terminalClose: (terminalId: string) => typedError<null, AppError>(__TAURI_INVOKE("terminal_close", { terminalId })),
 	/**  Ends the server streams behind channels the webview released; their terminals and sessions keep running. */
 	terminalRelease: (channelIds: number[]) => typedError<null, AppError>(__TAURI_INVOKE("terminal_release", { channelIds })),
+	terminalFrameAck: (channelId: number, seq: number | null) => typedError<null, AppError>(__TAURI_INVOKE("terminal_frame_ack", { channelId, seq })),
 	spawnCliTerminal: (args: string[], cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_cli_terminal", { args, cols, rows, onEvent })),
 	spawnShellTerminal: (command: string, cols: number, rows: number, onEvent: Channel<TerminalEvent>) => typedError<string, AppError>(__TAURI_INVOKE("spawn_shell_terminal", { command, cols, rows, onEvent })),
 	defaultShellName: () => typedError<string, AppError>(__TAURI_INVOKE("default_shell_name")),

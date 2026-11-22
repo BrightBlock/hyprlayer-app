@@ -1,6 +1,6 @@
-//! A terminal costs a client what it prints: raw bytes on the wire, a reattach
+//! A terminal costs a raw desktop what it prints: raw bytes on the wire, a reattach
 //! from the client's offset replays nothing it already has, and a released
-//! desktop still reads base64 in JSON.
+//! desktop still reads base64 in JSON. A frame desktop's resume is `shared_terminal_screen`'s.
 #![cfg(unix)]
 
 use std::path::Path;
@@ -11,7 +11,7 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
 use hyprlayer_core::terminal::TerminalEvent;
-use hyprlayer_e2e::{json, Journey, Sandbox, Server, Value};
+use hyprlayer_e2e::{json, Journey, Sandbox, Server, Value, RAW_DESKTOP};
 use hyprlayer_proto::frame::{decode_stream_frame, encode_control, Decoder, Frame};
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -82,7 +82,9 @@ async fn counted(socket: &Path) -> (Arc<RpcClient>, Arc<Link>) {
             }
         }
     });
-    let client = RpcClient::connect(client_end).await.expect("handshake");
+    let client = RpcClient::connect_announcing(client_end, RAW_DESKTOP)
+        .await
+        .expect("handshake");
     (client, link)
 }
 

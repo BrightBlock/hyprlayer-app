@@ -10,15 +10,20 @@ const h = vi.hoisted(() => {
   // and a full reset (`ESC c`) in the queue clears in turn.
   class FakeScreen {
     shown = "";
-    queued: string[] = [];
+    queued: Array<{ data: string; written?: () => void }> = [];
     resets = 0;
     write(data: Uint8Array | string) {
-      this.queued.push(typeof data === "string" ? data : new TextDecoder().decode(data));
+      this.queued.push({ data: typeof data === "string" ? data : new TextDecoder().decode(data) });
     }
+    writeFrame(data: Uint8Array, written: () => void) {
+      this.queued.push({ data: new TextDecoder().decode(data), written });
+    }
+    clipboard() {}
     parse() {
-      for (const data of this.queued.splice(0)) {
+      for (const { data, written } of this.queued.splice(0)) {
         const ris = data.lastIndexOf("\x1bc");
         this.shown = ris >= 0 ? data.slice(ris + 2) : this.shown + data;
+        written?.();
       }
     }
     reset() {
@@ -39,8 +44,9 @@ const h = vi.hoisted(() => {
   }
   const attaches: Array<{ id: string; offset: number | null; ch: FakeChannel }> = [];
   const reconnects: Array<() => void> = [];
+  const acks: number[] = [];
   const ok = <T,>(data: T) => ({ status: "ok" as const, data });
-  return { FakeChannel, FakeScreen, attaches, reconnects, ok, screen: undefined as FakeScreen | undefined };
+  return { FakeChannel, FakeScreen, attaches, reconnects, acks, ok, screen: undefined as FakeScreen | undefined };
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
@@ -56,6 +62,10 @@ vi.mock("@/lib/bindings", () => ({
     terminalResize: vi.fn(async () => h.ok(null)),
     terminalRelease: vi.fn(async () => h.ok(null)),
     terminalClose: vi.fn(async () => h.ok(null)),
+    terminalFrameAck: vi.fn(async (_channel: number, seq: number) => {
+      h.acks.push(seq);
+      return h.ok(null);
+    }),
   },
 }));
 vi.mock("@/lib/events", () => ({
@@ -85,6 +95,12 @@ globalThis.ResizeObserver = class {
 const { TerminalTab } = await import("./TerminalTab");
 
 const output = (offset: number, text: string) => ({ kind: "output", data: btoa(text), offset });
+const frame = (seq: number, history: number, text: string) => ({
+  kind: "output",
+  data: btoa(text),
+  offset: history,
+  frame: seq,
+});
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 
 async function mounted() {
@@ -96,6 +112,7 @@ async function mounted() {
 beforeEach(() => {
   h.attaches.length = 0;
   h.reconnects.length = 0;
+  h.acks.length = 0;
 });
 afterEach(cleanup);
 
@@ -138,5 +155,36 @@ describe("a terminal tab's output", () => {
 
     expect(resumed.offset).toBe(5);
     expect(h.screen!.shown).toBe("replay");
+  });
+});
+
+describe("a terminal tab rendering the server's frames", () => {
+  it("acks each frame once the screen has drawn it", async () => {
+    const { ch } = await mounted();
+    ch.onmessage(frame(1, 0, "one"));
+    ch.onmessage(frame(2, 0, "two"));
+    await settle();
+    expect(h.acks).toEqual([]);
+
+    h.screen!.parse();
+    await settle();
+    expect(h.acks).toEqual([1, 2]);
+  });
+
+  it("resumes from its history count once the server reconnects, keeping the screen", async () => {
+    const { ch } = await mounted();
+    ch.onmessage(frame(1, 0, "prompt$ "));
+    ch.onmessage(frame(2, 12, "ls"));
+    h.screen!.parse();
+
+    await act(async () => h.reconnects.forEach((fn) => fn()));
+    await settle();
+    const resumed = h.attaches[h.attaches.length - 1];
+    resumed.ch.onmessage(frame(1, 15, " done"));
+    h.screen!.parse();
+
+    expect(resumed.offset).toBe(12);
+    expect(h.screen!.resets).toBe(0);
+    expect(h.screen!.shown).toBe("prompt$ ls done");
   });
 });

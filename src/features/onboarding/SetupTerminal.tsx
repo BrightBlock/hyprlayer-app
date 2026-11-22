@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Channel } from "@tauri-apps/api/core";
 
 import { monoFontStack } from "@/lib/appearance";
-import { commands, type TerminalEvent } from "@/lib/bindings";
+import { commands } from "@/lib/bindings";
 import { errorMessage, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import {
@@ -10,7 +9,7 @@ import {
   useTerminalFontSync,
   useTerminalThemeSync,
 } from "@/lib/terminal/terminalChrome";
-import { b64ToBytes } from "@/lib/terminal/terminalCodec";
+import { TerminalFeed } from "@/lib/terminal/terminalFeed";
 import { writeTerminal } from "@/lib/terminal/terminalInput";
 import { createTerminalEngine, type TerminalEngine } from "@/lib/terminal/terminalEngine";
 import { useTerminalFontSize } from "@/lib/terminal/terminalFontSize";
@@ -47,22 +46,15 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
     engineRef.current = engine;
     let lastGrid = engine.fit();
 
-    const channel = new Channel<TerminalEvent>();
     let disposed = false;
-
-    channel.onmessage = (ev) => {
-      if (ev.kind === "output") {
-        engine.write(b64ToBytes(ev.data));
-      } else if (ev.kind === "resized") {
-        engine.follow(ev);
-      } else if (ev.kind === "exited") {
-        engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
-        if (!disposed) onExit?.(ev.code ?? null);
-      }
-    };
+    const feed = new TerminalFeed(engine, (code) => {
+      engine.write("\r\n\x1b[2m[process exited]\x1b[0m\r\n");
+      if (!disposed) onExit?.(code);
+    });
 
     void (async () => {
       const g = engine.grid();
+      const channel = feed.channel();
       const termId = await unwrap(
         shellCommand !== undefined
           ? commands.spawnShellTerminal(shellCommand, g.cols, g.rows, channel)
@@ -108,6 +100,7 @@ export function SetupTerminal({ args, shellCommand, onExit, className = "" }: Pr
       ro.disconnect();
       engine.dispose();
       engineRef.current = null;
+      feed.release();
       const id = idRef.current;
       if (id) void commands.terminalClose(id);
       idRef.current = undefined;

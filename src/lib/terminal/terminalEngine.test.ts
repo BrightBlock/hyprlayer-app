@@ -7,6 +7,11 @@ const disposeCalls: string[] = [];
 const parsed: string[] = [];
 let queued: { data: string; cb?: () => void }[] = [];
 let proposal: { cols: number; rows: number } | undefined;
+// What the terminal sent the program, and what reached the clipboard.
+const inputs: string[] = [];
+const copied: string[] = [];
+type CsiHandler = (params: (number | number[])[]) => boolean;
+const csi = new Map<string, CsiHandler>();
 
 // xterm runs a write's callback once that write is parsed, before the next one.
 function parseQueued() {
@@ -24,7 +29,10 @@ class FakeTerminal {
   options: Record<string, unknown> = {};
   element: HTMLElement | null = null;
   parser = {
-    registerCsiHandler: () => ({ dispose() {} }),
+    registerCsiHandler: (id: { prefix?: string; final: string }, handler: CsiHandler) => {
+      csi.set(`${id.prefix ?? ""}${id.final}`, handler);
+      return { dispose() {} };
+    },
     registerOscHandler: () => ({ dispose() {} }),
   };
   private selection = "";
@@ -60,7 +68,9 @@ class FakeTerminal {
     return this.selection;
   }
   paste() {}
-  input() {}
+  input(data: string) {
+    inputs.push(data);
+  }
   attachCustomKeyEventHandler() {}
   reset() {}
   dispose() {
@@ -106,6 +116,11 @@ vi.mock("@xterm/addon-webgl", () => ({
   },
 }));
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
+  writeText: async (text: string) => {
+    copied.push(text);
+  },
+}));
 
 const { createTerminalEngine } = await import("./terminalEngine");
 
@@ -128,6 +143,8 @@ beforeEach(() => {
   parsed.length = 0;
   queued = [];
   proposal = undefined;
+  inputs.length = 0;
+  copied.length = 0;
 });
 
 describe("XtermEngine disposal", () => {
@@ -300,5 +317,36 @@ describe("XtermEngine showing a followed grid", () => {
     proposal = { cols: 90, rows: 20 };
     engine.fit();
     expect(host.style.transform).toBe("");
+  });
+});
+
+describe("XtermEngine on a stream of the server's frames", () => {
+  const darkEngine = () =>
+    createTerminalEngine({ fontSize: 12, fontFamily: "monospace", theme: { background: "#000000" } });
+
+  it("copies what the program copied only right after a user gesture", () => {
+    const host = document.createElement("div");
+    const engine = newEngine();
+    engine.mount(host);
+    engine.bind("t1");
+    engine.writeFrame(new TextEncoder().encode("frame"), () => {});
+    engine.clipboard(btoa("unasked"));
+    host.dispatchEvent(new MouseEvent("mousedown"));
+    engine.clipboard(btoa("asked"));
+    expect(copied).toEqual(["asked"]);
+  });
+
+  it("leaves the program's theme reports to the server", () => {
+    const raw = darkEngine();
+    csi.get("?h")!([2031]);
+    raw.setTheme({ background: "#ffffff" });
+    expect(inputs).toEqual(["\x1b[?997;2n"]);
+
+    inputs.length = 0;
+    const framed = darkEngine();
+    framed.writeFrame(new TextEncoder().encode("frame"), () => {});
+    csi.get("?h")!([2031]);
+    framed.setTheme({ background: "#ffffff" });
+    expect(inputs).toEqual([]);
   });
 });

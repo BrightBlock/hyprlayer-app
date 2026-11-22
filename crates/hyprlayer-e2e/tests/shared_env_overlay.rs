@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::os::unix::net::UnixListener;
 use std::time::Duration;
 
-use hyprlayer_e2e::{json, read_until, Journey, Request, Sandbox, Server};
+use hyprlayer_e2e::{json, read_until, Journey, Request, Sandbox, Server, RAW_DESKTOP};
 
 const IO: Duration = Duration::from_secs(20);
 
@@ -21,7 +21,7 @@ async fn shared_env_overlay() {
 
     let mut j = Journey::new("shared_env_overlay", &sandbox);
     let server = Server::start(&sandbox).await;
-    let a = server.client();
+    let a = server.connect_announcing(RAW_DESKTOP).await;
     let b = server.connect().await;
 
     j.step("two clients attach with different overlays");

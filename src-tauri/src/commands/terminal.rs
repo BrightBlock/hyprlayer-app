@@ -387,6 +387,21 @@ pub(crate) fn pump(
         });
 }
 
+#[tauri::command]
+#[specta::specta]
+// `f64`: specta won't hand TypeScript a `u64`.
+pub async fn terminal_frame_ack(
+    state: State<'_, AppState>,
+    channel_id: u32,
+    seq: f64,
+) -> CmdResult<()> {
+    state
+        .streams()
+        .ack_frame(channel_id, seq as u64)
+        .await
+        .map_err(AppError::from)
+}
+
 /// Ends the server streams behind channels the webview released; their terminals and sessions keep running.
 #[tauri::command]
 #[specta::specta]

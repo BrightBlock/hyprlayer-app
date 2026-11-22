@@ -1,8 +1,8 @@
-//! Two desktops, A at 120x40 dark and B at 80x24 light, render one shared terminal from the raw
-//! bytes they receive. The golden records each case's outcome as it is today, failures included.
-//! Desktops C and D render the server's screen instead, as frames written into xterm 5.5
-//! (`xterm/render.mjs`, which needs `node` and the repository's `pnpm install`); each must show
-//! what the server's libghostty screen holds, cells and history, after every case.
+//! Two desktops, A at 120x40 dark and B at 80x24 light, render one shared terminal as the app does:
+//! they announce `screen_frames` and write the server's frames into xterm 5.5 (`xterm/render.mjs`,
+//! which needs `node` and the repository's `pnpm install`). Every case compares their screens cell
+//! by cell. A raw tap, which renders and answers nothing, feeds a libghostty model the bytes the
+//! program wrote; frame desktops C and D must show what that model holds, cells and history.
 #![cfg(unix)]
 
 use std::process::Stdio;
@@ -17,7 +17,7 @@ use hyprlayer_core::models::{Rgb, TerminalTheme};
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_e2e::agent_stub::{install, SCREEN_TUI};
 use hyprlayer_e2e::link::{far_phone, far_phone_announcing};
-use hyprlayer_e2e::{json, keystrokes, Journey, Sandbox, Server, Value};
+use hyprlayer_e2e::{eventually, json, keystrokes, Journey, Sandbox, Server, Value, RAW_DESKTOP};
 use hyprlayer_proto::Features;
 use hyprlayer_server::client::{RpcClient, TerminalStream};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -30,20 +30,8 @@ const FIXTURE: &str = concat!(
     "/../hyprlayer-core/tests/fixtures/claude_tui/effort-2.1.330-120x40.bin"
 );
 
-#[derive(Clone, Copy)]
-struct Theme {
-    background: &'static str,
-    scheme: &'static str,
-}
-
-const DARK: Theme = Theme {
-    background: "\x1b]11;rgb:0000/0000/0000\x1b\\",
-    scheme: "\x1b[?997;1n",
-};
-const LIGHT: Theme = Theme {
-    background: "\x1b]11;rgb:ffff/ffff/ffff\x1b\\",
-    scheme: "\x1b[?997;2n",
-};
+/// A light desktop's OSC 11 answer, typed as input to see it reach the program.
+const LIGHT_REPLY: &str = "\x1b]11;rgb:ffff/ffff/ffff\x1b\\";
 const A_THEME: TerminalTheme = TerminalTheme {
     foreground: Rgb(0xff, 0xff, 0xff),
     background: Rgb(0, 0, 0),
@@ -59,16 +47,21 @@ const LIGHT_THEME: TerminalTheme = TerminalTheme {
     dark: false,
 };
 
-enum Seen {
-    Resized(u16, u16),
-    Output(Vec<u8>),
-    Reset,
+/// The newest `(paint N)` the stub drew in `buf` that ends at or past `from`.
+fn painted_in(buf: &[u8], from: usize) -> Option<u64> {
+    find(buf, b"(paint ")
+        .filter_map(|at| {
+            let digits = &buf[at + 7..];
+            let len = digits.iter().take_while(|c| c.is_ascii_digit()).count();
+            if digits.get(len) != Some(&b')') || at + 7 + len < from {
+                return None;
+            }
+            std::str::from_utf8(&digits[..len]).ok()?.parse().ok()
+        })
+        .max()
 }
 
 struct Log {
-    render: bool,
-    seen: Vec<Seen>,
-    parser: vt100::Parser,
     stream: u64,
     next: Option<u64>,
     gaps: usize,
@@ -80,41 +73,15 @@ struct Log {
 }
 
 impl Log {
-    fn scan(&mut self, bytes: &[u8], theme: Theme) -> Vec<&'static str> {
+    fn scan(&mut self, bytes: &[u8]) {
         let mut buf = std::mem::take(&mut self.tail);
         let old = buf.len();
         buf.extend_from_slice(bytes);
-        let mut replies = Vec::new();
-        if buf.contains(&b'?') {
-            for (query, reply) in [
-                (&b"\x1b]11;?\x07"[..], theme.background),
-                (b"\x1b]11;?\x1b\\", theme.background),
-                (b"\x1b[?996n", theme.scheme),
-            ] {
-                replies.extend(
-                    find(&buf, query)
-                        .filter(|at| at + query.len() > old)
-                        .map(|_| reply),
-                );
-            }
-        }
-        if buf.contains(&b'(') {
-            for at in find(&buf, b"(paint ") {
-                let digits = &buf[at + 7..];
-                let len = digits.iter().take_while(|c| c.is_ascii_digit()).count();
-                if digits.get(len) == Some(&b')') && at + 7 + len >= old {
-                    let paint = std::str::from_utf8(&digits[..len])
-                        .ok()
-                        .and_then(|d| d.parse::<u64>().ok());
-                    if let Some(paint) = paint.filter(|&paint| paint > self.paints) {
-                        self.paints = paint;
-                        self.painted_at = Some(Instant::now());
-                    }
-                }
-            }
+        if let Some(paint) = painted_in(&buf, old).filter(|&paint| paint > self.paints) {
+            self.paints = paint;
+            self.painted_at = Some(Instant::now());
         }
         self.tail = buf[buf.len().saturating_sub(16)..].to_vec();
-        replies
     }
 }
 
@@ -125,31 +92,20 @@ fn find<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Item = usize> + 'a
         .map(|(at, _)| at)
 }
 
-// Mirrors TerminalFeed and xterm: a resume whose first output isn't where it asked starts over.
+/// A desktop from before frames, reading the raw bytes the program wrote; it answers nothing.
 #[derive(Clone)]
-struct Desktop {
+struct RawDesktop {
     client: Arc<RpcClient>,
     terminal: String,
-    theme: Theme,
     log: Arc<Mutex<Log>>,
 }
 
-impl Desktop {
-    fn new(
-        client: Arc<RpcClient>,
-        terminal: &str,
-        theme: Theme,
-        fit: (u16, u16),
-        render: bool,
-    ) -> Self {
+impl RawDesktop {
+    fn new(client: Arc<RpcClient>, terminal: &str) -> Self {
         Self {
             client,
             terminal: terminal.to_string(),
-            theme,
             log: Arc::new(Mutex::new(Log {
-                render,
-                seen: Vec::new(),
-                parser: vt100::Parser::new(fit.1, fit.0, 0),
                 stream: 0,
                 next: None,
                 gaps: 0,
@@ -167,7 +123,7 @@ impl Desktop {
         self
     }
 
-    fn watch(&self, mut stream: TerminalStream, from: Option<u64>) {
+    fn watch(&self, mut stream: TerminalStream) {
         let me = self.clone();
         let generation = {
             let mut log = self.log.lock().unwrap();
@@ -175,7 +131,6 @@ impl Desktop {
             log.stream
         };
         tokio::spawn(async move {
-            let mut first = true;
             while let Some(event) = stream.recv().await {
                 let mut log = me.log.lock().unwrap();
                 if log.stream != generation {
@@ -186,36 +141,19 @@ impl Desktop {
                         if let Some(model) = &log.model {
                             model.resize(cols, rows);
                         }
-                        if log.render {
-                            log.seen.push(Seen::Resized(cols, rows));
-                        }
                     }
                     TerminalEvent::Clipboard { .. } => {}
                     TerminalEvent::Output { data, offset, .. } => {
                         let bytes = STANDARD.decode(data).expect("output is base64");
-                        if first && from.is_some() && offset != from {
-                            log.seen.push(Seen::Reset);
-                        } else if matches!((offset, log.next), (Some(at), Some(next)) if at > next)
-                        {
+                        if matches!((offset, log.next), (Some(at), Some(next)) if at > next) {
                             log.gaps += 1;
                         }
-                        first = false;
                         log.next = offset.map(|at| at + bytes.len() as u64);
                         log.arrivals.push((Instant::now(), bytes.len()));
                         if let Some(model) = &log.model {
                             model.feed(&bytes);
                         }
-                        let replies = log.scan(&bytes, me.theme);
-                        if log.render {
-                            log.seen.push(Seen::Output(bytes));
-                        }
-                        drop(log);
-                        for reply in replies {
-                            let (client, terminal) = (me.client.clone(), me.terminal.clone());
-                            tokio::spawn(async move {
-                                let _ = client.terminal_write(terminal, keystrokes(reply)).await;
-                            });
-                        }
+                        log.scan(&bytes);
                     }
                     TerminalEvent::Exited { .. } => return,
                 }
@@ -227,18 +165,10 @@ impl Desktop {
         self.log.lock().unwrap().stream += 1;
     }
 
-    async fn send(&self, text: &str) {
-        self.client
-            .terminal_write(self.terminal.clone(), keystrokes(text))
-            .await
-            .expect("terminal_write");
-    }
-
-    async fn fit(&self, cols: u16, rows: u16) {
-        self.client
-            .terminal_resize(self.terminal.clone(), cols, rows)
-            .await
-            .expect("terminal_resize");
+    async fn leave(&self, stream: u64) -> Option<u64> {
+        let _ = self.client.cancel_stream(stream).await;
+        self.forget_stream();
+        self.log.lock().unwrap().next
     }
 
     async fn attach(&self, from: Option<u64>) -> (u64, bool) {
@@ -248,19 +178,12 @@ impl Desktop {
             .await
             .expect("terminal_attach")
             .expect("a live terminal");
-        self.watch(attached.events, from);
+        self.watch(attached.events);
         (attached.stream_id, attached.resumed)
     }
 
     async fn painted(&self, paint: u64) -> bool {
-        let deadline = Instant::now() + WAIT;
-        while Instant::now() < deadline {
-            if self.log.lock().unwrap().paints >= paint {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        false
+        eventually(WAIT, || self.paints() >= paint).await
     }
 
     fn gaps(&self) -> usize {
@@ -289,30 +212,10 @@ impl Desktop {
         }
         false
     }
-
-    fn next(&self) -> Option<u64> {
-        self.log.lock().unwrap().next
-    }
-
-    fn screen(&self) -> vt100::Screen {
-        let mut guard = self.log.lock().unwrap();
-        let log = &mut *guard;
-        for seen in std::mem::take(&mut log.seen) {
-            match seen {
-                Seen::Resized(cols, rows) => log.parser.screen_mut().set_size(rows, cols),
-                Seen::Output(bytes) => log.parser.process(&bytes),
-                Seen::Reset => {
-                    let (rows, cols) = log.parser.screen().size();
-                    log.parser = vt100::Parser::new(rows, cols, 0);
-                }
-            }
-        }
-        log.parser.screen().clone()
-    }
 }
 
-/// The server's screen: the same libghostty, fed the same bytes at the same sizes as desktop A
-/// is sent, with the server's scrollback limit.
+/// The server's screen: the same libghostty, fed the same bytes at the same sizes as the tap is
+/// sent, with the server's scrollback limit.
 #[derive(Clone)]
 struct Model(Arc<Mutex<Terminal>>);
 
@@ -551,8 +454,11 @@ struct FrameLog {
     copies: Vec<String>,
     frames: usize,
     bytes: usize,
+    paints: u64,
+    first_frame: Option<(Instant, usize)>,
 }
 
+/// A desktop as the app is one: it writes each frame into xterm 5.5 and acks it once handed over.
 #[derive(Clone)]
 struct FrameDesktop {
     client: Arc<RpcClient>,
@@ -578,12 +484,17 @@ impl FrameDesktop {
             .await
             .expect("terminal_attach")
             .expect("a live terminal");
+        self.watch(attached.stream_id, attached.events);
+        (attached.stream_id, attached.resumed)
+    }
+
+    fn watch(&self, stream_id: u64, mut stream: TerminalStream) {
         let generation = {
             let mut log = self.log.lock().unwrap();
             log.stream += 1;
             log.stream
         };
-        let (me, mut stream) = (self.clone(), attached.events);
+        let me = self.clone();
         tokio::spawn(async move {
             while let Some(event) = stream.recv().await {
                 let mut log = me.log.lock().unwrap();
@@ -597,12 +508,19 @@ impl FrameDesktop {
                     TerminalEvent::Output {
                         data,
                         offset,
-                        frame: Some(_),
+                        frame: Some(seq),
                     } => {
+                        let bytes = STANDARD.decode(&data).unwrap_or_default();
                         log.frames += 1;
-                        log.bytes += STANDARD.decode(&data).map_or(0, |bytes| bytes.len());
+                        log.bytes += bytes.len();
+                        log.first_frame.get_or_insert((Instant::now(), bytes.len()));
+                        log.paints = log.paints.max(painted_in(&bytes, 0).unwrap_or(0));
                         me.xterm.send(json!({ "write": data }));
                         log.history = offset;
+                        let client = me.client.clone();
+                        tokio::spawn(async move {
+                            let _ = client.terminal_frame_ack(stream_id, seq).await;
+                        });
                     }
                     TerminalEvent::Output { .. } => log.raw += 1,
                     TerminalEvent::Clipboard { data } => {
@@ -613,7 +531,6 @@ impl FrameDesktop {
                 }
             }
         });
-        (attached.stream_id, attached.resumed)
     }
 
     async fn leave(&self, stream: u64) -> Option<u64> {
@@ -655,6 +572,14 @@ impl FrameDesktop {
         self.log.lock().unwrap().copies.clone()
     }
 
+    fn paints(&self) -> u64 {
+        self.log.lock().unwrap().paints
+    }
+
+    async fn painted(&self, paint: u64) -> bool {
+        eventually(WAIT, || self.paints() >= paint).await
+    }
+
     async fn shows(&self, model: &Model) -> Value {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -683,25 +608,46 @@ fn frames_ok(evidence: &Value) -> bool {
         && evidence["raw_output_events"] == json!(0)
 }
 
-fn compare(a: &Desktop, b: &Desktop, answers_seen: u64) -> Value {
-    let (a, b) = (a.screen(), b.screen());
-    let ((a_rows, a_cols), (b_rows, b_cols)) = (a.size(), b.size());
-    let mismatched = (0..a_rows.max(b_rows))
-        .flat_map(|row| (0..a_cols.max(b_cols)).map(move |col| (row, col)))
-        .filter(|&(row, col)| a.cell(row, col) != b.cell(row, col))
+async fn compare(a: &FrameDesktop, b: &FrameDesktop, answers_seen: u64) -> Value {
+    let (a, b) = (a.xterm.dump().await, b.xterm.dump().await);
+    let size = |key: &str| a[key].as_u64().max(b[key].as_u64()).unwrap_or(0) as usize;
+    let mismatched = (0..size("rows"))
+        .flat_map(|y| (0..size("cols")).map(move |x| (y, x)))
+        .filter(|&(y, x)| a["grid"][y][x] != b["grid"][y][x])
         .count();
     json!({
-        "grids_match": mismatched == 0,
+        "grids_match": mismatched == 0 && a["cols"] == b["cols"] && a["rows"] == b["rows"],
         "mismatched_cells": mismatched,
         "answers_seen": answers_seen,
     })
 }
 
-fn reported(desktop: &Desktop, label: &str) -> Value {
-    let contents = desktop.screen().contents();
-    // A soft-wrapped row above can join the label's row in `contents`.
-    let line = contents
-        .lines()
+fn lines(view: &Value) -> Vec<String> {
+    let row = |cells: &Value| -> String {
+        let text: String = cells
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|cell| cell[1] != json!(0))
+            .map(|cell| match cell[0].as_str() {
+                Some("") | None => " ",
+                Some(text) => text,
+            })
+            .collect();
+        text.trim_end().to_string()
+    };
+    view["grid"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(row)
+        .collect()
+}
+
+async fn reported(desktop: &FrameDesktop, label: &str) -> Value {
+    let lines = lines(&desktop.xterm.dump().await);
+    let line = lines
+        .iter()
         .find_map(|line| line.find(label).map(|at| &line[at..]))
         .unwrap_or_default();
     let counts: serde_json::Map<String, Value> = line
@@ -712,18 +658,9 @@ fn reported(desktop: &Desktop, label: &str) -> Value {
     Value::Object(counts)
 }
 
-fn show(j: &mut Journey, case: &str, a: &Desktop, b: &Desktop) {
-    let rows = |d: &Desktop| {
-        d.screen()
-            .contents()
-            .lines()
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-    };
-    j.note(
-        &format!("screens {case}"),
-        json!({ "a": rows(a), "b": rows(b) }),
-    );
+async fn show(j: &mut Journey, case: &str, a: &FrameDesktop, b: &FrameDesktop) {
+    let (a, b) = (lines(&a.xterm.dump().await), lines(&b.xterm.dump().await));
+    j.note(&format!("screens {case}"), json!({ "a": a, "b": b }));
 }
 
 fn with(mut evidence: Value, extra: Value) -> Value {
@@ -733,7 +670,7 @@ fn with(mut evidence: Value, extra: Value) -> Value {
     evidence
 }
 
-const DREW: &str = "A saw every byte and both desktops drew the repaint";
+const DREW: &str = "the tap saw every byte and both desktops drew the repaint";
 
 async fn frames_shown(j: &mut Journey, c: &FrameDesktop, model: &Model) {
     let evidence = c.shows(model).await;
@@ -762,8 +699,8 @@ fn has_line(view: &Value, line: &str) -> bool {
     })
 }
 
-async fn drawn(a: &Desktop, b: &Desktop, paint: u64) -> bool {
-    a.painted(paint).await && b.painted(paint).await && a.gaps() == 0
+async fn drawn(tap: &RawDesktop, a: &FrameDesktop, b: &FrameDesktop, paint: u64) -> bool {
+    tap.painted(paint).await && a.painted(paint).await && b.painted(paint).await && tap.gaps() == 0
 }
 
 fn stub_command(sandbox: &Sandbox) -> String {
@@ -779,17 +716,27 @@ async fn shared_terminal_screen() {
     let (b_client, b_link) = far_phone(server.socket(), true, Duration::ZERO, false).await;
 
     j.step("A opens the program at 120x40 and B attaches at 80x24");
-    let (terminal, a_stream, opened) = server
+    // As the app does at start: a pty takes its spawner's theme.
+    server
+        .client()
+        .terminal_theme(A_THEME)
+        .await
+        .expect("A reports its theme");
+    let (terminal, mut a_stream, opened) = server
         .client()
         .spawn_shell_terminal_stream(stub_command(&sandbox), 120, 40)
         .await
         .expect("spawn the stub");
-    let model = Model::new(120, 40);
-    let a = Desktop::new(server.client(), &terminal, DARK, (120, 40), true).modelled(model.clone());
-    a.watch(opened, None);
+    let a = FrameDesktop::new(server.client(), &terminal);
+    a.watch(a_stream, opened);
     a.fit(120, 40).await;
-    let opened = a.painted(1).await;
-    let b = Desktop::new(b_client, &terminal, LIGHT, (80, 24), true);
+    let model = Model::new(120, 40);
+    let tap = RawDesktop::new(server.connect_announcing(RAW_DESKTOP).await, &terminal)
+        .modelled(model.clone());
+    let (mut tap_stream, _) = tap.attach(None).await;
+    let opened = tap.painted(1).await;
+    let b = FrameDesktop::new(b_client, &terminal);
+    b.theme(LIGHT_THEME).await;
     let (mut b_stream, _) = b.attach(None).await;
     b.fit(80, 24).await;
     let (c_client, c_link) = far_phone_announcing(
@@ -803,44 +750,50 @@ async fn shared_terminal_screen() {
     let c = FrameDesktop::new(c_client, &terminal);
     c.theme(A_THEME).await;
     let (mut c_stream, _) = c.attach(None).await;
-    let ok = opened && drawn(&a, &b, 1).await;
-    j.guard(DREW, ok, compare(&a, &b, 0));
-    show(&mut j, "attach", &a, &b);
+    let ok = opened && drawn(&tap, &a, &b, 1).await;
+    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    show(&mut j, "attach", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(a) A resizes");
     a.fit(100, 30).await;
-    let ok = drawn(&a, &b, 2).await;
-    j.guard(DREW, ok, compare(&a, &b, 0));
-    show(&mut j, "(a)", &a, &b);
+    let ok = drawn(&tap, &a, &b, 2).await;
+    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    show(&mut j, "(a)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(b) B types, which gives it the size, then resizes");
     b.send("j").await;
-    let typed = drawn(&a, &b, 4).await;
+    let typed = drawn(&tap, &a, &b, 4).await;
     b.fit(90, 28).await;
-    let ok = typed && drawn(&a, &b, 5).await;
-    j.guard(DREW, ok, compare(&a, &b, 0));
-    show(&mut j, "(b)", &a, &b);
+    let ok = typed && drawn(&tap, &a, &b, 5).await;
+    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    show(&mut j, "(b)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(c) B answers the picker, which erases and redraws it");
     b.send("\r").await;
-    let ok = drawn(&a, &b, 6).await;
-    j.guard(DREW, ok, compare(&a, &b, 0));
-    show(&mut j, "(c)", &a, &b);
+    let ok = drawn(&tap, &a, &b, 6).await;
+    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    show(&mut j, "(c)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(d) the program asks for the theme while B, the light desktop, is active");
+    // A raw viewer leaves the program's queries to the raw desktops, so the tap steps out first.
+    let from = tap.leave(tap_stream).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
     b.send("t").await;
-    let ok = drawn(&a, &b, 7).await;
-    let answers = reported(&a, "ANSWERS");
+    let drew = a.painted(7).await && b.painted(7).await;
+    let (stream, tap_resumed) = tap.attach(from).await;
+    tap_stream = stream;
+    let ok = drew && tap_resumed && drawn(&tap, &a, &b, 7).await;
+    let answers = reported(&a, "ANSWERS").await;
     let osc11 = answers["osc11"].as_u64().unwrap_or_default();
     j.guard(
         DREW,
         ok,
         with(
-            compare(&a, &b, osc11),
+            compare(&a, &b, osc11).await,
             json!({
                 "scheme_answers": answers["scheme"],
                 "themes_heard": { "dark": answers["dark"], "light": answers["light"] },
@@ -848,25 +801,25 @@ async fn shared_terminal_screen() {
             }),
         ),
     );
-    show(&mut j, "(d)", &a, &b);
+    show(&mut j, "(d)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("Ctrl+F3 and a key batched with a reply reach the program");
     b.send("h").await;
-    let listening = drawn(&a, &b, 8).await;
+    let listening = drawn(&tap, &a, &b, 8).await;
     b.send("\x1b[1;5R").await;
-    b.send(&format!("x{}", LIGHT.background)).await;
-    let ok = listening && drawn(&a, &b, 9).await;
-    let heard = reported(&a, "HEARD");
+    b.send(&format!("x{LIGHT_REPLY}")).await;
+    let ok = listening && drawn(&tap, &a, &b, 9).await;
+    let heard = reported(&a, "HEARD").await;
     j.guard(
         DREW,
         ok,
         with(
-            compare(&a, &b, 0),
+            compare(&a, &b, 0).await,
             json!({ "ctrl_f3_heard": heard["ctrl_f3"], "batched_key_heard": heard["batched_key"] }),
         ),
     );
-    show(&mut j, "ctrl+f3", &a, &b);
+    show(&mut j, "ctrl+f3", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(e) B's link stalls for 5 s while the program writes, then B reads");
@@ -876,56 +829,44 @@ async fn shared_terminal_screen() {
         let b = b.clone();
         tokio::spawn(async move { b.send("F").await })
     };
-    let a_drew = a.painted(10).await;
+    let a_drew = tap.painted(10).await && a.painted(10).await;
     tokio::time::sleep_until((stalled_at + STALL).into()).await;
     b_link.down_stalled.store(false, Relaxed);
     let _ = typing.await;
-    let ok = a_drew && drawn(&a, &b, 10).await;
-    j.guard(
-        DREW,
-        ok,
-        with(
-            compare(&a, &b, 0),
-            json!({ "b_skipped_output": b.gaps() > 0 }),
-        ),
-    );
-    show(&mut j, "(e)", &a, &b);
+    let ok = a_drew && drawn(&tap, &a, &b, 10).await;
+    j.guard(DREW, ok, compare(&a, &b, 0).await);
+    show(&mut j, "(e)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("(f) B reconnects after missing more output than the terminal keeps");
-    let from = b.next();
-    b.client
-        .cancel_stream(b_stream)
-        .await
-        .expect("B's stream drops");
-    b.forget_stream();
-    let size_back = a.painted(11).await;
+    let from = b.leave(b_stream).await;
+    let size_back = tap.painted(11).await;
     a.send("F").await;
-    let flooded = a.painted(12).await;
+    let flooded = tap.painted(12).await;
     let (stream, resumed) = b.attach(from).await;
     b_stream = stream;
     b.fit(80, 24).await;
-    let ok = size_back && flooded && drawn(&a, &b, 12).await;
+    let ok = size_back && flooded && drawn(&tap, &a, &b, 12).await;
     j.guard(
         DREW,
         ok,
-        with(compare(&a, &b, 0), json!({ "resumed": resumed })),
+        with(compare(&a, &b, 0).await, json!({ "resumed": resumed })),
     );
-    show(&mut j, "(f)", &a, &b);
+    show(&mut j, "(f)", &a, &b).await;
     frames_shown(&mut j, &c, &model).await;
 
     j.step("frames: C draws a row of emoji, CJK and a flag on a coloured picker row");
-    let paints = a.paints();
+    let paints = tap.paints();
     c.fit(110, 32).await;
     c.send("E").await;
-    let settled = a.repainted(paints).await;
+    let settled = tap.repainted(paints).await;
     let evidence = c.shows(&model).await;
     j.guard(SHOWS, settled && frames_ok(&evidence), evidence);
 
     j.step("frames: a URL the program wrote past the right margin stays one wrapped line");
-    let paints = a.paints();
+    let paints = tap.paints();
     c.send("U").await;
-    let settled = a.repainted(paints).await;
+    let settled = tap.repainted(paints).await;
     let evidence = c.shows(&model).await;
     let (snapshot, view) = (model.snapshot(), c.xterm.dump().await);
     let wrapped = snapshot.continues.iter().any(|c| *c) && wraps_match(&snapshot, &view);
@@ -938,14 +879,14 @@ async fn shared_terminal_screen() {
     j.step(
         "frames: C's link stalls while 300 lines scroll past, a progress line finished among them",
     );
-    let paints = a.paints();
+    let paints = tap.paints();
     c_link.down_stalled.store(true, Relaxed);
     // Its answer can't come back until the link does.
     let typing = {
         let c = c.clone();
         tokio::spawn(async move { c.send("L").await })
     };
-    let settled = a.repainted(paints).await;
+    let settled = tap.repainted(paints).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     c_link.down_stalled.store(false, Relaxed);
     let _ = typing.await;
@@ -961,9 +902,9 @@ async fn shared_terminal_screen() {
     j.step("frames: C narrows to 60 columns and back, so both sides reflow that history");
     let mut reflowed = Vec::new();
     for (cols, rows) in [(60, 30), (110, 32)] {
-        let paints = a.paints();
+        let paints = tap.paints();
         c.fit(cols, rows).await;
-        let settled = a.repainted(paints).await;
+        let settled = tap.repainted(paints).await;
         let evidence = c.shows(&model).await;
         reflowed.push(json!({ "settled": settled, "cols": cols, "shows": evidence }));
     }
@@ -981,9 +922,9 @@ async fn shared_terminal_screen() {
     );
     let kept = c.xterm.dump().await["history"].clone();
     let cursor = c.leave(c_stream).await;
-    let paints = a.paints();
+    let paints = tap.paints();
     c.send("j").await;
-    let drew = a.repainted(paints).await;
+    let drew = tap.repainted(paints).await;
     let (stream, resumed) = c.attach(cursor).await;
     c_stream = stream;
     let evidence = c.shows(&model).await;
@@ -1003,25 +944,27 @@ async fn shared_terminal_screen() {
     let (d_stream, _) = d.attach(None).await;
     d.fit(72, 40).await;
     c.fit(124, 40).await;
-    let paints = a.paints();
+    let paints = tap.paints();
     c.send("C").await;
-    let settled = a.repainted(paints).await;
+    let settled = tap.repainted(paints).await;
     let owner = c
         .copies()
         .iter()
         .any(|copy| copy == "copied by the program");
-    let other = !d.copies().is_empty();
+    let others = [&a, &b, &d]
+        .iter()
+        .any(|desktop| !desktop.copies().is_empty());
     let (c_shows, d_shows) = (c.shows(&model).await, d.shows(&model).await);
     j.guard(
         "only the size owner's frame stream carries the copy",
-        settled && owner && !other && frames_ok(&c_shows) && frames_ok(&d_shows),
-        json!({ "owner_copied": owner, "other_copied": other, "c": c_shows, "d": d_shows }),
+        settled && owner && !others && frames_ok(&c_shows) && frames_ok(&d_shows),
+        json!({ "owner_copied": owner, "other_copied": others, "c": c_shows, "d": d_shows }),
     );
 
     j.step("frames: focus flips between C at 124 and D at 72 columns, the program redrawing everything each time");
-    let paints = a.paints();
+    let paints = tap.paints();
     c.send("W").await;
-    let mut redrawn = a.repainted(paints).await;
+    let mut redrawn = tap.repainted(paints).await;
     let flips = 20;
     for flip in 0..flips {
         if flip % 2 == 0 {
@@ -1031,11 +974,11 @@ async fn shared_terminal_screen() {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    redrawn &= a.settled(Duration::from_millis(1500)).await;
+    redrawn &= tap.settled(Duration::from_millis(1500)).await;
     let (c_shows, d_shows) = (c.shows(&model).await, d.shows(&model).await);
-    let paints = a.paints();
+    let paints = tap.paints();
     c.send("w").await;
-    redrawn &= a.repainted(paints).await;
+    redrawn &= tap.repainted(paints).await;
     j.guard(
         "both frame desktops show the server's screen and history after the flips",
         redrawn && frames_ok(&c_shows) && frames_ok(&d_shows),
@@ -1043,23 +986,20 @@ async fn shared_terminal_screen() {
     );
 
     j.step("(g) with nobody watching, the program asks for the theme");
-    a.client
-        .terminal_theme(A_THEME)
-        .await
-        .expect("A reports its theme");
-    for (desktop, stream) in [(&a, a_stream), (&b, b_stream)] {
-        let _ = desktop.client.cancel_stream(stream).await;
-        desktop.forget_stream();
+    let paints = tap.paints();
+    tap.leave(tap_stream).await;
+    for (desktop, stream) in [(&a, a_stream), (&b, b_stream), (&d, d_stream)] {
+        desktop.leave(stream).await;
     }
+    // The size passes to the next viewer as each leaves, so C, which owns it, leaves last.
+    tokio::time::sleep(Duration::from_secs(1)).await;
     c.leave(c_stream).await;
-    d.leave(d_stream).await;
-    let paints = a.paints();
     tokio::time::sleep(Duration::from_secs(1)).await;
     a.send("t").await;
     tokio::time::sleep(Duration::from_secs(3)).await;
-    let (a_stream, _) = a.attach(None).await;
+    (a_stream, _) = a.attach(None).await;
     let painted = a.painted(paints + 1).await;
-    let answers = reported(&a, "ANSWERS");
+    let answers = reported(&a, "ANSWERS").await;
     j.guard(
         "the server answers each query once, in the theme of the desktop that last owned the size",
         painted
@@ -1070,7 +1010,7 @@ async fn shared_terminal_screen() {
         json!({ "answers": answers }),
     );
 
-    let _ = a.client.cancel_stream(a_stream).await;
+    a.leave(a_stream).await;
     let _ = server.client().terminal_close(terminal).await;
     j.finish();
 }
@@ -1078,7 +1018,6 @@ async fn shared_terminal_screen() {
 #[cfg(target_os = "linux")]
 mod baseline {
     use super::*;
-    use hyprlayer_e2e::eventually;
     use hyprlayer_e2e::link::Link;
 
     struct Shape {
@@ -1104,8 +1043,13 @@ mod baseline {
     // USER_HZ, the unit of /proc/<pid>/stat's times, is 100 on every Linux build.
     const USER_HZ: u64 = 100;
 
-    async fn linked(server: &Server, shape: &Shape) -> (Arc<RpcClient>, Arc<Link>) {
-        let (client, link) = far_phone(server.socket(), true, shape.one_way, false).await;
+    async fn linked(
+        server: &Server,
+        shape: &Shape,
+        features: Features,
+    ) -> (Arc<RpcClient>, Arc<Link>) {
+        let (client, link) =
+            far_phone_announcing(server.socket(), true, shape.one_way, false, Some(features)).await;
         link.down_bps.store(shape.bps, Relaxed);
         link.up_bps.store(shape.bps, Relaxed);
         (client, link)
@@ -1139,7 +1083,7 @@ mod baseline {
         (d.as_secs_f64() * 10_000.0).round() / 10.0
     }
 
-    impl Desktop {
+    impl RawDesktop {
         fn received(&self) -> (usize, usize) {
             let log = self.log.lock().unwrap();
             (
@@ -1147,9 +1091,28 @@ mod baseline {
                 log.arrivals.iter().map(|(_, n)| n).sum(),
             )
         }
+
+        async fn send(&self, text: &str) {
+            self.client
+                .terminal_write(self.terminal.clone(), keystrokes(text))
+                .await
+                .expect("terminal_write");
+        }
+
+        async fn fit(&self, cols: u16, rows: u16) {
+            self.client
+                .terminal_resize(self.terminal.clone(), cols, rows)
+                .await
+                .expect("terminal_resize");
+        }
     }
 
-    async fn repaint_bytes(desktop: &Desktop, link: &Link, key: &str, paint: u64) -> Option<Value> {
+    async fn repaint_bytes(
+        desktop: &RawDesktop,
+        link: &Link,
+        key: &str,
+        paint: u64,
+    ) -> Option<Value> {
         let (_, payload) = desktop.received();
         let wire = link.delivered.load(Relaxed);
         desktop.send(key).await;
@@ -1163,13 +1126,13 @@ mod baseline {
 
     async fn measure(j: &mut Journey, server: &Server, command: &str, shape: &Shape) -> Value {
         let pid = server.pid();
-        let (client, link) = linked(server, shape).await;
+        let (client, link) = linked(server, shape, RAW_DESKTOP).await;
         let (terminal, stream_id, opened) = client
             .spawn_shell_terminal_stream(command.into(), 120, 40)
             .await
             .expect("spawn the stub");
-        let desktop = Desktop::new(client.clone(), &terminal, DARK, (120, 40), false);
-        desktop.watch(opened, None);
+        let desktop = RawDesktop::new(client.clone(), &terminal);
+        desktop.watch(opened);
         desktop.fit(120, 40).await;
         let opened = desktop.painted(1).await;
 
@@ -1198,8 +1161,8 @@ mod baseline {
             json!({}),
         );
 
-        let (watcher_client, _watcher_link) = linked(server, shape).await;
-        let watcher = Desktop::new(watcher_client, &terminal, LIGHT, (80, 24), false);
+        let (watcher_client, _watcher_link) = linked(server, shape, RAW_DESKTOP).await;
+        let watcher = RawDesktop::new(watcher_client, &terminal);
         let asked = Instant::now();
         let (watcher_stream, _) = watcher.attach(None).await;
         let replayed = watcher.painted(4).await;
@@ -1211,8 +1174,7 @@ mod baseline {
             )
         };
         let replay_bytes = watcher.received().1;
-        let _ = watcher.client.cancel_stream(watcher_stream).await;
-        watcher.forget_stream();
+        watcher.leave(watcher_stream).await;
         j.guard(
             "a desktop attaching to it gets the screen",
             replayed && first_output.is_some(),
@@ -1237,8 +1199,8 @@ mod baseline {
                 .spawn_shell_terminal_stream(command.into(), 120, 40)
                 .await
                 .expect("spawn an idle stub");
-            let pty = Desktop::new(client.clone(), &id, DARK, (120, 40), false);
-            pty.watch(events, None);
+            let pty = RawDesktop::new(client.clone(), &id);
+            pty.watch(events);
             idle.push(pty);
         }
         let mut all_painted = true;
@@ -1297,7 +1259,7 @@ mod baseline {
     async fn frame_repaint(
         c: &FrameDesktop,
         link: &Link,
-        observer: &Desktop,
+        observer: &RawDesktop,
         key: &str,
     ) -> Option<Value> {
         let ((frames, bytes), wire) = (c.received(), link.delivered.load(Relaxed));
@@ -1327,25 +1289,16 @@ mod baseline {
         command: &str,
         shape: &Shape,
     ) -> Value {
-        let (terminal, stream_id, opened) = server
-            .client()
+        let raw = server.connect_announcing(RAW_DESKTOP).await;
+        let (terminal, stream_id, opened) = raw
             .spawn_shell_terminal_stream(command.into(), 120, 40)
             .await
             .expect("spawn the stub");
-        let observer = Desktop::new(server.client(), &terminal, DARK, (120, 40), false);
-        observer.watch(opened, None);
+        let observer = RawDesktop::new(raw.clone(), &terminal);
+        observer.watch(opened);
         observer.fit(120, 40).await;
         let opened = observer.painted(1).await;
-        let (client, link) = far_phone_announcing(
-            server.socket(),
-            true,
-            shape.one_way,
-            false,
-            Some(Features::ALL),
-        )
-        .await;
-        link.down_bps.store(shape.bps, Relaxed);
-        link.up_bps.store(shape.bps, Relaxed);
+        let (client, link) = linked(server, shape, Features::ALL).await;
         let c = FrameDesktop::new(client, &terminal);
         let (c_stream, _) = c.attach(None).await;
         c.fit(120, 40).await;
@@ -1358,10 +1311,35 @@ mod baseline {
             opened && attached && picker.is_some() && scroll.is_some(),
             json!({}),
         );
-        let _ = c.client.cancel_stream(c_stream).await;
-        let _ = server.client().cancel_stream(stream_id).await;
-        let _ = server.client().terminal_close(terminal).await;
-        json!({ "picker_redraw": picker, "scroll_60_lines": scroll })
+
+        // As the raw run does: the yes-like load, then a second desktop attaches on its own link.
+        let paints = observer.paints();
+        c.send("Y").await;
+        let loaded = observer.painted(paints + 1).await;
+        let (watcher_client, _watcher_link) = linked(server, shape, Features::ALL).await;
+        let watcher = FrameDesktop::new(watcher_client, &terminal);
+        let asked = Instant::now();
+        let (watcher_stream, _) = watcher.attach(None).await;
+        let first = eventually(WAIT, || watcher.log.lock().unwrap().first_frame.is_some()).await;
+        let first_frame = watcher.log.lock().unwrap().first_frame;
+        watcher.leave(watcher_stream).await;
+        j.guard(
+            "a desktop attaching after the load gets a frame",
+            loaded && first,
+            json!({}),
+        );
+
+        c.leave(c_stream).await;
+        let _ = raw.cancel_stream(stream_id).await;
+        let _ = raw.terminal_close(terminal).await;
+        json!({
+            "picker_redraw": picker,
+            "scroll_60_lines": scroll,
+            "attach": {
+                "first_frame_ms": first_frame.map(|(at, _)| ms(at - asked)),
+                "first_frame_bytes": first_frame.map(|(_, bytes)| bytes),
+            },
+        })
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
