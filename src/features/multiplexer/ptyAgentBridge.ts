@@ -67,12 +67,13 @@ export function reattachPtyAgent(a: PtyAgent): void {
 /** Startup and reconnect: no change replays, and a restarted server forgot every PTY. */
 export async function reconcilePtyAgents(): Promise<void> {
   const list = await unwrap(commands.listPtyAgents(null));
-  list.forEach(persistTab);
   // An unhooked entry is listed only to be adopted; its state was never folded.
   const hooked = list.filter((a) => a.hooked !== false);
   for (const applied of applyPtyAgentSnapshot(hooked)) notifyOnBlock(applied);
   void queryClient.invalidateQueries({ queryKey: ["pty-agents"] });
   await adoptSpawned(list);
+  // After adoption: a title has no tab to land in until adoptSpawned makes one.
+  list.forEach(persistTab);
 }
 
 /** Every desktop hears the change; only the one whose tab binds the terminal notifies (#320). */
