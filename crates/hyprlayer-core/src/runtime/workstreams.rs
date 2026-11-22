@@ -1206,11 +1206,18 @@ impl WorkstreamService<'_> {
         let gh = self.runtime.binaries.require(BinaryKind::Gh).await?;
         let auto = self.runtime.settings.get().await.git.automerge;
         let pr_ref = current_pr_ref(&item);
-        let target = match &pr_ref {
-            Some(pr_ref) => pr_ref.clone(),
-            None => cached_lookup_any_ref(&self.runtime.watchers.pr_cache, &item.id)
-                .and_then(|(_, lookup)| lookup.known().map(|pr| pr.number.to_string()))
-                .ok_or(CoreError::PrUnknownWhileDetached)?,
+        let cache = &self.runtime.watchers.pr_cache;
+        let lookup = match &pr_ref {
+            Some(pr_ref) => Some(match cached_lookup(cache, &item.id, pr_ref) {
+                Some(lookup) => lookup,
+                None => self.lookup_and_store(&item, pr_ref).await,
+            }),
+            None => cached_lookup_any_ref(cache, &item.id).map(|(_, lookup)| lookup),
+        };
+        let target = match lookup.as_ref().and_then(PrLookup::known) {
+            Some(pr) if !pr.url.is_empty() => pr.url.clone(),
+            Some(pr) => pr.number.to_string(),
+            None => pr_ref.clone().ok_or(CoreError::PrUnknownWhileDetached)?,
         };
         pr::merge_pr(
             &gh,
@@ -2359,7 +2366,7 @@ pub(crate) async fn workstream_pr(
                 _ => PrLookup::NoPr,
             }
         }
-        Err(e) if gh_found_no_github_remote(&e.to_string()) => PrLookup::NotGitHub,
+        Err(e) if pr::gh_found_no_github_remote(&e.to_string()) => PrLookup::NotGitHub,
         Err(e) => {
             tracing::debug!("PR lookup for {pr_ref} failed: {e}");
             PrLookup::Failed {
@@ -2371,14 +2378,7 @@ pub(crate) async fn workstream_pr(
 }
 
 fn not_github(item: &Workstream) -> bool {
-    !crate::gitops::has_web_remote(pr_dir(item))
-}
-
-fn gh_found_no_github_remote(stderr: &str) -> bool {
-    let s = stderr.to_lowercase();
-    s.contains(
-        "none of the git remotes configured for this repository point to a known github host",
-    ) || s.contains("no git remotes found")
+    !crate::gitops::has_github_remote(pr_dir(item))
 }
 
 fn owns(item: &Workstream, pr_ref: &str, pr: &PrStatus) -> bool {

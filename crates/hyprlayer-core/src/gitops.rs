@@ -543,43 +543,106 @@ fn remotes_of(dir: &Path) -> Option<Vec<(String, String, bool)>> {
     Some(remotes)
 }
 
-pub(crate) fn gh_api_hostname(dir: &Path) -> Option<String> {
-    base_remote_api_host(&remotes_of(dir)?)
+const NON_GITHUB_FORGES: [&str; 6] = [
+    "gitlab.com",
+    "bitbucket.org",
+    "dev.azure.com",
+    "visualstudio.com",
+    "codeberg.org",
+    "sr.ht",
+];
+
+pub(crate) struct GitHubRemote {
+    name: String,
+    host: String,
+    pub(crate) path: String,
 }
 
-pub(crate) fn has_web_remote(dir: &Path) -> bool {
-    remotes_of(dir).is_some_and(|remotes| {
-        remotes
-            .iter()
-            .any(|(_, url, _)| remote_to_web_url(url).is_some())
+impl GitHubRemote {
+    pub(crate) fn api_host(&self) -> Option<&str> {
+        (self.host != "github.com" && !self.host.ends_with(".github.com"))
+            .then_some(self.host.as_str())
+    }
+}
+
+fn web_host_and_path(url: &str) -> Option<(String, String)> {
+    let web = remote_to_web_url(url)?;
+    let (host, path) = web.strip_prefix("https://")?.split_once('/')?;
+    Some((host.to_ascii_lowercase(), path.to_string()))
+}
+
+fn on_other_forge(host: &str) -> bool {
+    NON_GITHUB_FORGES.iter().any(|forge| {
+        host.strip_suffix(forge)
+            .is_some_and(|sub| sub.is_empty() || sub.ends_with('.'))
     })
 }
 
-pub(crate) fn base_remote_web_url(dir: &Path) -> Option<String> {
-    remote_to_web_url(&base_remote(&remotes_of(dir)?)?.1)
-}
-
-fn base_remote(remotes: &[(String, String, bool)]) -> Option<&(String, String, bool)> {
+fn github_remotes(remotes: &[(String, String, bool)]) -> Vec<GitHubRemote> {
     let rank = |name: &str| match name.to_ascii_lowercase().as_str() {
         "upstream" => 0,
         "github" => 1,
         "origin" => 2,
         _ => 3,
     };
-    remotes
-        .iter()
-        .find(|r| r.2)
-        .or_else(|| remotes.iter().min_by_key(|r| rank(&r.0)))
+    let mut ranked: Vec<_> = remotes.iter().collect();
+    ranked.sort_by_key(|(name, _, resolved)| (!resolved, rank(name)));
+    ranked
+        .into_iter()
+        .filter_map(|(name, url, _)| {
+            let (host, path) = web_host_and_path(url)?;
+            (!on_other_forge(&host)).then(|| GitHubRemote {
+                name: name.clone(),
+                host,
+                path,
+            })
+        })
+        .collect()
 }
 
-fn base_remote_api_host(remotes: &[(String, String, bool)]) -> Option<String> {
-    let web = remote_to_web_url(&base_remote(remotes)?.1)?;
-    let host = web
-        .strip_prefix("https://")?
-        .split('/')
-        .next()?
-        .to_ascii_lowercase();
-    (host != "github.com" && !host.ends_with(".github.com")).then_some(host)
+pub(crate) fn lookup_remotes(dir: &Path) -> Vec<GitHubRemote> {
+    one_per_host(&remotes_of(dir).unwrap_or_default())
+}
+
+fn one_per_host(remotes: &[(String, String, bool)]) -> Vec<GitHubRemote> {
+    let mut picked: Vec<GitHubRemote> = Vec::new();
+    for remote in github_remotes(remotes) {
+        if !picked.iter().any(|p| p.api_host() == remote.api_host()) {
+            picked.push(remote);
+        }
+    }
+    picked
+}
+
+pub(crate) fn has_github_remote(dir: &Path) -> bool {
+    remotes_of(dir).is_some_and(|remotes| !github_remotes(&remotes).is_empty())
+}
+
+pub(crate) fn base_remote_web_url(dir: &Path) -> Option<String> {
+    let remotes = remotes_of(dir)?;
+    let base = github_remotes(&remotes).into_iter().next()?;
+    Some(format!("https://{}/{}", base.host, base.path))
+}
+
+pub(crate) fn fork_owner(dir: &Path, branch: &str, base: &GitHubRemote) -> Option<String> {
+    let repo = git2::Repository::discover(dir).ok()?;
+    let config = repo.config().ok()?;
+    let get = |key: &str| config.get_string(key).ok();
+    // gh's `@{push}` resolves with no push config only under push.default current or matching,
+    // and only once `refs/remotes/origin/<branch>` exists.
+    let pushes_by_name = matches!(get("push.default").as_deref(), Some("current" | "matching"));
+    let push = get(&format!("branch.{branch}.pushRemote"))
+        .or_else(|| get("remote.pushDefault"))
+        .or_else(|| get(&format!("branch.{branch}.remote")))
+        .or_else(|| {
+            let pushed = repo
+                .find_reference(&format!("refs/remotes/origin/{branch}"))
+                .is_ok();
+            (pushes_by_name && pushed).then(|| "origin".to_string())
+        })?;
+    let (host, path) = web_host_and_path(repo.find_remote(&push).ok()?.url()?)?;
+    (push != base.name && host == base.host && !path.eq_ignore_ascii_case(&base.path))
+        .then(|| path.split('/').next().unwrap_or_default().to_string())
 }
 
 pub fn file_web_url(file_abs: &Path) -> Option<String> {
@@ -1713,17 +1776,103 @@ mod tests {
     fn only_a_remote_with_a_web_url_can_be_github() {
         let tmp = tempfile::tempdir().unwrap();
         let (_origin, clone) = clone_with_origin(tmp.path());
-        assert!(!has_web_remote(&clone), "a local-path origin");
+        assert!(!has_github_remote(&clone), "a local-path origin");
+        assert_eq!(base_remote_web_url(&clone), None);
+        git_out(
+            &clone,
+            &["remote", "add", "gitlab", "git@gitlab.com:o/r.git"],
+        );
+        assert!(!has_github_remote(&clone), "a remote on gitlab.com");
         assert_eq!(base_remote_web_url(&clone), None);
         git_out(
             &clone,
             &["remote", "add", "github", "git@github.com:o/r.git"],
         );
-        assert!(has_web_remote(&clone));
+        assert!(has_github_remote(&clone));
         assert_eq!(
             base_remote_web_url(&clone).as_deref(),
             Some("https://github.com/o/r")
         );
+    }
+
+    #[test]
+    fn a_branch_pushed_to_a_fork_names_the_fork_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        git_out(tmp.path(), &["init", "-q", "-b", "main", "repo"]);
+        commit(&repo, "init");
+        let owner = || fork_owner(&repo, "feat", &lookup_remotes(&repo)[0]);
+        let config = |args: &[&str]| git_out(&repo, &[["config"].as_slice(), args].concat());
+
+        git_out(
+            &repo,
+            &["remote", "add", "origin", "git@github.com:me/app.git"],
+        );
+        config(&["branch.feat.remote", "origin"]);
+        assert_eq!(owner(), None, "a single remote is the base repo");
+        config(&["--unset", "branch.feat.remote"]);
+
+        git_out(
+            &repo,
+            &[
+                "remote",
+                "add",
+                "upstream",
+                "https://github.com/acme/app.git",
+            ],
+        );
+        assert_eq!(owner(), None, "no push config: the head repo is the base");
+        config(&["branch.feat.remote", "upstream"]);
+        config(&["branch.feat.merge", "refs/heads/main"]);
+        assert_eq!(owner(), None, "tracking the base it was cut from");
+        config(&["branch.feat.pushRemote", "origin"]);
+        assert_eq!(owner().as_deref(), Some("me"), "pushRemote overrides");
+        config(&["--unset", "branch.feat.pushRemote"]);
+        config(&["remote.pushDefault", "origin"]);
+        assert_eq!(
+            owner().as_deref(),
+            Some("me"),
+            "remote.pushDefault beats the upstream"
+        );
+        config(&["--unset", "remote.pushDefault"]);
+        config(&["branch.feat.remote", "origin"]);
+        config(&["branch.feat.merge", "refs/heads/feat"]);
+        assert_eq!(owner().as_deref(), Some("me"), "pushed with -u to the fork");
+        config(&["--unset", "branch.feat.remote"]);
+        config(&["--unset", "branch.feat.merge"]);
+
+        config(&["push.default", "current"]);
+        assert_eq!(owner(), None, "push.default current, never pushed");
+        git_out(&repo, &["update-ref", "refs/remotes/origin/feat", "HEAD"]);
+        assert_eq!(
+            owner().as_deref(),
+            Some("me"),
+            "push.default current, pushed to origin without -u"
+        );
+        config(&["--unset", "push.default"]);
+        assert_eq!(owner(), None, "push.default simple ignores that ref");
+        config(&["branch.feat.remote", "origin"]);
+
+        git_out(
+            &repo,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/ACME/App.git",
+            ],
+        );
+        assert_eq!(owner(), None, "the base repo under another spelling");
+        git_out(
+            &repo,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "git@ghe.corp.example:me/app.git",
+            ],
+        );
+        assert_eq!(owner(), None, "a push remote on another host than the base");
     }
 
     #[test]
@@ -2125,13 +2274,17 @@ mod tests {
 
     #[test]
     fn gh_api_host_follows_the_remote_gh_would_pick() {
-        let host = |remotes: &[(&str, &str, bool)]| {
+        let hosts = |remotes: &[(&str, &str, bool)]| {
             let remotes: Vec<_> = remotes
                 .iter()
                 .map(|(n, u, r)| (n.to_string(), u.to_string(), *r))
                 .collect();
-            base_remote_api_host(&remotes)
+            one_per_host(&remotes)
+                .iter()
+                .map(|r| r.api_host().map(String::from))
+                .collect::<Vec<_>>()
         };
+        let host = |remotes: &[(&str, &str, bool)]| hosts(remotes).into_iter().next().flatten();
         let ghe = "git@ghe.corp.example:team/app.git";
         let dotcom = "https://github.com/acme/app.git";
         assert_eq!(host(&[("origin", dotcom, false)]), None);
@@ -2159,8 +2312,55 @@ mod tests {
             .as_deref(),
             Some("ghe.corp.example")
         );
-        assert_eq!(host(&[("origin", "/srv/git/app.git", false)]), None);
-        assert_eq!(host(&[]), None);
+        assert_eq!(hosts(&[("origin", "/srv/git/app.git", false)]), vec![]);
+        assert_eq!(hosts(&[]), vec![]);
+
+        let origin = ("origin", "git@github.com:me/app.git", false);
+        for upstream in [
+            "https://gitlab.com/acme/app.git",
+            "ssh://git@altssh.gitlab.com:443/acme/app.git",
+            "git@bitbucket.org:acme/app.git",
+            "https://dev.azure.com/acme/app/_git/app",
+            "git@ssh.dev.azure.com:v3/acme/app/app",
+            "https://acme.visualstudio.com/app/_git/app",
+            "https://codeberg.org/acme/app.git",
+            "https://git.sr.ht/~acme/app",
+        ] {
+            assert_eq!(
+                hosts(&[("upstream", upstream, false), origin]),
+                vec![None],
+                "{upstream}"
+            );
+        }
+        assert_eq!(
+            hosts(&[("mine", "https://GitLab.com/me/app", true), origin]),
+            vec![None],
+            "a gh-resolved remote on gitlab.com"
+        );
+        assert_eq!(
+            hosts(&[
+                (
+                    "upstream",
+                    "https://gitlab.corp.example/acme/app.git",
+                    false
+                ),
+                origin
+            ]),
+            vec![Some("gitlab.corp.example".to_string()), None],
+            "a self-hosted forge gh cannot tell from GitHub Enterprise"
+        );
+        assert_eq!(
+            hosts(&[
+                ("upstream", "/srv/git/app.git", false),
+                ("origin", "git@ghe.corp.example:me/app.git", false)
+            ]),
+            vec![Some("ghe.corp.example".to_string())],
+            "a local-path upstream"
+        );
+        assert_eq!(
+            hosts(&[("upstream", "https://notgitlab.com/acme/app", false)]),
+            vec![Some("notgitlab.com".to_string())]
+        );
     }
 
     #[test]

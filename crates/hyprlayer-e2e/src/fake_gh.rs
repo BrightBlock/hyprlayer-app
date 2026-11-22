@@ -28,13 +28,19 @@ node_for() {{
   sed "s/@HEAD_OID@/$oid/g" "$dir/$key.json"
 }}
 if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
-  number=""; branch=""
+  number=""; branch=""; host=""; prev=""
   for arg in "$@"; do
     case "$arg" in
       number=*) number="${{arg#number=}}" ;;
       branch=*) branch="${{arg#branch=}}" ;;
     esac
+    [ "$prev" = "--hostname" ] && host="$arg"
+    prev="$arg"
   done
+  if [ -n "$host" ] && [ "$host" != "github.invalid" ]; then
+    printf "gh: No such type PullRequest, so it can't be a fragment condition\nField 'rateLimit' doesn't exist on type 'Query'\nField 'repository' doesn't exist on type 'Query'\n" >&2
+    exit 1
+  fi
   rate='{{"limit":5000,"remaining":5000,"resetAt":"2099-01-01T00:00:00Z"}}'
   [ -f "$dir/RATE" ] && rate=$(cat "$dir/RATE")
   if [ -n "$number" ]; then
@@ -46,17 +52,25 @@ if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
     echo "gh: Could not resolve to a PullRequest with the number of $number." >&2
     exit 1
   fi
-  node=$(node_for "$branch") || node=""
+  key=$(printf '%s' "$branch" | tr '/' '_')
+  oid=$(git rev-parse -q --verify "refs/heads/$branch" 2>/dev/null || git rev-parse -q --verify HEAD 2>/dev/null)
+  nodes=""
+  for f in "$dir/$key.json" "$dir"/*:"$key.json"; do
+    [ -f "$f" ] && nodes="$nodes${{nodes:+,}}$(sed "s/@HEAD_OID@/$oid/g" "$f")"
+  done
   if [ -f "$dir/SLOW_ONCE" ] && [ "$(cat "$dir/SLOW_ONCE")" = "$branch" ]; then
     rm -f "$dir/SLOW_ONCE"
     sleep 6
   fi
-  printf '{{"data":{{"rateLimit":%s,"repository":{{"defaultBranchRef":{{"name":"main"}},"pullRequests":{{"nodes":[%s]}}}}}}}}\n' "$rate" "$node"
+  printf '{{"data":{{"rateLimit":%s,"repository":{{"defaultBranchRef":{{"name":"main"}},"pullRequests":{{"nodes":[%s]}}}}}}}}\n' "$rate" "$nodes"
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
-  key=$(printf '%s' "$3" | tr '/' '_')
-  sed 's/"state":"OPEN"/"state":"MERGED"/' "$dir/$key.json" > "$dir/$key.merging" && mv "$dir/$key.merging" "$dir/$key.json"
+  number="${{3##*/}}"
+  for f in "$dir"/*.json; do
+    grep -q "\"number\":$number," "$f" || continue
+    sed 's/"state":"OPEN"/"state":"MERGED"/' "$f" > "$f.merging" && mv "$f.merging" "$f"
+  done
   exit 0
 fi
 if [ "$1" = "pr" ] && [ "$2" = "edit" ] && [ "$4" = "--base" ]; then
@@ -86,6 +100,7 @@ pub struct FakePr {
     pub base: &'static str,
     pub merge_state: &'static str,
     pub head_oid: Option<String>,
+    pub head_owner: Option<&'static str>,
     pub checks: Vec<Value>,
 }
 
@@ -98,6 +113,7 @@ impl FakePr {
             base: "main",
             merge_state: "UNKNOWN",
             head_oid: None,
+            head_owner: None,
             checks: Vec::new(),
         }
     }
@@ -120,14 +136,20 @@ pub fn set_pr(dir: &Path, reference: &str, pr: &FakePr) {
         "headRefName": head_ref_name,
         "headRefOid": pr.head_oid.as_deref().unwrap_or("@HEAD_OID@"),
         "mergeStateStatus": pr.merge_state,
-        "isCrossRepository": false,
+        "isCrossRepository": pr.head_owner.is_some(),
+        "headRepositoryOwner": pr.head_owner.map(|login| json!({ "login": login })),
         "latestReviews": { "nodes": [] },
         "commits": { "nodes": [{ "commit": { "statusCheckRollup": { "contexts": {
             "pageInfo": { "hasNextPage": false, "endCursor": null },
             "nodes": pr.checks,
         } } } }] },
     });
-    let path = dir.join(format!("{}.json", reference.replace('/', "_")));
+    let key = reference.replace('/', "_");
+    let key = match pr.head_owner {
+        Some(owner) => format!("{owner}:{key}"),
+        None => key,
+    };
+    let path = dir.join(format!("{key}.json"));
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, node.to_string()).expect("write the gh state");
     std::fs::rename(&tmp, &path).expect("publish the gh state");

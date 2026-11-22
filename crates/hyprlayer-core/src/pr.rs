@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{CoreError, Result};
+use crate::gitops::GitHubRemote;
 use crate::process::Exec;
 
 pub use hyprlayer_models::workstream::PrState;
@@ -258,7 +259,7 @@ pub struct PrAnswer {
 macro_rules! pr_fragment {
     () => {
         "fragment Pr on PullRequest {
-  number url title state reviewDecision headRefName isCrossRepository
+  number url title state reviewDecision headRefName isCrossRepository headRepositoryOwner { login }
   isDraft baseRefName headRefOid mergeStateStatus
   latestReviews(first: 50) { nodes { author { login } state } }
   commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $after) {
@@ -384,6 +385,8 @@ struct RawPr {
     head_ref_name: String,
     #[serde(default)]
     is_cross_repository: bool,
+    #[serde(default)]
+    head_repository_owner: Option<RawLogin>,
     #[serde(default)]
     is_draft: bool,
     #[serde(default)]
@@ -700,23 +703,56 @@ fn pr_by_number(stdout: &str) -> Result<(Option<RawPr>, Option<Quota>)> {
     ))
 }
 
-fn pr_for_branch(stdout: &str, branch: &str) -> Result<(Option<RawPr>, Option<Quota>)> {
+fn pr_for_branch(
+    stdout: &str,
+    branch: &str,
+    fork_owner: Option<&str>,
+) -> Result<(Option<RawPr>, Option<Quota>)> {
     let data: ByBranchData = graphql_data(stdout)?;
     Ok((
-        pick_for_branch(data.repository, branch),
+        pick_for_branch(data.repository, branch, fork_owner),
         data.rate_limit.map(Quota::from),
     ))
 }
 
-fn pick_for_branch(repo: RawRepoByBranch, branch: &str) -> Option<RawPr> {
+fn pick_for_branch(repo: RawRepoByBranch, branch: &str, fork_owner: Option<&str>) -> Option<RawPr> {
     let default = repo.default_branch_ref.map(|r| r.name);
     let mut prs = repo.pull_requests.nodes;
     prs.sort_by_key(|p| !p.state.eq_ignore_ascii_case("OPEN"));
     prs.into_iter().find(|p| {
-        !p.is_cross_repository
-            && p.head_ref_name == branch
-            && (p.state.eq_ignore_ascii_case("OPEN") || default.as_deref() != Some(branch))
+        p.head_ref_name == branch
+            && match fork_owner {
+                Some(owner) => {
+                    p.is_cross_repository
+                        && p.head_repository_owner
+                            .as_ref()
+                            .is_some_and(|o| o.login.eq_ignore_ascii_case(owner))
+                }
+                None => {
+                    !p.is_cross_repository
+                        && (p.state.eq_ignore_ascii_case("OPEN")
+                            || default.as_deref() != Some(branch))
+                }
+            }
     })
+}
+
+#[derive(Clone, Copy)]
+struct Target<'a> {
+    host: Option<&'a str>,
+    repo: Option<(&'a str, &'a str)>,
+}
+
+// The first ask leaves the repo to gh, whose own remote pick also skips hosts it has no login
+// for. A retry names its remote's repo, so a query never pairs one host with another's repo.
+fn target(remotes: &[GitHubRemote], attempt: usize) -> Target<'_> {
+    let remote = remotes.get(attempt);
+    Target {
+        host: remote.and_then(GitHubRemote::api_host),
+        repo: remote
+            .filter(|_| attempt > 0)
+            .and_then(|r| r.path.split_once('/')),
+    }
 }
 
 async fn graphql(
@@ -724,21 +760,20 @@ async fn graphql(
     dir: &Path,
     query: &str,
     vars: &[(&str, String)],
+    target: Target<'_>,
     overlay: &[(String, String)],
 ) -> Result<String> {
-    let mut exec = Exec::new(gh)
-        .cwd(dir)
-        .args([
-            "api",
-            "graphql",
-            "-F",
-            "owner={owner}",
-            "-F",
-            "repo={repo}",
-            "-f",
-        ])
-        .arg(format!("query={query}"));
-    if let Some(host) = crate::gitops::gh_api_hostname(dir) {
+    let mut exec = Exec::new(gh).cwd(dir).args(["api", "graphql"]);
+    exec = match target.repo {
+        Some((owner, name)) => exec
+            .arg("-f")
+            .arg(format!("owner={owner}"))
+            .arg("-f")
+            .arg(format!("repo={name}")),
+        None => exec.args(["-F", "owner={owner}", "-F", "repo={repo}"]),
+    };
+    exec = exec.arg("-f").arg(format!("query={query}"));
+    if let Some(host) = target.host {
         exec = exec.arg("--hostname").arg(host);
     }
     for (flag, var) in vars {
@@ -759,21 +794,49 @@ async fn graphql(
     })
 }
 
+pub(crate) fn gh_found_no_github_remote(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains(
+        "none of the git remotes configured for this repository point to a known github host",
+    ) || s.contains("no git remotes found")
+}
+
+fn another_host_cannot_help(e: &CoreError) -> bool {
+    let text = e.to_string();
+    crate::runtime::pr_watcher::is_rate_limited(&text) || gh_found_no_github_remote(&text)
+}
+
 pub async fn pr_status(
     gh: &Path,
     worktree: &Path,
     pr_ref: &str,
     overlay: &[(String, String)],
 ) -> Result<PrAnswer> {
-    let (first, mut quota) = if pr_ref.parse::<u32>().is_ok() {
-        let vars = [("-F", format!("number={pr_ref}"))];
-        pr_by_number(&graphql(gh, worktree, BY_NUMBER, &vars, overlay).await?)?
+    let by_number = pr_ref.parse::<u32>().is_ok();
+    let (query, vars) = if by_number {
+        (BY_NUMBER, [("-F", format!("number={pr_ref}"))])
     } else {
-        let vars = [("-f", format!("branch={pr_ref}"))];
-        pr_for_branch(
-            &graphql(gh, worktree, BY_BRANCH, &vars, overlay).await?,
-            pr_ref,
-        )?
+        (BY_BRANCH, [("-f", format!("branch={pr_ref}"))])
+    };
+    let remotes = crate::gitops::lookup_remotes(worktree);
+    let mut attempt = 0;
+    let out = loop {
+        let asked = target(&remotes, attempt);
+        match graphql(gh, worktree, query, &vars, asked, overlay).await {
+            Err(e) if attempt + 1 < remotes.len() && !another_host_cannot_help(&e) => {
+                attempt += 1;
+            }
+            out => break out?,
+        }
+    };
+    let asked = target(&remotes, attempt);
+    let (first, mut quota) = if by_number {
+        pr_by_number(&out)?
+    } else {
+        let fork_owner = remotes
+            .get(attempt)
+            .and_then(|base| crate::gitops::fork_owner(worktree, pr_ref, base));
+        pr_for_branch(&out, pr_ref, fork_owner.as_deref())?
     };
     let Some(mut pr) = first else {
         return Ok(PrAnswer { pr: None, quota });
@@ -783,7 +846,7 @@ pub async fn pr_status(
             ("-F", format!("number={}", pr.number)),
             ("-f", format!("after={after}")),
         ];
-        let out = graphql(gh, worktree, BY_NUMBER, &vars, overlay).await?;
+        let out = graphql(gh, worktree, BY_NUMBER, &vars, asked, overlay).await?;
         let (page, page_quota) = pr_by_number(&out)?;
         pr.append_page(page);
         quota = page_quota.or(quota);
@@ -1233,12 +1296,13 @@ mod tests {
 
     #[test]
     fn branch_lookup_picks_the_pr_gh_pr_view_would() {
-        let pick = |prs: Vec<Value>, branch: &str| {
-            pr_for_branch(&by_branch(prs), branch)
+        let pick_as = |prs: Vec<Value>, branch: &str, fork_owner: Option<&str>| {
+            pr_for_branch(&by_branch(prs), branch, fork_owner)
                 .unwrap()
                 .0
                 .map(|p| p.number)
         };
+        let pick = |prs: Vec<Value>, branch: &str| pick_as(prs, branch, None);
         let merged = pr_node(2, "MERGED", "feat", json!([]));
         let open = pr_node(1, "OPEN", "feat", json!([]));
         assert_eq!(pick(vec![merged.clone(), open], "feat"), Some(1));
@@ -1253,6 +1317,23 @@ mod tests {
         assert_eq!(pick(vec![merged_main, open_main], "main"), Some(5));
 
         assert_eq!(pick(vec![], "feat"), None);
+
+        let from_fork = |number: u32, state: &str, head: &str, owner: &str| {
+            let mut pr = pr_node(number, state, head, json!([]));
+            pr["isCrossRepository"] = json!(true);
+            pr["headRepositoryOwner"] = json!({ "login": owner });
+            pr
+        };
+        let theirs = from_fork(6, "OPEN", "feat", "another");
+        let mine = from_fork(7, "OPEN", "feat", "me");
+        let same_repo = pr_node(8, "OPEN", "feat", json!([]));
+        assert_eq!(
+            pick_as(vec![theirs, mine.clone(), same_repo], "feat", Some("me")),
+            Some(7)
+        );
+        assert_eq!(pick_as(vec![mine], "feat", Some("Me")), Some(7));
+        let merged_main = from_fork(9, "MERGED", "main", "me");
+        assert_eq!(pick_as(vec![merged_main], "main", Some("me")), Some(9));
     }
 
     #[test]
@@ -1271,7 +1352,7 @@ mod tests {
             .to_string()
             .contains("Could not resolve to a PullRequest"));
         assert!(matches!(
-            pr_for_branch(&by_branch(vec![]), "feat"),
+            pr_for_branch(&by_branch(vec![]), "feat", None),
             Ok((None, _))
         ));
     }
@@ -1279,10 +1360,110 @@ mod tests {
     #[test]
     fn a_rate_limited_body_is_an_error_the_watcher_recognises() {
         let body = r#"{"data":null,"errors":[{"type":"RATE_LIMITED","message":"API rate limit already exceeded for user ID 1."}]}"#;
-        let err = pr_for_branch(body, "feat").err().unwrap();
+        let err = pr_for_branch(body, "feat", None).err().unwrap();
         assert!(crate::runtime::pr_watcher::is_rate_limited(
             &err.to_string()
         ));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_failing_host_hands_the_lookup_to_the_next_one() {
+        use std::os::unix::fs::PermissionsExt;
+
+        const FAKE_GH: &str = r#"#!/bin/sh
+d=$(dirname "$0")
+line=""; prev=""
+for a in "$@"; do
+  case "$a" in owner=*|repo=*) line="$line $a" ;; esac
+  [ "$prev" = "--hostname" ] && line="$line host=$a"
+  prev="$a"
+done
+echo "${line# }" >> "$d/calls"
+case "$line" in
+  *host=*) [ -f "$d/other.err" ] && { cat "$d/other.err" >&2; exit 1; } ;;
+  *) [ -f "$d/dotcom.err" ] && { cat "$d/dotcom.err" >&2; exit 1; } ;;
+esac
+cat "$d/answer.json"
+"#;
+        let ask = |upstream: &'static str, other: Option<&'static str>, dotcom: Option<&str>| {
+            let dotcom = dotcom.map(str::to_string);
+            async move {
+                let tmp = tempfile::tempdir().unwrap();
+                let gh = tmp.path().join("gh");
+                std::fs::write(&gh, FAKE_GH).unwrap();
+                std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+                let answer = by_branch(vec![pr_node(5, "OPEN", "feat", json!([]))]);
+                std::fs::write(tmp.path().join("answer.json"), answer).unwrap();
+                for (file, err) in [
+                    ("other.err", other.map(str::to_string)),
+                    ("dotcom.err", dotcom),
+                ] {
+                    if let Some(err) = err {
+                        std::fs::write(tmp.path().join(file), err).unwrap();
+                    }
+                }
+                let repo_dir = tmp.path().join("repo");
+                let repo = git2::Repository::init(&repo_dir).unwrap();
+                repo.remote("upstream", upstream).unwrap();
+                repo.remote("origin", "https://github.com/me/app.git")
+                    .unwrap();
+                let found = pr_status(&gh, &repo_dir, "feat", &[]).await;
+                let calls = std::fs::read_to_string(tmp.path().join("calls")).unwrap();
+                let calls: Vec<String> = calls.lines().map(str::to_string).collect();
+                (found.map(|a| a.pr.map(|p| p.number)), calls)
+            }
+        };
+        let self_hosted = "https://gitlab.corp.example/acme/app.git";
+        let first_then_origin = vec![
+            "owner={owner} repo={repo} host=gitlab.corp.example".to_string(),
+            "owner=me repo=app".to_string(),
+        ];
+
+        for answer in [
+            "gh: Forbidden",
+            "error connecting to gitlab.corp.example",
+            "gh: Field 'repository' doesn't exist on type 'Query'",
+            "gh: HTTP 404",
+        ] {
+            let (found, calls) = ask(self_hosted, Some(answer), None).await;
+            assert_eq!(found.unwrap(), Some(5), "{answer}");
+            assert_eq!(calls, first_then_origin, "{answer}");
+        }
+
+        let (found, calls) = ask(
+            self_hosted,
+            Some("gh: Forbidden"),
+            Some("HTTP 502: Bad Gateway"),
+        )
+        .await;
+        assert!(
+            found.unwrap_err().to_string().contains("502"),
+            "the last host's error"
+        );
+        assert_eq!(calls, first_then_origin);
+
+        let none_known = "none of the git remotes configured for this repository point to a known \
+                          GitHub host. To tell gh about a new GitHub host, please use `gh auth login`";
+        let (found, calls) = ask(self_hosted, Some(none_known), None).await;
+        assert!(gh_found_no_github_remote(&found.unwrap_err().to_string()));
+        assert_eq!(
+            calls.len(),
+            1,
+            "gh's own remote pick found nothing; no host can change that"
+        );
+
+        let ghe = "https://ghe.corp.example/acme/app.git";
+        let limited = "gh: API rate limit already exceeded for user ID 1.";
+        let (found, calls) = ask(ghe, Some(limited), None).await;
+        assert!(crate::runtime::pr_watcher::is_rate_limited(
+            &found.unwrap_err().to_string()
+        ));
+        assert_eq!(
+            calls.len(),
+            1,
+            "a rate limit is GitHub's answer, not a wrong host"
+        );
     }
 
     #[test]

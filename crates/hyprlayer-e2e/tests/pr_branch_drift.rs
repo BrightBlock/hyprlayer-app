@@ -257,6 +257,30 @@ fn gh_lines(dir: &Path, prefix: &str) -> usize {
         .count()
 }
 
+fn hosts_asked(dir: &Path, branch: &str) -> Vec<String> {
+    let wanted = format!("branch={branch}");
+    let mut hosts = Vec::new();
+    for line in std::fs::read_to_string(dir.join("calls.log"))
+        .unwrap_or_default()
+        .lines()
+    {
+        let args: Vec<&str> = line.split(' ').collect();
+        if !args.contains(&wanted.as_str()) {
+            continue;
+        }
+        let host = args
+            .iter()
+            .position(|a| *a == "--hostname")
+            .and_then(|i| args.get(i + 1))
+            .unwrap_or(&"github.com")
+            .to_string();
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    }
+    hosts
+}
+
 fn gh_node(dir: &Path, reference: &str, field: &str) -> Value {
     std::fs::read_to_string(dir.join(format!("{}.json", reference.replace('/', "_"))))
         .ok()
@@ -1652,6 +1676,124 @@ async fn pr_branch_drift() {
                 "backdated": 1,
                 "afterSweep": { "state": "open", "number": 713 },
                 "ghCallsForTheOldName": 0,
+            }),
+        evidence,
+    );
+
+    j.step("a fork's PR is found by the owner its branch is pushed to");
+    let forked = create_workstream(&mut j, &client, &project, "Fork").await;
+    let forked_id = text(&forked, "/item/id");
+    let forked_tree = PathBuf::from(text(&forked, "/item/worktreePath"));
+    let forked_branch = text(&forked, "/item/branch");
+    sandbox.git(&sandbox.root, &["init", "--quiet", "--bare", "fork.git"]);
+    sandbox.git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "fork",
+            "https://github.invalid/me/demo.git",
+        ],
+    );
+    sandbox.git(
+        &repo,
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "fork",
+            &sandbox.root.join("fork.git").display().to_string(),
+        ],
+    );
+    for (owner, number) in [("another", 720), ("me", 721)] {
+        let pr = FakePr {
+            head_owner: Some(owner),
+            ..FakePr::new(number, "OPEN")
+        };
+        set_pr(&gh_state, &forked_branch, &pr);
+    }
+    let unpushed = pr_number(&client, &forked_id).await;
+    sandbox.git(
+        &forked_tree,
+        &["push", "--quiet", "-u", "fork", &forked_branch],
+    );
+    let pushed = pr_number(&client, &forked_id).await;
+    let merged = j
+        .call(
+            &client,
+            Request::MergeWorkstreamPr {
+                id: forked_id.clone(),
+                method: MergeMethod::Squash,
+            },
+        )
+        .await
+        .is_ok();
+    let after_merge = lookup(&client, &forked_id).await;
+    let evidence = json!({
+        "unpushed": unpushed,
+        "pushed": pushed,
+        "merged": merged,
+        "afterMerge": { "number": after_merge.pointer("/pr/number"), "state": after_merge.pointer("/pr/state") },
+        "mine": gh_node(&gh_state, &format!("me:{forked_branch}"), "state"),
+        "theirs": gh_node(&gh_state, &format!("another:{forked_branch}"), "state"),
+    });
+    j.guard(
+        "the fork PR from the owner the branch is pushed to is found and merged, not a same-named \
+         branch on another fork",
+        evidence
+            == json!({
+                "unpushed": null,
+                "pushed": 721,
+                "merged": true,
+                "afterMerge": { "number": 721, "state": "merged" },
+                "mine": "MERGED",
+                "theirs": "OPEN",
+            }),
+        evidence,
+    );
+
+    j.step("an upstream on another forge does not take the lookup there");
+    sandbox.git(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            "https://gitlab.com/e2e/demo.git",
+        ],
+    );
+    let on_gitlab = create_workstream(&mut j, &client, &project, "Upstream on GitLab").await;
+    let on_gitlab_branch = text(&on_gitlab, "/item/branch");
+    set_pr(&gh_state, &on_gitlab_branch, &FakePr::new(730, "OPEN"));
+    let on_gitlab = json!({
+        "pr": pr_number(&client, &text(&on_gitlab, "/item/id")).await,
+        "hosts": hosts_asked(&gh_state, &on_gitlab_branch),
+    });
+    sandbox.git(
+        &repo,
+        &[
+            "remote",
+            "set-url",
+            "upstream",
+            "https://gitlab.e2e.invalid/e2e/demo.git",
+        ],
+    );
+    let self_hosted = create_workstream(&mut j, &client, &project, "Upstream self-hosted").await;
+    let self_hosted_branch = text(&self_hosted, "/item/branch");
+    set_pr(&gh_state, &self_hosted_branch, &FakePr::new(731, "OPEN"));
+    let self_hosted = json!({
+        "pr": pr_number(&client, &text(&self_hosted, "/item/id")).await,
+        "hosts": hosts_asked(&gh_state, &self_hosted_branch),
+    });
+    sandbox.git(&repo, &["remote", "remove", "upstream"]);
+    let evidence = json!({ "gitlabCom": on_gitlab, "selfHosted": self_hosted });
+    j.guard(
+        "an upstream on gitlab.com is never asked; a self-hosted one gh cannot place is asked \
+         first, then the GitHub remote answers",
+        evidence
+            == json!({
+                "gitlabCom": { "pr": 730, "hosts": ["github.invalid"] },
+                "selfHosted": { "pr": 731, "hosts": ["gitlab.e2e.invalid", "github.invalid"] },
             }),
         evidence,
     );

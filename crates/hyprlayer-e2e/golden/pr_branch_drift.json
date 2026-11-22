@@ -597,6 +597,50 @@
       "guards": [
         {
           "evidence": {
+            "afterMerge": {
+              "number": 721,
+              "state": "merged"
+            },
+            "merged": true,
+            "mine": "MERGED",
+            "pushed": 721,
+            "theirs": "OPEN",
+            "unpushed": null
+          },
+          "guard": "the fork PR from the owner the branch is pushed to is found and merged, not a same-named branch on another fork",
+          "ok": true
+        }
+      ],
+      "step": "a fork's PR is found by the owner its branch is pushed to"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gitlabCom": {
+              "hosts": [
+                "github.invalid"
+              ],
+              "pr": 730
+            },
+            "selfHosted": {
+              "hosts": [
+                "gitlab.e2e.invalid",
+                "github.invalid"
+              ],
+              "pr": 731
+            }
+          },
+          "guard": "an upstream on gitlab.com is never asked; a self-hosted one gh cannot place is asked first, then the GitHub remote answers",
+          "ok": true
+        }
+      ],
+      "step": "an upstream on another forge does not take the lookup there"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "limited": {
               "cause": {
                 "kind": "other"
