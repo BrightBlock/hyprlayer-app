@@ -249,7 +249,7 @@ async fn serve() -> i32 {
         Ok(ctl) => {
             options = options.with_agent_control(AgentControlEndpoint {
                 ctl,
-                socket: socket::socket_path(&app_data_dir),
+                socket: socket::bind_path(&app_data_dir),
                 plugin_dir: agent_plugin::install(&app_data_dir),
                 #[cfg(unix)]
                 runtime_dir: socket::runtime_dir(&app_data_dir),
@@ -289,7 +289,7 @@ async fn serve() -> i32 {
     let server = match SocketServer::bind(runtime.clone(), &app_data_dir).await {
         Ok(server) => server,
         Err(e) => {
-            let socket = socket::socket_path(&app_data_dir);
+            let socket = socket::bind_path(&app_data_dir);
             tracing::error!("cannot bind {}: {e}", socket.display());
             eprintln!("cannot bind {}: {e}", socket.display());
             runtime.shutdown().await;

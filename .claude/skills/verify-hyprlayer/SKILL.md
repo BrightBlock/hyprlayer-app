@@ -37,7 +37,7 @@ Pick the mode by what the feature needs:
   ```bash
   .claude/skills/verify-hyprlayer/verify.sh launch attach <app-data-dir>
   ```
-  The target server must already be serving. On Linux it must also share the desktop's `XDG_RUNTIME_DIR`, or the app looks for the socket in the wrong place.
+  The target server must already be serving. A server since 0.8.22 records its socket in `<app-data-dir>/.server-socket`, which the app reads. On Linux an older one must also share the desktop's `XDG_RUNTIME_DIR`, or the app looks for the socket in the wrong place. <!-- src: crates/hyprlayer-server/src/socket.rs:36 -->
   A free 1430 can still leave a `.dev` server running with live agents. The app attaches to it and replaces it only when it's below `MIN_SERVER_VERSION`, so check its version in the `.dev` log first. Cleanup leaves that server running. `Hyprlayer Dev.app` is the `.main` profile, not `.dev`. <!-- src: src-tauri/src/supervisor.rs:134 -->
 
 `launch` creates a non-git seed folder and records it as `SEED` in `<run-dir>/run.env`. Run dirs are canonical (`pwd -P`) because the app stores resolved paths: on macOS a `/var/…` path matches nothing stored under `/private/var/…`. Once the page renders (Drive, step 1), import the seed from `webview_execute_js`:

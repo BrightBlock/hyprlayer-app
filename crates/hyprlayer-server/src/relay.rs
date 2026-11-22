@@ -46,7 +46,7 @@ where
                     .map(|start| logging::stderr_since(log_dir, start))
                     .unwrap_or_default()
             };
-            match wait_for_spawn(&mut child, &path, said).await {
+            match wait_for_spawn(&mut child, &app_data_dir, said).await {
                 Ok(stream) => stream,
                 // What the server said on its way out is the reason; the
                 // wait only says it never listened.
@@ -116,16 +116,18 @@ fn spawn_detached(
 
 /// Waits for the spawned server to listen. An exit fails at once, unless it
 /// lost the profile lock to a server another relay started at the same
-/// moment, which will be listening shortly.
+/// moment, which will be listening shortly. The path is resolved on every try:
+/// a crashed server's pointer can name a dead socket while the new one binds
+/// elsewhere.
 async fn wait_for_spawn(
     child: &mut tokio::process::Child,
-    path: &Path,
+    app_data_dir: &Path,
     said: impl Fn() -> String,
 ) -> Result<socket::ClientStream, String> {
     let mut lost_the_race = false;
     let mut last_err = None;
     for _ in 0..SPAWN_LISTEN_RETRIES {
-        match socket::connect(path).await {
+        match socket::connect(&socket::socket_path(app_data_dir)).await {
             Ok(stream) => return Ok(stream),
             Err(e) => last_err = Some(e),
         }
@@ -142,7 +144,7 @@ async fn wait_for_spawn(
     let waited = CONNECT_RETRY_DELAY * SPAWN_LISTEN_RETRIES;
     Err(format!(
         "the server did not listen at {} within {}s{}",
-        path.display(),
+        socket::socket_path(app_data_dir).display(),
         waited.as_secs(),
         last_err.map(|e| format!(" ({e})")).unwrap_or_default()
     ))

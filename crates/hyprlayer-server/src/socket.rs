@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 /// `<app_data_dir>/hyprlayer.sock`; a named pipe on Windows. The hash is of the
 /// canonical `app_data_dir`, so a client that knows only the profile can derive
 /// the name and two profiles never collide.
-pub fn socket_path(app_data_dir: &Path) -> PathBuf {
+pub fn bind_path(app_data_dir: &Path) -> PathBuf {
     if cfg!(windows) {
         return PathBuf::from(format!(
             r"\\.\pipe\hyprlayer-{}",
@@ -23,6 +23,30 @@ pub fn socket_path(app_data_dir: &Path) -> PathBuf {
         }
     }
     app_data_dir.join("hyprlayer.sock")
+}
+
+fn pointer_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join(".server-socket")
+}
+
+/// Where a client connects: the socket the running server recorded, else
+/// `bind_path`. `bind_path` reads the caller's `XDG_RUNTIME_DIR`, so a client
+/// whose environment differs from the server's would derive another path. A
+/// recorded path of another profile's, as a copied data dir carries, is ignored.
+pub fn socket_path(app_data_dir: &Path) -> PathBuf {
+    let hash = profile_hash(app_data_dir);
+    let socket_name = format!("{hash}.sock");
+    std::fs::read_to_string(pointer_path(app_data_dir))
+        .map(PathBuf::from)
+        .ok()
+        .filter(|recorded| {
+            recorded.exists()
+                && (recorded.file_name() == Some(socket_name.as_ref())
+                    || recorded
+                        .parent()
+                        .is_some_and(|dir| profile_hash(dir) == hash))
+        })
+        .unwrap_or_else(|| bind_path(app_data_dir))
 }
 
 /// A private dir for the sockets of PTY codex app-servers, short where `app_data_dir` may not be:
@@ -75,6 +99,7 @@ pub type ClientStream = tokio::net::UnixStream;
 pub struct Listener {
     inner: tokio::net::UnixListener,
     path: PathBuf,
+    pointer: PathBuf,
 }
 
 #[cfg(unix)]
@@ -86,7 +111,7 @@ impl Listener {
     pub fn bind(app_data_dir: &Path) -> io::Result<Self> {
         use std::os::unix::fs::PermissionsExt;
 
-        let path = socket_path(app_data_dir);
+        let path = bind_path(app_data_dir);
         let parent = path
             .parent()
             .ok_or_else(|| io::Error::other("socket path has no parent directory"))?;
@@ -95,7 +120,15 @@ impl Listener {
         remove_if_stale(&path)?;
         let inner = tokio::net::UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-        Ok(Self { inner, path })
+        let pointer = pointer_path(app_data_dir);
+        if let Err(e) = std::fs::write(&pointer, path.as_os_str().as_encoded_bytes()) {
+            tracing::warn!("cannot record the socket in {}: {e}", pointer.display());
+        }
+        Ok(Self {
+            inner,
+            path,
+            pointer,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -145,6 +178,7 @@ pub fn peer(stream: &Stream) -> String {
 impl Drop for Listener {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(&self.pointer);
     }
 }
 
@@ -172,7 +206,7 @@ impl Listener {
     pub fn bind(app_data_dir: &Path) -> io::Result<Self> {
         use tokio::net::windows::named_pipe::ServerOptions;
 
-        let name = socket_path(app_data_dir).to_string_lossy().into_owned();
+        let name = bind_path(app_data_dir).to_string_lossy().into_owned();
         let first = ServerOptions::new()
             .first_pipe_instance(true)
             .create(&name)?;
