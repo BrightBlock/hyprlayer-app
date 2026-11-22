@@ -121,7 +121,7 @@ export function ProjectPipeline({
       <div inert={expanded} className="contents">
         <header className="flex flex-wrap items-center gap-x-3.5 gap-y-2 px-6 pt-[18px] pb-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <h1 className="min-w-0 text-h2 text-ink">
+            <h1 className="-mx-1.5 min-w-0 max-w-[40ch] text-h2 text-ink">
               <ProjectPicker projectPath={projectPath} projectName={projectName} />
             </h1>
             {lead && (
@@ -188,10 +188,10 @@ function ProjectPicker({ projectPath, projectName }: { projectPath: string; proj
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="-mx-1.5 inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-control px-1.5 hover:bg-edge/50 focus-visible:bg-edge/50"
+        className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-control px-1.5 hover:bg-edge/50 focus-visible:bg-edge/50"
       >
         <span className="truncate">{projectName}</span>
-        <span className="text-ink-dim">
+        <span className="shrink-0 text-ink-dim">
           <Icon name="chevronDown" size="sm" />
         </span>
       </button>
