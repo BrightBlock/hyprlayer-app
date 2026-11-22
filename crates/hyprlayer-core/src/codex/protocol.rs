@@ -64,6 +64,8 @@ pub fn approval_posture(mode: PermissionMode) -> (&'static str, &'static str) {
         PermissionMode::Default => ("untrusted", "workspace-write"),
         PermissionMode::AcceptEdits => ("never", "workspace-write"),
         PermissionMode::Plan => ("on-request", "read-only"),
+        PermissionMode::Auto => ("on-request", "workspace-write"),
+        PermissionMode::DontAsk => ("never", "read-only"),
         PermissionMode::BypassPermissions => ("never", "danger-full-access"),
     }
 }

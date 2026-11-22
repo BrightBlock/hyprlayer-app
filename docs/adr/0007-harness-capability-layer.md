@@ -58,6 +58,22 @@ Two related, harness-aware seams sit alongside it:
   permission-mode change kills and relaunches (`RestartSession` in
   `crates/hyprlayer-server/src/streams.rs`), so there is no second path to keep in
   sync.
+- **Every claude permission mode has a codex posture** (`approval_posture` in
+  `codex/protocol.rs`), and a spawned agent runs no higher than its spawner in the
+  order `plan < dontAsk < default < acceptEdits < auto < bypassPermissions`
+  (`rank` in `runtime/agent_control/spawn.rs`):
+
+  | Mode | Codex approval | Codex sandbox |
+  |---|---|---|
+  | `plan` | `on-request` | `read-only` |
+  | `dontAsk` | `never` | `read-only` |
+  | `default` | `untrusted` | `workspace-write` |
+  | `acceptEdits` | `never` | `workspace-write` |
+  | `auto` | `on-request` | `workspace-write` |
+  | `bypassPermissions` | `never` | `danger-full-access` |
+
+  claude 2.1.330 also accepts `manual`, a newer name for `default`; the vocabulary
+  keeps `default`, which that version still takes.
 
 ## Consequences
 

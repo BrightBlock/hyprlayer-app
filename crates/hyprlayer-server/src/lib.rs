@@ -53,7 +53,7 @@ use transport::{
 /// standalone server must land on the same profile (ADR-0009).
 pub const APP_IDENTIFIER: &str = "ai.brightblock.hyprlayer";
 
-const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version|hook <claude|codex> [event]|statusline claude|ctl <verb>|mcp [--read-only]]";
+const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version|hook <claude|codex> [event]|lead-guard <checkout>|statusline claude|ctl <verb>|mcp [--read-only]]";
 const STOP_POLLS: u32 = 100;
 /// How much of each log file `logs` prints.
 const LOGS_TAIL_BYTES: u64 = 64 * 1024;
@@ -81,6 +81,8 @@ pub enum Command {
     Version,
     /// An engine hook reporting one signal for the agent named by `HYPRLAYER_AGENT_TOKEN`.
     Hook(HookEngine, Option<String>),
+    /// A Lead's PreToolUse hook; the main checkout it guards follows.
+    LeadGuard(String),
     /// claude's statusLine for a hooked PTY: reports, then runs the user's own.
     Statusline,
     /// An agent's command line into the runtime; the verb and its arguments follow.
@@ -109,6 +111,10 @@ impl Command {
                 };
                 Command::Hook(engine, args.next())
             }
+            Some("lead-guard") => match args.next() {
+                Some(checkout) => Command::LeadGuard(checkout),
+                None => return Err(format!("lead-guard needs the checkout path\n{USAGE}")),
+            },
             Some("statusline") => match args.next().as_deref() {
                 Some("claude") => Command::Statusline,
                 _ => return Err(format!("statusline needs an engine: claude\n{USAGE}")),
@@ -155,6 +161,7 @@ pub async fn run(command: Command) -> i32 {
             0
         }
         Command::Hook(engine, event) => hook::run_hook(engine, event).await,
+        Command::LeadGuard(checkout) => hook::run_lead_guard(&checkout),
         Command::Statusline => statusline::run_statusline().await,
         Command::Ctl(args) => ctl::run(args).await,
         Command::Mcp { read_only } => mcp::run(read_only).await,

@@ -135,9 +135,9 @@ export const commands = {
 	listGoals: (workstreamId: string | null, activeOnly: boolean) => typedError<Goal[], AppError>(__TAURI_INVOKE("list_goals", { workstreamId, activeOnly })),
 	deriveGoal: (request: DeriveGoalRequest) => typedError<GoalSpec, AppError>(__TAURI_INVOKE("derive_goal", { request })),
 	startStageSession: (workstreamId: string, stage: Stage, input: string, attachedDocs: string[], opts: StartOpts, onEvent: Channel<SessionStreamItemDto>) => typedError<StartedSession, AppError>(__TAURI_INVOKE("start_stage_session", { workstreamId, stage, input, attachedDocs, opts, onEvent })),
-	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | { kind: "tail" } | { kind: "before"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
-	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
-	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
+	resumeSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions" | null, cursor: { kind: "empty" } | { kind: "after"; seq: number | null; createdAt: number | null } | { kind: "tail" } | { kind: "before"; seq: number | null; createdAt: number | null } | null, onEvent: Channel<SessionStreamItemDto>) => typedError<ResumedSession, AppError>(__TAURI_INVOKE("resume_session", { sessionId, model, effort, permissionMode, cursor, onEvent })),
+	restartSession: (sessionId: string, model: string | null, effort: string | null, permissionMode: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<Session, AppError>(__TAURI_INVOKE("restart_session", { sessionId, model, effort, permissionMode, onEvent })),
+	rewindSession: (sessionId: string, userTurn: number, permissionMode: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions" | null, onEvent: Channel<SessionStreamItemDto>) => typedError<RewindResult, AppError>(__TAURI_INVOKE("rewind_session", { sessionId, userTurn, permissionMode, onEvent })),
 	sendUserMessage: (sessionId: string, text: string, attachedDocs: string[], promptName: string | null, clientMessageId: string | null, baseRev: number | null) => typedError<null, AppError>(__TAURI_INVOKE("send_user_message", { sessionId, text, attachedDocs, promptName, clientMessageId, baseRev })),
 	respondPermission: (sessionId: string, requestId: string, allow: boolean, message: string | null) => typedError<null, AppError>(__TAURI_INVOKE("respond_permission", { sessionId, requestId, allow, message })),
 	answerQuestion: (sessionId: string, requestId: string, answers: QuestionAnswers) => typedError<null, AppError>(__TAURI_INVOKE("answer_question", { sessionId, requestId, answers })),
@@ -147,7 +147,7 @@ export const commands = {
 	setSessionModel: (sessionId: string, model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_model", { sessionId, model })),
 	setSessionEffort: (sessionId: string, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_effort", { sessionId, effort })),
 	setSessionHarness: (sessionId: string, harness: Harness, model: string | null, effort: string | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_harness", { sessionId, harness, model, effort })),
-	setSessionPermissionMode: (sessionId: string, mode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_permission_mode", { sessionId, mode })),
+	setSessionPermissionMode: (sessionId: string, mode: "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions" | null) => typedError<null, AppError>(__TAURI_INVOKE("set_session_permission_mode", { sessionId, mode })),
 	listSessions: (workstreamId: string) => typedError<Session[], AppError>(__TAURI_INVOKE("list_sessions", { workstreamId })),
 	getSessionLog: (sessionId: string) => typedError<SessionLogEntryDto[], AppError>(__TAURI_INVOKE("get_session_log", { sessionId })),
 	listSessionTurns: (sessionId: string, cursor: LogCursorDto, limit: number) => typedError<SessionTurnsDto, AppError>(__TAURI_INVOKE("list_session_turns", { sessionId, cursor, limit })),
@@ -1332,6 +1332,8 @@ export type KeybindingSettings = {
 	overrides?: { [key in string]: string | null },
 };
 
+export type LeadPermissionMode = PermissionMode | null;
+
 export type LeadRuleScope = "inherit_and_file" | "inherit_only";
 
 export type LeadSettings = {
@@ -1341,6 +1343,7 @@ export type LeadSettings = {
 	maxLiveChildren?: number,
 	rules?: GuardrailRule[],
 	projects?: { [key in string]: LeadRuleScope },
+	permissionMode?: LeadPermissionMode,
 };
 
 export type LeadView = {
@@ -1461,7 +1464,7 @@ export type OpencodeCatalog = {
 	source: string,
 };
 
-export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 
 export type PrCheck = {
 	name: string,

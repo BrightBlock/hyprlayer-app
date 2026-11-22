@@ -860,7 +860,9 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
 }
 
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
-  auto: "Leave the posture to the stage's own policy.",
+  stage: "Leave the posture to the stage's own policy.",
+  auto: "A classifier approves safe actions and blocks risky ones; nothing waits for you.",
+  dontAsk: "Only the allow rules run; everything else is refused without asking.",
   default: "Every tool call outside the allow rules waits for approval.",
   acceptEdits: "File edits apply straight away; commands still ask.",
   plan: "Reads and reasons, but never writes files or runs commands.",

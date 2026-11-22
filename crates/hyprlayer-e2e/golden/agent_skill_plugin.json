@@ -67,6 +67,15 @@
         },
         {
           "evidence": {
+            "auto": true,
+            "guardHook": true,
+            "noFileTools": true
+          },
+          "guard": "the Lead launches in auto mode, without file tools, behind the checkout guard",
+          "ok": true
+        },
+        {
+          "evidence": {
             "enabledRule": true,
             "projectFile": false,
             "resumed": true,

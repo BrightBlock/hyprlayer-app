@@ -35,6 +35,8 @@ pub enum PermissionMode {
     Default,
     AcceptEdits,
     Plan,
+    Auto,
+    DontAsk,
     BypassPermissions,
 }
 
@@ -44,6 +46,8 @@ impl PermissionMode {
             PermissionMode::Default => "default",
             PermissionMode::AcceptEdits => "acceptEdits",
             PermissionMode::Plan => "plan",
+            PermissionMode::Auto => "auto",
+            PermissionMode::DontAsk => "dontAsk",
             PermissionMode::BypassPermissions => "bypassPermissions",
         }
     }
@@ -53,6 +57,8 @@ impl PermissionMode {
             "default" => Some(PermissionMode::Default),
             "acceptEdits" => Some(PermissionMode::AcceptEdits),
             "plan" => Some(PermissionMode::Plan),
+            "auto" => Some(PermissionMode::Auto),
+            "dontAsk" => Some(PermissionMode::DontAsk),
             "bypassPermissions" => Some(PermissionMode::BypassPermissions),
             _ => None,
         }

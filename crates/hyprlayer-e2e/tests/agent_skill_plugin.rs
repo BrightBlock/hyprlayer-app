@@ -147,6 +147,17 @@ async fn agent_skill_plugin() {
             "projectFile": first.contains("E2E_PROJECT_RULE"),
         }),
     );
+    j.guard(
+        "the Lead launches in auto mode, without file tools, behind the checkout guard",
+        first.contains("--permission-mode auto")
+            && first.contains(r#""disallowedTools":["Edit","Write","NotebookEdit"]"#)
+            && first.contains(" lead-guard "),
+        json!({
+            "auto": first.contains("--permission-mode auto"),
+            "noFileTools": first.contains(r#""disallowedTools":["Edit","Write","NotebookEdit"]"#),
+            "guardHook": first.contains(" lead-guard "),
+        }),
+    );
     update_settings(&mut j, &c, |s| {
         s.agent_control
             .lead

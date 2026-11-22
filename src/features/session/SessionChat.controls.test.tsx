@@ -313,13 +313,13 @@ describe("a session this tab did not start", () => {
     expect(argsOf("restartSession")[3]).toBe("bypassPermissions");
   });
 
-  it("keeps a tab that started its session in Auto on Auto after a reload", async () => {
-    // An Auto launch runs, and reports, the stage's own mode.
+  it("keeps a tab that started its session on Stage default there after a reload", async () => {
+    // A Stage default launch runs, and reports, the stage's own mode.
     running("claude-haiku-5-5", null, "default", null);
     renderChat({ harness: "claude" });
     await settle();
 
-    expect(controls()!.permissionKey).toBe("auto");
+    expect(controls()!.permissionKey).toBe("stage");
   });
 
   it("never shows this device's plan-mode default as the session's mode", async () => {
@@ -328,7 +328,7 @@ describe("a session this tab did not start", () => {
     renderChat({ harness: "claude" });
     await settle();
 
-    expect(controls()!.permissionKey).toBe("auto");
+    expect(controls()!.permissionKey).toBe("stage");
   });
 });
 

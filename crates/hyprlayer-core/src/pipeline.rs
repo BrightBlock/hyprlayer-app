@@ -158,6 +158,8 @@ pub struct SessionAgent {
     pub name: &'static str,
     pub description: &'static str,
     pub prompt: Cow<'static, str>,
+    pub disallowed_tools: &'static [&'static str],
+    pub hooks: Option<serde_json::Value>,
 }
 
 pub const SHIP_AGENT: SessionAgent = SessionAgent {
@@ -170,6 +172,8 @@ through, and do not improvise a PR body when a later step will write it.\n\n\
 The two skills you need (`/commit`, `/describe_pr`) are handed to you as slash commands \
 already expanded into the conversation. You cannot invoke skills yourself and never need to.",
     ),
+    disallowed_tools: &[],
+    hooks: None,
 };
 
 pub fn agent_for(stage: Stage) -> Option<SessionAgent> {

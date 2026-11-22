@@ -75,6 +75,7 @@ export function leadSettings(s: AppSettings): Lead | null {
       enabled: r.enabled ?? true,
     })),
     projects: l.projects ?? {},
+    permissionMode: l.permissionMode ?? null,
   };
 }
 

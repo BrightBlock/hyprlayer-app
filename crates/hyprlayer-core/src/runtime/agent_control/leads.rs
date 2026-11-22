@@ -13,7 +13,7 @@ use crate::runtime::sessions::{
 use crate::runtime::workstreams::{CreateWorkstreamRequest, ListWorkstreamsRequest};
 use crate::store::{Session, Workstream};
 
-const MAIN_TITLE: &str = "Lead Engineer";
+pub(super) const LEAD_TITLE: &str = "Lead Engineer";
 
 impl AgentControlService<'_> {
     pub async fn list_leads(&self) -> Result<Vec<LeadView>> {
@@ -87,6 +87,7 @@ impl AgentControlService<'_> {
         author: Option<ClientRef>,
     ) -> Result<String> {
         let settings = self.runtime.settings.get().await.agent_control.lead();
+        let mode = settings.permission_mode();
         if !settings.enabled {
             return Err(CoreError::LeadDisabled);
         }
@@ -116,7 +117,7 @@ impl AgentControlService<'_> {
                 if !sessions.is_live(&id).await {
                     sessions
                         .launch(LaunchSessionParams {
-                            permission_mode: session.requested_permission_mode,
+                            permission_mode: session.requested_permission_mode.or(Some(mode)),
                             session,
                             project_path: main.project_path,
                             model: None,
@@ -157,7 +158,7 @@ impl AgentControlService<'_> {
                     harness: Some(Harness::Claude),
                     model: settings.model,
                     effort: settings.effort,
-                    permission_mode: None,
+                    permission_mode: Some(mode),
                     prompt_name: None,
                     client_message_id: None,
                     parent_session_id: None,
@@ -186,7 +187,7 @@ impl AgentControlService<'_> {
             .workstreams()
             .create(CreateWorkstreamRequest {
                 project_path: project_path.to_string(),
-                title: MAIN_TITLE.into(),
+                title: LEAD_TITLE.into(),
                 base: None,
                 mode: WorktreeMode::Inplace,
                 branch: Some(branch),

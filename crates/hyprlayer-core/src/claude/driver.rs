@@ -191,12 +191,17 @@ impl ClaudeDriver {
             cmd.arg("--chrome");
         }
         if let Some(agent) = &config.agent {
-            let defs = serde_json::json!({
-                agent.name: {
-                    "description": agent.description,
-                    "prompt": agent.prompt,
-                }
+            let mut def = serde_json::json!({
+                "description": agent.description,
+                "prompt": agent.prompt,
             });
+            if !agent.disallowed_tools.is_empty() {
+                def["disallowedTools"] = agent.disallowed_tools.into();
+            }
+            if let Some(hooks) = &agent.hooks {
+                def["hooks"] = hooks.clone();
+            }
+            let defs = serde_json::json!({ agent.name: def });
             cmd.args(["--agents", &defs.to_string()])
                 .args(["--agent", agent.name]);
         }

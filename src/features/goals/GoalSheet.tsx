@@ -215,7 +215,7 @@ function initialForm(
     runIn: "sessionId" in request.target ? "this" : "new",
     harness: launch.harness,
     model: defaultModel(settings, launch.harness),
-    permissionKey: PERMISSION_MODES.find((p) => p.flag === launch.permissionMode)?.key ?? "auto",
+    permissionKey: PERMISSION_MODES.find((p) => p.flag === launch.permissionMode)?.key ?? "stage",
   };
 }
 

@@ -10,10 +10,12 @@ export type PermissionModeOption = {
 };
 
 export const PERMISSION_MODES: PermissionModeOption[] = [
-  { key: "auto", label: "Auto", short: "Auto", flag: null },
+  { key: "stage", label: "Stage default", short: "Stage", flag: null },
   { key: "default", label: "Ask each time", short: "Ask", flag: "default" },
   { key: "acceptEdits", label: "Accept edits", short: "Edits", flag: "acceptEdits" },
   { key: "plan", label: "Plan only", short: "Plan", flag: "plan" },
+  { key: "auto", label: "Auto", short: "Auto", flag: "auto" },
+  { key: "dontAsk", label: "Don't ask", short: "No ask", flag: "dontAsk" },
   {
     key: "bypassPermissions",
     label: "Bypass permissions",

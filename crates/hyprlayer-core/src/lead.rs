@@ -44,7 +44,12 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         (
             "briefs-open-with-goal",
             "Briefs open with the goal",
-            "Every brief opens with the goal. When the poteto-mode skill is installed, agents run in it.",
+            "Every brief opens with the goal.",
+        ),
+        (
+            "named-skills-only",
+            "Skills only when named",
+            "Use a skill, plugin or workflow only when the user names it for that work. Otherwise briefs use only hyprlayer's own stage commands, through spawn_agent's stage.",
         ),
         (
             "no-plan-unless-asked",
@@ -56,6 +61,11 @@ pub fn default_rules() -> Vec<GuardrailRule> {
             "Validate stacks once",
             "Stack multi-PR work. Run the full suite, the goldens, the live and perf checks and one plan validation once, at the top of the stack, then merge bottom-up.",
         ),
+        (
+            "lead-writes-no-code",
+            "The Lead writes no code",
+            "Every change, however small, goes to a spawned agent in its own workstream. The Lead never edits project files, switches branches, or commits in the main checkout.",
+        ),
     ]
     .into_iter()
     .map(|(id, title, text)| GuardrailRule {
@@ -65,6 +75,29 @@ pub fn default_rules() -> Vec<GuardrailRule> {
         enabled: true,
     })
     .collect()
+}
+
+const RETIRED_RULE_TEXTS: [(&str, &str); 1] = [(
+    "briefs-open-with-goal",
+    "Every brief opens with the goal. When the poteto-mode skill is installed, agents run in it.",
+)];
+
+/// Rewrites a stored default rule still holding the text a release retired; an edited one is the user's.
+pub fn refresh_retired_rules(rules: &mut [GuardrailRule]) -> bool {
+    let defaults = default_rules();
+    let mut changed = false;
+    for rule in rules.iter_mut() {
+        let retired = RETIRED_RULE_TEXTS.contains(&(rule.id.as_str(), rule.text.as_str()));
+        if let Some(fresh) = defaults
+            .iter()
+            .find(|d| d.id == rule.id)
+            .filter(|_| retired)
+        {
+            rule.text = fresh.text.clone();
+            changed = true;
+        }
+    }
+    changed
 }
 
 pub fn project_rules_path(checkout: &Path) -> PathBuf {
@@ -99,6 +132,8 @@ pub fn agent(settings: &LeadSettings, project_rules: Option<&str>) -> SessionAge
         name: LEAD_AGENT_NAME,
         description: "Starts, checks and lands work in this project's workstreams.",
         prompt: Cow::Owned(prompt),
+        disallowed_tools: &["Edit", "Write", "NotebookEdit"],
+        hooks: None,
     }
 }
 

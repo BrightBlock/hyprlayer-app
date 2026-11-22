@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { AgentControlSettings as Limits, AppSettings, LeadRuleScope } from "@/lib/bindings";
 import type { AgentControlLevel } from "@/lib/domain/agentControl";
 import { claudeModels, effortsForModel, modelOptions } from "@/lib/domain/models";
+import { PERMISSION_MODES } from "@/lib/domain/permissions";
 import { basename } from "@/lib/path";
 import { useClaudeProbe, useLeads, useSetAppSettings } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
@@ -22,6 +23,8 @@ import {
 
 import { NumberField } from "./NumberField";
 import { agentControlSettings, leadSettings, withAgentControl, withLead, type Lead } from "./settingsPatches";
+
+const LEAD_MODES = PERMISSION_MODES.filter((p) => p.flag).map((p) => ({ value: p.flag ?? "", label: p.label }));
 
 const LEVELS: { value: AgentControlLevel; label: string }[] = [
   { value: "off", label: "Off" },
@@ -147,6 +150,20 @@ function LeadCard({
         </SettingRow>
         <SettingRow title="Model" control={<LeadModelPicker lead={lead} onPatch={onPatch} />}>
           The Lead plans and judges; its agents use their own stage's model.
+        </SettingRow>
+        <SettingRow
+          title="Permission mode"
+          control={
+            <DropdownSelect
+              aria-label="Lead permission mode"
+              value={lead.permissionMode ?? "auto"}
+              onChange={(v) => onPatch({ permissionMode: v as Lead["permissionMode"] })}
+              options={LEAD_MODES}
+              className="w-[180px]"
+            />
+          }
+        >
+          Every Lead launch and resume. A mode you pick on a live Lead holds for that Lead. Its agents inherit it unless the brief names another.
         </SettingRow>
         <SettingRow
           title="Max live children"

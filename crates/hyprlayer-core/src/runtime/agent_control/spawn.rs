@@ -655,9 +655,8 @@ impl AgentControlService<'_> {
                     bypass,
                     model,
                     // Always set for a stage, so its own default mode cannot outrank the caller.
-                    permission_mode: stage_prompt
-                        .as_ref()
-                        .map(|_| permission_mode_flag(mode).to_string()),
+                    permission_mode: (stage_prompt.is_some() || mode != PermissionMode::Default)
+                        .then(|| permission_mode_flag(mode).to_string()),
                     effort,
                     first_prompt: stage_prompt.clone(),
                 },
@@ -990,6 +989,9 @@ impl AgentControlService<'_> {
 
     /// How a message names its sender: a session's title, or a terminal's engine.
     async fn caller_label(&self, identity: &AgentIdentity) -> String {
+        if identity.lead {
+            return super::leads::LEAD_TITLE.to_string();
+        }
         match &identity.caller {
             AgentCaller::Session { session_id } => {
                 match self.runtime.sessions().get(session_id).await {
@@ -1170,13 +1172,15 @@ fn asks_after(asking: bool, event: &SessionEvent) -> bool {
     }
 }
 
-/// Plan < Default < AcceptEdits < Bypass: a child never runs above its parent.
+/// Plan < DontAsk < Default < AcceptEdits < Auto < Bypass: a child never runs above its parent.
 fn rank(mode: PermissionMode) -> u8 {
     match mode {
         PermissionMode::Plan => 0,
-        PermissionMode::Default => 1,
-        PermissionMode::AcceptEdits => 2,
-        PermissionMode::BypassPermissions => 3,
+        PermissionMode::DontAsk => 1,
+        PermissionMode::Default => 2,
+        PermissionMode::AcceptEdits => 3,
+        PermissionMode::Auto => 4,
+        PermissionMode::BypassPermissions => 5,
     }
 }
 
@@ -1185,6 +1189,8 @@ fn mode_name(mode: PermissionMode) -> &'static str {
         PermissionMode::Plan => "plan",
         PermissionMode::Default => "default",
         PermissionMode::AcceptEdits => "accept-edits",
+        PermissionMode::Auto => "auto",
+        PermissionMode::DontAsk => "dont-ask",
         PermissionMode::BypassPermissions => "bypass",
     }
 }

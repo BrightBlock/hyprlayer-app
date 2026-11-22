@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
-use hyprlayer_models::AgentControlLevel;
+use hyprlayer_models::{AgentControlLevel, PermissionMode};
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::RwLock;
 
@@ -103,9 +103,12 @@ impl AppSettings {
             }
         }
 
-        if self.agent_control.lead.is_none() {
-            self.agent_control.lead = Some(LeadSettings::default());
-            changed = true;
+        match &mut self.agent_control.lead {
+            None => {
+                self.agent_control.lead = Some(LeadSettings::default());
+                changed = true;
+            }
+            Some(lead) => changed |= crate::lead::refresh_retired_rules(&mut lead.rules),
         }
 
         for model in [&mut self.tab_titles.model, &mut self.goals.evaluator_model] {
@@ -264,6 +267,31 @@ pub struct LeadSettings {
     pub max_live_children: u32,
     pub rules: Vec<GuardrailRule>,
     pub projects: BTreeMap<String, LeadRuleScope>,
+    // `None` reads as Auto, and on a save from a desktop that predates the field keeps the stored one.
+    pub permission_mode: LeadPermissionMode,
+}
+
+impl LeadSettings {
+    pub fn permission_mode(&self) -> PermissionMode {
+        self.permission_mode.0.unwrap_or(PermissionMode::Auto)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(transparent)]
+pub struct LeadPermissionMode(pub Option<PermissionMode>);
+
+// Tolerant, so one unknown mode cannot fail the whole settings file and reset it.
+impl<'de> Deserialize<'de> for LeadPermissionMode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        let mode = raw.as_str().and_then(PermissionMode::try_parse);
+        if mode.is_none() && !raw.is_null() {
+            tracing::warn!("unknown Lead permission mode {raw}; using Auto");
+        }
+        Ok(Self(mode))
+    }
 }
 
 impl Default for LeadSettings {
@@ -275,6 +303,7 @@ impl Default for LeadSettings {
             max_live_children: 6,
             rules: crate::lead::default_rules(),
             projects: BTreeMap::new(),
+            permission_mode: LeadPermissionMode(None),
         }
     }
 }
@@ -664,8 +693,13 @@ impl SettingsStore {
 
     pub async fn set(&self, mut settings: AppSettings) -> Result<()> {
         self.update(|s| {
-            if settings.agent_control.lead.is_none() {
-                settings.agent_control.lead = s.agent_control.lead.take();
+            let stored = s.agent_control.lead.take();
+            match &mut settings.agent_control.lead {
+                None => settings.agent_control.lead = stored,
+                Some(lead) if lead.permission_mode.0.is_none() => {
+                    lead.permission_mode = stored.map(|l| l.permission_mode).unwrap_or_default();
+                }
+                Some(_) => {}
             }
             *s = settings;
         })

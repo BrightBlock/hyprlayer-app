@@ -113,7 +113,7 @@ fn plan_args() -> Value {
     json!({ "type": "object", "required": ["plan"], "properties": {
         "plan": { "type": "string", "description": "The plan document's path, as list_docs returns it." },
         "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream." },
-        "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Keeps it a composer session in that harness. Unset, it is this agent's own, or the default engine when the user runs app actions in a CLI." },
+        "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Only when the user names one: forces a composer session in that harness. Unset, the agent gets the user's default engine." },
         "model": { "type": "string" },
         "effort": { "type": "string" },
         "title": { "type": "string" },
@@ -253,7 +253,7 @@ const TOOLS: [Tool; 32] = [
     },
     Tool {
         name: "spawn_agent",
-        description: "Starts a background agent in this project: a composer session, or a PTY agent when terminal_engine is set or the user runs app actions in a CLI (a harness keeps it a session). The result names a sessionId or a terminalId. It runs no higher than this agent's own permission mode.",
+        description: "Starts a background agent in this project on the user's default engine: a PTY agent when the user runs app actions in a CLI, else a composer session. Leave harness unset unless the user names one. The result names a sessionId or a terminalId; wait on a terminalId with wake_when. It runs no higher than this agent's own permission mode.",
         read_only: false,
         schema: || {
             json!({ "type": "object", "properties": {
@@ -262,10 +262,10 @@ const TOOLS: [Tool; 32] = [
                 "bypass": { "type": "boolean", "description": "PTY agents only; needs this agent to be in bypass mode." },
                 "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream." },
                 "stage": { "type": "string", "enum": ["general", "research", "plan", "implement", "validate", "commit", "ship", "revise"] },
-                "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Keeps it a composer session in that harness. Unset, it is this agent's own, or the default engine when the user runs app actions in a CLI." },
+                "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Only when the user names one: forces a composer session in that harness. Unset, the agent gets the user's default engine." },
                 "model": { "type": "string" },
                 "effort": { "type": "string" },
-                "permission_mode": { "type": "string", "enum": ["plan", "default", "acceptEdits", "bypassPermissions"], "description": "Defaults to this agent's own." },
+                "permission_mode": { "type": "string", "enum": ["plan", "dontAsk", "default", "acceptEdits", "auto", "bypassPermissions"], "description": "Defaults to this agent's own. Ranked as listed; a child runs no higher than this agent." },
                 "attached_docs": { "type": "array", "items": { "type": "string" } },
                 "title": { "type": "string" },
             } })

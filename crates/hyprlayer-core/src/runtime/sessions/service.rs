@@ -2012,7 +2012,13 @@ impl SessionService<'_> {
                 if session.lead {
                     let lead = settings.agent_control.lead();
                     let file = lead::rules_in_effect(&lead, project_path);
-                    agent = Some(lead::agent(&lead, file.as_deref()));
+                    let mut lead_agent = lead::agent(&lead, file.as_deref());
+                    lead_agent.hooks = self
+                        .runtime
+                        .agent_control_endpoint
+                        .as_ref()
+                        .map(|endpoint| inject::lead_guard_hooks(&endpoint.ctl, project_path));
+                    agent = Some(lead_agent);
                 }
                 let library = &settings.agents;
                 let drafts: Vec<String> = agents::list_agents(

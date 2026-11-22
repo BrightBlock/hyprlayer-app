@@ -296,3 +296,129 @@ fn truncate(mut s: String, max_bytes: usize) -> String {
     }
     s
 }
+
+const MUTATING_GIT: [&str; 18] = [
+    "add",
+    "am",
+    "apply",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "commit",
+    "merge",
+    "mv",
+    "pull",
+    "push",
+    "rebase",
+    "reset",
+    "restore",
+    "revert",
+    "rm",
+    "stash",
+    "switch",
+];
+
+/// `hyprlayer-server lead-guard <checkout>`: a Lead's PreToolUse hook that refuses writes to its main checkout.
+pub fn run_lead_guard(checkout: &str) -> i32 {
+    let reason = read_stdin()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .and_then(|payload| lead_refusal(&payload, Path::new(checkout)));
+    if let Some(reason) = reason {
+        let answer = serde_json::json!({ "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        } });
+        let _ = writeln!(std::io::stdout(), "{answer}");
+    }
+    0
+}
+
+fn lead_refusal(payload: &Value, checkout: &Path) -> Option<String> {
+    let input = payload.get("tool_input")?;
+    let cwd = payload
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map_or(checkout, Path::new);
+    let refuse = |what: &str| {
+        Some(format!(
+            "The Lead writes no code: {what} in the main checkout is refused. \
+Create a workstream and spawn an agent to make the change."
+        ))
+    };
+    match payload.get("tool_name")?.as_str()? {
+        "Edit" | "Write" | "NotebookEdit" => {
+            let path = ["file_path", "notebook_path"]
+                .iter()
+                .find_map(|key| input.get(key)?.as_str())?;
+            under(&cwd.join(path), checkout).then(|| refuse("a file edit"))?
+        }
+        "Bash" => {
+            let mut at = cwd.to_path_buf();
+            for segment in input.get("command")?.as_str()?.split(['\n', ';', '&', '|']) {
+                let words: Vec<&str> = segment.split_whitespace().collect();
+                match words.as_slice() {
+                    ["cd" | "pushd"] => at = PathBuf::from("/"),
+                    ["cd" | "pushd", dir, ..] => at = at.join(unquote(dir)),
+                    ["git", rest @ ..] => {
+                        let (repo, sub) = git_target(&at, rest);
+                        if under(&repo, checkout) && sub.is_some_and(|s| MUTATING_GIT.contains(&s))
+                        {
+                            return refuse(&format!("`git {}`", sub.unwrap_or_default()));
+                        }
+                    }
+                    _ => {}
+                }
+                let target = words.iter().enumerate().find_map(|(i, w)| {
+                    let w = w.trim_start_matches(|c: char| c.is_ascii_digit());
+                    let rest = w.strip_prefix(">>").or_else(|| w.strip_prefix('>'))?;
+                    match rest {
+                        "" => words.get(i + 1).copied(),
+                        _ => Some(rest),
+                    }
+                });
+                if let Some(target) = target.filter(|t| !t.starts_with('&') && *t != "/dev/null") {
+                    if under(&at.join(target), checkout) {
+                        return refuse("a shell redirect");
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn git_target<'a>(at: &Path, args: &[&'a str]) -> (PathBuf, Option<&'a str>) {
+    let mut repo = at.to_path_buf();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match *arg {
+            "-C" => repo = repo.join(unquote(args.next().unwrap_or(&""))),
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
+                args.next();
+            }
+            flag if flag.starts_with('-') => {}
+            sub => return (repo, Some(sub)),
+        }
+    }
+    (repo, None)
+}
+
+fn unquote(word: &str) -> &str {
+    word.trim_matches(['"', '\''])
+}
+
+fn under(path: &Path, checkout: &Path) -> bool {
+    let mut normal = PathBuf::new();
+    for part in path.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => normal.push(other),
+        }
+    }
+    normal.starts_with(checkout)
+}

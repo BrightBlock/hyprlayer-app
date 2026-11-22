@@ -148,6 +148,19 @@ pub fn claude_settings(ctl: &Path) -> serde_json::Value {
     })
 }
 
+/// A Lead's agent `hooks`: `<ctl> lead-guard <checkout>` before every file edit and shell command.
+pub fn lead_guard_hooks(ctl: &Path, checkout: &str) -> serde_json::Value {
+    let command = format!(
+        "{} lead-guard {}",
+        quoted_ctl(ctl),
+        quoted_ctl(Path::new(checkout))
+    );
+    serde_json::json!({ "PreToolUse": [{
+        "matcher": "Bash|Edit|Write|NotebookEdit",
+        "hooks": [{ "type": "command", "command": command, "timeout": HOOK_TIMEOUT_SECS }],
+    }] })
+}
+
 #[cfg(not(windows))]
 fn quoted_ctl(ctl: &Path) -> String {
     crate::runtime::terminals::sh_quote(&ctl.to_string_lossy())
