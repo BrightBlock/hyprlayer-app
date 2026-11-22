@@ -2,10 +2,12 @@
 //! of the save contract; `compose` is the write side. Together they let a
 //! save with no edits leave the file byte-identical.
 
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 use super::frontmatter::{
-    bom_len, extract_block, patch_frontmatter, tokenize_keys, FmError, FmPatch,
+    bom_len, extract_block, first_eol, patch_frontmatter, tokenize_keys, FmError, FmPatch,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,12 +64,8 @@ pub fn strict_error(yaml: &str) -> Option<String> {
 // The BOM stays in `rebuilt`; patch_frontmatter and replace_block keep it in front.
 pub fn compose(original: &str, body: &str, edit: &FrontmatterEdit) -> Result<String, FmError> {
     let parts = split(original);
-    let eol = if original.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
-    let body = match_eol(original, body);
+    let eol = first_eol(original);
+    let body = match_eol(original, parts.body(original), body);
     let rebuilt = format!("{}{}", &original[..parts.body_offset], body);
     match edit {
         FrontmatterEdit::Patch(p) if p.set.is_empty() && p.remove.is_empty() => Ok(rebuilt),
@@ -145,11 +143,85 @@ fn normalise_yaml(yaml: &str, eol: &str, original_block: &str) -> String {
 }
 
 // CodeMirror hands back LF; a uniformly CRLF file stays CRLF.
-fn match_eol<'b>(original: &str, body: &'b str) -> std::borrow::Cow<'b, str> {
-    let uniformly_crlf = original.contains("\r\n") && !original.replace("\r\n", "").contains('\n');
-    if uniformly_crlf && !body.contains('\r') {
-        body.replace('\n', "\r\n").into()
-    } else {
-        body.into()
+pub(crate) fn match_eol<'b>(original: &str, original_text: &str, text: &'b str) -> Cow<'b, str> {
+    if text.contains("\r\n") || !original.contains("\r\n") {
+        return text.into();
     }
+    if !original.replace("\r\n", "").contains('\n') {
+        return text.replace('\n', "\r\n").into();
+    }
+    restore_endings(original_text, text, first_eol(original)).map_or(text.into(), Cow::Owned)
+}
+
+fn restore_endings(original: &str, text: &str, fallback: &'static str) -> Option<String> {
+    let old: Vec<&str> = original.split_inclusive('\n').collect();
+    let new: Vec<&str> = text.split_inclusive('\n').collect();
+    let hunks = line_hunks(&original.replace("\r\n", "\n"), text)?;
+    let mut endings: Vec<Option<&'static str>> = Vec::with_capacity(new.len());
+    let (mut i, mut j) = (0, 0);
+    for (old_at, old_len, new_at, new_len) in
+        hunks.into_iter().chain([(old.len(), 0, new.len(), 0)])
+    {
+        if old_at < i || new_at < j || old_at - i != new_at - j || old_at + old_len > old.len() {
+            return None;
+        }
+        endings.extend(old[i..old_at].iter().map(|line| line_ending(line)));
+        for k in 0..new_len {
+            endings.push(match old_len {
+                0 => endings
+                    .last()
+                    .copied()
+                    .flatten()
+                    .or_else(|| old.get(old_at).and_then(|line| line_ending(line))),
+                _ => line_ending(old[old_at + k.min(old_len - 1)]),
+            });
+        }
+        (i, j) = (old_at + old_len, new_at + new_len);
+    }
+
+    let mut out = String::with_capacity(text.len() + new.len());
+    let mut last = fallback;
+    for (line, ending) in new.iter().zip(endings) {
+        match line.strip_suffix('\n') {
+            Some(content) => {
+                last = ending.unwrap_or(last);
+                out.push_str(content);
+                out.push_str(last);
+            }
+            None => out.push_str(line),
+        }
+    }
+    Some(out)
+}
+
+fn line_ending(line: &str) -> Option<&'static str> {
+    if line.ends_with("\r\n") {
+        Some("\r\n")
+    } else if line.ends_with('\n') {
+        Some("\n")
+    } else {
+        None
+    }
+}
+
+fn line_hunks(old: &str, new: &str) -> Option<Vec<(usize, usize, usize, usize)>> {
+    let mut opts = git2::DiffOptions::new();
+    opts.context_lines(0).interhunk_lines(0).force_text(true);
+    let patch =
+        git2::Patch::from_buffers(old.as_bytes(), None, new.as_bytes(), None, Some(&mut opts))
+            .ok()?;
+    // Unified-diff starts are 1-based, except that an empty side names the line before it.
+    let at = |start: u32, len: u32| (start as usize).saturating_sub(usize::from(len > 0));
+    (0..patch.num_hunks())
+        .map(|h| {
+            let (hunk, _) = patch.hunk(h).ok()?;
+            let (old_len, new_len) = (hunk.old_lines(), hunk.new_lines());
+            Some((
+                at(hunk.old_start(), old_len),
+                old_len as usize,
+                at(hunk.new_start(), new_len),
+                new_len as usize,
+            ))
+        })
+        .collect()
 }

@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::docs::frontmatter::{extract_block, patch_frontmatter, FmPatch, FmValue};
+use crate::docs::frontmatter::{
+    bom_len, extract_block, first_eol, patch_frontmatter, FmPatch, FmValue,
+};
+use crate::docs::parts::match_eol;
 use crate::error::Result;
 use crate::hyprcli::AiPlatformStatus;
 
@@ -211,7 +214,7 @@ pub fn parse_agent(path: &Path, source: &str, text: &str) -> AgentFile {
         memory: pick(KEY_MEMORY),
         category: pick(KEY_CATEGORY),
         prompt: text[parsed.body_offset..]
-            .trim_start_matches('\n')
+            .trim_start_matches(['\r', '\n'])
             .to_string(),
         updated_at: mtime_ms(path),
         shipped_path: None,
@@ -416,27 +419,26 @@ pub fn render_agent(original: &str, agent: &AgentFile) -> Result<String> {
     }
 
     let patched = patch_frontmatter(original, &patch)?;
-    let head_len = extract_block(&patched)
-        .map(|(_, offset)| offset)
-        .unwrap_or(0);
-    let separator = separator_of(original);
-    Ok(format!(
-        "{}{}{}\n",
-        patched[..head_len].trim_end(),
-        separator,
-        agent.prompt.trim()
-    ))
-}
+    if agent.prompt.replace("\r\n", "\n") == current.prompt.replace("\r\n", "\n") {
+        return Ok(patched);
+    }
 
-fn separator_of(original: &str) -> String {
-    let Some((_, body_offset)) = extract_block(original) else {
-        return "\n".to_string();
+    let (head_len, joint) = match extract_block(&patched) {
+        Some((_, offset)) if !patched[..offset].ends_with('\n') => (offset, first_eol(original)),
+        Some((_, offset)) => (offset, ""),
+        None => (bom_len(&patched), ""),
     };
-    let blanks = original[body_offset..]
-        .chars()
-        .take_while(|c| *c == '\n')
-        .count();
-    "\n".repeat(blanks + 1)
+    let (head, body) = patched.split_at(head_len);
+    let gap = body.strip_suffix(current.prompt.as_str()).unwrap_or("");
+    let kept = current.prompt.trim_end_matches(['\r', '\n']).len();
+    let trail = if current.prompt.is_empty() {
+        "\n".to_string()
+    } else {
+        current.prompt[kept..].replace("\r\n", "\n")
+    };
+    let text = format!("{}{trail}", agent.prompt.trim_end_matches(['\r', '\n']));
+    let prompt = match_eol(original, &current.prompt, &text);
+    Ok(format!("{head}{joint}{gap}{prompt}"))
 }
 
 pub fn save_agent(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
@@ -717,6 +719,72 @@ mod tests {
             out.contains("notes: keep me"),
             "unmodelled key dropped:\n{out}"
         );
+    }
+
+    #[test]
+    fn unchanged_save_keeps_bom_and_line_endings() {
+        for original in [
+            "\u{FEFF}just a prompt\n",
+            "\u{FEFF}---\nname: a\ndescription: d\n---\n\nBody.\n",
+            "---\r\nname: a\r\ndescription: d\r\n---\r\n\r\nLine one.\r\nLine two.\r\n",
+            "---\nname: a\n---\nBody.",
+            "---\nname: a\n---\n",
+            "---\nname: a\n---",
+            "---\nname: a\n---\n\n   \n",
+            "---\nname: a\r\n---\r\n# H\nline one\r\nline two\n",
+        ] {
+            let agent = parse_agent(Path::new("/x/a.md"), "user", original);
+            assert_eq!(
+                render_agent(original, &agent).unwrap(),
+                original,
+                "{original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_prompt_edit_changes_only_the_edited_line() {
+        for original in [
+            "\u{FEFF}line one\n",
+            "# H\nline one\r\nline two\n",
+            "---\nname: a\r\n---\r\n# H\nline one\r\nline two\n",
+            "\u{FEFF}---\r\nname: a\r\n---\r\n\r\nline one\r\nline two",
+        ] {
+            let mut agent = parse_agent(Path::new("/x/a.md"), "user", original);
+            agent.prompt = agent
+                .prompt
+                .replace("\r\n", "\n")
+                .replacen("line one", "line ONE", 1);
+            assert_eq!(
+                render_agent(original, &agent).unwrap(),
+                original.replacen("line one", "line ONE", 1),
+                "{original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_metadata_edit_keeps_the_body_bytes() {
+        let cases = [
+            ("\u{FEFF}old\n", "\u{FEFF}---\ndescription: d\n---\nold\n"),
+            (
+                "\u{FEFF}---\r\nname: a\r\ndescription: x\r\n---\r\n\r\nold\r\n",
+                "\u{FEFF}---\r\nname: a\r\ndescription: d\r\n---\r\n\r\nold\r\n",
+            ),
+            (
+                "---\nname: a\r\n---\r\n# H\nline one\r\nline two",
+                "---\nname: a\r\ndescription: d\r\n---\r\n# H\nline one\r\nline two",
+            ),
+        ];
+        for (original, expected) in cases {
+            let mut agent = parse_agent(Path::new("/x/a.md"), "user", original);
+            agent.description = "d".into();
+            assert_eq!(
+                render_agent(original, &agent).unwrap(),
+                expected,
+                "{original:?}"
+            );
+        }
     }
 
     #[test]

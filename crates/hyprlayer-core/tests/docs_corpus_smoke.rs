@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use hyprlayer_core::config::ConfigService;
-use hyprlayer_core::docs::frontmatter::{self, FmPatch, FmValue};
+use hyprlayer_core::docs::frontmatter::{self, FmError, FmPatch, FmValue};
 use hyprlayer_core::docs::parts::{compose, split, FrontmatterEdit};
 use hyprlayer_core::index::thoughts_roots;
 
@@ -82,12 +82,19 @@ async fn corpus_status_patch_only_touches_frontmatter() {
         set: vec![("status".to_string(), FmValue::Str("archived".to_string()))],
         remove: vec![],
     };
+    let mut refused: Vec<&PathBuf> = Vec::new();
     for path in &files {
         let Ok(content) = std::fs::read_to_string(path) else {
             continue;
         };
-        let out = frontmatter::patch_frontmatter(&content, &patch)
-            .unwrap_or_else(|e| panic!("patch failed for {}: {e}", path.display()));
+        let out = match frontmatter::patch_frontmatter(&content, &patch) {
+            Ok(out) => out,
+            Err(FmError::Malformed) => {
+                refused.push(path);
+                continue;
+            }
+            Err(e) => panic!("patch failed for {}: {e}", path.display()),
+        };
         let before = frontmatter::parse(&content);
         let after = frontmatter::parse(&out);
         assert_eq!(
@@ -103,10 +110,10 @@ async fn corpus_status_patch_only_touches_frontmatter() {
             path.display()
         );
     }
-}
-
-fn is_uniformly_crlf(text: &str) -> bool {
-    text.contains("\r\n") && !text.replace("\r\n", "").contains('\n')
+    eprintln!("refused as malformed: {} files", refused.len());
+    for path in &refused {
+        eprintln!("  {}", path.display());
+    }
 }
 
 #[tokio::test]
@@ -119,7 +126,6 @@ async fn corpus_split_and_empty_save_is_identity() {
 
     let no_op = FrontmatterEdit::Patch(FmPatch::default());
     let mut fm_errors: Vec<PathBuf> = Vec::new();
-    let mut mixed_eol: Vec<PathBuf> = Vec::new();
 
     for path in &files {
         let Ok(content) = std::fs::read_to_string(path) else {
@@ -136,33 +142,22 @@ async fn corpus_split_and_empty_save_is_identity() {
         assert_eq!(out, content, "no-op compose mutated {}", path.display());
 
         let lf_body = body.replace("\r\n", "\n");
-        if !body.contains("\r\n") || is_uniformly_crlf(&content) {
-            let out = compose(&content, &lf_body, &no_op).unwrap_or_else(|e| {
-                panic!(
-                    "compose (LF-normalised body) failed for {}: {e}",
-                    path.display()
-                )
-            });
-            assert_eq!(
-                out,
-                content,
-                "LF-normalised no-op compose mutated {}",
+        let out = compose(&content, &lf_body, &no_op).unwrap_or_else(|e| {
+            panic!(
+                "compose (LF-normalised body) failed for {}: {e}",
                 path.display()
-            );
-        } else {
-            mixed_eol.push(path.clone());
-        }
+            )
+        });
+        assert_eq!(
+            out,
+            content,
+            "LF-normalised no-op compose mutated {}",
+            path.display()
+        );
     }
 
     eprintln!("fm_error: {} files", fm_errors.len());
     for path in &fm_errors {
-        eprintln!("  {}", path.display());
-    }
-    eprintln!(
-        "mixed-EOL (excluded from the LF-normalised check): {} files",
-        mixed_eol.len()
-    );
-    for path in &mixed_eol {
         eprintln!("  {}", path.display());
     }
 }

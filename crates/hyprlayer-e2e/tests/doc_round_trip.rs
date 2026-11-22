@@ -407,27 +407,12 @@ async fn doc_round_trip() {
         .await
         .unwrap_or_else(|e| panic!("revert {}: {e:?}", f.name));
         let after = std::fs::read(&f.path).unwrap();
-        if f.name == "mixed-eol" {
-            let expected_split = split(&f.content);
-            let before_fm = &f.content.as_bytes()[..expected_split.body_offset];
-            let after_fm = &after[..expected_split.body_offset.min(after.len())];
-            let after_body = &after[expected_split.body_offset.min(after.len())..];
-            let body_eol_normalised = !after_body.windows(2).any(|w| w == b"\r\n");
-            let fm_unchanged = after_fm == before_fm;
-            let ok = body_eol_normalised && fm_unchanged;
-            revert_ok &= ok;
-            revert_evidence.insert(
-                f.name.to_string(),
-                json!({ "body_eol_normalised": body_eol_normalised, "frontmatter_unchanged": fm_unchanged }),
-            );
-        } else {
-            let ok = after == f.content.as_bytes();
-            revert_ok &= ok;
-            revert_evidence.insert(f.name.to_string(), json!({ "byte_identical": ok }));
-        }
+        let ok = after == f.content.as_bytes();
+        revert_ok &= ok;
+        revert_evidence.insert(f.name.to_string(), json!({ "byte_identical": ok }));
     }
     j.guard(
-        "editing and reverting a body leaves the file byte-identical (mixed-eol excepted)",
+        "editing and reverting a body leaves the file byte-identical",
         revert_ok,
         Value::Object(revert_evidence),
     );

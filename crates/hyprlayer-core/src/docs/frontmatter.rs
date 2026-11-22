@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::parts::strict_error;
 use super::vocab::DocType;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -35,7 +36,7 @@ pub fn parse(content: &str) -> ParsedDoc {
         return ParsedDoc {
             fm: Frontmatter::default(),
             warnings: vec!["no frontmatter block".into()],
-            body_offset: 0,
+            body_offset: bom_len(content),
         };
     };
 
@@ -168,6 +169,13 @@ pub fn bom_len(s: &str) -> usize {
     }
 }
 
+pub(crate) fn first_eol(s: &str) -> &'static str {
+    match s.find('\n') {
+        Some(i) if s[..i].ends_with('\r') => "\r\n",
+        _ => "\n",
+    }
+}
+
 pub fn extract_block(content: &str) -> Option<(&str, usize)> {
     let bom = bom_len(content);
     let rest = &content[bom..];
@@ -201,7 +209,7 @@ pub fn body_offset_bytes(content: &[u8]) -> usize {
     } else if let Some(r) = rest.strip_prefix(b"---\n") {
         r
     } else {
-        return 0;
+        return bom;
     };
     let open_len = rest.len() - after_open.len();
 
@@ -213,7 +221,7 @@ pub fn body_offset_bytes(content: &[u8]) -> usize {
         }
         offset += line.len();
     }
-    0
+    bom
 }
 
 fn trim_end_cr_lf(mut line: &[u8]) -> &[u8] {
@@ -400,11 +408,7 @@ pub fn patch_frontmatter(original: &str, patch: &FmPatch) -> Result<String, FmEr
     for (key, _) in &patch.set {
         validate_key(key)?;
     }
-    let eol = if original.contains("\r\n") {
-        "\r\n"
-    } else {
-        "\n"
-    };
+    let eol = first_eol(original);
 
     let result = match extract_block(original) {
         None => {
@@ -414,7 +418,13 @@ pub fn patch_frontmatter(original: &str, patch: &FmPatch) -> Result<String, FmEr
                 synthesize_block(original, &patch.set, eol)?
             }
         }
-        Some((block, body_offset)) => patch_block(original, block, body_offset, patch, eol)?,
+        Some((block, body_offset)) => {
+            let out = patch_block(original, block, body_offset, patch)?;
+            if out != original && has_foreign_line(block) && strict_error(block).is_some() {
+                return Err(FmError::Malformed);
+            }
+            out
+        }
     };
 
     validate_patch(&result, patch)?;
@@ -501,12 +511,40 @@ enum WorkBody<'a> {
     Rendered(String),
 }
 
+impl WorkBody<'_> {
+    fn text(&self) -> &str {
+        match self {
+            WorkBody::Original(s) => s,
+            WorkBody::Rendered(s) => s,
+        }
+    }
+}
+
+fn has_foreign_line(block: &str) -> bool {
+    block.lines().any(|line| {
+        let trimmed = line.trim();
+        !(trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || line.starts_with([' ', '\t'])
+            || trimmed.starts_with("- ")
+            || trimmed == "-"
+            || find_key_colon(line).is_some())
+    })
+}
+
+fn last_eol(s: &str) -> &'static str {
+    if s.ends_with("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 fn patch_block(
     original: &str,
     block: &str,
     body_offset: usize,
     patch: &FmPatch,
-    eol: &str,
 ) -> Result<String, FmError> {
     let bom = bom_len(original);
     let open_len = if original[bom..].starts_with("---\r\n") {
@@ -534,12 +572,14 @@ fn patch_block(
     items.retain(|item| !patch.remove.contains(&item.key));
 
     for (key, value) in &patch.set {
-        let rendered = render_span(key, value, eol)?;
         if let Some(item) = items.iter_mut().rev().find(|item| item.key == *key) {
+            let rendered = render_span(key, value, first_eol(item.body.text()))?;
             item.body = WorkBody::Rendered(rendered);
             continue;
         }
         let idx = insertion_index(&items, key);
+        let before = idx.checked_sub(1).map_or(opening, |i| items[i].body.text());
+        let rendered = render_span(key, value, last_eol(before))?;
         items.insert(
             idx,
             WorkItem {
@@ -555,10 +595,7 @@ fn patch_block(
     out.push_str(opening);
     for item in &items {
         out.push_str(item.lead);
-        match &item.body {
-            WorkBody::Original(s) => out.push_str(s),
-            WorkBody::Rendered(s) => out.push_str(s),
-        }
+        out.push_str(item.body.text());
     }
     out.push_str(tail);
     out.push_str(closing);
@@ -747,7 +784,7 @@ mod stub_tests {
             "\u{FEFF}no frontmatter here\n",
         ];
         for doc in cases {
-            let expected = extract_block(doc).map(|(_, o)| o).unwrap_or(0);
+            let expected = extract_block(doc).map(|(_, o)| o).unwrap_or(bom_len(doc));
             let actual = body_offset_bytes(doc.as_bytes());
             assert_eq!(actual, expected, "mismatch for {doc:?}");
         }
@@ -1007,6 +1044,155 @@ mod patch_tests {
         };
         let out = patch_frontmatter(body, &patch).unwrap();
         assert_eq!(out, "---\r\ntitle: t\r\n---\r\nbody\r\nmore\r\n");
+    }
+
+    fn archived() -> FmPatch {
+        FmPatch {
+            set: vec![("status".into(), FmValue::Str("archived".into()))],
+            remove: vec![],
+        }
+    }
+
+    #[test]
+    fn status_patch_keeps_bom_line_endings_and_body() {
+        let cases = [
+            (
+                "\u{FEFF}---\ntitle: t\nstatus: draft\n---\nBody.\n",
+                "\u{FEFF}---\ntitle: t\nstatus: archived\n---\nBody.\n",
+            ),
+            (
+                "\u{FEFF}Body.\n",
+                "\u{FEFF}---\nstatus: archived\n---\nBody.\n",
+            ),
+            (
+                "---\r\ntitle: t\r\nstatus: draft\r\n---\r\nC:\\temp\reseed\r\n",
+                "---\r\ntitle: t\r\nstatus: archived\r\n---\r\nC:\\temp\reseed\r\n",
+            ),
+            (
+                "\u{FEFF}---\r\ntitle: t\r\nstatus: draft\r\n---\r\nBody.\r\n",
+                "\u{FEFF}---\r\ntitle: t\r\nstatus: archived\r\n---\r\nBody.\r\n",
+            ),
+            (
+                "\u{FEFF}Body.\r\n",
+                "\u{FEFF}---\r\nstatus: archived\r\n---\r\nBody.\r\n",
+            ),
+            (
+                "---\ntitle: t\nstatus: draft\n---\nlf\r\ncrlf\n",
+                "---\ntitle: t\nstatus: archived\n---\nlf\r\ncrlf\n",
+            ),
+            (
+                "---\ntitle: t\r\nstatus: draft\r\n---\r\nBody\r\n",
+                "---\ntitle: t\r\nstatus: archived\r\n---\r\nBody\r\n",
+            ),
+            (
+                "---\ntitle: t\nstatus: draft\r\n---\nBody\n",
+                "---\ntitle: t\nstatus: archived\r\n---\nBody\n",
+            ),
+            (
+                "---\ntitle: t\r\n---\nBody\n",
+                "---\ntitle: t\r\nstatus: archived\r\n---\nBody\n",
+            ),
+            (
+                "---\nstatus: closed, 3 open as a\n  reliability fix\n---\nBody\n",
+                "---\nstatus: archived\n---\nBody\n",
+            ),
+        ];
+        for (doc, expected) in cases {
+            let out = patch_frontmatter(doc, &archived()).unwrap();
+            assert_eq!(out, expected, "{doc:?}");
+            assert_eq!(
+                &out[parse(&out).body_offset..],
+                &doc[parse(doc).body_offset..],
+                "body of {doc:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn crlf_doc_saved_from_an_lf_editor_keeps_its_bytes() {
+        use crate::docs::parts::{compose, split, FrontmatterEdit};
+
+        let cases = [
+            (
+                "---\r\ntitle: t\r\nstatus: draft\r\n---\r\nC:\\temp\reseed\r\nnext\r\n",
+                "---\r\ntitle: t\r\nstatus: archived\r\n---\r\nC:\\temp\reseed\r\nnext\r\n",
+            ),
+            (
+                "\u{FEFF}---\r\ntitle: t\r\nstatus: draft\r\n---\r\nBody.\r\n",
+                "\u{FEFF}---\r\ntitle: t\r\nstatus: archived\r\n---\r\nBody.\r\n",
+            ),
+        ];
+        for (doc, expected) in cases {
+            let editor_body = split(doc).body(doc).replace("\r\n", "\n");
+            let noop = FrontmatterEdit::Patch(FmPatch::default());
+            assert_eq!(compose(doc, &editor_body, &noop).unwrap(), doc, "{doc:?}");
+            let status = FrontmatterEdit::Patch(archived());
+            assert_eq!(
+                compose(doc, &editor_body, &status).unwrap(),
+                expected,
+                "{doc:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_patch_never_rewrites_a_block_with_stray_lines() {
+        let conflicted = "---\ntitle: t\n<<<<<<< HEAD\nstatus: draft\n=======\nstatus: implemented\n>>>>>>> 452404f (Sync thoughts - 08:29:47)\n---\nBody\n";
+        let junk = "---\ntitle: t\nstatus: draft\nnot a key line\n---\nBody\n";
+        let absent = FmPatch {
+            set: vec![],
+            remove: vec!["ticket".into()],
+        };
+        for doc in [conflicted, junk] {
+            assert!(
+                matches!(patch_frontmatter(doc, &archived()), Err(FmError::Malformed)),
+                "{doc:?}"
+            );
+            assert_eq!(patch_frontmatter(doc, &absent).unwrap(), doc);
+        }
+    }
+
+    #[test]
+    fn an_lf_editor_body_keeps_each_line_ending_of_a_mixed_doc() {
+        use crate::docs::parts::{compose, split, FrontmatterEdit};
+
+        let doc = "---\ntitle: t\r\n---\r\n# H\nline one\r\nline two\nline three\r\nline four\n";
+        let head = "---\ntitle: t\r\n---\r\n";
+        let editor = split(doc).body(doc).replace("\r\n", "\n");
+        let cases = [
+            (
+                editor.replacen("one", "ONE", 1),
+                "# H\nline ONE\r\nline two\nline three\r\nline four\n",
+            ),
+            (
+                editor.replacen("one", "ONE", 1).replacen("four", "FOUR", 1),
+                "# H\nline ONE\r\nline two\nline three\r\nline FOUR\n",
+            ),
+            (
+                editor.replacen("line one\n", "line one\nadded\n", 1),
+                "# H\nline one\r\nadded\r\nline two\nline three\r\nline four\n",
+            ),
+            (
+                format!("first\n{editor}"),
+                "first\n# H\nline one\r\nline two\nline three\r\nline four\n",
+            ),
+            (
+                editor.replacen("line two\n", "", 1),
+                "# H\nline one\r\nline three\r\nline four\n",
+            ),
+            (
+                editor.trim_end().to_string(),
+                "# H\nline one\r\nline two\nline three\r\nline four",
+            ),
+        ];
+        let noop = FrontmatterEdit::Patch(FmPatch::default());
+        for (edited, body) in cases {
+            assert_eq!(
+                compose(doc, &edited, &noop).unwrap(),
+                format!("{head}{body}"),
+                "{edited:?}"
+            );
+        }
     }
 
     #[test]

@@ -203,8 +203,7 @@
               "byte_identical": true
             },
             "mixed-eol": {
-              "body_eol_normalised": true,
-              "frontmatter_unchanged": true
+              "byte_identical": true
             },
             "no-frontmatter": {
               "byte_identical": true
@@ -219,7 +218,7 @@
               "byte_identical": true
             }
           },
-          "guard": "editing and reverting a body leaves the file byte-identical (mixed-eol excepted)",
+          "guard": "editing and reverting a body leaves the file byte-identical",
           "ok": true
         }
       ],
