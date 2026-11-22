@@ -126,15 +126,16 @@ async fn remote_host() {
         Request::TerminalWrite {
             terminal_id: terminal.clone(),
             data: keystrokes(
-                "printf 'OS=%s\\n' \"$(uname -s)\"; printf 'CWD=%s\\n' \"$PWD\"; printf 'E2E_%s\\n' OK\n",
+                "printf '%s\\n%s\\n' \"$(uname -s)\" \"$PWD\" > \"$HOME/terminal-where\"; printf 'E2E_%s\\n' OK\n",
             ),
         },
     )
     .await
     .expect("terminal_write");
-    let output = read_until(&mut events, "E2E_OK", IO).await;
-    let os = value_of(&output, "OS=");
-    let cwd = value_of(&output, "CWD=");
+    read_until(&mut events, "E2E_OK", IO).await;
+    let terminal_where = host.exec("cat \"$HOME/terminal-where\" 2>/dev/null || true");
+    let mut lines = terminal_where.lines().map(str::to_string);
+    let (os, cwd) = (lines.next(), lines.next());
     j.guard(
         "the terminal runs on the host, in the folder",
         os.as_deref() == Some("Linux") && cwd.as_deref() == Some("/home/e2e/notes"),
@@ -276,14 +277,4 @@ fn ids_of(workstreams: &Value) -> Vec<String> {
         .as_array()
         .map(|items| items.iter().map(|w| text(w, "/item/id")).collect())
         .unwrap_or_default()
-}
-
-/// The value on the first output line that starts with `prefix`; the echoed
-/// command line never does, because the prompt precedes it.
-fn value_of(output: &str, prefix: &str) -> Option<String> {
-    output
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(prefix))
-        .map(str::to_string)
 }
