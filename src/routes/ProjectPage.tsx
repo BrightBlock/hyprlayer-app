@@ -472,7 +472,7 @@ export function ProjectPage() {
     return () => setActiveWorkstream(null);
   }, [wsId]);
 
-  useSeedWorkstreamTabs(wsId, bootstrap.isSuccess);
+  useSeedWorkstreamTabs(wsId, bootstrap.isSuccess, !!activeView?.item.parentWorkstreamId);
 
   useEffect(() => {
     if (!wsId) return;

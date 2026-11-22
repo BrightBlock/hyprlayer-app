@@ -417,13 +417,20 @@ export function seedWorkstreamTabs(workstreamId: string, mode?: StageKey): void 
   updateWorkstreamTabs((all) => ({ ...all, [workstreamId]: { ...base, shells } }));
 }
 
-/** Stores a viewed workstream's first tabs once settings are known, before paint, so no chat flashes first. */
-export function useSeedWorkstreamTabs(workstreamId: string | null, settingsLoaded: boolean): void {
+/**
+ * Stores a viewed workstream's first tabs once settings are known, before paint, so no chat flashes first.
+ * An agent-created workstream starts blank: its creator spawns the first agent into it.
+ */
+export function useSeedWorkstreamTabs(
+  workstreamId: string | null,
+  settingsLoaded: boolean,
+  agentCreated: boolean,
+): void {
   useLayoutEffect(() => {
-    if (settingsLoaded && workstreamId && !useWorkstreamTabsStore.getState().byWs[workstreamId]) {
-      seedWorkstreamTabs(workstreamId);
-    }
-  }, [workstreamId, settingsLoaded]);
+    if (!settingsLoaded || !workstreamId || useWorkstreamTabsStore.getState().byWs[workstreamId]) return;
+    if (agentCreated) updateWorkstreamTabs((all) => ({ ...all, [workstreamId]: blankTabState() }));
+    else seedWorkstreamTabs(workstreamId);
+  }, [workstreamId, settingsLoaded, agentCreated]);
 }
 
 export const useComposerFocusStore =create<{ pendingShellId: number | null }>(() => ({
