@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -328,18 +329,23 @@ pub(crate) fn spawn(
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
     attribution: Option<Arc<DocAttribution>>,
+    server_stopping: Arc<AtomicBool>,
 ) -> ActorHandle {
     let (ingress_tx, ingress_rx) = mpsc::channel(INGRESS_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel();
-    let join = tokio::spawn(run(
-        session_id,
-        db,
-        events,
-        attribution,
-        ingress_tx.clone(),
-        ingress_rx,
-        control_rx,
-    ));
+    let ingress_sender = ingress_tx.clone();
+    let join = tokio::spawn(async move {
+        let state = ActorState::new(
+            session_id,
+            db,
+            events,
+            attribution,
+            server_stopping,
+            ingress_sender,
+        )
+        .await;
+        run(state, ingress_rx, control_rx).await;
+    });
     ActorHandle {
         ingress: ingress_tx,
         control: control_tx,
@@ -348,15 +354,10 @@ pub(crate) fn spawn(
 }
 
 async fn run(
-    session_id: String,
-    db: Arc<Db>,
-    events: broadcast::Sender<RuntimeEvent>,
-    attribution: Option<Arc<DocAttribution>>,
-    ingress_sender: mpsc::Sender<SessionEvent>,
+    mut state: ActorState,
     mut ingress_rx: mpsc::Receiver<SessionEvent>,
     mut control_rx: mpsc::UnboundedReceiver<Control>,
 ) {
-    let mut state = ActorState::new(session_id, db, events, attribution, ingress_sender).await;
     loop {
         tokio::select! {
             biased;
@@ -467,6 +468,7 @@ struct ActorState {
     streams_kept: bool,
     /// The next detach relaunches nothing, so its row must stop claiming a live harness.
     settle_on_detach: bool,
+    server_stopping: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -481,6 +483,7 @@ impl ActorState {
         db: Arc<Db>,
         events: broadcast::Sender<RuntimeEvent>,
         attribution: Option<Arc<DocAttribution>>,
+        server_stopping: Arc<AtomicBool>,
         ingress_sender: mpsc::Sender<SessionEvent>,
     ) -> Self {
         let sid = session_id.clone();
@@ -525,6 +528,7 @@ impl ActorState {
             keep_streams: false,
             streams_kept: false,
             settle_on_detach: false,
+            server_stopping,
         }
     }
 
@@ -910,8 +914,12 @@ impl ActorState {
         if unreportable_exit {
             let db = self.db.clone();
             let sid = self.session_id.clone();
+            // The server's own stop keeps the row: the next start reads it to wake the session.
+            let cut_off_by_stop = self.server_stopping.load(Ordering::SeqCst);
             let written = blocking(move || {
-                db.clear_orphans_for(&sid)?;
+                if !cut_off_by_stop {
+                    db.clear_orphans_for(&sid)?;
+                }
                 if settle {
                     db.settle_session(&sid)?;
                 }

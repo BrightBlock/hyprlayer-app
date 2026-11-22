@@ -152,7 +152,7 @@ async fn goal_server_restart() {
     );
     let named = sandbox
         .server_log()
-        .contains(&format!("reaping goal orphan pid {pid} (session {s2})"));
+        .contains(&format!("reaping orphan pid {pid} (session {s2})"));
     j.guard(
         "the server log names the reap of that pid",
         named,

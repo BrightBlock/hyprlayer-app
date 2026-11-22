@@ -548,6 +548,8 @@ pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
 /// The `prompt_name` every iteration turn is sent under, so a client can tell it from a typed message.
 pub const GOAL_PROMPT_NAME: &str = "hyprlayer:goal";
 
+pub const RESTART_PROMPT_NAME: &str = "hyprlayer:restart";
+
 pub const GOAL_PREAMBLE: &str = "Goal (checked after each turn): {condition}\nChecks: {checks}\n\
 Work toward it and end your turn when you have made real progress. If you cannot continue \
 without a decision from the user, write a line starting with NEEDS-HUMAN: and stop.";

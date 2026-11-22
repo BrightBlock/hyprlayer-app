@@ -6,9 +6,11 @@ mod recap;
 pub mod registry;
 mod service;
 pub(crate) mod titles;
+pub(crate) mod wake;
 mod workflow_bridge;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
@@ -39,6 +41,7 @@ pub(crate) struct SessionActors {
     events: broadcast::Sender<RuntimeEvent>,
     attribution: Option<Arc<DocAttribution>>,
     handles: AsyncMutex<HashMap<String, forwarder::ActorHandle>>,
+    stopping: Arc<AtomicBool>,
 }
 
 impl SessionActors {
@@ -52,7 +55,12 @@ impl SessionActors {
             events,
             attribution,
             handles: AsyncMutex::new(HashMap::new()),
+            stopping: Arc::default(),
         }
+    }
+
+    pub(crate) fn server_stopping(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
     }
 
     fn spawn_actor(&self, session_id: &str) -> forwarder::ActorHandle {
@@ -61,6 +69,7 @@ impl SessionActors {
             self.db.clone(),
             self.events.clone(),
             self.attribution.clone(),
+            self.stopping.clone(),
         )
     }
 

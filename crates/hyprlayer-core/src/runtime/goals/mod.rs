@@ -41,8 +41,8 @@ const REASON_CHARS: usize = 200;
 const WORKSTREAM_STOP_WAIT: Duration = Duration::from_secs(5);
 const FINISHING_WAIT: Duration = Duration::from_secs(2);
 /// A remote host may have no desktop to send one.
-const OVERLAY_WAIT: Duration = Duration::from_secs(30);
-const MAX_RESTART_RESUMES: u32 = 3;
+pub(crate) const OVERLAY_WAIT: Duration = Duration::from_secs(30);
+pub(crate) const MAX_RESTART_RESUMES: u32 = 3;
 const DERIVED_TIMEOUT_SECS: u32 = 600;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

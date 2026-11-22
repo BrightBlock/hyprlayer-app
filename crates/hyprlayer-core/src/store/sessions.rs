@@ -636,19 +636,42 @@ impl Db {
         })
     }
 
-    /// Rows a previous server left mid-turn; their harnesses died with it.
+    /// Rows a previous server left live; their harnesses died with it. Queues a wake for each mid-turn one and counts them.
     pub fn settle_stale_sessions(&self) -> Result<usize> {
+        let stale = [
+            SessionState::Starting.as_str(),
+            SessionState::Running.as_str(),
+            SessionState::AwaitingPermission.as_str(),
+            SessionState::AwaitingQuestion.as_str(),
+        ];
         self.with(|conn| {
-            conn.execute(
+            let tx = conn.unchecked_transaction()?;
+            let mid_turn = tx
+                .prepare(&format!(
+                    "SELECT {COLS} FROM sessions WHERE state IN (?1, ?2, ?3, ?4)"
+                ))?
+                .query_map(stale, row_to_session)?
+                .filter_map(|row| row.map(|s| s.working.then_some(s.id)).transpose())
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for id in &mid_turn {
+                tx.execute(
+                    "INSERT INTO pending_wakes (session_id, mid_turn) VALUES (?1, 1)
+                     ON CONFLICT(session_id) DO UPDATE SET mid_turn = 1",
+                    params![id],
+                )?;
+            }
+            tx.execute(
                 "UPDATE sessions SET state = ?1 WHERE state IN (?2, ?3, ?4, ?5)",
                 params![
                     SessionState::Idle.as_str(),
-                    SessionState::Starting.as_str(),
-                    SessionState::Running.as_str(),
-                    SessionState::AwaitingPermission.as_str(),
-                    SessionState::AwaitingQuestion.as_str(),
+                    stale[0],
+                    stale[1],
+                    stale[2],
+                    stale[3]
                 ],
-            )
+            )?;
+            tx.commit()?;
+            Ok(mid_turn.len())
         })
     }
 
@@ -1132,9 +1155,34 @@ impl Db {
         })
     }
 
-    pub fn clear_all_orphans(&self) -> Result<()> {
+    pub fn queue_orphan_wakes(&self) -> Result<()> {
         self.with(|conn| {
-            conn.execute("DELETE FROM orphan_pids", [])?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "INSERT OR IGNORE INTO pending_wakes (session_id, mid_turn)
+                 SELECT DISTINCT session_id, 0 FROM orphan_pids",
+                [],
+            )?;
+            tx.execute("DELETE FROM orphan_pids", [])?;
+            tx.commit()
+        })
+    }
+
+    pub fn pending_wakes(&self) -> Result<Vec<(String, bool)>> {
+        self.with(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT session_id, mid_turn FROM pending_wakes ORDER BY session_id")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    pub fn delete_pending_wake(&self, session_id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "DELETE FROM pending_wakes WHERE session_id = ?1",
+                params![session_id],
+            )?;
             Ok(())
         })
     }
@@ -1411,7 +1459,15 @@ mod tests {
         assert_eq!(left.len(), 1);
         assert_eq!((left[0].0, left[0].1.as_str()), (5678, "s2"));
         assert!(left[0].2 > 0.0);
-        db.clear_all_orphans().unwrap();
+        db.record_orphan(9012, "s2").unwrap();
+        db.record_orphan(3456, "s3").unwrap();
+        db.queue_orphan_wakes().unwrap();
         assert!(db.list_orphans().unwrap().is_empty());
+        assert_eq!(
+            db.pending_wakes().unwrap(),
+            [("s2".to_string(), false), ("s3".to_string(), false)]
+        );
+        db.delete_pending_wake("s2").unwrap();
+        assert_eq!(db.pending_wakes().unwrap(), [("s3".to_string(), false)]);
     }
 }

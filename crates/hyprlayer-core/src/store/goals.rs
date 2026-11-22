@@ -1,4 +1,3 @@
-use hyprlayer_models::agent::Harness;
 use hyprlayer_models::goal::{
     Goal, GoalCheck, GoalCheckOutcome, GoalCheckResult, GoalEndReason, GoalIteration,
     GoalIterationNote, GoalLimits, GoalPauseReason, GoalSource, GoalSpec, GoalStatus, GoalStep,
@@ -450,25 +449,6 @@ impl Db {
                 row_to_goal,
             )
             .optional()
-        })
-    }
-
-    /// The sessions of running and paused goals, with each one's harness and harness session id.
-    pub fn live_goal_sessions(&self) -> Result<Vec<(String, Harness, Option<String>)>> {
-        self.with(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT s.id, s.harness, s.claude_session_id FROM goals g
-                   JOIN sessions s ON s.id = g.session_id
-                  WHERE g.status IN ('running', 'paused')",
-            )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    Harness::parse(&row.get::<_, String>(1)?),
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            })?;
-            rows.collect()
         })
     }
 

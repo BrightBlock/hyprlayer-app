@@ -305,6 +305,12 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_claude_worktrees_name ON claude_worktrees(project_path, name);
     ",
+    "
+    CREATE TABLE pending_wakes (
+        session_id TEXT PRIMARY KEY,
+        mid_turn   INTEGER NOT NULL
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

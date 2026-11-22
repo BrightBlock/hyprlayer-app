@@ -193,21 +193,26 @@ impl HyprlayerRuntime {
         let db = Arc::new(Db::open(&db_path)?);
 
         let mut cut_off = HashSet::new();
+        if let Ok(queued) = db.pending_wakes() {
+            if !queued.is_empty() {
+                tracing::info!(
+                    "{} wake(s) an earlier start never ran are still queued",
+                    queued.len()
+                );
+            }
+            cut_off.extend(queued.into_iter().map(|(session, _)| session));
+        }
         if let Ok(orphans) = db.list_orphans() {
             cut_off.extend(orphans.iter().map(|(_, session, _)| session.clone()));
             if !orphans.is_empty() {
-                let reaped = reap_goal_orphans(&db, &orphans).await;
+                let reaped = reap_orphans(&db, &orphans).await;
                 // A pid may since belong to something else; the program says.
                 let described: Vec<String> = orphans
                     .iter()
                     .filter(|(pid, ..)| !reaped.contains(pid))
-                    .map(|(pid, session, _)| {
-                        match crate::process::orphan::running_program(*pid as u32) {
-                            Some(program) => {
-                                format!("{pid} (session {session}) still runs {program}")
-                            }
-                            None => format!("{pid} (session {session}) has exited"),
-                        }
+                    .filter_map(|(pid, session, _)| {
+                        let program = crate::process::orphan::running_program(*pid as u32)?;
+                        Some(format!("{pid} (session {session}) still runs {program}"))
                     })
                     .collect();
                 if !described.is_empty() {
@@ -217,7 +222,11 @@ impl HyprlayerRuntime {
                         described.join("; ")
                     );
                 }
-                let _ = db.clear_all_orphans();
+                if let Err(e) = db.queue_orphan_wakes() {
+                    tracing::warn!(
+                        "could not queue wakes for the sessions a previous run cut off: {e}"
+                    );
+                }
             }
         }
 
@@ -469,6 +478,7 @@ impl HyprlayerRuntime {
             sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
 
         let goal_task = goals::spawn_resumer(self.goal_runners.clone(), Arc::downgrade(self));
+        let wake_task = sessions::wake::spawn_waker(Arc::downgrade(self));
 
         // A required tool is usually installed from a terminal, outside the
         // app. Coming back to the window re-reads the login shell's `PATH`;
@@ -548,6 +558,7 @@ impl HyprlayerRuntime {
             account_task,
             title_task,
             goal_task,
+            wake_task,
             rescan_task,
             fetch_task,
         ]);
@@ -679,6 +690,7 @@ impl HyprlayerRuntime {
 
                 self.pty_agents.stop_app_servers();
                 let terminals = self.terminals.kill_all_blocking();
+                self.session_actors.server_stopping();
                 let sessions = self.session_registry.kill_all_blocking();
                 self.opencode.shutdown().await;
                 let count = |killed: Option<usize>| {
@@ -705,6 +717,7 @@ impl HyprlayerRuntime {
         self.coordinator.shutdown_now(|| {
             self.pty_agents.stop_app_servers();
             self.terminals.kill_all_blocking();
+            self.session_actors.server_stopping();
             self.session_registry.kill_all_blocking();
             self.opencode.kill_blocking();
         });
@@ -823,21 +836,19 @@ impl HyprlayerRuntime {
     }
 }
 
-/// Kills the harness a live goal's session left running, so its relaunch is the only one; returns the pids signalled.
-async fn reap_goal_orphans(db: &Db, orphans: &[(i64, String, f64)]) -> HashSet<i64> {
+/// Kills the harness a cut-off session left running, so its relaunch is the only one; returns the pids signalled.
+async fn reap_orphans(db: &Db, orphans: &[(i64, String, f64)]) -> HashSet<i64> {
     use crate::process::orphan;
 
-    let sessions = match db.live_goal_sessions() {
-        Ok(sessions) => sessions,
-        Err(e) => {
-            tracing::warn!("could not read the sessions of live goals: {e}");
-            return HashSet::new();
-        }
-    };
     let mut reaped = HashSet::new();
     for (pid, session, spawned_at) in orphans {
-        let Some((_, harness, harness_id)) = sessions.iter().find(|(id, ..)| id == session) else {
-            continue;
+        let row = match db.get_session(session) {
+            Ok(Some(row)) => row,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!("session {session}: its orphan pid {pid} was not checked: {e}");
+                continue;
+            }
         };
         let Some(line) = u32::try_from(*pid)
             .ok()
@@ -848,15 +859,15 @@ async fn reap_goal_orphans(db: &Db, orphans: &[(i64, String, f64)]) -> HashSet<i
         };
         // A fork resumes under its own harness session id.
         let ours = std::iter::once(session.as_str())
-            .chain(harness_id.as_deref())
-            .any(|id| orphan::harness_orphan_matches(&line, *harness, id));
+            .chain(row.provider_session_id.as_deref())
+            .any(|id| orphan::harness_orphan_matches(&line, row.harness, id));
         // A codex argv names no thread, so a pid that started after its record was reused.
-        let reused = *harness == crate::agent::Harness::Codex
+        let reused = row.harness == crate::agent::Harness::Codex
             && !orphan::started_by(orphan::started_at_ms(*pid as u32), *spawned_at);
         if !ours || reused {
             continue;
         }
-        tracing::warn!("reaping goal orphan pid {pid} (session {session})");
+        tracing::warn!("reaping orphan pid {pid} (session {session})");
         orphan::kill_group(*pid as u32);
         reaped.insert(*pid);
     }
@@ -866,7 +877,7 @@ async fn reap_goal_orphans(db: &Db, orphans: &[(i64, String, f64)]) -> HashSet<i
         .any(|pid| orphan::cmdline(*pid as u32).is_some())
     {
         if tokio::time::Instant::now() >= deadline {
-            tracing::warn!("a reaped goal orphan was still running after {ORPHAN_EXIT_WAIT:?}");
+            tracing::warn!("a reaped orphan was still running after {ORPHAN_EXIT_WAIT:?}");
             break;
         }
         tokio::time::sleep(ORPHAN_POLL).await;

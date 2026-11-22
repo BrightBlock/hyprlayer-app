@@ -12,14 +12,32 @@
         },
         {
           "evidence": {
+            "opened": true,
+            "turnDone": true
+          },
+          "guard": "a turn starts a background task and ends",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "hung": true
+          },
+          "guard": "a stub that never answers holds a turn open",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "$BACKGROUND": "running",
             "$ENDED": "killed",
+            "$IDLE": "running",
+            "$LOOP": "running",
             "$PARKED": "awaiting_permission"
           },
           "guard": "the rows record a parked and an ended session",
           "ok": true
         }
       ],
-      "step": "park one session on a permission ask and kill another"
+      "step": "park a session on an ask, open a background task in another, leave two idle, kill one"
     },
     {
       "guards": [
@@ -32,23 +50,126 @@
         },
         {
           "evidence": {
-            "active": 0
+            "background": {
+              "launches": 2,
+              "namesTask": true,
+              "resumed": true,
+              "wakes": 1
+            },
+            "ended": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "idle": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "loop": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            },
+            "parked": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            }
           },
-          "guard": "no session is live on a fresh server",
+          "guard": "the sessions cut off mid-turn or with a task open are resumed, each woken once",
           "ok": true
         },
         {
           "evidence": {
-            "$ENDED": "killed",
-            "$PARKED": "idle"
+            "background": {
+              "launches": 2,
+              "namesTask": true,
+              "resumed": true,
+              "wakes": 1
+            },
+            "ended": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "idle": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "loop": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            },
+            "parked": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            }
           },
-          "guard": "the parked row is settled to idle",
+          "guard": "only the background session's wake names its task",
           "ok": true
         },
         {
           "evidence": {
-            "$ENDED": "killed",
-            "$PARKED": "idle"
+            "background": {
+              "launches": 2,
+              "namesTask": true,
+              "resumed": true,
+              "wakes": 1
+            },
+            "ended": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "idle": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "loop": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            },
+            "parked": {
+              "launches": 2,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 1
+            }
+          },
+          "guard": "the clean idle and the ended sessions stay asleep",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "live": [
+              "background",
+              "loop",
+              "parked"
+            ]
+          },
+          "guard": "only the woken sessions are live",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "ended": "killed"
           },
           "guard": "the ended row keeps its outcome",
           "ok": true
@@ -60,10 +181,9 @@
       "guards": [
         {
           "evidence": {
-            "$ENDED": "killed",
-            "$PARKED": "awaiting_permission"
+            "parked": "awaiting_permission"
           },
-          "guard": "the resumed session parks on a new ask",
+          "guard": "the woken session parks on a new ask",
           "ok": true
         },
         {
@@ -75,14 +195,126 @@
         },
         {
           "evidence": {
-            "$ENDED": "killed",
-            "$PARKED": "idle"
+            "background": {
+              "launches": 2,
+              "namesTask": true,
+              "resumed": true,
+              "wakes": 1
+            },
+            "ended": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "idle": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "loop": {
+              "launches": 3,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 2
+            },
+            "parked": {
+              "launches": 3,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 2
+            }
           },
-          "guard": "a crash leaves no row claiming to be live",
+          "guard": "the mid-turn sessions get one more wake each",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "background": {
+              "launches": 2,
+              "namesTask": true,
+              "resumed": true,
+              "wakes": 1
+            },
+            "ended": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "idle": {
+              "launches": 1,
+              "namesTask": false,
+              "resumed": false,
+              "wakes": 0
+            },
+            "loop": {
+              "launches": 3,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 2
+            },
+            "parked": {
+              "launches": 3,
+              "namesTask": false,
+              "resumed": true,
+              "wakes": 2
+            }
+          },
+          "guard": "a task from before the last relaunch and a finished turn wake nothing",
           "ok": true
         }
       ],
-      "step": "resume, park again, and restart after a crash"
+      "step": "park the woken session again and restart after a crash"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "capLogged": true,
+            "launches": 4,
+            "wakesAfterFourth": 3,
+            "wakesAfterThird": 3
+          },
+          "guard": "the third restart wakes it, the fourth logs the cap instead",
+          "ok": true
+        }
+      ],
+      "step": "a session that never answers its wake is woken three times at most"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gone": true,
+            "leftoverLogged": true,
+            "passed": true,
+            "windowedPass": false,
+            "wokenOnce": true
+          },
+          "guard": "a start killed before its wakes run leaves them to the next, which wakes each once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "atMostTwo": true,
+            "threeStarted": true
+          },
+          "guard": "at most two wakes start at once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "launchedOnce": true,
+            "sent": true,
+            "skipLogged": true
+          },
+          "guard": "a session cut off before its harness started is not relaunched as a new conversation",
+          "ok": true
+        }
+      ],
+      "step": "a restart before the wakes run keeps them, and the next start runs two at once"
     },
     {
       "guards": [

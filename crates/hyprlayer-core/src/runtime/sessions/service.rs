@@ -49,7 +49,9 @@ impl HyprlayerRuntime {
     }
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+pub(super) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
     match tokio::task::spawn_blocking(f).await {
         Ok(result) => result,
         Err(join_err) => Err(CoreError::Io(std::io::Error::other(join_err.to_string()))),
@@ -1638,6 +1640,28 @@ impl SessionService<'_> {
         self.launch_driver(params).await.map(Some)
     }
 
+    pub(crate) async fn resume_if_exited_held(
+        &self,
+        session: Session,
+        project_path: String,
+        held: &OpGuard<'_>,
+    ) -> Result<Option<Arc<dyn AgentDriver>>> {
+        let params = LaunchSessionParams {
+            permission_mode: session.requested_permission_mode,
+            session,
+            project_path,
+            model: None,
+            effort: None,
+            resume: true,
+            boundary_on_relaunch: true,
+            max_budget_usd: None,
+            extra_allowed_tools: Vec::new(),
+            extra_disallowed_tools: Vec::new(),
+            report_only: false,
+        };
+        self.launch_if_exited_held(params, held).await
+    }
+
     pub(crate) async fn launch_driver(
         &self,
         mut params: LaunchSessionParams,
@@ -1715,6 +1739,11 @@ impl SessionService<'_> {
             session.cwd
         );
 
+        // A running session's next restart wake comes from this launch's own rows, not a queued one.
+        let (db, sid) = (self.runtime.db.clone(), session_id.clone());
+        if let Err(e) = blocking(move || db.delete_pending_wake(&sid)).await {
+            tracing::warn!("session {session_id}: its queued restart wake stays: {e}");
+        }
         if let Some(pid) = driver.pid() {
             let db = self.runtime.db.clone();
             let sid = session_id.clone();
