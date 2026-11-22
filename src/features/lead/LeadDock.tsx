@@ -5,7 +5,7 @@ import { Button, ErrorNote, Spinner } from "@/components/ui";
 import type { WorkstreamView } from "@/lib/bindings";
 import { formatCompactAge } from "@/lib/format";
 import { errorMessage } from "@/lib/ipc";
-import { useArchiveWorkstream, useMessageLead, useWorkstreamSessions } from "@/lib/queries";
+import { useMessageLead, useWorkstreamSessions } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useSlowNow } from "@/lib/useSlowNow";
@@ -30,26 +30,27 @@ function tokenMs(name: string, fallback: number): number {
 
 const SHRINK_SHARE = 0.7;
 
-// The mutation's promise, not mutate's callbacks: archiving drops the workstream, which unmounts this.
+// The server archives the workstream before it forwards an Archive answer.
 export function ArchiveOrLater({ ask, workstream }: { ask: LeadAsk; workstream: WorkstreamView }) {
-  const archive = useArchiveWorkstream();
+  const [busy, setBusy] = useState(false);
   const answer = (label: string) => {
     const q = ask.question.questions[0];
-    void answerQuestion(ask.sessionId, ask.question.requestId, q ? { [q.question]: label } : {});
+    return answerQuestion(ask.sessionId, ask.question.requestId, q ? { [q.question]: label } : {});
   };
-  const archiveThenAnswer = () =>
-    archive.mutateAsync({ id: workstream.item.id }).then(
-      () => answer("Archive"),
-      (e: unknown) =>
-        useToast.getState().show(`Couldn't archive ${workstream.item.title}`, errorMessage(e), { tone: "bad" }),
-    );
+  const archiveThenAnswer = () => {
+    setBusy(true);
+    answer("Archive").catch((e: unknown) => {
+      setBusy(false);
+      useToast.getState().show(`Couldn't archive ${workstream.item.title}`, errorMessage(e), { tone: "bad" });
+    });
+  };
 
   return (
     <span className="flex shrink-0 items-center gap-1.5">
-      <Button variant="primary" size="sm" busy={archive.isPending} onClick={() => void archiveThenAnswer()}>
+      <Button variant="primary" size="sm" busy={busy} onClick={archiveThenAnswer}>
         Archive
       </Button>
-      <Button size="sm" disabled={archive.isPending} onClick={() => answer("Later")}>
+      <Button size="sm" disabled={busy} onClick={() => void answer("Later")}>
         Later
       </Button>
     </span>
