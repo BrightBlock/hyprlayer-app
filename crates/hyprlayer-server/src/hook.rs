@@ -1,5 +1,6 @@
 //! `hyprlayer-server hook <engine> [Event]`: a claude or codex hook that reports one signal and gets out of the way.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -320,9 +321,10 @@ const MUTATING_GIT: [&str; 18] = [
 
 /// `hyprlayer-server lead-guard <checkout>`: a Lead's PreToolUse hook that refuses writes to its main checkout.
 pub fn run_lead_guard(checkout: &str) -> i32 {
+    let env = |name: &str| std::env::var(name).ok();
     let reason = read_stdin()
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-        .and_then(|payload| lead_refusal(&payload, Path::new(checkout)));
+        .and_then(|payload| lead_refusal(&payload, Path::new(checkout), &env));
     if let Some(reason) = reason {
         let answer = serde_json::json!({ "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -334,7 +336,16 @@ pub fn run_lead_guard(checkout: &str) -> i32 {
     0
 }
 
-fn lead_refusal(payload: &Value, checkout: &Path) -> Option<String> {
+/// A shell variable's value; `None` when the guard cannot know it.
+type Vars = HashMap<String, Option<String>>;
+
+/// The hook runs in claude's environment, which its Bash tool shares, so `env` stands in for
+/// variables the command does not assign itself.
+fn lead_refusal(
+    payload: &Value,
+    checkout: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     let input = payload.get("tool_input")?;
     let cwd = payload
         .get("cwd")
@@ -354,15 +365,27 @@ Create a workstream and spawn an agent to make the change."
             under(&cwd.join(path), checkout).then(|| refuse("a file edit"))?
         }
         "Bash" => {
-            let mut at = cwd.to_path_buf();
+            let mut shell = Shell {
+                env,
+                vars: Vars::new(),
+            };
+            let mut at = Some(cwd.to_path_buf());
             for segment in input.get("command")?.as_str()?.split(['\n', ';', '&', '|']) {
                 let words: Vec<&str> = segment.split_whitespace().collect();
+                if let Some(assigned) = assignments(&words) {
+                    for (name, value) in assigned {
+                        let value = shell.expand(value);
+                        shell.vars.insert(name.to_string(), value);
+                    }
+                    continue;
+                }
                 match words.as_slice() {
-                    ["cd" | "pushd"] => at = PathBuf::from("/"),
-                    ["cd" | "pushd", dir, ..] => at = at.join(unquote(dir)),
+                    ["cd" | "pushd"] => at = Some(PathBuf::from("/")),
+                    ["cd" | "pushd", dir, ..] => at = shell.resolve(at.as_deref(), dir),
                     ["git", rest @ ..] => {
-                        if let (repo, Some(sub)) = git_target(&at, rest) {
-                            if MUTATING_GIT.contains(&sub) && under(&repo, checkout) {
+                        if let (repo, Some(sub)) = git_target(&shell, at.as_deref(), rest) {
+                            let maybe_checkout = repo.as_deref().is_none_or(|r| under(r, checkout));
+                            if MUTATING_GIT.contains(&sub) && maybe_checkout {
                                 return refuse(&format!("`git {sub}`"));
                             }
                         }
@@ -377,9 +400,18 @@ Create a workstream and spawn an agent to make the change."
                         _ => Some(rest),
                     }
                 });
-                if let Some(target) = target.filter(|t| !t.starts_with('&') && *t != "/dev/null") {
-                    if under(&at.join(target), checkout) {
-                        return refuse("a shell redirect");
+                let Some(target) = target.filter(|t| !t.starts_with('&')) else {
+                    continue;
+                };
+                match shell.resolve(at.as_deref(), target) {
+                    Some(path) if path == Path::new("/dev/null") || !under(&path, checkout) => {}
+                    Some(_) => return refuse("a shell redirect"),
+                    None => {
+                        return Some(format!(
+                            "The Lead writes no code: a shell redirect to `{target}` is refused, since the \
+guard cannot tell where it points and it could be the main checkout. Name the file by an absolute \
+path, or create a workstream and spawn an agent to make the change."
+                        ))
                     }
                 }
             }
@@ -389,12 +421,99 @@ Create a workstream and spawn an agent to make the change."
     }
 }
 
-fn git_target<'a>(at: &Path, args: &[&'a str]) -> (PathBuf, Option<&'a str>) {
-    let mut repo = at.to_path_buf();
+struct Shell<'a> {
+    env: &'a dyn Fn(&str) -> Option<String>,
+    vars: Vars,
+}
+
+impl Shell<'_> {
+    /// A word as bash would expand it, or `None` when part of it can't be known: a command
+    /// substitution, `~user`, a parameter operator, or a variable set nowhere the guard can see.
+    fn expand(&self, word: &str) -> Option<String> {
+        if let Some(literal) = word.strip_prefix('\'').and_then(|w| w.strip_suffix('\'')) {
+            return Some(literal.to_string());
+        }
+        let word = word.trim_matches('"');
+        if word.contains("$(") || word.contains('`') {
+            return None;
+        }
+        let mut out = String::new();
+        let mut rest = match word.strip_prefix('~') {
+            Some(after) if after.is_empty() || after.starts_with('/') => {
+                out.push_str(&self.lookup("HOME")?);
+                after
+            }
+            Some(_) => return None,
+            None => word,
+        };
+        while let Some(at) = rest.find('$') {
+            out.push_str(&rest[..at]);
+            let after = &rest[at + 1..];
+            let (name, tail) = match after.strip_prefix('{') {
+                Some(braced) => braced.split_at(braced.find('}')?),
+                None => after.split_at(
+                    after
+                        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                        .unwrap_or(after.len()),
+                ),
+            };
+            if !is_name(name) {
+                return None;
+            }
+            out.push_str(&self.lookup(name)?);
+            rest = tail.strip_prefix('}').unwrap_or(tail);
+        }
+        out.push_str(rest);
+        Some(out)
+    }
+
+    fn lookup(&self, name: &str) -> Option<String> {
+        match self.vars.get(name) {
+            Some(value) => value.clone(),
+            None => (self.env)(name),
+        }
+    }
+
+    fn resolve(&self, at: Option<&Path>, word: &str) -> Option<PathBuf> {
+        let path = PathBuf::from(self.expand(word)?);
+        match path.is_absolute() {
+            true => Some(path),
+            false => Some(at?.join(path)),
+        }
+    }
+}
+
+fn is_name(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// A segment that only assigns variables, which then last for the rest of the command.
+fn assignments<'a>(words: &[&'a str]) -> Option<Vec<(&'a str, &'a str)>> {
+    let words = match words {
+        ["export" | "local" | "declare" | "readonly", rest @ ..] => rest,
+        all => all,
+    };
+    if words.is_empty() {
+        return None;
+    }
+    words
+        .iter()
+        .map(|w| w.split_once('=').filter(|(name, _)| is_name(name)))
+        .collect()
+}
+
+/// The repo a git command runs in, `None` when it can't be known, and its subcommand.
+fn git_target<'a>(
+    shell: &Shell,
+    at: Option<&Path>,
+    args: &[&'a str],
+) -> (Option<PathBuf>, Option<&'a str>) {
+    let mut repo = at.map(Path::to_path_buf);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match *arg {
-            "-C" => repo = repo.join(unquote(args.next().unwrap_or(&""))),
+            "-C" => repo = shell.resolve(repo.as_deref(), args.next().unwrap_or(&"")),
             "-c" | "--git-dir" | "--work-tree" | "--namespace" => {
                 args.next();
             }
@@ -403,10 +522,6 @@ fn git_target<'a>(at: &Path, args: &[&'a str]) -> (PathBuf, Option<&'a str>) {
         }
     }
     (repo, None)
-}
-
-fn unquote(word: &str) -> &str {
-    word.trim_matches(['"', '\''])
 }
 
 fn under(path: &Path, checkout: &Path) -> bool {
@@ -421,4 +536,55 @@ fn under(path: &Path, checkout: &Path) -> bool {
         }
     }
     normal.starts_with(checkout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bash(command: &str) -> Option<String> {
+        let payload = serde_json::json!({
+            "tool_name": "Bash",
+            "cwd": "/home/u/repo",
+            "tool_input": { "command": command },
+        });
+        let env = |name: &str| (name == "HOME").then(|| "/home/u".to_string());
+        lead_refusal(&payload, Path::new("/home/u/repo"), &env)
+    }
+
+    #[test]
+    fn a_redirect_outside_the_checkout_through_home_or_a_variable_goes() {
+        for command in [
+            "M=/home/u/.claude/memory; cat > $M/fleet.md <<'EOF'\nhi\nEOF",
+            "f=~/.claude/settings.json; jq . \"$f\" > \"$f.tmp\" && mv \"$f.tmp\" \"$f\"",
+            "echo hi > ~/notes.txt",
+            "echo hi > ${HOME}/notes.txt",
+            "export D=/tmp/out; echo hi >> \"${D}/log\"",
+            "cd /tmp && echo hi > x.txt",
+            "ls 2>/dev/null > /tmp/list",
+            "git -C ~/other commit -m x",
+        ] {
+            assert_eq!(bash(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn a_redirect_that_lands_in_the_checkout_or_cannot_be_resolved_is_refused() {
+        for command in [
+            "echo hi > README.md",
+            "echo hi > ~/repo/README.md",
+            "R=~/repo; echo hi > $R/src/main.rs",
+            "cd ~/repo/src && echo hi > x.rs",
+            "echo hi > $UNSET/x",
+            "echo hi > \"$(mktemp)\"",
+            "echo hi > ${R:-/tmp}/x",
+            "echo hi > ~someone/x",
+            "D=$(pwd); echo hi > $D/x",
+            "cd $SOMEWHERE && echo hi > x",
+            "git -C ~/repo commit -m x",
+            "git -C $UNSET commit -m x",
+        ] {
+            assert!(bash(command).is_some(), "{command}");
+        }
+    }
 }
