@@ -117,6 +117,23 @@
       "guards": [
         {
           "evidence": {
+            "implementer": [
+              "45 150"
+            ],
+            "reviewer": [
+              "32 120"
+            ]
+          },
+          "guard": "the reviewer, spawned before any fit, starts at 120x32; the implementer, spawned after a 150x45 tab fit, starts at 150x45",
+          "ok": true
+        }
+      ],
+      "step": "a spawn after a desktop fitted an agent tab starts at that tab's size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "error": null,
             "hasSessionId": true,
             "stage": "validate"

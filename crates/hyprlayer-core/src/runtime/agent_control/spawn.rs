@@ -31,7 +31,9 @@ use crate::terminal::{engines, text, PtySession, RingReader};
 const WAIT_CAP: Duration = Duration::from_secs(600);
 const STALL: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(250);
-/// A spawned PTY has no window yet; this is the size a desktop tab starts from.
+/// A spawned PTY has no window yet: it takes the size a desktop last fitted an agent tab to, so
+/// opening its tab resizes nothing. claude reprints its whole transcript on a resize and leaves the
+/// old width's copy in scrollback. This is the size before any desktop has fitted one.
 const SPAWN_COLS: u16 = 120;
 const SPAWN_ROWS: u16 = 32;
 /// A first prompt still waiting on its TUI counts as owed this long past each check.
@@ -650,6 +652,11 @@ impl AgentControlService<'_> {
             }
             None => (None, prompt),
         };
+        let (cols, rows) = self
+            .runtime
+            .terminals
+            .agent_fit()
+            .unwrap_or((SPAWN_COLS, SPAWN_ROWS));
         let (_, launched) = self
             .runtime
             .terminals()
@@ -667,8 +674,8 @@ impl AgentControlService<'_> {
                     effort,
                     first_prompt: stage_prompt.clone(),
                 },
-                cols: SPAWN_COLS,
-                rows: SPAWN_ROWS,
+                cols,
+                rows,
                 lineage: Some(PtyLineage {
                     parent: identity.caller.clone(),
                     depth: check.depth,

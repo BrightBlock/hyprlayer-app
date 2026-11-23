@@ -19,7 +19,8 @@ const FACE_TIMEOUT: Duration = Duration::from_secs(30);
 const MCP_REPLY: Duration = Duration::from_secs(30);
 
 /// PTY claude. Logs to `agent-control/<$HYPRLAYER_TERMINAL_ID, else session-<id>>/`: `argv` (one
-/// per line), `env` (`HYPRLAYER_*`), copies of the `--settings`/`--mcp-config` files, `hooks.log`
+/// per line), `env` (`HYPRLAYER_*`), `size` (`stty size` at launch), copies of the
+/// `--settings`/`--mcp-config` files, `hooks.log`
 /// (`<Event> exit=<code>`) and `stdin.log` (each line as read). Each hook runs the command
 /// `--settings` names for its event, so a launch without injected hooks fires none. `SessionStart`
 /// fires at launch; stdin lines: `work` (prompt, Bash tool, `Stop` replying `done: work`), `hold`
@@ -88,6 +89,7 @@ home="$PWD"
 for a in "$@"; do printf '%s\n' "$a"; done > "$dir/argv"
 env | grep '^HYPRLAYER_' > "$dir/env"
 printf '%s\n' "$$" > "$dir/pid"
+stty size > "$dir/size" 2>/dev/null
 # The exit watcher deletes the launch dir, so keep what it held.
 [ -f "$settings" ] && cp "$settings" "$dir/settings.json"
 [ -f "$mcp" ] && cp "$mcp" "$dir/mcp.json"

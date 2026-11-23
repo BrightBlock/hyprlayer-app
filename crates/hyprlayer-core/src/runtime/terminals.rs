@@ -267,6 +267,9 @@ impl TerminalService<'_> {
 
     pub async fn resize(&self, req: ResizeTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
+        if self.runtime.pty_agents.snapshot(&req.terminal_id).is_some() {
+            self.runtime.terminals.note_agent_fit(req.cols, req.rows);
+        }
         if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
             s.fit(req.viewer, req.cols, req.rows);
         }
@@ -814,6 +817,7 @@ impl TerminalService<'_> {
 
     pub async fn resize_agent(&self, req: ResizeAgentTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
+        self.runtime.terminals.note_agent_fit(req.cols, req.rows);
         let Some(session) = self.runtime.terminals.get(&req.terminal_id).await else {
             return Ok(());
         };

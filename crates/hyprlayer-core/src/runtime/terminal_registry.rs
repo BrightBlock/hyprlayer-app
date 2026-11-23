@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as SyncMutex, PoisonError};
 
 use tokio::sync::Mutex;
 
@@ -8,6 +8,7 @@ use crate::terminal::PtySession;
 #[derive(Default)]
 pub struct TerminalRegistry {
     live: Mutex<HashMap<String, Arc<PtySession>>>,
+    agent_fit: SyncMutex<Option<(u16, u16)>>,
 }
 
 impl TerminalRegistry {
@@ -32,6 +33,22 @@ impl TerminalRegistry {
                 live.remove(&id);
             }
         });
+    }
+
+    pub fn note_agent_fit(&self, cols: u16, rows: u16) {
+        if cols > 0 && rows > 0 {
+            *self
+                .agent_fit
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some((cols, rows));
+        }
+    }
+
+    pub fn agent_fit(&self) -> Option<(u16, u16)> {
+        *self
+            .agent_fit
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     pub async fn get(&self, id: &str) -> Option<Arc<PtySession>> {

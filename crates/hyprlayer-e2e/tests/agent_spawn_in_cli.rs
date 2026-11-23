@@ -294,6 +294,9 @@ async fn agent_spawn_in_cli() {
     j.step("approve_plan builds the plan in the default engine");
     set_mode(&mut j, &c, &lead, PermissionMode::BypassPermissions).await;
     let plan = write_plan(&mut j, &c, &project).await;
+    c.agent_resize(terminal.clone(), 150, 45)
+        .await
+        .expect("agent_resize");
     let approved = parsed(&mcp.call("approve_plan", json!({ "plan": plan })).await);
     let implement = approved["terminalId"]
         .as_str()
@@ -318,6 +321,15 @@ async fn agent_spawn_in_cli() {
         "/implement_plan is typed with the rest pasted as its arguments, under Implement's deny list, in the bypass caller's mode, and the plan turns active",
         opened && denies_push && bypasses && active,
         json!({ "opensWithTheSkill": opened, "deniesPush": denies_push, "bypasses": bypasses, "planActive": active }),
+    );
+
+    j.step("a spawn after a desktop fitted an agent tab starts at that tab's size");
+    let first = lines(&launch_log(&sandbox, &terminal).join("size"));
+    let fitted = lines(&log.join("size"));
+    j.guard(
+        "the reviewer, spawned before any fit, starts at 120x32; the implementer, spawned after a 150x45 tab fit, starts at 150x45",
+        first == ["32 120"] && fitted == ["45 150"],
+        json!({ "reviewer": first, "implementer": fitted }),
     );
 
     j.step("a stage on an engine that can't apply its guardrails keeps a session");
