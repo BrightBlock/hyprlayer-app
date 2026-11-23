@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import type { Session, WorkstreamView } from "@/lib/bindings";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionFlag } from "@/lib/domain/permissions";
 import { errorMessage } from "@/lib/ipc";
 import { useValidationSummary, useWorkstreamSessions } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
@@ -49,7 +49,7 @@ function useSessionBusy(workstreamId: string, sessions: Session[] | undefined, i
 function useValidationSnapshot(workstreamId: string, implementId: string, agentId: string | null) {
   useEffect(() => {
     if (!agentId) return;
-    const mode = permissionModeOption(sessionPermissionMode(workstreamId, agentId)).flag;
+    const mode = permissionFlag(sessionPermissionMode(workstreamId, agentId));
     void restoreSessionIfNeeded(agentId, workstreamId, "validate", mode);
   }, [agentId, workstreamId]);
   const sessionId = agentId ?? implementId;

@@ -60,7 +60,7 @@ import {
 import { planTasksFromItems, todoPhaseLabel, type PlanTask, type PlanTaskStatus } from "./planTasks";
 import { type Attachment } from "./attachments";
 import { REVIEW_PROMPT } from "./reviewCardSlot";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionFlag } from "@/lib/domain/permissions";
 import { isAgentAuthor } from "@/lib/domain/agentControl";
 import {
   bodyHasVars,
@@ -2149,7 +2149,7 @@ export async function runPromptTextInWorkstream(
         active.sessionId,
         workstreamId,
         active.sessionStage ?? active.mode,
-        permissionModeOption(active.permissionMode).flag,
+        permissionFlag(active.permissionMode),
       );
     }
     const entry = entryOf(active.sessionId);
@@ -2194,7 +2194,7 @@ async function attachForReview(workstreamId: string, implement: Session): Promis
     implement.id,
     workstreamId,
     "implement",
-    permissionModeOption(sessionPermissionMode(workstreamId, implement.id)).flag,
+    permissionFlag(sessionPermissionMode(workstreamId, implement.id)),
   );
   const entry = entryOf(implement.id);
   if (!entry || entry.state === "spawn_failed") return false;

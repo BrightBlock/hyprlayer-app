@@ -21,6 +21,7 @@ const session = (id: string, title: string | null): Session => ({
   workstreamId: WS,
   stage: "general",
   harness: "claude",
+  permissionMode: "default",
   claudeSessionId: null,
   cwd: "/tmp/ws-sync",
   state: "running",

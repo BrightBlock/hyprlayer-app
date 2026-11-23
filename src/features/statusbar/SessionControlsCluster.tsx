@@ -12,7 +12,7 @@ import {
   goalControls,
   goalMeters,
 } from "@/lib/domain/goals";
-import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
+import { PERMISSION_MODES, permissionFlag, permissionModeOption } from "@/lib/domain/permissions";
 import { formatTokens } from "@/lib/format";
 import { useGoals } from "@/lib/queries";
 import { useTickingNow } from "@/lib/useTickingNow";
@@ -286,7 +286,7 @@ function PermissionPill({
 }) {
   const [open, setOpen] = useMenuOpen(interactive);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const mode = permissionModeOption(permissionKey);
+  const mode = permissionModeOption(permissionFlag(permissionKey) ?? "default");
   const name = `Permission mode: ${mode.label}`;
   return (
     <>

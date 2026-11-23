@@ -20,7 +20,9 @@ mod window_geometry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use hyprlayer_core::claude::PermissionMode;
 use hyprlayer_core::docs::{DocScope, DocStatus, DocType};
+use hyprlayer_core::pipeline::{policy_for, Stage};
 use hyprlayer_server::events::{REVISIONS_IN_STREAM, TARGETED_EVENTS, TRANSCRIPT_SYNC};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
@@ -320,6 +322,17 @@ fn specta_builder() -> Builder<tauri::Wry> {
         .typ::<DocType>()
         .typ::<DocStatus>()
         .typ::<DocScope>()
+        .constant("STAGE_PERMISSION_MODES", stage_permission_modes())
+}
+
+fn stage_permission_modes() -> BTreeMap<&'static str, PermissionMode> {
+    use Stage::*;
+    [
+        Research, Plan, Implement, Validate, Commit, Ship, Revise, General,
+    ]
+    .into_iter()
+    .map(|stage| (stage.as_str(), policy_for(stage).permission_mode))
+    .collect()
 }
 
 /// The vars a daemonized server has none of on its own (ADR-0009 §7):

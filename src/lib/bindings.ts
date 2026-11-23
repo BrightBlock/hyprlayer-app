@@ -390,6 +390,9 @@ export const events = {
 	worktreeChanged: makeEvent<WorktreeChanged>("worktree-changed"),
 };
 
+/* Constants */
+export const STAGE_PERMISSION_MODES = {"commit":"default","general":"default","implement":"acceptEdits","plan":"acceptEdits","research":"default","revise":"default","ship":"default","validate":"default"} as const;
+
 /* Types */
 export type AccountChanged = null;
 
@@ -2012,6 +2015,7 @@ export type Session = {
 	effort?: string | null,
 	/**  The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own. */
 	requestedPermissionMode?: PermissionMode | null,
+	permissionMode: PermissionMode,
 	lead?: boolean,
 };
 

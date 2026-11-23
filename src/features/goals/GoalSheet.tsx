@@ -31,7 +31,7 @@ import type {
 import { goalBudgetUnit } from "@/lib/domain/goals";
 import { HARNESSES, HARNESS_SHORT_LABEL, newChatLaunchArgs } from "@/lib/domain/harnessing";
 import { modelOption, visibleModels } from "@/lib/domain/models";
-import { PERMISSION_MODES, permissionModeOption } from "@/lib/domain/permissions";
+import { PERMISSION_MODES, permissionFlag, stagePermissionMode } from "@/lib/domain/permissions";
 import { stageLabel } from "@/lib/domain/stages";
 import {
   closeGoalSheet,
@@ -215,7 +215,7 @@ function initialForm(
     runIn: "sessionId" in request.target ? "this" : "new",
     harness: launch.harness,
     model: defaultModel(settings, launch.harness),
-    permissionKey: PERMISSION_MODES.find((p) => p.flag === launch.permissionMode)?.key ?? "stage",
+    permissionKey: launch.permissionMode ?? "",
   };
 }
 
@@ -723,7 +723,7 @@ function GoalForm({
           </div>
         </Section>
         {request.mode === "start" && (
-          <RunIn request={request} session={session} settings={settings} form={form} patch={patch} />
+          <RunIn request={request} session={session} settings={settings} form={form} stage={stage} patch={patch} />
         )}
         <p className="text-ui text-ink-dim">Permission and question asks pause the goal until you answer.</p>
       </div>
@@ -1143,12 +1143,14 @@ function RunIn({
   session,
   settings,
   form,
+  stage,
   patch,
 }: {
   request: GoalSheetRequest;
   session: Session | null;
   settings: AppSettings | undefined;
   form: Form;
+  stage: Stage;
   patch: (next: Partial<Form>) => void;
 }) {
   const canUseThis = "sessionId" in request.target;
@@ -1197,7 +1199,7 @@ function RunIn({
           {form.harness !== "opencode" && (
             <DropdownSelect
               aria-label="Permission mode"
-              value={permissionModeOption(form.permissionKey).key}
+              value={permissionFlag(form.permissionKey) ?? stagePermissionMode(stage)}
               options={PERMISSION_MODES.map((p) => ({ value: p.key, label: p.label }))}
               onChange={(permissionKey) => patch({ permissionKey })}
             />

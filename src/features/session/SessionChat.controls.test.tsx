@@ -115,6 +115,7 @@ function sessionRow(over: Partial<Session>): Session {
     endedAt: null,
     exitSummary: null,
     effort: null,
+    permissionMode: "default",
     ...over,
   };
 }
@@ -313,13 +314,24 @@ describe("a session this tab did not start", () => {
     expect(argsOf("restartSession")[3]).toBe("bypassPermissions");
   });
 
-  it("keeps a tab that started its session on Stage default there after a reload", async () => {
-    // A Stage default launch runs, and reports, the stage's own mode.
+  it("shows the mode a session started with none runs in, not a stage placeholder", async () => {
     running("claude-haiku-5-5", null, "default", null);
     renderChat({ harness: "claude" });
     await settle();
 
-    expect(controls()!.permissionKey).toBe("stage");
+    expect(controls()!.permissionKey).toBe("default");
+  });
+
+  it("shows the mode the server says a session inherited", async () => {
+    running("claude-haiku-5-5", null, null, null);
+    h.state.rows = [
+      sessionRow({ harness: "claude", model: "claude-haiku-5-5", claudeSessionId: "c1", stage: "implement", permissionMode: "auto" }),
+    ];
+    h.state.active = [{ session: h.state.rows[0] }];
+    renderChat({ harness: "claude", mode: "implement" });
+    await settle();
+
+    expect(controls()!.permissionKey).toBe("auto");
   });
 
   it("never shows this device's plan-mode default as the session's mode", async () => {
@@ -328,11 +340,19 @@ describe("a session this tab did not start", () => {
     renderChat({ harness: "claude" });
     await settle();
 
-    expect(controls()!.permissionKey).toBe("stage");
+    expect(controls()!.permissionKey).toBe("default");
   });
 });
 
 describe("a tab starting a session", () => {
+  it("shows the mode its stage launches in before the session starts", async () => {
+    h.state.rows = [];
+    renderChat({ harness: "claude", sessionId: undefined, mode: "plan" });
+    await settle();
+
+    expect(controls()!.permissionKey).toBe("acceptEdits");
+  });
+
   it("keeps the plan-mode default it launched with, so a reload still shows it", async () => {
     h.state.planDefault = true;
     h.state.rows = [sessionRow({ harness: "claude" })];

@@ -10,7 +10,7 @@ import {
 } from "@/lib/bindings";
 import { newChatLaunchArgs } from "@/lib/domain/harnessing";
 import { claudeModels, type ModelOption } from "@/lib/domain/models";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionFlag } from "@/lib/domain/permissions";
 import { isAppError, unwrap } from "@/lib/ipc";
 import { queryClient } from "@/lib/queryClient";
 import { invalidateGoals } from "@/lib/queries";
@@ -45,7 +45,7 @@ export async function approvePlan(workstreamId: string, planPath: string, from: 
 export function planBuildAgent(settings: AppSettings | undefined, from: ShellTab, catalog: readonly ModelOption[]) {
   const launch = newChatLaunchArgs(settings, from, catalog);
   const planMode = settings?.providers?.claude?.defaultPlanMode ? "plan" : undefined;
-  return { launch, permissionKey: permissionModeOption(from.permissionMode ?? planMode).key };
+  return { launch, permissionKey: permissionFlag(from.permissionMode ?? planMode) };
 }
 
 export async function approvePlanUntilMet(
@@ -75,7 +75,7 @@ export async function approvePlanUntilMet(
     source: spec.source,
     planPath,
     spec,
-    target: { newSession: { stage: "implement", attachedDocs: [planPath], permissionMode: permissionKey } },
+    target: { newSession: { stage: "implement", attachedDocs: [planPath], permissionMode: permissionKey ?? undefined } },
   });
   return goal;
 }

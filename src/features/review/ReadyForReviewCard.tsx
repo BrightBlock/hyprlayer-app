@@ -4,7 +4,7 @@ import { Icon } from "@/components/Icon";
 import { Button, ChordHint } from "@/components/ui";
 import { openReview } from "@/lib/appNav";
 import type { ReviewView, WorkstreamView } from "@/lib/bindings";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionFlag } from "@/lib/domain/permissions";
 import { plural } from "@/lib/format";
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { findWorkstreamForNotify } from "@/lib/notifications";
@@ -46,7 +46,7 @@ function ReadyCard({ sessionId, workstreamId, projectPath }: ReadyCardProps & { 
 export function useRestoreImplement(workstreamId: string, implementId: string, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
-    const mode = permissionModeOption(sessionPermissionMode(workstreamId, implementId)).flag;
+    const mode = permissionFlag(sessionPermissionMode(workstreamId, implementId));
     void restoreSessionIfNeeded(implementId, workstreamId, "implement", mode);
   }, [enabled, implementId, workstreamId]);
 }

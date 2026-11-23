@@ -720,6 +720,7 @@ describe("openSessionTab", () => {
     workstreamId: WS,
     stage: "general",
     harness: "claude",
+    permissionMode: "default",
     claudeSessionId: null,
     cwd: "/tmp/ws-open",
     state: "completed",

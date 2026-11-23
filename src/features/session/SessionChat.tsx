@@ -77,7 +77,7 @@ import {
   opencodeModelLabel,
   opencodeModelNames,
 } from "@/lib/domain/harnessing";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionFlag, permissionModeOption, stagePermissionMode } from "@/lib/domain/permissions";
 import { AgentModePicker } from "./AgentModePicker";
 import { controlsKey, usePublishSessionControls } from "./sessionControls";
 import { formatTokens } from "@/lib/format";
@@ -442,14 +442,15 @@ export function SessionChat({
   const claudeEffortKey = shell.effort ?? rowFor("claude")?.effort ?? claudeDefaults?.defaultEffort ?? undefined;
   const effort = effectiveEffort(claudeEffortKey, model);
   const claudeEffortItems = effortsForModel(model);
-  // The row has the mode another client started it in; null there is Auto.
+  const requestedMode =
+    permissionFlag(shell.permissionMode) ??
+    (started
+      ? (session?.permissionMode ?? sessionRow?.requestedPermissionMode ?? null)
+      : claudeDefaults?.defaultPlanMode
+        ? "plan"
+        : null);
   const permissionMode = permissionModeOption(
-    shell.permissionMode ??
-      (started
-        ? (session?.permissionMode ?? sessionRow?.requestedPermissionMode ?? undefined)
-        : claudeDefaults?.defaultPlanMode
-          ? "plan"
-          : undefined),
+    requestedMode ?? sessionRow?.permissionMode ?? stagePermissionMode(shell.sessionStage ?? shell.mode),
   );
   const modelItems = visibleModels(claudeDefaults?.visibleModels, claudeCatalog);
 
@@ -628,7 +629,7 @@ export function SessionChat({
     onModelChange(key);
     if (sid && rowTakesClaude) {
       const nextEffort = effectiveEffort(claudeEffortKey, next);
-      await applyModel(sid, resumeModelFlag(next), nextEffort?.key ?? null, permissionMode.flag);
+      await applyModel(sid, resumeModelFlag(next), nextEffort?.key ?? null, requestedMode);
     }
   };
 
@@ -657,7 +658,7 @@ export function SessionChat({
     }
   };
 
-  const restorePermissionFlag = permissionModeOption(shell.permissionMode).flag;
+  const restorePermissionFlag = permissionFlag(shell.permissionMode);
   useEffect(() => {
     if (shell.sessionId && !hasEntry) {
       void restoreSessionIfNeeded(
@@ -1113,12 +1114,12 @@ export function SessionChat({
         harness: harness.key,
         model: startModelFlag,
         effort: startEffort,
-        permissionMode: permissionMode.flag,
+        permissionMode: requestedMode,
         promptName: expanded.title,
       });
       onSessionStarted(created.id);
       // The tab keeps the mode it launched with; a reload rebuilds the session from the tab.
-      if (shell.permissionMode === undefined && permissionMode.flag) onPermissionModeChange(permissionMode.key);
+      if (shell.permissionMode === undefined && requestedMode) onPermissionModeChange(requestedMode);
       onDraftChange("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;
@@ -1216,10 +1217,12 @@ export function SessionChat({
   };
 
   const handlePermissionModeChange = async (key: string) => {
-    const opt = permissionModeOption(key);
+    const picked = permissionFlag(key);
+    if (!picked) return;
+    const opt = permissionModeOption(picked);
     const live = Boolean(sid && session && session.live && !isTerminal(session.state));
     const inPlace = harness.key === "claude";
-    if (live && session && !inPlace && opt.flag !== session.permissionMode && isBusy(session)) {
+    if (live && session && !inPlace && opt.key !== session.permissionMode && isBusy(session)) {
       const ok = await confirm({
         title: "Restart session?",
         message: `Restart this session to apply “${opt.label}”? The active turn will be interrupted.`,
@@ -1228,7 +1231,7 @@ export function SessionChat({
       if (!ok) return;
     }
     onPermissionModeChange(key);
-    if (live && sid) await applyPermissionMode(sid, opt.flag, inPlace);
+    if (live && sid) await applyPermissionMode(sid, opt.key, inPlace);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {

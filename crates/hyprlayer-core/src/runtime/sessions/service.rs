@@ -1337,6 +1337,9 @@ impl SessionService<'_> {
                 db.set_session_effort(&session.id, requested.1.as_deref())?;
                 db.set_session_requested_permission_mode(&session.id, permission_mode)?;
                 session.requested_permission_mode = permission_mode;
+                if let Some(mode) = permission_mode {
+                    session.permission_mode = mode;
+                }
                 db.set_session_first_turn(&session.id, &first_turn)?;
                 if lineage.origin != SessionOrigin::User || lineage.parent_session_id.is_some() {
                     db.set_session_lineage(

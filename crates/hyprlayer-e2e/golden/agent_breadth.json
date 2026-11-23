@@ -321,11 +321,12 @@
           "evidence": {
             "origin": "agent",
             "parentSessionId": "$LEAD",
+            "permissionMode": "bypassPermissions",
             "planAttached": true,
             "planStatus": "active",
             "stage": "implement"
           },
-          "guard": "the plan is active, and an implement session under the caller has it attached",
+          "guard": "the plan is active, and an implement session under the caller has it attached and runs in the caller's mode",
           "ok": true
         },
         {

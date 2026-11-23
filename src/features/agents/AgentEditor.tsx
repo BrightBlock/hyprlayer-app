@@ -860,7 +860,6 @@ function PermissionsTab({ overlay, patchOverlay }: Props) {
 }
 
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
-  stage: "Each stage uses its own permission mode.",
   auto: "A safety check approves safe actions and blocks risky ones. Nothing waits for your approval.",
   dontAsk: "Only actions your allow rules cover can run. Anything else is refused without asking you.",
   default: "Every tool call outside the allow rules waits for approval.",

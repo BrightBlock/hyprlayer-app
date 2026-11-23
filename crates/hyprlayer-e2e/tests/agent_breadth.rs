@@ -698,17 +698,19 @@ async fn agent_breadth() {
     let row = session_row(&mut j, &c, &ws, &implement).await;
     let attached = first_turn(&c, &implement).await;
     j.guard(
-        "the plan is active, and an implement session under the caller has it attached",
+        "the plan is active, and an implement session under the caller has it attached and runs in the caller's mode",
         status == "active"
             && approved["stage"] == json!("implement")
             && row["origin"] == json!("agent")
             && row["parentSessionId"] == json!(lead)
+            && row["permissionMode"] == json!("bypassPermissions")
             && attached.contains(&plan),
         json!({
             "planStatus": status,
             "stage": approved["stage"],
             "origin": row["origin"],
             "parentSessionId": row["parentSessionId"],
+            "permissionMode": row["permissionMode"],
             "planAttached": attached.contains(&plan),
         }),
     );

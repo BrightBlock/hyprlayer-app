@@ -13,7 +13,7 @@ import type { ShellTab } from "@/features/session/workstreamTabs";
 import { goalBudgetUnit, type GoalSpec } from "@/lib/domain/goals";
 import { HARNESS_SHORT_LABEL } from "@/lib/domain/harnessing";
 import { claudeModels } from "@/lib/domain/models";
-import { permissionModeOption } from "@/lib/domain/permissions";
+import { permissionModeOption, stagePermissionMode } from "@/lib/domain/permissions";
 import { plural } from "@/lib/format";
 import { openGoalSheet, type GoalSheetRequest } from "@/lib/goalSheet";
 import { useBootstrap, useClaudeProbe, useDeriveGoal } from "@/lib/queries";
@@ -157,7 +157,7 @@ export function BuildUntilMet({
   const agent = [
     HARNESS_SHORT_LABEL[launch.harness],
     launch.model,
-    launch.harness === "opencode" ? null : permissionModeOption(permissionKey).label,
+    launch.harness === "opencode" ? null : permissionModeOption(permissionKey ?? stagePermissionMode("implement")).label,
   ].filter(Boolean);
 
   return (

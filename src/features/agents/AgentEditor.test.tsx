@@ -31,7 +31,7 @@ const agent = (managed: boolean): AgentFile => ({
   modified: false,
 });
 
-function renderEditor(draft: AgentFile) {
+function renderEditor(draft: AgentFile, tab: "setup" | "permissions" = "setup") {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <AgentEditor
@@ -42,7 +42,7 @@ function renderEditor(draft: AgentFile) {
         patchOverlay={vi.fn()}
         onDefault={vi.fn()}
         dirty={true}
-        tab="setup"
+        tab={tab}
         onTab={vi.fn()}
         onBack={vi.fn()}
         onSave={vi.fn()}
@@ -82,5 +82,17 @@ describe("AgentEditor managed agents", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "More actions" })).toBeTruthy();
     expect((screen.getByDisplayValue("cartographer") as HTMLInputElement).disabled).toBe(false);
+  });
+});
+
+describe("AgentEditor permission mode", () => {
+  it("offers only modes the provider has, with the default checked", () => {
+    renderEditor(agent(false), "permissions");
+
+    const radios = screen.getAllByRole("radio") as HTMLInputElement[];
+    const labels = radios.map((r) => r.closest("label")?.textContent ?? "");
+    expect(labels.some((l) => l.includes("Stage default"))).toBe(false);
+    expect(radios).toHaveLength(6);
+    expect(labels[radios.findIndex((r) => r.checked)]).toContain("Ask each time");
   });
 });

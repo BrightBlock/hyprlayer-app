@@ -416,6 +416,22 @@ describe("StatusBar session controls", () => {
     expect(document.activeElement).toBe(pill);
   });
 
+  it("lists only the provider's real modes", () => {
+    publish(controls());
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: "Permission mode: Ask each time" }));
+
+    const menu = screen.getByRole("menu", { name: "Permission mode" });
+    expect(within(menu).getAllByRole("menuitemradio").map((i) => i.textContent?.trim())).toEqual([
+      "Ask each time",
+      "Accept edits",
+      "Plan only",
+      "Auto",
+      "Don't ask",
+      "Bypass permissions",
+    ]);
+  });
+
   it("marks Bypass with a bad dot", () => {
     publish(controls({ permissionKey: "bypassPermissions" }));
     renderBar();

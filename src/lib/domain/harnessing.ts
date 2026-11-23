@@ -6,7 +6,7 @@ import {
   resolveCodexEffort,
   type ModelOption,
 } from "./models";
-import { permissionModeOption } from "./permissions";
+import { permissionFlag } from "./permissions";
 
 export type HarnessOption = { key: Harness; label: string };
 
@@ -151,9 +151,7 @@ export function newChatLaunchArgs(
 } {
   const providers = settings?.providers;
   const claude = providers?.claude;
-  const permissionMode = permissionModeOption(
-    shell?.permissionMode ?? (claude?.defaultPlanMode ? "plan" : undefined),
-  ).flag;
+  const permissionMode = permissionFlag(shell?.permissionMode ?? (claude?.defaultPlanMode ? "plan" : undefined));
   const harnessKey = shell?.harness ?? effectiveHarnessKey(providers?.defaultHarness);
   if (harnessKey === "opencode") {
     const oc = providers?.opencode;

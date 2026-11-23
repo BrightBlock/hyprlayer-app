@@ -293,10 +293,14 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
     let origin: String = row.get("origin")?;
     let last_turn_kind: Option<String> = row.get("last_turn_kind")?;
     let goal_brief: Option<String> = row.get("goal_brief")?;
+    let stage = Stage::parse(&row.get::<_, String>("stage")?);
+    let requested_permission_mode = row
+        .get::<_, Option<String>>("requested_permission_mode")?
+        .and_then(|m| PermissionMode::try_parse(&m));
     Ok(Session {
         id: row.get("id")?,
         workstream_id: row.get("workstream_id")?,
-        stage: Stage::parse(&row.get::<_, String>("stage")?),
+        stage,
         harness: Harness::parse(&row.get::<_, String>("harness")?),
         provider_session_id: row.get("claude_session_id")?,
         cwd: row.get("cwd")?,
@@ -317,9 +321,9 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         origin: SessionOrigin::parse(&origin),
         parent_session_id: row.get("parent_session_id")?,
         effort: row.get("effort")?,
-        requested_permission_mode: row
-            .get::<_, Option<String>>("requested_permission_mode")?
-            .and_then(|m| PermissionMode::try_parse(&m)),
+        requested_permission_mode,
+        permission_mode: requested_permission_mode
+            .unwrap_or(pipeline::policy_for(stage).permission_mode),
         // A Lead is a user's session; `origin = 'lead'` parses as `User` on an older server too.
         lead: origin == LEAD_ORIGIN,
     })
@@ -386,6 +390,7 @@ impl Db {
             parent_session_id: None,
             effort: None,
             requested_permission_mode: None,
+            permission_mode: pipeline::policy_for(new.stage).permission_mode,
             lead: false,
         };
         self.with(|conn| {

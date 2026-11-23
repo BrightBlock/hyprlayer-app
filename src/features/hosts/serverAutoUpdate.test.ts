@@ -53,6 +53,7 @@ const session = (patch: Partial<Session>): Session => ({
   workstreamId: "w",
   stage: "implement",
   harness: "claude",
+  permissionMode: "default",
   claudeSessionId: null,
   cwd: "/tmp",
   state: "running",

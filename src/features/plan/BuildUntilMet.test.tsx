@@ -19,7 +19,7 @@ const b = vi.hoisted(() => ({
   getDoc: vi.fn(),
   patchDocFrontmatter: vi.fn(),
 }));
-vi.mock("@/lib/bindings", () => ({ commands: b }));
+vi.mock("@/lib/bindings", async (importOriginal) => ({ ...(await importOriginal<object>()), commands: b }));
 
 const s = vi.hoisted(() => ({ openGoalSession: vi.fn(), approvePlanAndBuild: vi.fn() }));
 vi.mock("@/features/session/sessionStore", () => s);
