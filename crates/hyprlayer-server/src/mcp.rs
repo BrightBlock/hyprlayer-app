@@ -12,8 +12,8 @@ use hyprlayer_core::runtime::reviews::AddReviewCommentRequest;
 use hyprlayer_core::settings::GoalSettings;
 use hyprlayer_core::{ScriptKind, Stage, WorktreeMode};
 use hyprlayer_models::{
-    AgentCaller, AgentControlLevel, AgentWhoami, GoalLimits, GoalSource, GoalSpec, PtyAgent,
-    RevealTarget, ReviewSide, SessionEvent, SpawnPtyAgentRequest, SpawnSessionRequest,
+    AgentCaller, AgentControlLevel, AgentWhoami, GoalLimits, GoalSource, GoalSpec, MessageDelivery,
+    PtyAgent, RevealTarget, ReviewSide, SessionEvent, SpawnPtyAgentRequest, SpawnSessionRequest,
     SpawnedAgent, WaitUntil, WakeCondition,
 };
 use hyprlayer_proto::WireError;
@@ -283,7 +283,7 @@ const TOOLS: [Tool; 33] = [
     },
     Tool {
         name: "message_agent",
-        description: "Sends a message to a session in this project, or to a PTY agent this agent spawned, marked as from this agent.",
+        description: "Sends a message to a session in this project, or to a PTY agent this agent spawned, marked as from this agent. A message opening with a slash command to a PTY agent that is mid-turn, and any message sent after it, waits for the agent's next idle: the result is then `queued`.",
         read_only: false,
         schema: || {
             with_props(
@@ -488,6 +488,15 @@ fn arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 fn required<'a>(args: &'a Value, key: &str) -> Result<&'a str, WireError> {
     arg(args, key).ok_or_else(|| bad_args(format!("`{key}` is required")))
+}
+
+fn delivered(delivery: MessageDelivery) -> &'static str {
+    match delivery {
+        MessageDelivery::Sent => "sent",
+        MessageDelivery::Queued => {
+            "queued: the agent is mid-turn, so this slash command, or a message behind one, is typed at its next idle"
+        }
+    }
 }
 
 fn message_text(args: &Value) -> Result<&str, WireError> {
@@ -773,11 +782,14 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
         }
         "message_agent" => {
             let text = message_text(args)?;
-            match target(args)? {
-                Target::Session(id) => client.send_agent_message(id.into(), text.into()).await?,
+            let delivery = match target(args)? {
+                Target::Session(id) => {
+                    client.send_agent_message(id.into(), text.into()).await?;
+                    MessageDelivery::Sent
+                }
                 Target::Terminal(id) => client.send_pty_message(id.into(), text.into()).await?,
-            }
-            Ok(json!("sent"))
+            };
+            Ok(json!(delivered(delivery)))
         }
         "prompt_and_wait" => {
             let text = message_text(args)?;

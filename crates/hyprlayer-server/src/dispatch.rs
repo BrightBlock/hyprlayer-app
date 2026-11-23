@@ -95,9 +95,9 @@ use hyprlayer_core::{
 };
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer,
-    ClaudeWorktreeEvent, ClientRef, LeadView, PtyAgent, PtyControlOutcome, RevealTarget,
-    ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest,
-    SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
+    ClaudeWorktreeEvent, ClientRef, LeadView, MessageDelivery, PtyAgent, PtyControlOutcome,
+    RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
+    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -2492,7 +2492,11 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn send_pty_message(&self, terminal_id: String, text: String) -> Result<(), WireError> {
+    async fn send_pty_message(
+        &self,
+        terminal_id: String,
+        text: String,
+    ) -> Result<MessageDelivery, WireError> {
         let identity = self.agent_identity("send_pty_message")?;
         self.runtime
             .agent_control()

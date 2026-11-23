@@ -1,6 +1,6 @@
 //! Server-launched PTY agents: hook signals folded into state, broadcast as `PtyAgentChanged`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -80,6 +80,9 @@ struct Entry {
     switched_to: Option<String>,
     /// The app-server a PTY codex runs over; its API, not the hooks or rollout, reports the settings.
     remote: Option<Arc<CodexRemote>>,
+    /// A slash command claude would take in mid-turn as plain text, and the messages sent after it.
+    held: VecDeque<String>,
+    draining: bool,
     /// Held only to revoke on drop, when the entry goes.
     _token: Option<TokenGuard>,
 }
@@ -220,6 +223,8 @@ impl PtyAgents {
                 switch_pending: false,
                 switched_to: None,
                 remote,
+                held: VecDeque::new(),
+                draining: false,
                 _token: token,
             });
             self.emit(entry);
@@ -344,6 +349,29 @@ impl PtyAgents {
         if let Some(entry) = lock(&self.entries).get_mut(terminal_id) {
             entry.prompt_owed_until = Some(Instant::now() + within);
         }
+    }
+
+    /// `Some(true)` when no task delivers the held messages yet, so the caller starts one.
+    pub(crate) fn hold(&self, terminal_id: &str, text: String) -> Option<bool> {
+        let mut entries = lock(&self.entries);
+        let entry = entries.get_mut(terminal_id)?;
+        entry.held.push_back(text);
+        Some(!std::mem::replace(&mut entry.draining, true))
+    }
+
+    pub(crate) fn holds(&self, terminal_id: &str) -> bool {
+        lock(&self.entries)
+            .get(terminal_id)
+            .is_some_and(|entry| !entry.held.is_empty())
+    }
+
+    /// `None` ends the delivering task.
+    pub(crate) fn next_held(&self, terminal_id: &str) -> Option<String> {
+        let mut entries = lock(&self.entries);
+        let entry = entries.get_mut(terminal_id)?;
+        let next = entry.held.pop_front();
+        entry.draining = next.is_some();
+        next
     }
 
     pub(crate) fn clear_prompt_owed(&self, terminal_id: &str) {

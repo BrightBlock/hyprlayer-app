@@ -76,9 +76,9 @@ use hyprlayer_core::{
 };
 use hyprlayer_models::{
     AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer, ClaudeWorktreeEvent,
-    LeadView, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns,
-    SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
-    Wake, WakeCondition,
+    LeadView, MessageDelivery, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime,
+    SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent,
+    TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -351,7 +351,7 @@ hyprlayer_proto::commands! {
     WaitSession: wait_session(session_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     SendAgentMessage: send_agent_message(session_id: String, text: String) -> ();
     SpawnPtyAgent: spawn_pty_agent(request: SpawnPtyAgentRequest) -> PtyAgent;
-    SendPtyMessage: send_pty_message(terminal_id: String, text: String) -> ();
+    SendPtyMessage: send_pty_message(terminal_id: String, text: String) -> MessageDelivery;
     ReadTerminal: read_terminal(terminal_id: String, lines: u32) -> String;
     WaitPtyAgent: wait_pty_agent(terminal_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();

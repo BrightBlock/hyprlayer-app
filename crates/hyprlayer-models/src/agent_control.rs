@@ -473,3 +473,11 @@ pub struct Wake {
     pub condition: WakeCondition,
     pub deadline_ms: f64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageDelivery {
+    Sent,
+    /// Mid-turn, a slash command or what follows one waits for the agent's next idle.
+    Queued,
+}

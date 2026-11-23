@@ -251,6 +251,44 @@ async fn agent_breadth() {
         json!({ "outcome": settled }),
     );
 
+    j.step("a slash command to a busy agent waits for its next idle");
+    let stdin = log.join("stdin.log");
+    c.terminal_write(term.clone(), hyprlayer_e2e::keystrokes("hold\r"))
+        .await
+        .expect("terminal_write");
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline
+        && pty_state(&c, &ws, &term).await.as_deref() != Some("working")
+    {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let before = lines(&stdin).len();
+    // The stub acts on whole lines, so the paste's `work` line ends the turn the command starts.
+    let held = tool_text(
+        &mcp.call(
+            "message_agent",
+            json!({ "terminal_id": term, "text": "/echo-args\nwork\nE2E_HELD" }),
+        )
+        .await,
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let typed_while_busy = lines(&stdin).len() - before;
+    c.terminal_write(term.clone(), hyprlayer_e2e::keystrokes("work\r"))
+        .await
+        .expect("terminal_write");
+    let expected = vec![
+        format!("/echo-args \x1b[200~{header}"),
+        String::new(),
+        "work".into(),
+        "E2E_HELD\x1b[201~".into(),
+    ];
+    let typed_at_idle = eventually(IO, || lines(&stdin).ends_with(&expected)).await;
+    j.guard(
+        "mid-turn, the command is queued and nothing reaches the TUI; at the next idle it is typed with the rest pasted after it",
+        held.starts_with("\"queued: ") && typed_while_busy == 0 && typed_at_idle,
+        json!({ "reply": held, "typedWhileBusy": typed_while_busy, "typedAtIdle": typed_at_idle }),
+    );
+
     j.step("a message is refused while the target shows a prompt");
     let stdin = log.join("stdin.log");
     let typed = lines(&stdin).len();

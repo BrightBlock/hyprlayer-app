@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hyprlayer_models::{
-    AgentCaller, ClientRef, Goal, Harness, PermissionMode, PtyAgent, PtyAgentState, PtyFirstPrompt,
-    PtyLaunchSession, RuntimeEvent, SessionEvent, SessionOrigin, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil, WorkstreamStatus,
+    AgentCaller, ClientRef, Goal, Harness, MessageDelivery, PermissionMode, PtyAgent,
+    PtyAgentState, PtyFirstPrompt, PtyLaunchSession, RuntimeEvent, SessionEvent, SessionOrigin,
+    SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, UiRequest, WaitOutcome, WaitUntil,
+    WorkstreamStatus,
 };
 use tokio::sync::OwnedMutexGuard;
 use tokio::time::Instant;
@@ -789,7 +790,7 @@ impl AgentControlService<'_> {
         identity: &AgentIdentity,
         terminal_id: &str,
         text: &str,
-    ) -> Result<()> {
+    ) -> Result<MessageDelivery> {
         self.require_full(identity).await?;
         let target = self.pty_target(identity, terminal_id).await?;
         self.check_descendant(identity, terminal_id, false).await?;
@@ -811,13 +812,25 @@ impl AgentControlService<'_> {
             )
             .await?;
         }
-        // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
-        agents.owe_prompt(terminal_id, PROMPT_ACK);
-        paste(agents, terminal_id, &target.session, &text).await?;
+        let delivery =
+            if agents.holds(terminal_id) || command_while_busy(agents, terminal_id, &text) {
+                if agents.hold(terminal_id, text) == Some(true) {
+                    tokio::spawn(deliver_held(
+                        self.runtime.pty_agents.clone(),
+                        terminal_id.to_string(),
+                    ));
+                }
+                MessageDelivery::Queued
+            } else {
+                // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
+                agents.owe_prompt(terminal_id, PROMPT_ACK);
+                paste(agents, terminal_id, &target.session, &text).await?;
+                MessageDelivery::Sent
+            };
         if !identity.lead {
             self.record_hop(terminal_id).await;
         }
-        Ok(())
+        Ok(delivery)
     }
 
     /// Ends a PTY agent the caller spawned, freeing its live-children slot.
@@ -1115,6 +1128,43 @@ pub(super) fn paste_refusal(agents: &PtyAgents, terminal_id: &str) -> Option<&'s
         return Some("that agent is asking its user something, and a message now would answer it");
     }
     now.screen.as_deref().and_then(pty_controls::paste_refusal)
+}
+
+/// claude takes in a slash command sent mid-turn as a queued prompt, and can run it as plain text.
+fn command_while_busy(agents: &PtyAgents, terminal_id: &str, text: &str) -> bool {
+    pipeline::leading_command(text).is_some()
+        && agents.snapshot(terminal_id).is_some_and(|now| {
+            engines::harness_of(&now.agent.engine_id) == Some(Harness::Claude)
+                && (now.agent.state != PtyAgentState::Idle || now.prompt_owed)
+        })
+}
+
+/// Types the held messages one per idle, in order, as `send_pty_message` would have.
+async fn deliver_held(agents: Arc<PtyAgents>, terminal_id: String) {
+    let ready = || {
+        agents
+            .snapshot(&terminal_id)
+            .is_some_and(|now| now.agent.state == PtyAgentState::Idle && !now.prompt_owed)
+            && paste_refusal(&agents, &terminal_id).is_none()
+    };
+    loop {
+        let Some(now) = agents.snapshot(&terminal_id) else {
+            return;
+        };
+        if ready() {
+            let _input = now.input.lock().await;
+            if ready() {
+                let Some(text) = agents.next_held(&terminal_id) else {
+                    return;
+                };
+                agents.owe_prompt(&terminal_id, PROMPT_ACK);
+                if let Err(e) = paste(&agents, &terminal_id, &now.session, &text).await {
+                    tracing::warn!("terminal {terminal_id}: a held message was not delivered: {e}");
+                }
+            }
+        }
+        tokio::time::sleep(POLL).await;
+    }
 }
 
 /// Bracketed paste, then Enter on its own: a CR inside the paste is a newline to the TUI. Call it

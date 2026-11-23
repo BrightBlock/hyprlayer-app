@@ -108,6 +108,20 @@
       "guards": [
         {
           "evidence": {
+            "reply": "\"queued: the agent is mid-turn, so this slash command, or a message behind one, is typed at its next idle\"",
+            "typedAtIdle": true,
+            "typedWhileBusy": 0
+          },
+          "guard": "mid-turn, the command is queued and nothing reaches the TUI; at the next idle it is typed with the rest pasted after it",
+          "ok": true
+        }
+      ],
+      "step": "a slash command to a busy agent waits for its next idle"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "refusal": "agent_control_denied: agent control refused this: the agent is showing a prompt",
             "state": "idle",
             "typedSince": 0
