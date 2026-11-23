@@ -171,12 +171,14 @@ CodexRead ==
                /\ out' = Append(out, <<"steerErr", line[2]>>)
                /\ UNCHANGED <<busy, turn, respond, queue, cOpen, delivered>>
           [] line[1] = "interrupt" /\ busy /\ line[2] = turn ->
-               \* codex settles its open approvals itself; whether each one's item then
-               \* completes (a declined result) is left open
+               \* codex settles its open approvals itself: turn/completed, then
+               \* serverRequest/resolved for each; whether each one's item completes
+               \* first (a declined result) is left open
                /\ busy' = FALSE /\ cOpen' = {} /\ queue' = <<>>
                /\ \E settled \in SUBSET cOpen :
                     out' = out \o SetToSeq({<<"toolResult", r>> : r \in settled})
                                \o <<<<"turnCompleted">>>>
+                               \o SetToSeq({<<"srvResolved", r>> : r \in cOpen})
                /\ UNCHANGED <<turn, respond, delivered>>
           [] line[1] = "interrupt" ->
                UNCHANGED <<busy, turn, respond, queue, cOpen, out, delivered>>
@@ -275,6 +277,12 @@ DriverRead ==
                /\ UNCHANGED pending
           [] line[1] = "ask" ->
                pending' = pending \cup {line[2]} /\ bus' = Append(bus, <<"ask", line[2]>>)
+               /\ UNCHANGED <<dActive, dReq, waiting>>
+          [] line[1] = "srvResolved" ->
+               \* settle: an approval still pending closes as declined; an answered one is gone
+               /\ IF line[2] \in pending
+                    THEN pending' = pending \ {line[2]} /\ bus' = Append(bus, <<"resolved", line[2]>>)
+                    ELSE UNCHANGED <<pending, bus>>
                /\ UNCHANGED <<dActive, dReq, waiting>>
           [] line[1] = "toolResult" ->
                bus' = Append(bus, <<"toolResult", line[2]>>) /\ UNCHANGED <<dActive, dReq, waiting, pending>>

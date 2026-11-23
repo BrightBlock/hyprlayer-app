@@ -298,6 +298,12 @@ impl Translator {
     }
 
     pub fn notification(&mut self, method: &str, p: &Value) -> Vec<SessionEvent> {
+        if method == "serverRequest/resolved" {
+            return p
+                .get("requestId")
+                .map(|rpc_id| self.settle(rpc_id))
+                .unwrap_or_default();
+        }
         if !self.accepts_notification(p) {
             self.observe_child_notification(method, p);
             if method == "error" {
@@ -419,6 +425,34 @@ impl Translator {
                 Vec::new()
             }
         }
+    }
+
+    /// An ask codex withdrew itself, as an interrupt does; one the user answered is already gone.
+    fn settle(&mut self, rpc_id: &Value) -> Vec<SessionEvent> {
+        let approval = self
+            .pending_approvals
+            .iter()
+            .find(|(_, (id, _))| id == rpc_id)
+            .map(|(request_id, _)| request_id.clone());
+        if let Some(request_id) = approval {
+            self.pending_approvals.remove(&request_id);
+            return vec![SessionEvent::PermissionResolved {
+                request_id,
+                allow: false,
+            }];
+        }
+        let question = self
+            .pending_questions
+            .iter()
+            .find(|(_, q)| &q.rpc_id == rpc_id)
+            .map(|(request_id, _)| request_id.clone());
+        question
+            .map(|request_id| {
+                self.pending_questions.remove(&request_id);
+                SessionEvent::QuestionAnswered { request_id }
+            })
+            .into_iter()
+            .collect()
     }
 
     pub fn server_request(&mut self, id: &Value, method: &str, p: &Value) -> Vec<SessionEvent> {

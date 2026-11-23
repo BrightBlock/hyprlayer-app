@@ -28,7 +28,7 @@ the same) and the same rule names, so each rule is checked per provider.
   task), `steering` and `pending_approvals`; codex reading requests, writing
   the `turn/start` response at any point after it starts the turn, asking,
   committing steers at its next step, and settling its own approvals on an
-  interrupt; and the shared relay, actor and desktop, where a codex ask (no
+  interrupt (`serverRequest/resolved` after `turn/completed`); and the shared relay, actor and desktop, where a codex ask (no
   `tool_use_id`) is closed by the newest tool result with its tool's name.
 - `OpenCodeTurns.tla` covers one session on the shared OpenCode server:
   `OpenCodeDriver`'s `send_user_turn` (echo, `begin_turn`, `prompt_async`),
@@ -76,7 +76,7 @@ Results at the sync commit, per provider (`expected.txt`):
 | `NoLostAgentMessage` | PASS | FAIL | PASS |
 | `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
 | `TurnProgress` | PASS | FAIL | FAIL |
-| `AskResolution` | PASS | FAIL | FAIL |
+| `AskResolution` | PASS | PASS | FAIL |
 | `AskVisible` | PASS | FAIL | FAIL |
 | `InterruptSafe` | PASS | FAIL | FAIL |
 | `InterruptHonored` | PASS | FAIL | FAIL |
@@ -221,19 +221,22 @@ scratch delay (the PR that fixed them has the evidence).
    counts from zero again once a `turnDone` is stored after the last
    recorded wake (`restart_wake_seq`).
 
-6. **codex `AskResolution`, `InterruptSafe`: an approval codex settles itself stays open.**
+6. **Fixed: codex `AskResolution`: an approval codex settles itself stayed open.**
    Reproduced live by the "Interrogate codex and opencode chat" workstream in
    the debug app with real codex: after an interrupt, "Turn interrupted" sits
    under a live Allow/Deny card, the status bar keeps "Waiting for
    approval" and Stop, `openRequestIds` keeps naming the ask, and a message
-   queued after it never sends. In the code, `pending_approvals` loses an id
-   only in `respond_permission`; a request codex settles itself (on
-   `turn/interrupt`) leaves nothing the Translator handles, so the card and
-   every reload keep it. Shortest path (14 steps): an agent's message starts
-   a turn, codex asks, someone presses stop, codex ends the turn with the
-   approval settled; the desktop shows the ask after `turnDone`. A fix is in
-   progress in that workstream. `InterruptSafe`'s shortest path is the stale
-   turn id in finding 8; this ask path breaks it too.
+   queued after it never sends. `pending_approvals` lost an id only in
+   `respond_permission`, and the Translator dropped the
+   `serverRequest/resolved` codex 0.171 sends after `turn/completed` for a
+   request it settled itself, so the card and every reload kept it.
+   Shortest path (15 steps): an agent's message starts a turn, codex asks,
+   someone presses stop, codex ends the turn with the approval settled; the
+   desktop shows the ask after `turnDone`. Fixed: `serverRequest/resolved`
+   removes the approval or question with that rpc id and emits
+   `PermissionResolved {allow: false}` or `QuestionAnswered`; an ask the user
+   already answered is gone and emits nothing. `InterruptSafe` still failed
+   after this fix, on finding 8's stale turn id.
 7. **codex `NoLostAgentMessage`: a steer codex never commits is dropped while the session stays live.**
    The mechanism was reproduced live by the interrogate workstream (a steer
    codex drops on an interrupt is never resent or reported); the
@@ -373,7 +376,7 @@ turn, what closes an ask, or what reports the server's death.
 | `ClientAnswer` | `respond_permission`, codex/driver.rs:439 (an id not in `pending_approvals` returns Ok and writes nothing) |
 | `Interrupt` | `CodexDriver::interrupt`, codex/driver.rs:489 (no turn id: returns Ok, sends nothing) |
 | `CodexRead`, `CodexRespond`, `CodexAsk`, `CodexOtherTool`, `CodexCommitSteer`, `CodexFinish`, `CodexExit` | codex app-server's own behaviour (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: the `turn/start` task sets `requested_turn`, 373; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `Exited`, driver.rs:889 |
+| `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: the `turn/start` task sets `requested_turn`, 373; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `serverRequest/resolved` → `settle` (drops the approval with that rpc id, `PermissionResolved {allow: false}`); `Exited`, driver.rs:889 |
 | `Relay` | as `SessionTurns`, with `settleAnsweredPrompt`, transcript.ts:403, deciding a codex card by tool name (codex asks have `tool_use_id: None`, protocol.rs:431) |
 | `ClientResume` | `thread/resume` in a fresh app-server and driver, then `held::resend` |
 
@@ -458,10 +461,12 @@ attachment together).
 - Assumptions about codex app-server: `turn/start` while a turn runs is
   refused (an error response); a steer is accepted only into the running turn
   it names; codex drops steers it never committed when the turn ends (the
-  driver's own comment); on `turn/interrupt` it settles its open approvals
-  without a message the driver handles, and may or may not complete their
-  items; the `turn/start` response may trail the turn's notifications. Only
-  the self-settled approval is confirmed live.
+  driver's own comment); on `turn/interrupt` it settles its open approvals,
+  writes `turn/completed` and then `serverRequest/resolved` for each, and
+  may or may not complete their items; the `turn/start` response may trail
+  the turn's notifications. The self-settled approval and its
+  `serverRequest/resolved` after `turn/completed` are confirmed against
+  codex 0.171 (the interrogate workstream's probes p1, p4, p8a).
 - Assumptions about OpenCode: a prompt POSTed while busy runs after the
   running one; an abort ends the running prompt, and the prompts held behind
   it may or may not run; the aborted reply message may or may not exist yet;
@@ -538,6 +543,9 @@ wrong: fix the action, re-run, and say what you changed.
      result (closing by name instead of by `tool_use_id`).
    - `SessionTurns.InterruptHonored`: `Interrupt` writes its line ahead of
      the messages already in the pipe.
+   - `CodexTurns.AskResolution`: `DriverRead` ignores `srvResolved` (the
+     code before the fix): a 15-step path, an agent's message, codex asks,
+     stop, the desktop keeps the ask after `turnDone`.
    - `CodexTurns.NoDoubleSend`: codex keeps an uncommitted steer across the
      end of its turn and commits it later, while the driver declines it.
    - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`: `send_user_turn`

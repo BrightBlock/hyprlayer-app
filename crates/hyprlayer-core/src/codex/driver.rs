@@ -1513,4 +1513,82 @@ mod tests {
             .pending_questions
             .contains_key("root-thread:root-question"));
     }
+
+    #[test]
+    fn an_ask_codex_settles_itself_closes_once() {
+        let mut state = Translator::default();
+        state.set_root_thread_id("th".into());
+        let (driver, _codex) = fake_driver(true, state);
+        let mut events = driver.subscribe();
+        let feed = |line: &str| {
+            route_incoming(
+                decode_line(line).expect("a JSON-RPC line"),
+                &driver.events,
+                &driver.pending,
+                &driver.state,
+                &driver.stdin_tx.downgrade(),
+            );
+        };
+        let mut settled = || {
+            std::iter::from_fn(|| events.try_recv().ok())
+                .filter(|e| {
+                    matches!(
+                        e,
+                        SessionEvent::PermissionResolved { .. }
+                            | SessionEvent::QuestionAnswered { .. }
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let interrupted = |turn: &str| {
+            format!(
+                r#"{{"method":"turn/completed","params":{{"threadId":"th","turn":{{"id":"{turn}","status":"interrupted","error":null}}}}}}"#
+            )
+        };
+        let resolved = |rpc: u64| {
+            format!(
+                r#"{{"method":"serverRequest/resolved","params":{{"threadId":"th","requestId":{rpc}}}}}"#
+            )
+        };
+
+        feed(
+            r#"{"method":"item/commandExecution/requestApproval","id":0,"params":{"kind":"command","threadId":"th","turnId":"t1","itemId":"exec-1","command":"/usr/bin/bash -lc 'touch probe-one.txt'","cwd":"/w"}}"#,
+        );
+        feed(&interrupted("t1"));
+        feed(&resolved(0));
+        assert!(driver.pending_requests().is_empty());
+        assert_eq!(
+            settled(),
+            [SessionEvent::PermissionResolved {
+                request_id: "th:exec-1".into(),
+                allow: false,
+            }]
+        );
+
+        feed(
+            r#"{"method":"item/tool/requestUserInput","id":1,"params":{"threadId":"th","turnId":"t2","itemId":"call-1","questions":[{"id":"color_choice","header":"Color","question":"Which color do you choose?","isOther":true,"isSecret":false,"options":[{"label":"Red","description":"Choose red."},{"label":"Blue","description":"Choose blue."}]}],"isBlocking":true,"autoResolutionMs":null}}"#,
+        );
+        feed(&interrupted("t2"));
+        feed(&resolved(1));
+        assert!(driver.pending_requests().is_empty());
+        assert_eq!(
+            settled(),
+            [SessionEvent::QuestionAnswered {
+                request_id: "th:call-1".into(),
+            }]
+        );
+
+        feed(
+            r#"{"method":"item/commandExecution/requestApproval","id":2,"params":{"kind":"command","threadId":"th","turnId":"t3","itemId":"exec-2","command":"ls","cwd":"/w"}}"#,
+        );
+        driver.respond_permission("th:exec-2", true, None).unwrap();
+        feed(&resolved(2));
+        assert_eq!(
+            settled(),
+            [SessionEvent::PermissionResolved {
+                request_id: "th:exec-2".into(),
+                allow: true,
+            }]
+        );
+    }
 }
