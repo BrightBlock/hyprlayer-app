@@ -244,8 +244,9 @@ async fn agent_control_read() {
     set_level(&mut j, &c, AgentControlLevel::Read).await;
     j.guard(
         "at full every tool is listed; --read-only still lists only the read tools",
-        full_list.names.len() == 33
+        full_list.names.len() == 38
             && full_list.names.iter().any(|n| n == "spawn_agent")
+            && full_list.names.iter().any(|n| n == "queue_start")
             && read_only_list.names == listed.names,
         json!({ "full": full_list.names.len(), "readOnly": read_only_list.names.len() }),
     );
@@ -348,6 +349,12 @@ async fn agent_control_read() {
     let reveal = mcp
         .call("reveal", json!({ "kind": "file", "path": "README.md" }))
         .await;
+    let queue = mcp
+        .call(
+            "queue_add",
+            json!({ "title": "Login page", "summary": "add one" }),
+        )
+        .await;
     let shelf = text(
         &create_workstream(&mut j, &c, &project, "Shelf").await,
         "/item/id",
@@ -374,6 +381,15 @@ async fn agent_control_read() {
             "reveal": first_line(&tool_text(&reveal)),
             "spawned": sessions_after - sessions_before,
         }),
+    );
+    let queued = c
+        .list_lead_queue(project.clone())
+        .await
+        .expect("list_lead_queue");
+    j.guard(
+        "queue_add needs Full too, and the queue stays empty",
+        needs_full(&queue) && queued.is_empty(),
+        json!({ "queueAdd": first_line(&tool_text(&queue)), "queued": queued.len() }),
     );
     let shelf_open = is_open(&c, &project, &shelf).await;
     j.guard(
@@ -537,6 +553,120 @@ async fn agent_control_read() {
         "the shelf is archived, and another client hears the list change without asking",
         !tool_failed(&shelved) && tool_text(&shelved).contains("archived") && heard && !shelf_open,
         json!({ "result": first_line(&tool_text(&shelved)), "otherClientHeard": heard, "shelfOpen": shelf_open }),
+    );
+
+    j.step("the Lead queue is shared with the desktop");
+    let first = parse(
+        &mcp.call(
+            "queue_add",
+            json!({ "title": "Login page", "summary": "add  a login\npage" }),
+        )
+        .await,
+    );
+    let second_item = parse(
+        &mcp.call(
+            "queue_add",
+            json!({ "title": "Billing export", "summary": "export invoices as CSV" }),
+        )
+        .await,
+    );
+    let heard = events_until(&mut second_rx, IO, |e| {
+        matches!(e, RuntimeEvent::LeadQueueChanged { project_path } if *project_path == project)
+    })
+    .await
+    .iter()
+    .any(|e| matches!(e, RuntimeEvent::LeadQueueChanged { project_path } if *project_path == project));
+    let desktop = c
+        .list_lead_queue(project.clone())
+        .await
+        .expect("list_lead_queue");
+    let shown: Vec<_> = desktop
+        .iter()
+        .map(|i| json!({ "title": i.title, "summary": i.summary, "state": i.state, "position": i.position }))
+        .collect();
+    j.guard(
+        "the desktop lists both items in order, summaries on one line, and another client hears the change",
+        heard
+            && desktop.len() == 2
+            && desktop[0].title == "Login page"
+            && desktop[0].summary == "add a login page"
+            && desktop[1].title == "Billing export",
+        json!({ "queue": shown, "otherClientHeard": heard }),
+    );
+    let (first_id, second_id) = (text(&first, "/id"), text(&second_item, "/id"));
+    j.alias(&first_id, "$QUEUE_A");
+    j.alias(&second_id, "$QUEUE_B");
+    c.remove_lead_queue_item(project.clone(), second_id.clone())
+        .await
+        .expect("the user removes an item");
+    let listed = parse(&mcp.call("queue_list", json!({})).await);
+    let titles: Vec<String> = ids(&listed, "/title");
+    let revived = mcp
+        .call(
+            "queue_start",
+            json!({ "id": second_id, "workstream_id": ws }),
+        )
+        .await;
+    j.guard(
+        "the Lead's next queue_list leaves out the item the user removed, and starting it is refused",
+        titles == ["Login page"]
+            && tool_failed(&revived)
+            && tool_text(&revived).starts_with("lead_queue_item_gone"),
+        json!({ "queueList": titles, "startRemoved": first_line(&tool_text(&revived)) }),
+    );
+    let elsewhere = mcp
+        .call(
+            "queue_start",
+            json!({ "id": first_id, "workstream_id": other_ws }),
+        )
+        .await;
+    let started = parse(
+        &mcp.call(
+            "queue_start",
+            json!({ "id": first_id, "workstream_id": ws }),
+        )
+        .await,
+    );
+    let again = mcp
+        .call(
+            "queue_start",
+            json!({ "id": first_id, "workstream_id": ws }),
+        )
+        .await;
+    j.guard(
+        "queue_start runs the item in this project's workstream, once",
+        tool_failed(&elsewhere)
+            && started["state"] == json!("running")
+            && started["workstreamId"] == json!(ws)
+            && tool_failed(&again),
+        json!({
+            "otherProjectWorkstream": first_line(&tool_text(&elsewhere)),
+            "state": started["state"],
+            "startAgain": first_line(&tool_text(&again)),
+        }),
+    );
+    let done = parse(&mcp.call("queue_done", json!({ "id": first_id })).await);
+    let after = c
+        .list_lead_queue(project.clone())
+        .await
+        .expect("list_lead_queue");
+    let foreign = j
+        .call(
+            &agent,
+            Request::ListLeadQueue {
+                project_path: other.clone(),
+            },
+        )
+        .await
+        .err();
+    j.guard(
+        "queue_done takes it off the queue, and another project's queue is out of scope",
+        done["state"] == json!("done")
+            && after.is_empty()
+            && foreign
+                .as_ref()
+                .is_some_and(|e| e.code == "agent_control_denied"),
+        json!({ "state": done["state"], "queued": after.len(), "otherProject": wire(&foreign) }),
     );
 
     j.step("agent connections cannot open streams");

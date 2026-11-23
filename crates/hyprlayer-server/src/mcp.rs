@@ -120,6 +120,12 @@ fn plan_args() -> Value {
     } })
 }
 
+fn queue_item_arg() -> Value {
+    json!({ "type": "object", "required": ["id"], "properties": {
+        "id": { "type": "string" },
+    } })
+}
+
 fn wait_props() -> Value {
     json!({
         "until": { "type": "string", "enum": ["idle", "needs_you", "exited"],
@@ -143,7 +149,7 @@ fn with_props(mut base: Value, extra: Value) -> Value {
     base
 }
 
-const TOOLS: [Tool; 33] = [
+const TOOLS: [Tool; 38] = [
     Tool {
         name: READ_TOOLS[0],
         description: "Who this agent is to hyprlayer: its session or terminal, workstream, project and control level.",
@@ -360,6 +366,46 @@ const TOOLS: [Tool; 33] = [
                 "session_id": { "type": "string", "description": "Defaults to this agent's own session." },
             } })
         },
+    },
+    Tool {
+        name: "queue_add",
+        description: "Adds planned work to the end of this project's Lead queue, which the user sees and can edit.",
+        read_only: false,
+        schema: || {
+            json!({ "type": "object", "required": ["title", "summary"], "properties": {
+                "title": { "type": "string" },
+                "summary": { "type": "string", "description": "One line: what the brief will ask for." },
+            } })
+        },
+    },
+    Tool {
+        name: "queue_list",
+        description: "Lists this project's Lead queue in order: queued and running items. The user may have removed or reordered items since you last read it.",
+        read_only: false,
+        schema: no_args,
+    },
+    Tool {
+        name: "queue_start",
+        description: "Marks a queued item running in the workstream it became. Refused when the item is no longer queued, for example because the user removed it.",
+        read_only: false,
+        schema: || {
+            json!({ "type": "object", "required": ["id", "workstream_id"], "properties": {
+                "id": { "type": "string" },
+                "workstream_id": { "type": "string" },
+            } })
+        },
+    },
+    Tool {
+        name: "queue_done",
+        description: "Marks a queue item done, which takes it off the queue.",
+        read_only: false,
+        schema: queue_item_arg,
+    },
+    Tool {
+        name: "queue_remove",
+        description: "Removes an item from the queue without running it.",
+        read_only: false,
+        schema: queue_item_arg,
     },
     Tool {
         name: "create_workstream",
@@ -884,6 +930,36 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
                 .set_session_title(session_id, Some(required(args, "title")?.into()))
                 .await?;
             Ok(json!("renamed"))
+        }
+        "queue_add" => encode(
+            client
+                .add_lead_queue_item(
+                    me.project_path.clone(),
+                    required(args, "title")?.into(),
+                    required(args, "summary")?.into(),
+                )
+                .await?,
+        ),
+        "queue_list" => encode(client.list_lead_queue(me.project_path.clone()).await?),
+        "queue_start" => encode(
+            client
+                .start_lead_queue_item(
+                    me.project_path.clone(),
+                    required(args, "id")?.into(),
+                    required(args, "workstream_id")?.into(),
+                )
+                .await?,
+        ),
+        "queue_done" => encode(
+            client
+                .finish_lead_queue_item(me.project_path.clone(), required(args, "id")?.into())
+                .await?,
+        ),
+        "queue_remove" => {
+            client
+                .remove_lead_queue_item(me.project_path.clone(), required(args, "id")?.into())
+                .await?;
+            Ok(json!("removed"))
         }
         "create_workstream" => {
             let mode = parsed(args, "worktree_mode")?.unwrap_or(WorktreeMode::Isolated);

@@ -42,6 +42,11 @@ At agent control Full:
   title <title> [--session id]            rename this agent's session or one it spawned
   create-workstream <title> [--base b] [--branch b] [--worktree-mode isolated|existing]
                                           a new workstream; its setup script runs
+  queue                                   the project's Lead queue: queued and running items
+  queue-add <title> <summary>             add planned work to the end of the queue
+  queue-start <item> <workstream>         mark a queued item running in its workstream
+  queue-done <item>                       mark an item done
+  queue-remove <item>                     drop an item from the queue
   approve-plan <plan> [--workstream id] [--harness h] [--model m] [--effort e] [--mode m] [--title t]
                                           approve a plan and build it in a background session
   validate-plan <plan> [--workstream id] [--harness h] [--model m] [--effort e] [--title t]
@@ -226,6 +231,11 @@ fn parse(argv: Vec<String>) -> Result<Parsed, String> {
         "title" => ("set_agent_title", &[("title", TEXT)]),
         "read-terminal" => ("read_terminal", &[("terminal_id", TEXT)]),
         "create-workstream" => ("create_workstream", &[("title", TEXT)]),
+        "queue-add" => ("queue_add", &[("title", TEXT), ("summary", TEXT)]),
+        "queue" => ("queue_list", &[]),
+        "queue-start" => ("queue_start", &[("id", TEXT), ("workstream_id", TEXT)]),
+        "queue-done" => ("queue_done", &[("id", TEXT)]),
+        "queue-remove" => ("queue_remove", &[("id", TEXT)]),
         "approve-plan" => ("approve_plan", &[("plan", TEXT)]),
         "validate-plan" => ("validate_plan", &[("plan", TEXT)]),
         "start-goal" => ("start_goal", &[("condition", TEXT), ("work_prompt", TEXT)]),

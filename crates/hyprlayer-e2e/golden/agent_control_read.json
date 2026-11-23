@@ -123,7 +123,7 @@
         },
         {
           "evidence": {
-            "full": 33,
+            "full": 38,
             "readOnly": 13
           },
           "guard": "at full every tool is listed; --read-only still lists only the read tools",
@@ -243,6 +243,14 @@
         },
         {
           "evidence": {
+            "queueAdd": "agent_control_denied: agent control refused this: this needs agent control at Full",
+            "queued": 0
+          },
+          "guard": "queue_add needs Full too, and the queue stays empty",
+          "ok": true
+        },
+        {
+          "evidence": {
             "archiveWorkstream": "agent_control_denied: agent control refused this: this needs agent control at Full",
             "workstreamOpen": true
           },
@@ -352,6 +360,63 @@
         }
       ],
       "step": "the archive_workstream tool archives another workstream at full"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "otherClientHeard": true,
+            "queue": [
+              {
+                "position": 0,
+                "state": "queued",
+                "summary": "add a login page",
+                "title": "Login page"
+              },
+              {
+                "position": 1,
+                "state": "queued",
+                "summary": "export invoices as CSV",
+                "title": "Billing export"
+              }
+            ]
+          },
+          "guard": "the desktop lists both items in order, summaries on one line, and another client hears the change",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "queueList": [
+              "Login page"
+            ],
+            "startRemoved": "lead_queue_item_gone: No queued item $QUEUE_B in this project; the user may have removed it"
+          },
+          "guard": "the Lead's next queue_list leaves out the item the user removed, and starting it is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "otherProjectWorkstream": "invalid_arguments: workstream $OTHER_WS is not in this project",
+            "startAgain": "invalid_arguments: item $QUEUE_A is running, not queued",
+            "state": "running"
+          },
+          "guard": "queue_start runs the item in this project's workstream, once",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "otherProject": {
+              "code": "agent_control_denied",
+              "message": "agent control refused this: that belongs to another project"
+            },
+            "queued": 0,
+            "state": "done"
+          },
+          "guard": "queue_done takes it off the queue, and another project's queue is out of scope",
+          "ok": true
+        }
+      ],
+      "step": "the Lead queue is shared with the desktop"
     },
     {
       "guards": [
