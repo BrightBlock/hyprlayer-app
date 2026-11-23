@@ -126,6 +126,12 @@ pub enum CoreError {
     #[error("The Lead Engineer runs on a branch, and {path} has a detached or unborn HEAD.")]
     LeadNeedsBranch { path: String },
 
+    #[error("No queued item {id} in this project; the user may have removed it")]
+    LeadQueueItemGone { id: String },
+
+    #[error("{detail}")]
+    LeadQueueInvalid { detail: String },
+
     #[error("{detail}")]
     WakeInvalid { detail: String },
 
@@ -637,6 +643,10 @@ impl CoreError {
                 "Turn on Start a Lead on every project in Settings → Agent control.".into(),
             ),
             CoreError::LeadNeedsGit { .. } => None,
+            CoreError::LeadQueueItemGone { .. } => {
+                Some("Read the queue again; never start an item that left it.".into())
+            }
+            CoreError::LeadQueueInvalid { .. } => None,
             CoreError::LeadNeedsBranch { .. } => Some(
                 "Check out a branch that has a commit in the project's folder, then message the Lead again."
                     .into(),
@@ -871,6 +881,8 @@ impl CoreError {
             CoreError::LeadDisabled => "lead_disabled",
             CoreError::LeadNeedsGit { .. } => "lead_needs_git",
             CoreError::LeadNeedsBranch { .. } => "lead_needs_branch",
+            CoreError::LeadQueueItemGone { .. } => "lead_queue_item_gone",
+            CoreError::LeadQueueInvalid { .. } => "invalid_arguments",
             CoreError::WakeInvalid { .. } => "invalid_arguments",
             CoreError::PtyControlFailed { .. } => "pty_control_failed",
             CoreError::ApiKeyEmpty => "api_key_empty",

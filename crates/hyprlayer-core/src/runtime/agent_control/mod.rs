@@ -6,6 +6,7 @@ mod leads;
 pub(crate) mod links;
 pub mod pty_agents;
 pub mod pty_controls;
+mod queue;
 mod rollout;
 pub mod spawn;
 pub mod tokens;

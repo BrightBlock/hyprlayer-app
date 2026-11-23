@@ -5,7 +5,9 @@ use std::time::Duration;
 use hyprlayer_core::agent::Harness;
 use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
 use hyprlayer_core::models::session::{LogCursor, QuestionAnswers, SessionLogEntry};
-use hyprlayer_core::models::{ClientRef, LeadView, SessionRev, SessionTurns};
+use hyprlayer_core::models::{
+    ClientRef, HostStats, LeadQueueItem, LeadView, SessionRev, SessionTurns,
+};
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::store::Session;
 use hyprlayer_proto::WireError;
@@ -488,6 +490,53 @@ pub async fn set_lead_remote_control(
         .set_lead_remote_control(project_path, enabled)
         .await
         .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_lead_queue(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> CmdResult<Vec<LeadQueueItem>> {
+    state
+        .client()?
+        .list_lead_queue(project_path)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_lead_queue_item(
+    state: State<'_, AppState>,
+    project_path: String,
+    id: String,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .remove_lead_queue_item(project_path, id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_lead_queue(
+    state: State<'_, AppState>,
+    project_path: String,
+    ids: Vec<String>,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .reorder_lead_queue(project_path, ids)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn host_stats(state: State<'_, AppState>) -> CmdResult<HostStats> {
+    state.client()?.host_stats().await.map_err(AppError::from)
 }
 
 #[tauri::command]

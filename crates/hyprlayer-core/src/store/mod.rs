@@ -1,4 +1,5 @@
 mod goals;
+mod lead_queue;
 mod library;
 mod migrations;
 mod projects;

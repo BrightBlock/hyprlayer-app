@@ -165,6 +165,10 @@ export const commands = {
 	listLeads: () => typedError<LeadView[], AppError>(__TAURI_INVOKE("list_leads")),
 	messageLead: (projectPath: string, text: string) => typedError<string, AppError>(__TAURI_INVOKE("message_lead", { projectPath, text })),
 	setLeadRemoteControl: (projectPath: string, enabled: boolean) => typedError<LeadView, AppError>(__TAURI_INVOKE("set_lead_remote_control", { projectPath, enabled })),
+	listLeadQueue: (projectPath: string) => typedError<LeadQueueItem[], AppError>(__TAURI_INVOKE("list_lead_queue", { projectPath })),
+	removeLeadQueueItem: (projectPath: string, id: string) => typedError<null, AppError>(__TAURI_INVOKE("remove_lead_queue_item", { projectPath, id })),
+	reorderLeadQueue: (projectPath: string, ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_lead_queue", { projectPath, ids })),
+	hostStats: () => typedError<HostStats, AppError>(__TAURI_INVOKE("host_stats")),
 	importAttachment: (workstreamId: string, srcPath: string) => typedError<string, AppError>(__TAURI_INVOKE("import_attachment", { workstreamId, srcPath })),
 	/**  `data` is base64; the server decodes it. */
 	saveAttachment: (workstreamId: string, fileName: string, data: string) => typedError<string, AppError>(__TAURI_INVOKE("save_attachment", { workstreamId, fileName, data })),
@@ -370,6 +374,7 @@ export const events = {
 	docStateChanged: makeEvent<DocStateChanged>("doc-state-changed"),
 	eventsMissed: makeEvent<EventsMissed>("events-missed"),
 	goalChanged: makeEvent<GoalChanged>("goal-changed"),
+	leadQueueChanged: makeEvent<LeadQueueChanged>("lead-queue-changed"),
 	omarchyThemeChanged: makeEvent<OmarchyThemeChanged>("omarchy-theme-changed"),
 	prStatusChanged: makeEvent<PrStatusChanged>("pr-status-changed"),
 	projectCreateProgress: makeEvent<ProjectCreateProgress>("project-create-progress"),
@@ -1328,6 +1333,15 @@ export type HostServerState =
  */
 "stale";
 
+export type HostStats = {
+	load: [(number | null), (number | null), (number | null)] | null,
+	cpus: number,
+	memoryUsed: number | null,
+	memoryTotal: number | null,
+	swapUsed: number | null,
+	swapTotal: number | null,
+};
+
 export type HostsFile = {
 	hosts?: Host[],
 	/**  The active host's `destination`, or `None` for the local server. */
@@ -1344,6 +1358,23 @@ export type KeybindingSettings = {
 };
 
 export type LeadPermissionMode = PermissionMode | null;
+
+export type LeadQueueChanged = {
+	projectPath: string,
+};
+
+export type LeadQueueItem = {
+	id: string,
+	projectPath: string,
+	title: string,
+	summary: string,
+	state: LeadQueueState,
+	workstreamId: string | null,
+	position: number,
+	createdAt: number | null,
+};
+
+export type LeadQueueState = "queued" | "running" | "done";
 
 export type LeadRuleScope = "inherit_and_file" | "inherit_only";
 

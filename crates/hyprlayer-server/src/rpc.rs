@@ -76,9 +76,10 @@ use hyprlayer_core::{
 };
 use hyprlayer_models::{
     AgentSignal, AgentStatusReport, AgentWhoami, ArchiveReport, ChildWorkstream,
-    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, LeadView, MessageDelivery, PtyAgent,
-    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
+    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, HostStats, LeadQueueItem, LeadView, MessageDelivery,
+    PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns,
+    SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil,
+    Wake, WakeCondition,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -278,6 +279,13 @@ hyprlayer_proto::commands! {
     ListLeads: list_leads() -> Vec<LeadView>;
     MessageLead: message_lead(project_path: String, text: String) -> String;
     SetLeadRemoteControl: set_lead_remote_control(project_path: String, enabled: bool) -> LeadView;
+    ListLeadQueue: list_lead_queue(project_path: String) -> Vec<LeadQueueItem>;
+    AddLeadQueueItem: add_lead_queue_item(project_path: String, title: String, summary: String) -> LeadQueueItem;
+    StartLeadQueueItem: start_lead_queue_item(project_path: String, id: String, workstream_id: String) -> LeadQueueItem;
+    FinishLeadQueueItem: finish_lead_queue_item(project_path: String, id: String) -> LeadQueueItem;
+    RemoveLeadQueueItem: remove_lead_queue_item(project_path: String, id: String) -> ();
+    ReorderLeadQueue: reorder_lead_queue(project_path: String, ids: Vec<String>) -> ();
+    HostStats: host_stats() -> HostStats;
 
     ImportAttachment: import_attachment(workstream_id: String, src_path: String) -> String;
     // Attachment bytes are base64: a JSON number array costs 3.6x on the wire.

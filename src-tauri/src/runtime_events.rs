@@ -113,6 +113,9 @@ fn map(handle: &AppHandle, event: RuntimeEvent) {
         RuntimeEvent::WorkstreamsChanged { project_path } => {
             let _ = events::WorkstreamsChanged { project_path }.emit(handle);
         }
+        RuntimeEvent::LeadQueueChanged { project_path } => {
+            let _ = events::LeadQueueChanged { project_path }.emit(handle);
+        }
         RuntimeEvent::GoalChanged {
             goal_id,
             session_id,

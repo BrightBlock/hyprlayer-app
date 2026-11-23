@@ -41,6 +41,7 @@ pub mod docs;
 pub mod env;
 pub mod error;
 pub mod gitops;
+pub mod host_stats;
 pub mod hyprcli;
 pub mod index;
 pub mod lead;

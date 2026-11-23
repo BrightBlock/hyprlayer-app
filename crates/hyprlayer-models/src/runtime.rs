@@ -43,6 +43,9 @@ pub enum RuntimeEvent {
     WorkstreamsChanged {
         project_path: String,
     },
+    LeadQueueChanged {
+        project_path: String,
+    },
     PrStatusChanged {
         workstream_id: String,
         /// The row's `observed_pr` changed, so workstream lists are stale too.

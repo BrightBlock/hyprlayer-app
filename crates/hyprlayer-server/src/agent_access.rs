@@ -64,6 +64,15 @@ pub(crate) fn access(request: &Request) -> Access {
         Request::ListLeads { .. }
         | Request::MessageLead { .. }
         | Request::SetLeadRemoteControl { .. } => Access::Excluded("the Lead is the user's own"),
+        Request::ListLeadQueue { project_path }
+        | Request::AddLeadQueueItem { project_path, .. }
+        | Request::StartLeadQueueItem { project_path, .. }
+        | Request::FinishLeadQueueItem { project_path, .. }
+        | Request::RemoveLeadQueueItem { project_path, .. }
+        | Request::ReorderLeadQueue { project_path, .. } => {
+            Access::Full(Scope::Project(project_path.clone()))
+        }
+        Request::HostStats {} => Access::Excluded("host load is the user's view"),
         Request::QueryDocs { .. } => Access::Read(Scope::Filtered),
         Request::GetDoc { id, .. } => Access::Read(Scope::Doc(id.clone())),
         Request::SaveDoc { id, .. } => Access::Full(Scope::WritableDoc(id.clone())),

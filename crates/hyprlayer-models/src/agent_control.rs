@@ -51,6 +51,64 @@ pub struct LeadView {
     pub summary: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum LeadQueueState {
+    Queued,
+    Running,
+    Done,
+}
+
+impl LeadQueueState {
+    pub fn try_parse(s: &str) -> Option<LeadQueueState> {
+        match s {
+            "queued" => Some(LeadQueueState::Queued),
+            "running" => Some(LeadQueueState::Running),
+            "done" => Some(LeadQueueState::Done),
+            _ => None,
+        }
+    }
+
+    pub fn parse(s: &str) -> LeadQueueState {
+        LeadQueueState::try_parse(s).unwrap_or(LeadQueueState::Queued)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LeadQueueState::Queued => "queued",
+            LeadQueueState::Running => "running",
+            LeadQueueState::Done => "done",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct LeadQueueItem {
+    pub id: String,
+    pub project_path: String,
+    pub title: String,
+    pub summary: String,
+    pub state: LeadQueueState,
+    pub workstream_id: Option<String>,
+    pub position: u32,
+    pub created_at: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct HostStats {
+    pub load: Option<[f64; 3]>,
+    pub cpus: u32,
+    pub memory_used: f64,
+    pub memory_total: f64,
+    pub swap_used: f64,
+    pub swap_total: f64,
+}
+
 /// The agent a control call speaks for: a composer session or a PTY terminal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]

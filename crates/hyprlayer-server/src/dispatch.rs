@@ -95,9 +95,10 @@ use hyprlayer_core::{
 };
 use hyprlayer_models::{
     AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ArchiveReport, ChildWorkstream,
-    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, ClientRef, LeadView, MessageDelivery, PtyAgent,
-    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
-    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
+    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, ClientRef, HostStats, LeadQueueItem, LeadView,
+    MessageDelivery, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev,
+    SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent, TerminalTheme,
+    WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
 
@@ -3042,6 +3043,83 @@ impl Dispatch for Server {
             .set_lead_remote_control(&project_path, enabled)
             .await
             .wire()
+    }
+
+    async fn list_lead_queue(&self, project_path: String) -> Result<Vec<LeadQueueItem>, WireError> {
+        self.runtime
+            .agent_control()
+            .lead_queue(&project_path)
+            .await
+            .wire()
+    }
+
+    async fn add_lead_queue_item(
+        &self,
+        project_path: String,
+        title: String,
+        summary: String,
+    ) -> Result<LeadQueueItem, WireError> {
+        self.runtime
+            .agent_control()
+            .add_lead_queue_item(&project_path, &title, &summary)
+            .await
+            .wire()
+    }
+
+    async fn start_lead_queue_item(
+        &self,
+        project_path: String,
+        id: String,
+        workstream_id: String,
+    ) -> Result<LeadQueueItem, WireError> {
+        self.runtime
+            .agent_control()
+            .start_lead_queue_item(&project_path, &id, &workstream_id)
+            .await
+            .wire()
+    }
+
+    async fn finish_lead_queue_item(
+        &self,
+        project_path: String,
+        id: String,
+    ) -> Result<LeadQueueItem, WireError> {
+        self.runtime
+            .agent_control()
+            .finish_lead_queue_item(&project_path, &id)
+            .await
+            .wire()
+    }
+
+    async fn remove_lead_queue_item(
+        &self,
+        project_path: String,
+        id: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .agent_control()
+            .remove_lead_queue_item(&project_path, &id)
+            .await
+            .wire()
+    }
+
+    async fn reorder_lead_queue(
+        &self,
+        project_path: String,
+        ids: Vec<String>,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .agent_control()
+            .reorder_lead_queue(&project_path, ids)
+            .await
+            .wire()
+    }
+
+    async fn host_stats(&self) -> Result<HostStats, WireError> {
+        tokio::task::spawn_blocking(hyprlayer_core::host_stats::host_stats)
+            .await
+            .map_err(|e| WireError::internal(e.to_string()))?
+            .map_err(|e| WireError::internal(e.to_string()))
     }
 }
 

@@ -335,6 +335,19 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE sessions ADD COLUMN actor_state TEXT;
     ",
+    "
+    CREATE TABLE lead_queue (
+        id            TEXT PRIMARY KEY,
+        project_path  TEXT NOT NULL REFERENCES projects(path) ON DELETE CASCADE,
+        title         TEXT NOT NULL,
+        summary       TEXT NOT NULL,
+        state         TEXT NOT NULL DEFAULT 'queued',
+        workstream_id TEXT,
+        position      INTEGER NOT NULL,
+        created_at    REAL NOT NULL
+    );
+    CREATE INDEX idx_lead_queue_project ON lead_queue(project_path, position);
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

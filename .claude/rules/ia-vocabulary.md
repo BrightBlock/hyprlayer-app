@@ -28,6 +28,7 @@ enums or raw `string` types** — use the generated binding.
 | `SessionOrigin` | `crates/hyprlayer-models/src/session.rs` | `lib/domain/agentControl.ts` |
 | `AgentControlLevel` / `PtyAgentState` | `crates/hyprlayer-models/src/agent_control.rs` | `lib/domain/agentControl.ts` |
 | `LeadRuleScope` | `crates/hyprlayer-core/src/settings.rs` | Direct binding via specta |
+| `LeadQueueState` | `crates/hyprlayer-models/src/agent_control.rs` | Direct binding via specta |
 
 SQLite columns stay TEXT. Core `parse()` functions do tolerant parsing so legacy
 rows keep loading.
