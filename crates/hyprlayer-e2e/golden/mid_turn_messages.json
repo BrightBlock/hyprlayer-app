@@ -202,6 +202,57 @@
       "guards": [
         {
           "evidence": {
+            "events": [
+              "commandLifecycle",
+              "exited"
+            ]
+          },
+          "guard": "the client is told the held message was never taken in",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "order": [
+              "userMessage:first-turn",
+              "init",
+              "assistantText:E2E_REPLY",
+              "turnDone",
+              "userMessage:steer-turn",
+              "init",
+              "toolUse",
+              "toolResult",
+              "userMessage:mid-turn",
+              "assistantText:E2E_HEARD_STEER",
+              "turnDone",
+              "userMessage:withdraw-turn",
+              "init",
+              "toolUse",
+              "toolResult",
+              "assistantText:E2E_HEARD_NOTHING",
+              "turnDone",
+              "userMessage:stop-turn",
+              "init",
+              "toolUse",
+              "toolResult",
+              "assistantText:[Request interrupted by user for tool use]",
+              "turnDone",
+              "userMessage:hold-turn",
+              "init",
+              "toolUse",
+              "commandLifecycle",
+              "exited"
+            ]
+          },
+          "guard": "the stored log names it, so a client that reads the log later hands it back too",
+          "ok": true
+        }
+      ],
+      "step": "a message the harness held when its process ended stays in the log"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "followUpSent": false
           },
           "guard": "no describe turn starts after the stop",

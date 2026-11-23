@@ -329,6 +329,63 @@ async fn mid_turn_messages() {
         json!({ "turnStatus": status }),
     );
 
+    j.step("a message the harness held when its process ended stays in the log");
+    send(
+        &mut j,
+        &client,
+        &session.id,
+        "E2E_WITHDRAW hold the tool",
+        "hold-turn",
+    )
+    .await;
+    recv_until(&mut events, |e| matches!(e, SessionEvent::ToolUse { .. })).await;
+    send(
+        &mut j,
+        &client,
+        &session.id,
+        "E2E_HELD also run the tests",
+        "held",
+    )
+    .await;
+    j.call(
+        &client,
+        Request::KillSession {
+            session_id: session.id.clone(),
+        },
+    )
+    .await
+    .expect("kill_session");
+    let ended = recv_until(&mut events, |e| matches!(e, SessionEvent::Exited { .. })).await;
+    let handed_back = ended.iter().any(|e| {
+        matches!(e, SessionEvent::CommandLifecycle { command_uuid, state } if command_uuid == "held" && state == "cancelled")
+    });
+    j.guard(
+        "the client is told the held message was never taken in",
+        handed_back,
+        json!({ "events": shape(&ended) }),
+    );
+    let log = j
+        .call(
+            &client,
+            Request::GetSessionLog {
+                session_id: session.id.clone(),
+            },
+        )
+        .await
+        .expect("get_session_log");
+    let named = log.as_array().is_some_and(|rows| {
+        rows.iter().any(|r| {
+            r["event"]["kind"] == "commandLifecycle"
+                && r["event"]["commandUuid"] == "held"
+                && r["event"]["state"] == "cancelled"
+        })
+    });
+    j.guard(
+        "the stored log names it, so a client that reads the log later hands it back too",
+        named,
+        json!({ "order": stored_order(&log) }),
+    );
+
     j.step("a stopped Ship turn sends no follow-up");
     let (ship, _prompt, _stream_id, mut ship_events) = client
         .start_stage_session_stream(

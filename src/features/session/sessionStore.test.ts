@@ -2182,6 +2182,16 @@ describe("reconnecting from the held cursor", () => {
       expect(sends()).toEqual(["also run the tests", "also run the tests"]);
     });
 
+    it("is sent again when the relaunch arrives live", async () => {
+      const id = await steerMidTurn();
+      const rows = [at(2, { kind: "relaunched", quiet: true }), at(3, INIT), at(4, reply("back after the restart")), at(5, TURN_DONE)];
+      server.get(id)!.rows.push(...rows);
+      for (const row of rows) stream(id, row);
+      await settle();
+      await settle();
+      expect(sends()).toEqual(["also run the tests", "also run the tests"]);
+    });
+
     it("goes back to the queue once a reconnect reads the crash", async () => {
       const id = await steerMidTurn();
       server.get(id)!.rows.push(at(2, { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" }));

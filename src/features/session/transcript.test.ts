@@ -966,6 +966,13 @@ describe("question flow", () => {
       expect(view.queuedQuestions).toEqual([]);
     });
 
+    it("keeps the first when the queued second is answered by its id", () => {
+      const view = reduceEvent(bothAsked(), { kind: "questionAnswered", requestId: "req-two" } as SessionEvent);
+      expect(view.pendingQuestion?.requestId).toBe("req-one");
+      expect(view.queuedQuestions).toEqual([]);
+      expect(view.state).toBe("awaiting_question");
+    });
+
     it("expires both when the harness exits", () => {
       const view = reduceEvent(bothAsked(), { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" });
       const expired = view.items.filter((it) => it.kind === "permission" && it.decision === "expired");
