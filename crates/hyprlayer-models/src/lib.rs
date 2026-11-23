@@ -46,4 +46,6 @@ pub use skill::{SkillScope, SkillSourceKind, SkillTarget};
 pub use terminal::{
     PtyFirstPrompt, PtyLaunchSession, PtyLaunched, Rgb, TerminalEvent, TerminalTheme,
 };
-pub use workstream::{Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode};
+pub use workstream::{
+    ArchiveReport, ChildWorkstream, Workstream, WorkstreamDoc, WorkstreamStatus, WorktreeMode,
+};

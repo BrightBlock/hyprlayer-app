@@ -89,6 +89,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
             commands::workstreams::list_project_memory,
             commands::workstreams::save_project_memory_file,
             commands::workstreams::archive_workstream,
+            commands::workstreams::list_child_workstreams,
             commands::workstreams::list_archived_workstreams,
             commands::workstreams::restore_workstream,
             commands::workstreams::delete_archived_workstream,

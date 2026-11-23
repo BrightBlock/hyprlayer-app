@@ -266,3 +266,19 @@ mod tests {
         assert_eq!(ws.pr_ref(), "42");
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct ChildWorkstream {
+    pub id: String,
+    pub title: String,
+    pub changed_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchiveReport {
+    pub children: Vec<ChildWorkstream>,
+    pub children_archived: bool,
+}

@@ -1,5 +1,6 @@
 use hyprlayer_core::branch_prefix::{BranchPrefix, PrefixSource};
 use hyprlayer_core::gitops::{CommitEntry, DirEntry, FileSides, GitFileEntry, WorktreeGitStatus};
+use hyprlayer_core::models::ChildWorkstream;
 use hyprlayer_core::pipeline::Stage;
 use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::review::diff::{ReviewFileList, ReviewFileSides};
@@ -15,6 +16,19 @@ use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
 
 pub use hyprlayer_core::runtime::workstreams::{ArchiveInfo, ProjectMemory, WorkstreamBases};
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_child_workstreams(
+    state: State<'_, AppState>,
+    id: String,
+) -> CmdResult<Vec<ChildWorkstream>> {
+    state
+        .client()?
+        .list_child_workstreams(id)
+        .await
+        .map_err(AppError::from)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

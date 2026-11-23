@@ -329,11 +329,12 @@ const TOOLS: [Tool; 33] = [
     },
     Tool {
         name: "archive_workstream",
-        description: "Archives another workstream in this project, as the user's archive does: its agents stop and its worktree moves aside. Only once the user has said to archive it. Never this agent's own workstream, main, or the Lead's.",
+        description: "Archives another workstream in this project, as the user's archive does: its agents stop and its worktree moves aside. Only once the user has said to archive it. Never this agent's own workstream, main, or the Lead's. The result lists the workstream's active child workstreams (made by its subagents) with their changed files; they stay active unless include_children is true.",
         read_only: false,
         schema: || {
             json!({ "type": "object", "required": ["workstream_id"], "properties": {
                 "workstream_id": { "type": "string" },
+                "include_children": { "type": "boolean", "description": "Also archive its active child workstreams, uncommitted changes and all, which move aside with them. Only once the user has said to." },
             } })
         },
     },
@@ -849,10 +850,15 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             Ok(json!("archived"))
         }
         "archive_workstream" => {
-            client
-                .archive_workstream_for_agent(required(args, "workstream_id")?.into())
-                .await?;
-            Ok(json!("archived"))
+            let include_children = args.get("include_children").and_then(Value::as_bool);
+            encode(
+                client
+                    .archive_workstream_for_agent(
+                        required(args, "workstream_id")?.into(),
+                        include_children.unwrap_or(false),
+                    )
+                    .await?,
+            )
         }
         "answer_question" => {
             let answers: QuestionAnswers =

@@ -117,6 +117,29 @@
       "guards": [
         {
           "evidence": {
+            "children": [
+              {
+                "changedFiles": [
+                  "changed.txt"
+                ],
+                "title": "agent-b2"
+              },
+              {
+                "changedFiles": [],
+                "title": "agent-c3"
+              }
+            ]
+          },
+          "guard": "the dirty subagent's child names its written file, the committed one names none, and the archived one is gone",
+          "ok": true
+        }
+      ],
+      "step": "the parent lists its active children with their changed files"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": "0",
             "path": "$SANDBOX/home/hyprlayer/worktrees/demo/baz",
             "samePath": true,

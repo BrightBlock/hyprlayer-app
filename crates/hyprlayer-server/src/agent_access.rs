@@ -170,7 +170,7 @@ pub(crate) fn access(request: &Request) -> Access {
             Access::Full(Scope::Terminal(terminal_id.clone()))
         }
         Request::KillPtyAgent { terminal_id } => Access::Full(Scope::Terminal(terminal_id.clone())),
-        Request::ArchiveWorkstreamForAgent { workstream_id } => {
+        Request::ArchiveWorkstreamForAgent { workstream_id, .. } => {
             Access::Full(Scope::Workstream(workstream_id.clone()))
         }
         Request::RequestReveal { target } => Access::Full(Scope::Reveal(target.clone())),
@@ -264,6 +264,7 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::ListProjectMemory { .. }
         | Request::SaveProjectMemoryFile { .. }
         | Request::ListArchivedWorkstreams { .. }
+        | Request::ListChildWorkstreams { .. }
         | Request::RestoreWorkstream { .. }
         | Request::RefreshArchivedWorkstreams { .. }
         | Request::KeepArchivedWorkstream { .. }

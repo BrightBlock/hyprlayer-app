@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
-use hyprlayer_models::RuntimeEvent;
+use hyprlayer_models::{ChildWorkstream, RuntimeEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::Harness;
@@ -1833,6 +1833,25 @@ impl WorkstreamService<'_> {
         })
     }
 
+    pub async fn active_children(&self, id: &str) -> Result<Vec<ChildWorkstream>> {
+        let parent = self.find(id).await?;
+        let (db, id) = (self.runtime.db.clone(), id.to_string());
+        blocking(move || {
+            let rows = db.list_workstreams(&parent.project_path, false)?;
+            Ok(rows
+                .into_iter()
+                .filter(|w| w.parent_workstream_id.as_deref() == Some(id.as_str()))
+                .filter(|w| w.status != WorkstreamStatus::Archived)
+                .map(|w| ChildWorkstream {
+                    changed_files: changed_files(Path::new(&w.worktree_path)),
+                    id: w.id,
+                    title: w.title,
+                })
+                .collect())
+        })
+        .await
+    }
+
     pub async fn archive(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
         let what = format!("archive workstream {}", req.id);
         let archived = logged(&what, self.archive_inner(req)).await?;
@@ -2853,6 +2872,18 @@ async fn logged<T>(what: &str, work: impl std::future::Future<Output = Result<T>
 /// The day before a workstream's creation, `YYYY-MM-DD` in UTC: a doc's date is its author's local day.
 fn created_day(created_at_ms: f64) -> String {
     crate::store::utc_date(((created_at_ms / 1000.0) as u64).saturating_sub(86_400))
+}
+
+fn changed_files(worktree: &Path) -> Vec<String> {
+    let read = crate::gitops::open_repo(worktree)
+        .and_then(|repo| crate::gitops::read_changes(&repo, git2::StatusShow::IndexAndWorkdir));
+    match read {
+        Ok(changes) => changes.into_iter().map(|c| c.path).collect(),
+        Err(e) => {
+            tracing::warn!("{}: its changes are unreadable: {e}", worktree.display());
+            Vec::new()
+        }
+    }
 }
 
 #[cfg(test)]

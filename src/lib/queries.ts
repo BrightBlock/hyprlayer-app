@@ -849,12 +849,34 @@ export async function setNewWorkstreamStage(id: string, stage: Stage): Promise<v
 
 export function useArchiveWorkstream() {
   return useMutation({
-    mutationFn: ({ id, skipScripts = false }: { id: string; skipScripts?: boolean }) =>
-      unwrap(commands.archiveWorkstream(id, skipScripts)),
+    mutationFn: async ({
+      id,
+      skipScripts = false,
+      childIds = [],
+    }: {
+      id: string;
+      skipScripts?: boolean;
+      childIds?: string[];
+    }) => {
+      for (const child of childIds) {
+        await unwrap(commands.archiveWorkstream(child, skipScripts));
+        for (const cleanup of workstreamArchiveCleanups) cleanup(child);
+        invalidateWorkstream(child);
+      }
+      await unwrap(commands.archiveWorkstream(id, skipScripts));
+    },
     onSuccess: (_data, { id }) => {
       for (const cleanup of workstreamArchiveCleanups) cleanup(id);
       invalidateWorkstream(id);
     },
+  });
+}
+
+export function useChildWorkstreams(id: string | null) {
+  return useQuery({
+    queryKey: ["workstreams", "@children", id],
+    queryFn: id === null ? skipToken : () => unwrap(commands.listChildWorkstreams(id)),
+    staleTime: 0,
   });
 }
 

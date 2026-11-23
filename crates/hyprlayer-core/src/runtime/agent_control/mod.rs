@@ -17,8 +17,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use hyprlayer_models::goal::GoalCheck;
 use hyprlayer_models::{
-    AgentCaller, AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, Harness,
-    PermissionMode, RevealTarget, RuntimeEvent, Session, SessionOrigin, UiRequest,
+    AgentCaller, AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ArchiveReport,
+    Harness, PermissionMode, RevealTarget, RuntimeEvent, Session, SessionOrigin, UiRequest,
 };
 
 use super::attribution::DocWriter;
@@ -425,7 +425,12 @@ impl AgentControlService<'_> {
     }
 
     /// The user's archive, by an agent: never its own workstream, main, or one holding a Lead.
-    pub async fn archive_workstream(&self, identity: &AgentIdentity, id: &str) -> Result<()> {
+    pub async fn archive_workstream(
+        &self,
+        identity: &AgentIdentity,
+        id: &str,
+        include_children: bool,
+    ) -> Result<ArchiveReport> {
         self.require_full(identity).await?;
         self.check_workstream(identity, id).await?;
         if id == identity.workstream_id {
@@ -441,14 +446,24 @@ impl AgentControlService<'_> {
         if sessions.iter().any(|s| s.lead) {
             return Err(denied("that workstream holds the Lead"));
         }
-        self.runtime
-            .workstreams()
-            .archive(super::workstreams::ArchiveWorkstreamRequest {
+        let workstreams = self.runtime.workstreams();
+        let children = workstreams.active_children(id).await?;
+        let archive = |id: &str| {
+            workstreams.archive(super::workstreams::ArchiveWorkstreamRequest {
                 id: id.to_string(),
                 skip_scripts: false,
             })
-            .await?;
-        Ok(())
+        };
+        if include_children {
+            for child in &children {
+                archive(&child.id).await?;
+            }
+        }
+        archive(id).await?;
+        Ok(ArchiveReport {
+            children,
+            children_archived: include_children,
+        })
     }
 
     pub async fn check_session(&self, identity: &AgentIdentity, id: &str) -> Result<()> {

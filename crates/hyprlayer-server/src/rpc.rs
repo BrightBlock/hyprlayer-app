@@ -75,10 +75,10 @@ use hyprlayer_core::{
     WorkstreamDoc, WorktreeMode,
 };
 use hyprlayer_models::{
-    AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer, ClaudeWorktreeEvent,
-    LeadView, MessageDelivery, PtyAgent, PtyControlOutcome, RevealTarget, ScriptRuntime,
-    SessionRev, SessionTurns, SpawnPtyAgentRequest, SpawnSessionRequest, SpawnedAgent,
-    TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
+    AgentSignal, AgentStatusReport, AgentWhoami, ArchiveReport, ChildWorkstream,
+    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, LeadView, MessageDelivery, PtyAgent,
+    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
+    SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::WireError;
 use serde::{Deserialize, Serialize};
@@ -204,6 +204,7 @@ hyprlayer_proto::commands! {
     ListProjectMemory: list_project_memory(id: String) -> ProjectMemory;
     SaveProjectMemoryFile: save_project_memory_file(id: String, name: String, content: String, base_mtime_ms: f64) -> ();
     ArchiveWorkstream: archive_workstream(id: String, skip_scripts: bool) -> ();
+    ListChildWorkstreams: list_child_workstreams(id: String) -> Vec<ChildWorkstream>;
     ListArchivedWorkstreams: list_archived_workstreams() -> Vec<ArchivedWorkstreamView>;
     RestoreWorkstream: restore_workstream(id: String, target: Option<String>) -> WorkstreamView;
     DeleteArchivedWorkstream: delete_archived_workstream(id: String) -> ();
@@ -356,7 +357,7 @@ hyprlayer_proto::commands! {
     WaitPtyAgent: wait_pty_agent(terminal_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();
     KillPtyAgent: kill_pty_agent(terminal_id: String) -> ();
-    ArchiveWorkstreamForAgent: archive_workstream_for_agent(workstream_id: String) -> ();
+    ArchiveWorkstreamForAgent: archive_workstream_for_agent(workstream_id: String, include_children: bool) -> ArchiveReport;
     RequestReveal: request_reveal(target: RevealTarget) -> ();
     WakeWhen: wake_when(condition: WakeCondition, timeout_ms: Option<u32>) -> Wake;
     ListWakes: list_wakes() -> Vec<Wake>;

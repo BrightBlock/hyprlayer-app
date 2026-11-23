@@ -94,9 +94,9 @@ use hyprlayer_core::{
     SessionLogEntry, Stage, Workstream, WorkstreamDoc, WorktreeMode,
 };
 use hyprlayer_models::{
-    AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ClaudeWorktreeAnswer,
-    ClaudeWorktreeEvent, ClientRef, LeadView, MessageDelivery, PtyAgent, PtyControlOutcome,
-    RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
+    AgentControlLevel, AgentSignal, AgentStatusReport, AgentWhoami, ArchiveReport, ChildWorkstream,
+    ClaudeWorktreeAnswer, ClaudeWorktreeEvent, ClientRef, LeadView, MessageDelivery, PtyAgent,
+    PtyControlOutcome, RevealTarget, ScriptRuntime, SessionRev, SessionTurns, SpawnPtyAgentRequest,
     SpawnSessionRequest, SpawnedAgent, TerminalTheme, WaitOutcome, WaitUntil, Wake, WakeCondition,
 };
 use hyprlayer_proto::{StaleTranscript, WireError};
@@ -1151,6 +1151,10 @@ impl Dispatch for Server {
             .await
             .wire()?;
         Ok(())
+    }
+
+    async fn list_child_workstreams(&self, id: String) -> Result<Vec<ChildWorkstream>, WireError> {
+        self.runtime.workstreams().active_children(&id).await.wire()
     }
 
     async fn list_archived_workstreams(&self) -> Result<Vec<ArchivedWorkstreamView>, WireError> {
@@ -2552,11 +2556,15 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn archive_workstream_for_agent(&self, workstream_id: String) -> Result<(), WireError> {
+    async fn archive_workstream_for_agent(
+        &self,
+        workstream_id: String,
+        include_children: bool,
+    ) -> Result<ArchiveReport, WireError> {
         let identity = self.agent_identity("archive_workstream_for_agent")?;
         self.runtime
             .agent_control()
-            .archive_workstream(&identity, &workstream_id)
+            .archive_workstream(&identity, &workstream_id, include_children)
             .await
             .wire()
     }

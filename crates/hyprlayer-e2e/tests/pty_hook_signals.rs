@@ -1049,6 +1049,27 @@ async fn claude_worktree_create() {
         json!({ "archived": clean_gone }),
     );
 
+    j.step("the parent lists its active children with their changed files");
+    let mut children = c
+        .list_child_workstreams(lead.clone())
+        .await
+        .expect("list_child_workstreams");
+    // Created at the same instant, so their list order varies.
+    children.sort_by(|a, b| a.title.cmp(&b.title));
+    let changed = |name: &str| {
+        children
+            .iter()
+            .find(|w| w.title == name)
+            .map(|w| w.changed_files.clone())
+    };
+    j.guard(
+        "the dirty subagent's child names its written file, the committed one names none, and the archived one is gone",
+        changed("agent-b2") == Some(vec!["changed.txt".to_string()])
+            && changed("agent-c3") == Some(Vec::new())
+            && changed("agent-a1").is_none(),
+        json!({ "children": children.iter().map(|w| json!({ "title": w.title, "changedFiles": w.changed_files })).collect::<Vec<_>>() }),
+    );
+
     j.step("a restored claude workstream answers its name again");
     worktree("worktree baz").await;
     let (_, baz) = created(&hooks, "baz");

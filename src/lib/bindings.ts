@@ -62,6 +62,7 @@ export const commands = {
 	listProjectMemory: (id: string) => typedError<ProjectMemory, AppError>(__TAURI_INVOKE("list_project_memory", { id })),
 	saveProjectMemoryFile: (id: string, name: string, content: string, baseMtimeMs: number | null) => typedError<null, AppError>(__TAURI_INVOKE("save_project_memory_file", { id, name, content, baseMtimeMs })),
 	archiveWorkstream: (id: string, skipScripts: boolean) => typedError<null, AppError>(__TAURI_INVOKE("archive_workstream", { id, skipScripts })),
+	listChildWorkstreams: (id: string) => typedError<ChildWorkstream[], AppError>(__TAURI_INVOKE("list_child_workstreams", { id })),
 	listArchivedWorkstreams: () => typedError<ArchivedWorkstreamView[], AppError>(__TAURI_INVOKE("list_archived_workstreams")),
 	restoreWorkstream: (id: string, target: string | null) => typedError<WorkstreamView, AppError>(__TAURI_INVOKE("restore_workstream", { id, target })),
 	deleteArchivedWorkstream: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("delete_archived_workstream", { id })),
@@ -690,6 +691,12 @@ export type CheckOutcome = "pass" | "fail";
 export type CheckStatus = "pass" | "warn" | "fail";
 
 export type ChecksState = "none" | "pending" | "passing" | "failing";
+
+export type ChildWorkstream = {
+	id: string,
+	title: string,
+	changedFiles: string[],
+};
 
 export type ClaudeAuthStatus = {
 	connected: boolean,
