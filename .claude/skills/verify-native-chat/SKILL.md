@@ -76,14 +76,19 @@ Results at the sync commit, per provider (`expected.txt`):
 
 | Rule | claude | codex | OpenCode |
 |---|---|---|---|
-| `NoLostUserMessage` | PASS | PASS | PASS |
-| `NoLostAgentMessage` | PASS | PASS | PASS |
-| `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
+| `NoLostUserMessage` | PASS | PASS | FAIL |
+| `NoLostAgentMessage` | PASS | PASS | FAIL |
+| `NoDoubleSend` | PASS | PASS | PASS |
 | `TurnProgress` | PASS | PASS | FAIL |
 | `AskResolution` | PASS | PASS | FAIL |
 | `AskVisible` | PASS | PASS | FAIL |
 | `InterruptSafe` | PASS | PASS | FAIL |
 | `InterruptHonored` | PASS | PASS | FAIL |
+
+In `OpenCodeTurns` a stored echo keeps a message only while OpenCode has not
+left it unread in its history (finding 16): until the driver held a mid-turn
+message's echo for the step that reads it, it stored every echo at send, and
+the rule passed a message OpenCode never answered.
 
 ## Run it
 
@@ -104,13 +109,16 @@ its real end states. It prints `PASS`/`FAIL` per rule, compares the list with
 `expected.txt` (a `#` starts a note to the end of the line), and exits
 non-zero when they differ.
 
-Timing, all 33 rules: 32 s on the Mac with `WORKERS=12` (18 cores), 51 s on
-nexus with `WORKERS=4`. Run it on the Mac when you can (nexus is shared):
+Timing, all 51 rules: 64 s on the Mac with `WORKERS=12` (18 cores, measured
+under a load average of about 20 from other runs; not re-measured on nexus,
+where the 33 rules before took 51 s with `WORKERS=4`). Run it on the Mac
+when you can (nexus is shared):
 `/home/jt/.cache/mac-run.sh <worktree> <run-name> 'JAVA=<mise java> WORKERS=12
 sh .claude/skills/verify-native-chat/check.sh'`; that shell has no mise shims on
 `PATH`, so name the java binary under `~/.local/share/mise/installs/java/`.
-Distinct states: `SessionTurns` 5.1 M, `CodexTurns` 0.45 M, `OpenCodeTurns`
-0.8 M, `SessionSync` 58 k, `RestartWake` about 400. `OUT=dir` keeps the logs:
+Distinct states in each model's passing run: `SessionTurns` 10.0 M,
+`CodexTurns` 0.72 M, `OpenCodeTurns` 2.9 M (`-stop` 2.2 k, `-death` 298),
+`SessionSync` 58 k, `RestartWake` 251. `OUT=dir` keeps the logs:
 `$OUT/<Model>.<Rule>/tlc.out` for each FAIL, `$OUT/<Model>.pass/tlc.out` for the
 run every PASS shares. `check.sh CodexTurns` checks one model and skips the
 comparison.
@@ -365,6 +373,47 @@ scratch delay (the PR that fixed them has the evidence).
     OpenCode starts and asks, you press stop before the driver reads the ask,
     OpenCode handles the abort. Now the session's `session.idle` declines every
     ask the driver still holds (`decline_all`: an idle OpenCode holds none).
+16. **Fixed for messages sent mid-turn: OpenCode `NoLostUserMessage`, `NoLostAgentMessage`: a stopped turn left a queued message unread.**
+    Reproduced live (the interrogate workstream, OpenCode 1.18 on
+    deepseek-v4.1-flash-free): a message sent past the desktop's queue while
+    a turn ran was echoed at once, the turn was stopped, and it was never
+    answered nor handed back; OpenCode kept it in the session's history and
+    the model read it in a later turn's context. OpenCode holds a prompt sent
+    mid-turn for its next step and, on an abort, keeps it unanswered. The
+    driver now holds such a message's echo until an assistant step's
+    `parentID` is at or past its id (`Turns.waiting`, `read_up_to`). When an
+    interrupted turn ends with messages still waiting, `forget_unread`
+    deletes each from OpenCode's history (DELETE
+    `/session/:id/message/:id`, OpenCode 1.2.14+, retried on 409), then emits
+    a `cancelled` lifecycle for each it deleted, then the turn's `TurnDone`
+    (`DropUnread`): the relay resends an agent's message and the desktop
+    hands back its own, and the delete keeps OpenCode from reading a copy as
+    well. The filter task reads nothing more until the deletes are done, so
+    a `TurnDone` held for a cut-short reply (`Settle`) also goes out after
+    the handed-back lifecycles. One OpenCode would not delete stays waiting
+    and echoes when a later step reads it. Two paths remain, both model only:
+    - Two prompts in flight at once (8 steps): you send from an idle view, an
+      agent's message follows while the driver's turn runs, OpenCode handles
+      the agent's POST first and holds yours behind it, someone presses stop.
+      Yours was echoed at send as a turn start, so nothing drops it, and it
+      stays unread in the history. The agent's path is the mirror. Sending
+      the driver's POSTs in order would close it; with OpenCode handling two
+      prompts in send order (a scratch copy), `NoLostUserMessage` passes.
+    - Finding 13's late abort (13 steps, with prompts in order): stop, then
+      an agent's message; the agent's `begin_turn` resets `interrupted`, so
+      the abort is not ours, the turn never ends and the held message is
+      never dropped or echoed.
+    Breaks in scratch copies: with prompts handled in send order, the driver
+    before the fix (every echo at send, nothing dropped at a stopped turn's
+    end) fails both rules in 9 steps; handing back without the delete fails
+    `NoDoubleSend` in 17 steps (the resend and the copy left in the history
+    are both read). With the filter task reading on while the deletes run (a
+    delete in a task of its own), a config of one composer and one agent
+    message, POSTs in order and no lost event or server death fails
+    `NoLostAgentMessage` in 18 steps: the stopped turn's held `TurnDone`
+    goes out at `SETTLE_WAIT` ahead of the handed-back lifecycle, and the
+    relay never sends the agent's message again; awaiting the deletes, that
+    config passes it.
 
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
@@ -455,15 +504,18 @@ turn, what closes an ask, or what reports the server's death.
 
 | Model action | Code (at the sync commit) |
 |---|---|
-| `SendServer` | `OpenCodeDriver::send_user_turn`, opencode/runtime.rs:1033 (the echo first, `begin_turn`, 691, `prompt_async`, 885 → `request_async`, 964: a failed POST sends "OpenCode request failed" and a failed `TurnDone`) |
+| `SendServer` | `OpenCodeDriver::send_user_turn`, opencode/runtime.rs (`Turns::running`: while the driver's turn runs the echo waits in `Turns.waiting`, otherwise it goes out first; `Turns::begin`, `prompt_async`: a failed POST sends "OpenCode request failed" and a failed `TurnDone`, which the model counts as reported) |
 | `ClientAnswer` | `respond_permission`, runtime.rs:1068 (`take_ask`, then a POST either way) |
 | `Interrupt` | `OpenCodeDriver::interrupt`, runtime.rs:1135 (drains the asks map as declined, marks the sent turn, POSTs abort) |
 | `ServerExited` | `OpenCodeServer::watch_exit` (polls the child every 250 ms; `end_sessions` publishes one `Exited`, crashed), then each driver's filter task forwards it after the SSE events it already has |
-| `RelayExited` | `spawn_relay` on `Exited`: drops the driver; the desktop's `exited` reducer ends working and expires the cards; the composer's own unechoed message is handed back and an agent's reported (`held::report_undelivered`), both counted as `failed` |
+| `RelayExited` | `spawn_relay` on `Exited`: drops the driver; the desktop's `exited` reducer ends working and expires the cards; the composer's own unechoed message goes back to its queue (`chip`), and the held agent messages are reported (`held::report_undelivered`, counted as `failed`) |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
 | `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
-| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), `decline_all` on the session's idle, then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it |
+| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), `decline_all` on the session's idle, then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291, and an assistant's `parentID` releases the waiting echoes at or before it, `read_up_to`; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it; `Translator::end` moves a stopped turn's waiting messages to `unread`, and the filter task sends the turn's events only after `forget_unread` |
 | `Settle` | the held end released by `expire` (`SETTLE_WAIT`, 3 s) or by a newer turn's next event (`Translator::handle`) |
+| `DropUnread` | `forget_unread`, awaited by the filter task: `delete_message` for each (409 retried for about 2 s), a `cancelled` lifecycle for each deleted, then the turn's events; one not deleted goes back to `Turns.waiting`. The model deletes when OpenCode is alive and idle, as one step |
+| `RelayResend` | as `SessionTurns` (OpenCode's `send_user_turn` never fails) |
+| `OcRead`, `OcFinish` (a run) | a prompt's run reads every message a stopped turn left in the history (`orphans`) as well as its own, each copy once |
 | `Relay` | as `SessionTurns`, plus `author_for`'s `next_turn` (forwarder.rs:1056); OpenCode's permission names never equal a normalized tool name (`normalize_tool`, 1679), so no tool result decides a card |
 
 `RestartWake.tla`:
@@ -657,7 +709,15 @@ wrong: fix the action, re-run, and say what you changed.
    - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`: `send_user_turn`
      sends no echo.
    - `OpenCodeTurns.NoDoubleSend`: a prompt held behind a running one is also
-     taken in at once.
+     taken in at once; or `DropUnread` hands back without deleting (17 steps).
+   - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`, with OpenCode
+     handling prompts in send order: the driver before finding 16's fix (an
+     echo at send for every message, nothing dropped at a stopped turn's
+     end), 9 steps.
+   - `OpenCodeTurns.NoLostAgentMessage`, in a copy with one composer and one
+     agent message, POSTs in order and no lost event or server death:
+     `DriverRead`, `Expire` and `Settle` not waiting for `DropUnread` (the
+     deletes in a task of their own), 18 steps.
    - `OpenCodeTurns-stop.AskVisible`: an `OcAsk` from a subagent's session
      never reaches the driver (the filter before `admits`; in the copy,
      `OcAsk` may leave `out` unchanged).

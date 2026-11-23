@@ -408,3 +408,141 @@ async fn a_turn_whose_permission_is_denied_ends() {
     assert_eq!(denied.status.as_deref(), Some("completed"));
     assert!(trailing.is_empty(), "one TurnDone per turn: {trailing:?}");
 }
+
+/// Events up to and including the next `TurnDone`.
+async fn until_turn_done(events: &mut broadcast::Receiver<SessionEvent>) -> Vec<SessionEvent> {
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(event)) => {
+                let done = matches!(event, SessionEvent::TurnDone { .. });
+                seen.push(event);
+                if done {
+                    return seen;
+                }
+            }
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => {}
+            Ok(Err(_)) => panic!("event channel closed mid-turn"),
+            Err(_) => panic!("the turn did not end within 120s"),
+        }
+    }
+}
+
+async fn send_and_stream(live: &mut Live, text: &str, id: &str) {
+    live.driver
+        .send_user_turn(text, None, None, Some(id))
+        .expect("send turn");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    while !matches!(
+        tokio::time::timeout_at(deadline, live.events.recv()).await,
+        Ok(Ok(SessionEvent::PartialText { .. }))
+    ) {
+        assert!(tokio::time::Instant::now() < deadline, "nothing streamed");
+    }
+}
+
+fn echoed(events: &[SessionEvent], id: &str) -> Vec<usize> {
+    events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| {
+            matches!(e, SessionEvent::UserMessage { client_message_id: Some(m), .. } if m == id)
+        })
+        .map(|(at, _)| at)
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "requires opencode; runs an opencode/*-free model (or HYPRLAYER_OPENCODE_FREE_MODEL)"]
+async fn a_message_sent_mid_turn_echoes_once_opencode_reads_it() {
+    let mut live = Live::open().await;
+    send_and_stream(
+        &mut live,
+        "Without using any tool, count from 1 to 80, one number per line.",
+        "counting",
+    )
+    .await;
+    live.driver
+        .send_user_turn(
+            "Reply with exactly the word: second.",
+            None,
+            None,
+            Some("second"),
+        )
+        .expect("send mid-turn");
+    let mut seen = until_turn_done(&mut live.events).await;
+    seen.extend(
+        tokio::time::timeout(Duration::from_secs(3), until_turn_done(&mut live.events))
+            .await
+            .unwrap_or_default(),
+    );
+    live.close().await;
+    let echoes = echoed(&seen, "second");
+    let counted = seen
+        .iter()
+        .position(|e| matches!(e, SessionEvent::AssistantText { .. }));
+    println!("echoes at {echoes:?}, the count's reply at {counted:?}");
+    assert_eq!(echoes.len(), 1, "one echo: {seen:?}");
+    assert!(
+        counted.is_some_and(|reply| reply < echoes[0]),
+        "the echo waits for the step that reads it, after the running reply: {seen:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires opencode; runs an opencode/*-free model (or HYPRLAYER_OPENCODE_FREE_MODEL)"]
+async fn a_message_queued_behind_a_stopped_turn_is_handed_back_and_unread() {
+    const CODEWORD: &str = "PINEAPPLE-77";
+    let mut live = Live::open().await;
+    let session = opened_session(&mut live.events).await;
+    send_and_stream(
+        &mut live,
+        "Without using any tool, count from 1 to 400, one number per line.",
+        "counting",
+    )
+    .await;
+    live.driver
+        .send_user_turn(
+            &format!("Remember the codeword {CODEWORD}."),
+            None,
+            None,
+            Some("queued"),
+        )
+        .expect("send mid-turn");
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    live.driver.interrupt().expect("abort");
+    let seen = until_turn_done(&mut live.events).await;
+
+    let record = std::fs::read_to_string(live._root.path().join("app-data/opencode-server.pid"))
+        .expect("the server's pid record");
+    let port = record.split_whitespace().last().expect("the server's port");
+    let messages: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/session/{session}/message"))
+        .query(&[("directory", live.cwd.as_str())])
+        .send()
+        .await
+        .expect("read the session's messages")
+        .json()
+        .await
+        .expect("messages as JSON");
+    let kept = messages.to_string().contains(CODEWORD);
+    live.close().await;
+
+    let handed_back = seen.iter().position(|e| {
+        matches!(e, SessionEvent::CommandLifecycle { command_uuid, state }
+            if command_uuid == "queued" && state == "cancelled")
+    });
+    println!("{seen:?}");
+    assert_eq!(echoed(&seen, "queued"), [] as [usize; 0], "never echoed");
+    assert!(
+        matches!(seen.last(), Some(SessionEvent::TurnDone { turn_status, .. })
+            if turn_status.as_deref() == Some("interrupted")),
+        "the stop ends the turn"
+    );
+    assert!(
+        handed_back.is_some_and(|at| at < seen.len() - 1),
+        "handed back before the turn's end"
+    );
+    assert!(!kept, "OpenCode's history no longer holds it");
+}

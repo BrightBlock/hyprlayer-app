@@ -17,8 +17,8 @@ PASS CodexTurns.AskVisible
 PASS CodexTurns.InterruptSafe
 PASS CodexTurns.InterruptHonored
 PASS OpenCodeTurns.TypeOK
-PASS OpenCodeTurns.NoLostUserMessage
-PASS OpenCodeTurns.NoLostAgentMessage
+FAIL OpenCodeTurns.NoLostUserMessage  # finding 16 (two prompts handled out of order, then a stop): model only, not reproduced live
+FAIL OpenCodeTurns.NoLostAgentMessage  # finding 16 (two prompts handled out of order), and 13: model only, not reproduced live
 PASS OpenCodeTurns.NoDoubleSend
 FAIL OpenCodeTurns.TurnProgress  # finding 14 (a lost idle), and 13: model only, not reproduced live
 FAIL OpenCodeTurns.AskResolution  # findings 13 and 14 together: model only, not reproduced live

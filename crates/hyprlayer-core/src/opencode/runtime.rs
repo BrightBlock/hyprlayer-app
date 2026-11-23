@@ -11,7 +11,7 @@ use tokio::process::Command;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, watch, Mutex};
 
-use crate::agent::{AgentDriver, KillFlag, UsageSoFar};
+use crate::agent::{declined_message, AgentDriver, KillFlag, UsageSoFar};
 use crate::claude::{ExitOutcome, SessionEvent};
 use crate::error::Result as CoreResult;
 use crate::models::session::QuestionAnswers;
@@ -20,6 +20,9 @@ use crate::store::session_event_codec::questions_from_value;
 
 const EVENT_CAP: usize = 1024;
 const EXIT_POLL: Duration = Duration::from_millis(250);
+/// Under the desktop's three seconds before a stop escalates to a kill.
+const DELETE_TRIES: u32 = 20;
+const DELETE_RETRY: Duration = Duration::from_millis(100);
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
@@ -762,21 +765,103 @@ struct SentTurn {
     interrupted: bool,
     /// Denied a permission or question; 1.18.32 then stops on a `tool-calls` step.
     refused: bool,
+    ended: bool,
 }
 
-type SharedTurn = Arc<StdMutex<Option<SentTurn>>>;
+#[derive(Default)]
+struct Turns {
+    latest: Option<SentTurn>,
+    /// Sent while a turn ran, by message id: OpenCode holds each for its next step, which reads
+    /// every user message older than the one it answers, so the echo waits for that step.
+    waiting: Vec<(String, SessionEvent)>,
+}
 
-fn begin_turn(turn: &SharedTurn) -> String {
-    let sent_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
-    let id = message_id(sent_at);
-    *turn.lock().unwrap_or_else(PoisonError::into_inner) = Some(SentTurn {
-        id: id.clone(),
-        sent_at,
-        ..SentTurn::default()
-    });
-    id
+impl Turns {
+    fn running(&self) -> bool {
+        self.latest.as_ref().is_some_and(|turn| !turn.ended)
+    }
+
+    fn begin(&mut self) -> String {
+        let sent_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        let id = message_id(sent_at);
+        self.latest = Some(SentTurn {
+            id: id.clone(),
+            sent_at,
+            ..SentTurn::default()
+        });
+        id
+    }
+
+    fn read_up_to(&mut self, answered: &str) -> Vec<SessionEvent> {
+        let (read, unread) = std::mem::take(&mut self.waiting)
+            .into_iter()
+            .partition(|(id, _)| id.as_str() <= answered);
+        self.waiting = unread;
+        read.into_iter().map(|(_, echo)| echo).collect()
+    }
+}
+
+type SharedTurn = Arc<StdMutex<Turns>>;
+
+fn turns(shared: &SharedTurn) -> std::sync::MutexGuard<'_, Turns> {
+    shared.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// OpenCode keeps a stopped turn's queued messages, and a later turn would read them; one it
+/// deletes is handed back, and one it will not delete waits for the step that reads it.
+async fn forget_unread(
+    delete: &impl Fn(&str) -> reqwest::RequestBuilder,
+    unread: Vec<(String, SessionEvent)>,
+    shared: &SharedTurn,
+) -> Vec<SessionEvent> {
+    let mut handed_back = Vec::new();
+    for (id, echo) in unread {
+        if delete_message(delete, &id).await {
+            handed_back.extend(declined_message(&echo));
+        } else {
+            turns(shared).waiting.push((id, echo));
+        }
+    }
+    handed_back
+}
+
+fn message_delete(
+    server: &OpenCodeServer,
+    session_id: &str,
+    directory: &str,
+) -> impl Fn(&str) -> reqwest::RequestBuilder + Send + 'static {
+    let client = server.client.clone();
+    let messages = format!("{}/session/{session_id}/message", server.base_url);
+    let directory = directory.to_string();
+    move |id| {
+        client
+            .delete(format!("{messages}/{id}"))
+            .query(&[("directory", &directory)])
+    }
+}
+
+/// OpenCode 1.2.14 added the route; a busy session answers 409 until the abort lands.
+async fn delete_message(delete: &impl Fn(&str) -> reqwest::RequestBuilder, id: &str) -> bool {
+    for _ in 0..DELETE_TRIES {
+        match delete(id).send().await {
+            Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
+                tokio::time::sleep(DELETE_RETRY).await;
+            }
+            Ok(resp) if resp.status().is_success() => return true,
+            Ok(resp) => {
+                tracing::warn!("opencode DELETE message {id} returned {}", resp.status());
+                return false;
+            }
+            Err(e) => {
+                tracing::warn!("opencode DELETE message {id} failed: {e}");
+                return false;
+            }
+        }
+    }
+    tracing::warn!("opencode DELETE message {id}: the session stayed busy");
+    false
 }
 
 /// An id in OpenCode's ascending format, which orders a session's messages: the low 48 bits of
@@ -878,26 +963,20 @@ impl OpenCodeDriver {
         let xlate_sent = sent.clone();
         let mut server_exit = server.exited.subscribe();
         let exit_tx = events.clone();
+        let delete = message_delete(&server, &session_id, cwd);
         let translate = async move {
             let mut xlate = Translator {
                 sent: xlate_sent,
                 ..Translator::default()
             };
             loop {
-                let received = match xlate.deadline() {
-                    Some(at) => match tokio::time::timeout_at(at.into(), sse_rx.recv()).await {
-                        Ok(received) => received,
-                        Err(_) => {
-                            for se in xlate.expire() {
-                                let _ = tx.send(se);
-                            }
-                            continue;
-                        }
-                    },
-                    None => sse_rx.recv().await,
+                let next = match xlate.deadline() {
+                    Some(at) => tokio::time::timeout_at(at.into(), sse_rx.recv()).await.ok(),
+                    None => Some(sse_rx.recv().await),
                 };
-                match received {
-                    Ok(ev) => {
+                let translated = match next {
+                    None => xlate.expire(),
+                    Some(Ok(ev)) => {
                         if !admits(&mut family, &sid, &ev) {
                             continue;
                         }
@@ -913,12 +992,17 @@ impl OpenCodeDriver {
                         if let Ok(mut so_far) = published_cost.lock() {
                             *so_far = Some(xlate.cost_total);
                         }
-                        for se in translated {
-                            let _ = tx.send(se);
-                        }
+                        translated
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
+                    Some(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                    Some(Err(broadcast::error::RecvError::Closed)) => break,
+                };
+                // Handed back ahead of the turn's end, and before a held end can be let out, so
+                // a resend after it reads alone.
+                let unread = std::mem::take(&mut xlate.unread);
+                let handed_back = forget_unread(&delete, unread, &xlate.sent).await;
+                for se in handed_back.into_iter().chain(translated) {
+                    let _ = tx.send(se);
                 }
             }
         };
@@ -963,7 +1047,19 @@ impl OpenCodeDriver {
     }
 
     fn end(&self, outcome: ExitOutcome) {
-        self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
+        let unread = std::mem::take(&mut turns(&self.sent).waiting);
+        let abort_path = format!("/session/{}/abort", self.session_id);
+        let abort = self
+            .request(reqwest::Method::POST, &abort_path)
+            .json(&json!({}));
+        let delete = message_delete(&self.server, &self.session_id, &self.cwd);
+        let shared = self.sent.clone();
+        self.server.tasks.spawn(async move {
+            if let Err(e) = abort.send().await {
+                tracing::warn!("opencode POST {abort_path} failed: {e}");
+            }
+            forget_unread(&delete, unread, &shared).await;
+        });
         if let Ok(mut guard) = self.filter_task.try_lock() {
             if let Some(handle) = guard.take() {
                 handle.abort();
@@ -1017,7 +1113,13 @@ impl OpenCodeDriver {
         });
     }
 
-    fn command_async(&self, command: &str, arguments: &str, original_text: &str) {
+    fn command_async(
+        &self,
+        command: &str,
+        arguments: &str,
+        original_text: &str,
+        message_id: String,
+    ) {
         let model = self.model.lock().ok().and_then(|model| model.clone());
         let arguments = if self.skills.contains(command) {
             routed_skill_arguments(skill_base_for_model(model.as_ref()), arguments)
@@ -1027,7 +1129,7 @@ impl OpenCodeDriver {
         let mut body = json!({
             "command": command,
             "arguments": arguments,
-            "messageID": begin_turn(&self.sent),
+            "messageID": message_id,
         });
         let mut fallback = json!({ "parts": [{ "type": "text", "text": original_text }] });
         if let Some((provider, model)) = &model {
@@ -1055,7 +1157,7 @@ impl OpenCodeDriver {
             tracing::warn!(
                 "opencode command failed; delivering the turn as a plain prompt: {command_error}"
             );
-            fallback["messageID"] = json!(begin_turn(&turn));
+            fallback["messageID"] = json!(turns(&turn).begin());
             let delivered = prompt
                 .json(&fallback)
                 .send()
@@ -1088,12 +1190,7 @@ impl OpenCodeDriver {
     }
 
     fn mark_turn(&self, mark: impl FnOnce(&mut SentTurn)) {
-        if let Some(turn) = self
-            .sent
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_mut()
-        {
+        if let Some(turn) = turns(&self.sent).latest.as_mut() {
             mark(turn);
         }
     }
@@ -1123,20 +1220,31 @@ impl AgentDriver for OpenCodeDriver {
         prompt_name: Option<&str>,
         client_message_id: Option<&str>,
     ) -> CoreResult<()> {
-        let _ = self.events.send(SessionEvent::UserMessage {
+        let echo = SessionEvent::UserMessage {
             text: text.to_string(),
             stage: stage.map(str::to_string),
             prompt_name: prompt_name.map(str::to_string),
             client_message_id: client_message_id.map(str::to_string),
             author: None,
-        });
+        };
+        let message_id = {
+            let mut sent = turns(&self.sent);
+            let running = sent.running();
+            let id = sent.begin();
+            if running && client_message_id.is_some() {
+                sent.waiting.push((id.clone(), echo));
+            } else {
+                let _ = self.events.send(echo);
+            }
+            id
+        };
         if let Some(invocation) = leading_skill_invocation(text, &self.commands, prompt_name) {
-            self.command_async(invocation.name, invocation.arguments, text);
+            self.command_async(invocation.name, invocation.arguments, text, message_id);
             return Ok(());
         }
         let mut body = json!({
             "parts": [{ "type": "text", "text": text }],
-            "messageID": begin_turn(&self.sent),
+            "messageID": message_id,
         });
         if let Some((provider, model)) = self.model.lock().ok().and_then(|m| m.clone()) {
             body["model"] = json!({ "providerID": provider, "modelID": model });
@@ -1384,13 +1492,13 @@ struct Translator {
     sent: SharedTurn,
     /// The sent turn's id, and the id OpenCode gave its user message.
     anchor: Option<(String, String)>,
-    /// The sent turn OpenCode finished answering, and the one that ended.
+    /// The sent turn OpenCode finished answering.
     answered: Option<String>,
-    ended: Option<String>,
     /// An idle or error that came before the anchor, when, and the sent turn it waits on.
     unplaced: Option<(std::time::Instant, String, OcEvent)>,
     open_reply: Option<String>,
     held_end: Option<(std::time::Instant, Vec<SessionEvent>)>,
+    unread: Vec<(String, SessionEvent)>,
 }
 
 /// How long an unplaced idle or error waits for the anchor before it ends the turn anyway.
@@ -1463,11 +1571,17 @@ fn error_events(p: &Value) -> Vec<SessionEvent> {
 
 impl Translator {
     fn open_turn(&self) -> Option<SentTurn> {
-        self.sent
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-            .filter(|turn| self.ended.as_ref() != Some(&turn.id))
+        turns(&self.sent).latest.clone().filter(|turn| !turn.ended)
+    }
+
+    fn end(&mut self, turn: &SentTurn) {
+        let mut sent = turns(&self.sent);
+        if let Some(latest) = sent.latest.as_mut().filter(|t| t.id == turn.id) {
+            latest.ended = true;
+        }
+        if turn.interrupted {
+            self.unread = std::mem::take(&mut sent.waiting);
+        }
     }
 
     fn anchor_of(&self, turn: &SentTurn) -> Option<&str> {
@@ -1517,7 +1631,7 @@ impl Translator {
             turn.id,
             held.kind
         );
-        self.ended = Some(turn.id.clone());
+        self.end(&turn);
         let mut out = vec![SessionEvent::ProtocolError {
             detail: "OpenCode reported no message matching this prompt, so its turn ended on the next idle or error".into(),
             raw: format!("prompt {}; ended on {}", turn.id, held.kind),
@@ -1532,8 +1646,8 @@ impl Translator {
 
     /// OpenCode ends a turn before it settles the parts of the reply it cut short, so the end
     /// waits for that reply, and goes out before anything of a turn sent after it.
-    fn end_turn(&mut self, turn: String, events: Vec<SessionEvent>) -> Vec<SessionEvent> {
-        self.ended = Some(turn);
+    fn end_turn(&mut self, turn: &SentTurn, events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+        self.end(turn);
         if self.open_reply.is_none() {
             return events;
         }
@@ -1571,6 +1685,7 @@ impl Translator {
                 let Some(info) = p.get("info") else {
                     return Vec::new();
                 };
+                let mut out = Vec::new();
                 if let (Some(id), Some(role)) = (
                     info.get("id").and_then(Value::as_str),
                     info.get("role").and_then(Value::as_str),
@@ -1594,18 +1709,21 @@ impl Translator {
                     if message_settled(info) && self.open_reply.as_deref() == Some(id) {
                         self.open_reply = None;
                     }
+                    if let Some(parent) = info.get("parentID").and_then(Value::as_str) {
+                        out = turns(&self.sent).read_up_to(parent);
+                    }
                     self.roles.insert(id.to_string(), role.to_string());
                 }
                 // Every message names the agent answering it; `plan` is OpenCode's plan mode.
-                let planning = match info.get("agent").and_then(Value::as_str) {
-                    Some(agent) => agent == "plan",
-                    None => return Vec::new(),
+                let Some(agent) = info.get("agent").and_then(Value::as_str) else {
+                    return out;
                 };
-                if planning == self.planning {
-                    return Vec::new();
+                let planning = agent == "plan";
+                if planning != self.planning {
+                    self.planning = planning;
+                    out.push(SessionEvent::PlanModeChanged { active: planning });
                 }
-                self.planning = planning;
-                vec![SessionEvent::PlanModeChanged { active: planning }]
+                out
             }
             "message.part.delta" => {
                 let mid = p
@@ -1663,11 +1781,11 @@ impl Translator {
                 let answered = self.answered.as_ref() == Some(&turn.id) || turn.refused;
                 if answered {
                     let done = self.ended_as("completed");
-                    return self.end_turn(turn.id, vec![done]);
+                    return self.end_turn(&turn, vec![done]);
                 }
                 if turn.interrupted {
                     let done = self.ended_as("interrupted");
-                    return self.end_turn(turn.id, vec![done]);
+                    return self.end_turn(&turn, vec![done]);
                 }
                 self.hold_unplaced(&turn, ev);
                 Vec::new()
@@ -1686,7 +1804,7 @@ impl Translator {
                     self.hold_unplaced(&turn, ev);
                     return Vec::new();
                 }
-                self.end_turn(turn.id, error_events(p))
+                self.end_turn(&turn, error_events(p))
             }
             _ => Vec::new(),
         }
@@ -2126,14 +2244,14 @@ mod tests {
     }
 
     fn send(x: &Translator, id: &str) {
-        *x.sent.lock().unwrap() = Some(SentTurn {
+        x.sent.lock().unwrap().latest = Some(SentTurn {
             id: id.into(),
             ..SentTurn::default()
         });
     }
 
     fn interrupt(x: &Translator) {
-        x.sent.lock().unwrap().as_mut().unwrap().interrupted = true;
+        x.sent.lock().unwrap().latest.as_mut().unwrap().interrupted = true;
     }
 
     #[test]
@@ -2197,7 +2315,7 @@ mod tests {
         send(&x, "msg_a");
         let mut denied = x.handle(&user("msg_a"));
         denied.extend(x.handle(&reply("msg_b", Some("tool-calls"))));
-        x.sent.lock().unwrap().as_mut().unwrap().refused = true;
+        x.sent.lock().unwrap().latest.as_mut().unwrap().refused = true;
         denied.extend(x.handle(&idle()));
         assert_eq!(statuses(denied), ["completed"]);
 
@@ -2208,7 +2326,7 @@ mod tests {
                 json!({ "info": { "id": id, "role": "user", "time": { "created": created } } }),
             )
         };
-        *x.sent.lock().unwrap() = Some(SentTurn {
+        x.sent.lock().unwrap().latest = Some(SentTurn {
             id: "msg_c".into(),
             sent_at: 100,
             ..SentTurn::default()
@@ -2341,6 +2459,53 @@ mod tests {
             events = x.expire();
         }
         assert_eq!(statuses(events), ["interrupted"]);
+    }
+
+    #[test]
+    fn a_message_sent_mid_turn_echoes_at_the_step_that_reads_it_and_a_stop_leaves_the_rest() {
+        let mut x = Translator::default();
+        send(&x, "msg_1");
+        let echo = |id: &str| SessionEvent::UserMessage {
+            text: id.into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some(id.into()),
+            author: None,
+        };
+        x.sent.lock().unwrap().waiting = vec![
+            ("msg_2".into(), echo("two")),
+            ("msg_3".into(), echo("three")),
+        ];
+        let step = |id: &str, parent: &str| {
+            oc(
+                "message.updated",
+                json!({ "info": {
+                    "id": id, "role": "assistant", "parentID": parent,
+                    "finish": "tool-calls", "time": { "completed": 1 },
+                } }),
+            )
+        };
+        let echoed = |events: Vec<SessionEvent>| -> Vec<String> {
+            events
+                .into_iter()
+                .filter_map(|e| match e {
+                    SessionEvent::UserMessage {
+                        client_message_id, ..
+                    } => client_message_id,
+                    _ => None,
+                })
+                .collect()
+        };
+        assert!(echoed(x.handle(&step("msg_1a", "msg_1"))).is_empty());
+        assert_eq!(echoed(x.handle(&step("msg_2a", "msg_2"))), ["two"]);
+        interrupt(&x);
+        assert_eq!(
+            statuses(x.handle(&error("MessageAbortedError"))),
+            ["interrupted"]
+        );
+        let unread: Vec<_> = x.unread.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(unread, ["msg_3"]);
+        assert!(x.sent.lock().unwrap().waiting.is_empty());
     }
 
     #[test]

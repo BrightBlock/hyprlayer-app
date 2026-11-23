@@ -35,8 +35,10 @@ const labels: Record<string, string> = {
   DriverRead: "the server reads OpenCode's event",
   Expire: "an unclaimed idle ends the turn",
   Settle: "the held turn end goes out",
+  DropUnread: "the server deletes what the stopped turn left unread and hands it back",
   Relay: "the server stores the event",
   RelayExited: "the server drops the session's driver",
+  RelayResend: "the server sends a dropped message again",
   ClientReload: "the app reloads the transcript",
   Done: "everything settles",
 };
