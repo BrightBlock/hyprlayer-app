@@ -59,6 +59,7 @@ mod tests {
         assert_eq!(outcome_from_unclean_exit(None, None), ExitOutcome::Crashed);
     }
 
+    #[cfg(unix)]
     #[test]
     fn unix_stop_signals_are_kills_but_faults_are_crashes() {
         for signal in [1, 2, 15, 9] {

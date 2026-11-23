@@ -588,16 +588,14 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_symlinked_directory_is_covered_but_never_walked() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join("real/deep")).unwrap();
         std::fs::create_dir_all(root.join("node_modules")).unwrap();
-        #[cfg(unix)]
         std::os::unix::fs::symlink(root.join("real"), root.join("link")).unwrap();
-        #[cfg(not(unix))]
-        return;
 
         let prune = |p: &Path| p.file_name().is_some_and(|n| n == "node_modules");
         let plan = plan_of(root, &prune);

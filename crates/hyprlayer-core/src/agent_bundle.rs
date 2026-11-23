@@ -258,6 +258,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn leaves_an_already_linked_target_alone() {
         let tmp = tempfile::tempdir().unwrap();

@@ -1113,6 +1113,7 @@ pub fn login_shell_args(command: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     #[test]
     fn resolve_shell_prefers_the_supplied_env_value() {
         assert_eq!(
@@ -1121,6 +1122,7 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn resolve_shell_falls_back_to_bin_sh() {
         assert_eq!(resolve_shell(None), PathBuf::from("/bin/sh"));
