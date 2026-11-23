@@ -60,6 +60,8 @@ struct Entry {
     trailing: bool,
     /// An agent's paste the hooks haven't acknowledged yet; until then the agent reads as working.
     prompt_owed_until: Option<Instant>,
+    /// claude is at a prompt it shows before its session starts, as its folder-trust one.
+    startup_prompt: bool,
     /// While a title is being generated, so a later prompt doesn't start a second.
     title_busy: bool,
     title_tries: u8,
@@ -208,6 +210,7 @@ impl PtyAgents {
                 emitted_at: None,
                 trailing: false,
                 prompt_owed_until: None,
+                startup_prompt: false,
                 title_busy: false,
                 title_tries: 0,
                 rollout: Arc::default(),
@@ -349,6 +352,22 @@ impl PtyAgents {
         }
     }
 
+    /// A prompt before the session starts reads as a permission ask; it needs a person to answer it.
+    pub(crate) fn startup_prompt(self: &Arc<Self>, terminal_id: &str, showing: bool) {
+        let mut entries = lock(&self.entries);
+        let Some(entry) = entries.get_mut(terminal_id) else {
+            return;
+        };
+        let before = entry.agent.clone();
+        if showing && entry.agent.state == PtyAgentState::Starting {
+            entry.startup_prompt = true;
+            entry.agent.state = PtyAgentState::AwaitingPermission;
+        } else if !showing && std::mem::take(&mut entry.startup_prompt) {
+            unprompt(&mut entry.agent);
+        }
+        self.publish(entry, terminal_id, &before);
+    }
+
     pub(crate) fn apply(self: &Arc<Self>, terminal_id: &str, signal: &AgentSignal) {
         let mut entries = lock(&self.entries);
         let Some(entry) = entries.get_mut(terminal_id) else {
@@ -368,6 +387,9 @@ impl PtyAgents {
             entry.switched_to = signal.to_model.clone();
         }
         let before = entry.agent.clone();
+        if std::mem::take(&mut entry.startup_prompt) {
+            unprompt(&mut entry.agent);
+        }
         let remote = entry.remote.clone();
         fold(&mut entry.agent, &mut entry.asks, signal);
         let hook_mode = remote.as_ref().is_none_or(|r| !r.mode_reported());
@@ -673,6 +695,13 @@ pub(super) fn asking(state: PtyAgentState) -> bool {
         state,
         PtyAgentState::AwaitingPermission | PtyAgentState::AwaitingQuestion
     )
+}
+
+/// A settle may have idled it since.
+fn unprompt(agent: &mut PtyAgent) {
+    if agent.state == PtyAgentState::AwaitingPermission {
+        agent.state = PtyAgentState::Starting;
+    }
 }
 
 /// Without a screen to read (codex), a quiet ask can't be told from a denied one.

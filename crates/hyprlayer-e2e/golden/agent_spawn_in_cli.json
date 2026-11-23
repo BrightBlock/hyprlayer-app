@@ -56,6 +56,38 @@
       "guards": [
         {
           "evidence": {
+            "nothingTypedWhileAsked": true,
+            "promptAfterTrust": true,
+            "state": "awaiting_permission",
+            "wakeFired": true,
+            "wakeSaysNeedsYou": true
+          },
+          "guard": "at the trust prompt the agent awaits permission and the spawner's needs_you wake fires; nothing is typed until the person trusts the folder, then the prompt arrives",
+          "ok": true
+        }
+      ],
+      "step": "a spawn into a folder claude has yet to trust waits on the person, then sends its prompt"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "asked": true,
+            "reported": "terminal $QUITTER exited before it was ready, so the prompt you spawned it with was never delivered",
+            "typed": [
+              "no"
+            ]
+          },
+          "guard": "the spawner reads a hyprlayer turn saying its prompt was never delivered, and the prompt was never typed",
+          "ok": true
+        }
+      ],
+      "step": "an agent that exits at the trust prompt is reported to its spawner"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "error": null,
             "livePtys": 1,
             "result": "session"

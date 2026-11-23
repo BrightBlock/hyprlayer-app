@@ -11,6 +11,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{broadcast, oneshot};
 use tokio::time::{Instant, MissedTickBehavior};
 
+use super::pty_agents::asking;
 use super::spawn::{
     observe_pty, paste, paste_refusal, quiet_spell, session_label, Observed, PROMPT_ACK,
 };
@@ -136,6 +137,31 @@ impl AgentControlService<'_> {
         };
         tokio::spawn(waiter.run(cancelled));
         Ok(wake)
+    }
+
+    /// Delivers `report` to `caller` as a wake would, once it can take a message.
+    pub(crate) fn report_to(&self, caller: AgentCaller, project: String, report: String) {
+        let wake = Wake {
+            id: uuid::Uuid::new_v4().to_string(),
+            condition: WakeCondition::After { secs: 0 },
+            deadline_ms: now_ms(),
+        };
+        let (cancel, cancelled) = oneshot::channel();
+        if let Err(e) = self.runtime.wakes.add(caller.id(), wake.clone(), cancel) {
+            tracing::warn!("not reported to {}: {report}: {e}", caller.id());
+            return;
+        }
+        let waiter = Waiter {
+            runtime: self.runtime.handle.clone(),
+            caller,
+            project,
+            wake,
+            deadline: Instant::now(),
+            waited_secs: 0,
+            watch: Watch::Report(report),
+            events: self.runtime.events.subscribe(),
+        };
+        tokio::spawn(waiter.run(cancelled));
     }
 
     pub fn list_wakes(&self, identity: &AgentIdentity) -> Vec<Wake> {
@@ -298,6 +324,8 @@ impl Agent {
 
 enum Watch {
     Timer,
+    /// Already due, with this report.
+    Report(String),
     Ref(RefWatch),
     Pr {
         workstream_id: String,
@@ -321,13 +349,14 @@ impl Watch {
         match self {
             Watch::Ref(_) => Some(POLL),
             Watch::Pr { .. } => Some(Duration::ZERO),
-            Watch::Timer | Watch::Agent { .. } | Watch::AnyAgent { .. } => None,
+            Watch::Timer | Watch::Report(_) | Watch::Agent { .. } | Watch::AnyAgent { .. } => None,
         }
     }
 
     /// Already true at the start: a session or terminal that is there already, or a cached PR.
     async fn holds(&self, rt: &HyprlayerRuntime) -> Option<String> {
         match self {
+            Watch::Report(report) => Some(report.clone()),
             Watch::Pr {
                 workstream_id,
                 until,
@@ -373,7 +402,7 @@ impl Watch {
                 let lookup = rt.workstreams().refresh_pr_in_background(&item).await?;
                 pr_report(&item, &lookup, *until).await
             }
-            Watch::Timer | Watch::Agent { .. } | Watch::AnyAgent { .. } => None,
+            Watch::Timer | Watch::Report(_) | Watch::Agent { .. } | Watch::AnyAgent { .. } => None,
         }
     }
 
@@ -385,7 +414,7 @@ impl Watch {
         event: &RuntimeEvent,
     ) -> Option<String> {
         match self {
-            Watch::Timer => None,
+            Watch::Timer | Watch::Report(_) => None,
             Watch::Ref(watch) => match event {
                 RuntimeEvent::WorktreeChanged { .. } => watch.reread().await,
                 _ => None,
@@ -437,7 +466,7 @@ impl Watch {
     /// After a lag: a target is observed afresh, and edges across the project are let go.
     async fn resync(&mut self, rt: &HyprlayerRuntime, project: &str, me: &str) -> Option<String> {
         match self {
-            Watch::Timer => None,
+            Watch::Timer | Watch::Report(_) => None,
             Watch::Ref(watch) => watch.reread().await,
             Watch::Agent { target, now, .. } => {
                 *now = observe_agent(rt, target).await;
@@ -641,7 +670,7 @@ fn observed<'e>(
 fn pty_observed(rt: &HyprlayerRuntime, terminal_id: &str) -> Observed {
     match rt.pty_agents.snapshot(terminal_id) {
         None => Observed::Exited,
-        Some(now) if now.prompt_owed => Observed::Working,
+        Some(now) if now.prompt_owed && !asking(now.agent.state) => Observed::Working,
         Some(now) => observe_pty(now.agent.state),
     }
 }

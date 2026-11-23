@@ -36,6 +36,8 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `worktree-remove` (back to the launch dir, then `WorktreeRemove` for the worktree it left) and
 /// `subagent-stop <id> [dirty]` (`SubagentStop` for `agent-<id>`'s worktree, after writing
 /// `changed.txt` there when `dirty`).
+/// `--stub-trust` first shows claude's folder-trust prompt, firing no hook, and reads one line:
+/// `trust` goes on to the launch; anything else exits, as claude's default "No, exit" does.
 /// Without `--stub-tui` it paints claude's empty input box at launch and after each line, a
 /// permission or question prompt after `ask` or `question`, the `/model` picker after `picker`, and
 /// nothing after `tools`. The statusLine
@@ -62,7 +64,7 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 pub const PTY_CLAUDE: &str = r#"#!/bin/sh
 base="$(dirname "$0")/../agent-control"
 sid=""; settings=""; mcp=""; prev=""
-tui=""; dialog=""; ignore_allow=""; silent=""; narrow=""; v330=""
+tui=""; dialog=""; ignore_allow=""; silent=""; narrow=""; v330=""; trust=""
 for a in "$@"; do
   case "$prev" in
     --session-id|--resume) sid="$a" ;;
@@ -76,6 +78,7 @@ for a in "$@"; do
     --stub-silent-switch) silent=1 ;;
     --stub-narrow) narrow=1 ;;
     --stub-330) v330=1 ;;
+    --stub-trust) trust=1 ;;
   esac
   prev="$a"
 done
@@ -200,6 +203,12 @@ run_line() {
   esac
 }
 rule="────────────────────────────────────────"
+if [ -n "$trust" ]; then
+  printf '\033[2J\033[H Accessing workspace:\n\n %s\n\n \342\235\257 No, exit\n   Yes, I trust this folder\n\n Enter to confirm \302\267 Esc to cancel\n' "$PWD"
+  IFS= read -r line
+  printf '%s\n' "$line" >> "$dir/stdin.log"
+  [ "$line" = trust ] || exit 0
+fi
 if [ -z "$tui" ]; then
   # One write each, so a screen read never lands between the clear and the paint.
   box() {

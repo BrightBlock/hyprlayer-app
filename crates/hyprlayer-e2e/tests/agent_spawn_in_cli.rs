@@ -9,12 +9,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use hyprlayer_core::models::{AgentControlLevel, PermissionMode, PtyLaunchSession};
+use hyprlayer_core::models::{AgentControlLevel, PermissionMode, PtyAgentState, PtyLaunchSession};
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::agent_stub::{
     agent_env, delivered, env_var, install, launch_log, lines, set_engine, set_level, tool_failed,
-    tool_text, update_settings, McpDriver, PTY_CLAUDE,
+    tool_text, type_line, update_settings, McpDriver, PTY_CLAUDE,
 };
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::goal_stub::GOAL_CLAUDE;
@@ -181,6 +181,89 @@ async fn agent_spawn_in_cli() {
             && lead_live,
         json!({ "started": started, "exited": exited, "shelvedListed": listed.contains(&shelved), "reviewerListed": listed.contains(&terminal), "leadLive": lead_live }),
     );
+    j.step(
+        "a spawn into a folder claude has yet to trust waits on the person, then sends its prompt",
+    );
+    set_engine(&mut j, &c, "claude-code", &pty_claude, &["--stub-trust"]).await;
+    let truster = terminal_of(
+        &mcp.call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_TRUSTED", "title": "Truster" }),
+        )
+        .await,
+    );
+    j.alias(&truster, "$TRUSTER");
+    let wake = wake_id(
+        &mcp.call(
+            "wake_when",
+            json!({ "condition": { "kind": "terminal", "terminalId": truster, "until": "needs_you" } }),
+        )
+        .await,
+    );
+    let woke = lead_turn(&c, &lead, &format!("wake {wake}]")).await;
+    let state = pty_state(&c, &ws, &truster).await;
+    let stdin = launch_log(&sandbox, &truster).join("stdin.log");
+    let untouched = lines(&stdin).is_empty();
+    type_line(&c, &truster, "trust").await;
+    let mut expected = vec!["trust".to_string()];
+    expected.extend(delivered(&format!("E2E_TRUSTED\n\n{header}\n\n{note}")));
+    let typed = eventually(IO, || lines(&stdin) == expected).await;
+    j.guard(
+        "at the trust prompt the agent awaits permission and the spawner's needs_you wake fires; nothing is typed until the person trusts the folder, then the prompt arrives",
+        woke.as_deref()
+            .is_some_and(|t| t.ends_with(&format!("terminal {truster} \"Truster\" needs you")))
+            && state == Some(PtyAgentState::AwaitingPermission)
+            && untouched
+            && typed,
+        json!({
+            "wakeFired": woke.is_some(),
+            "wakeSaysNeedsYou": woke.as_deref().is_some_and(|t| t.ends_with("needs you")),
+            "state": state,
+            "nothingTypedWhileAsked": untouched,
+            "promptAfterTrust": typed,
+        }),
+    );
+
+    mcp.call("kill_agent", json!({ "terminal_id": truster }))
+        .await;
+    assert!(
+        reaches(&c, &ws, &truster, None).await,
+        "the truster outlived kill_agent"
+    );
+
+    j.step("an agent that exits at the trust prompt is reported to its spawner");
+    let quitter = terminal_of(
+        &mcp.call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_QUIT", "title": "Quitter" }),
+        )
+        .await,
+    );
+    j.alias(&quitter, "$QUITTER");
+    let asked = reaches(&c, &ws, &quitter, Some(PtyAgentState::AwaitingPermission)).await;
+    type_line(&c, &quitter, "no").await;
+    let report = lead_turn(
+        &c,
+        &lead,
+        &format!("terminal {quitter} exited before it was ready"),
+    )
+    .await;
+    let stdin = lines(&launch_log(&sandbox, &quitter).join("stdin.log"));
+    j.guard(
+        "the spawner reads a hyprlayer turn saying its prompt was never delivered, and the prompt was never typed",
+        asked
+            && report.as_deref().is_some_and(|t| {
+                t.starts_with("[from hyprlayer · wake ")
+                    && t.ends_with("so the prompt you spawned it with was never delivered")
+            })
+            && stdin == ["no"],
+        json!({
+            "asked": asked,
+            "reported": report.as_deref().and_then(|t| t.split_once("\n\n")).map(|(_, body)| body.replace(&quitter, "$QUITTER")),
+            "typed": stdin,
+        }),
+    );
+    set_engine(&mut j, &c, "claude-code", &pty_claude, &[]).await;
 
     j.step("an unhooked engine falls back to a session for a non-bypass caller");
     set_engine(
@@ -605,6 +688,55 @@ fn alive(pid: &str) -> bool {
             .stderr(std::process::Stdio::null())
             .status()
             .is_ok_and(|s| s.success())
+}
+
+fn terminal_of(result: &Value) -> String {
+    text(&parsed(result), "/terminalId")
+}
+
+fn wake_id(result: &Value) -> String {
+    text(&parsed(result), "/wake/id")
+}
+
+async fn pty_state(c: &RpcClient, ws: &str, terminal: &str) -> Option<PtyAgentState> {
+    c.list_pty_agents(Some(ws.to_string()))
+        .await
+        .expect("list_pty_agents")
+        .into_iter()
+        .find(|a| a.terminal_id == terminal)
+        .map(|a| a.state)
+}
+
+async fn reaches(c: &RpcClient, ws: &str, terminal: &str, want: Option<PtyAgentState>) -> bool {
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline {
+        if pty_state(c, ws, terminal).await == want {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// The first user turn in the lead's log that contains `needle`.
+async fn lead_turn(c: &RpcClient, lead: &str, needle: &str) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline {
+        let found = c
+            .get_session_log(lead.to_string())
+            .await
+            .expect("get_session_log")
+            .into_iter()
+            .find_map(|e| match e.event {
+                SessionEvent::UserMessage { text, .. } if text.contains(needle) => Some(text),
+                _ => None,
+            });
+        if found.is_some() {
+            return found;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    None
 }
 
 fn parsed(result: &Value) -> Value {

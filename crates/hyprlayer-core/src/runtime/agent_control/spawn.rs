@@ -32,7 +32,7 @@ const POLL: Duration = Duration::from_millis(250);
 /// A spawned PTY has no window yet; this is the size a desktop tab starts from.
 const SPAWN_COLS: u16 = 120;
 const SPAWN_ROWS: u16 = 32;
-/// How long a spawned PTY's first prompt waits for its TUI to be ready.
+/// A first prompt still waiting on its TUI counts as owed this long past each check.
 const PROMPT_WAIT: Duration = Duration::from_secs(60);
 /// An unhooked TUI reports no ready state; this much quiet output stands in for one.
 const PROMPT_QUIET: Duration = Duration::from_secs(3);
@@ -717,35 +717,45 @@ impl AgentControlService<'_> {
             agent.title = Some(title);
         }
         // After the hooked check, so a refused spawn activates no plan; the header trails a leading `/skill`.
-        if let Some(fp) = stage_prompt {
+        let text = if let Some(fp) = stage_prompt {
             let text = self
                 .runtime
                 .sessions()
                 .pty_first_prompt(&check.workstream, engines::harness_of(&agent.engine_id), fp)
                 .await;
-            let text = format!(
+            Some(format!(
                 "{text}\n\n{}\n\n{}",
                 header(identity, &label),
                 spawner_note(identity, &label)
-            );
-            send_first_prompt(self.runtime.pty_agents.clone(), &agent.terminal_id, text);
-        } else if let (Some(prompt), Some(snapshot)) =
-            (prompt.filter(|p| !p.trim().is_empty()), snapshot)
-        {
-            let text = format!(
-                "{}\n\n{}",
-                pipeline::headed(&header(identity, &label), &prompt),
-                spawner_note(identity, &label)
-            );
+            ))
+        } else {
+            prompt.filter(|p| !p.trim().is_empty()).map(|prompt| {
+                format!(
+                    "{}\n\n{}",
+                    pipeline::headed(&header(identity, &label), &prompt),
+                    spawner_note(identity, &label)
+                )
+            })
+        };
+        if let (Some(text), Some(snapshot)) = (text, snapshot) {
             // A wait right after the spawn must not see the pre-prompt idle as the agent's answer.
-            self.runtime
-                .pty_agents
-                .owe_prompt(&agent.terminal_id, PROMPT_WAIT);
-            tokio::spawn(first_prompt(
-                self.runtime.pty_agents.clone(),
-                snapshot,
-                text,
-            ));
+            let agents = self.runtime.pty_agents.clone();
+            agents.owe_prompt(&agent.terminal_id, PROMPT_WAIT);
+            let runtime = self.runtime.handle.clone();
+            let (caller, project) = (identity.caller.clone(), identity.project_path.clone());
+            let terminal_id = agent.terminal_id.clone();
+            tokio::spawn(async move {
+                if first_prompt(agents, snapshot, text).await {
+                    return;
+                }
+                if let Some(rt) = runtime.upgrade() {
+                    rt.agent_control().report_to(
+                        caller,
+                        project,
+                        format!("terminal {terminal_id} exited before it was ready, so the prompt you spawned it with was never delivered"),
+                    );
+                }
+            });
         }
         Ok(Some(agent))
     }
@@ -847,7 +857,7 @@ impl AgentControlService<'_> {
                         moved = Instant::now();
                     }
                     last_reply = now.agent.last_reply;
-                    if now.prompt_owed {
+                    if now.prompt_owed && !asking(now.agent.state) {
                         Observed::Working
                     } else {
                         observe_pty(now.agent.state)
@@ -1138,9 +1148,10 @@ pub(crate) fn send_first_prompt(agents: Arc<PtyAgents>, terminal_id: &str, text:
     tokio::spawn(first_prompt(agents, snapshot, text));
 }
 
-/// Waits for the TUI to be ready, then pastes under the input lock: hooked, idle with nothing
-/// over its input box; unhooked, a quiet spell.
-async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String) {
+/// Waits for the TUI to be ready, however long a startup prompt holds it, then pastes under the
+/// input lock: hooked, idle with nothing over its input box; unhooked, a quiet spell. `false` when
+/// the agent exited first.
+async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String) -> bool {
     let terminal_id = launch.agent.terminal_id.clone();
     let send = || async {
         agents.owe_prompt(&terminal_id, PROMPT_ACK);
@@ -1154,29 +1165,28 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
                 .is_some_and(|now| now.agent.state == PtyAgentState::Idle)
                 && paste_refusal(&agents, &terminal_id).is_none()
         };
-        let ready = async {
-            loop {
-                agents.snapshot(&terminal_id)?;
+        loop {
+            let Some(now) = agents.snapshot(&terminal_id) else {
+                break None;
+            };
+            agents.owe_prompt(&terminal_id, PROMPT_WAIT);
+            if idle() {
+                let _input = launch.input.lock().await;
+                // Again under the lock: a bar change that held it may have opened a picker.
                 if idle() {
-                    let _input = launch.input.lock().await;
-                    // Again under the lock: a bar change that held it may have opened a picker.
-                    if idle() {
-                        return Some(send().await);
-                    }
+                    break Some(send().await);
                 }
-                tokio::time::sleep(POLL).await;
             }
-        };
-        tokio::time::timeout(PROMPT_WAIT, ready)
-            .await
-            .ok()
-            .flatten()
+            let prompting = now
+                .screen
+                .and_then(|screen| screen.rows())
+                .is_some_and(|rows| pty_controls::covered(&rows));
+            agents.startup_prompt(&terminal_id, prompting);
+            tokio::time::sleep(POLL).await;
+        }
     } else {
         let mut reader = launch.session.subscribe();
-        if matches!(
-            tokio::time::timeout(PROMPT_WAIT, quiet_spell(&mut reader)).await,
-            Ok(true)
-        ) {
+        if quiet_spell(&mut reader).await {
             let _input = launch.input.lock().await;
             Some(send().await)
         } else {
@@ -1184,15 +1194,14 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
         }
     };
     match sent {
-        Some(Ok(())) => {}
+        Some(Ok(())) => true,
         Some(Err(e)) => {
-            tracing::warn!("terminal {terminal_id}: its first prompt was not written: {e}")
+            tracing::warn!("terminal {terminal_id}: its first prompt was not written: {e}");
+            true
         }
         None => {
-            agents.clear_prompt_owed(&terminal_id);
-            tracing::warn!(
-                "terminal {terminal_id}: its first prompt was dropped; the agent never became ready"
-            );
+            tracing::warn!("terminal {terminal_id}: exited before its first prompt was sent");
+            false
         }
     }
 }

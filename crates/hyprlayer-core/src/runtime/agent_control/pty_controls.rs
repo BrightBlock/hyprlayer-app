@@ -744,7 +744,7 @@ pub(super) fn paste_refusal(screen: &Screen) -> Option<&'static str> {
     }
 }
 
-fn covered(rows: &[String]) -> bool {
+pub(super) fn covered(rows: &[String]) -> bool {
     rows.iter().any(|r| r.contains("Enter to confirm"))
         || rfind_wrapped(rows, "Esc to cancel").is_some()
 }
