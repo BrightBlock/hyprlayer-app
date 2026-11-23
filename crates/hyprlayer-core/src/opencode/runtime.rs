@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Handle;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 
 use crate::agent::{AgentDriver, KillFlag, UsageSoFar};
 use crate::claude::{ExitOutcome, SessionEvent};
@@ -19,6 +19,7 @@ use crate::opencode::support::opencode_provider_is_supported;
 use crate::store::session_event_codec::questions_from_value;
 
 const EVENT_CAP: usize = 1024;
+const EXIT_POLL: Duration = Duration::from_millis(250);
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
@@ -92,7 +93,7 @@ impl OpenCodeManager {
             );
             dead.kill_blocking();
         }
-        let server = Arc::new(OpenCodeServer::start(config).await?);
+        let server = OpenCodeServer::start(config).await?;
         *guard = Some(server.clone());
         Ok(server)
     }
@@ -111,16 +112,19 @@ impl OpenCodeManager {
     #[doc(hidden)]
     pub async fn install_child_for_test(&self, child: crate::process::SupervisedChild) {
         let (events, _) = broadcast::channel(EVENT_CAP);
-        *self.inner.lock().await = Some(Arc::new(OpenCodeServer {
+        let server = Arc::new(OpenCodeServer {
             base_url: String::new(),
             client: reqwest::Client::new(),
             events,
+            exited: watch::channel(None).0,
             model_context: std::collections::HashMap::new(),
             home: PathBuf::new(),
             tasks: Handle::current(),
             pid_file: PathBuf::new(),
-            _child: Mutex::new(child),
-        }));
+            child: StdMutex::new(child),
+        });
+        server.watch_exit(Arc::default());
+        *self.inner.lock().await = Some(server);
     }
 }
 
@@ -128,6 +132,7 @@ pub struct OpenCodeServer {
     base_url: String,
     client: reqwest::Client,
     events: broadcast::Sender<OcEvent>,
+    exited: watch::Sender<Option<SessionEvent>>,
     model_context: std::collections::HashMap<String, u32>,
     home: PathBuf,
     // The sync `AgentDriver` methods fire their HTTP calls from whatever thread
@@ -135,7 +140,7 @@ pub struct OpenCodeServer {
     // handle onto the runtime rather than an ambient `tokio::spawn` context.
     tasks: Handle,
     pid_file: PathBuf,
-    _child: Mutex<crate::process::SupervisedChild>,
+    child: StdMutex<crate::process::SupervisedChild>,
 }
 
 /// The string the reaper matches against the live process's command line.
@@ -153,7 +158,7 @@ fn orphan_program(bin: &Path, args: &[String]) -> String {
 }
 
 impl OpenCodeServer {
-    async fn start(config: OpenCodeServerConfig) -> Result<Self, String> {
+    async fn start(config: OpenCodeServerConfig) -> Result<Arc<Self>, String> {
         let OpenCodeServerConfig {
             bin,
             path,
@@ -263,24 +268,76 @@ impl OpenCodeServer {
         let tasks = Handle::current();
 
         let (events, _) = broadcast::channel(EVENT_CAP);
-        spawn_sse(&tasks, base_url.clone(), client.clone(), events.clone());
+        let (exited, _) = watch::channel(None);
+        spawn_sse(
+            &tasks,
+            base_url.clone(),
+            client.clone(),
+            events.clone(),
+            exited.subscribe(),
+        );
 
-        Ok(Self {
+        let server = Arc::new(Self {
             base_url,
             client,
             events,
+            exited,
             model_context,
             home,
             tasks,
             pid_file,
-            _child: Mutex::new(child),
+            child: StdMutex::new(child),
+        });
+        server.watch_exit(stderr);
+        Ok(server)
+    }
+
+    fn watch_exit(self: &Arc<Self>, stderr: Arc<StdMutex<VecDeque<String>>>) {
+        let weak = Arc::downgrade(self);
+        self.tasks.spawn(async move {
+            loop {
+                tokio::time::sleep(EXIT_POLL).await;
+                let Some(server) = weak.upgrade() else {
+                    return;
+                };
+                let polled = server
+                    .child
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .try_wait();
+                let Ok(Some(status)) = polled else { continue };
+                let said = stderr_text(&stderr);
+                let detail = format!("`opencode serve` exited ({status}): {said}");
+                if server.end_sessions(ExitOutcome::Crashed, status.code(), detail) {
+                    tracing::error!("opencode serve exited ({status}): {said}");
+                }
+                return;
+            }
+        });
+    }
+
+    fn end_sessions(&self, outcome: ExitOutcome, code: Option<i32>, stderr_tail: String) -> bool {
+        self.exited.send_if_modified(|exited| {
+            let first = exited.is_none();
+            if first {
+                *exited = Some(SessionEvent::Exited {
+                    outcome,
+                    code,
+                    stderr_tail,
+                });
+            }
+            first
         })
     }
 
     fn kill_blocking(&self) {
-        if let Ok(child) = self._child.try_lock() {
-            child.kill_blocking();
+        let mut child = self.child.lock().unwrap_or_else(PoisonError::into_inner);
+        // Killing a live server detaches its sessions, as a server stop does; one that already
+        // exited crashed, and `watch_exit` says so.
+        if let Ok(None) = child.try_wait() {
+            self.end_sessions(ExitOutcome::Detached, None, String::new());
         }
+        child.kill_blocking();
         crate::process::orphan::clear(&self.pid_file);
     }
 
@@ -414,9 +471,10 @@ fn spawn_sse(
     base_url: String,
     client: reqwest::Client,
     tx: broadcast::Sender<OcEvent>,
+    mut exited: watch::Receiver<Option<SessionEvent>>,
 ) {
-    tasks.spawn(async move {
-        // One warning per outage: this retries every half second, forever.
+    let stream = async move {
+        // One warning per outage: this retries every half second until the server exits.
         let mut connected = true;
         loop {
             let response = client.get(format!("{base_url}/global/event")).send().await;
@@ -444,6 +502,12 @@ fn spawn_sse(
                 }
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    };
+    tasks.spawn(async move {
+        tokio::select! {
+            () = stream => {}
+            _ = exited.wait_for(Option::is_some) => {}
         }
     });
 }
@@ -798,7 +862,9 @@ impl OpenCodeDriver {
         let published_cost = cost_so_far.clone();
         let sent = SharedTurn::default();
         let xlate_sent = sent.clone();
-        let task = server.tasks.spawn(async move {
+        let mut server_exit = server.exited.subscribe();
+        let exit_tx = events.clone();
+        let translate = async move {
             let mut xlate = Translator {
                 sent: xlate_sent,
                 ..Translator::default()
@@ -834,6 +900,19 @@ impl OpenCodeDriver {
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        };
+        let server_exited = async move {
+            let exited = server_exit.wait_for(Option::is_some).await.ok()?;
+            exited.clone()
+        };
+        let task = server.tasks.spawn(async move {
+            tokio::select! {
+                biased;
+                () = translate => {}
+                Some(exited) = server_exited => {
+                    let _ = exit_tx.send(exited);
                 }
             }
         });

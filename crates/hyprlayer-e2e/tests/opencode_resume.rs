@@ -6,13 +6,14 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use hyprlayer_core::models::QuestionAnswers;
+use hyprlayer_core::models::{ExitOutcome, QuestionAnswers};
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::{EventStream, RpcClient};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
+use tokio::time::Instant;
 
 const IO: Duration = Duration::from_secs(20);
 const NONCE: &str = "NONCE-7Q2X";
@@ -442,6 +443,37 @@ async fn opencode_resume() {
         json!({ "harnessSession": reused, "reply": kept }),
     );
 
+    j.step("when opencode serve dies mid-turn, each session on it ends, and a resume continues");
+    stub_delays(&sandbox, json!({ "reply": 30000 }));
+    let stranded = "A turn the server dies in.";
+    send(&mut j, &client, &retried, stranded).await;
+    sent(&mut events, stranded).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let deadline = kill_serve(&sandbox) + Duration::from_secs(5);
+    let exited = exit_by(&mut events, deadline).await;
+    let rows = crashed_by(&client, &ws, [&id, &retried], deadline).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "within 5s both sessions on it end as crashed, and neither reads as working",
+        exited == Some(ExitOutcome::Crashed)
+            && rows == [json!(["crashed", false]), json!(["crashed", false])],
+        json!({ "exited": exited, "sessions": rows }),
+    );
+    drop(events);
+    let mut events = resume(&client, &retried).await;
+    let back = "Back after the crash?";
+    send(&mut j, &client, &retried, back).await;
+    let (_, after_crash) = turn(&mut events, back).await;
+    let continued = harness_session(&mut j, &client, &ws, &retried).await;
+    j.guard(
+        "the resume starts a new server and continues the same OpenCode session",
+        continued == created
+            && after_crash
+                .as_deref()
+                .is_some_and(|r| r.ends_with(&format!("{still} | {stranded}]"))),
+        json!({ "harnessSession": continued, "reply": after_crash }),
+    );
+
     j.step("shutdown");
     drop(events);
     let stopped = server.shutdown(&client).await;
@@ -652,6 +684,57 @@ fn status_of(seen: &[SessionEvent]) -> Option<String> {
         SessionEvent::TurnDone { turn_status, .. } => turn_status.clone(),
         _ => None,
     })
+}
+
+fn kill_serve(sandbox: &Sandbox) -> Instant {
+    let record = std::fs::read_to_string(sandbox.app_data.join("opencode-server.pid"))
+        .expect("read the opencode serve pid");
+    let pid = record.lines().next().unwrap_or_default();
+    let killed = std::process::Command::new("kill")
+        .args(["-9", pid])
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(killed, "kill opencode serve {pid}");
+    Instant::now()
+}
+
+async fn exit_by(events: &mut EventStream<SessionEvent>, deadline: Instant) -> Option<ExitOutcome> {
+    tokio::time::timeout_at(deadline, async {
+        while let Some(event) = events.recv().await {
+            if let SessionEvent::Exited { outcome, .. } = event {
+                return Some(outcome);
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn crashed_by(
+    client: &RpcClient,
+    ws: &str,
+    ids: [&str; 2],
+    deadline: Instant,
+) -> Vec<serde_json::Value> {
+    loop {
+        let sessions = client
+            .list_sessions(ws.to_string())
+            .await
+            .expect("list_sessions");
+        let rows: Vec<serde_json::Value> = ids
+            .iter()
+            .map(|id| match sessions.iter().find(|s| s.id == *id) {
+                Some(s) => json!([s.state, s.working]),
+                None => json!(null),
+            })
+            .collect();
+        if rows.iter().all(|row| row[0] == "crashed") || Instant::now() >= deadline {
+            return rows;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 /// Whether the session's harness exited, as a start that failed before it launched does.

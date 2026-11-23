@@ -131,8 +131,9 @@ OcRead ==
   /\ droppedStop' = (droppedStop \/ (alive /\ line[1] = "abort" /\ ~busy
                                      /\ \E j \in 1..Len(pipe) : pipe[j][1] = "prompt" /\ pipe[j][2] \in stopFor))
   /\ IF ~alive
-          THEN \* prompt_async's request fails: "OpenCode request failed", then a failed TurnDone
-               /\ bus' = IF line[1] = "prompt" THEN bus \o <<<<"text">>, <<"turnDone">>>> ELSE bus
+          THEN \* prompt_async's request fails: "OpenCode request failed", then a failed TurnDone,
+               \* which no one hears once the relay has dropped the driver
+               /\ bus' = IF line[1] = "prompt" /\ live THEN bus \o <<<<"text">>, <<"turnDone">>>> ELSE bus
                /\ UNCHANGED <<busy, current, queue, cOpen, out, delivered>>
           ELSE /\ UNCHANGED bus
                /\ CASE line[1] = "prompt" /\ ~busy ->
@@ -202,13 +203,20 @@ OcFinish ==
   /\ UNCHANGED <<alive, pipe, cOpen, asked, drops, downs, turnVars, pending, bus, live,
                  inTurn, parked, stored, viewVars, accepted, failed, interrupts, droppedStop, stopFor>>
 
-\* The server dies: its work and its event stream with it. No driver is told; spawn_sse retries.
+\* The server dies: its work and its event stream with it.
 OcDown ==
   /\ alive /\ downs < MaxDowns
   /\ alive' = FALSE /\ downs' = downs + 1
   /\ busy' = FALSE /\ current' = None /\ queue' = <<>> /\ cOpen' = {} /\ out' = <<>>
   /\ UNCHANGED <<pipe, asked, drops, turnVars, pending, bus, live, inTurn, parked, stored,
                  viewVars, accepted, failed, delivered, interrupts, droppedStop, stopFor>>
+
+\* watch_exit sees the child gone and every driver on the server sends Exited (crashed).
+ServerExited ==
+  /\ ~alive /\ live /\ ~InSeq(<<"exited">>, bus)
+  /\ bus' = Append(bus, <<"exited">>)
+  /\ UNCHANGED <<ocVars, turnVars, pending, live, inTurn, parked, stored, viewVars, accepted,
+                 failed, delivered, interrupts, droppedStop, stopFor>>
 
 \* An SSE event the driver never sees: a reconnect gap, or its broadcast receiver lagging.
 SseDrop ==
@@ -299,8 +307,20 @@ Settle ==
 
 (* ---- spawn_relay + ActorState::handle_event (author_for's next_turn), the desktop ---- *)
 
+\* On Exited the relay drops the driver and ends; the desktop clears its working state and its
+\* cards and hands back its own unechoed messages, and the relay reports an agent's
+\* (held::report_undelivered), so a message whose echo never got stored is reported failed.
+RelayExited ==
+  /\ bus /= <<>> /\ Head(bus) = <<"exited">>
+  /\ bus' = <<>>
+  /\ live' = FALSE /\ vLive' = FALSE
+  /\ inTurn' = FALSE /\ parked' = FALSE /\ streaming' = FALSE /\ vOpen' = {}
+  /\ failed' = failed \cup {m \in Msgs : InSeq(<<"echo", m>>, bus)}
+  /\ UNCHANGED <<ocVars, turnVars, pending, stored, clicked, sends, accepted, delivered,
+                 interrupts, droppedStop, stopFor>>
+
 Relay ==
-  /\ bus /= <<>>
+  /\ bus /= <<>> /\ Head(bus) /= <<"exited">>
   /\ LET ev == Head(bus) IN
      /\ bus' = Tail(bus)
      /\ inTurn' = CASE ev[1] = "echo" -> TRUE
@@ -333,6 +353,7 @@ ClientReload ==
 Quiet ==
   /\ out = <<>> /\ bus = <<>> /\ pipe = <<>> /\ ~(unplaced /\ Open /\ ~anchored) /\ ~held
   /\ alive => ~busy
+  /\ alive \/ ~live
 
 Done == Quiet /\ UNCHANGED vars
 
@@ -341,12 +362,13 @@ Next ==
   \/ \E m \in Agent : AgentSend(m)
   \/ \E r \in Asks : ClientAnswer(r) \/ OcAsk(r) \/ OcElsewhereReply(r)
   \/ Interrupt
-  \/ OcRead \/ OcFinish \/ OcDown \/ SseDrop
-  \/ DriverRead \/ Expire \/ Settle \/ Relay \/ ClientReload \/ Done
+  \/ OcRead \/ OcFinish \/ OcDown \/ ServerExited \/ SseDrop
+  \/ DriverRead \/ Expire \/ Settle \/ Relay \/ RelayExited \/ ClientReload \/ Done
 
 Spec == Init /\ [][Next]_vars
 
-\* No exits, no chips and no held messages: a message is kept once its echo is stored.
+\* No chips and no held messages: a message is kept once its echo is stored, or reported failed
+\* when the server's death drops the driver first.
 Kept(m) ==
   \/ m \notin accepted
   \/ delivered[m] > 0

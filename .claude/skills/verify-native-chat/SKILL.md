@@ -312,14 +312,17 @@ scratch delay (the PR that fixed them has the evidence).
     and `route_incoming` sends `turn/interrupt` right after the
     `turn/started` it reads; a refused `turn/start` that leaves no turn and
     no other start drops the waiting stop.
-12. **OpenCode `TurnProgress`, `AskResolution`: a server death is never reported.**
+12. **Fixed: OpenCode `TurnProgress`, `AskResolution`: a server death was never reported.**
     `TurnProgress` reproduced live by the interrogate workstream: with `opencode
-    serve` killed mid-turn (a Bash call sleeping 90 s), the turn never ends and
-    only Stop recovers it. No driver is told when the shared server dies:
-    `spawn_sse` reconnects forever and no `Exited` is sent, so the sent turn,
-    `in_turn` and any open ask stay. `AskResolution`'s path (an ask open when
-    the server dies) is model only. With deaths and lost SSE events turned off,
-    both still fail on finding 13's path.
+    serve` killed mid-turn (a Bash call sleeping 90 s), the turn never ended and
+    only Stop recovered it. No driver was told when the shared server died:
+    `spawn_sse` reconnected forever and no `Exited` was sent, so the sent turn,
+    `in_turn` and any open ask stayed. `AskResolution`'s path (an ask open when
+    the server dies) is model only. Now `OpenCodeServer::watch_exit` sees the
+    child exit and every driver on the server sends `Exited` (crashed), about
+    0.1 s after a SIGKILL in the E2E (`ServerExited`). `OpenCodeTurns-death`
+    passes both rules and fails both again without `ServerExited`; the main
+    config still fails both on findings 13 and 14's paths.
 13. **OpenCode `InterruptSafe`, `TurnProgress`, `InterruptHonored` (model only): a late abort.**
     `prompt_async`, the abort and each permission reply are separate HTTP
     requests from separate tasks, so OpenCode can handle them in any order. An
@@ -428,6 +431,8 @@ turn, what closes an ask, or what reports the server's death.
 | `SendServer` | `OpenCodeDriver::send_user_turn`, opencode/runtime.rs:1033 (the echo first, `begin_turn`, 691, `prompt_async`, 885 → `request_async`, 964: a failed POST sends "OpenCode request failed" and a failed `TurnDone`) |
 | `ClientAnswer` | `respond_permission`, runtime.rs:1068 (`take_ask`, then a POST either way) |
 | `Interrupt` | `OpenCodeDriver::interrupt`, runtime.rs:1135 (drains the asks map as declined, marks the sent turn, POSTs abort) |
+| `ServerExited` | `OpenCodeServer::watch_exit` (polls the child every 250 ms; `end_sessions` publishes one `Exited`, crashed), then each driver's filter task forwards it after the SSE events it already has |
+| `RelayExited` | `spawn_relay` on `Exited`: drops the driver; the desktop's `exited` reducer ends working and expires the cards; the composer's own unechoed message is handed back and an agent's reported (`held::report_undelivered`), both counted as `failed` |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
 | `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
 | `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it |
@@ -498,12 +503,14 @@ attachment together).
 - `CodexTurns`: one composer message, one agent message, one ask id, two
   app-server processes (one exit and one resume), one interrupt, one other
   tool result. `OpenCodeTurns`: one composer and one agent message, one ask
-  id, one interrupt, one lost SSE event, one server death; no exits and no
-  resume (a driver never exits except by a kill, which is left out).
+  id, one interrupt, one lost SSE event, one server death; a driver exits only
+  when that death is reported, and there is no resume.
   `OpenCodeTurns-stop.cfg` checks the same rules on one composer message,
   one ask and one stop, with OpenCode handling the driver's POSTs in the
   order sent (`InOrder`), no lost SSE event and no server death: the stop and
-  ask paths without findings 12 to 14 in the way.
+  ask paths without findings 12 to 14 in the way. `OpenCodeTurns-death.cfg`
+  has one composer message, POSTs in order, no lost SSE event and no stop,
+  and one server death: finding 12's path alone.
 - Assumptions about codex app-server: `turn/start` while a turn runs is
   refused (an error response; codex 0.171 instead takes the message into the
   running turn and answers with that turn's id, probe p10, which the model
@@ -537,8 +544,9 @@ attachment together).
   the session's `?directory=`, which every driver request carries),
   `command_async` (slash commands), the 5 s `UNPLACED_WAIT` as time (`Expire`
   may fire any time after), compaction, a subagent's text and tools (its asks
-  are `OcAsk`s, which `admits` passes), the kill path (`end`),
-  and a server that comes back.
+  are `OcAsk`s, which `admits` passes), the kill path (`end`), a deliberate
+  kill of a live server (`kill_blocking` on app quit or when `ensure` replaces
+  it, which sends `Exited` detached), and a server that comes back.
 - Left out of `RestartWake`: orphan wakes (`queue_orphan_wakes`, mid-turn off,
   with open background tasks), the overlay wait and concurrency (a free delay
   between check and wake stands in for them), goals (the goal resumer's
@@ -626,6 +634,9 @@ wrong: fix the action, re-run, and say what you changed.
    - `OpenCodeTurns-stop.AskVisible`: an `OcAsk` from a subagent's session
      never reaches the driver (the filter before `admits`; in the copy,
      `OcAsk` may leave `out` unchanged).
+   - `OpenCodeTurns-death.TurnProgress`, `AskResolution`: no `ServerExited`
+     (the driver before `watch_exit`; the copy also drops `Quiet`'s
+     `alive \/ ~live`, since nothing is then in flight).
    - `OpenCodeTurns-stop.TurnProgress`: `EndTurn` sends the `TurnDone` at
      once while the reply is open (the translator before `end_turn`): the
      stopped reply's last part lands after it and the desktop shows working

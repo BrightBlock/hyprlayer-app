@@ -238,6 +238,36 @@
       "guards": [
         {
           "evidence": {
+            "exited": "crashed",
+            "sessions": [
+              [
+                "crashed",
+                false
+              ],
+              [
+                "crashed",
+                false
+              ]
+            ]
+          },
+          "guard": "within 5s both sessions on it end as crashed, and neither reads as working",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSession": "$RETRIED_SESSION",
+            "reply": "model=stub-other-free earlier=[Start on a model OpenCode lacks. | Still there? | A turn the server dies in.]"
+          },
+          "guard": "the resume starts a new server and continues the same OpenCode session",
+          "ok": true
+        }
+      ],
+      "step": "when opencode serve dies mid-turn, each session on it ends, and a resume continues"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

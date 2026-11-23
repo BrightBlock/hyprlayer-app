@@ -30,11 +30,13 @@ const labels: Record<string, string> = {
   OcElsewhereReply: "the ask is answered in another OpenCode client",
   OcFinish: "OpenCode finishes the reply",
   OcDown: "the OpenCode server dies",
+  ServerExited: "the server reports the OpenCode server's death",
   SseDrop: "an event never reaches the server",
   DriverRead: "the server reads OpenCode's event",
   Expire: "an unclaimed idle ends the turn",
   Settle: "the held turn end goes out",
   Relay: "the server stores the event",
+  RelayExited: "the server drops the session's driver",
   ClientReload: "the app reloads the transcript",
   Done: "everything settles",
 };

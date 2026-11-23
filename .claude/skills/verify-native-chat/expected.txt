@@ -25,6 +25,15 @@ FAIL OpenCodeTurns.AskResolution
 FAIL OpenCodeTurns.AskVisible
 FAIL OpenCodeTurns.InterruptSafe
 FAIL OpenCodeTurns.InterruptHonored
+PASS OpenCodeTurns-death.TypeOK
+PASS OpenCodeTurns-death.NoLostUserMessage
+PASS OpenCodeTurns-death.NoLostAgentMessage
+PASS OpenCodeTurns-death.NoDoubleSend
+PASS OpenCodeTurns-death.TurnProgress
+PASS OpenCodeTurns-death.AskResolution
+PASS OpenCodeTurns-death.AskVisible
+PASS OpenCodeTurns-death.InterruptSafe
+PASS OpenCodeTurns-death.InterruptHonored
 PASS OpenCodeTurns-stop.TypeOK
 PASS OpenCodeTurns-stop.NoLostUserMessage
 PASS OpenCodeTurns-stop.NoLostAgentMessage
