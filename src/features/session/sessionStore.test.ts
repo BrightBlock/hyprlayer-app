@@ -152,8 +152,10 @@ const {
   rewindRefusal,
   rewindToMessage,
   sessionBridge,
+  shipWorkstream,
   whenBackfilled,
 } = await import("./sessionStore");
+const { openShipTab, useWorkstreamTabsStore } = await import("./workstreamTabs");
 const { isBusy, isTerminal, isWorking } = await import("./transcript");
 const { activityStatus } = await import("./activityStatus");
 const { pullNow } = await import("./sessionStore");
@@ -2943,5 +2945,41 @@ describe("retrying a start that failed", () => {
     expect(h.setSessionModel).not.toHaveBeenCalled();
     expect(h.setSessionEffort).not.toHaveBeenCalled();
     expect(h.resumeSession).toHaveBeenCalled();
+  });
+});
+
+describe("shipping a workstream", () => {
+  const shipTabSession = () =>
+    useWorkstreamTabsStore.getState().byWs.wsShip?.shells.find((s) => s.mode === "ship")?.sessionId;
+
+  async function openShip(): Promise<string> {
+    const session = await startSession({ workstreamId: "wsShip", stage: "ship", input: "" });
+    openShipTab("wsShip", session.id);
+    emit(INIT);
+    return session.id;
+  }
+
+  it("starts a new Ship turn in the tab once the last one finished", async () => {
+    const first = await openShip();
+    emit(TURN_DONE);
+    h.startStageSession.mockClear();
+
+    await shipWorkstream("wsShip");
+
+    expect(h.startStageSession).toHaveBeenCalledTimes(1);
+    expect(h.startStageSession.mock.calls[0][1]).toBe("ship");
+    expect(h.killSession).toHaveBeenCalledWith(first);
+    expect(shipTabSession()).not.toBe(first);
+  });
+
+  it("only focuses the Ship tab while its turn is still running", async () => {
+    const first = await openShip();
+    h.startStageSession.mockClear();
+
+    await shipWorkstream("wsShip");
+
+    expect(h.startStageSession).not.toHaveBeenCalled();
+    expect(h.killSession).not.toHaveBeenCalled();
+    expect(shipTabSession()).toBe(first);
   });
 });

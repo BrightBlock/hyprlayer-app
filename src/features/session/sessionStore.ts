@@ -2344,10 +2344,12 @@ export async function shipWorkstream(workstreamId: string): Promise<void> {
   const shipTab = tabs?.shells.find((s) => s.mode === "ship");
   if (shipTab?.sessionId) {
     const entry = entryOf(shipTab.sessionId);
-    if (entry && !isTerminal(entry.state)) {
+    if (entry && (isBusy(entry) || agentStillWorking(entry))) {
       openShipTab(workstreamId, shipTab.sessionId);
       return;
     }
+    // Ship's describe follow-up is armed only when a session starts, so a re-run takes a fresh one.
+    if (entry && !isTerminal(entry.state)) void endSession(shipTab.sessionId);
   }
   const cli = launchActionInCli(workstreamId, { stage: "ship", title: "Ship" });
   if (cli) {
