@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -460,6 +460,7 @@ struct ActorState {
     attribution: Option<Arc<DocAttribution>>,
     /// Write tool id → its paths, until the result says whether it landed.
     pending_writes: HashMap<String, Vec<String>>,
+    open_asks: HashSet<String>,
     /// The main-thread text block streamed so far and not yet stored.
     in_flight: InFlightText,
     /// The next detach is a server relaunch: its exit would end every client's stream.
@@ -524,6 +525,7 @@ impl ActorState {
             lapsed: VecDeque::new(),
             attribution,
             pending_writes: HashMap::new(),
+            open_asks: HashSet::new(),
             in_flight: InFlightText::default(),
             keep_streams: false,
             streams_kept: false,
@@ -944,6 +946,7 @@ impl ActorState {
         {
             *stamped = author.clone();
         }
+        let resumed = self.settles_last_ask(&event);
         let turn_kind = event.turn_kind();
         let closes_turn = exited || matches!(event, SessionEvent::TurnDone { .. });
         let announce_close =
@@ -968,7 +971,10 @@ impl ActorState {
                     return;
                 }
             };
-            let mutation = row_mutation_for(&event);
+            let mut mutation = row_mutation_for(&event);
+            if resumed {
+                mutation.state = FieldOp::Set(SessionState::Running);
+            }
             let db = self.db.clone();
             let session_id = self.session_id.clone();
             let outcome = blocking(move || {
@@ -1016,7 +1022,7 @@ impl ActorState {
             None => {}
         }
 
-        if let Some(state) = lifecycle_for(&event) {
+        if let Some(state) = lifecycle_for(&event).or(resumed.then_some(SessionState::Running)) {
             let _ = self.events.send(RuntimeEvent::SessionLifecycle {
                 session_id: self.session_id.clone(),
                 workstream_id: self.workstream_id.clone(),
@@ -1128,6 +1134,25 @@ impl ActorState {
             self.next_turn = None;
             self.reservations.clear();
             self.lapsed.clear();
+        }
+    }
+
+    fn settles_last_ask(&mut self, event: &SessionEvent) -> bool {
+        match event {
+            SessionEvent::PermissionAsk { request_id, .. }
+            | SessionEvent::QuestionAsk { request_id, .. } => {
+                self.open_asks.insert(request_id.clone());
+                false
+            }
+            SessionEvent::PermissionResolved { request_id, .. }
+            | SessionEvent::QuestionAnswered { request_id } => {
+                self.open_asks.remove(request_id) && self.open_asks.is_empty()
+            }
+            SessionEvent::TurnDone { .. } | SessionEvent::Exited { .. } => {
+                self.open_asks.clear();
+                false
+            }
+            _ => false,
         }
     }
 

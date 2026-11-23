@@ -459,6 +459,48 @@ async fn a_non_coalescible_ephemeral_event_is_never_silently_dropped() {
 }
 
 #[tokio::test]
+async fn a_session_needs_no_one_once_every_open_ask_is_resolved() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    let mut events = handle.subscribe_events();
+    let ingress = handle.ingress("s1").await;
+    let ask = |id: &str| SessionEvent::PermissionAsk {
+        request_id: id.into(),
+        tool_name: "Bash".into(),
+        input: "{}".into(),
+        tool_use_id: None,
+    };
+    let resolved = |id: &str| SessionEvent::PermissionResolved {
+        request_id: id.into(),
+        allow: true,
+    };
+    let state = || db.get_session("s1").unwrap().unwrap().state;
+
+    for event in [ask("a"), ask("b"), resolved("a")] {
+        ingress.send(event).await.unwrap();
+    }
+    wait_for_log_len(&db, "s1", 3).await;
+    assert_eq!(state(), SessionState::AwaitingPermission);
+
+    ingress
+        .send(SessionEvent::QuestionAnswered {
+            request_id: "b".into(),
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 4).await;
+    assert_eq!(state(), SessionState::Running);
+    let mut lifecycles = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let RuntimeEvent::SessionLifecycle { state, .. } = event {
+            lifecycles.push(state);
+        }
+    }
+    assert_eq!(lifecycles.last(), Some(&SessionState::Running));
+}
+
+#[tokio::test]
 async fn a_row_mutation_failure_rolls_back_atomically_and_a_retry_is_safe() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");

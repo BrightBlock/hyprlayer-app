@@ -5,6 +5,8 @@ PASS SessionTurns.NoDoubleSend
 PASS SessionTurns.TurnProgress
 PASS SessionTurns.AskResolution
 PASS SessionTurns.AskVisible
+PASS SessionTurns.AskClosesOnAnswer
+PASS SessionTurns.ResolvedOnce
 PASS SessionTurns.InterruptSafe
 PASS SessionTurns.InterruptHonored
 PASS CodexTurns.TypeOK

@@ -64,6 +64,8 @@ first eight; "the harness" is claude, codex or OpenCode.
 | `TurnProgress` | Once nothing is in flight, the actor is not `in_turn`, the desktop does not show working, and a live driver thinks no turn runs. | "Working" forever after the harness finished or exited; the next send is held behind a turn that is over. |
 | `AskResolution` | Once nothing is in flight, every ask the desktop shows open, live or after a reload, is one the harness still waits on. | "Needs approval" stays after the turn ended, and the composer queues your next message instead of sending it (`isBusy`). |
 | `AskVisible` | While the harness waits on an ask and nothing is in flight, the desktop shows it. | The harness waits forever on an approval no one can see. |
+| `SessionTurns.AskClosesOnAnswer` | Once the driver and relay have caught up, the desktop shows no ask claude stopped waiting on, even while the tool it allowed still runs. | An ask answered on claude.ai keeps its Allow/Deny card and "Waiting for approval" until the tool finishes, and the composer queues your next message (`isBusy`). |
+| `SessionTurns.ResolvedOnce` | An ask's resolution reaches the log once, whoever answered it. | A card answered here and elsewhere at once records two answers. |
 | `InterruptSafe` | After an interrupt, a live session settles idle: no turn, no held echo, no open ask. | Stop leaves the session looking busy, so the next message does not go out. |
 | `InterruptHonored` | An interrupt is never dropped while a message sent before it is still to run (codex: while codex runs or is about to run a turn the driver has no id for). | You press stop and the turn runs to the end anyway. |
 | `RestartWake.WakeBounded` | A session cut off mid-turn is woken at most `MAX_RESTART_RESUMES` (3) times before it finishes a turn. | A crash loop: every restart wakes the session again. |
@@ -82,6 +84,8 @@ Results at the sync commit, per provider (`expected.txt`):
 | `TurnProgress` | PASS | PASS | FAIL |
 | `AskResolution` | PASS | PASS | FAIL |
 | `AskVisible` | PASS | PASS | FAIL |
+| `AskClosesOnAnswer` | PASS | not modeled | not modeled |
+| `ResolvedOnce` | PASS | not modeled | not modeled |
 | `InterruptSafe` | PASS | PASS | FAIL |
 | `InterruptHonored` | PASS | PASS | FAIL |
 
@@ -134,8 +138,8 @@ the turn models' passing rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-Findings 1 to 5 are claude's (`SessionTurns`) and the shared models'; 6 to
-14 are codex's and OpenCode's. Each path was walked step by step against the
+Findings 1 to 5 and 17 are claude's (`SessionTurns`) and the shared models'; 6 to
+16 are codex's and OpenCode's. Each path was walked step by step against the
 code. A provider FAIL counts as confirmed only once it has been reproduced live
 in a debug instance; each says "reproduced live" (by whom, and the evidence) or
 "model only". Findings 2 and 5 are fixed, and each was reproduced live
@@ -415,6 +419,23 @@ scratch delay (the PR that fixed them has the evidence).
     relay never sends the agent's message again; awaiting the deletes, that
     config passes it.
 
+17. **Fixed: `AskClosesOnAnswer`: an ask answered elsewhere stayed open until its tool finished.**
+    After #520 the cancel took the id out of `pending_permissions` and emitted
+    nothing, so nothing was recorded and the live card closed only on the
+    tool's result. A deny writes that result with the cancel; an allowed
+    Bash command writes it only once the command has run. Reproduced live
+    (a PermissionRequest hook answering after 4 s, standing in for claude.ai;
+    a 20 s command): the card and "Waiting for approval" stayed 24 s, and the
+    log held no resolution. The cancel now emits the same event
+    `respond_permission` or `answer_question` would, once: an id already
+    answered here is no longer pending, and a later click finds none. A
+    permission answered elsewhere records `allow: true`, which removes the
+    card; the tool's result shows what ran or the denial. The actor also
+    sets the row back to running once the last open ask is resolved
+    (`settles_last_ask`), and `wait_agent`'s `asks_after` and the goal gate end
+    their wait on a resolution as on a tool result; before, both paths read
+    "needs you" until the turn ended.
+
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
 not in the models: a failed codex turn ended twice (`error` {willRetry:
@@ -479,10 +500,10 @@ turn, what closes an ask, or what reports the server's death.
 | `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:616 (breaks on the first failed write) |
 | `ClientSend` | `sendMessage`/`deliverMessage` (direct: optimistic row and an `unechoed` entry until its echo; `session_not_found` puts it back in the queue), sessionStore.ts:1510/1573; `steerMessage` (chip with a `clientMessageId`), 1655; `handedBackBy`, 532, and `returnUnechoed`, 556 (a live `relaunched` hands back steered chips only); `settleFolded`, 594; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
 | `AgentSend` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`), `send_app_turn` (follow-ups), each recording the message with `held::hold` before `send_user_turn` and releasing it on Err |
-| `ClientAnswer` | `respond_permission`, service.rs:416 → driver.rs:378 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
+| `ClientAnswer` | `respond_permission`, service.rs:416 → driver.rs:378 (emits `PermissionResolved` only when `pending_permissions` held the id; `answer_question` the same with `QuestionAnswered`); a card is answered once |
 | `Interrupt` | `SessionService::interrupt`, service.rs:439 → driver.rs:433; `stopSession`, sessionStore.ts:1993 |
-| `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
+| `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeToolDone`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below); `ClaudeRemoteAnswer` is an answer on claude.ai or from a PermissionRequest hook: a deny writes the cancel and the error result together, an allow writes the cancel and `ClaudeToolDone` writes the result once the tool has run |
+| `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207, which takes the id out of `pending_permissions` and, when it was there, emits the event the answer path emits (`QuestionAnswered` for an `AskUserQuestion`, else `PermissionResolved` with `allow: true`); a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
 | `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, keeps the ids of `cancelled` lifecycles, sends each event on, after a `TurnDone` sends the held ones among those ids again (`RelayResend`) before reading on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867); `handBack`: after the desktop's Stop (`stopped`, set by `stopSession` and cleared by `sendMessage`) a handed-back chip goes to the composer (`"returned"`) instead of the queue |
 | `RelayResend` | `held::send_dropped` → `send_again`, held.rs: `reserve_user_turn` and `send_user_turn` with the held nonce; an Err reports a sender who can be told and drops its row, and keeps one no one would hear about |
 | `ClientReload` | `SessionService::list_turns`, service.rs:828 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
@@ -665,6 +686,12 @@ wrong: fix the action, re-run, and say what you changed.
      the own item without the held queue (`applyHeld` skipped), or `Receive`
      skips at `s <= applied + 1` (tried as a real one-line change to `route`'s
      skip in transcriptSync.ts, mirrored in the model).
+   - `SessionTurns.AskClosesOnAnswer`: `DriverRead` leaves `bus` alone on a
+     `cancel` line (the code after #520): a remote allow's card stays open
+     while its tool runs.
+   - `SessionTurns.ResolvedOnce`: `DriverRead` emits `resolved` on every
+     `cancel`, held or not: an ask answered here and elsewhere at once is
+     resolved twice.
    - `NoWakeWhenArchived`: `WakerWake` launches without the `~wsArchived`
      test (`hold_unarchived` gone).
    - `AskResolution`, `InterruptSafe`: `DriverRead` leaves `pending` alone on

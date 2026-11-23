@@ -308,6 +308,9 @@ impl IterationWatch {
                 self.open_tools.retain(|(id, ..)| *id != tool_use_id);
                 self.item_from(parent_id.as_deref());
             }
+            SessionEvent::PermissionResolved { .. } | SessionEvent::QuestionAnswered { .. } => {
+                self.answered();
+            }
             SessionEvent::PermissionAsk { tool_name, .. } => {
                 self.turn_item();
                 self.ask_scope = self.scope_of(&tool_name);

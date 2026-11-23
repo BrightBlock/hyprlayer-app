@@ -1354,6 +1354,8 @@ fn asks_after(asking: bool, event: &SessionEvent) -> bool {
         SessionEvent::PermissionAsk { .. } | SessionEvent::QuestionAsk { .. } => true,
         SessionEvent::UserMessage { .. }
         | SessionEvent::AssistantText { .. }
+        | SessionEvent::PermissionResolved { .. }
+        | SessionEvent::QuestionAnswered { .. }
         | SessionEvent::ToolResult { .. }
         | SessionEvent::TurnDone { .. }
         | SessionEvent::Exited { .. } => false,

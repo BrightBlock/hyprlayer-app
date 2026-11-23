@@ -126,7 +126,7 @@ pub struct ClaudeDriver {
     control_seq: std::sync::atomic::AtomicU64,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     kill_flag: Arc<KillFlag>,
-    pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
+    pending_permissions: Arc<StdMutex<HashMap<String, PendingAsk>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     inbox: Arc<StdMutex<Inbox>>,
     /// The process's cumulative `total_cost_usd` as of its last `result`.
@@ -252,7 +252,7 @@ impl ClaudeDriver {
         let (stdin_tx, stdin_rx) = mpsc::unbounded_channel::<String>();
         let stderr_ring = Arc::new(StdMutex::new(Vec::<String>::new()));
         let kill_flag = Arc::new(KillFlag::default());
-        let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, Value>::new()));
+        let pending_permissions = Arc::new(StdMutex::new(HashMap::<String, PendingAsk>::new()));
         let pending_controls = Arc::new(StdMutex::new(
             HashMap::<String, oneshot::Sender<Value>>::new(),
         ));
@@ -385,7 +385,8 @@ impl ClaudeDriver {
             .pending_permissions
             .lock()
             .ok()
-            .and_then(|mut map| map.remove(request_id));
+            .and_then(|mut map| map.remove(request_id))
+            .map(|ask| ask.input);
         if updated_input.is_some() {
             let _ = self.events.send(SessionEvent::PermissionResolved {
                 request_id: request_id.to_string(),
@@ -418,7 +419,7 @@ impl ClaudeDriver {
                 request_id: request_id.to_string(),
             });
         }
-        let mut input = pending.unwrap_or_else(|| json!({}));
+        let mut input = pending.map_or_else(|| json!({}), |ask| ask.input);
         if let Value::Object(map) = &mut input {
             map.insert("answers".to_string(), json!(answers));
         }
@@ -637,6 +638,18 @@ async fn stderr_loop(stderr: tokio::process::ChildStderr, ring: Arc<StdMutex<Vec
     }
 }
 
+struct PendingAsk {
+    input: Value,
+    question: bool,
+}
+
+fn asked_questions<'a>(tool_name: &str, input: &'a Value) -> Option<&'a Value> {
+    (tool_name == "AskUserQuestion")
+        .then(|| input.get("questions"))
+        .flatten()
+        .filter(|q| q.as_array().is_some_and(|a| !a.is_empty()))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn read_and_wait(
     mut child: crate::process::SupervisedChild,
@@ -644,7 +657,7 @@ async fn read_and_wait(
     events: broadcast::Sender<SessionEvent>,
     stderr_ring: Arc<StdMutex<Vec<String>>>,
     kill_flag: Arc<KillFlag>,
-    pending_permissions: Arc<StdMutex<HashMap<String, Value>>>,
+    pending_permissions: Arc<StdMutex<HashMap<String, PendingAsk>>>,
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     inbox: Arc<StdMutex<Inbox>>,
     cost_so_far: Arc<StdMutex<Option<f64>>>,
@@ -701,10 +714,20 @@ async fn read_and_wait(
                         }
                     }
                     ParsedLine::CanUseTool {
-                        request_id, input, ..
+                        request_id,
+                        tool_name,
+                        input,
+                        ..
                     } => {
                         if let Ok(mut map) = pending_permissions.lock() {
-                            map.insert(request_id.clone(), input.clone());
+                            let question = asked_questions(tool_name, input).is_some();
+                            map.insert(
+                                request_id.clone(),
+                                PendingAsk {
+                                    input: input.clone(),
+                                    question,
+                                },
+                            );
                         }
                     }
                     ParsedLine::Elicitation { request_id } => {
@@ -715,8 +738,21 @@ async fn read_and_wait(
                         continue;
                     }
                     ParsedLine::ControlCancel { request_id } => {
-                        if let Ok(mut map) = pending_permissions.lock() {
-                            map.remove(request_id);
+                        let withdrawn = pending_permissions
+                            .lock()
+                            .ok()
+                            .and_then(|mut map| map.remove(request_id));
+                        if let Some(ask) = withdrawn {
+                            let request_id = request_id.clone();
+                            let _ = events.send(if ask.question {
+                                SessionEvent::QuestionAnswered { request_id }
+                            } else {
+                                // The tool's result shows what the other answerer chose.
+                                SessionEvent::PermissionResolved {
+                                    request_id,
+                                    allow: true,
+                                }
+                            });
                         }
                         continue;
                     }
@@ -854,25 +890,19 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             tool_name,
             input,
             tool_use_id,
-        } => {
-            let questions = (tool_name == "AskUserQuestion")
-                .then(|| input.get("questions"))
-                .flatten()
-                .filter(|q| q.as_array().is_some_and(|a| !a.is_empty()));
-            match questions {
-                Some(questions) => vec![SessionEvent::QuestionAsk {
-                    request_id,
-                    questions: questions_from_value(Some(questions)),
-                    subject: question_subject(&input),
-                }],
-                None => vec![SessionEvent::PermissionAsk {
-                    request_id,
-                    tool_name,
-                    input: input.to_string(),
-                    tool_use_id,
-                }],
-            }
-        }
+        } => match asked_questions(&tool_name, &input).cloned() {
+            Some(questions) => vec![SessionEvent::QuestionAsk {
+                request_id,
+                questions: questions_from_value(Some(&questions)),
+                subject: question_subject(&input),
+            }],
+            None => vec![SessionEvent::PermissionAsk {
+                request_id,
+                tool_name,
+                input: input.to_string(),
+                tool_use_id,
+            }],
+        },
         ParsedLine::Result {
             is_error,
             subtype,
@@ -1346,5 +1376,73 @@ mod tests {
                 "expected PermissionAsk fallback for input {bad}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_ask_answered_elsewhere_is_resolved_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let lines = [
+            r#"{"type":"control_request","request_id":"perm","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"touch x"},"tool_use_id":"toolu_perm"}}"#,
+            r#"{"type":"control_request","request_id":"question","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Ship?","header":"Ship","multiSelect":false,"options":[{"label":"Yes","description":"Do it"}]}]},"tool_use_id":"toolu_q"}}"#,
+            r#"{"type":"control_cancel_request","request_id":"perm"}"#,
+            r#"{"type":"control_cancel_request","request_id":"question"}"#,
+            r#"{"type":"control_cancel_request","request_id":"never-asked"}"#,
+        ];
+        let script = dir.path().join("claude");
+        let body: String = lines.iter().map(|l| format!("echo '{l}'\n")).collect();
+        std::fs::write(&script, format!("#!/bin/sh\n{body}sleep 1\n")).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (driver, mut events) = ClaudeDriver::spawn(SpawnConfig {
+            claude_bin: script,
+            cwd: dir.path().to_path_buf(),
+            session_id: "s".into(),
+            permission_mode: PermissionMode::Default,
+            allowed_tools: vec![],
+            disallowed_tools: vec![],
+            add_dirs: vec![],
+            resume: None,
+            fork: false,
+            max_budget_usd: None,
+            model: None,
+            effort: None,
+            chrome: false,
+            agent: None,
+            append_system_prompt: None,
+            env: std::env::vars().collect(),
+            claude_config_dir: None,
+            mcp_config: None,
+            plugin_dir: None,
+        })
+        .unwrap();
+        let mut resolutions = Vec::new();
+        loop {
+            match tokio::time::timeout(Duration::from_secs(10), events.recv()).await {
+                Ok(Ok(SessionEvent::Exited { .. })) => break,
+                Ok(Ok(
+                    event @ (SessionEvent::PermissionResolved { .. }
+                    | SessionEvent::QuestionAnswered { .. }),
+                )) => resolutions.push(event),
+                Ok(Ok(_)) => {}
+                other => panic!("no exit: {other:?}"),
+            }
+        }
+        let _ = driver.respond_permission("perm", true, None);
+        let _ = driver.answer_question("question", QuestionAnswers::default());
+        while let Ok(event) = events.try_recv() {
+            resolutions.push(event);
+        }
+        assert!(
+            matches!(
+                resolutions.as_slice(),
+                [
+                    SessionEvent::PermissionResolved { request_id: p, allow: true },
+                    SessionEvent::QuestionAnswered { request_id: q },
+                ] if p == "perm" && q == "question"
+            ),
+            "{resolutions:?}"
+        );
+        assert!(driver.pending_requests().is_empty());
     }
 }
