@@ -24,7 +24,7 @@ import {
 import { NumberField } from "./NumberField";
 import { agentControlSettings, leadSettings, withAgentControl, withLead, type Lead } from "./settingsPatches";
 
-const LEAD_MODES = PERMISSION_MODES.filter((p) => p.flag).map((p) => ({ value: p.flag ?? "", label: p.label }));
+const LEAD_MODES = PERMISSION_MODES.flatMap((p) => (p.flag ? [{ value: p.flag, label: p.label }] : []));
 
 const LEVELS: { value: AgentControlLevel; label: string }[] = [
   { value: "off", label: "Off" },

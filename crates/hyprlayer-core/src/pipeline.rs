@@ -838,6 +838,7 @@ fn fill(template: &str, vars: &[(&str, &str)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hyprlayer_models::goal::GoalLimits;
 
     #[test]
     fn leading_command_is_only_a_first_line_slash_name() {
@@ -859,7 +860,6 @@ mod tests {
         assert_eq!(headed("[h]", "/x"), "/x\n\n[h]");
         assert_eq!(headed("[h]", "do it"), "[h]\n\ndo it");
     }
-    use hyprlayer_models::goal::GoalLimits;
 
     fn compose(stage: Stage, input: &str, base: &str, bodies: &ActionPromptBodies) -> String {
         compose_prompt(stage, input, base, bodies, Harness::Claude)

@@ -148,7 +148,6 @@ pub fn claude_settings(ctl: &Path) -> serde_json::Value {
     })
 }
 
-/// A Lead's agent `hooks`: `<ctl> lead-guard <checkout>` before every file edit and shell command.
 pub fn lead_guard_hooks(ctl: &Path, checkout: &str) -> serde_json::Value {
     let command = format!(
         "{} lead-guard {}",

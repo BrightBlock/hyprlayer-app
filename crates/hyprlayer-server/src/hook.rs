@@ -361,10 +361,10 @@ Create a workstream and spawn an agent to make the change."
                     ["cd" | "pushd"] => at = PathBuf::from("/"),
                     ["cd" | "pushd", dir, ..] => at = at.join(unquote(dir)),
                     ["git", rest @ ..] => {
-                        let (repo, sub) = git_target(&at, rest);
-                        if under(&repo, checkout) && sub.is_some_and(|s| MUTATING_GIT.contains(&s))
-                        {
-                            return refuse(&format!("`git {}`", sub.unwrap_or_default()));
+                        if let (repo, Some(sub)) = git_target(&at, rest) {
+                            if MUTATING_GIT.contains(&sub) && under(&repo, checkout) {
+                                return refuse(&format!("`git {sub}`"));
+                            }
                         }
                     }
                     _ => {}

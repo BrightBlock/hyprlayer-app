@@ -23,8 +23,10 @@ function focusAgent(workstreamId: string, id: string): void {
 
 function LinkButton({ link, workstreamId }: { link: IncomingLink; workstreamId: string | null }) {
   if (link.kind === "agent" && !workstreamId) return null;
-  const onClick = () =>
-    link.kind === "pr" ? void openExternalUrl(link.url) : focusAgent(workstreamId as string, link.id);
+  const onClick = () => {
+    if (link.kind === "pr") void openExternalUrl(link.url);
+    else if (workstreamId) focusAgent(workstreamId, link.id);
+  };
   return (
     <button
       type="button"
