@@ -1,0 +1,150 @@
+---
+name: verify-skill-installs
+description: Model-check skill install, update (replace), remove and restore against crashes, failed steps and other people's files with TLA+ (ADR-0010). Use before merging any change to skill_sources/install.rs (commit, replace, remove, adopt_into_store, the undo structs), skill_sources/layout.rs (link_state, owned, link_skill, relink, sweep_leftovers, lock_state), skill_sources/lock.rs's write, or SkillService::restore_entry, and whenever a skill is reported stuck installed, impossible to remove, or out of step with its lock.
+---
+
+# Verify skill installs
+
+`SkillInstalls.tla` is a model of one skill folder in one scope: its store dir,
+its two link paths (`.claude/skills/<f>` and `.agents/skills/<f>`) and its lock
+entry, as install, update, remove and restore change them. Every filesystem step
+can fail, which runs that operation's undo, or be cut off by a crash, after which
+nothing runs. Between operations, someone else may delete the store or a link, or
+put their own entry at a free link path. Operations never overlap, because each
+holds the per-scope mutex (`skill_locks.lock(&key)` in `runtime/skills.rs`).
+TLC checks every order of those steps up to the bounds in the two configs:
+`SkillInstalls-unix.cfg` (links are always symlinks) and `SkillInstalls-windows.cfg`
+(a link may fall back to a copy of the store).
+
+## The rules
+
+| Rule | In one sentence | The harm when it breaks |
+|---|---|---|
+| `ForeignUntouched` | An entry someone else put at a link path is never deleted or replaced. | The app deletes a person's own skill. |
+| `AppEntriesOwned` | Between operations, every entry the app made at a link path is one the ownership predicate still claims. | A skill the harness still loads that the app can no longer remove, update or restore. |
+| `FinishedOpsConsistent` | A finished install, update or restore leaves the store's content equal to the lock's and every link resolving to it; a finished remove leaves only other people's entries. | The lock (committed, in project scope) says one version while the checkout runs another, or a remove leaves the skill behind. |
+| `LeftoversSwept` | A finished operation leaves no `.tmp-` or `.old-` dirs from earlier crashes. | Disk leak; in project scope, untracked dirs inside the checkout that can get committed. |
+| `TypeOK` | The variables stay in their domains. | None, it only guards the model. |
+
+## Run it
+
+From the repo root:
+
+```sh
+.claude/skills/verify-skill-installs/check.sh
+```
+
+It needs `java` (11+) and `mise`. It installs TLC 1.7.4 through mise, pinned by
+checksum (set `TLA2TOOLS=/path/tla2tools.jar` to skip mise). It runs TLC once per
+rule per config and compares `<PASS|FAIL> <platform> <rule>` lines with
+`expected.txt`, exiting non-zero when they differ. It takes about 13 s on 16 cores.
+`OUT=dir` keeps the logs: `$OUT/<platform>/<Rule>/tlc.out`.
+
+**Read every result with the pstack `/statechart` skill.** Give it this spec, one
+of the two configs, and the view module `statechart-view.ts` beside it. It prints
+each broken rule as its shortest path in plain words. Add a label in the view for
+any new action. `check.sh` gives the verdict, and `/statechart` gives the story.
+
+## Known findings (the baseline in `expected.txt`)
+
+The model fails these rules on the code at the sync commit. These are findings
+about the product, not modeling errors. Each path was walked against the code; none
+was replayed on a real filesystem.
+
+1. **`FinishedOpsConsistent` (both platforms): a crash mid-update leaves new content under the old lock, and restore calls it fine.**
+   `replace` moves the new store in before it writes the lock. A crash in between
+   leaves the store at the new commit and `skills.lock` at the old one.
+   `lock_state` and `restore_entry` check only that the store dir exists, and
+   `relink` only the links, so a restore reports `Ok` and the drift stays. Nothing
+   compares the store's `content_hash` with the lock's `hash`. In project scope
+   the committed lock then disagrees with the checkout.
+2. **`LeftoversSwept` (both platforms): store-side leftovers are never swept.**
+   A crash leaves `.tmp-<token>-*` (fresh install, update or adopt) or
+   `.old-<token>-*` (update) inside the store dir, and `skills.lock.tmp-*` beside
+   the lock. `sweep_leftovers` sweeps only beside the links, and `sweep_staging`
+   sweeps only the staging root. The listing skips dot entries, so the leftovers
+   are invisible in the app. In project scope they sit in
+   `.agents/hyprlayer/skills/` as untracked files.
+3. **`AppEntriesOwned`, `FinishedOpsConsistent` (Windows): a crashed copy-fallback link is disowned forever.**
+   When `link_skill` falls back to a copy, `link_state` claims that copy only while
+   the lock has an entry whose hash matches it. If a crash comes after the copy
+   but before `lock::write` (a fresh install), or after `refresh_copy` but before
+   the lock moves (an update), the copy reads as `Foreign`. After that, remove
+   leaves it, restore skips it, and install refuses the name, while the harness
+   still loads it.
+
+When one is fixed in the code, change the model to match, run `check.sh`, and flip
+that rule's lines in `expected.txt` to `PASS`.
+
+## Does a change touch the verified code?
+
+Run this from the repo root:
+
+```sh
+git diff --stat ae3c225143b11389eff4796d43286fe08e51832e -- \
+  crates/hyprlayer-core/src/skill_sources/install.rs \
+  crates/hyprlayer-core/src/skill_sources/layout.rs \
+  crates/hyprlayer-core/src/skill_sources/lock.rs \
+  crates/hyprlayer-core/src/runtime/skills.rs
+```
+
+Anything listed means: read the diff against the table. Some changes do not move
+the model: previews, fetching, hashing rules, skills.sh search, frontmatter, and
+the listing's presentation. These do move it: the order of filesystem steps, what
+an undo puts back, the ownership predicate, what restore or relink repairs, what
+gets swept, and which calls hold the scope mutex.
+
+| Model action | Code (at the sync commit) |
+|---|---|
+| `Owned`, `State` | `layout::owned` / `link_state`, layout.rs:51/70 |
+| `Linked` | `layout::link_skill`, layout.rs:324 (symlink; on Windows junction or copy) |
+| `InstallStart` … `InstallLock` | `install::commit`, install.rs:245: the precheck, `remove_dir_all(store_dir)`, tmp copy, rename, links, `lock::write` |
+| `InstallUndo` | `Undo::run`, install.rs:219 |
+| `ReplaceStart` … `ReplaceClean` | `install::replace`, install.rs:498: `sweep_leftovers`, set the store aside, tmp copy and rename, per-link `refresh_copy`/`set_aside`/`link_skill` (479/489), `lock::write`, `remove_any` |
+| `ReplaceUndo` | `ReplaceUndo::run`, install.rs:454 |
+| `RemoveStart` … `RemoveLock` | `install::remove`, install.rs:414 (links, store, lock; no undo) |
+| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:531 → `adopt_into_store` (install.rs:612) → `Layout::relink` (layout.rs:238) |
+| atomic lock write | `lock::write`, lock.rs:73 (tmp + rename) |
+| one operation at a time | `skill_locks.lock(&key)` in `restore`/`install`/`remove`, runtime/skills.rs:518/690/704 |
+
+Granularity: each action is one filesystem call (a rename, a symlink, a copy into
+a fresh tmp, a `remove_dir_all`, the lock's tmp-and-rename) or a read-only check.
+An undo is one action. That is coarser than the code, where each undo step is a
+separate `let _ =` call; see the next section.
+
+## Bounds and what the model leaves out
+
+- One folder, two versions (`A`, `B`), both link targets, at most 1 crash, 1 failed
+  step and 2 outside changes per behavior.
+- Left out: two link targets that share one physical dir (`link_paths` dedup);
+  text-file links in the initial state (only restore and update handle them);
+  the junction step (it behaves like a symlink here); an undo that itself fails
+  or is cut off part-way; power loss (no fsync anywhere); restore's
+  `NeedsApproval` (a locked commit whose content no longer matches its hash);
+  unknown `source` entries; two processes on one checkout (the mutex is
+  in-process); and git switching branches under the files.
+- A PASS covers these bounds only.
+
+## Real bug or modeling error?
+
+Walk the trace (from `/statechart`, or `$OUT/<platform>/<Rule>/tlc.out`) through
+the code, one action at a time. If every step can happen, it is a bug: report it
+in the code's words, and do not weaken the rule or the model. If a step cannot
+happen, the model is wrong. For example, an operation must start with fresh locals,
+the way a new call does. Fix the action, re-run, and say what you changed.
+
+## When a change is intended
+
+1. Change the actions that mirror the changed code, keeping one action per
+   filesystem call, and update the table.
+2. Prove the rule you touched can still fail. Break that path in the model on
+   purpose (for `ForeignUntouched`, have `RemoveStart` take every non-empty link
+   path instead of the owned ones) and see `check.sh` report it, then undo the
+   break.
+3. Run `check.sh`. Update `expected.txt` only for verdicts the change was meant to
+   move, and say so in the PR.
+4. Move the sync commit (in the `git diff` above and the line below) forward only
+   after you have read the covered code at the new commit and confirmed the model
+   describes it.
+
+Last confirmed against: `ae3c225143b11389eff4796d43286fe08e51832e`.
