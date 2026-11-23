@@ -467,6 +467,33 @@
       "guards": [
         {
           "evidence": {
+            "exited": true,
+            "loggedAsRead": false,
+            "senderTold": true,
+            "sent": true
+          },
+          "guard": "message_agent returns ok, the harness exits before reading it, and the sender gets a turn saying it was not delivered",
+          "ok": true
+        }
+      ],
+      "step": "a message its harness held when it crashed goes back to its sender"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "held": true
+          },
+          "guard": "the keeper's harness holds the message mid-turn",
+          "ok": true
+        }
+      ],
+      "step": "a message its harness held when the server stopped is set up"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "lead": {
               "origin": "user",
               "parentSessionId": null
@@ -515,6 +542,19 @@
         }
       ],
       "step": "lineage survives a restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "readByTheNewProcess": true,
+            "storedTimes": 1
+          },
+          "guard": "the relaunched harness reads it, and the log holds it once, from its sender",
+          "ok": true
+        }
+      ],
+      "step": "the restart resends the held message once"
     },
     {
       "guards": [

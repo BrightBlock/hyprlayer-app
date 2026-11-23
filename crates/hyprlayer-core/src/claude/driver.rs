@@ -738,6 +738,15 @@ async fn read_and_wait(
         }
     }
 
+    let dropped: Vec<SessionEvent> = lock(&inbox)
+        .waiting
+        .drain(..)
+        .filter_map(|(_, echo)| declined_message(&echo))
+        .collect();
+    for declined in dropped {
+        let _ = events.send(declined);
+    }
+
     let status = child.wait().await;
     let code = status.as_ref().ok().and_then(|s| s.code());
     let stderr_tail = stderr_ring.lock().map(|r| r.join("\n")).unwrap_or_default();

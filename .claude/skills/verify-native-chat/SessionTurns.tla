@@ -23,6 +23,8 @@ VARIABLES
   live, procs, exits, inTurn, stored,
   \* the desktop
   vLive, streaming, vOpen, clicked, chip, sends,
+  \* held_messages: agent messages recorded until their echo, resent once, and those whose sender is told
+  held, resent, toldSet,
   \* bookkeeping
   accepted, failed, delivered, interrupts
 
@@ -30,13 +32,18 @@ vars == <<alive, busy, turn, pipe, queue, cOpen, asked, out,
           dBusy, lifecycle, waiting, pending, stdinOpen, bus,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vOpen, clicked, chip, sends,
+          held, resent, toldSet,
           accepted, failed, delivered, interrupts>>
 
 claudeVars == <<alive, busy, turn, pipe, queue, cOpen, asked, out>>
 driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus>>
 viewVars == <<vLive, streaming, vOpen, clicked, chip, sends>>
+heldVars == <<held, resent, toldSet>>
 
 InSeq(x, s) == \E i \in 1..Len(s) : s[i] = x
+
+RECURSIVE SetToSeq(_)
+SetToSeq(S) == IF S = {} THEN <<>> ELSE LET x == CHOOSE y \in S : TRUE IN <<x>> \o SetToSeq(S \ {x})
 
 Init ==
   /\ alive = TRUE /\ busy = FALSE /\ turn = 0 /\ pipe = <<>> /\ queue = <<>>
@@ -45,6 +52,7 @@ Init ==
   /\ live = TRUE /\ procs = 1 /\ exits = 0 /\ inTurn = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vOpen = {} /\ clicked = {}
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
+  /\ held = {} /\ resent = {} /\ toldSet \in SUBSET Agent
   /\ accepted = {} /\ failed = {} /\ delivered = [m \in Msgs |-> 0]
   /\ interrupts = 0
 
@@ -99,15 +107,19 @@ ClientSend(m) ==
        \* direct: an optimistic row, and the view shows the turn running
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
-  /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, out, live, procs, exits,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, live, procs, exits,
                  inTurn, stored, vLive, vOpen, clicked, delivered,
                  interrupts>>
 
+\* SessionService::send records an agent's message in held_messages before send_user_turn and
+\* removes it again on Err.
 AgentSend(m) ==
   /\ m \in Agent /\ m \notin accepted \cup failed
-  /\ \E result \in {"ok", "err", "gone"} : SendServer(m, result) /\ Outcome(m, result, FALSE)
+  /\ \E result \in {"ok", "err", "gone"} :
+       /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
+       /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
   /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, out, live, procs, exits,
-                 inTurn, stored, viewVars, delivered, interrupts>>
+                 inTurn, stored, viewVars, resent, toldSet, delivered, interrupts>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -119,7 +131,7 @@ ClientAnswer(r) ==
   /\ IF r \in pending
        THEN pending' = pending \ {r} /\ bus' = Append(bus, <<"resolved", r>>)
        ELSE pending' = pending /\ bus' = bus
-  /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
                  live, procs, exits, inTurn, stored, vLive, streaming, vOpen, chip,
                  sends, accepted, failed, delivered, interrupts>>
 
@@ -129,7 +141,7 @@ Interrupt ==
   /\ interrupts < MaxInterrupts /\ live /\ stdinOpen
   /\ WriteOk(<<"interrupt">>)
   /\ interrupts' = interrupts + 1
-  /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
                  pending, bus, live, procs, exits, inTurn, stored, viewVars,
                  accepted, failed, delivered>>
 
@@ -170,14 +182,14 @@ ClaudeRead ==
                /\ UNCHANGED <<busy, turn, queue, delivered>>
           [] line[1] = "answer" ->
                UNCHANGED <<busy, turn, queue, cOpen, out, delivered>>
-  /\ UNCHANGED <<alive, asked, driverVars, live, procs, exits, inTurn, stored,
+  /\ UNCHANGED <<heldVars, alive, asked, driverVars, live, procs, exits, inTurn, stored,
                  viewVars, accepted, failed, interrupts>>
 
 ClaudeAsk(r) ==
   /\ alive /\ busy /\ r \notin asked
   /\ asked' = asked \cup {r} /\ cOpen' = cOpen \cup {r}
   /\ out' = Append(out, <<"ask", r>>)
-  /\ UNCHANGED <<alive, busy, turn, pipe, queue, driverVars, live, procs, exits,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, driverVars, live, procs, exits,
                  inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts>>
 
@@ -186,7 +198,7 @@ ClaudeTakeQueued ==
   /\ alive /\ busy /\ queue /= <<>> /\ cOpen = {}
   /\ Take(Head(queue)) /\ queue' = Tail(queue)
   /\ out' = Append(out, <<"started", Head(queue)>>)
-  /\ UNCHANGED <<alive, busy, turn, pipe, cOpen, asked, driverVars, live, procs,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, cOpen, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed,
                  interrupts>>
 
@@ -195,14 +207,14 @@ ClaudeRemoteAnswer(r) ==
   /\ alive /\ r \in cOpen
   /\ cOpen' = cOpen \ {r}
   /\ out' = out \o Withdraw({r})
-  /\ UNCHANGED <<alive, busy, turn, pipe, queue, asked, driverVars, live, procs,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts>>
 
 ClaudeFinish ==
   /\ alive /\ busy /\ cOpen = {}
   /\ busy' = FALSE /\ out' = Append(out, <<"result">>)
-  /\ UNCHANGED <<alive, turn, pipe, queue, cOpen, asked, driverVars, live, procs,
+  /\ UNCHANGED <<heldVars, alive, turn, pipe, queue, cOpen, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts>>
 
@@ -212,7 +224,7 @@ ClaudeStartQueued ==
   /\ busy' = TRUE /\ turn' = turn + 1
   /\ Take(Head(queue)) /\ queue' = Tail(queue)
   /\ out' = out \o <<<<"started", Head(queue)>>, <<"init">>>>
-  /\ UNCHANGED <<alive, pipe, cOpen, asked, driverVars, live, procs, exits, inTurn,
+  /\ UNCHANGED <<heldVars, alive, pipe, cOpen, asked, driverVars, live, procs, exits, inTurn,
                  stored, viewVars, accepted, failed, interrupts>>
 
 \* A crash, a kill, or the process ending: unread lines and claude's queue die with it.
@@ -221,7 +233,7 @@ ClaudeExit ==
   /\ alive' = FALSE /\ busy' = FALSE /\ cOpen' = {} /\ pipe' = <<>> /\ queue' = <<>>
   /\ out' = Append(out, <<"eof">>)
   /\ exits' = exits + 1
-  /\ UNCHANGED <<turn, asked, driverVars, live, procs, inTurn, stored, viewVars,
+  /\ UNCHANGED <<heldVars, turn, asked, driverVars, live, procs, inTurn, stored, viewVars,
                  accepted, failed, delivered, interrupts>>
 
 (* ---- read_and_wait ---- *)
@@ -250,9 +262,12 @@ DriverRead ==
           [] line[1] = "toolResult" ->
                bus' = Append(bus, <<"toolResult", line[2]>>) /\ UNCHANGED <<dBusy, waiting, pending>>
           [] line[1] = "eof" ->
-               bus' = Append(bus, <<"exited">>) /\ UNCHANGED <<dBusy, waiting, pending>>
+               \* read_and_wait declines every echo still waiting, then broadcasts Exited
+               /\ bus' = bus \o SetToSeq({<<"declined", w>> : w \in waiting}) \o <<<<"exited">>>>
+               /\ waiting' = {}
+               /\ UNCHANGED <<dBusy, pending>>
   /\ Head(out)[1] /= "started" => lifecycle' = lifecycle
-  /\ UNCHANGED <<alive, busy, turn, pipe, queue, cOpen, asked, stdinOpen, live,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, stdinOpen, live,
                  procs, exits, inTurn, stored, viewVars, accepted, failed,
                  delivered, interrupts>>
 
@@ -284,10 +299,18 @@ Relay ==
                   [] OTHER -> vOpen
      /\ vLive' = IF ev[1] = "exited" THEN FALSE ELSE vLive
      /\ chip' = CASE ev[1] = "echo" /\ ev[2] \in Composer -> [chip EXCEPT ![ev[2]] = "none"]
+                 [] ev[1] = "declined" /\ ev[2] \in Composer /\ chip[ev[2]] = "delivered" ->
+                      [chip EXCEPT ![ev[2]] = "queued"]
                  [] ev[1] \in {"exited", "relaunched"} -> handBack
                  [] OTHER -> chip
+     \* the relay releases a held message on its echo; after an exit it tells the senders it can
+     \* (the model's exits are all crashes, never a detach) and keeps the rest for the next relaunch
+     /\ held' = CASE ev[1] = "echo" -> held \ {ev[2]}
+                 [] ev[1] = "exited" -> held \ toldSet
+                 [] OTHER -> held
+     /\ failed' = IF ev[1] = "exited" THEN failed \cup (held \cap toldSet) ELSE failed
   /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, procs, exits,
-                 clicked, sends, accepted, failed, delivered, interrupts>>
+                 clicked, sends, resent, toldSet, accepted, delivered, interrupts>>
 
 \* A tail read refolds the log: list_turns re-sends the stored asks open_request_ids
 \* (pending_requests) names, even when their results lie outside the page, and
@@ -295,20 +318,28 @@ Relay ==
 ClientReload ==
   /\ vLive /\ live
   /\ vOpen' = pending \cap stored
-  /\ UNCHANGED <<claudeVars, driverVars, live, procs, exits, inTurn, stored,
+  /\ UNCHANGED <<heldVars, claudeVars, driverVars, live, procs, exits, inTurn, stored,
                  vLive, streaming, clicked, chip, sends, accepted, failed, delivered,
                  interrupts>>
 
 \* ResumeSession on a session with no live harness: launch_driver, a fresh driver, Relaunched.
+\* held::resend then sends each held message once to the fresh driver, which is idle and has seen no
+\* lifecycle frame, so it echoes at once; one already resent is reported lost instead.
 ClientResume ==
+  LET again == held \ resent
+      lost == held \cap resent
+  IN
   /\ ~vLive /\ ~live /\ procs < MaxProcs
-  /\ alive' = TRUE /\ busy' = FALSE /\ pipe' = <<>> /\ queue' = <<>> /\ cOpen' = {}
+  /\ alive' = TRUE /\ busy' = FALSE /\ queue' = <<>> /\ cOpen' = {}
+  /\ pipe' = SetToSeq({<<"msg", m>> : m \in again})
   /\ out' = <<>>
-  /\ dBusy' = FALSE /\ lifecycle' = FALSE /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
-  /\ bus' = <<<<"relaunched">>>>
+  /\ dBusy' = (again /= {}) /\ lifecycle' = FALSE /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
+  /\ bus' = <<<<"relaunched">>>> \o SetToSeq({<<"echo", m>> : m \in again})
   /\ live' = TRUE /\ procs' = procs + 1 /\ vLive' = TRUE
+  /\ held' = again /\ resent' = resent \cup again
+  /\ failed' = failed \cup (lost \cap toldSet)
   /\ UNCHANGED <<turn, asked, exits, inTurn, stored, streaming, vOpen, clicked, chip,
-                 sends, accepted, failed, delivered, interrupts>>
+                 sends, toldSet, accepted, delivered, interrupts>>
 
 (* ---- the rules ---- *)
 
@@ -342,6 +373,8 @@ Kept(m) ==
   \/ m \in Composer /\ chip[m] /= "none"
   \/ m \in failed
   \/ m \in stored
+  \* recorded in held_messages for the next relaunch: a live, quiet session has already taken it in
+  \/ m \in held /\ ~(Quiet /\ live)
 
 NoLostUserMessage == \A m \in Composer : Kept(m)
 NoLostAgentMessage == \A m \in Agent : Kept(m)
@@ -367,4 +400,5 @@ TypeOK ==
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "queued"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs
+  /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent
 =============================================================================

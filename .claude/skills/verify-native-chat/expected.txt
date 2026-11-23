@@ -1,6 +1,6 @@
 PASS SessionTurns.TypeOK
 FAIL SessionTurns.NoLostUserMessage
-FAIL SessionTurns.NoLostAgentMessage
+PASS SessionTurns.NoLostAgentMessage
 PASS SessionTurns.NoDoubleSend
 PASS SessionTurns.TurnProgress
 PASS SessionTurns.AskResolution

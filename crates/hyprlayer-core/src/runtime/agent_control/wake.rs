@@ -1068,6 +1068,7 @@ impl Waiter {
                 let ctx = SendContext {
                     base_rev: None,
                     author: Some(author()),
+                    sender: None,
                 };
                 match rt
                     .sessions()

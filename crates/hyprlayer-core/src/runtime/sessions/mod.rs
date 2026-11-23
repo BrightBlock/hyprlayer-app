@@ -2,6 +2,7 @@ pub mod delivery;
 mod followup;
 mod forwarder;
 pub(crate) mod goal_loop;
+pub(crate) mod held;
 pub(crate) mod lead_summary;
 mod recap;
 pub mod registry;
@@ -20,12 +21,13 @@ use hyprlayer_models::{ClientRef, RuntimeEvent, SessionTurns};
 
 use crate::agent::AgentDriver;
 use crate::claude::SessionEvent;
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::runtime::attribution::DocAttribution;
 use crate::store::{Db, LogCursor, SessionLogEntry};
 
 pub use delivery::{LiveReceiver, SessionAttachment, SessionStreamError};
 pub use forwarder::ActorRevState;
+pub use held::MessageSender;
 pub use service::{
     ActiveSession, LaunchAndConverseParams, LaunchSessionParams, RewindSessionOutcome,
     RewindSessionRequest, SendContext, SessionLineage, SessionService, StartStageSessionRequest,
@@ -74,6 +76,27 @@ impl SessionActors {
         )
     }
 
+    /// A client read must not leave an actor behind for an id with no session.
+    async fn known_actor<'a>(
+        &self,
+        handles: &'a mut HashMap<String, forwarder::ActorHandle>,
+        session_id: &str,
+    ) -> Result<&'a forwarder::ActorHandle> {
+        if !handles.contains_key(session_id) {
+            let (db, id) = (self.db.clone(), session_id.to_string());
+            if service::blocking(move || db.get_session(&id))
+                .await?
+                .is_none()
+            {
+                return Err(CoreError::SessionNotFound {
+                    session_id: session_id.to_string(),
+                });
+            }
+            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
+        }
+        Ok(handles.get(session_id).expect("just inserted above"))
+    }
+
     pub(crate) async fn ingress(&self, session_id: &str) -> mpsc::Sender<SessionEvent> {
         let mut handles = self.handles.lock().await;
         if let Some(handle) = handles.get(session_id) {
@@ -91,10 +114,7 @@ impl SessionActors {
         echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
-        if !handles.contains_key(session_id) {
-            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
-        }
-        let handle = handles.get(session_id).expect("just inserted above");
+        let handle = self.known_actor(&mut handles, session_id).await?;
         handle.attach(echo_user_messages).await
     }
 
@@ -105,10 +125,7 @@ impl SessionActors {
         after_seq: Option<i64>,
     ) -> Result<Vec<SessionLogEntry>> {
         let mut handles = self.handles.lock().await;
-        if !handles.contains_key(session_id) {
-            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
-        }
-        let handle = handles.get(session_id).expect("just inserted above");
+        let handle = self.known_actor(&mut handles, session_id).await?;
         handle.log_after(caller_epoch, after_seq).await
     }
 
@@ -120,10 +137,7 @@ impl SessionActors {
         echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
-        if !handles.contains_key(session_id) {
-            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
-        }
-        let handle = handles.get(session_id).expect("just inserted above");
+        let handle = self.known_actor(&mut handles, session_id).await?;
         handle
             .attach_after(caller_epoch, after_seq, echo_user_messages)
             .await
@@ -136,10 +150,7 @@ impl SessionActors {
         echo_user_messages: bool,
     ) -> Result<SessionAttachment> {
         let mut handles = self.handles.lock().await;
-        if !handles.contains_key(session_id) {
-            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
-        }
-        let handle = handles.get(session_id).expect("just inserted above");
+        let handle = self.known_actor(&mut handles, session_id).await?;
         handle.attach_from(cursor, echo_user_messages).await
     }
 
@@ -240,10 +251,7 @@ impl SessionActors {
         open: Vec<String>,
     ) -> Result<SessionTurns> {
         let mut handles = self.handles.lock().await;
-        if !handles.contains_key(session_id) {
-            handles.insert(session_id.to_string(), self.spawn_actor(session_id));
-        }
-        let handle = handles.get(session_id).expect("just inserted above");
+        let handle = self.known_actor(&mut handles, session_id).await?;
         handle.list_turns(cursor, limit, caller, open).await
     }
 

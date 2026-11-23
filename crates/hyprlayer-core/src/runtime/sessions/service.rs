@@ -234,6 +234,7 @@ pub struct ActiveSession {
 pub struct SendContext {
     pub base_rev: Option<u64>,
     pub author: Option<ClientRef>,
+    pub sender: Option<super::held::MessageSender>,
 }
 
 /// A turn the app sends on its own: a stage follow-up or a goal iteration.
@@ -297,20 +298,53 @@ impl SessionService<'_> {
             }
             return Err(e);
         }
+        // A desktop keeps its own copy and resends it; an agent's message has only this one.
+        let held = match (&nonce, ctx.author) {
+            (Some(nonce), Some(author)) if author.is_agent() => {
+                let hold = super::held::Hold {
+                    nonce,
+                    text: &prompt,
+                    prompt_name,
+                    author: Some(author),
+                    sender: ctx.sender,
+                };
+                super::held::hold(self.runtime, session_id, hold).await;
+                Some(nonce)
+            }
+            _ => None,
+        };
         // A failure from here keeps the reservation: the driver broadcast its UserMessage first.
-        driver.send_user_turn(
+        let sent = driver.send_user_turn(
             &prompt,
             None,
             prompt_name,
             nonce.as_deref().or(client_message_id),
-        )
+        );
+        if let (Err(_), Some(nonce)) = (&sent, held) {
+            super::held::release(self.runtime, session_id, nonce).await;
+        }
+        sent
     }
 
-    /// The one send path for app-originated turns.
+    /// The one send path for app-originated turns. Held until claude takes it in: unlike a goal
+    /// iteration or a restart wake, nothing else would send it again.
     pub(crate) async fn send_app_turn(&self, session_id: &str, turn: AppTurn<'_>) -> Result<()> {
         let op = self.op_lock(session_id).await;
         let guard = op.lock().await;
-        self.send_app_turn_held(session_id, turn, &guard).await
+        let nonce = turn.nonce.clone();
+        let hold = super::held::Hold {
+            nonce: &nonce,
+            text: turn.text,
+            prompt_name: turn.prompt_name,
+            author: turn.author.clone(),
+            sender: None,
+        };
+        super::held::hold(self.runtime, session_id, hold).await;
+        let sent = self.send_app_turn_held(session_id, turn, &guard).await;
+        if sent.is_err() {
+            super::held::release(self.runtime, session_id, &nonce).await;
+        }
+        sent
     }
 
     /// For a caller holding the op lock. Always reserved, author or not, so another client's send waits until this one lands.
@@ -858,6 +892,13 @@ impl SessionService<'_> {
             }
             driver.kill_detached();
             self.await_exit(session_id).await;
+            super::held::report_undelivered(
+                self.runtime,
+                session_id,
+                false,
+                "the session was ended before it read it",
+            )
+            .await;
         }
     }
 
@@ -1456,6 +1497,7 @@ impl SessionService<'_> {
             let ctx = SendContext {
                 base_rev: None,
                 author: author.clone(),
+                sender: None,
             };
             let nonce = self
                 .reserve_turn(&session_id, Some(&client_message_id), &ctx, replay)
@@ -1830,10 +1872,13 @@ impl SessionService<'_> {
         spawn_relay(
             rx,
             ingress,
-            self.runtime.session_registry.clone(),
-            session_id,
+            self.runtime.handle.clone(),
+            session_id.clone(),
             token,
         );
+        if resume {
+            super::held::resend(self.runtime, &session_id, driver.as_ref()).await;
+        }
 
         Ok(driver)
     }
@@ -2214,7 +2259,7 @@ impl SessionService<'_> {
 fn spawn_relay(
     mut rx: broadcast::Receiver<SessionEvent>,
     ingress: mpsc::Sender<SessionEvent>,
-    registry: Arc<super::registry::SessionRegistry>,
+    runtime: Weak<HyprlayerRuntime>,
     session_id: String,
     token: Option<TokenGuard>,
 ) {
@@ -2242,16 +2287,43 @@ fn spawn_relay(
         // Revoked when the relay ends, not when this function returns.
         let _token = token;
         while let Some(event) = pending.recv().await {
+            let rt = runtime.upgrade();
             let terminal = matches!(event, SessionEvent::Exited { .. });
-            // Keeps a resume asking for the new mode from relaunching.
-            if let SessionEvent::PermissionModeChanged { mode } = event {
-                registry.set_permission_mode(&session_id, mode).await;
+            if let Some(rt) = &rt {
+                // Keeps a resume asking for the new mode from relaunching.
+                if let SessionEvent::PermissionModeChanged { mode } = event {
+                    rt.session_registry
+                        .set_permission_mode(&session_id, mode)
+                        .await;
+                }
+                if let SessionEvent::UserMessage {
+                    client_message_id: Some(id),
+                    ..
+                } = &event
+                {
+                    super::held::release(rt, &session_id, id).await;
+                }
             }
+            // A detach is a relaunch or a server stop, which resends what it held; after any other
+            // exit only messages no one would hear about wait for the next relaunch.
+            let undelivered =
+                matches!(&event, SessionEvent::Exited { outcome, .. } if outcome.is_reportable());
             if ingress.send(event).await.is_err() {
                 break;
             }
             if terminal {
-                registry.remove(&session_id).await;
+                if let Some(rt) = &rt {
+                    rt.session_registry.remove(&session_id).await;
+                    if undelivered {
+                        super::held::report_undelivered(
+                            rt,
+                            &session_id,
+                            true,
+                            "the session exited before reading it",
+                        )
+                        .await;
+                    }
+                }
                 break;
             }
         }
@@ -2294,8 +2366,7 @@ mod tests {
     async fn a_stalled_actor_loses_no_events() {
         let (events, rx) = broadcast::channel(1024);
         let (ingress, mut actor) = mpsc::channel(INGRESS_CAPACITY);
-        let registry = Arc::new(super::super::registry::SessionRegistry::new());
-        spawn_relay(rx, ingress, registry, "s".into(), None);
+        spawn_relay(rx, ingress, Weak::new(), "s".into(), None);
         let burst = INGRESS_CAPACITY + 4096;
         for n in 0..burst {
             let _ = events.send(SessionEvent::PartialText {

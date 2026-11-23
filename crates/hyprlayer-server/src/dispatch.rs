@@ -1646,6 +1646,7 @@ impl Dispatch for Server {
                 SendContext {
                     base_rev,
                     author: self.caller(),
+                    sender: None,
                 },
             )
             .await

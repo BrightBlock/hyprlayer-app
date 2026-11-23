@@ -10,7 +10,9 @@ use crate::Sandbox;
 /// `bg-result`, `needs-human`, `idle-turn`, `commit`, `fail-turn`, `ask` / `ask-question` (wait
 /// for the reply; `ask` streams a parallel call's second `tool_use` and a subagent's text and
 /// tool result while pending), `crash` / `crash-once` (`exit 1` mid-turn; `-once` deletes itself),
-/// `crash-after` (`exit 1` after the turn's result).
+/// `crash-after` (`exit 1` after the turn's result), `queue` (take the turn's message in, start a
+/// tool, report the next message as queued and wait for the end of stdin) and `queue-crash` (as
+/// `queue`, then `exit 1`).
 /// `slow-exit` is read at launch, and so is `noinit`, under which the launch reports no init and
 /// answers nothing; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
 /// and, on an optional second line, the turn that ticks every box in it. Launches log to `argv.log`
@@ -145,6 +147,21 @@ while IFS= read -r line; do
     printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"session_id":"%s"}\n' "$sid"
     result success false 1 ',"terminal_reason":"aborted_streaming"'
     continue
+  fi
+  if ctl queue || ctl queue-crash; then
+    lifecycle() {
+      printf '{"type":"command_lifecycle","command_uuid":"%s","state":"%s"}\n' \
+        "$(printf '%s' "$1" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')" "$2"
+    }
+    lifecycle "$line" started
+    tool_use toolu-long Bash '{"command":"sleep 600"}'
+    while IFS= read -r next; do
+      printf '%s\n' "$next" >> "$log"
+      case "$next" in *'"type":"user"'*) lifecycle "$next" queued; break ;; esac
+    done
+    ctl queue-crash && exit 1
+    cat >/dev/null
+    exit 0
   fi
   if ctl fail-turn; then
     result error_during_execution true 1 ""

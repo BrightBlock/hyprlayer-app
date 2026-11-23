@@ -134,6 +134,25 @@ async fn next_session_reset(events: &mut broadcast::Receiver<RuntimeEvent>) -> u
 }
 
 #[tokio::test]
+async fn reading_an_unknown_session_leaves_no_actor() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let handle = SessionRuntimeHandle::new(db);
+    let metrics = tokio::runtime::Handle::current().metrics();
+    let before = metrics.num_alive_tasks();
+    for n in 0..100 {
+        let read = handle
+            .list_turns(&format!("no-such-session-{n}"), LogCursor::Tail, 10, None)
+            .await;
+        assert!(
+            matches!(read, Err(CoreError::SessionNotFound { .. })),
+            "{read:?}"
+        );
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(metrics.num_alive_tasks(), before);
+}
+
+#[tokio::test]
 async fn legacy_raw_row_reaches_attach_replay() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");

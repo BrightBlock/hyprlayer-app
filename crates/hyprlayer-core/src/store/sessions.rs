@@ -9,6 +9,8 @@ use crate::claude::{ExitOutcome, PermissionMode, SessionEvent, SessionState};
 use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 
+use hyprlayer_models::agent_control::AgentCaller;
+use hyprlayer_models::session::ClientRef;
 pub use hyprlayer_models::session::{LogCursor, Session, SessionLogEntry, SessionOrigin};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -667,6 +669,10 @@ impl Db {
                 "DELETE FROM session_events WHERE session_id = ?1",
                 params![id],
             )?;
+            tx.execute(
+                "DELETE FROM held_messages WHERE session_id = ?1",
+                params![id],
+            )?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
             tx.commit()
         })
@@ -1234,6 +1240,91 @@ impl Db {
         })
     }
 
+    pub fn hold_message(&self, held: &HeldMessage) -> Result<()> {
+        let sender = held
+            .sender
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|e| CoreError::Io(std::io::Error::other(e)))?;
+        self.with(|conn| {
+            conn.execute(
+                "INSERT OR REPLACE INTO held_messages
+                 (session_id, nonce, text, prompt_name, author_id, author_device, sender, project_path, resent)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    held.session_id,
+                    held.nonce,
+                    held.text,
+                    held.prompt_name,
+                    held.author.as_ref().map(|a| &a.client_id),
+                    held.author.as_ref().map(|a| &a.device),
+                    sender,
+                    held.project_path,
+                    held.resent,
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn release_held(&self, session_id: &str, nonce: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "DELETE FROM held_messages WHERE session_id = ?1 AND nonce = ?2",
+                params![session_id, nonce],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Removes and returns a session's held messages, oldest first; with `told_only`, only those
+    /// whose sender can be told.
+    pub fn take_held(&self, session_id: &str, told_only: bool) -> Result<Vec<HeldMessage>> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let held: Vec<HeldMessage> = held_rows(&tx, session_id)?
+                .into_iter()
+                .filter(|held| !told_only || held.sender.is_some())
+                .collect();
+            tx.execute(
+                "DELETE FROM held_messages WHERE session_id = ?1 AND (?2 = 0 OR sender IS NOT NULL)",
+                params![session_id, told_only],
+            )?;
+            tx.commit()?;
+            Ok(held)
+        })
+    }
+
+    /// For a relaunch: the messages to send again, now marked resent, and those already
+    /// resent once, now removed.
+    pub fn relaunch_held(&self, session_id: &str) -> Result<(Vec<HeldMessage>, Vec<HeldMessage>)> {
+        self.with(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            let (lost, resend): (Vec<_>, Vec<_>) = held_rows(&tx, session_id)?
+                .into_iter()
+                .partition(|held| held.resent);
+            tx.execute(
+                "DELETE FROM held_messages WHERE session_id = ?1 AND resent = 1",
+                params![session_id],
+            )?;
+            tx.execute(
+                "UPDATE held_messages SET resent = 1 WHERE session_id = ?1",
+                params![session_id],
+            )?;
+            tx.commit()?;
+            Ok((resend, lost))
+        })
+    }
+
+    pub fn held_session_ids(&self) -> Result<Vec<String>> {
+        self.with(|conn| {
+            let mut stmt = conn.prepare("SELECT DISTINCT session_id FROM held_messages")?;
+            let rows = stmt.query_map([], |row| row.get(0))?;
+            rows.collect()
+        })
+    }
+
     pub(crate) fn apply_session_event(
         &self,
         session_id: &str,
@@ -1517,4 +1608,52 @@ mod tests {
         db.delete_pending_wake("s2").unwrap();
         assert_eq!(db.pending_wakes().unwrap(), [("s3".to_string(), false)]);
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeldMessage {
+    pub session_id: String,
+    pub nonce: String,
+    pub text: String,
+    pub prompt_name: Option<String>,
+    pub author: Option<ClientRef>,
+    /// The agent to tell if the message is never read; `None` when no one would read it.
+    pub sender: Option<AgentCaller>,
+    pub project_path: Option<String>,
+    pub resent: bool,
+}
+
+fn held_rows(conn: &rusqlite::Connection, session_id: &str) -> rusqlite::Result<Vec<HeldMessage>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, nonce, text, prompt_name, author_id, author_device, sender, project_path, resent
+         FROM held_messages WHERE session_id = ?1 ORDER BY rowid",
+    )?;
+    let rows = stmt.query_map(params![session_id], |row| {
+        let sender: Option<String> = row.get(6)?;
+        let sender = sender
+            .map(|s| serde_json::from_str(&s))
+            .transpose()
+            .map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    6,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+        let author_id: Option<String> = row.get(4)?;
+        let author_device: Option<String> = row.get(5)?;
+        Ok(HeldMessage {
+            session_id: row.get(0)?,
+            nonce: row.get(1)?,
+            text: row.get(2)?,
+            prompt_name: row.get(3)?,
+            author: author_id
+                .zip(author_device)
+                .map(|(client_id, device)| ClientRef { client_id, device }),
+            sender,
+            project_path: row.get(7)?,
+            resent: row.get(8)?,
+        })
+    })?;
+    rows.collect()
 }

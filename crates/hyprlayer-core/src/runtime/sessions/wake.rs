@@ -35,6 +35,9 @@ pub(crate) fn spawn_after_restart(
         let pickup = async {
             resume_running(&runners, &runtime).await;
             wake_stopped(&runtime, &restarted_at).await;
+            if let Some(rt) = runtime.upgrade() {
+                super::held::sweep_after_restart(&rt).await;
+            }
         };
         tokio::select! {
             () = pickup => {}

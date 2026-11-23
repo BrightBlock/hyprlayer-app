@@ -29,7 +29,7 @@ bounds in its `.cfg`:
 | Rule | In one sentence | The harm when it breaks |
 |---|---|---|
 | `SessionTurns.NoLostUserMessage` | A message you send from the composer and the server accepts is taken in by claude, still on its way, back in your queue to resend, reported failed, or at least stored in the transcript. | Your message vanishes: the send said OK, claude never saw it, and a reload drops it from the screen. |
-| `SessionTurns.NoLostAgentMessage` | The same for a message an agent, a wake or a follow-up sends (`SessionService::send` with an author, `send_app_turn_held`). | An agent's `message_agent` returns OK and the message is gone; nothing retries it. |
+| `SessionTurns.NoLostAgentMessage` | The same for a message an agent or a stage follow-up sends (`SessionService::send` with an agent author: `message_agent`, an agent wake; `send_app_turn`), with one more way to be kept: recorded in `held_messages` for the next relaunch, or its sender told it was not delivered. Goal iterations and restart wakes (`send_app_turn_held`) are not in it: their runners send again themselves. | An agent's `message_agent` returns OK and the message is gone; nothing retries it. |
 | `SessionTurns.NoDoubleSend` | Claude takes in no message twice, across an exit, the hand-back and the resend. | Claude acts on one instruction twice. |
 | `SessionTurns.TurnProgress` | Once nothing is in flight, the actor is not `in_turn`, the desktop does not show working, and a live driver's inbox is idle. | "Working" forever after the harness finished or exited; the next send is held behind a turn that is over. |
 | `SessionTurns.AskResolution` | Once nothing is in flight, every ask the desktop shows open, live or after a reload, is one claude still waits on. | "Needs approval" stays after the turn ended, and the composer queues your next message instead of sending it (`isBusy`). |
@@ -68,10 +68,10 @@ verdict: past the first break it bounds each run at 100,000 states and lists
 
 ## Known findings (the baseline in `expected.txt`)
 
-Three rules fail on the code at the sync commit. Each is a product bug, not a
+Two rules fail on the code at the sync commit. Each is a product bug, not a
 modeling error: each path below was walked step by step against the code; none
-was replayed in a running server by this skill. Two findings were fixed on
-main and are kept for the record.
+was replayed in a running server by this skill. Three findings were fixed and
+are kept for the record.
 
 1. **Fixed: `AskResolution`, `InterruptSafe`: an ask claude settled itself reopened on a reload.**
    Claude writes `control_cancel_request` for a `can_use_tool` it settles
@@ -95,6 +95,11 @@ main and are kept for the record.
    writes the tool's result right after the cancel (the interrogate
    workstream's trace), and that closes the card.
 2. **`NoLostUserMessage`: a direct send can vanish when claude exits.**
+   Still open after the `held_messages` fix: a desktop's sends stay out of
+   it, because a steered chip is resent by the desktop itself and a second
+   copy would break `NoDoubleSend`. The `cancelled` row `read_and_wait` now
+   writes for a held direct send names its `clientMessageId`, but
+   `deliverMessage` keeps no chip, so nothing hands it back.
    `deliverMessage` sends with no chip, so nothing hands the message back on
    `exited`. Two paths:
    - The exit window (the shortest, 4 steps): claude exits; `read_and_wait`
@@ -113,12 +118,27 @@ main and are kept for the record.
      optimistic row stays until a reload drops it. A steered message
      (`steerMessage`) is safe here: its chip goes back to the queue on
      `exited` and is resent.
-3. **`NoLostAgentMessage`: an agent's message to a session whose claude exits before taking it in is lost.**
+3. **Fixed: `NoLostAgentMessage`: an agent's message to a session whose claude exits before taking it in was lost.**
    The same two paths, and no sender retries: `message_agent` and agent wakes go
    through `SessionService::send`, restart wakes and follow-ups through
    `send_app_turn_held`, and none keeps a copy to resend. The common case is
    the held echo: an agent messages a session mid-turn, then the session is
    stopped, crashes or is killed before claude's next step.
+   Fixed by recording each such message in `held_messages` (`held::hold`,
+   from `SessionService::send` for an agent author and from `send_app_turn`)
+   until the relay sees its echo (`held::release`). After a crash or kill the
+   relay tells each sender it can (`message_agent`'s caller) with a wake turn
+   ("Your message to session … was not delivered: the session exited before
+   reading it") and forgets those; a message with no one to tell stays. A
+   relaunch (`launch_driver` with `resume`, including a server restart's
+   wake) sends what is left once more, in order (`held::resend`); one
+   already resent is reported instead. Ending a session quietly (archive)
+   and the restart sweep (`sweep_after_restart`, for sessions no wake
+   relaunched) report and forget the rest. `read_and_wait` also declines
+   each echo still waiting when the process ends (`commandLifecycle`
+   `cancelled`). e2e: `agent_spawn_and_message`, steps "a message its
+   harness held when it crashed goes back to its sender" and "the restart
+   resends the held message once".
 4. **Fixed: `NoWakeWhenArchived`: a wake checked before an archive still resumed the session.**
    `wake::check` reads the workstream's status once (wake.rs:163), and
    `wake_one` re-reads neither it nor `ended_at`; `archive`'s
@@ -147,7 +167,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat cf15b41147fff3b9c4e9c7cbc16ac29676e072fa -- \
+git diff --stat 07967f19234db6c95c9b6ceff6419b038a008ebd -- \
   crates/hyprlayer-core/src/claude/driver.rs \
   crates/hyprlayer-core/src/claude/protocol.rs \
   crates/hyprlayer-core/src/runtime/sessions/service.rs \
@@ -178,26 +198,26 @@ re-attaches, or how the desktop skips, holds or merges seqs does move them.
 |---|---|
 | `EchoOrHold`, `SendServer` | `ClaudeDriver::send_user_turn`, driver.rs:304 (`Inbox::idle`, 77; `lifecycle`; echo before `write_line`, 591; `take` on Err) |
 | `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:609 (breaks on the first failed write) |
-| `ClientSend` | `sendMessage`/`deliverMessage` (direct, optimistic row), sessionStore.ts:1480/1543; `steerMessage` (chip with a `clientMessageId`), 1607; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:270 |
-| `AgentSend` | `SessionService::send` with an author (agent_control/wake.rs, `message_agent`), `send_app_turn_held`, service.rs:317 (restart wakes, follow-ups) |
-| `ClientAnswer` | `respond_permission`, service.rs:369 → driver.rs:371 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
-| `Interrupt` | `SessionService::interrupt`, service.rs:392 → driver.rs:426; `stopSession`, sessionStore.ts:1945 |
+| `ClientSend` | `sendMessage`/`deliverMessage` (direct, optimistic row), sessionStore.ts:1480/1543; `steerMessage` (chip with a `clientMessageId`), 1607; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
+| `AgentSend` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`), `send_app_turn` (follow-ups), each recording the message with `held::hold` before `send_user_turn` and releasing it on Err |
+| `ClientAnswer` | `respond_permission`, service.rs:403 → driver.rs:371 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
+| `Interrupt` | `SessionService::interrupt`, service.rs:426 → driver.rs:426; `stopSession`, sessionStore.ts:1945 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, driver.rs:634 (`Init` 657, `CommandLifecycle` → `Inbox::frame` 94, `Result` 674, `CanUseTool` 696, `ControlCancel` 710, `Exited` 754); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult` |
-| `Relay` | `spawn_relay`, service.rs:2214 (its reader stops at `Exited`; its forwarder sends it on, then calls `registry.remove`, 2254); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:452 (`handedBackBy` 527), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
-| `ClientReload` | `SessionService::list_turns`, service.rs:781 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
-| `ClientResume` | `ResumeSession` → `launch_driver`, service.rs:1681 (fresh driver and inbox, `Relaunched`) |
+| `DriverRead` | `read_and_wait`, driver.rs:634 (`Init` 657, `CommandLifecycle` → `Inbox::frame` 94, `Result` 674, `CanUseTool` 696, `ControlCancel` 710, `Exited` 763); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it declines every echo still in `Inbox.waiting` before `Exited` |
+| `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:452 (`handedBackBy` 527), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
+| `ClientReload` | `SessionService::list_turns`, service.rs:815 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
+| `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
 
 `RestartWake.tla`:
 
 | Model action | Code (at the sync commit) |
 |---|---|
 | `Restart` | server stop (harnesses die, the actor with them) and start: `settle_stale_sessions`, store/sessions.rs:687 (`is_working`, 264), from runtime/mod.rs:243; `spawn_after_restart`, wake.rs:28 |
-| `WakerCheck` | `wake_stopped` → `check`, wake.rs:46/152 (ended, archived workstream at 163, `unanswered_wakes` 297 against `MAX_RESTART_RESUMES`) |
-| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:189 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake, service.rs:1705/1766; `send_app_turn_held`) |
+| `WakerCheck` | `wake_stopped` → `check`, wake.rs:49/155 (ended, archived workstream at 166, `unanswered_wakes` 300 against `MAX_RESTART_RESUMES`) |
+| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:192 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake, service.rs:1747/1808; `send_app_turn_held`) |
 | `StoreEcho` | the wake's `UserMessage` through `spawn_relay` to `handle_event` |
 | `ClaudeFinishes` | a `TurnDone` row |
-| `Archive` | `WorkstreamService::archive` → `archive_inner`, workstreams.rs:1836/1857, under `lock_pair` (`stop_for_archive`, 2063: `end_quietly_and_await_exit`, 2081 → service.rs:848), then the status |
+| `Archive` | `WorkstreamService::archive` → `archive_inner`, workstreams.rs:1836/1857, under `lock_pair` (`stop_for_archive`, 2063: `end_quietly_and_await_exit`, 2081 → service.rs:882), then the status |
 
 `SessionSync.tla`:
 
@@ -232,6 +252,13 @@ attachment together).
   denied or withdrawn, and an interrupt or a Remote Control answer withdraws
   an open ask with `control_cancel_request` first (both seen against real
   claude by the interrogate workstream).
+- `held_messages` in `SessionTurns`: every exit is a crash, so a detach
+  (server stop, `kill_for_relaunch`) keeps all held messages as a crash keeps
+  the untold ones; `toldSet` picks at Init which agent messages have a sender
+  to tell. Left out: an agent send that passes `require_live` before the relay
+  drops the driver and records its message after the relay's report (the
+  message stays in `held_messages` until the next relaunch or restart sweep),
+  a second resend (bounded by two processes), and the restart sweep.
 - Left out of `SessionTurns`: relay lag (since #521 `spawn_relay` drains the
   broadcast into an unbounded buffer, so it lags only if that reader falls
   `EVENT_CHANNEL_CAP` behind; the model's relay never lags), subagent asks,
@@ -286,12 +313,17 @@ wrong: fix the action, re-run, and say what you changed.
    - `AskResolution`, `InterruptSafe`: `DriverRead` leaves `pending` alone on
      a `cancel` line (the code before #520). Both fail on an 18-step path
      ending in a reload.
-   - `NoLostUserMessage`, `NoLostAgentMessage`, `WakeBounded` fail today;
-     once one passes, add a break for it here.
+   - `NoLostAgentMessage`: `Relay` forgets the held messages on `exited`
+     without telling their senders (a 5-step path: claude exits, an agent
+     sends into the window before the relay drops the driver); or
+     `ClientResume` resends nothing and keeps them held (`held::resend`
+     gone).
+   - `NoLostUserMessage`, `WakeBounded` fail today; once one passes, add a
+     break for it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
    change was meant to move, and say so in the PR.
 4. Move the sync commit (the hash in the `git diff` command above and below)
    forward only after you have read the covered code at the new commit and
    confirmed the models describe it.
 
-Last confirmed against: `cf15b41147fff3b9c4e9c7cbc16ac29676e072fa`.
+Last confirmed against: `07967f19234db6c95c9b6ceff6419b038a008ebd`.

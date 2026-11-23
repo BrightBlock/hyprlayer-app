@@ -314,6 +314,20 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE goals ADD COLUMN control_request TEXT;
     ",
+    "
+    CREATE TABLE held_messages (
+        session_id    TEXT NOT NULL,
+        nonce         TEXT NOT NULL,
+        text          TEXT NOT NULL,
+        prompt_name   TEXT,
+        author_id     TEXT,
+        author_device TEXT,
+        sender        TEXT,
+        project_path  TEXT,
+        resent        INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (session_id, nonce)
+    );
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

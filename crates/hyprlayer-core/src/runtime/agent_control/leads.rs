@@ -195,6 +195,7 @@ impl AgentControlService<'_> {
                     SendContext {
                         base_rev: None,
                         author,
+                        sender: None,
                     },
                 )
                 .await?;

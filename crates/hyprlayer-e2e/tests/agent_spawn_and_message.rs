@@ -911,6 +911,44 @@ async fn agent_spawn_and_message() {
         }),
     );
 
+    j.step("a message its harness held when it crashed goes back to its sender");
+    let holder = start_session(&mut j, &c, &ws, "Holder", "$HOLDER").await;
+    control_for(&sandbox, &holder, "queue-crash", "2");
+    let held_crash = hold_a_message(&c, &sandbox, &mut lead_mcp, &holder, "E2E_HELD_CRASH").await;
+    let exited = gone(&c, &holder).await;
+    let report = {
+        let deadline = tokio::time::Instant::now() + IO;
+        let mut found = None;
+        while found.is_none() && tokio::time::Instant::now() < deadline {
+            found = user_turns(&c, &lead).await.into_iter().find(|t| {
+                t.2.contains("was not delivered: the session exited before reading it")
+                    && t.2.contains("E2E_HELD_CRASH")
+            });
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        found.is_some()
+    };
+    let logged = user_turns(&c, &holder)
+        .await
+        .iter()
+        .any(|t| t.2.ends_with("E2E_HELD_CRASH"));
+    j.guard(
+        "message_agent returns ok, the harness exits before reading it, and the sender gets a turn saying it was not delivered",
+        held_crash && exited && report && !logged,
+        json!({ "sent": held_crash, "exited": exited, "senderTold": report, "loggedAsRead": logged }),
+    );
+
+    j.step("a message its harness held when the server stopped is set up");
+    let keeper = start_session(&mut j, &c, &ws, "Keeper", "$KEEPER").await;
+    control_for(&sandbox, &keeper, "queue", "2");
+    let held_restart =
+        hold_a_message(&c, &sandbox, &mut lead_mcp, &keeper, "E2E_HELD_RESTART").await;
+    j.guard(
+        "the keeper's harness holds the message mid-turn",
+        held_restart,
+        json!({ "held": held_restart }),
+    );
+
     j.step("lineage survives a restart");
     drop((lead_mcp, partner_mcp, child_mcp, grand_mcp, validate_mcp));
     let stopped = server.shutdown(&c).await;
@@ -943,6 +981,31 @@ async fn agent_spawn_and_message() {
             && read(&validate) == json!({ "origin": "user", "parentSessionId": lead })
             && read(&lead) == json!({ "origin": "user", "parentSessionId": null }),
         json!({ "restarted": stopped.status.success(), "rows": after, "lead": read(&lead) }),
+    );
+
+    j.step("the restart resends the held message once");
+    let resent = |reads: usize| {
+        stub_user_lines(&sandbox, &keeper)
+            .iter()
+            .filter(|w| w.ends_with("E2E_HELD_RESTART"))
+            .count()
+            == reads
+    };
+    let reread = eventually(IO + IO, || resent(2)).await;
+    let mut stored = 0;
+    let deadline = tokio::time::Instant::now() + IO;
+    while stored == 0 && tokio::time::Instant::now() < deadline {
+        stored = user_turns(&c, &keeper)
+            .await
+            .iter()
+            .filter(|t| t.0 == format!("agent:{lead}") && t.2.ends_with("E2E_HELD_RESTART"))
+            .count();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    j.guard(
+        "the relaunched harness reads it, and the log holds it once, from its sender",
+        reread && stored == 1,
+        json!({ "readByTheNewProcess": reread, "storedTimes": stored }),
     );
 
     j.step("wake_when wakes its caller when the timer is up");
@@ -1300,6 +1363,45 @@ async fn start_linked(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     session.id
+}
+
+/// Starts a turn in `target` whose harness then holds the next message, and sends it from `sender`.
+async fn hold_a_message(
+    c: &RpcClient,
+    sandbox: &Sandbox,
+    sender: &mut McpDriver,
+    target: &str,
+    text: &str,
+) -> bool {
+    c.send_user_message(
+        target.to_string(),
+        "E2E_BUSY".into(),
+        vec![],
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("send_user_message");
+    let busy = eventually(IO, || {
+        stub_user_lines(sandbox, target)
+            .iter()
+            .any(|w| w == "E2E_BUSY")
+    })
+    .await;
+    let sent = sender
+        .call(
+            "message_agent",
+            json!({ "session_id": target, "text": text }),
+        )
+        .await;
+    let read = eventually(IO, || {
+        stub_user_lines(sandbox, target)
+            .iter()
+            .any(|w| w.ends_with(text))
+    })
+    .await;
+    busy && !tool_failed(&sent) && read
 }
 
 /// The MCP face under a composer session's launch env, initialized.

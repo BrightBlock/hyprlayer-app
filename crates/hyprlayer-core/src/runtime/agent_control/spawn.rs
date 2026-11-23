@@ -20,7 +20,9 @@ use crate::error::{CoreError, Result};
 use crate::pipeline::{self, Stage};
 use crate::runtime::goals::{GoalTarget, StartGoalRequest};
 use crate::runtime::sessions::goal_loop::{is_idle, Watch};
-use crate::runtime::sessions::{SendContext, SessionLineage, StartStageSessionRequest};
+use crate::runtime::sessions::{
+    MessageSender, SendContext, SessionLineage, StartStageSessionRequest,
+};
 use crate::runtime::terminals::{CloseTerminalRequest, LaunchAgentRequest, PtyLineage};
 use crate::store::{Session, Workstream};
 use crate::terminal::{engines, text, PtySession, RingReader};
@@ -423,6 +425,10 @@ impl AgentControlService<'_> {
                 SendContext {
                     base_rev: None,
                     author: Some(author(identity, label)),
+                    sender: Some(MessageSender {
+                        caller: identity.caller.clone(),
+                        project_path: identity.project_path.clone(),
+                    }),
                 },
             )
             .await?;
