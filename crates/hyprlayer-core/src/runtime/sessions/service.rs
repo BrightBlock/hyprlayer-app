@@ -2218,30 +2218,41 @@ fn spawn_relay(
     session_id: String,
     token: Option<TokenGuard>,
 ) {
+    // The driver's broadcast drops what a slow reader misses, so it is drained at once
+    // and a stalled actor holds events here instead of losing them.
+    let (buffered, mut pending) = mpsc::unbounded_channel();
+    let lag_id = session_id.clone();
     tokio::spawn(async move {
-        // Revoked when the relay ends, not when this function returns.
-        let _token = token;
         loop {
             match rx.recv().await {
                 Ok(event) => {
                     let terminal = matches!(event, SessionEvent::Exited { .. });
-                    // Keeps a resume asking for the new mode from relaunching.
-                    if let SessionEvent::PermissionModeChanged { mode } = event {
-                        registry.set_permission_mode(&session_id, mode).await;
-                    }
-                    if ingress.send(event).await.is_err() {
-                        break;
-                    }
-                    if terminal {
-                        registry.remove(&session_id).await;
+                    if buffered.send(event).is_err() || terminal {
                         break;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("session {session_id} relay lagged {n} events");
-                    continue;
+                    tracing::warn!("session {lag_id} relay lagged {n} events");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+    tokio::spawn(async move {
+        // Revoked when the relay ends, not when this function returns.
+        let _token = token;
+        while let Some(event) = pending.recv().await {
+            let terminal = matches!(event, SessionEvent::Exited { .. });
+            // Keeps a resume asking for the new mode from relaunching.
+            if let SessionEvent::PermissionModeChanged { mode } = event {
+                registry.set_permission_mode(&session_id, mode).await;
+            }
+            if ingress.send(event).await.is_err() {
+                break;
+            }
+            if terminal {
+                registry.remove(&session_id).await;
+                break;
             }
         }
     });
@@ -2272,4 +2283,34 @@ fn owes_first_turn(log: &[SessionLogEntry]) -> bool {
         failed,
         Some(ExitOutcome::SpawnFailed | ExitOutcome::Crashed)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::sessions::delivery::INGRESS_CAPACITY;
+
+    #[tokio::test]
+    async fn a_stalled_actor_loses_no_events() {
+        let (events, rx) = broadcast::channel(1024);
+        let (ingress, mut actor) = mpsc::channel(INGRESS_CAPACITY);
+        let registry = Arc::new(super::super::registry::SessionRegistry::new());
+        spawn_relay(rx, ingress, registry, "s".into(), None);
+        let burst = INGRESS_CAPACITY + 4096;
+        for n in 0..burst {
+            let _ = events.send(SessionEvent::PartialText {
+                text: n.to_string(),
+                parent_id: None,
+            });
+            tokio::task::yield_now().await;
+        }
+        let mut received = 0;
+        while tokio::time::timeout(Duration::from_millis(200), actor.recv())
+            .await
+            .is_ok_and(|event| event.is_some())
+        {
+            received += 1;
+        }
+        assert_eq!(received, burst);
+    }
 }
