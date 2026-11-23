@@ -681,6 +681,35 @@ export function useMessageLead() {
   });
 }
 
+export function invalidateLeadQueue(projectPath: string) {
+  void queryClient.invalidateQueries({ queryKey: ["lead-queue", projectPath] });
+}
+
+// LeadQueueChanged refreshes it; a finite staleTime would refetch on every window focus.
+export function useLeadQueue(projectPath: string) {
+  return useQuery({
+    queryKey: ["lead-queue", projectPath],
+    queryFn: () => unwrap(commands.listLeadQueue(projectPath)),
+    staleTime: Infinity,
+  });
+}
+
+export function useRemoveLeadQueueItem() {
+  return useMutation({
+    mutationFn: ({ projectPath, id }: { projectPath: string; id: string }) =>
+      unwrap(commands.removeLeadQueueItem(projectPath, id)),
+    onSettled: (_data, _error, { projectPath }) => invalidateLeadQueue(projectPath),
+  });
+}
+
+export function useHostStats() {
+  return useQuery({
+    queryKey: ["host-stats"],
+    queryFn: () => unwrap(commands.hostStats()),
+    refetchInterval: 3_000,
+  });
+}
+
 export function useSetLeadRemoteControl() {
   return useMutation({
     mutationFn: ({ projectPath, enabled }: { projectPath: string; enabled: boolean }) =>

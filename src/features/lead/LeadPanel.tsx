@@ -1,0 +1,185 @@
+import type { ReactNode } from "react";
+
+import { Icon } from "@/components/Icon";
+import { cx, IconButton } from "@/components/ui";
+import type { HostStats, LeadQueueItem, WorkstreamView } from "@/lib/bindings";
+import { formatBytes } from "@/lib/format";
+import { errorMessage } from "@/lib/ipc";
+import { useHostStats, useLeadQueue, useRemoveLeadQueueItem } from "@/lib/queries";
+import { useToast } from "@/lib/toast";
+import { pipelineColumnOf, prNumberOf } from "@/features/board/pipeline";
+import { useProjectLead } from "./lead";
+
+const STEPS = ["plan", "build", "validate", "merged"];
+
+function reachedStep(view: WorkstreamView): number {
+  switch (pipelineColumnOf(view, false)) {
+    case "merged":
+      return STEPS.length;
+    case "review":
+      return 2;
+    case "implementing":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function hasOpenPr(view: WorkstreamView): boolean {
+  const observed = view.item.observedPr;
+  return observed ? observed.state === "open" : view.item.prNumber !== null;
+}
+
+export function LeadPanel({
+  projectPath,
+  views,
+  className,
+}: {
+  projectPath: string;
+  views: WorkstreamView[];
+  className?: string;
+}) {
+  const lead = useProjectLead(projectPath);
+  const queue = useLeadQueue(projectPath).data ?? [];
+  if (!lead) return null;
+
+  const driven = new Set(lead.view.driving);
+  const driving = views.filter((v) => driven.has(v.item.id));
+  const others = views.filter((v) => v.item.id !== lead.view.workstreamId);
+  const queued = queue.filter((item) => item.state === "queued");
+
+  return (
+    <div aria-label="Lead" className={cx("flex flex-col overflow-y-auto", className)}>
+      <Section title="Queue" count={queued.length}>
+        {queued.length === 0 ? (
+          <Empty>Nothing queued</Empty>
+        ) : (
+          <ul>
+            {queued.map((item) => (
+              <QueueRow key={item.id} item={item} />
+            ))}
+          </ul>
+        )}
+      </Section>
+      <Section title="Running" count={driving.length}>
+        {driving.length === 0 ? (
+          <Empty>No workstreams running</Empty>
+        ) : (
+          <ul>
+            {driving.map((view) => (
+              <DrivingRow key={view.item.id} view={view} />
+            ))}
+          </ul>
+        )}
+      </Section>
+      <Section title="Stats">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 pb-3 text-meta">
+          <Stat label="Agents" value={`${lead.view.liveChildren}/${lead.settings.maxLiveChildren}`} />
+          <Stat label="Workstreams" value={String(others.length)} />
+          <Stat label="Open PRs" value={String(others.filter(hasOpenPr).length)} />
+          <HostRows />
+        </dl>
+      </Section>
+    </div>
+  );
+}
+
+function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+  return (
+    <section className="border-b border-edge last:border-b-0">
+      <h3 className="flex h-9 items-center gap-2 px-3 text-ink-dim">
+        <span className="text-label">{title}</span>
+        {count !== undefined && <span className="ml-auto text-meta">{count}</span>}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function Empty({ children }: { children: ReactNode }) {
+  return <p className="px-3 pb-3 text-meta text-ink-4">{children}</p>;
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt className="text-ink-dim">{label}</dt>
+      <dd className="text-right text-ink tabular-nums">{value}</dd>
+    </>
+  );
+}
+
+function hostRows(stats: HostStats): [string, string][] {
+  const load = stats.load ? stats.load.map((n) => (n ?? 0).toFixed(2)).join(" ") : "n/a";
+  const used = (a: number | null, b: number | null) =>
+    b ? `${formatBytes(a ?? 0)} of ${formatBytes(b)}` : "none";
+  return [
+    ["Load", `${load} (${stats.cpus} cores)`],
+    ["Memory", used(stats.memoryUsed, stats.memoryTotal)],
+    ["Swap", used(stats.swapUsed, stats.swapTotal)],
+  ];
+}
+
+function HostRows() {
+  const stats = useHostStats().data;
+  if (!stats) return null;
+  return (
+    <>
+      {hostRows(stats).map(([label, value]) => (
+        <Stat key={label} label={label} value={value} />
+      ))}
+    </>
+  );
+}
+
+function QueueRow({ item }: { item: LeadQueueItem }) {
+  const remove = useRemoveLeadQueueItem();
+  const drop = () =>
+    remove.mutate(
+      { projectPath: item.projectPath, id: item.id },
+      {
+        onError: (e) =>
+          useToast.getState().show(`Couldn't remove ${item.title}`, errorMessage(e), { tone: "bad" }),
+      },
+    );
+  return (
+    <li className="group flex items-start gap-2 border-t border-edge-2 py-2 pr-1.5 pl-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-body text-ink">{item.title}</p>
+        <p className="line-clamp-2 text-meta text-ink-dim">{item.summary}</p>
+      </div>
+      <IconButton
+        aria-label={`Remove ${item.title} from the queue`}
+        title="Remove from the queue"
+        disabled={remove.isPending}
+        onClick={drop}
+        className="h-6 w-6"
+      >
+        <Icon name="close" size="xs" />
+      </IconButton>
+    </li>
+  );
+}
+
+function DrivingRow({ view }: { view: WorkstreamView }) {
+  const reached = reachedStep(view);
+  const pr = prNumberOf(view);
+  return (
+    <li className="flex flex-col gap-2 border-t border-edge-2 px-3 py-3">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">{view.item.title}</span>
+        {pr !== null && <span className="shrink-0 text-meta text-ink-4">#{pr}</span>}
+      </div>
+      <ol className="grid grid-cols-4 gap-[3px]">
+        {STEPS.map((label, i) => (
+          <li key={label} aria-current={i === reached ? "step" : undefined} className="flex flex-col gap-1">
+            <span
+              className={cx("h-[3px] rounded-[1px]", i < reached ? "bg-ok" : i === reached ? "bg-accent" : "bg-edge")}
+            />
+            <span className={cx("text-meta", i === reached ? "text-ink" : "text-ink-4")}>{label}</span>
+          </li>
+        ))}
+      </ol>
+    </li>
+  );
+}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 import { Icon } from "@/components/Icon";
 import { Button, ErrorNote, IconButton, Spinner } from "@/components/ui";
-import type { LeadView } from "@/lib/bindings";
+import type { LeadView, WorkstreamView } from "@/lib/bindings";
 import { openExternalUrl } from "@/lib/browser";
 import { formatCompactAge } from "@/lib/format";
 import { errorMessage } from "@/lib/ipc";
@@ -15,6 +15,7 @@ import { answerQuestion, useSessionStore } from "@/features/session/sessionStore
 import { isWorking, type TranscriptItem } from "@/features/session/transcript";
 import { nextDockPhase, type DockEvent, type DockPhase } from "./dockPhase";
 import { LeadMark } from "./LeadChip";
+import { LeadPanel } from "./LeadPanel";
 import { clearLeadNote, useFollowLead, useLeadNote, type LeadAsk, type LeadNote, type ProjectLead } from "./lead";
 
 function latestReply(items: readonly TranscriptItem[]): string | null {
@@ -36,6 +37,7 @@ export function LeadDock({
   ask,
   expanded,
   chat,
+  views,
   onExpand,
   onMinimize,
 }: {
@@ -43,6 +45,7 @@ export function LeadDock({
   ask: LeadAsk | null;
   expanded: boolean;
   chat: ReactNode;
+  views: WorkstreamView[];
   onExpand: () => void;
   onMinimize: () => void;
 }) {
@@ -285,12 +288,15 @@ export function LeadDock({
           <div style={contentStyle} className="flex min-h-0 flex-1 flex-col">
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             {/* SessionChat's transcript slides 36px up under its own header; this clip keeps it off the dock's. */}
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-t border-edge-2">
-              {chat ?? (
-                <div className="flex flex-1 items-center justify-center">
-                  <Spinner />
-                </div>
-              )}
+            <div className="flex min-h-0 flex-1 border-t border-edge-2">
+              <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                {chat ?? (
+                  <div className="flex flex-1 items-center justify-center">
+                    <Spinner />
+                  </div>
+                )}
+              </div>
+              <LeadPanel projectPath={projectPath} views={views} className="w-[300px] shrink-0 border-l border-edge" />
             </div>
           </div>
         </div>

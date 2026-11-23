@@ -12,6 +12,7 @@ import { queryClient } from "./queryClient";
 import { refreshOmarchyTheme } from "./theme";
 import {
   invalidateCliBundleState,
+  invalidateLeadQueue,
   invalidateLeads,
   invalidateReview,
   invalidateScriptOutput,
@@ -132,6 +133,7 @@ export function attachEventListeners(): () => void {
       if (event.payload.observedPrChanged) invalidateWorkstreamLists();
     }),
     events.workstreamsChanged.listen((event) => void refreshProjectWorkstreams(event.payload.projectPath)),
+    events.leadQueueChanged.listen((event) => invalidateLeadQueue(event.payload.projectPath)),
     events.worktreeChanged.listen((event) => {
       invalidateWorktreeGit(event.payload.workstreamId);
     }),

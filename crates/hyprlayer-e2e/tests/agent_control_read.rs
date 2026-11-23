@@ -549,10 +549,15 @@ async fn agent_control_read() {
     .iter()
     .any(|e| matches!(e, RuntimeEvent::WorkstreamsChanged { project_path } if *project_path == project));
     let shelf_open = is_open(&c, &project, &shelf).await;
+    let report = parse(&shelved);
     j.guard(
         "the shelf is archived, and another client hears the list change without asking",
-        !tool_failed(&shelved) && tool_text(&shelved).contains("archived") && heard && !shelf_open,
-        json!({ "result": first_line(&tool_text(&shelved)), "otherClientHeard": heard, "shelfOpen": shelf_open }),
+        !tool_failed(&shelved)
+            && report["children"].as_array().is_some_and(Vec::is_empty)
+            && report["childrenArchived"] == json!(false)
+            && heard
+            && !shelf_open,
+        json!({ "result": report, "otherClientHeard": heard, "shelfOpen": shelf_open }),
     );
 
     j.step("the Lead queue is shared with the desktop");

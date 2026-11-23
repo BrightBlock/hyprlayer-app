@@ -147,7 +147,7 @@ import {
 import { WorkstreamDocsPanel } from "@/features/workstreams/WorkstreamDocsPanel";
 import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectPipeline } from "@/features/board/ProjectPipeline";
-import { LeadDrivingPanel } from "@/features/lead/LeadDrivingPanel";
+import { LeadPanel } from "@/features/lead/LeadPanel";
 import { useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
 import { planGoalTarget, usePlanPath } from "@/features/board/pipelineData";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
@@ -1834,7 +1834,9 @@ export function ProjectPage() {
               className="absolute inset-y-0 right-0 flex flex-col"
               style={{ width: asideWidth }}
             >
-              <LeadDrivingPanel projectPath={projectPath} workstreamId={wsId} views={views} />
+              {lead && focusedShell?.sessionId && focusedShell.sessionId === lead.view.sessionId && (
+                <LeadPanel projectPath={projectPath} views={views} className="max-h-[60%] shrink-0 border-b border-edge" />
+              )}
               {(planAside.available || goalAside.available) && (
                 <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
                   <SegmentedControl

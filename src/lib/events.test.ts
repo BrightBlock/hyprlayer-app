@@ -21,6 +21,7 @@ vi.mock("./bindings", () => ({
     omarchyThemeChanged: stub("omarchyThemeChanged"),
     prStatusChanged: stub("prStatusChanged"),
     workstreamsChanged: stub("workstreamsChanged"),
+    leadQueueChanged: stub("leadQueueChanged"),
     worktreeChanged: stub("worktreeChanged"),
     reviewChanged: stub("reviewChanged"),
     workstreamBranchChanged: stub("workstreamBranchChanged"),

@@ -34,8 +34,6 @@ export type UiStore = {
   setDiffWidth: (width: number) => void;
   tasksCollapsed: boolean;
   toggleTasks: () => void;
-  drivingCollapsed: boolean;
-  toggleDriving: () => void;
   leadDockExpanded: string[];
   setLeadDockExpanded: (projectPath: string, expanded: boolean) => void;
   // Persisted raw; readers resolve it against what the focused session offers.
@@ -85,8 +83,6 @@ export const useUiStore = create<UiStore>()(
       setDiffWidth: (width) => set({ diffWidth: width }),
       tasksCollapsed: false,
       toggleTasks: () => set((state) => ({ tasksCollapsed: !state.tasksCollapsed })),
-      drivingCollapsed: false,
-      toggleDriving: () => set((state) => ({ drivingCollapsed: !state.drivingCollapsed })),
       leadDockExpanded: [],
       setLeadDockExpanded: (projectPath, expanded) =>
         set((state) => {
@@ -159,7 +155,6 @@ export const useUiStore = create<UiStore>()(
       partialize: (s) => ({
         diffHidden: s.diffHidden,
         tasksCollapsed: s.tasksCollapsed,
-        drivingCollapsed: s.drivingCollapsed,
         leadDockExpanded: s.leadDockExpanded,
         asideView: s.asideView,
         docsCollapsed: s.docsCollapsed,

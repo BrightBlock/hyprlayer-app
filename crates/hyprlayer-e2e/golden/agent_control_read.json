@@ -352,7 +352,10 @@
         {
           "evidence": {
             "otherClientHeard": true,
-            "result": "\"archived\"",
+            "result": {
+              "children": [],
+              "childrenArchived": false
+            },
             "shelfOpen": false
           },
           "guard": "the shelf is archived, and another client hears the list change without asking",

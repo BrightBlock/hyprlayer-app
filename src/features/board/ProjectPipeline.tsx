@@ -89,6 +89,7 @@ export function ProjectPipeline({
       ask={ask}
       expanded={expanded}
       chat={leadChat}
+      views={views}
       onExpand={expandLead}
       onMinimize={() => setLeadDockExpanded(projectPath, false)}
     />
