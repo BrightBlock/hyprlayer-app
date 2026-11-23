@@ -2,9 +2,9 @@ PASS unix TypeOK
 PASS unix ForeignUntouched
 PASS unix AppEntriesOwned
 PASS unix FinishedOpsConsistent
-FAIL unix LeftoversSwept
+PASS unix LeftoversSwept
 PASS windows TypeOK
 PASS windows ForeignUntouched
 FAIL windows AppEntriesOwned
 FAIL windows FinishedOpsConsistent
-FAIL windows LeftoversSwept
+PASS windows LeftoversSwept

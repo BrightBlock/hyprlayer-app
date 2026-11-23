@@ -1,6 +1,6 @@
 ---
 name: verify-skill-installs
-description: Model-check skill install, update (replace), remove and restore against crashes, failed steps and other people's files with TLA+ (ADR-0010). Use before merging any change to skill_sources/install.rs (commit, replace, remove, adopt_into_store, the undo structs), skill_sources/layout.rs (link_state, owned, link_skill, relink, sweep_leftovers, lock_state), skill_sources/lock.rs's write, or SkillService::restore_entry, and whenever a skill is reported stuck installed, impossible to remove, or out of step with its lock.
+description: Model-check skill install, update (replace), remove and restore against crashes, failed steps and other people's files with TLA+ (ADR-0010). Use before merging any change to skill_sources/install.rs (commit, replace, remove, adopt_into_store, the undo structs), skill_sources/layout.rs (link_state, owned, link_skill, relink, sweep_leftovers, sweep_store, lock_state), skill_sources/lock.rs's write, or SkillService::restore_entry, and whenever a skill is reported stuck installed, impossible to remove, or out of step with its lock.
 ---
 
 # Verify skill installs
@@ -59,13 +59,17 @@ was replayed on a real filesystem.
    commit like a missing one: `adopt_into_store` sets the stale store aside, renames
    the fetched copy in, and removes the old one (or renames it back on failure).
    `FinishedOpsConsistent` passes on unix; on Windows it still fails through finding 3.
-2. **`LeftoversSwept` (both platforms): store-side leftovers are never swept.**
+2. **Fixed: store-side leftovers were never swept.**
    A crash leaves `.tmp-<token>-*` (fresh install, update or adopt) or
-   `.old-<token>-*` (update) inside the store dir, and `skills.lock.tmp-*` beside
-   the lock. `sweep_leftovers` sweeps only beside the links, and `sweep_staging`
-   sweeps only the staging root. The listing skips dot entries, so the leftovers
-   are invisible in the app. In project scope they sit in
-   `.agents/hyprlayer/skills/` as untracked files.
+   `.old-<token>-*` (update or restore) inside the store dir, and `skills.lock.tmp-*`
+   beside the lock. Install, update, remove and restore now call `Layout::sweep_store`
+   under the scope mutex before they start; it removes only names with exactly those
+   prefixes. Remove and restore also run `sweep_leftovers` for their folders, which
+   only update did before: without it the Windows model still fails, through a
+   crashed copy refresh's `.<folder>.tmp-`/`.old-` left beside a link and then a
+   finished remove or restore. `sweep_staging` is unchanged. `LeftoversSwept` passes
+   on both platforms. The model has no `skills.lock.tmp-*` (the lock write is one
+   atomic action), so that part of the sweep is checked only by reading the code.
 3. **`AppEntriesOwned`, `FinishedOpsConsistent` (Windows): a crashed copy-fallback link is disowned forever.**
    When `link_skill` falls back to a copy, `link_state` claims that copy only while
    the lock has an entry whose hash matches it. If a crash comes after the copy
@@ -82,7 +86,7 @@ that rule's lines in `expected.txt` to `PASS`.
 Run this from the repo root:
 
 ```sh
-git diff --stat 232b091dab3aa6ee28fbb81f2034aa7655fc9d06 -- \
+git diff --stat bd55f5c98355c1df3233f05551d6b594a124d1ef -- \
   crates/hyprlayer-core/src/skill_sources/install.rs \
   crates/hyprlayer-core/src/skill_sources/layout.rs \
   crates/hyprlayer-core/src/skill_sources/lock.rs \
@@ -98,15 +102,16 @@ gets swept, and which calls hold the scope mutex.
 | Model action | Code (at the sync commit) |
 |---|---|
 | `Owned`, `State` | `layout::owned` / `link_state`, layout.rs:51/70 |
-| `Linked` | `layout::link_skill`, layout.rs:328 (symlink; on Windows junction or copy) |
+| `Linked` | `layout::link_skill`, layout.rs:353 (symlink; on Windows junction or copy) |
+| sweep at each start (`storeJunk' = 0`; remove and restore also `linkJunk' = 0`) | `Layout::sweep_store` (layout.rs:222) and, for remove and restore, `sweep_leftovers` (layout.rs:203), in `SkillService::restore`/`install`/`remove` under the mutex, runtime/skills.rs:521/700/718 |
 | `InstallStart` … `InstallLock` | `install::commit`, install.rs:245: the precheck, `remove_dir_all(store_dir)`, tmp copy, rename, links, `lock::write` |
 | `InstallUndo` | `Undo::run`, install.rs:219 |
 | `ReplaceStart` … `ReplaceClean` | `install::replace`, install.rs:498: `sweep_leftovers`, set the store aside, tmp copy and rename, per-link `refresh_copy`/`set_aside`/`link_skill` (479/489), `lock::write`, `remove_any` |
 | `ReplaceUndo` | `ReplaceUndo::run`, install.rs:454 |
 | `RemoveStart` … `RemoveLock` | `install::remove`, install.rs:414 (links, store, lock; no undo) |
-| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:531: `Layout::store_matches` (layout.rs:218) → `adopt_into_store` (install.rs:613: tmp copy, set a stale store aside, rename, `remove_any`) → `Layout::relink` (layout.rs:242) |
+| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:539: `Layout::store_matches` (layout.rs:218) → `adopt_into_store` (install.rs:613: tmp copy, set a stale store aside, rename, `remove_any`) → `Layout::relink` (layout.rs:267) |
 | atomic lock write | `lock::write`, lock.rs:73 (tmp + rename) |
-| one operation at a time | `skill_locks.lock(&key)` in `restore`/`install`/`remove`, runtime/skills.rs:518/690/704 |
+| one operation at a time | `skill_locks.lock(&key)` in `restore`/`install`/`remove`, runtime/skills.rs:518/698/716 |
 
 Granularity: each action is one filesystem call (a rename, a symlink, a copy into
 a fresh tmp, a `remove_dir_all`, the lock's tmp-and-rename) or a read-only check.
@@ -148,4 +153,4 @@ the way a new call does. Fix the action, re-run, and say what you changed.
    after you have read the covered code at the new commit and confirmed the model
    describes it.
 
-Last confirmed against: `232b091dab3aa6ee28fbb81f2034aa7655fc9d06`.
+Last confirmed against: `bd55f5c98355c1df3233f05551d6b594a124d1ef`.

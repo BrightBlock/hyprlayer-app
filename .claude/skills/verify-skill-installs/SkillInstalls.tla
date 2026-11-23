@@ -4,7 +4,9 @@
    filesystem step can fail (the operation's undo runs) or be cut off by a
    crash (nothing runs). The person or another tool may delete the store or a
    link, or put their own entry at a free link path. Operations hold the
-   scope mutex, so they never overlap. See SKILL.md for the coverage map. *)
+   scope mutex, so they never overlap, and each starts by sweeping the store's
+   leftovers (storeJunk' = 0); remove and restore also sweep beside the links.
+   See SKILL.md for the coverage map. *)
 EXTENDS Naturals, FiniteSets, Sequences
 
 CONSTANTS Windows, MaxCrashes, MaxFaults, MaxDamage
@@ -64,8 +66,10 @@ InstallStart(v) ==
   /\ IF \E t \in Targets : link[t] # "none" \/ lock # "none"
      THEN pc' = "idle"
      ELSE pc' = "i_clear"
+  /\ storeJunk' = 0
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<fsVars, states, oldStore, owned0, foreign, crashes, faults, damage>>
+  /\ UNCHANGED <<store, link, lock, linkJunk, states, oldStore, owned0, foreign,
+                 crashes, faults, damage>>
 
 (* `if store_dir.exists() { remove_dir_all }`, then the tmp copy *)
 InstallClear ==
@@ -122,10 +126,12 @@ ReplaceStart(v) ==
   /\ ver' = v
   /\ justDone' = "none"
   /\ IF lock = "none" THEN pc' = "idle" ELSE pc' = "r_sweep"
+  /\ storeJunk' = 0
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<fsVars, states, oldStore, owned0, foreign, crashes, faults, damage>>
+  /\ UNCHANGED <<store, link, lock, linkJunk, states, oldStore, owned0, foreign,
+                 crashes, faults, damage>>
 
-(* sweep_leftovers (beside the links only), then the link states by the old lock *)
+(* sweep_leftovers beside the links, then the link states by the old lock *)
 ReplaceSweep ==
   /\ pc = "r_sweep"
   /\ linkJunk' = 0
@@ -251,8 +257,9 @@ RemoveStart ==
   /\ IF {t \in Targets : Owned(t)} = {} /\ lock = "none" /\ store = "none"
      THEN pc' = "idle"
      ELSE pc' = "m_links"
+  /\ storeJunk' = 0 /\ linkJunk' = 0
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<fsVars, ver, states, oldStore, foreign, crashes, faults, damage>>
+  /\ UNCHANGED <<store, link, lock, ver, states, oldStore, foreign, crashes, faults, damage>>
 
 RemoveLinks ==
   /\ pc = "m_links"
@@ -302,8 +309,9 @@ RestoreStart ==
             [] store = "none" -> "s_adopt"
             [] OTHER -> "s_aside"
   /\ oldStore' = "none"
+  /\ storeJunk' = 0 /\ linkJunk' = 0
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<fsVars, ver, states, owned0, foreign, crashes, faults, damage>>
+  /\ UNCHANGED <<store, link, lock, ver, states, owned0, foreign, crashes, faults, damage>>
 
 (* rename(store_dir, .old-<token>) *)
 RestoreAside ==

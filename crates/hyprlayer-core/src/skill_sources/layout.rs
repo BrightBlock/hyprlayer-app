@@ -219,6 +219,31 @@ impl Layout {
         content_hash(&self.store_dir(folder)).is_ok_and(|hash| hash == entry.hash)
     }
 
+    pub fn sweep_store(&self) {
+        let lock_tmp = format!(
+            "{}.tmp-",
+            self.lock
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("skills.lock")
+        );
+        let sweeps: [(&Path, &[&str]); 2] = [
+            (&self.store, &[".tmp-", ".old-"]),
+            (self.lock.parent().unwrap_or(&self.store), &[&lock_tmp]),
+        ];
+        for (dir, prefixes) in sweeps {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if prefixes.iter().any(|p| name.starts_with(p)) {
+                    remove_any(&entry.path());
+                }
+            }
+        }
+    }
+
     /// Local, no network: what a restore would have to repair.
     pub fn lock_state(&self, folder: &str, entry: &LockEntry, lock: &SkillLock) -> SkillLockState {
         if !self.store_matches(folder, entry) {

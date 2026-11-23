@@ -516,8 +516,16 @@ impl SkillService<'_> {
         let key = self.scope_lock_key(scope, checkout.as_deref())?;
         let staging_root = self.prepare_staging().await?;
         let _guard = self.runtime.skill_locks.lock(&key).await;
-        let lock_path = layout.lock.clone();
-        let lock = blocking(move || lock::read(&lock_path)).await?;
+        let swept = layout.clone();
+        let lock = blocking(move || {
+            swept.sweep_store();
+            let lock = lock::read(&swept.lock)?;
+            for folder in lock.skills.keys() {
+                swept.sweep_leftovers(folder);
+            }
+            Ok(lock)
+        })
+        .await?;
         let mut entries = Vec::new();
         for (folder, entry) in &lock.skills {
             entries.push(
@@ -688,7 +696,11 @@ impl SkillService<'_> {
         let key = self.scope_lock_key(scope, checkout.as_deref())?;
         let staging_root = self.staging_root();
         let _guard = self.runtime.skill_locks.lock(&key).await;
-        blocking(move || install::commit(&staging_root, &token, &layout, &targets)).await
+        blocking(move || {
+            layout.sweep_store();
+            install::commit(&staging_root, &token, &layout, &targets)
+        })
+        .await
     }
 
     pub async fn remove(
@@ -702,7 +714,12 @@ impl SkillService<'_> {
         let layout = self.layout(scope, checkout.as_deref())?;
         let key = self.scope_lock_key(scope, checkout.as_deref())?;
         let _guard = self.runtime.skill_locks.lock(&key).await;
-        blocking(move || install::remove(&layout, &name)).await
+        blocking(move || {
+            layout.sweep_store();
+            layout.sweep_leftovers(&name);
+            install::remove(&layout, &name)
+        })
+        .await
     }
 }
 
