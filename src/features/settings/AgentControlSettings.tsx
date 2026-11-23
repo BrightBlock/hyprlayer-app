@@ -163,7 +163,7 @@ function LeadCard({
             />
           }
         >
-          Every Lead launch and resume. A mode you pick on a live Lead holds for that Lead. Its agents inherit it unless the brief names another.
+          The Lead starts and resumes in this mode. If you change the mode on a running Lead, that Lead keeps your choice. Agents the Lead starts use the same mode unless the Lead asks for another.
         </SettingRow>
         <SettingRow
           title="Max live children"

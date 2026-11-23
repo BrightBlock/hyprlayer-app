@@ -17,7 +17,10 @@ export function LeadProjectTitle({
 
   return (
     <>
-      <span className="flex shrink-0" title={needsYou > 0 ? `Lead · ${needsYou} needs you` : "Lead"}>
+      <span
+        className="flex shrink-0"
+        title={needsYou === 0 ? "Lead" : needsYou === 1 ? "Lead: 1 workstream needs you" : `Lead: ${needsYou} workstreams need you`}
+      >
         <RepoAvatar
           source={source}
           name={name}

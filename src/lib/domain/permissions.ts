@@ -15,7 +15,7 @@ export const PERMISSION_MODES: PermissionModeOption[] = [
   { key: "acceptEdits", label: "Accept edits", short: "Edits", flag: "acceptEdits" },
   { key: "plan", label: "Plan only", short: "Plan", flag: "plan" },
   { key: "auto", label: "Auto", short: "Auto", flag: "auto" },
-  { key: "dontAsk", label: "Don't ask", short: "No ask", flag: "dontAsk" },
+  { key: "dontAsk", label: "Don't ask", short: "Don't ask", flag: "dontAsk" },
   {
     key: "bypassPermissions",
     label: "Bypass permissions",

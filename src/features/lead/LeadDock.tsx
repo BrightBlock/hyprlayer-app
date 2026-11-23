@@ -356,9 +356,11 @@ function RemoteControl({ view }: { view: LeadView }) {
             .show(`Couldn't turn Remote Control ${enabled ? "on" : "off"}`, errorMessage(e), { tone: "bad" }),
       },
     );
-  const label = remoteControl
-    ? "Reachable from the Claude app · click to stop"
-    : "Local only · click to reach from the Claude app";
+  const label = !remoteControl
+    ? "Turn on Remote Control to reach this Lead from the Claude app"
+    : url
+      ? "Remote Control is on. Click to turn it off."
+      : "Remote Control is on. The Claude app link appears when the Lead is running. Click to turn it off.";
   const copy = (link: string) =>
     void navigator.clipboard.writeText(link).then(() => useToast.getState().show("Remote Control link copied", link));
 
@@ -378,9 +380,6 @@ function RemoteControl({ view }: { view: LeadView }) {
             <Icon name="copy" size="xs" />
           </IconButton>
         </>
-      )}
-      {remoteControl && !url && !set.isPending && (
-        <span className="text-meta text-ink-4">Link shows while the Lead runs</span>
       )}
       <IconButton
         active={remoteControl}

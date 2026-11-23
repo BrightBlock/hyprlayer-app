@@ -48,7 +48,7 @@ export function parseIncomingMessage(text: string): IncomingMessage | null {
   if (!trailing) {
     const wake = WAKE.exec(header);
     if (wake) return wakeReport(body, wake[1]);
-    if (HYPRLAYER.test(header)) return { kind: "hyprlayer", title: "hyprlayer", body, ids: [], links: [] };
+    if (HYPRLAYER.test(header)) return { kind: "hyprlayer", title: "Hyprlayer", body, ids: [], links: [] };
   }
   const agent = AGENT.exec(header);
   if (!agent) return null;
