@@ -1,12 +1,17 @@
 ---
 name: verify-native-chat
-description: Model-check the native chat (composer) session protocol with TLA+: user messages reaching claude exactly once, permission asks clearing, turns ending, interrupts, server-restart wakes, and a desktop converging on the session's event log. Use before merging any change to claude/driver.rs (Inbox, send_user_turn, respond_permission, interrupt, write_loop, read_and_wait), claude/protocol.rs's control lines, runtime/sessions/service.rs (send, send_app_turn_held, respond_permission, interrupt, launch_driver, spawn_relay, list_turns), forwarder.rs (handle_event, author_for, close_turn, attach_after, register_after), delivery.rs, wake.rs, store/sessions.rs's settle_stale_sessions, WorkstreamService::archive, hyprlayer-server's forward_session, or src/features/session's sessionStore.ts (dispatch, applyEvent, handedBackBy, deliverMessage, steerMessage, stopSession, pullNow), transcriptSync.ts (route, mergeEntries) and transcript.ts's ask handling, and whenever a message is reported lost or sent twice, an ask will not clear, a session stays working, or a restart wakes a session it should not.
+description: Model-check the native chat (composer) session protocol with TLA+ for each provider (claude, codex app-server, OpenCode): user messages reaching the harness exactly once, permission asks clearing, turns ending, interrupts, server-restart wakes, and a desktop converging on the session's event log. Use before merging any change to claude/driver.rs (Inbox, send_user_turn, respond_permission, interrupt, write_loop, read_and_wait), claude/protocol.rs's control lines, codex/driver.rs (send_user_turn, steer, interrupt, respond_permission, read_and_wait, route_incoming) or codex/protocol.rs's Translator (active_turn, requested_turn, steering, pending_approvals, turn/completed, item_completed), opencode/runtime.rs (OpenCodeDriver send_user_turn, respond_permission, interrupt, track_ask, the Translator's handle/expire, spawn_sse), runtime/sessions/service.rs (send, send_app_turn_held, respond_permission, interrupt, launch_driver, spawn_relay, list_turns), forwarder.rs (handle_event, author_for, close_turn, attach_after, register_after), delivery.rs, wake.rs, store/sessions.rs's settle_stale_sessions, WorkstreamService::archive, hyprlayer-server's forward_session, or src/features/session's sessionStore.ts (dispatch, applyEvent, handedBackBy, deliverMessage, steerMessage, stopSession, pullNow), transcriptSync.ts (route, mergeEntries) and transcript.ts's ask handling, and whenever a message is reported lost or sent twice, an ask will not clear, a session stays working, or a restart wakes a session it should not.
 ---
 
 # Verify the native chat
 
-Three TLA+ models, each checked by TLC over every order of its steps, up to the
-bounds in its `.cfg`:
+Five TLA+ models, each checked by TLC over every order of its steps, up to the
+bounds in its `.cfg`. The session turn protocol has one model per provider:
+claude's stream-json over stdin with lifecycle frames, codex's JSON-RPC with
+turn ids, and OpenCode's HTTP requests plus SSE events from one shared server
+differ too much at the harness and driver for one model with an adapter. The
+three share the service, relay, actor and desktop steps (copied, so they read
+the same) and the same rule names, so each rule is checked per provider.
 
 - `SessionTurns.tla` covers one claude session from the send to the screen: the
   service's sends, answers and interrupts; `ClaudeDriver`'s inbox (`busy`,
@@ -16,6 +21,24 @@ bounds in its `.cfg`:
   settles an ask itself); `spawn_relay` and the forwarder actor; and one
   desktop's `sessionStore` (direct sends, steered chips, the hand-back on
   exit, asks closed by an answer or by their tool's result, reloads, resume).
+- `CodexTurns.tla` covers one codex app-server session: `CodexDriver`'s
+  `send_user_turn` (a steer into the turn it knows of, else an echo and
+  `turn/start`), `interrupt` (needs a turn id), `respond_permission`, and the
+  Translator's `active_turn`, `requested_turn` (set by the `turn/start`
+  task), `steering` and `pending_approvals`; codex reading requests, writing
+  the `turn/start` response at any point after it starts the turn, asking,
+  committing steers at its next step, and settling its own approvals on an
+  interrupt; and the shared relay, actor and desktop, where a codex ask (no
+  `tool_use_id`) is closed by the newest tool result with its tool's name.
+- `OpenCodeTurns.tla` covers one session on the shared OpenCode server:
+  `OpenCodeDriver`'s `send_user_turn` (echo, `begin_turn`, `prompt_async`),
+  `respond_permission`, `interrupt` (drains the asks map, marks the sent
+  turn, POSTs abort); OpenCode handling each POST in any order, holding a
+  prompt behind a running one, aborting, asking, another OpenCode client
+  answering, dying, and SSE events the driver never sees; the filter task's
+  `track_ask` and Translator turn ending (`sent`, anchor, `answered`,
+  `interrupted`, the unplaced idle and its expiry); and the shared relay,
+  actor (including `next_turn`) and desktop.
 - `RestartWake.tla` covers one session cut off mid-turn by server restarts:
   `settle_stale_sessions` queuing its wake, `wake::check` and `wake_one`, the
   wake turn's echo on its way to the log, and archiving the workstream.
@@ -26,19 +49,37 @@ bounds in its `.cfg`:
 
 ## The rules
 
+`SessionTurns` (claude), `CodexTurns` and `OpenCodeTurns` each check the
+first eight; "the harness" is claude, codex or OpenCode.
+
 | Rule | In one sentence | The harm when it breaks |
 |---|---|---|
-| `SessionTurns.NoLostUserMessage` | A message you send from the composer and the server accepts is taken in by claude, still on its way, back in your queue to resend, reported failed, or at least stored in the transcript. | Your message vanishes: the send said OK, claude never saw it, and a reload drops it from the screen. |
-| `SessionTurns.NoLostAgentMessage` | The same for a message an agent or a stage follow-up sends (`SessionService::send` with an agent author: `message_agent`, an agent wake; `send_app_turn`), with one more way to be kept: recorded in `held_messages` for the next relaunch, or its sender told it was not delivered. Goal iterations and restart wakes (`send_app_turn_held`) are not in it: their runners send again themselves. | An agent's `message_agent` returns OK and the message is gone; nothing retries it. |
-| `SessionTurns.NoDoubleSend` | Claude takes in no message twice, across an exit, the hand-back and the resend. | Claude acts on one instruction twice. |
-| `SessionTurns.TurnProgress` | Once nothing is in flight, the actor is not `in_turn`, the desktop does not show working, and a live driver's inbox is idle. | "Working" forever after the harness finished or exited; the next send is held behind a turn that is over. |
-| `SessionTurns.AskResolution` | Once nothing is in flight, every ask the desktop shows open, live or after a reload, is one claude still waits on. | "Needs approval" stays after the turn ended, and the composer queues your next message instead of sending it (`isBusy`). |
-| `SessionTurns.InterruptSafe` | After an interrupt, a live session settles idle: no turn, no held echo, no open ask. | Stop leaves the session looking busy, so the next message does not go out. |
+| `NoLostUserMessage` | A message you send from the composer and the server accepts is taken in by the harness, still on its way, back in your queue to resend, reported failed, or at least stored in the transcript. | Your message vanishes: the send said OK, the harness never saw it, and a reload drops it from the screen. |
+| `NoLostAgentMessage` | The same for a message an agent or a stage follow-up sends (`SessionService::send` with an agent author: `message_agent`, an agent wake; `send_app_turn`), with one more way to be kept: recorded in `held_messages` for the next relaunch (while the session is not live and quiet), or its sender told it was not delivered. Goal iterations and restart wakes (`send_app_turn_held`) are not in it: their runners send again themselves. | An agent's `message_agent` returns OK and the message is gone; nothing retries it. |
+| `NoDoubleSend` | The harness takes in no message twice, across an exit, the hand-back and the resend. | The harness acts on one instruction twice. |
+| `TurnProgress` | Once nothing is in flight, the actor is not `in_turn`, the desktop does not show working, and a live driver thinks no turn runs. | "Working" forever after the harness finished or exited; the next send is held behind a turn that is over. |
+| `AskResolution` | Once nothing is in flight, every ask the desktop shows open, live or after a reload, is one the harness still waits on. | "Needs approval" stays after the turn ended, and the composer queues your next message instead of sending it (`isBusy`). |
+| `AskVisible` | While the harness waits on an ask and nothing is in flight, the desktop shows it. | The harness waits forever on an approval no one can see. |
+| `InterruptSafe` | After an interrupt, a live session settles idle: no turn, no held echo, no open ask. | Stop leaves the session looking busy, so the next message does not go out. |
+| `InterruptHonored` | An interrupt is never dropped while a message sent before it is still to run (codex: while codex runs or is about to run a turn the driver has no id for). | You press stop and the turn runs to the end anyway. |
 | `RestartWake.WakeBounded` | A session cut off mid-turn is woken at most `MAX_RESTART_RESUMES` (3) times before it finishes a turn. | A crash loop: every restart wakes the session again. |
 | `RestartWake.NoWakeWhenArchived` | No restart wake starts a harness in an archived workstream. | An archived workstream's agent comes back and works in a worktree the user put away. |
 | `SessionSync.NoSkippedSeq` | The desktop never folds in a seq with an earlier one missing. | A turn silently missing from the transcript. |
 | `SessionSync.ClientsConverge` | Once the log stops and every frame and pull has landed, the desktop holds every stored seq, or still holds another device's items behind the "behind" strip. | The desktop never catches up after a lag, short of a reload. |
 | `*.TypeOK` | The variables stay in their domains. | None, it only guards the model. |
+
+Results at the sync commit, per provider (`expected.txt`):
+
+| Rule | claude | codex | OpenCode |
+|---|---|---|---|
+| `NoLostUserMessage` | FAIL | FAIL | PASS |
+| `NoLostAgentMessage` | PASS | FAIL | PASS |
+| `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
+| `TurnProgress` | PASS | FAIL | FAIL |
+| `AskResolution` | PASS | FAIL | FAIL |
+| `AskVisible` | PASS | FAIL | FAIL |
+| `InterruptSafe` | PASS | FAIL | FAIL |
+| `InterruptHonored` | PASS | FAIL | FAIL |
 
 ## Run it
 
@@ -49,29 +90,42 @@ From the repo root:
 ```
 
 It needs `java` (11+) and `mise`. It installs TLC 1.7.4 through mise, pinned by
-checksum (set `TLA2TOOLS=/path/tla2tools.jar` to skip mise), and runs TLC once
-per rule with `WORKERS` threads (default 4; nexus is shared, so keep it low
-there, or run it on the Mac). TLC's deadlock check is on: each model's `Done`
-action marks its real end states. It prints `PASS`/`FAIL` per rule, compares
-the list with `expected.txt`, and exits non-zero when they differ. About 20 s in
-all with 4 workers: `SessionTurns` has 1.71 M distinct states, `SessionSync`
-58 k, `RestartWake` about 500. `OUT=dir` keeps the logs: `$OUT/<Model>.<Rule>/tlc.out`.
-`check.sh SessionTurns` checks one model and skips the comparison.
+checksum (set `TLA2TOOLS=/path/tla2tools.jar` to skip mise, `JAVA=` to pick a
+java), and runs TLC with `WORKERS` threads (default 4). One TLC run checks
+every rule of a config still unresolved; breadth-first, it stops at the
+shortest path that breaks any of them, that rule is FAIL, and TLC runs again
+without it, so each FAIL's trace is its own shortest path and the passing rules
+share one full run. TLC's deadlock check is on: each model's `Done` action marks
+its real end states. It prints `PASS`/`FAIL` per rule, compares the list with
+`expected.txt`, and exits non-zero when they differ.
+
+Timing, all 33 rules: 32 s on the Mac with `WORKERS=12` (18 cores), 51 s on
+nexus with `WORKERS=4`. Run it on the Mac when you can (nexus is shared):
+`/home/jt/.cache/mac-run.sh <worktree> <run-name> 'JAVA=<mise java> WORKERS=12
+sh .claude/skills/verify-native-chat/check.sh'`; that shell has no mise shims on
+`PATH`, so name the java binary under `~/.local/share/mise/installs/java/`.
+Distinct states: `SessionTurns` 5.1 M, `CodexTurns` 2.4 M, `OpenCodeTurns`
+0.8 M, `SessionSync` 58 k, `RestartWake` about 400. `OUT=dir` keeps the logs:
+`$OUT/<Model>.<Rule>/tlc.out` for each FAIL, `$OUT/<Model>.pass/tlc.out` for the
+run every PASS shares. `check.sh CodexTurns` checks one model and skips the
+comparison.
 
 **Read every result with the pstack `/statechart` skill.** Give it the spec, its
 `.cfg`, and the view module beside it (`SessionTurns-view.ts`,
-`RestartWake-view.ts`, `SessionSync-view.ts`), which labels the states and steps
+`CodexTurns-view.ts`, `OpenCodeTurns-view.ts`, `RestartWake-view.ts`,
+`SessionSync-view.ts`), which labels the states and steps
 in the user's words. Add a label there for any new action. It prints each broken
 rule as its shortest path in plain words. Use it for the report, not as the
 verdict: past the first break it bounds each run at 100,000 states and lists
-`SessionTurns`' passing rules as not checked. `check.sh` gives the verdict.
+the turn models' passing rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-Two rules fail on the code at the sync commit. Each is a product bug, not a
-modeling error: each path below was walked step by step against the code; none
-was replayed in a running server by this skill. Three findings were fixed and
-are kept for the record.
+Findings 1 to 5 are claude's (`SessionTurns`) and the shared models'; 6 to
+14 are codex's and OpenCode's. Each path was walked step by step against the
+code. A provider FAIL counts as confirmed only once it has been reproduced live
+in a debug instance; each says "reproduced live" (by whom, and the evidence) or
+"model only".
 
 1. **Fixed: `AskResolution`, `InterruptSafe`: an ask claude settled itself reopened on a reload.**
    Claude writes `control_cancel_request` for a `can_use_tool` it settles
@@ -159,6 +213,87 @@ are kept for the record.
    The window is the relay and the actor's write, normally milliseconds, so
    this needs a server that dies right after each wake.
 
+6. **codex `AskResolution`, `InterruptSafe`: an approval codex settles itself stays open.**
+   Reproduced live by the "Interrogate codex and opencode chat" workstream in
+   the debug app with real codex: after an interrupt, "Turn interrupted" sits
+   under a live Allow/Deny card, the status bar keeps "Waiting for
+   approval" and Stop, `openRequestIds` keeps naming the ask, and a message
+   queued after it never sends. In the code, `pending_approvals` loses an id
+   only in `respond_permission`; a request codex settles itself (on
+   `turn/interrupt`) leaves nothing the Translator handles, so the card and
+   every reload keep it. Shortest path (14 steps): an agent's message starts
+   a turn, codex asks, someone presses stop, codex ends the turn with the
+   approval settled; the desktop shows the ask after `turnDone`. A fix is in
+   progress in that workstream. `InterruptSafe`'s shortest path is the stale
+   turn id in finding 8; this ask path breaks it too.
+7. **codex `NoLostAgentMessage`: a steer codex never commits is dropped while the session stays live.**
+   The mechanism was reproduced live by the interrogate workstream (a steer
+   codex drops on an interrupt is never resent or reported); the
+   end-of-turn path below is model only. An agent's message to a busy session
+   goes out as `turn/steer` with its echo in `steering` and the message in
+   `held_messages`. If codex accepts it and then completes the turn before
+   its next step, `turn/completed` runs `decline_steers`: a `cancelled`
+   `CommandLifecycle`, and no echo. The desktop's chip goes back to its queue
+   on that row, but nothing on the server reacts to it, so the agent's message
+   stays held, unread and untold, until the next relaunch. Shortest path (13
+   steps). A refused steer (`expectedTurnId` no longer running) declines the
+   same way.
+8. **codex `TurnProgress`, `InterruptSafe`: a stale `requested_turn` (model only).**
+   The `turn/start` task sets `requested_turn` from the response whenever it
+   runs, after any `turn/completed` that cleared it: codex writing the response
+   after a short turn's notifications, or the task merely scheduled late. The
+   driver then believes a turn runs: the next message is sent as `turn/steer`
+   into the finished turn and declined (a direct send keeps no chip, so it is
+   lost; finding 9), and an interrupt targets the dead turn. Shortest path
+   (10 steps): you send, codex starts and finishes the turn, its response
+   trails `turn/completed`.
+9. **codex `NoLostUserMessage` (model only).** The shortest path (4 steps) is
+   claude's exit window from finding 2: codex exits, `Exited` is broadcast, you
+   send before the relay drops the driver; the echo trails `Exited`. Finding 8
+   adds a codex-only path: a direct send steered into a stale turn is declined
+   with no chip to hand back.
+10. **codex `AskVisible` (model only): another command's result closes the card.**
+    codex's `PermissionAsk` has `tool_use_id: None`, so `settleAnsweredPrompt`
+    decides the newest undecided card with the result's tool name. A root
+    thread Bash call that needed no approval, finishing while another waits on
+    its approval, closes that card; codex waits on an ask no one sees until a
+    reload. Shortest path (11 steps). Needs two root-thread Bash calls in one
+    turn, one auto-approved.
+11. **codex `InterruptHonored` (model only): stop before the driver knows the turn id is dropped.**
+    `CodexDriver::interrupt` returns Ok and sends nothing when neither
+    `active_turn` nor `requested_turn` is set: from `turn/start` until its
+    response or `turn/started` is read. Shortest path (2 steps): you send,
+    you press stop.
+12. **OpenCode `TurnProgress`, `AskResolution`: a server death is never reported.**
+    `TurnProgress` reproduced live by the interrogate workstream: with `opencode
+    serve` killed mid-turn (a Bash call sleeping 90 s), the turn never ends and
+    only Stop recovers it. No driver is told when the shared server dies:
+    `spawn_sse` reconnects forever and no `Exited` is sent, so the sent turn,
+    `in_turn` and any open ask stay. `AskResolution`'s path (an ask open when
+    the server dies) is model only. With deaths and lost SSE events turned off,
+    both still fail on finding 13's path.
+13. **OpenCode `InterruptSafe`, `TurnProgress`, `InterruptHonored` (model only): a late abort.**
+    `prompt_async`, the abort and each permission reply are separate HTTP
+    requests from separate tasks, so OpenCode can handle them in any order. An
+    abort handled after a newer prompt started aborts that prompt; its
+    `SentTurn` was reset by `begin_turn`, so the `MessageAbortedError` is not
+    "ours", and if OpenCode had not yet created the reply message (no
+    `finished` reply to mark it answered) the anchored turn's `session.idle`
+    ends nothing: working forever. Shortest path (9 steps, `TurnProgress` 10
+    with deaths and drops off): someone presses stop, you send, OpenCode
+    handles the prompt and then the abort. `InterruptHonored` (3 steps): an
+    abort handled before the prompt it was for does nothing, and the turn runs
+    to the end.
+14. **OpenCode `AskVisible` (model only): a lost `permission.asked`.** An SSE
+    event the driver never sees (a reconnect gap in `spawn_sse`, or the filter
+    task's receiver lagging, which it skips with `continue`) leaves an ask
+    OpenCode waits on that the desktop never shows (8 steps).
+
+Not in the models and found by the interrogate workstream (reproduced live):
+codex auto-declines an MCP tool's approval request (`auto_decline`), so no card
+shows; a failed codex turn ends twice (`error` and a failed `turn/completed`);
+a stopped Ship turn still sends its follow-up, on every provider.
+
 When one of these is fixed in the code, change the model to match, run
 `check.sh`, and change that rule's line in `expected.txt` to `PASS`.
 
@@ -167,9 +302,13 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 07967f19234db6c95c9b6ceff6419b038a008ebd -- \
+git diff --stat e4442013f27bb615e223fa28638fba5aeba3dc1a -- \
   crates/hyprlayer-core/src/claude/driver.rs \
   crates/hyprlayer-core/src/claude/protocol.rs \
+  crates/hyprlayer-core/src/codex/driver.rs \
+  crates/hyprlayer-core/src/codex/protocol.rs \
+  crates/hyprlayer-core/src/opencode/runtime.rs \
+  crates/hyprlayer-core/src/runtime/sessions/held.rs \
   crates/hyprlayer-core/src/runtime/sessions/service.rs \
   crates/hyprlayer-core/src/runtime/sessions/forwarder.rs \
   crates/hyprlayer-core/src/runtime/sessions/delivery.rs \
@@ -185,12 +324,16 @@ git diff --stat 07967f19234db6c95c9b6ceff6419b038a008ebd -- \
 Anything listed means: read the diff against the tables below. A change to
 event content, prompts, titles, attribution, partial-text coalescing,
 elicitations (declined in `read_and_wait`), the order of queued questions, the
-`rev`/reservation arithmetic, codex or opencode does not move the models. A
+`rev`/reservation arithmetic, codex's tool-call translation, OpenCode's part
+handling, catalog or skill routing does not move the models. A
 change to when an echo is emitted or held, what `write_line` returns, what
 `read_and_wait` emits for a line, when the relay ends or the registry drops a
 driver, what opens or closes `in_turn`, which events hand chips back, how an
 ask is opened, closed or reloaded, what `check` or `wake_one` read, how a lag
-re-attaches, or how the desktop skips, holds or merges seqs does move them.
+re-attaches, or how the desktop skips, holds or merges seqs does move them;
+so does, for codex, when a turn id is set or cleared, what declines a steer,
+or what settles an approval, and, for OpenCode, which event ends the sent
+turn, what closes an ask, or what reports the server's death.
 
 `SessionTurns.tla`:
 
@@ -207,6 +350,30 @@ re-attaches, or how the desktop skips, holds or merges seqs does move them.
 | `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:452 (`handedBackBy` 527), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
 | `ClientReload` | `SessionService::list_turns`, service.rs:815 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
 | `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
+
+`CodexTurns.tla` (the service, relay, actor and desktop rows are as in `SessionTurns`):
+
+| Model action | Code (at the sync commit) |
+|---|---|
+| `SendServer`, `WriteOk` | `CodexDriver::send_user_turn`, codex/driver.rs:310 (`active_turn` or `requested_turn`: `steer`, 382, with the echo in `steering`, protocol.rs:187; none: echo, then `turn/start`), `write`, 639, `write_loop`, 807 |
+| `ClientAnswer` | `respond_permission`, codex/driver.rs:439 (an id not in `pending_approvals` returns Ok and writes nothing) |
+| `Interrupt` | `CodexDriver::interrupt`, codex/driver.rs:489 (no turn id: returns Ok, sends nothing) |
+| `CodexRead`, `CodexRespond`, `CodexAsk`, `CodexOtherTool`, `CodexCommitSteer`, `CodexFinish`, `CodexExit` | codex app-server's own behaviour (see the assumptions below) |
+| `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: the `turn/start` task sets `requested_turn`, 373; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `Exited`, driver.rs:889 |
+| `Relay` | as `SessionTurns`, with `settleAnsweredPrompt`, transcript.ts:403, deciding a codex card by tool name (codex asks have `tool_use_id: None`, protocol.rs:431) |
+| `ClientResume` | `thread/resume` in a fresh app-server and driver, then `held::resend` |
+
+`OpenCodeTurns.tla` (the relay, actor and desktop rows are as in `SessionTurns`):
+
+| Model action | Code (at the sync commit) |
+|---|---|
+| `SendServer` | `OpenCodeDriver::send_user_turn`, opencode/runtime.rs:1033 (the echo first, `begin_turn`, 691, `prompt_async`, 885 → `request_async`, 964: a failed POST sends "OpenCode request failed" and a failed `TurnDone`) |
+| `ClientAnswer` | `respond_permission`, runtime.rs:1068 (`take_ask`, then a POST either way) |
+| `Interrupt` | `OpenCodeDriver::interrupt`, runtime.rs:1135 (drains the asks map as declined, marks the sent turn, POSTs abort) |
+| `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
+| `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
+| `DriverRead`, `Expire` | the filter task: `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379 |
+| `Relay` | as `SessionTurns`, plus `author_for`'s `next_turn` (forwarder.rs:1056); OpenCode's permission names never equal a normalized tool name (`normalize_tool`, 1679), so no tool result decides a card |
 
 `RestartWake.tla`:
 
@@ -269,6 +436,30 @@ attachment together).
   failed persist in the actor, codex and opencode, and an interrupt landing on
   the turn that starts right after the one it was meant for (the composer's
   `stopSession` withdraws queued chips first and accepts the rest by design).
+- `CodexTurns`: one composer message, one agent message, one ask id, two
+  app-server processes (one exit and one resume), one interrupt, one other
+  tool result. `OpenCodeTurns`: one composer and one agent message, one ask
+  id, one interrupt, one lost SSE event, one server death; no exits and no
+  resume (a driver never exits except by a kill, which is left out).
+- Assumptions about codex app-server: `turn/start` while a turn runs is
+  refused (an error response); a steer is accepted only into the running turn
+  it names; codex drops steers it never committed when the turn ends (the
+  driver's own comment); on `turn/interrupt` it settles its open approvals
+  without a message the driver handles, and may or may not complete their
+  items; the `turn/start` response may trail the turn's notifications. Only
+  the self-settled approval is confirmed live.
+- Assumptions about OpenCode: a prompt POSTed while busy runs after the
+  running one; an abort ends the running prompt, and the prompts held behind
+  it may or may not run; the aborted reply message may or may not exist yet;
+  another OpenCode client can answer an ask (`permission.replied`). Only the
+  server death is confirmed live.
+- Left out of `CodexTurns`: codex errors and their double `TurnDone`,
+  `requestUserInput` questions, child threads, MCP elicitations and approvals
+  (`auto_decline`), rewind, collaboration mode, a refused steer while live
+  (the end-of-turn decline stands for both).
+- Left out of `OpenCodeTurns`: questions, `command_async` (slash commands),
+  the 5 s `UNPLACED_WAIT` as time (`Expire` may fire any time after), compaction,
+  child sessions, the kill path (`end`), and a server that comes back.
 - Left out of `RestartWake`: orphan wakes (`queue_orphan_wakes`, mid-turn off,
   with open background tasks), the overlay wait and concurrency (a free delay
   between check and wake stands in for them), goals (the goal resumer's
@@ -318,12 +509,22 @@ wrong: fix the action, re-run, and say what you changed.
      sends into the window before the relay drops the driver); or
      `ClientResume` resends nothing and keeps them held (`held::resend`
      gone).
-   - `NoLostUserMessage`, `WakeBounded` fail today; once one passes, add a
-     break for it here.
+   - `SessionTurns.AskVisible`: `Relay` closes every open card on any tool
+     result (closing by name instead of by `tool_use_id`).
+   - `SessionTurns.InterruptHonored`: `Interrupt` writes its line ahead of
+     the messages already in the pipe.
+   - `CodexTurns.NoDoubleSend`: codex keeps an uncommitted steer across the
+     end of its turn and commits it later, while the driver declines it.
+   - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`: `send_user_turn`
+     sends no echo.
+   - `OpenCodeTurns.NoDoubleSend`: a prompt held behind a running one is also
+     taken in at once.
+   - `NoLostUserMessage` (claude, codex), the codex and OpenCode FAILs, and
+     `WakeBounded` fail today; once one passes, add a break for it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
    change was meant to move, and say so in the PR.
 4. Move the sync commit (the hash in the `git diff` command above and below)
    forward only after you have read the covered code at the new commit and
    confirmed the models describe it.
 
-Last confirmed against: `07967f19234db6c95c9b6ceff6419b038a008ebd`.
+Last confirmed against: `e4442013f27bb615e223fa28638fba5aeba3dc1a`.

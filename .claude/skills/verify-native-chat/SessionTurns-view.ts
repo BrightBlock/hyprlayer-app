@@ -38,6 +38,7 @@ const labels: Record<string, string> = {
   ClientRecv: "the app receives the event",
   ClientReload: "the app reloads the transcript",
   ClientResume: "you resume the session",
+  Done: "everything settles",
 };
 
 export const step = (action: string) => labels[action] ?? action;

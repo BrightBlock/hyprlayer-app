@@ -1,7 +1,8 @@
 #!/bin/sh
-# Model-checks SessionTurns.tla, RestartWake.tla and SessionSync.tla one rule at a time and compares with expected.txt.
+# Model-checks SessionTurns.tla (claude), CodexTurns.tla, OpenCodeTurns.tla, RestartWake.tla and SessionSync.tla one rule at a time and compares with expected.txt.
 # Usage: check.sh [Model ...]   SRC=dir checks the .tla and .cfg files in dir instead (a break check).
-# Prints one line per rule, PASS or FAIL, and keeps each TLC log in $OUT (default: a temp dir).
+# Prints one line per rule, PASS or FAIL, and keeps the TLC logs in $OUT (default: a temp dir):
+# $OUT/<Model>.<Rule>/tlc.out for each FAIL, $OUT/<Model>.pass/tlc.out for the run every PASS shares.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -15,32 +16,52 @@ fi
 java=${JAVA:-java}
 workers=${WORKERS:-4}
 out=${OUT:-$(mktemp -d)}
-models=${*:-SessionTurns RestartWake SessionSync}
+models=${*:-SessionTurns CodexTurns OpenCodeTurns RestartWake SessionSync}
 mkdir -p "$out"
 
 got=$out/result.txt
 : > "$got"
+# One TLC run checks every rule still unresolved. Breadth-first, it stops at the shortest
+# path that breaks any of them; that rule is FAIL, it is dropped, and TLC runs again. A run
+# that finishes clean passes every rule left.
 for model in $models; do
   for cfg in "$src/$model".cfg "$src/$model"-*.cfg; do
     [ -f "$cfg" ] || continue
     name=$(basename "$cfg" .cfg)
-    rules=$(sed -n '/^INVARIANTS/,$p' "$cfg" | tail -n +2 | tr -d ' ')
+    all=$(sed -n '/^INVARIANTS/,$p' "$cfg" | tail -n +2 | tr -d ' ')
     consts=$(sed -n '/^CONSTANTS/,/^SPECIFICATION/p' "$cfg" | sed '$d')
-    for rule in $rules; do
-      dir=$out/$name.$rule
+    left=$all
+    verdicts=$out/$name.verdicts
+    : > "$verdicts"
+    while [ -n "$left" ]; do
+      dir=$out/$name.run
+      rm -rf "$dir"
       mkdir -p "$dir"
       cp "$src/$model.tla" "$dir/$model.tla"
-      printf '%s\nSPECIFICATION Spec\nINVARIANT %s\n' "$consts" "$rule" > "$dir/$model.cfg"
+      { printf '%s\nSPECIFICATION Spec\nINVARIANTS\n' "$consts"; printf '  %s\n' $left; } > "$dir/$model.cfg"
       (cd "$dir" && "$java" -XX:+UseParallelGC -cp "$TLA2TOOLS" tlc2.TLC \
           -workers "$workers" -metadir "$dir/states" "$model.tla" > tlc.out 2>&1) || true
       rm -rf "$dir/states"
-      if grep -q "Invariant $rule is violated" "$dir/tlc.out"; then
-        verdict=FAIL
+      broke=$(sed -n 's/^Error: Invariant \([A-Za-z0-9_]*\) is violated.*/\1/p' "$dir/tlc.out" | head -1)
+      if [ -n "$broke" ]; then
+        rm -rf "$out/$name.$broke"
+        mv "$dir" "$out/$name.$broke"
+        echo "FAIL $broke" >> "$verdicts"
+        left=$(printf '%s\n' $left | grep -vx "$broke" || true)
       elif grep -q "No error has been found" "$dir/tlc.out"; then
-        verdict=PASS
+        rm -rf "$out/$name.pass"
+        mv "$dir" "$out/$name.pass"
+        for rule in $left; do echo "PASS $rule" >> "$verdicts"; done
+        left=
       else
-        verdict=ERROR
+        rm -rf "$out/$name.error"
+        mv "$dir" "$out/$name.error"
+        for rule in $left; do echo "ERROR $rule" >> "$verdicts"; done
+        left=
       fi
+    done
+    for rule in $all; do
+      verdict=$(grep " $rule\$" "$verdicts" | cut -d' ' -f1)
       printf '%s %s\n' "$verdict" "$name.$rule" | tee -a "$got"
     done
   done

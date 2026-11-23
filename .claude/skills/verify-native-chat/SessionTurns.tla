@@ -26,14 +26,14 @@ VARIABLES
   \* held_messages: agent messages recorded until their echo, resent once, and those whose sender is told
   held, resent, toldSet,
   \* bookkeeping
-  accepted, failed, delivered, interrupts
+  accepted, failed, delivered, interrupts, droppedStop
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, asked, out,
           dBusy, lifecycle, waiting, pending, stdinOpen, bus,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vOpen, clicked, chip, sends,
           held, resent, toldSet,
-          accepted, failed, delivered, interrupts>>
+          accepted, failed, delivered, interrupts, droppedStop>>
 
 claudeVars == <<alive, busy, turn, pipe, queue, cOpen, asked, out>>
 driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus>>
@@ -54,7 +54,7 @@ Init ==
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
   /\ held = {} /\ resent = {} /\ toldSet \in SUBSET Agent
   /\ accepted = {} /\ failed = {} /\ delivered = [m \in Msgs |-> 0]
-  /\ interrupts = 0
+  /\ interrupts = 0 /\ droppedStop = FALSE
 
 (* ---- ClaudeDriver::send_user_turn plus write_line, under the op lock ---- *)
 
@@ -109,7 +109,7 @@ ClientSend(m) ==
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, live, procs, exits,
                  inTurn, stored, vLive, vOpen, clicked, delivered,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 \* SessionService::send records an agent's message in held_messages before send_user_turn and
 \* removes it again on Err.
@@ -119,7 +119,7 @@ AgentSend(m) ==
        /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
        /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
   /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, out, live, procs, exits,
-                 inTurn, stored, viewVars, resent, toldSet, delivered, interrupts>>
+                 inTurn, stored, viewVars, resent, toldSet, delivered, interrupts, droppedStop>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -133,17 +133,18 @@ ClientAnswer(r) ==
        ELSE pending' = pending /\ bus' = bus
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
                  live, procs, exits, inTurn, stored, vLive, streaming, vOpen, chip,
-                 sends, accepted, failed, delivered, interrupts>>
+                 sends, accepted, failed, delivered, interrupts, droppedStop>>
 
 \* SessionService::interrupt from anyone: the composer's stop (which declines a parked ask
 \* first), an agent's stop_agent, a goal.
 Interrupt ==
   /\ interrupts < MaxInterrupts /\ live /\ stdinOpen
-  /\ WriteOk(<<"interrupt">>)
+  \* the line carries the messages written before it, which the stop is for
+  /\ WriteOk(<<"interrupt", {pipe[i][2] : i \in {j \in 1..Len(pipe) : pipe[j][1] = "msg"}}>>)
   /\ interrupts' = interrupts + 1
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
                  pending, bus, live, procs, exits, inTurn, stored, viewVars,
-                 accepted, failed, delivered>>
+                 accepted, failed, delivered, droppedStop>>
 
 (* ---- claude ---- *)
 
@@ -161,6 +162,8 @@ ClaudeRead ==
   /\ alive /\ pipe /= <<>>
   /\ LET line == Head(pipe) IN
      /\ pipe' = Tail(pipe)
+     /\ droppedStop' = (droppedStop \/ (line[1] = "interrupt" /\ ~busy
+                          /\ \E j \in 2..Len(pipe) : pipe[j][1] = "msg" /\ pipe[j][2] \in line[2]))
      /\ CASE line[1] = "msg" /\ ~busy ->
                /\ busy' = TRUE /\ turn' = turn + 1 /\ Take(line[2])
                /\ out' = out \o <<<<"started", line[2]>>, <<"init">>>>
@@ -191,7 +194,7 @@ ClaudeAsk(r) ==
   /\ out' = Append(out, <<"ask", r>>)
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, driverVars, live, procs, exits,
                  inTurn, stored, viewVars, accepted, failed, delivered,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 \* A message sent mid-turn joins the turn at claude's next step.
 ClaudeTakeQueued ==
@@ -200,7 +203,7 @@ ClaudeTakeQueued ==
   /\ out' = Append(out, <<"started", Head(queue)>>)
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, cOpen, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 \* Remote Control: the ask is answered on claude.ai, and claude withdraws its can_use_tool.
 ClaudeRemoteAnswer(r) ==
@@ -209,14 +212,14 @@ ClaudeRemoteAnswer(r) ==
   /\ out' = out \o Withdraw({r})
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed, delivered,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 ClaudeFinish ==
   /\ alive /\ busy /\ cOpen = {}
   /\ busy' = FALSE /\ out' = Append(out, <<"result">>)
   /\ UNCHANGED <<heldVars, alive, turn, pipe, queue, cOpen, asked, driverVars, live, procs,
                  exits, inTurn, stored, viewVars, accepted, failed, delivered,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 \* claude starts a waiting message right after a result.
 ClaudeStartQueued ==
@@ -225,7 +228,7 @@ ClaudeStartQueued ==
   /\ Take(Head(queue)) /\ queue' = Tail(queue)
   /\ out' = out \o <<<<"started", Head(queue)>>, <<"init">>>>
   /\ UNCHANGED <<heldVars, alive, pipe, cOpen, asked, driverVars, live, procs, exits, inTurn,
-                 stored, viewVars, accepted, failed, interrupts>>
+                 stored, viewVars, accepted, failed, interrupts, droppedStop>>
 
 \* A crash, a kill, or the process ending: unread lines and claude's queue die with it.
 ClaudeExit ==
@@ -234,7 +237,7 @@ ClaudeExit ==
   /\ out' = Append(out, <<"eof">>)
   /\ exits' = exits + 1
   /\ UNCHANGED <<heldVars, turn, asked, driverVars, live, procs, inTurn, stored, viewVars,
-                 accepted, failed, delivered, interrupts>>
+                 accepted, failed, delivered, interrupts, droppedStop>>
 
 (* ---- read_and_wait ---- *)
 
@@ -269,7 +272,7 @@ DriverRead ==
   /\ Head(out)[1] /= "started" => lifecycle' = lifecycle
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, stdinOpen, live,
                  procs, exits, inTurn, stored, viewVars, accepted, failed,
-                 delivered, interrupts>>
+                 delivered, interrupts, droppedStop>>
 
 (* ---- spawn_relay + ActorState::handle_event, and the desktop's applyEvent ----
    One step: the actor's fan-out reaches the desktop in order, and no rule needs the
@@ -310,7 +313,7 @@ Relay ==
                  [] OTHER -> held
      /\ failed' = IF ev[1] = "exited" THEN failed \cup (held \cap toldSet) ELSE failed
   /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, procs, exits,
-                 clicked, sends, resent, toldSet, accepted, delivered, interrupts>>
+                 clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop>>
 
 \* A tail read refolds the log: list_turns re-sends the stored asks open_request_ids
 \* (pending_requests) names, even when their results lie outside the page, and
@@ -320,7 +323,7 @@ ClientReload ==
   /\ vOpen' = pending \cap stored
   /\ UNCHANGED <<heldVars, claudeVars, driverVars, live, procs, exits, inTurn, stored,
                  vLive, streaming, clicked, chip, sends, accepted, failed, delivered,
-                 interrupts>>
+                 interrupts, droppedStop>>
 
 \* ResumeSession on a session with no live harness: launch_driver, a fresh driver, Relaunched.
 \* held::resend then sends each held message once to the fresh driver, which is idle and has seen no
@@ -339,7 +342,7 @@ ClientResume ==
   /\ held' = again /\ resent' = resent \cup again
   /\ failed' = failed \cup (lost \cap toldSet)
   /\ UNCHANGED <<turn, asked, exits, inTurn, stored, streaming, vOpen, clicked, chip,
-                 sends, toldSet, accepted, delivered, interrupts>>
+                 sends, toldSet, accepted, delivered, interrupts, droppedStop>>
 
 (* ---- the rules ---- *)
 
@@ -387,6 +390,12 @@ TurnProgress ==
 
 \* Every ask the desktop shows open is one claude still waits on.
 AskResolution == Quiet => vOpen \subseteq cOpen
+
+\* While claude waits on an ask and nothing is in flight, the desktop shows it.
+AskVisible == (out = <<>> /\ bus = <<>> /\ pipe = <<>>) => cOpen \subseteq vOpen
+
+\* An interrupt is never handled while idle ahead of a message written before it.
+InterruptHonored == ~droppedStop
 
 \* After an interrupt, a live session settles idle: no turn, no held echo, and no ask that would
 \* make the composer queue your next message instead of sending it (isBusy).
