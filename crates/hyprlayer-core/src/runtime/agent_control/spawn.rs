@@ -1028,12 +1028,13 @@ fn spawner_note(identity: &AgentIdentity, label: &str) -> String {
     match identity.caller {
         AgentCaller::Session { .. } => format!(
             "Your spawner is {label} (session {id}). Your final reply is your report. To message it \
-             mid-task, use mcp__hyprlayer__message_agent with session_id {id}, not SendMessage; it \
-             is refused if that session runs in a higher permission mode than yours."
+             mid-task, use mcp__hyprlayer__message_agent with session_id {id}, not SendMessage. \
+             hyprlayer refuses the message if that session runs in a higher permission mode than \
+             yours."
         ),
         AgentCaller::Terminal { .. } => format!(
-            "Your spawner is {label} (terminal {id}). Your final reply is your report; a terminal \
-             agent can't be messaged by the agents it spawns, and SendMessage can't reach it."
+            "Your spawner is {label} (terminal {id}). Your final reply is your report. The agents a \
+             terminal agent spawns can't message it, and SendMessage can't reach it."
         ),
     }
 }

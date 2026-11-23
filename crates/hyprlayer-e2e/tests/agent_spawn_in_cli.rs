@@ -65,8 +65,9 @@ async fn agent_spawn_in_cli() {
     let log = launch_log(&sandbox, &terminal);
     let note = format!(
         "Your spawner is Lead (session {lead}). Your final reply is your report. To message it \
-         mid-task, use mcp__hyprlayer__message_agent with session_id {lead}, not SendMessage; it \
-         is refused if that session runs in a higher permission mode than yours."
+         mid-task, use mcp__hyprlayer__message_agent with session_id {lead}, not SendMessage. \
+         hyprlayer refuses the message if that session runs in a higher permission mode than \
+         yours."
     );
     let expected = delivered(&format!("E2E_REVIEW\n\n{header}\n\n{note}"));
     let stdin = log.join("stdin.log");

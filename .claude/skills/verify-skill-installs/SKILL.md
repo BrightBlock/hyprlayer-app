@@ -43,13 +43,13 @@ rule per config and compares `<PASS|FAIL> <platform> <rule>` lines with
 **Read every result with the pstack `/statechart` skill.** Give it this spec, one
 of the two configs, and the view module `statechart-view.ts` beside it. It prints
 each broken rule as its shortest path in plain words. Add a label in the view for
-any new action. `check.sh` gives the verdict, and `/statechart` gives the story.
+any new action. `check.sh` gives the verdict; `/statechart` explains the path.
 
 ## Known findings (the baseline in `expected.txt`)
 
-Every rule in `expected.txt` passes on the code at the sync commit. The findings below
-were about the product, not modeling errors, and are kept for the record. Each path was walked against the code; none
-was replayed on a real filesystem.
+Every rule in `expected.txt` passes on the code at the sync commit. The findings
+below were product bugs, not modeling errors, kept here for the record. Each path
+was walked against the code; none was replayed on a real filesystem.
 
 1. **Fixed: a crash mid-update left new content under the old lock, and restore called it fine.**
    `replace` moves the new store in before it writes the lock, so a crash in between
@@ -135,8 +135,8 @@ separate `let _ =` call; see the next section.
   text-file links in the initial state (only restore and update handle them);
   the junction step (it behaves like a symlink here); the copy fallback's tmp,
   marker write and rename (one step here, so no leftover of its own); a copy
-  someone edited (its marker stops matching and it reads as foreign); an undo that itself fails
-  or is cut off part-way; power loss (no fsync anywhere); restore's
+  someone edited (its marker stops matching and it reads as foreign); an undo that
+  itself fails or is cut off part-way; power loss (no fsync anywhere); restore's
   `NeedsApproval` (a locked commit whose content no longer matches its hash);
   unknown `source` entries; two processes on one checkout (the mutex is
   in-process); and git switching branches under the files.

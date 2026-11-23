@@ -59,9 +59,9 @@ verdict: `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-Two rules fail on the code at the sync commit. These are findings about the
-product, not modeling errors. Each path below was walked step by step against
-the code. Neither was replayed in a running server.
+Two rules fail on the code at the sync commit. Both are product bugs, not
+modeling errors: each path below was walked step by step against the code,
+though neither was replayed in a running server.
 
 1. **`CancelReleasesInbox`: a finished stream's `Inbox` is never removed from the client's `stream_senders`.**
    `Loop::data` (client.rs) removes a stream's entry only when a data frame

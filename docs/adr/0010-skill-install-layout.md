@@ -36,10 +36,10 @@ CLI must not widen either over these stores. The sibling store is not a `config.
 write, so ADR-0002 needs no exception.
 
 **Windows.** Global: `symlink_dir`, then a junction on OS error 1314, then a copy. Project:
-`symlink_dir`, then a copy (a junction is absolute and useless checked in). A copy is made
-in a tmp dir beside the link, given its marker, and renamed into place, so a crash before the
-lock write still leaves a copy the app recognises. One whose content differs from the lock's
-is stale: remove takes it, restore replaces it, and an update refreshes it. A folder without
+`symlink_dir`, then a copy (a junction is absolute and useless checked in). The app builds
+a copy in a tmp dir beside the link, writes its marker, and renames it into place, so a crash
+before the lock write still leaves a copy the app recognises. A copy whose content differs from
+the lock's is stale: remove takes it, restore replaces it, and an update refreshes it. A folder without
 the marker is recognised only through the lock and hash.
 
 **Locking.** Every install, remove, update and restore holds a per-scope async mutex for
@@ -68,10 +68,11 @@ replace branch: the store swaps in place, copy-fallback links are refreshed from
 store (old kept until the end, undone in reverse on failure), missing links return, and the
 lock's `commit`, `hash` and `installedAt` move. The lock's targets are authoritative.
 
-Restore repairs from the lock. A store that is missing, or whose content hash differs from
-the lock's (an update cut off before its lock write), is refetched at the locked commit:
-matching the lock's hash it is moved in, setting the stale store aside until it is, otherwise
-it returns for approval through the same replace branch. Missing, dangling and text-file links are re-created (symlink, then copy); a foreign
+Restore repairs from the lock. It refetches at the locked commit any store that is missing
+or whose content hash differs from the lock's (an update cut off before its lock write). A
+fetch that matches the lock's hash is moved in, with the stale store set aside until the move
+lands; any other fetch returns for approval through the same replace branch. Missing,
+dangling and text-file links are re-created (symlink, then copy); a foreign
 entry at a link path is never touched. On Windows a repaired project link shows as modified
 in `git status` until the checkout supports symlinks. Entries with an unknown `source` are
 skipped everywhere. `skillfish.json` is read-only: candidates come from the checkout's and

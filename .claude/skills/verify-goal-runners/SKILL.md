@@ -48,8 +48,8 @@ states, so it can list rules as not checked. `check.sh` gives the verdict.
 ## Known findings (the baseline in `expected.txt`)
 
 The model passes every rule on the code at the sync commit. The four findings
-below were found about the product, not modeling errors, and are now fixed. Each path below was walked step by step
-against the code. None was replayed in a running server.
+below were product bugs, not modeling errors, and all four are fixed. Each path
+was walked step by step against the code; none was replayed in a running server.
 
 1. **Fixed: `PauseHonored`, `StopHonored`: a pause or stop that is accepted but not yet applied dies with the server.**
    `try_pause`/`try_end` return as soon as `GoalRunners::send` puts the control on
