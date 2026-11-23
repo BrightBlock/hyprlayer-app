@@ -1069,6 +1069,7 @@ export function rewindRefusal(olderTurns: OlderTurns | undefined): { title: stri
 // The latest row sets these; a live event since the paint keeps its own.
 const LATEST_FIELDS = [
   "pendingQuestion",
+  "queuedQuestions",
   "pendingPermission",
   "model",
   "claudeSessionId",
@@ -1367,6 +1368,7 @@ export async function rewindToMessage(sessionId: string, itemId: string): Promis
       state: "running",
       pendingPermission: null,
       pendingQuestion: null,
+      queuedQuestions: [],
       queued: [],
     });
   }

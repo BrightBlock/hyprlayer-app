@@ -932,6 +932,46 @@ describe("question flow", () => {
   it("describeState labels a pending question as needing an answer", () => {
     expect(describeState("awaiting_question", true)).toEqual({ label: "needs answer", tone: "warn" });
   });
+
+  describe("two questions asked at once", () => {
+    const call = (id: string): SessionEvent => ({ kind: "toolUse", id, name: "AskUserQuestion", input: "{}", parentId: null });
+    const result = (toolUseId: string): SessionEvent => ({
+      kind: "toolResult",
+      toolUseId,
+      content: "Your questions have been answered.",
+      isError: false,
+      parentId: null,
+    });
+    const bothAsked = () =>
+      [
+        call("toolu_one"),
+        call("toolu_two"),
+        { kind: "questionAsk", requestId: "req-one", questions: TABS_QUESTION },
+        { kind: "questionAsk", requestId: "req-two", questions: TABS_QUESTION },
+      ].reduce((view, event) => reduceEvent(view, event as SessionEvent), initialSessionView("running"));
+
+    it("shows the second once the first is answered here", () => {
+      let view = bothAsked();
+      expect(view.pendingQuestion?.requestId).toBe("req-one");
+      view = resolveQuestion(view, "req-one");
+      view = reduceEvent(view, { kind: "questionAnswered", requestId: "req-one" } as SessionEvent);
+      view = reduceEvent(view, result("toolu_one"));
+      expect(view.pendingQuestion?.requestId).toBe("req-two");
+      expect(view.state).toBe("awaiting_question");
+    });
+
+    it("keeps the first when only the second is answered elsewhere", () => {
+      const view = reduceEvent(bothAsked(), result("toolu_two"));
+      expect(view.pendingQuestion?.requestId).toBe("req-one");
+      expect(view.queuedQuestions).toEqual([]);
+    });
+
+    it("expires both when the harness exits", () => {
+      const view = reduceEvent(bothAsked(), { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" });
+      const expired = view.items.filter((it) => it.kind === "permission" && it.decision === "expired");
+      expect(expired.map((it) => it.kind === "permission" && it.requestId)).toEqual(["req-one", "req-two"]);
+    });
+  });
 });
 
 describe("turn + exit lifecycle", () => {

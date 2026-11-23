@@ -17,7 +17,12 @@ export type { Question, QuestionOption, SessionState };
 // "expired": the ask died with its harness process, so no answer can reach it.
 export type PermissionDecision = "allow" | "deny" | "expired";
 
-export type PendingQuestion = { requestId: string; questions: Question[]; subject?: QuestionSubject | null };
+export type PendingQuestion = {
+  requestId: string;
+  questions: Question[];
+  subject?: QuestionSubject | null;
+  toolUseId?: string;
+};
 
 // Stored rows written before typed questions still carry a raw JSON string here.
 // Removable no earlier than 0.9, once that wire shape is retired.
@@ -233,6 +238,8 @@ export type SessionView = {
   mcpServers: string[];
   pendingPermission: { requestId: string; toolName: string; input: string } | null;
   pendingQuestion: PendingQuestion | null;
+  /** Asked while `pendingQuestion` was open; shown in turn. */
+  queuedQuestions: PendingQuestion[];
 };
 
 export function initialSessionView(state: SessionState = "idle"): SessionView {
@@ -250,6 +257,7 @@ export function initialSessionView(state: SessionState = "idle"): SessionView {
     mcpServers: [],
     pendingPermission: null,
     pendingQuestion: null,
+    queuedQuestions: [],
   };
 }
 
@@ -359,7 +367,25 @@ export function restoredView(view: SessionView, live: boolean): SessionView {
     streaming: false,
     pendingPermission: null,
     pendingQuestion: null,
+    queuedQuestions: [],
   };
+}
+
+function openQuestions(view: SessionView): PendingQuestion[] {
+  return view.pendingQuestion ? [view.pendingQuestion, ...view.queuedQuestions] : view.queuedQuestions;
+}
+
+function withQuestions(view: SessionView, questions: PendingQuestion[]): SessionView {
+  return { ...view, pendingQuestion: questions[0] ?? null, queuedQuestions: questions.slice(1) };
+}
+
+// Claude asks after streaming the call, so the oldest unanswered AskUserQuestion no open question claims is this one.
+function questionToolUse(view: SessionView): string | undefined {
+  const claimed = new Set(openQuestions(view).map((q) => q.toolUseId));
+  const call = view.items.find(
+    (it) => it.kind === "tool" && it.name === "AskUserQuestion" && it.result === null && !claimed.has(it.toolUseId),
+  );
+  return call?.kind === "tool" ? call.toolUseId : undefined;
 }
 
 // Its card's decision was local only; a restore would offer it again, and turnDone would park on it.
@@ -382,12 +408,15 @@ function settleAnsweredPrompt(
 ): SessionView {
   let nextItems = items;
   let pendingPermission = view.pendingPermission;
-  let pendingQuestion = view.pendingQuestion;
+  let questions = openQuestions(view);
   let answered = false;
 
   if (toolName === "AskUserQuestion") {
-    answered = pendingQuestion !== null;
-    pendingQuestion = null;
+    const own = questions.findIndex((q) => q.toolUseId === toolUseId);
+    // A question from an older fold claims no call; the one on screen is the best guess.
+    const at = own !== -1 ? own : questions.findIndex((q) => q.toolUseId === undefined);
+    answered = at !== -1;
+    if (answered) questions = questions.filter((_, i) => i !== at);
   } else {
     for (let i = nextItems.length - 1; i >= 0; i -= 1) {
       const it = nextItems[i];
@@ -403,10 +432,9 @@ function settleAnsweredPrompt(
   }
 
   const next: SessionView = {
-    ...view,
+    ...withQuestions(view, questions),
     items: nextItems,
     pendingPermission,
-    pendingQuestion,
     // A result after turnDone is a stopped call settling; only an answered prompt resumes the turn.
     streaming: view.streaming || answered,
   };
@@ -795,16 +823,18 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     }
 
     case "questionAsk": {
+      const asked: PendingQuestion = {
+        requestId: event.requestId,
+        questions: parseQuestions(event.questions),
+        subject: event.subject,
+        toolUseId: questionToolUse(view),
+      };
+      const others = openQuestions(view).filter((q) => q.requestId !== event.requestId);
       return {
-        ...view,
+        ...withQuestions(view, [...others, asked]),
         items: closeOpenAssistant(view.items),
         state: "awaiting_question",
         streaming: true,
-        pendingQuestion: {
-          requestId: event.requestId,
-          questions: parseQuestions(event.questions),
-          subject: event.subject,
-        },
       };
     }
 
@@ -857,6 +887,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
         streaming: false,
         pendingPermission: null,
         pendingQuestion: null,
+        queuedQuestions: [],
       };
     }
 
@@ -972,7 +1003,7 @@ export function resolvePermission(
 }
 
 export function resolveQuestion(view: SessionView, requestId: string): SessionView {
-  if (view.pendingQuestion?.requestId !== requestId) return view;
+  if (!openQuestions(view).some((q) => q.requestId === requestId)) return view;
   return { ...closeQuestion(view, requestId), streaming: true };
 }
 
@@ -990,8 +1021,9 @@ function closeAsk(view: SessionView, requestId: string, decision: PermissionDeci
 }
 
 function closeQuestion(view: SessionView, requestId: string): SessionView {
-  if (view.pendingQuestion?.requestId !== requestId) return view;
-  const next = { ...view, pendingQuestion: null };
+  const questions = openQuestions(view);
+  if (!questions.some((q) => q.requestId === requestId)) return view;
+  const next = withQuestions(view, questions.filter((q) => q.requestId !== requestId));
   return { ...next, state: parkedState(next) };
 }
 
@@ -1005,10 +1037,9 @@ export function settleUnwaitedAsks(view: SessionView, open: ReadonlySet<string>)
   );
   const waits = <T extends { requestId: string }>(ask: T | null) => (ask && open.has(ask.requestId) ? ask : null);
   const next = {
-    ...view,
+    ...withQuestions(view, openQuestions(view).filter((q) => open.has(q.requestId))),
     items,
     pendingPermission: waits(view.pendingPermission),
-    pendingQuestion: waits(view.pendingQuestion),
   };
   return { ...next, state: parkedState(next) };
 }
@@ -1019,25 +1050,25 @@ export function expirePendingPrompts(view: SessionView): SessionView {
   );
   let counter = view.counter;
   // A question has no transcript card of its own, so it leaves one behind.
-  if (view.pendingQuestion) {
+  for (const question of openQuestions(view)) {
     items.push({
       kind: "permission",
       id: `i${counter}`,
-      requestId: view.pendingQuestion.requestId,
+      requestId: question.requestId,
       toolName: "AskUserQuestion",
-      input: JSON.stringify({ questions: view.pendingQuestion.questions }),
+      input: JSON.stringify({ questions: question.questions }),
       decision: "expired",
     });
     counter += 1;
   }
-  return { ...view, items, counter, pendingPermission: null, pendingQuestion: null };
+  return { ...view, items, counter, pendingPermission: null, pendingQuestion: null, queuedQuestions: [] };
 }
 
 export function cancelPendingPrompts(view: SessionView): SessionView {
   const items = view.items.map((it) =>
     it.kind === "permission" && it.decision === null ? { ...it, decision: "deny" as const } : it,
   );
-  return { ...view, items, pendingPermission: null, pendingQuestion: null };
+  return { ...view, items, pendingPermission: null, pendingQuestion: null, queuedQuestions: [] };
 }
 
 
