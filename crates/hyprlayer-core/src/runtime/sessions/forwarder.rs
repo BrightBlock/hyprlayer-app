@@ -995,12 +995,17 @@ impl ActorState {
         let unreportable_exit =
             matches!(&event, SessionEvent::Exited { outcome, .. } if !outcome.is_reportable());
         // Modes are live state: a replayed one would be stale, and an older app
-        // cannot decode the row.
+        // cannot decode the row. So is a relaunch's notice, sent ahead of the turn that
+        // waits on it: stored, it would read as an exit that dropped that turn's message.
         let ephemeral = matches!(
             event,
             SessionEvent::PartialText { .. }
                 | SessionEvent::PermissionModeChanged { .. }
                 | SessionEvent::PlanModeChanged { .. }
+                | SessionEvent::Relaunched {
+                    reason: Some(_),
+                    ..
+                }
         ) || unreportable_exit;
         let suppress_live = matches!(event, SessionEvent::UserMessage { .. });
         let exited = matches!(event, SessionEvent::Exited { .. });

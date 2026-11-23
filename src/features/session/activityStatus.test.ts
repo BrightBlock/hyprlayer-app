@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type { SessionEvent } from "@/lib/bindings";
+
 import { activityStatus, nextTurn, recapWanted, type ActivityInput } from "./activityStatus";
-import { initialSessionView, type TranscriptItem } from "./transcript";
+import { addUserMessage, initialSessionView, reduceEvent, type TranscriptItem } from "./transcript";
 
 type Tool = Extract<TranscriptItem, { kind: "tool" }>;
 
@@ -230,6 +232,46 @@ describe("activityStatus", () => {
       ctx,
     );
     expect(s?.label).toBe("Working…");
+  });
+
+  describe("a reload for new provider settings", () => {
+    const oc = { harnessLabel: "OpenCode", otherDevice: null };
+    const RELOADING = "Reloading OpenCode for the new provider settings…";
+    const apply = (e: ActivityInput, event: SessionEvent): ActivityInput => ({ ...e, ...reduceEvent(e, event) });
+    const label = (e: ActivityInput) => activityStatus(e, oc)?.label;
+    const idle = entry([user()], { streaming: false, workingSince: null, lastTurn: { ms: 1_000, endedAt: 5_000 } });
+    const RELAUNCH: SessionEvent = { kind: "relaunched", quiet: true, reason: "providerSettings" };
+    const INIT: SessionEvent = { kind: "init", claudeSessionId: "ses_1", model: "openai/gpt-5" };
+
+    function sendThenReload(): ActivityInput {
+      const sent = { ...idle, ...addUserMessage(idle, "go", null, [], 6_000, null, "c1") };
+      return apply(apply(apply(sent, RELAUNCH), INIT), { kind: "userMessage", text: "go", stage: null, clientMessageId: "c1" });
+    }
+
+    it("shows from the user's send until the new turn answers", () => {
+      const sent = { ...idle, ...addUserMessage(idle, "go", null, [], 6_000, null, "c1") };
+      expect(label(apply(sent, RELAUNCH))).toBe(RELOADING);
+      const echoed = sendThenReload();
+      expect(label(echoed)).toBe(RELOADING);
+      expect(label(apply(echoed, { kind: "partialText", text: "Hi", parentId: null }))).toBe("Writing…");
+    });
+
+    it("shows for an agent's turn until its message lands", () => {
+      const reloading = apply(idle, RELAUNCH);
+      expect(label(reloading)).toBe(RELOADING);
+      expect(label(apply(apply(reloading, INIT), { kind: "userMessage", text: "go", stage: null }))).toBe("Working…");
+    });
+
+    it("ends with a failed reload, and with a turn that wrote nothing", () => {
+      const failed = apply(apply(idle, RELAUNCH), { kind: "protocolError", detail: "OpenCode did not restart", raw: "" });
+      expect(label(failed)).not.toBe(RELOADING);
+      const done: SessionEvent = { kind: "turnDone", costUsd: null, numTurns: null, contextTokens: null };
+      expect(label(apply(sendThenReload(), done))).not.toBe(RELOADING);
+    });
+
+    it("never shows for a relaunch with no reason", () => {
+      expect(label(apply(idle, { kind: "relaunched", quiet: true }))).not.toBe(RELOADING);
+    });
   });
 
   it("reports a foreground subagent with its latest step", () => {

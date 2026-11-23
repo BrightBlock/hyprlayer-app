@@ -312,6 +312,42 @@
       "guards": [
         {
           "evidence": {
+            "turnStatus": "completed"
+          },
+          "guard": "the turn running as the key lands ends completed",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "harnessSession": "$RETRIED_SESSION",
+            "reloadNotice": true,
+            "reply": "model=stub-keyed earlier=[Start on a model OpenCode lacks. | Still there? | A turn the server dies in. | Back after the crash? | A turn running as the key lands.]",
+            "turnStatus": "completed"
+          },
+          "guard": "the next turn says it reloads, then runs on the keyed model in the same OpenCode session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "storedNotices": 0
+          },
+          "guard": "the notice is live only: a stored one would read as an exit that dropped the turn",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "released": true
+          },
+          "guard": "the replaced opencode serve exits once no session runs on it",
+          "ok": true
+        }
+      ],
+      "step": "a provider key added mid-session reaches the session's next turn, not the running one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

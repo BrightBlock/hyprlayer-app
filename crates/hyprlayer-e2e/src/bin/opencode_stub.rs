@@ -1,6 +1,8 @@
 //! `opencode serve` for E2E: the routes the OpenCode driver calls, shaped as 1.18.32 answers them.
 //! Sessions live under `$XDG_DATA_HOME`, so they survive a restart and vanish with a data wipe.
-//! A turn replies `model=<model> earlier=[<this session's earlier prompts>]`.
+//! A turn replies `model=<model> earlier=[<this session's earlier prompts>]`. Besides the
+//! `opencode` models it serves `<provider>/stub-keyed` for each provider in the
+//! `OPENCODE_AUTH_CONTENT` it was spawned with, and fails a turn on any other model.
 //!
 //! `$XDG_DATA_HOME/opencode-stub/control.json` delays, in ms, the events 1.18.32 sends late:
 //! `start` (the prompt's user message), `reply`, `echo` (the user message again after the idle),
@@ -34,6 +36,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 const MODELS: [&str; 2] = ["stub-free", "stub-other-free"];
+const KEYED_MODEL: &str = "stub-keyed";
 
 struct Request {
     method: String,
@@ -58,6 +61,7 @@ struct Ask {
 
 struct Stub {
     root: PathBuf,
+    keyed: Vec<String>,
     subscribers: Mutex<Vec<TcpStream>>,
     running: Mutex<HashMap<String, Arc<Running>>>,
     asks: Mutex<HashMap<String, Ask>>,
@@ -79,10 +83,16 @@ fn main() {
         .expect("--port");
     let data = std::env::var_os("XDG_DATA_HOME").expect("XDG_DATA_HOME");
     let root = PathBuf::from(data).join("opencode-stub");
+    let keyed = std::env::var("OPENCODE_AUTH_CONTENT")
+        .ok()
+        .and_then(|auth| serde_json::from_str::<serde_json::Map<String, Value>>(&auth).ok())
+        .map(|auth| auth.keys().cloned().collect())
+        .unwrap_or_default();
     std::fs::create_dir_all(root.join("sessions")).expect("create the session store");
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind the port");
     let stub = Arc::new(Stub {
         root,
+        keyed,
         subscribers: Mutex::new(Vec::new()),
         running: Mutex::new(HashMap::new()),
         asks: Mutex::new(HashMap::new()),
@@ -145,16 +155,24 @@ impl Stub {
                 respond(stream, 200, &json!(all[skip..]))
             }
             ("GET", ["config", "providers"]) => {
-                let models: serde_json::Map<String, Value> = MODELS
-                    .iter()
-                    .map(|id| {
-                        let model = json!({ "id": id, "name": id, "limit": { "context": 200000 } });
-                        (id.to_string(), model)
-                    })
-                    .collect();
-                let providers =
-                    json!({ "providers": [{ "id": "opencode", "models": models }], "default": {} });
-                respond(stream, 200, &providers)
+                let listed = |ids: &[&str]| -> serde_json::Map<String, Value> {
+                    ids.iter()
+                        .map(|id| {
+                            let model =
+                                json!({ "id": id, "name": id, "limit": { "context": 200000 } });
+                            (id.to_string(), model)
+                        })
+                        .collect()
+                };
+                let mut providers = vec![json!({ "id": "opencode", "models": listed(&MODELS) })];
+                for provider in &self.keyed {
+                    providers.push(json!({ "id": provider, "models": listed(&[KEYED_MODEL]) }));
+                }
+                respond(
+                    stream,
+                    200,
+                    &json!({ "providers": providers, "default": {} }),
+                )
             }
             ("GET", ["command"]) => respond(stream, 200, &json!([])),
             ("POST", ["session"]) => {
@@ -186,7 +204,10 @@ impl Stub {
                 );
                 prompts.push(text.unwrap_or_default().to_string());
                 self.save(id, &prompts);
-                let control = self.delays();
+                let mut control = self.delays();
+                if let Some(unknown) = self.unknown_model(body) {
+                    control.fail = Some(format!("Model not found: {unknown}"));
+                }
                 let user = match body.get("messageID").and_then(Value::as_str) {
                     Some(user) if !control.own_ids && !control.bare => user.to_string(),
                     _ => self.new_id(control.bare),
@@ -482,6 +503,16 @@ impl Stub {
         let mut last = self.last_id.lock().unwrap();
         *last += 1;
         format!("msg_0{:025}", *last)
+    }
+
+    fn unknown_model(&self, body: &Value) -> Option<String> {
+        let provider = body.pointer("/model/providerID")?.as_str()?;
+        let model = body.pointer("/model/modelID")?.as_str()?;
+        let served = match provider {
+            "opencode" => MODELS.contains(&model),
+            _ => self.keyed.iter().any(|p| p == provider) && model == KEYED_MODEL,
+        };
+        (!served).then(|| format!("{provider}/{model}"))
     }
 
     fn delays(&self) -> Delays {

@@ -38,8 +38,8 @@ pub use review::{
 pub use runtime::{DocStateChange, RuntimeEvent, ThoughtsIndexUpdateKind};
 pub use script::{RunPhase, ScriptKind, ScriptRuntime, ScriptStatus};
 pub use session::{
-    ClientRef, ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, RevisedTurn,
-    Session, SessionEvent, SessionLogEntry, SessionOrigin, SessionRev, SessionState,
+    ClientRef, ExitOutcome, LogCursor, Question, QuestionAnswers, QuestionOption, RelaunchReason,
+    RevisedTurn, Session, SessionEvent, SessionLogEntry, SessionOrigin, SessionRev, SessionState,
     SessionStreamItem, SessionTurns, TurnKind, TurnStatus,
 };
 pub use skill::{SkillScope, SkillSourceKind, SkillTarget};

@@ -121,6 +121,10 @@ pub trait AgentDriver: Send + Sync {
         None
     }
 
+    fn provider_settings_outdated(&self) -> bool {
+        false
+    }
+
     fn respond_permission(
         &self,
         request_id: &str,

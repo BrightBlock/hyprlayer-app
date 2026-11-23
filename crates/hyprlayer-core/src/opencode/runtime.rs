@@ -2,7 +2,8 @@ use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex as StdMutex, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, PoisonError, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
@@ -67,6 +68,7 @@ pub struct OpenCodeServerConfig {
 #[derive(Default)]
 pub struct OpenCodeManager {
     inner: Mutex<Option<Arc<OpenCodeServer>>>,
+    retired: StdMutex<Vec<Weak<OpenCodeServer>>>,
 }
 
 impl OpenCodeManager {
@@ -75,6 +77,7 @@ impl OpenCodeManager {
     }
 
     pub fn kill_blocking(&self) {
+        self.stop_retired();
         if let Ok(guard) = self.inner.try_lock() {
             if let Some(server) = guard.as_ref() {
                 server.kill_blocking();
@@ -85,8 +88,17 @@ impl OpenCodeManager {
     /// The graceful counterpart to `kill_blocking`, used by the explicit quit
     /// path — it can await the lock instead of skipping a held one.
     pub async fn shutdown(&self) {
+        self.stop_retired();
         if let Some(server) = self.inner.lock().await.take() {
             server.kill_blocking();
+        }
+    }
+
+    fn stop_retired(&self) {
+        let retired =
+            std::mem::take(&mut *self.retired.lock().unwrap_or_else(PoisonError::into_inner));
+        for server in retired.iter().filter_map(Weak::upgrade) {
+            server.stop();
         }
     }
 
@@ -116,8 +128,15 @@ impl OpenCodeManager {
         self.inner.lock().await.clone()
     }
 
+    /// Sessions keep a retired server until their next idle turn moves them to a new one.
     pub async fn invalidate(&self) {
-        *self.inner.lock().await = None;
+        let Some(server) = self.inner.lock().await.take() else {
+            return;
+        };
+        server.retired.store(true, Ordering::SeqCst);
+        let mut retired = self.retired.lock().unwrap_or_else(PoisonError::into_inner);
+        retired.retain(|kept| kept.strong_count() > 0);
+        retired.push(Arc::downgrade(&server));
     }
 }
 
@@ -136,6 +155,7 @@ impl OpenCodeManager {
             tasks: Handle::current(),
             pid_file: PathBuf::new(),
             child: StdMutex::new(child),
+            retired: AtomicBool::default(),
         });
         server.watch_exit(Arc::default());
         *self.inner.lock().await = Some(server);
@@ -155,6 +175,17 @@ pub struct OpenCodeServer {
     tasks: Handle,
     pid_file: PathBuf,
     child: StdMutex<crate::process::SupervisedChild>,
+    retired: AtomicBool,
+}
+
+/// `kill_on_drop` signals only the server; its process group also holds whatever it spawned.
+impl Drop for OpenCodeServer {
+    fn drop(&mut self) {
+        self.child
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .kill_blocking();
+    }
 }
 
 /// The string the reaper matches against the live process's command line.
@@ -301,6 +332,7 @@ impl OpenCodeServer {
             tasks,
             pid_file,
             child: StdMutex::new(child),
+            retired: AtomicBool::default(),
         });
         server.watch_exit(stderr);
         Ok(server)
@@ -345,6 +377,12 @@ impl OpenCodeServer {
     }
 
     fn kill_blocking(&self) {
+        self.stop();
+        crate::process::orphan::clear(&self.pid_file);
+    }
+
+    /// Leaves the pid record alone: it names the newest server, which a retired one is not.
+    fn stop(&self) {
         let mut child = self.child.lock().unwrap_or_else(PoisonError::into_inner);
         // Killing a live server detaches its sessions, as a server stop does; one that already
         // exited crashed, and `watch_exit` says so.
@@ -352,7 +390,6 @@ impl OpenCodeServer {
             self.end_sessions(ExitOutcome::Detached, None, String::new());
         }
         child.kill_blocking();
-        crate::process::orphan::clear(&self.pid_file);
     }
 
     fn context_window(&self, model_id: &str) -> Option<u32> {
@@ -1603,6 +1640,10 @@ impl AgentDriver for OpenCodeDriver {
 
     fn pid(&self) -> Option<u32> {
         None
+    }
+
+    fn provider_settings_outdated(&self) -> bool {
+        self.server.retired.load(Ordering::SeqCst)
     }
 }
 

@@ -5,6 +5,7 @@ import type {
   Question,
   QuestionOption,
   QuestionSubject,
+  RelaunchReason,
   SessionEvent,
   SessionState,
 } from "@/lib/bindings";
@@ -210,6 +211,7 @@ export type TranscriptItem =
       kind: "relaunched";
       id: string;
       quiet?: boolean;
+      reason?: RelaunchReason | null;
     } & Sequenced)
   | ({
       kind: "rewound";
@@ -853,7 +855,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     case "turnDone": {
       const done: SessionView = {
         ...view,
-        items: closeOpenAssistant(view.items),
+        items: closeOpenAssistant(settleReload(view.items)),
         state: parkedState(view),
         streaming: false,
         costUsd: event.costUsd ?? view.costUsd,
@@ -939,7 +941,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
       const base = superseded ? { ...view, items: view.items.slice(0, -1) } : view;
       return {
         ...base,
-        ...appended(base, (id) => ({ kind: "relaunched", id, quiet: event.quiet }), false, seq),
+        ...appended(base, (id) => ({ kind: "relaunched", id, quiet: event.quiet, reason: event.reason }), false, seq),
       };
     }
 
@@ -966,6 +968,13 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
   }
 }
 
+
+// A reload's notice holds until the turn waiting on it writes; one that wrote nothing ends it here.
+function settleReload(items: TranscriptItem[]): TranscriptItem[] {
+  const last = items[items.length - 1];
+  if (last?.kind !== "relaunched" || !last.reason) return items;
+  return [...items.slice(0, -1), { ...last, reason: null }];
+}
 
 export function addUserMessage(
   view: SessionView,

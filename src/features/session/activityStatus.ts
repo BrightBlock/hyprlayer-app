@@ -157,6 +157,10 @@ export function activityStatus(entry: ActivityInput | undefined, ctx: ActivityCo
       more: 0,
     };
   }
+  const newest = entry.items[entry.items.length - 1];
+  if (newest?.kind === "relaunched" && newest.reason === "providerSettings") {
+    return work(`Reloading ${ctx.harnessLabel} for the new provider settings…`, null);
+  }
   if (other) return work(`${other} is working…`, null);
   if (entry.streaming) return streamActivity(entry, ctx.naming);
   const last = entry.lastTurn;

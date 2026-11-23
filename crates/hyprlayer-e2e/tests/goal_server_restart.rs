@@ -94,7 +94,7 @@ async fn goal_server_restart() {
     let boundaries: Vec<bool> = log
         .iter()
         .filter_map(|e| match e.event {
-            SessionEvent::Relaunched { quiet } => Some(quiet),
+            SessionEvent::Relaunched { quiet, .. } => Some(quiet),
             _ => None,
         })
         .collect();

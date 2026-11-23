@@ -204,7 +204,10 @@ mod tests {
                 text: "hi".into(),
                 parent_id: None,
             },
-            SessionEvent::Relaunched { quiet: true },
+            SessionEvent::Relaunched {
+                quiet: true,
+                reason: None,
+            },
             SessionEvent::Exited {
                 outcome: ExitOutcome::Completed,
                 code: Some(0),

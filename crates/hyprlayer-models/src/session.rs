@@ -158,6 +158,13 @@ impl From<BTreeMap<String, String>> for QuestionAnswers {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub enum RelaunchReason {
+    ProviderSettings,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[serde(
@@ -280,6 +287,8 @@ pub enum SessionEvent {
     Relaunched {
         #[serde(default)]
         quiet: bool,
+        #[serde(default)]
+        reason: Option<RelaunchReason>,
     },
     Rewound {},
     ProtocolError {
@@ -548,13 +557,20 @@ mod tests {
     #[test]
     fn relaunched_carries_quiet_and_rewound_only_its_tag() {
         assert_eq!(
-            serde_json::to_string(&SessionEvent::Relaunched { quiet: false }).unwrap(),
-            r#"{"kind":"relaunched","quiet":false}"#
+            serde_json::to_string(&SessionEvent::Relaunched {
+                quiet: false,
+                reason: None
+            })
+            .unwrap(),
+            r#"{"kind":"relaunched","quiet":false,"reason":null}"#
         );
         // Rows stored before `quiet` existed were all drawn.
         assert_eq!(
             serde_json::from_str::<SessionEvent>(r#"{"kind":"relaunched"}"#).unwrap(),
-            SessionEvent::Relaunched { quiet: false }
+            SessionEvent::Relaunched {
+                quiet: false,
+                reason: None
+            }
         );
         assert_eq!(
             serde_json::to_string(&SessionEvent::Rewound {}).unwrap(),

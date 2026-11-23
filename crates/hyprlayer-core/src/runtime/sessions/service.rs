@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use hyprlayer_models::goal::GoalEndReason;
 use hyprlayer_models::session::QuestionAnswers;
-use hyprlayer_models::{AgentCaller, SessionOrigin};
+use hyprlayer_models::{AgentCaller, RelaunchReason, SessionOrigin};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::agent::{AgentDriver, Harness};
@@ -268,6 +268,36 @@ impl SessionService<'_> {
         self.live_driver(session_id).await.is_some()
     }
 
+    async fn live_on_current_settings(
+        &self,
+        session_id: &str,
+        held: &OpGuard<'_>,
+    ) -> Result<Arc<dyn AgentDriver>> {
+        let driver = self.require_live(session_id).await?;
+        if !driver.provider_settings_outdated()
+            || !is_idle(&self.runtime.session_actors, session_id).await
+        {
+            return Ok(driver);
+        }
+        tracing::info!("session {session_id}: relaunching for the new provider settings");
+        let ingress = self.runtime.session_actors.ingress(session_id).await;
+        let notice = SessionEvent::Relaunched {
+            quiet: true,
+            reason: Some(RelaunchReason::ProviderSettings),
+        };
+        let _ = ingress.send(notice).await;
+        if let Err(e) = self.relaunch_in_place(session_id, false, held).await {
+            let failed = SessionEvent::ProtocolError {
+                detail: "OpenCode did not restart with the new provider settings".into(),
+                raw: e.to_string(),
+            };
+            let _ = ingress.send(failed).await;
+            self.end_kept_streams(session_id).await;
+            return Err(e);
+        }
+        self.require_live(session_id).await
+    }
+
     pub async fn send(
         &self,
         session_id: &str,
@@ -278,10 +308,10 @@ impl SessionService<'_> {
         ctx: SendContext,
     ) -> Result<()> {
         let op = self.op_lock(session_id).await;
-        let _op_guard = op.lock().await;
+        let guard = op.lock().await;
 
         let prompt = pipeline::append_docs(text.to_string(), attached_docs);
-        let driver = self.require_live(session_id).await?;
+        let driver = self.live_on_current_settings(session_id, &guard).await?;
 
         let nonce = self
             .reserve_turn(session_id, client_message_id, &ctx, false)
@@ -367,9 +397,9 @@ impl SessionService<'_> {
         &self,
         session_id: &str,
         turn: AppTurn<'_>,
-        _held: &OpGuard<'_>,
+        held: &OpGuard<'_>,
     ) -> Result<()> {
-        let driver = self.require_live(session_id).await?;
+        let driver = self.live_on_current_settings(session_id, held).await?;
         self.runtime
             .session_actors
             .reserve_user_turn(session_id, turn.nonce.clone(), None, turn.author, false)
@@ -993,7 +1023,12 @@ impl SessionService<'_> {
                 return;
             }
             if is_idle(&self.runtime.session_actors, session_id).await {
-                self.relaunch_uncapped(session_id, &guard).await;
+                if let Err(e) = self.relaunch_in_place(session_id, true, &guard).await {
+                    self.end_kept_streams(session_id).await;
+                    tracing::warn!(
+                        "session {session_id}: the relaunch without its budget cap failed: {e}"
+                    );
+                }
                 return;
             }
             drop(guard);
@@ -1039,26 +1074,20 @@ impl SessionService<'_> {
         }
     }
 
-    async fn relaunch_uncapped(&self, session_id: &str, held: &OpGuard<'_>) {
-        let session = match self.require_row(session_id).await {
-            Ok(session) => session,
-            Err(e) => {
-                tracing::warn!("session {session_id}: its budget cap stays: {e}");
-                return;
-            }
-        };
-        let project_path = match self
+    /// On an error the caller ends the streams the kill kept open.
+    async fn relaunch_in_place(
+        &self,
+        session_id: &str,
+        boundary_on_relaunch: bool,
+        held: &OpGuard<'_>,
+    ) -> Result<()> {
+        let session = self.require_row(session_id).await?;
+        let project_path = self
             .runtime
             .workstreams()
             .find(&session.workstream_id)
-            .await
-        {
-            Ok(workstream) => workstream.project_path,
-            Err(e) => {
-                tracing::warn!("session {session_id}: its budget cap stays: {e}");
-                return;
-            }
-        };
+            .await?
+            .project_path;
         // A mode the user switched to live survives the relaunch.
         let permission_mode = self.permission_mode(session_id).await;
         self.kill_for_relaunch(session_id).await;
@@ -1069,16 +1098,13 @@ impl SessionService<'_> {
             effort: None,
             permission_mode,
             resume: true,
-            boundary_on_relaunch: true,
+            boundary_on_relaunch,
             max_budget_usd: None,
             extra_allowed_tools: Vec::new(),
             extra_disallowed_tools: Vec::new(),
             report_only: false,
         };
-        if let Err(e) = self.launch_if_exited_held(params, held).await {
-            self.end_kept_streams(session_id).await;
-            tracing::warn!("session {session_id}: the relaunch without its budget cap failed: {e}");
-        }
+        self.launch_if_exited_held(params, held).await.map(drop)
     }
 
     async fn thoughts_add_dirs(&self, project_path: &str) -> Result<Vec<PathBuf>> {
@@ -1885,7 +1911,11 @@ impl SessionService<'_> {
         if has_history {
             if params.boundary_on_relaunch {
                 let quiet = !self.runtime.take_cut_off(&session_id);
-                let _ = ingress.send(SessionEvent::Relaunched { quiet }).await;
+                let relaunched = SessionEvent::Relaunched {
+                    quiet,
+                    reason: None,
+                };
+                let _ = ingress.send(relaunched).await;
             }
             workflow_bridge::recover_workflow_runs(&self.runtime.db, &session_id, &workflow).await;
         }

@@ -9,7 +9,7 @@ use std::time::Duration;
 use hyprlayer_core::models::{ExitOutcome, QuestionAnswers};
 use hyprlayer_core::{Harness, LogCursor, SessionEvent, Stage};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
-use hyprlayer_e2e::{json, text, Journey, Request, Sandbox, Server};
+use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::{EventStream, RpcClient};
 use hyprlayer_server::events::TARGETED_EVENTS;
 use hyprlayer_server::streams::StreamStartOpts;
@@ -558,6 +558,81 @@ async fn opencode_resume() {
         json!({ "harnessSession": continued, "reply": after_crash }),
     );
 
+    j.step("a provider key added mid-session reaches the session's next turn, not the running one");
+    stub_delays(&sandbox, json!({ "reply": 1500 }));
+    let running = "A turn running as the key lands.";
+    send(&mut j, &client, &retried, running).await;
+    sent(&mut events, running).await;
+    let replaced = serve_port(&sandbox);
+    j.call(
+        &client,
+        Request::OpencodeSetProviderKey {
+            provider: "openai".into(),
+            key: "sk-e2e-not-a-real-key".into(),
+        },
+    )
+    .await
+    .expect("opencode_set_provider_key");
+    let kept_running = turn_status(&mut events).await;
+    stub_delays(&sandbox, json!({}));
+    j.call(
+        &client,
+        Request::SetSessionModel {
+            session_id: retried.clone(),
+            model: Some("openai/stub-keyed".into()),
+        },
+    )
+    .await
+    .expect("set_session_model");
+    let keyed = "First turn with the new key.";
+    send(&mut j, &client, &retried, keyed).await;
+    let (seen, reply) = turn(&mut events, keyed).await;
+    let moved = harness_session(&mut j, &client, &ws, &retried).await;
+    let reload_notice = |e: &SessionEvent| {
+        serde_json::to_value(e)
+            .is_ok_and(|v| v["kind"] == "relaunched" && v["reason"] == "providerSettings")
+    };
+    let notice = seen.iter().any(reload_notice);
+    let stored_notices = client
+        .get_session_log(retried.clone())
+        .await
+        .expect("get_session_log")
+        .iter()
+        .filter(|row| reload_notice(&row.event))
+        .count();
+    let released = eventually(Duration::from_secs(5), || {
+        std::net::TcpStream::connect(("127.0.0.1", replaced)).is_err()
+    })
+    .await;
+    j.guard(
+        "the turn running as the key lands ends completed",
+        kept_running.as_deref() == Some("completed"),
+        json!({ "turnStatus": kept_running }),
+    );
+    j.guard(
+        "the next turn says it reloads, then runs on the keyed model in the same OpenCode session",
+        notice
+            && model_of(&reply) == Some("stub-keyed")
+            && status_of(&seen).as_deref() == Some("completed")
+            && moved == created,
+        json!({
+            "reloadNotice": notice,
+            "reply": reply,
+            "turnStatus": status_of(&seen),
+            "harnessSession": moved,
+        }),
+    );
+    j.guard(
+        "the notice is live only: a stored one would read as an exit that dropped the turn",
+        stored_notices == 0,
+        json!({ "storedNotices": stored_notices }),
+    );
+    j.guard(
+        "the replaced opencode serve exits once no session runs on it",
+        released,
+        json!({ "released": released }),
+    );
+
     j.step("shutdown");
     drop(events);
     let stopped = server.shutdown(&client).await;
@@ -791,6 +866,16 @@ fn kill_serve(sandbox: &Sandbox) -> Instant {
         .is_ok_and(|s| s.success());
     assert!(killed, "kill opencode serve {pid}");
     Instant::now()
+}
+
+fn serve_port(sandbox: &Sandbox) -> u16 {
+    let record = std::fs::read_to_string(sandbox.app_data.join("opencode-server.pid"))
+        .expect("read the opencode serve record");
+    record
+        .split_whitespace()
+        .last()
+        .and_then(|port| port.parse().ok())
+        .expect("the record ends with the port")
 }
 
 async fn exit_by(events: &mut EventStream<SessionEvent>, deadline: Instant) -> Option<ExitOutcome> {
