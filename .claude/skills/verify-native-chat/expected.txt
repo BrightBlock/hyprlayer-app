@@ -51,3 +51,4 @@ PASS RestartWake.NoWakeWhenArchived
 PASS SessionSync.TypeOK
 PASS SessionSync.NoSkippedSeq
 PASS SessionSync.ClientsConverge
+PASS SessionSync.NoLostEvent

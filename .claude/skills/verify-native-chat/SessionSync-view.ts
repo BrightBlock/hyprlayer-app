@@ -24,6 +24,12 @@ const labels: Record<string, string> = {
   Receive: "the app receives a frame",
   PullRead: "you pull, and the server reads a page",
   PullApply: "the page lands",
+  End: "the harness exits",
+  Resume: "the session resumes",
+  Close: "you close the session's tab",
+  Retire: "the idle actor retires",
+  Lose: "the relay sends to a retired actor",
+  Reopen: "you open the session again",
 };
 
 export const step = (action: string) => labels[action] ?? action;

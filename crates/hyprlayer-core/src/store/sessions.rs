@@ -928,6 +928,29 @@ impl Db {
         })
     }
 
+    pub(crate) fn session_actor_state(&self, session_id: &str) -> Result<Option<String>> {
+        self.with(|conn| {
+            let state = conn
+                .query_row(
+                    "SELECT actor_state FROM sessions WHERE id = ?1",
+                    params![session_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?;
+            Ok(state.flatten())
+        })
+    }
+
+    pub(crate) fn set_session_actor_state(&self, session_id: &str, state: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                "UPDATE sessions SET actor_state = ?2 WHERE id = ?1",
+                params![session_id, state],
+            )?;
+            Ok(())
+        })
+    }
+
     /// `(rev, reset_rev, working)` for a session with no running actor; `None` without a row.
     pub(crate) fn session_rev_state(&self, session_id: &str) -> Result<Option<(u64, u64, bool)>> {
         self.with(|conn| {

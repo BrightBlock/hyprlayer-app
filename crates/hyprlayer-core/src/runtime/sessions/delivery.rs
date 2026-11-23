@@ -100,7 +100,7 @@ impl LiveAttachment {
     }
 
     pub(crate) fn detached(&self) -> bool {
-        self.detached
+        self.detached || self.sender.is_closed()
     }
 
     // One slot of the channel's capacity is always kept free so a `Lagged`

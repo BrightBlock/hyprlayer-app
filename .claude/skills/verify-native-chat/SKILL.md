@@ -49,7 +49,9 @@ the same) and the same rule names, so each rule is checked per provider.
 - `SessionSync.tla` covers one desktop following one session's log: the actor
   storing events under consecutive seqs, `LiveAttachment::deliver` and its
   `Lagged` slot, `forward_session`'s re-attach, and the desktop's
-  `route`/hold/flush, `pullNow` pages, `mergeEntries` and `trimHeld`.
+  `route`/hold/flush, `pullNow` pages, `mergeEntries` and `trimHeld`; and the
+  actor's lifetime: the harness ending and resuming, the desktop closing and
+  reopening the session, and an idle actor retiring.
 
 ## The rules
 
@@ -71,7 +73,8 @@ first eight; "the harness" is claude, codex or OpenCode.
 | `RestartWake.WakeBounded` | A session cut off mid-turn is woken at most `MAX_RESTART_RESUMES` (3) times before it finishes a turn. | A crash loop: every restart wakes the session again. |
 | `RestartWake.NoWakeWhenArchived` | No restart wake starts a harness in an archived workstream. | An archived workstream's agent comes back and works in a worktree the user put away. |
 | `SessionSync.NoSkippedSeq` | The desktop never folds in a seq with an earlier one missing. | A turn silently missing from the transcript. |
-| `SessionSync.ClientsConverge` | Once the log stops and every frame and pull has landed, the desktop holds every stored seq, or still holds another device's items behind the "behind" strip. | The desktop never catches up after a lag, short of a reload. |
+| `SessionSync.ClientsConverge` | Once the log stops and every frame and pull has landed, a desktop that has the session open holds every stored seq, or still holds another device's items behind the "behind" strip, including after it closed the session, its actor retired, and it opened the session again. | The desktop never catches up after a lag or a reopen, short of a reload. |
+| `SessionSync.NoLostEvent` | No event a live harness emits reaches an actor that has retired. | A turn's rows vanish: the relay's send to a retired actor fails and nothing stores them. |
 | `*.TypeOK` | The variables stay in their domains. | None, it only guards the model. |
 
 Results at the sync commit, per provider (`expected.txt`):
@@ -436,6 +439,15 @@ scratch delay (the PR that fixed them has the evidence).
     their wait on a resolution as on a tool result; before, both paths read
     "needs you" until the turn ended.
 
+18. **Fixed: an ended session's actor lived until the server stopped.**
+    Every read of a session (a reopened tab, `list_turns`, a tail read)
+    spawned its actor, and nothing ever stopped one. Reproduced live: reading
+    1,000 ended sessions left 1,003 actors (with the run's own three) four
+    minutes later, and the server's RSS went from 68.9 MB to 92.8 MB. An actor
+    now retires after `ACTOR_IDLE` (60 s) with nothing attached and no relay
+    feeding it, and keeps its revision state in `sessions.actor_state` for the
+    next one.
+
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
 not in the models: a failed codex turn ended twice (`error` {willRetry:
@@ -468,6 +480,7 @@ git diff --stat b9c008a0acf0f956d8e444ccfbb6d67a0f72fbec -- \
   crates/hyprlayer-core/src/runtime/sessions/held.rs \
   crates/hyprlayer-core/src/runtime/sessions/service.rs \
   crates/hyprlayer-core/src/runtime/sessions/forwarder.rs \
+  crates/hyprlayer-core/src/runtime/sessions/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/delivery.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs \
   crates/hyprlayer-core/src/store/sessions.rs \
@@ -558,6 +571,10 @@ turn, what closes an ask, or what reports the server's death.
 | `Forward` | `forward_session`, streams.rs:1411 (the `Lagged` arm at 1443 → `attach_after`, forwarder.rs:571, and `register_after`, 626, in one actor turn) |
 | `Receive` | `dispatch`, sessionStore.ts:357 → `route`, transcriptSync.ts:267 (skip, hold, flush via `applyHeld`, sessionStore.ts:429, apply) |
 | `PullRead`, `PullApply` | `pullNow`, sessionStore.ts:1776 → `list_turns`; `mergeEntries`, transcriptSync.ts:352; `trimHeld`, sessionStore.ts:446 |
+| `End`, `Resume` | the relay ending at `Exited` and dropping its ingress sender; `launch_driver` → `spawn_relay` with `SessionActors::ingress`, which spawns an actor when none runs |
+| `Close`, `Reopen` | the tab's stream ending (its attachment detaches); `attach_from`(cursor) through `SessionActors::known_actor`, which spawns the actor again, replays the log after the cursor and registers the attachment in one actor turn |
+| `Retire` | the actor's `ACTOR_IDLE` timer, 60 s after its last use (a desktop's `rev_state` poll is not a use: with no actor it is answered from the row) → `retire_idle` (sessions/mod.rs), which holds the registry lock while it sends `Control::Retire`; the actor agrees only when `idle` (no open attachment, counting one whose stream closed as gone; no reservation, pending write, open turn or kept stream; a workflow neither armed nor running; nothing queued; and no ingress sender but its handle's, its own and its workflow pump's), saves its `RevSnapshot` to `sessions.actor_state`, and stops; `ActorState::new` restores it when the row's `rev` still matches |
+| `Lose` | a relay's `ingress.send` to an actor that stopped (only reachable when `Retire` ignores a live relay) |
 
 Granularity: an action is one step only where the code makes it one. That
 means a service call under the session's op lock with the driver's inbox mutex
@@ -652,6 +669,10 @@ attachment together).
   between check and wake stands in for them), goals (the goal resumer's
   sessions), the session's own `archived_at` (open to the same race), and
   claude crashing during a wake.
+- `SessionSync`'s actor lifetime: one end and resume, one close and reopen.
+  The per-author revision state the snapshot keeps (`rev_by_author`,
+  `foreign_floor`) is not in any model; `session_runtime`'s
+  `ended_sessions_leave_no_actors_and_keep_who_sent_what` checks it.
 - Left out of `SessionSync`: rewinds and epochs, unpersisted partial text and
   `drop`, the sync state's `rev` arithmetic behind the "behind" strip
   (`ClientsConverge` accepts held items as "the strip shows" without checking
@@ -692,6 +713,10 @@ wrong: fix the action, re-run, and say what you changed.
    - `SessionTurns.ResolvedOnce`: `DriverRead` emits `resolved` on every
      `cancel`, held or not: an ask answered here and elsewhere at once is
      resolved twice.
+   - `SessionSync.NoLostEvent`: `Retire` without `~harness` (the sender count
+     ignored): the relay sends into a retired actor.
+   - `SessionSync.NoSkippedSeq`, `ClientsConverge`: `Reopen` replays from
+     `applied + 2` (an `attach_from` that skips the row after the cursor).
    - `NoWakeWhenArchived`: `WakerWake` launches without the `~wsArchived`
      test (`hold_unarchived` gone).
    - `AskResolution`, `InterruptSafe`: `DriverRead` leaves `pending` alone on

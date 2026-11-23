@@ -13,7 +13,7 @@ mod workflow_bridge;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
 
@@ -43,8 +43,10 @@ pub(crate) struct SessionActors {
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
     attribution: Option<Arc<DocAttribution>>,
-    handles: AsyncMutex<HashMap<String, forwarder::ActorHandle>>,
+    handles: Arc<AsyncMutex<HashMap<String, forwarder::ActorHandle>>>,
     stopping: Arc<AtomicBool>,
+    reaper: mpsc::UnboundedSender<String>,
+    retiring: StdMutex<Option<mpsc::UnboundedReceiver<String>>>,
 }
 
 impl SessionActors {
@@ -53,12 +55,15 @@ impl SessionActors {
         events: broadcast::Sender<RuntimeEvent>,
         attribution: Option<Arc<DocAttribution>>,
     ) -> Self {
+        let (reaper, retiring) = mpsc::unbounded_channel();
         Self {
             db,
             events,
             attribution,
-            handles: AsyncMutex::new(HashMap::new()),
+            handles: Arc::default(),
             stopping: Arc::default(),
+            reaper,
+            retiring: StdMutex::new(Some(retiring)),
         }
     }
 
@@ -67,12 +72,16 @@ impl SessionActors {
     }
 
     fn spawn_actor(&self, session_id: &str) -> forwarder::ActorHandle {
+        if let Some(retiring) = self.retiring.lock().ok().and_then(|mut rx| rx.take()) {
+            tokio::spawn(retire_idle(self.handles.clone(), retiring));
+        }
         forwarder::spawn(
             session_id.to_string(),
             self.db.clone(),
             self.events.clone(),
             self.attribution.clone(),
             self.stopping.clone(),
+            self.reaper.clone(),
         )
     }
 
@@ -271,11 +280,33 @@ impl SessionActors {
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    pub(crate) async fn actor_count(&self) -> usize {
+        self.handles.lock().await.len()
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) async fn attachment_count(&self, session_id: &str) -> usize {
         let handles = self.handles.lock().await;
         match handles.get(session_id) {
             Some(handle) => handle.attachment_count().await,
             None => 0,
+        }
+    }
+}
+
+/// Under the registry lock, so no call can reach an actor between its consent and its removal.
+async fn retire_idle(
+    handles: Arc<AsyncMutex<HashMap<String, forwarder::ActorHandle>>>,
+    mut retiring: mpsc::UnboundedReceiver<String>,
+) {
+    while let Some(session_id) = retiring.recv().await {
+        let mut handles = handles.lock().await;
+        let retired = match handles.get(&session_id) {
+            Some(handle) => handle.retire().await,
+            None => false,
+        };
+        if retired {
+            handles.remove(&session_id);
         }
     }
 }
@@ -360,6 +391,10 @@ impl SessionRuntimeHandle {
 
     pub async fn attachment_count(&self, session_id: &str) -> usize {
         self.actors.attachment_count(session_id).await
+    }
+
+    pub async fn actor_count(&self) -> usize {
+        self.actors.actor_count().await
     }
 
     pub async fn log_after(

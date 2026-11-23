@@ -458,6 +458,60 @@ async fn a_non_coalescible_ephemeral_event_is_never_silently_dropped() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn ended_sessions_leave_no_actors_and_keep_who_sent_what() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    let handle = SessionRuntimeHandle::new(db.clone());
+    for i in 0..20 {
+        let id = format!("ended-{i}");
+        seed_session(&db, &id);
+        handle
+            .list_turns(&id, LogCursor::Tail, 50, None)
+            .await
+            .unwrap();
+    }
+    seed_session(&db, "s1");
+    let stream = handle.attach("s1", true).await.unwrap();
+    handle
+        .reserve_user_turn("s1", "n1".into(), Some(0), Some(client_ref("a")))
+        .await
+        .unwrap();
+    let ingress = handle.ingress("s1").await;
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "hi".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("n1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    ingress.send(turn_done(0.0)).await.unwrap();
+    drop(ingress);
+    wait_for_log_len(&db, "s1", 2).await;
+    drop(stream);
+    assert_eq!(handle.actor_count().await, 21);
+
+    for _ in 0..15 {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        handle.rev_state("ended-0", None).await;
+    }
+    assert_eq!(handle.actor_count().await, 0);
+
+    handle
+        .reserve_user_turn("s1", "n2".into(), Some(0), Some(client_ref("a")))
+        .await
+        .expect("its own commit is not one it missed");
+    let other = handle
+        .reserve_user_turn("s1", "n3".into(), Some(0), Some(client_ref("b")))
+        .await;
+    assert!(
+        matches!(other, Err(CoreError::StaleTranscript { .. })),
+        "{other:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_session_needs_no_one_once_every_open_ask_is_resolved() {
     let db = Arc::new(Db::open_in_memory().unwrap());

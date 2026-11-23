@@ -332,6 +332,9 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE sessions ADD COLUMN restart_wakes INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sessions ADD COLUMN restart_wake_seq INTEGER NOT NULL DEFAULT -1;
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN actor_state TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

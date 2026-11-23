@@ -95,6 +95,9 @@ pub(crate) enum Control {
         caller: Option<String>,
         reply: oneshot::Sender<ActorRevState>,
     },
+    Retire {
+        reply: oneshot::Sender<bool>,
+    },
     #[cfg(any(test, feature = "test-support"))]
     AttachmentCount {
         reply: oneshot::Sender<usize>,
@@ -299,6 +302,14 @@ impl ActorHandle {
         reply_rx.await.map_err(|_| actor_gone())
     }
 
+    pub(crate) async fn retire(&self) -> bool {
+        let (reply, reply_rx) = oneshot::channel();
+        if self.control.send(Control::Retire { reply }).is_err() {
+            return true;
+        }
+        reply_rx.await.unwrap_or(true)
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) async fn attachment_count(&self) -> usize {
         let (reply, reply_rx) = oneshot::channel();
@@ -324,12 +335,15 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
     }
 }
 
+pub(crate) const ACTOR_IDLE: Duration = Duration::from_secs(60);
+
 pub(crate) fn spawn(
     session_id: String,
     db: Arc<Db>,
     events: broadcast::Sender<RuntimeEvent>,
     attribution: Option<Arc<DocAttribution>>,
     server_stopping: Arc<AtomicBool>,
+    reaper: mpsc::UnboundedSender<String>,
 ) -> ActorHandle {
     let (ingress_tx, ingress_rx) = mpsc::channel(INGRESS_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel();
@@ -342,6 +356,7 @@ pub(crate) fn spawn(
             attribution,
             server_stopping,
             ingress_sender,
+            reaper,
         )
         .await;
         run(state, ingress_rx, control_rx).await;
@@ -358,10 +373,15 @@ async fn run(
     mut ingress_rx: mpsc::Receiver<SessionEvent>,
     mut control_rx: mpsc::UnboundedReceiver<Control>,
 ) {
+    let mut last_use = tokio::time::Instant::now();
     loop {
         tokio::select! {
             biased;
             ctrl = control_rx.recv() => {
+                // A revision poll is answered from the row once the actor is gone, so it keeps none alive.
+                if !matches!(ctrl, Some(Control::RevState { .. } | Control::Retire { .. })) {
+                    last_use = tokio::time::Instant::now();
+                }
                 match ctrl {
                     Some(Control::Attach { echo_user_messages, reply }) => {
                         let _ = reply.send(state.attach(echo_user_messages).await);
@@ -409,6 +429,13 @@ async fn run(
                     Some(Control::RevState { caller, reply }) => {
                         let _ = reply.send(state.rev_state(caller.as_deref()));
                     }
+                    Some(Control::Retire { reply }) => {
+                        if state.idle(&ingress_rx) && state.save_snapshot().await {
+                            let _ = reply.send(true);
+                            break;
+                        }
+                        let _ = reply.send(false);
+                    }
                     #[cfg(any(test, feature = "test-support"))]
                     Some(Control::AttachmentCount { reply }) => {
                         let _ = reply.send(state.attachments.len());
@@ -417,6 +444,7 @@ async fn run(
                 }
             }
             event = ingress_rx.recv() => {
+                last_use = tokio::time::Instant::now();
                 match event {
                     Some(event) => state.handle_event(event).await,
                     None => break,
@@ -424,6 +452,12 @@ async fn run(
             }
             _ = tokio::time::sleep_until(state.next_expiry()), if !state.reservations.is_empty() => {
                 state.expire_reservations();
+            }
+            _ = tokio::time::sleep_until(last_use + ACTOR_IDLE) => {
+                last_use = tokio::time::Instant::now();
+                if state.idle(&ingress_rx) {
+                    let _ = state.reaper.send(state.session_id.clone());
+                }
             }
         }
     }
@@ -470,6 +504,16 @@ struct ActorState {
     /// The next detach relaunches nothing, so its row must stop claiming a live harness.
     settle_on_detach: bool,
     server_stopping: Arc<AtomicBool>,
+    reaper: mpsc::UnboundedSender<String>,
+}
+
+/// What a retired actor's successor needs to judge sends the way it would have.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RevSnapshot {
+    rev: u64,
+    epoch: u64,
+    foreign_floor: u64,
+    rev_by_author: HashMap<String, u64>,
 }
 
 #[derive(Default)]
@@ -486,20 +530,31 @@ impl ActorState {
         attribution: Option<Arc<DocAttribution>>,
         server_stopping: Arc<AtomicBool>,
         ingress_sender: mpsc::Sender<SessionEvent>,
+        reaper: mpsc::UnboundedSender<String>,
     ) -> Self {
         let sid = session_id.clone();
         let handle = db.clone();
-        let (seq, workstream_id, agent_spawned, rev, reset_rev) = blocking(move || {
+        let (seq, workstream_id, agent_spawned, rev, reset_rev, snapshot) = blocking(move || {
             let seq = handle.next_session_seq(&sid)?;
             let (workstream_id, agent_spawned) = handle
                 .get_session(&sid)?
                 .map(|s| (s.workstream_id, s.origin == SessionOrigin::Agent))
                 .unwrap_or_default();
             let (rev, reset_rev) = handle.session_rev(&sid)?;
-            Ok((seq, workstream_id, agent_spawned, rev, reset_rev))
+            let snapshot = handle.session_actor_state(&sid)?;
+            Ok((seq, workstream_id, agent_spawned, rev, reset_rev, snapshot))
         })
         .await
-        .unwrap_or((0, String::new(), false, 0, 0));
+        .unwrap_or((0, String::new(), false, 0, 0, None));
+        let snapshot = snapshot
+            .and_then(|json| serde_json::from_str::<RevSnapshot>(&json).ok())
+            .filter(|snapshot| snapshot.rev == rev)
+            .unwrap_or(RevSnapshot {
+                rev,
+                epoch: 0,
+                foreign_floor: rev,
+                rev_by_author: HashMap::new(),
+            });
         Self {
             session_id,
             workstream_id,
@@ -508,15 +563,15 @@ impl ActorState {
             events,
             ingress_sender,
             seq,
-            epoch: 0,
+            epoch: snapshot.epoch,
             ordinal: 0,
             next_attach_id: 0,
             attachments: HashMap::new(),
             workflow: None,
             rev,
             reset_rev,
-            foreign_floor: rev,
-            rev_by_author: HashMap::new(),
+            foreign_floor: snapshot.foreign_floor,
+            rev_by_author: snapshot.rev_by_author,
             in_turn: false,
             turn_author: None,
             next_turn: None,
@@ -531,6 +586,49 @@ impl ActorState {
             streams_kept: false,
             settle_on_detach: false,
             server_stopping,
+            reaper,
+        }
+    }
+
+    fn idle(&mut self, ingress: &mpsc::Receiver<SessionEvent>) -> bool {
+        self.attachments
+            .retain(|_, attachment| !attachment.detached());
+        let workflow_done = self.workflow.as_ref().is_none_or(|workflow| {
+            workflow
+                .workflows
+                .try_lock()
+                .is_ok_and(|w| !w.is_armed() && w.runs.is_empty())
+        });
+        // The handle's, its own, and its workflow pump's; any other is a relay still feeding it.
+        let own_senders = 2 + usize::from(self.workflow.is_some());
+        self.attachments.is_empty()
+            && self.reservations.is_empty()
+            && workflow_done
+            && self.pending_writes.is_empty()
+            && !self.in_turn
+            && !self.keep_streams
+            && !self.streams_kept
+            && ingress.is_empty()
+            && ingress.sender_strong_count() <= own_senders
+    }
+
+    async fn save_snapshot(&self) -> bool {
+        let snapshot = RevSnapshot {
+            rev: self.rev,
+            epoch: self.epoch,
+            foreign_floor: self.foreign_floor,
+            rev_by_author: self.rev_by_author.clone(),
+        };
+        let Ok(json) = serde_json::to_string(&snapshot) else {
+            return false;
+        };
+        let (db, sid) = (self.db.clone(), self.session_id.clone());
+        match blocking(move || db.set_session_actor_state(&sid, &json)).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!("session {}: its actor stays: {e}", self.session_id);
+                false
+            }
         }
     }
 
