@@ -251,7 +251,11 @@ export function LeadDock({
         <span className="min-w-0 flex-1 truncate text-meta text-ink-dim">
           {reply ? (
             <>
-              <span className="text-ink-4">Lead:</span> {reply}
+              {lead.view.summary ?? (
+                <>
+                  <span className="text-ink-4">Lead:</span> {reply}
+                </>
+              )}
               {age && <span className="text-ink-4">{` · ${age}`}</span>}
             </>
           ) : (

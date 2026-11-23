@@ -77,6 +77,9 @@ impl AgentControlService<'_> {
             }
             _ => None,
         };
+        let summary = session_id
+            .as_deref()
+            .and_then(|id| self.runtime.lead_summaries.get(id));
         Ok(LeadView {
             workstream_id: main,
             session_id,
@@ -86,6 +89,7 @@ impl AgentControlService<'_> {
             project_rules,
             remote_control,
             remote_control_url,
+            summary,
         })
     }
 

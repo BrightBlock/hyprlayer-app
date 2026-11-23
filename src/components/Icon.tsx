@@ -210,6 +210,7 @@ const ICONS = {
   iteration: Repeat,
   keyboard: Keyboard,
   layers: Layers,
+  lead: Lambda,
   leadLocal: Laptop,
   leadRemote: Smartphone,
   linkDoc: Link2,

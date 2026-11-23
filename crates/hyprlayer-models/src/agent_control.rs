@@ -47,6 +47,8 @@ pub struct LeadView {
     pub project_rules: Option<String>,
     pub remote_control: bool,
     pub remote_control_url: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 /// The agent a control call speaks for: a composer session or a PTY terminal.

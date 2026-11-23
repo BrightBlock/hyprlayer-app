@@ -10,7 +10,7 @@ export function LeadMark({ className }: { className?: string }) {
         className,
       )}
     >
-      <Icon name="branch" size="xs" />
+      <Icon name="lead" size="xs" />
     </span>
   );
 }

@@ -470,6 +470,7 @@
               "remoteControl": false,
               "remoteControlUrl": null,
               "sessionId": "$PROJECT_LEAD",
+              "summary": null,
               "workstreamId": "$MAIN"
             },
             "spawns": [

@@ -1357,6 +1357,7 @@ export type LeadView = {
 	projectRules: string | null,
 	remoteControl: boolean,
 	remoteControlUrl: string | null,
+	summary?: string | null,
 };
 
 export type LinkStatus = "ok" | "unsupported" | "broken";

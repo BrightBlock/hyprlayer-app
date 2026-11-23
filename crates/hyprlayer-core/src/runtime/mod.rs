@@ -121,6 +121,7 @@ pub struct HyprlayerRuntime {
     goal_runners: Arc<goals::GoalRunners>,
     attribution: Arc<DocAttribution>,
     session_titler: Arc<sessions::titles::SessionTitler>,
+    lead_summaries: Arc<sessions::lead_summary::LeadSummaries>,
     terminals: Arc<TerminalRegistry>,
     scripts: Arc<ScriptRegistry>,
     opencode: Arc<OpenCodeManager>,
@@ -325,6 +326,7 @@ impl HyprlayerRuntime {
             goal_runners: Arc::default(),
             attribution,
             session_titler: Arc::default(),
+            lead_summaries: Arc::default(),
             terminals,
             scripts: Arc::new(ScriptRegistry::new()),
             opencode: Arc::new(OpenCodeManager::new()),
@@ -497,6 +499,8 @@ impl HyprlayerRuntime {
 
         let title_task =
             sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
+        let lead_summary_task =
+            sessions::lead_summary::spawn_worker(self.lead_summaries.clone(), self);
 
         let restart_task =
             sessions::wake::spawn_after_restart(self.goal_runners.clone(), Arc::downgrade(self));
@@ -578,6 +582,7 @@ impl HyprlayerRuntime {
             sweep_task,
             account_task,
             title_task,
+            lead_summary_task,
             restart_task,
             rescan_task,
             fetch_task,
