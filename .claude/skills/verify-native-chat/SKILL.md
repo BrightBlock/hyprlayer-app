@@ -307,9 +307,13 @@ scratch delay (the PR that fixed them has the evidence).
     OpenCode waits on that the desktop never shows (8 steps).
 
 Not in the models and found by the interrogate workstream (reproduced live):
-codex auto-declines an MCP tool's approval request (`auto_decline`), so no card
-shows; a failed codex turn ends twice (`error` and a failed `turn/completed`);
-a stopped Ship turn still sends its follow-up, on every provider.
+a failed codex turn ends twice (`error` and a failed `turn/completed`); a
+stopped Ship turn still sends its follow-up, on every provider. Fixed and not
+in the models: codex auto-declined an MCP tool's approval request
+(`mcpServer/elicitation/request` with `_meta.codex_approval_kind`
+`mcp_tool_call`) in `auto_decline`, so no card showed and the tool failed; it
+is now a `PermissionAsk` named `mcp__<server>__<tool>`, answered `accept` or
+`decline` (a `codex::driver` test). Other elicitations are still declined.
 
 When one of these is fixed in the code, change the model to match, run
 `check.sh`, and change that rule's line in `expected.txt` to `PASS`.
@@ -473,8 +477,9 @@ attachment together).
   another OpenCode client can answer an ask (`permission.replied`). Only the
   server death is confirmed live.
 - Left out of `CodexTurns`: codex errors and their double `TurnDone`,
-  `requestUserInput` questions, child threads, MCP elicitations and approvals
-  (`auto_decline`), rewind, collaboration mode, a refused steer while live
+  `requestUserInput` questions, child threads, MCP elicitations (declined)
+  and MCP tool approvals (asked like any approval, but outside the model),
+  rewind, collaboration mode, a refused steer while live
   (the end-of-turn decline stands for both).
 - Left out of `OpenCodeTurns`: questions, `command_async` (slash commands),
   the 5 s `UNPLACED_WAIT` as time (`Expire` may fire any time after), compaction,

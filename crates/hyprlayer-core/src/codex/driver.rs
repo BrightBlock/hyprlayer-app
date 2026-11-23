@@ -1220,6 +1220,72 @@ mod tests {
     }
 
     #[test]
+    fn an_mcp_tool_approval_is_asked_and_answered() {
+        fn written(codex: &mut FakeCodex) -> Option<Value> {
+            let line = codex.requests.try_recv().ok()?;
+            Some(serde_json::from_str(line.trim()).unwrap())
+        }
+        let (driver, mut codex) = fake_driver(true, Translator::default());
+        let mut events = driver.subscribe();
+        let feed = |line: &str| {
+            route_incoming(
+                decode_line(line).expect("a JSON-RPC line"),
+                &driver.events,
+                &driver.pending,
+                &driver.state,
+                &driver.stdin_tx.downgrade(),
+            );
+        };
+        let mut asked = || {
+            std::iter::from_fn(|| events.try_recv().ok()).find_map(|e| match e {
+                SessionEvent::PermissionAsk {
+                    request_id,
+                    tool_name,
+                    input,
+                    ..
+                } => Some((request_id, tool_name, input)),
+                _ => None,
+            })
+        };
+        let tool_approval = |rpc: u64, tool: &str, params: &str| {
+            format!(
+                r#"{{"method":"mcpServer/elicitation/request","id":{rpc},"params":{{"threadId":"th","turnId":"t1","serverName":"probe","environmentId":null,"mode":"form","_meta":{{"codex_approval_kind":"mcp_tool_call","persist":["session","always"],"tool_name":"{tool}","tool_params":{params},"tool_params_display":[]}},"message":"Allow the probe MCP server to run tool \"{tool}\"?","requestedSchema":{{"type":"object","properties":{{}}}}}}}}"#
+            )
+        };
+
+        feed(&tool_approval(0, "wipe_cache", r#"{"scope":"all"}"#));
+        let (request_id, tool_name, input) = asked().expect("the approval is asked");
+        assert_eq!(tool_name, "mcp__probe__wipe_cache");
+        assert_eq!(input, r#"{"scope":"all"}"#);
+        assert_eq!(written(&mut codex), None, "the ask waits for the user");
+        assert_eq!(driver.pending_requests(), vec![request_id.clone()]);
+        driver.respond_permission(&request_id, true, None).unwrap();
+        assert_eq!(
+            written(&mut codex),
+            Some(json!({ "id": 0, "result": { "action": "accept", "content": {} } }))
+        );
+
+        feed(&tool_approval(1, "plain_tool", "{}"));
+        let (request_id, tool_name, _) = asked().expect("the approval is asked");
+        assert_eq!(tool_name, "mcp__probe__plain_tool");
+        driver.respond_permission(&request_id, false, None).unwrap();
+        assert_eq!(
+            written(&mut codex),
+            Some(json!({ "id": 1, "result": { "action": "decline" } }))
+        );
+
+        feed(
+            r#"{"method":"mcpServer/elicitation/request","id":2,"params":{"threadId":"th","turnId":"t1","serverName":"probe","environmentId":null,"mode":"form","_meta":null,"message":"Deploy to production?","requestedSchema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}}}"#,
+        );
+        assert_eq!(asked(), None);
+        assert_eq!(
+            written(&mut codex),
+            Some(json!({ "id": 2, "result": { "action": "decline" } }))
+        );
+        assert!(driver.pending_requests().is_empty());
+    }
+
+    #[test]
     fn app_server_args_enable_the_user_input_and_plan_tools() {
         let configs: Vec<&str> = APP_SERVER_ARGS
             .windows(2)

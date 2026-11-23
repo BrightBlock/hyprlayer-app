@@ -118,6 +118,7 @@ pub enum ApprovalKind {
     CommandExecution,
     FileChange,
     Permissions { requested: Value },
+    McpToolCall,
     Legacy,
 }
 
@@ -599,6 +600,34 @@ impl Translator {
                     subject: None,
                 }]
             }
+            "mcpServer/elicitation/request"
+                if p.pointer("/_meta/codex_approval_kind")
+                    .and_then(Value::as_str)
+                    == Some("mcp_tool_call") =>
+            {
+                // codex numbers its requests from 0 in every process, so the turn keeps a relaunch's ids apart.
+                let request_id = match p.get("turnId").and_then(Value::as_str) {
+                    Some(turn) => format!("{turn}:{id}"),
+                    None => id.to_string(),
+                };
+                self.pending_approvals
+                    .insert(request_id.clone(), (id.clone(), ApprovalKind::McpToolCall));
+                let field = |pointer: &str| p.pointer(pointer).and_then(Value::as_str);
+                vec![SessionEvent::PermissionAsk {
+                    request_id,
+                    tool_use_id: None,
+                    tool_name: format!(
+                        "mcp__{}__{}",
+                        field("/serverName").unwrap_or_default(),
+                        field("/_meta/tool_name").unwrap_or_default(),
+                    ),
+                    input: p
+                        .pointer("/_meta/tool_params")
+                        .cloned()
+                        .unwrap_or(json!({}))
+                        .to_string(),
+                }]
+            }
             _ => Vec::new(),
         }
     }
@@ -807,6 +836,13 @@ pub fn approval_reply(kind: &ApprovalKind, allow: bool, message: Option<&str>) -
                 "permissions": if allow { requested.clone() } else { json!({}) },
                 "scope": "turn",
             })
+        }
+        ApprovalKind::McpToolCall => {
+            if allow {
+                json!({ "action": "accept", "content": {} })
+            } else {
+                json!({ "action": "decline" })
+            }
         }
         ApprovalKind::Legacy => {
             if allow {
