@@ -55,4 +55,4 @@ Steps:
 - The `[aria-label="Right panel"]` switch only exists while a plan or goal is available. Otherwise the panel shows directly. <!-- src: src/routes/ProjectPage.tsx:1838 -->
 - The commits tab fetches only while it's selected. If a file you wrote by hand doesn't show, click `Refresh` before judging. <!-- src: src/features/workstreams/ChangesPanel.tsx:544 -->
 - `Review changes` in this header opens the review workspace ([review-workspace.md](./review-workspace.md)); it isn't a diff of the Changes list. <!-- src: src/features/workstreams/ChangesPanel.tsx:582 -->
-- The sandbox has no `origin`. `Fetch remote` and `Refresh branches` in the Git panel fail or list `No remote branches`. That's the fixture, not a bug. <!-- src: src/features/workstreams/GitPanel.tsx:122 -->
+- The sandbox has no `origin`. `Fetch remote` and `Refresh branches` in the Git panel fail or list `No remote branches`. That's the fixture, not a bug. <!-- src: src/features/workstreams/GitPanel.tsx:129 -->

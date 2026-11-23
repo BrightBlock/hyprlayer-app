@@ -24,7 +24,7 @@ Prompts are reusable agent instructions. Two are built in (Commit and Ship, whos
 
 Preconditions:
 
-- **Isolated** is enough. Settings are stored per identifier in `~/Library/Application Support/<identifier>/settings.json`, and cleanup deletes them. <!-- src: crates/hyprlayer-core/src/runtime/mod.rs:177 --> <!-- src: crates/hyprlayer-core/src/settings.rs:633 -->
+- **Isolated** is enough. Settings are stored per identifier in `~/Library/Application Support/<identifier>/settings.json`, and cleanup deletes them. <!-- src: crates/hyprlayer-core/src/runtime/mod.rs:179 --> <!-- src: crates/hyprlayer-core/src/settings.rs:664 -->
 - Running a prompt (`prompts-run`) starts a real agent turn: $0 on a free OpenCode tab, paid on Claude. It needs a workstream with an agent tab. Built-ins never show for a folder workstream like `verify-demo`'s. <!-- src: src/features/prompts/PromptPalette.tsx:64 --> <!-- src: src/features/prompts/runPrompt.ts:58 -->
 - In shared mode, edits change the user's real prompts. Copy `get_app_settings().prompts` into the evidence dir first and restore it after.
 

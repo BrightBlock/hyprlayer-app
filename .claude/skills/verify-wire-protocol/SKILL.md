@@ -102,7 +102,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 601908aa27afa5f93bb51973341b562268da28fb -- \
+git diff --stat e9c026d23f548661d26a5fd3c7b384718e81ae4f -- \
   crates/hyprlayer-proto/src/lib.rs \
   crates/hyprlayer-proto/src/frame.rs \
   crates/hyprlayer-server/src/client.rs \
@@ -210,4 +210,4 @@ is wrong: fix the action, re-run, and say what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the models describe it.
 
-Last confirmed against: `601908aa27afa5f93bb51973341b562268da28fb`.
+Last confirmed against: `e9c026d23f548661d26a5fd3c7b384718e81ae4f`.

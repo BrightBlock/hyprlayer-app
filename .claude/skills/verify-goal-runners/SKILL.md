@@ -109,7 +109,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 6070e4abe05f7feee62d2ccf2b744b5db51e3b64 -- \
+git diff --stat e9c026d23f548661d26a5fd3c7b384718e81ae4f -- \
   crates/hyprlayer-core/src/runtime/goals/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/goal_loop.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs
@@ -136,7 +136,7 @@ check commands, prompts, spend arithmetic or `decide_boundary`'s order beyond
 | `Pause*` | `GoalService::pause` (699) → `try_pause` (1056; writes `control_request` on `Delivered`), `wait_exit` (453) |
 | `Stop*` | `stop` (748) → `end` (1042) → `try_end` (1091; writes `control_request` on `Delivered`) |
 | `Resume*` | `GoalService::resume` (714), `running_again` (303) |
-| `Restart` | server exit + `stop_all`; `spawn_after_restart` (wake.rs:28, from runtime/mod.rs:502) runs the `Srv*` steps, then the waker's |
+| `Restart` | server exit + `stop_all`; `spawn_after_restart` (wake.rs:28, from runtime/mod.rs:506) runs the `Srv*` steps, then the waker's |
 | `Srv*` | `resume_running` (474) → `resume_one` (515) |
 | `WakerCheck`, `WakerWake` | `wake::check`, wake.rs:152–159 (skips a running goal's session); `wake_one` (189) |
 
@@ -182,4 +182,4 @@ what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the model describes it.
 
-Last confirmed against: `6070e4abe05f7feee62d2ccf2b744b5db51e3b64`.
+Last confirmed against: `e9c026d23f548661d26a5fd3c7b384718e81ae4f`.

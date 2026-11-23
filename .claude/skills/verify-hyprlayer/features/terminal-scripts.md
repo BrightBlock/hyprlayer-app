@@ -39,7 +39,7 @@ Preconditions:
   - `invoke('get_script_runtime', { workstreamId })` has `runTerminalId` set, `port` N, and `statuses[{kind:'run', phase:'running'}]`.
   - `invoke('list_running_scripts')` contains the workstream id.
   - `cat hl-run-proof.txt` reads `port=N`.
-  - The attach replay from [terminal-shell-tab.md](./terminal-shell-tab.md) on `runTerminalId` shows the output. <!-- src: src/lib/bindings.ts:252 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:421 -->
+  - The attach replay from [terminal-shell-tab.md](./terminal-shell-tab.md) on `runTerminalId` shows the output. <!-- src: src/lib/bindings.ts:253 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:421 -->
 - **Stop.** Click the split button (now `Stop ⌘R`). `[process exited]` is written, `list_running_scripts` drops the id, and `get_script_runtime` reports `runTerminalId: null` and run `failed` (killed is a non-zero exit). <!-- src: src/features/session/ScriptRunView.tsx:84 --> <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:438 -->
 - **Output kept.** `invoke('get_script_output', { workstreamId, kind: 'run' })` returns the captured text. <!-- src: crates/hyprlayer-core/src/runtime/scripts.rs:446 -->
 - **Clear.** Click `button[aria-label="Clear output"]`. The pane empties, and `get_script_output` returns `null`. <!-- src: src/features/session/ScriptDock.tsx:252 -->

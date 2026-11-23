@@ -49,5 +49,5 @@ Steps:
 - `Request changes` is disabled while the implement agent is busy (`<agent> is still working`), and the default verdict then becomes `Comment`. <!-- src: src/features/review/SubmitReviewPopover.tsx:103 -->
 - The agent label is the implement session's harness, `Claude Code` in the sandbox (its stub), and `the agent` only when the workstream has no implement session. Match composer labels by prefix. <!-- src: src/lib/domain/harnessing.ts:55 -->
 - With no live implement session, delivery starts a new `general` session titled `Review`. In the sandbox that's the stub; on a real profile it's a real turn. <!-- src: src/features/session/sessionStore.ts:2177 -->
-- Agent notes come from `.hyprlayer/review/<workstream-id>.jsonl` in the worktree and are ingested on the next `get_review`. Append a JSON line there to add a case without rerunning the scenario. <!-- src: crates/hyprlayer-core/src/pipeline.rs:241 -->
+- Agent notes come from `.hyprlayer/review/<workstream-id>.jsonl` in the worktree and are ingested on the next `get_review`. Append a JSON line there to add a case without rerunning the scenario. <!-- src: crates/hyprlayer-core/src/pipeline.rs:245 -->
 - An outdated item sits at the nearest surviving line, and in unified view a base-side thread lists above the diff. Don't read its position as a bug. <!-- src: src/features/review/DiffPane.tsx:142 -->

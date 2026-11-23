@@ -22,7 +22,7 @@ With Multiplexer mode on, the agent strip's `+` opens a menu of CLI engines (Cla
 
 Preconditions:
 
-- **Isolated** instance seeded with `verify-demo` and one folder workstream, opened. Engines are app settings in that profile's own `settings.json`, not the shared CLI config. <!-- src: crates/hyprlayer-core/src/settings.rs:633 -->
+- **Isolated** instance seeded with `verify-demo` and one folder workstream, opened. Engines are app settings in that profile's own `settings.json`, not the shared CLI config. <!-- src: crates/hyprlayer-core/src/settings.rs:664 -->
 - A stub engine script in the run dir: `<run-dir>/seed/stub-engine.sh`, containing `#!/bin/sh` + `echo "STUB-ENGINE cwd=$(pwd)"` + `exec cat`, then `chmod +x`.
 - Cost: the stub spends nothing. For `engine-hooked-controls` you need `claude` installed and signed in. An idle claude TUI spends no turn until you send a prompt, but a model change from the bar drives its `/model` picker.
 
@@ -44,7 +44,7 @@ Preconditions:
 - **Close.** Click the active tab's `[aria-label="Archive Agent N"]`. The pill goes, its `terminalId` attach returns `false`, and the shell moves to `byWs[wsId].archived`. <!-- src: src/routes/ProjectPage.tsx:235 -->
 - **Hooked controls (optional, needs claude).** Open `Claude Code` from `New agent`, and wait for the TUI to paint. On a seed folder claude first asks `Is this a project you created or one you trust?`; answering it writes the user's real `~/.claude.json`, so stop there unless the user agrees. Until then `list_pty_agents` reports `hooked: true` but `state: "starting"` and `status.model: null`, and the bar shows only `Restart`. Expected:
   - `invoke('list_pty_agents', { workstreamId })` returns its row with `hooked: true` and `status.model` set.
-  - The status bar shows `[aria-label^="Permission mode: "]`, `[aria-label^="Model: "]` and, once reported, `[aria-label^="Effort: "]`. <!-- src: src/lib/bindings.ts:223 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:300 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:352 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:419 -->
+  - The status bar shows `[aria-label^="Permission mode: "]`, `[aria-label^="Model: "]` and, once reported, `[aria-label^="Effort: "]`. <!-- src: src/lib/bindings.ts:224 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:300 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:352 --> <!-- src: src/features/statusbar/SessionControlsCluster.tsx:419 -->
   - Picking a model calls `pty_agent_set_model`. Verify the change with `list_pty_agents` `status.model`, not the agent's own words.
   - Close the tab when done so claude exits.
 - **Proof.**

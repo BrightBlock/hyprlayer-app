@@ -15,19 +15,19 @@ After an implement session finishes its plan's tasks, the app walks the workstre
 ## How to get to it (user POV)
 
 - Open the Plan tab for an implement or validate session ([plan-tab.md](./plan-tab.md)). The badge and body sit above the phases. <!-- src: src/features/review/LifecycleSteps.tsx:351 -->
-- Scroll to the end of the implement chat for the card. It renders only once the plan's tasks are done and the agent is idle, and disappears once the review is approved. <!-- src: src/features/session/TranscriptView.tsx:1792 --> <!-- src: src/features/review/validateFlow.ts:119 -->
+- Scroll to the end of the implement chat for the card. It renders only once the plan's tasks are done and the agent is idle, and disappears once the review is approved. <!-- src: src/features/session/TranscriptView.tsx:1798 --> <!-- src: src/features/review/validateFlow.ts:119 -->
 
 ## Driving it with the MCP bridge
 
 Preconditions:
 
 - **Instance.** Use **shared** (`.dev`), or an isolated instance with one implement session: open a `Native chat` tab, set `Agent mode: Implement`, start one short Haiku turn, then `openPlanPreview` that session with a tracking plan (plan-tab.md). On a folder workstream the Review step reads `No changes to review`, and the chat card stays hidden because the diff is empty. In the `review_lifecycle` sandbox the right panel offers `Plan`, but it reads `Document is not in the thoughts index: thoughts/shared/plans/e2e.md`, so no lifecycle renders there. <!-- src: crates/hyprlayer-core/src/error.rs:300 --> <!-- src: src/features/review/ReadyForReviewCard.tsx:74 -->
-- **Workstream.** Find one with an implement session whose tracked plan has every task done. Use `window.__TAURI__.core.invoke('list_sessions', { workstreamId })` for `stage: "implement"` and `parentSessionId` links, and `plan-tab.md` for picking the plan. <!-- src: src/lib/bindings.ts:150 -->
+- **Workstream.** Find one with an implement session whose tracked plan has every task done. Use `window.__TAURI__.core.invoke('list_sessions', { workstreamId })` for `stage: "implement"` and `parentSessionId` links, and `plan-tab.md` for picking the plan. <!-- src: src/lib/bindings.ts:151 -->
   - Read-only checks (badge, rows, `Report`, `Full report`) can use any such workstream.
 - **Anything that starts an agent spends model turns.** Run those only in the `jtsiros/hyprlayer-live-tests` project, per ADR-0012 (agent timing). Never use a real project: name any doc it writes `zz-…`. <!-- src: docs/adr/0012-live-test-repo.md:12 --> This covers:
   - `Validate in new agent`, `Validate as subagent`, `Fix all` and `Fix with agent`. <!-- src: src/features/review/validateFlow.ts:168 --> <!-- src: src/features/review/validateFlow.ts:181 -->
   - `Fix until met` and `Implement until validated`, which open the goal sheet; starting a goal there spends turns too. <!-- src: src/features/review/goalActions.tsx:16 -->
-- **Each new report also costs one `claude -p` call** (`summarize_validation_report`) for its summary. <!-- src: src/lib/queries.ts:1177 -->
+- **Each new report also costs one `claude -p` call** (`summarize_validation_report`) for its summary. <!-- src: src/lib/queries.ts:1185 -->
 - **Sessions can't start over the bridge.** Drive the user's click, which starts them in the app. Never call `start_stage_session` raw: it needs a Channel. <!-- src: docs/adr/0012-live-test-repo.md:23 -->
 - **`Skip` and `Accept` are local.** They write the persisted `validate-steps` store, keyed by implement session. <!-- src: src/features/review/validateStep.ts:35 --> Before clicking, save that entry from the live module (SKILL.md, Drive step 5): `useValidateStepStore.getState().byImplement[<implementId>]`. Restore it afterwards with `setState`, deleting the key if it was absent.
 

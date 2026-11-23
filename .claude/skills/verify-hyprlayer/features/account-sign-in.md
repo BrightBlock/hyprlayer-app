@@ -24,7 +24,7 @@ Preconditions:
 - Cost and risk: clicking Sign in opens a tab in the user's default browser at the dev pool's login domain. Tell the user before you click.
 - Loopback ports are fixed at 1430 and 1420, minus this instance's own Vite port. A shared `.dev` instance's Vite holds 1430, so the attempt binds 1420. If both are busy, sign-in fails with `account_ports_busy`. <!-- src: src-tauri/src/commands/account.rs:15 --> <!-- src: src-tauri/src/commands/account.rs:100 --> <!-- src: crates/hyprlayer-core/src/error.rs:947 -->
 
-- **Read state.** Run `invoke('account_status')`, which returns `{ state: "signedOut" }`. `webview_find_element` `button[aria-haspopup="dialog"][aria-label="Sign in"]` matches. <!-- src: src/lib/bindings.ts:212 --> <!-- src: src/lib/bindings.ts:395 --> <!-- src: src/features/account/AccountButton.tsx:46 --> <!-- src: src/features/account/AccountButton.tsx:38 -->
+- **Read state.** Run `invoke('account_status')`, which returns `{ state: "signedOut" }`. `webview_find_element` `button[aria-haspopup="dialog"][aria-label="Sign in"]` matches. <!-- src: src/lib/bindings.ts:213 --> <!-- src: src/lib/bindings.ts:396 --> <!-- src: src/features/account/AccountButton.tsx:46 --> <!-- src: src/features/account/AccountButton.tsx:38 -->
 - **Open.** Click that button. A `[role="dialog"]` with heading `Account` shows one row, `Sign in with GitHub`. <!-- src: src/features/account/AccountPopover.tsx:43 --> <!-- src: src/features/account/AccountPopover.tsx:108 -->
 - **Start (opens the browser).** Click the popover's row with XPath `//div[@role="dialog"]//button[normalize-space()="Sign in with GitHub"]`. A text match also hits the header button, whose `title` is the same. The row becomes a spinner, `Waiting for GitHub…`, and a `Cancel` button. `dev.log` in the run dir logs `account sign-in listening on port <1430|1420>`. <!-- src: src/features/account/AccountPopover.tsx:99 --> <!-- src: src/features/account/AccountPopover.tsx:101 --> <!-- src: src-tauri/src/commands/account.rs:105 -->
 - **Cancel.** Click `Cancel` inside the popover. It returns to `Sign in with GitHub` with no error note, since a cancel isn't a failure. `dev.log` logs `account sign-in ended: account_sign_in_cancelled`. `account_status` is still `signedOut`. The browser tab stays on the hosted UI; close it by hand. <!-- src: src/features/account/AccountPopover.tsx:116 --> <!-- src: src-tauri/src/commands/account.rs:81 --> <!-- src: crates/hyprlayer-core/src/error.rs:946 -->
@@ -34,7 +34,7 @@ Preconditions:
 ## Gotchas
 
 - Never click `Sign out` in a shared profile. It revokes the refresh token, and getting it back needs the user's browser sign-in.
-- Never call raw `account_sign_in` as a read-back. It opens the browser. Use `account_status`. <!-- src: src/lib/bindings.ts:213 -->
+- Never call raw `account_sign_in` as a read-back. It opens the browser. Use `account_status`. <!-- src: src/lib/bindings.ts:214 -->
 - The popover closes and won't open while the server is disconnected. <!-- src: src/features/account/AccountButton.tsx:25 -->
 - An unanswered attempt times out after 300 s, and starting a new one supersedes the old. <!-- src: src-tauri/src/commands/account.rs:16 --> <!-- src: src-tauri/src/commands/account.rs:25 -->
 - A release `account.json` (prod pool) next to a debug server reads as signed out. Pools aren't shared. <!-- src: docs/adr/0011-cloud-account.md:44 -->

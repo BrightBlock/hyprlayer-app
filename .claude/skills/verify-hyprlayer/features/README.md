@@ -35,7 +35,7 @@ Mode is the cheapest one each feature works in. **Cost** marks anything that spe
 - [Server status](./server-status.md) covers the status bar's connection label and the Servers popover. Isolated, free.
 - [Settings popover and page](./settings-popover.md) covers the header gear popover's quick settings, its links and the Settings section nav. Isolated, free.
 - [Appearance](./settings-appearance.md) covers themes, the popover's Light/Dark/Auto, zoom, text size and fonts, all stored in localStorage. Isolated, free; restore them afterwards.
-- [Preferences](./settings-preferences.md) covers the default harness, quit confirm, keybinding unbind/reset, harness tabs, agent control, the Lead Engineer and Guardrails cards, and the Full Disk Access notice. Isolated, free.
+- [Preferences](./settings-preferences.md) covers the default harness, quit confirm, keybinding unbind/reset, harness tabs, agent control, the Lead Engineer card (with its permission mode) and Guardrails, and the Full Disk Access notice. Isolated, free.
 - [Servers page](./servers-page.md) covers adding, validating, testing, editing and removing SSH servers, plus Set default and Install. Isolated, free; Install needs a reachable host.
 - [Cloud account](./account-sign-in.md) covers the account button and starting and cancelling GitHub sign-in. Isolated; it opens your browser.
 - [Home dashboard and setup wizard](./dashboard-home.md) covers the first-run blank, the dashboard panels, Discover and the onboarding wizard. Isolated, free.
@@ -45,13 +45,13 @@ Mode is the cheapest one each feature works in. **Cost** marks anything that spe
 - [Add, configure and remove a project](./projects-add-settings.md) covers Add project by typed path, Project settings and health, and Remove project. Isolated, free.
 - [Create a workstream](./workstream-create.md) covers the folder-mode New workstream dialog and its stored row. Isolated, free.
 - [Workstream lifecycle](./workstreams-lifecycle.md) covers rename, pin, archive, the Archived worktrees popover and git-mode creation. Isolated, free; git mode writes the shared CLI config.
-- [Project pipeline board](./board-pipeline.md) covers the blank state, board columns, the Triage/Table views, the project picker, and the Lead chip and dock on git projects. Isolated, free.
+- [Project pipeline board](./board-pipeline.md) covers the blank state, board columns, the Triage/Table views, the project picker, and the Lead chip and dock (λ mark, day summary, Remote Control button) on git projects. Isolated, free.
 - [Workshop](./workshop-agents-skills.md) covers sections, scope, creating and deleting a project agent, and the skills list and detail. Isolated, free.
 - [Goal sheet](./goals-sheet.md) covers opening and validating a goal and its checks. Free up to submit; one run to met costs about $0.01 on Haiku.
 
 **Agent sessions**
 - [Send and run a turn](./session-send.md) covers starting from the Agent tab, follow-ups, queueing, Stop, a session ending and Clear context. Costs model turns (free on an OpenCode `-free` model once titles and recaps are off).
-- [Session pickers](./session-pickers.md) covers the agent-mode tile and the status bar's model, effort and permission menus. Costs model turns for the live switch.
+- [Session pickers](./session-pickers.md) covers the agent-mode tile and the status bar's model, effort and permission menus (`Stage default` through `Bypass permissions`). Costs model turns for the live switch.
 - [Permissions and questions](./session-permissions.md) covers the permission card and the question card. Costs Claude Haiku turns.
 - [Session tabs](./session-tabs.md) covers New agent, per-tab drafts, rename, archive and the Stop agent confirm. Costs model turns once a tab starts.
 - [Attach context](./session-attach.md) covers `@` file autocomplete, chips and sending with attachments. Costs model turns.
@@ -100,7 +100,7 @@ User-facing surfaces with no recipe yet. Each names its entry point in source.
 - Archive script run and `Skip script & archive`: `src/features/workstreams/ArchiveWorkstreamDialog.tsx:13`
 - Harness sign-in card: `src/features/settings/harnesses/AuthCard.tsx:3`
 - Handoff banner: `src/features/session/SessionChat.tsx:273`
-- Rewind: `src/features/session/TranscriptView.tsx:121`
+- Rewind: `src/features/session/TranscriptView.tsx:123`
 - Prompt history: `src/features/session/promptHistory.ts:20`
 - Steering (⌘Enter mid-turn): `src/features/session/SessionChat.tsx:1334`
 - Background tasks: `src/features/session/BackgroundTasksIndicator.tsx:8`
@@ -111,7 +111,7 @@ User-facing surfaces with no recipe yet. Each names its entry point in source.
 - Plan aside header actions: `src/features/plan/PlanAside.tsx:163`
 - Review plan coverage: `src/features/review/PlanCoverage.tsx:141`
 - Goal handoff: `src/features/review/GoalHandoff.tsx:23`
-- Commit flow (`Commit · N`): `src/features/workstreams/GitPanel.tsx:230`
+- Commit flow (`Commit · N`): `src/features/workstreams/GitPanel.tsx:237`
 - Settings sections Git, Notifications, Goals, Binaries: `src/features/settings/GitSettings.tsx:23`, `src/features/settings/NotificationsSettings.tsx:14`, `src/features/settings/GoalsSettings.tsx:13`, `src/features/settings/BinariesSettings.tsx:7`
 - Server update flow: `src/features/hosts/ServerUpdateConfirm.tsx:12`
 - Disconnected notice and reconnect: `src/features/system/ServerDisconnectedNotice.tsx:20`, `src/features/hosts/reconnect.ts:148`
@@ -123,11 +123,12 @@ User-facing surfaces with no recipe yet. Each names its entry point in source.
 - Per-project prompt overrides: `src/features/prompts/PromptLibrary.tsx:277`
 - Doc Properties related picker and raw YAML: `src/features/library/DocProperties.tsx:23`
 - View on GitHub: `src/routes/Root.tsx:1002`
-- Lead dock beyond its idle state (send, expand to the Lead's chat, its question, the note strip): `src/features/lead/LeadDock.tsx:74`. Each needs a Lead turn.
+- Lead dock beyond its idle state (send, expand to the Lead's chat and minimize, its question, the note strip, the day summary, `Open in Claude` and the copy-link button), and the status bar's Lead model, effort and permission pills while it's expanded: `src/features/lead/LeadDock.tsx:76`. Each needs a Lead turn.
 - Lead-driven board marks (`◎ Driven by the Lead`, a Lead question pointing at a workstream card, `Archive`/`Later`): `src/features/board/PipelineCard.tsx:115`, `src/features/lead/lead.ts:71`. Need a Lead that spawns or asks.
-- Sidebar project header as the Lead (Lead mark, `Lead · N needs you`, main hidden once the Lead holds a session): `src/features/lead/LeadProjectTitle.tsx`, `src/routes/Root.tsx:1292`. The mark alone renders free on the `review_lifecycle` sandbox.
+- Sidebar project header as the Lead (Lead mark, the needs-you warn glow on the repo avatar titled `Lead: 1 workstream needs you` or `Lead: N workstreams need you`, main hidden once the Lead holds a session): `src/features/lead/LeadProjectTitle.tsx:22`, `src/routes/Root.tsx:1292`. The mark alone renders free on the `review_lifecycle` sandbox.
 - Right-aside Driving panel: `src/features/lead/LeadDrivingPanel.tsx:24`. Needs Lead-spawned workstreams.
 - Sub-workstreams folding under their parent's board card (`N sub-workstreams`, `↳ <parent>`) and nesting under their parent in the sidebar (`Collapse <title>`/`Expand <title>`): `src/features/board/PipelineBoard.tsx:121`, `src/routes/Root.tsx:1417`. Need `parentWorkstreamId`, set only for agent-created workstreams.
 - Server-side workstream list changes (an agent's create or archive) reaching the sidebar without refocus: `src/lib/events.ts:134`. Needs a create from outside the webview.
-- Session wake after a server restart and `wake_when` turns (`[from hyprlayer]`): server-side, rendered by `src/features/session/TranscriptView.tsx`. Needs a mid-turn session and a server restart.
+- Session wake after a server restart and `wake_when` turns: server-side; their `[from hyprlayer]` and `[from hyprlayer · wake <id>]` turns render as incoming-message cards. Needs a mid-turn session and a server restart.
+- Incoming-message cards from other agents and hyprlayer (title, `Open agent`/`Open session`/`Open terminal`, a wake's `PR #N` link): `src/features/session/IncomingMessageCard.tsx:43`, `src/features/session/incomingMessage.ts:44`. A real one needs another agent's `message_agent` or a wake; session-send.md notes that typed text with the header renders the same card.
 - Plan `[x]` write-back: `src/features/plan/PlanAside.tsx:241`

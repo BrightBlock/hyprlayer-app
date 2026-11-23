@@ -28,7 +28,7 @@ Preconditions:
 Helpers (paste into `webview_execute_js`):
 
 - Live dock store: `const u = performance.getEntriesByType('resource').map(e => e.name).filter(n => n.includes('/features/session/scriptsStore')).pop(); const { useScriptsStore } = await import(u); useScriptsStore.getState().dock['<wsId>']`. `termIds` maps tab number to terminal id. <!-- src: src/features/session/scriptsStore.ts:11 -->
-- Output read-back. An attach with `offset: null` replays the server's ring from its start; a number resumes from that absolute offset. Release the channel afterwards; the PTY keeps running. <!-- src: crates/hyprlayer-core/src/terminal/mod.rs:170 --> <!-- src: src/lib/bindings.ts:231 -->
+- Output read-back. An attach with `offset: null` replays the server's ring from its start; a number resumes from that absolute offset. Release the channel afterwards; the PTY keeps running. <!-- src: crates/hyprlayer-core/src/terminal/mod.rs:170 --> <!-- src: src/lib/bindings.ts:232 -->
   ```js
   const { Channel, invoke } = window.__TAURI__.core;
   const ch = new Channel(); let out = '';
@@ -56,7 +56,7 @@ Steps:
 - The main strip has no plain shell tab. `ShellTab.terminalView` renders a `TerminalTab`, but nothing in `src/` creates one, so shells live only in the dock. <!-- src: src/routes/ProjectPage.tsx:1290 -->
 - No handle exposes the live xterm buffer. `Terminal` is private to `XtermEngine`, and the WebGL renderer draws to a canvas, so DOM text is empty. Read output through the attach replay above, and use screenshots only for layout. <!-- src: src/lib/terminal/terminalEngine.ts:113 -->
 - An occluded window stalls `requestAnimationFrame`. `TerminalTab` waits two frames before `terminal_open`, so the pane stays blank and `termIds` stays empty. Bring the window forward and check `document.hidden`. <!-- src: src/features/session/TerminalTab.tsx:82 -->
-- Bridge `type` reaches xterm, including a trailing `\n`; `press Enter` doesn't. `terminal_write` (`{ terminalId, data: base64 }`) only seeds input; it isn't the user path. <!-- src: src/lib/bindings.ts:227 -->
+- Bridge `type` reaches xterm, including a trailing `\n`; `press Enter` doesn't. `terminal_write` (`{ terminalId, data: base64 }`) only seeds input; it isn't the user path. <!-- src: src/lib/bindings.ts:228 -->
 - The shell is your `$SHELL -l`, so profile output (such as a mise banner) lands in the replay. <!-- src: crates/hyprlayer-core/src/runtime/terminals.rs:1085 -->
 - The replay is capped ring scrollback. Very long output loses its head.
 - Dock position and height persist in webview storage for this Vite origin. Restore `bottom` before cleanup.
