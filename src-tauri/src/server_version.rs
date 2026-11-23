@@ -9,7 +9,7 @@ pub const SERVER_VERSION: &str = hyprlayer_server::VERSION;
 
 /// The oldest server this app works against. Raise it, and bump the server,
 /// when the app starts depending on a server change such as a new command.
-pub const MIN_SERVER_VERSION: &str = "0.8.22";
+pub const MIN_SERVER_VERSION: &str = "0.8.23";
 
 /// Servers up to 0.8.2 send no version; none of them can be told apart.
 const UNVERSIONED_SERVER: &str = "0.8.2";

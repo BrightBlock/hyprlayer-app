@@ -34,8 +34,8 @@ From the repo root:
 It needs `java` (11+) and `mise`. It installs TLC 1.7.4 through mise, pinned by
 checksum (set `TLA2TOOLS=/path/tla2tools.jar` to skip mise), and runs TLC once per rule.
 It prints `PASS`/`FAIL` per rule, compares the list with `expected.txt`, and exits
-non-zero when they differ. About 80 s on 16 cores: the two passing rules each
-explore about 18 M states, while failing rules stop at their first, shortest
+non-zero when they differ. Each passing rule explores about 18 M states (about
+36 s on 24 cores), while failing rules stop at their first, shortest
 counterexample. `OUT=dir` keeps the logs. Each rule's TLC output is in
 `$OUT/<Rule>/tlc.out`.
 
@@ -47,7 +47,7 @@ states, so it can list rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails five rules on the code at the sync commit. These are findings
+The model fails four rules on the code at the sync commit. These are findings
 about the product, not modeling errors. Each path below was walked step by step
 against the code. None was replayed in a running server.
 
@@ -72,14 +72,18 @@ against the code. None was replayed in a running server.
    `gate` → `send`, which start `iteration + 1` without comparing it with
    `max_iterations`. Only `decide_boundary` (in `judge`) and `recover` (the crash
    path) check the limit.
-3. **`NoStrandedGoal`: a runner that exits from `Run::open` is never marked finishing.**
-   `Run::open` returns `Err(Over)` when the goal is not running, and `run` returns
-   without `lease.finishing()`. A `spawn` in that window sees a live,
-   non-finishing runner and does nothing. Then the runner's `Registration` drops
-   and the goal is left running with no runner. Path: a restart, the resumer
-   writes `Resuming`, your pause writes `Paused` (no runner yet), the resumer's
-   runner opens and sees paused, your resume writes running, your resume's
-   `spawn` is a no-op, and the runner exits.
+3. **Fixed: `NoStrandedGoal`: a runner that exits from `Run::open` is never marked finishing.**
+   `Run::open` returned `Err(Over)` when the goal was not running, without
+   `lease.finishing()`. A `spawn` in that window saw a live, non-finishing
+   runner and did nothing. Then the runner's `Registration` dropped and the
+   goal was left running with no runner. Path: a restart, the resumer writes
+   `Resuming`, your pause writes `Paused` (no runner yet), the resumer's runner
+   opens and sees paused, your resume writes running, your resume's `spawn` is
+   a no-op, and the runner exits.
+   `Run::open` now reads the status and marks the lease finishing while it
+   holds `transitions`. Marking finishing without the lock is not enough: split
+   into a read step and a mark step, the model fails again (a resume writes
+   running and its `spawn` no-ops between them).
 4. **`CutOffSessionPickedUp`: a session whose goal is paused is never woken.**
    `wake::check` skips any session with `session.goal` set ("a running or paused
    goal is the goal resumer's"), but `resume_running` reads only
@@ -94,7 +98,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 63421a2c9f91ee07e1da31545db3088e95800863 -- \
+git diff --stat cec5abd86213b5b286241d591d6115af6974caa9 -- \
   crates/hyprlayer-core/src/runtime/goals/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/goal_loop.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs
@@ -110,14 +114,14 @@ check commands, prompts, spend arithmetic or `decide_boundary`'s order beyond
 |---|---|
 | `Spawn` | `GoalRunners::spawn`, goals/mod.rs:378 (no-op on a live runner; chain after a finishing one) |
 | `RunnerChain` | the `earlier.changed()` wait in `spawn`'s task |
-| `RunnerOpen` | `Run::open`, goal_loop.rs:592 (exits when status ≠ running) |
-| `RunnerResume` | `Run::resume`, goal_loop.rs:696 |
-| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1522/1542, from `drain_controls` (1503) or the selects in `working` (1003) and `check` (1375) |
-| `RunnerToGate`, `RunnerGate` | `boundary` (802) → `gate` (836) → `send` (936) |
-| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1127 |
-| `RunnerJudge` | `judge` (1217) → `decide_boundary` → `follow` |
-| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1620 (`finishing`, `transition`, drain, write) |
-| `RunnerLift`, `RunnerExit` | `lift_cap` (1635); `Registration::drop`, goals/mod.rs:359 |
+| `RunnerOpen` | `Run::open`, goal_loop.rs:592 (under `transitions`: marks finishing and exits when status ≠ running) |
+| `RunnerResume` | `Run::resume`, goal_loop.rs:702 |
+| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1528/1548, from `drain_controls` (1509) or the selects in `working` (1009) and `check` (1381) |
+| `RunnerToGate`, `RunnerGate` | `boundary` (808) → `gate` (842) → `send` (942) |
+| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1133 |
+| `RunnerJudge` | `judge` (1223) → `decide_boundary` → `follow` |
+| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1626 (`finishing`, `transition`, drain, write) |
+| `RunnerLift`, `RunnerExit` | `lift_cap` (1641); `Registration::drop`, goals/mod.rs:359 |
 | `Pause*` | `GoalService::pause` (698) → `try_pause` (1055), `wait_exit` (442) |
 | `Stop*` | `stop` (747) → `end` (1041) → `try_end` (1080) |
 | `Resume*` | `GoalService::resume` (713), `running_again` (292) |
@@ -167,4 +171,4 @@ what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the model describes it.
 
-Last confirmed against: `63421a2c9f91ee07e1da31545db3088e95800863`.
+Last confirmed against: `cec5abd86213b5b286241d591d6115af6974caa9`.

@@ -3,5 +3,5 @@ PASS SingleDriver
 FAIL PauseHonored
 FAIL StopHonored
 FAIL IterationCap
-FAIL NoStrandedGoal
+PASS NoStrandedGoal
 FAIL CutOffSessionPickedUp

@@ -96,12 +96,17 @@ RunnerChain(g) ==
   /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
-(* Run::open: a goal that is not running has nothing to drive *)
+(* Run::open: under `transitions`, a goal that is not running has nothing to
+   drive, and the runner is marked finishing before the lock drops. *)
 RunnerOpen(g) ==
   /\ rpc[g] = "open"
-  /\ Goto(g, IF status # "running" THEN "exit"
-             ELSE IF mode[g] = "resume" THEN "resume" ELSE "boundary")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ lock = Free
+  /\ IF status # "running"
+     THEN /\ Goto(g, "exit")
+          /\ fin' = [fin EXCEPT ![g] = TRUE]
+     ELSE /\ Goto(g, IF mode[g] = "resume" THEN "resume" ELSE "boundary")
+          /\ UNCHANGED fin
+  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Run::resume: picks up from the step the goal went down on *)

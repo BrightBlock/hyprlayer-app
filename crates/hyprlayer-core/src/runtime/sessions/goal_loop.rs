@@ -602,11 +602,17 @@ impl Run {
         let actors = rt.session_actors.clone();
         let events = rt.events.clone();
 
-        let id = goal_id.clone();
-        let row = read(&db, move |db| db.goal(&id)).await?.ok_or(Over)?;
-        if row.goal.status != GoalStatus::Running {
-            return Err(Over);
-        }
+        let row = {
+            // A resume writes `running` under this lock and spawns after it, so it either sees us finishing or we see it running.
+            let _transition = lease.transition().await;
+            let id = goal_id.clone();
+            let row = read(&db, move |db| db.goal(&id)).await?.ok_or(Over)?;
+            if row.goal.status != GoalStatus::Running {
+                lease.finishing();
+                return Err(Over);
+            }
+            row
+        };
         let session = rt
             .sessions()
             .get(&row.goal.session_id)
