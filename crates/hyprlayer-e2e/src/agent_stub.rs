@@ -84,6 +84,7 @@ mkdir -p "$dir"
 home="$PWD"
 for a in "$@"; do printf '%s\n' "$a"; done > "$dir/argv"
 env | grep '^HYPRLAYER_' > "$dir/env"
+printf '%s\n' "$$" > "$dir/pid"
 # The exit watcher deletes the launch dir, so keep what it held.
 [ -f "$settings" ] && cp "$settings" "$dir/settings.json"
 [ -f "$mcp" ] && cp "$mcp" "$dir/mcp.json"

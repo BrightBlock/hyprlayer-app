@@ -132,6 +132,8 @@ pub struct Question {
 #[serde(rename_all = "camelCase")]
 pub struct QuestionSubject {
     pub workstream_id: String,
+    /// Always false. Desktops through 0.8.24 fail to decode a subject without it.
+    #[serde(default)]
     pub archive: bool,
 }
 

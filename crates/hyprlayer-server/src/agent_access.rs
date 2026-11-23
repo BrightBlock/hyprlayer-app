@@ -165,6 +165,9 @@ pub(crate) fn access(request: &Request) -> Access {
             Access::Full(Scope::Terminal(terminal_id.clone()))
         }
         Request::KillPtyAgent { terminal_id } => Access::Full(Scope::Terminal(terminal_id.clone())),
+        Request::ArchiveWorkstreamForAgent { workstream_id } => {
+            Access::Full(Scope::Workstream(workstream_id.clone()))
+        }
         Request::RequestReveal { target } => Access::Full(Scope::Reveal(target.clone())),
         Request::WakeWhen { condition, .. } => Access::Read(match condition {
             WakeCondition::Pr { workstream_id, .. } => Scope::Workstream(workstream_id.clone()),

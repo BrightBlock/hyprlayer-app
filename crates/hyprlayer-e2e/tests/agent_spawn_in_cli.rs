@@ -78,6 +78,57 @@ async fn agent_spawn_in_cli() {
         json!({ "engineId": spawned["engineId"], "hasSessionId": spawned.get("sessionId").is_some(), "matchesThePaste": typed }),
     );
 
+    j.step("archiving a workstream ends the PTY agent spawned into it, and only that one");
+    let shelf = create_workstream(&mut j, &c, &project, "Shelved").await;
+    let shelf = text(&shelf, "/item/id");
+    let shelved = parsed(
+        &mcp.call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_SHELVED", "title": "Shelved", "workstream_id": shelf }),
+        )
+        .await,
+    );
+    let shelved = shelved["terminalId"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    j.alias(&shelved, "$SHELVED");
+    let pid_file = launch_log(&sandbox, &shelved).join("pid");
+    let started = eventually(IO, || pid_file.is_file()).await;
+    let pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+    j.call(
+        &c,
+        Request::ArchiveWorkstream {
+            id: shelf.clone(),
+            skip_scripts: true,
+        },
+    )
+    .await
+    .expect("archive_workstream");
+    let exited = eventually(IO, || !alive(pid.trim())).await;
+    let listed: Vec<String> = c
+        .list_pty_agents(None)
+        .await
+        .expect("list_pty_agents")
+        .into_iter()
+        .map(|a| a.terminal_id)
+        .collect();
+    let lead_live = c
+        .list_active_sessions()
+        .await
+        .expect("list_active_sessions")
+        .iter()
+        .any(|a| a.session.id == lead);
+    j.guard(
+        "the shelved agent's process exits and leaves the list; the lead and its reviewer in another workstream stay up",
+        started
+            && exited
+            && !listed.contains(&shelved)
+            && listed.contains(&terminal)
+            && lead_live,
+        json!({ "started": started, "exited": exited, "shelvedListed": listed.contains(&shelved), "reviewerListed": listed.contains(&terminal), "leadLive": lead_live }),
+    );
+
     j.step("an unhooked engine falls back to a session for a non-bypass caller");
     set_engine(
         &mut j,
@@ -298,6 +349,15 @@ fn plan_status(plan: &str) -> String {
                 .find_map(|l| l.strip_prefix("status: ").map(str::to_string))
         })
         .unwrap_or_default()
+}
+
+fn alive(pid: &str) -> bool {
+    !pid.is_empty()
+        && std::process::Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
 }
 
 fn parsed(result: &Value) -> Value {

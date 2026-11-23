@@ -50,6 +50,7 @@ These need Full. You get it when the user sets agent control to Full, or when yo
 | `stop_agent` | `ctl stop-agent <session>` |
 | `kill_agent` | `ctl kill-agent <session>` |
 | `archive_agent` | `ctl archive-agent <session>` |
+| `archive_workstream` | `ctl archive-workstream <workstream>` |
 | `answer_question` | `ctl answer <session> <request> <answers-json>` |
 | `set_agent_title` | `ctl title <title>` |
 | `create_workstream` | `ctl create-workstream <title>` |
@@ -72,7 +73,7 @@ A refusal carries a code, a message and a remedy. Don't retry it: change course,
 - `agent_control_off`: the user turned agent control off. Nothing here works; carry on without it.
 - `agent_control_denied`: the message says why:
   - the call needs Full and you are at Read;
-  - the command is never open to agents: merging a PR, archiving or deleting a workstream, running the archive script, discarding changes, removing a project, creating a global document, answering permission prompts, changing a permission mode or settings, skills, agent definitions, the agent bundle, the Cloud account;
+  - the command is never open to agents: merging a PR, deleting a workstream, archiving one other than through `archive_workstream`, running the archive script, discarding changes, removing a project, creating a global document, answering permission prompts, changing a permission mode or settings, skills, agent definitions, the agent bundle, the Cloud account;
   - the target is not an agent you spawned;
   - the target belongs to another project, or is a document outside it you tried to write or attach;
   - you are a report-only session;

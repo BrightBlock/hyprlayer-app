@@ -136,7 +136,7 @@ fn with_props(mut base: Value, extra: Value) -> Value {
     base
 }
 
-const TOOLS: [Tool; 32] = [
+const TOOLS: [Tool; 33] = [
     Tool {
         name: READ_TOOLS[0],
         description: "Who this agent is to hyprlayer: its session or terminal, workstream, project and control level.",
@@ -319,6 +319,16 @@ const TOOLS: [Tool; 32] = [
         description: "Archives an idle session this agent spawned.",
         read_only: false,
         schema: session_arg,
+    },
+    Tool {
+        name: "archive_workstream",
+        description: "Archives another workstream in this project, as the user's archive does: its agents stop and its worktree moves aside. Only once the user has said to archive it. Never this agent's own workstream, main, or the Lead's.",
+        read_only: false,
+        schema: || {
+            json!({ "type": "object", "required": ["workstream_id"], "properties": {
+                "workstream_id": { "type": "string" },
+            } })
+        },
     },
     Tool {
         name: "answer_question",
@@ -789,6 +799,12 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
         "archive_agent" => {
             client
                 .set_session_archived(required(args, "session_id")?.into(), true)
+                .await?;
+            Ok(json!("archived"))
+        }
+        "archive_workstream" => {
+            client
+                .archive_workstream_for_agent(required(args, "workstream_id")?.into())
                 .await?;
             Ok(json!("archived"))
         }

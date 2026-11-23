@@ -356,6 +356,7 @@ hyprlayer_proto::commands! {
     WaitPtyAgent: wait_pty_agent(terminal_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();
     KillPtyAgent: kill_pty_agent(terminal_id: String) -> ();
+    ArchiveWorkstreamForAgent: archive_workstream_for_agent(workstream_id: String) -> ();
     RequestReveal: request_reveal(target: RevealTarget) -> ();
     WakeWhen: wake_when(condition: WakeCondition, timeout_ms: Option<u32>) -> Wake;
     ListWakes: list_wakes() -> Vec<Wake>;

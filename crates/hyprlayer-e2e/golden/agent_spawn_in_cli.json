@@ -19,6 +19,22 @@
       "guards": [
         {
           "evidence": {
+            "exited": true,
+            "leadLive": true,
+            "reviewerListed": true,
+            "shelvedListed": false,
+            "started": true
+          },
+          "guard": "the shelved agent's process exits and leaves the list; the lead and its reviewer in another workstream stay up",
+          "ok": true
+        }
+      ],
+      "step": "archiving a workstream ends the PTY agent spawned into it, and only that one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "error": null,
             "livePtys": 1,
             "result": "session"

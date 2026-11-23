@@ -37,6 +37,7 @@ At agent control Full:
   stop-agent <session>                    interrupt an agent this agent spawned
   kill-agent <session>                    end an agent this agent spawned
   archive-agent <session>                 archive a session this agent spawned
+  archive-workstream <workstream>         archive another workstream once the user said to
   answer <session> <request> <answers>    answer its question; answers is a JSON object
   title <title> [--session id]            rename this agent's session or one it spawned
   create-workstream <title> [--base b] [--branch b] [--worktree-mode isolated|existing]
@@ -217,6 +218,7 @@ fn parse(argv: Vec<String>) -> Result<Parsed, String> {
         "stop-agent" => ("stop_agent", &[SESSION]),
         "kill-agent" => ("kill_agent", &[SESSION]),
         "archive-agent" => ("archive_agent", &[SESSION]),
+        "archive-workstream" => ("archive_workstream", &[("workstream_id", TEXT)]),
         "answer" => (
             "answer_question",
             &[SESSION, ("request_id", TEXT), ("answers", FlagValue::Json)],

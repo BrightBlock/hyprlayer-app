@@ -180,7 +180,7 @@ mod tests {
             questions: vec![question("Ship it?")],
             subject: Some(QuestionSubject {
                 workstream_id: "ws-461".into(),
-                archive: true,
+                archive: false,
             }),
         };
         let raw = encode_raw_event(&event).unwrap();

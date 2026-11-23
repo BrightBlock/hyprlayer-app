@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 
 import { Icon } from "@/components/Icon";
 import { Button, ErrorNote, IconButton, Spinner } from "@/components/ui";
-import type { LeadView, WorkstreamView } from "@/lib/bindings";
+import type { LeadView } from "@/lib/bindings";
 import { openExternalUrl } from "@/lib/browser";
 import { formatCompactAge } from "@/lib/format";
 import { errorMessage } from "@/lib/ipc";
@@ -30,48 +30,6 @@ function tokenMs(name: string, fallback: number): number {
 }
 
 const SHRINK_SHARE = 0.7;
-
-// The server archives the workstream before it forwards an Archive answer.
-export function ArchiveOrLater({ ask, workstream }: { ask: LeadAsk; workstream: WorkstreamView }) {
-  const [busy, setBusy] = useState(false);
-  const answer = (label: string) => {
-    const q = ask.question.questions[0];
-    return answerQuestion(ask.sessionId, ask.question.requestId, q ? { [q.question]: label } : {});
-  };
-  const archiveThenAnswer = () => {
-    setBusy(true);
-    answer("Archive").catch((e: unknown) => {
-      setBusy(false);
-      useToast.getState().show(`Couldn't archive ${workstream.item.title}`, errorMessage(e), { tone: "bad" });
-    });
-  };
-
-  return (
-    <span className="flex shrink-0 items-center gap-1.5">
-      <Button variant="primary" size="sm" busy={busy} onClick={archiveThenAnswer}>
-        Archive
-      </Button>
-      <Button size="sm" disabled={busy} onClick={() => void answer("Later")}>
-        Later
-      </Button>
-    </span>
-  );
-}
-
-function ArchiveAsk({ ask, workstream }: { ask: LeadAsk; workstream: WorkstreamView }) {
-  const text = ask.question.questions[0]?.question ?? "";
-  const title = workstream.item.title;
-  return (
-    <div className="flex items-center gap-2.5 border-b border-edge-2 py-2 pr-2 pl-3.5">
-      <span className="h-[7px] w-[7px] shrink-0 rounded-full bg-warn" />
-      <span className="min-w-0 flex-1 text-body text-ink-2">
-        {!text.includes(title) && <span className="font-semibold text-ink">{title} </span>}
-        {text}
-      </span>
-      <ArchiveOrLater ask={ask} workstream={workstream} />
-    </div>
-  );
-}
 
 export function LeadDock({
   lead,
@@ -288,7 +246,7 @@ export function LeadDock({
       <div ref={docked} inert={phase !== "closed"} className="shrink-0 border-t border-edge bg-panel">
         {header(false)}
         <div className="px-6 pt-1 pb-3.5">
-          {ask && !ask.subject?.archive && (
+          {ask && (
             <QuestionPrompt
               key={ask.question.requestId}
               pending={ask.question}
@@ -296,7 +254,6 @@ export function LeadDock({
             />
           )}
           <div className="rounded-card border border-edge bg-surface focus-within:border-ink-dim/70">
-            {ask?.subject?.archive && <ArchiveAsk ask={ask} workstream={ask.subject.view} />}
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             <form onSubmit={submit} className="flex items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
               <input
@@ -326,7 +283,6 @@ export function LeadDock({
         >
           {header(true)}
           <div style={contentStyle} className="flex min-h-0 flex-1 flex-col">
-            {ask?.subject?.archive && <ArchiveAsk ask={ask} workstream={ask.subject.view} />}
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             {/* SessionChat's transcript slides 36px up under its own header; this clip keeps it off the dock's. */}
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-t border-edge-2">

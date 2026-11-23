@@ -907,15 +907,10 @@ fn question_subject(input: &Value) -> Option<QuestionSubject> {
         other => other,
     };
     let (kind, id) = metadata.get("source")?.as_str()?.split_once(':')?;
-    let archive = match kind.trim() {
-        "workstream" => false,
-        "archive" => true,
-        _ => return None,
-    };
     let workstream_id = id.trim();
-    (!workstream_id.is_empty()).then(|| QuestionSubject {
+    (kind.trim() == "workstream" && !workstream_id.is_empty()).then(|| QuestionSubject {
         workstream_id: workstream_id.to_string(),
-        archive,
+        archive: false,
     })
 }
 
@@ -1182,26 +1177,17 @@ mod tests {
 
     #[test]
     fn ask_user_question_metadata_source_names_its_subject() {
-        let subject = |id: &str, archive| {
+        let subject = |id: &str| {
             Some(QuestionSubject {
                 workstream_id: id.into(),
-                archive,
+                archive: false,
             })
         };
         for (metadata, expected) in [
-            (
-                json!({ "source": "workstream:ws-461" }),
-                subject("ws-461", false),
-            ),
-            (
-                json!({ "source": "archive:ws-461" }),
-                subject("ws-461", true),
-            ),
-            (json!(r#"{"source":"archive:ws-7"}"#), subject("ws-7", true)),
-            (
-                json!({ "source": "workstream: ws-2 " }),
-                subject("ws-2", false),
-            ),
+            (json!({ "source": "workstream:ws-461" }), subject("ws-461")),
+            (json!(r#"{"source":"workstream:ws-7"}"#), subject("ws-7")),
+            (json!({ "source": "workstream: ws-2 " }), subject("ws-2")),
+            (json!({ "source": "archive:ws-461" }), None),
             (json!({ "source": "workstream:" }), None),
             (json!({ "source": "merge:ws-461" }), None),
             (json!({ "source": "ws-461" }), None),

@@ -44,8 +44,12 @@ import { queryClient } from "./queryClient";
 
 const workstreamArchiveCleanups: Array<(id: string) => void> = [];
 
-export function onWorkstreamArchived(cleanup: (id: string) => void): void {
+export function onWorkstreamArchived(cleanup: (id: string) => void): () => void {
   workstreamArchiveCleanups.push(cleanup);
+  return () => {
+    const at = workstreamArchiveCleanups.indexOf(cleanup);
+    if (at >= 0) workstreamArchiveCleanups.splice(at, 1);
+  };
 }
 
 export function useBootstrap() {

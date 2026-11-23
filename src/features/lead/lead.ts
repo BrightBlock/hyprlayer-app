@@ -65,7 +65,7 @@ export function useFollowLead({ sessionId, workstreamId }: LeadView): void {
 export type LeadAsk = {
   sessionId: string;
   question: PendingQuestion;
-  subject: { view: WorkstreamView; archive: boolean } | null;
+  subject: { view: WorkstreamView } | null;
 };
 
 export function useLeadAsk(lead: ProjectLead | null, views: readonly WorkstreamView[]): LeadAsk | null {
@@ -76,7 +76,7 @@ export function useLeadAsk(lead: ProjectLead | null, views: readonly WorkstreamV
   const view = named
     ? views.find((v) => v.item.id === named.workstreamId && v.item.id !== lead.view.workstreamId)
     : undefined;
-  return { sessionId, question, subject: named && view ? { view, archive: named.archive } : null };
+  return { sessionId, question, subject: view ? { view } : null };
 }
 
 export type LeadNote = { title: string; body: string };

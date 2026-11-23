@@ -244,7 +244,7 @@ async fn agent_control_read() {
     set_level(&mut j, &c, AgentControlLevel::Read).await;
     j.guard(
         "at full every tool is listed; --read-only still lists only the read tools",
-        full_list.names.len() == 32
+        full_list.names.len() == 33
             && full_list.names.iter().any(|n| n == "spawn_agent")
             && read_only_list.names == listed.names,
         json!({ "full": full_list.names.len(), "readOnly": read_only_list.names.len() }),
@@ -348,6 +348,14 @@ async fn agent_control_read() {
     let reveal = mcp
         .call("reveal", json!({ "kind": "file", "path": "README.md" }))
         .await;
+    let shelf = text(
+        &create_workstream(&mut j, &c, &project, "Shelf").await,
+        "/item/id",
+    );
+    j.alias(&shelf, "$SHELF");
+    let shelve = mcp
+        .call("archive_workstream", json!({ "workstream_id": shelf }))
+        .await;
     let sessions_after = c
         .list_sessions(ws.clone())
         .await
@@ -366,6 +374,12 @@ async fn agent_control_read() {
             "reveal": first_line(&tool_text(&reveal)),
             "spawned": sessions_after - sessions_before,
         }),
+    );
+    let shelf_open = is_open(&c, &project, &shelf).await;
+    j.guard(
+        "archive_workstream needs Full too, and the workstream stays",
+        needs_full(&shelve) && shelf_open,
+        json!({ "archiveWorkstream": first_line(&tool_text(&shelve)), "workstreamOpen": shelf_open }),
     );
 
     j.step("notify reaches announced desktops");
@@ -470,6 +484,59 @@ async fn agent_control_read() {
                 .is_some_and(|e| e.message.contains("it ends a workstream"))
             && still_open,
         json!({ "archive": wire(&archive), "workstreamOpen": still_open }),
+    );
+
+    j.step("the archive_workstream tool archives another workstream at full");
+    let own = mcp
+        .call("archive_workstream", json!({ "workstream_id": ws }))
+        .await;
+    let elsewhere = mcp
+        .call("archive_workstream", json!({ "workstream_id": other_ws }))
+        .await;
+    let own_open = is_open(&c, &project, &ws).await;
+    let elsewhere_open = is_open(&c, &other, &other_ws).await;
+    j.guard(
+        "its own workstream and another project's are refused, and both stay",
+        tool_failed(&own)
+            && tool_text(&own).starts_with("agent_control_denied")
+            && tool_text(&own).contains("its own workstream")
+            && tool_failed(&elsewhere)
+            && tool_text(&elsewhere).starts_with("agent_control_denied")
+            && own_open
+            && elsewhere_open,
+        json!({
+            "own": first_line(&tool_text(&own)),
+            "elsewhere": first_line(&tool_text(&elsewhere)),
+            "ownOpen": own_open,
+            "elsewhereOpen": elsewhere_open,
+        }),
+    );
+    let second = server.connect().await;
+    let mut second_rx = second.take_events().expect("the second desktop's events");
+    j.call(
+        &second,
+        Request::AnnounceClient {
+            client_id: "desktop-b".into(),
+            device: "device-b".into(),
+            capabilities: TARGETED_EVENTS.iter().map(|k| k.to_string()).collect(),
+        },
+    )
+    .await
+    .expect("announce the second desktop");
+    let shelved = mcp
+        .call("archive_workstream", json!({ "workstream_id": shelf }))
+        .await;
+    let heard = events_until(&mut second_rx, IO, |e| {
+        matches!(e, RuntimeEvent::WorkstreamsChanged { project_path } if *project_path == project)
+    })
+    .await
+    .iter()
+    .any(|e| matches!(e, RuntimeEvent::WorkstreamsChanged { project_path } if *project_path == project));
+    let shelf_open = is_open(&c, &project, &shelf).await;
+    j.guard(
+        "the shelf is archived, and another client hears the list change without asking",
+        !tool_failed(&shelved) && tool_text(&shelved).contains("archived") && heard && !shelf_open,
+        json!({ "result": first_line(&tool_text(&shelved)), "otherClientHeard": heard, "shelfOpen": shelf_open }),
     );
 
     j.step("agent connections cannot open streams");
@@ -1177,6 +1244,14 @@ fn flag_values(argv: &[String], flag: &str) -> Vec<String> {
         .take_while(|a| !a.starts_with("--"))
         .cloned()
         .collect()
+}
+
+async fn is_open(c: &RpcClient, project: &str, id: &str) -> bool {
+    c.list_workstreams(project.to_string(), false)
+        .await
+        .expect("list_workstreams")
+        .iter()
+        .any(|w| w.item.id == id)
 }
 
 fn first_line(text: &str) -> String {

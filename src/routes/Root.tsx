@@ -22,6 +22,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import {
   useAllWorkstreams,
+  onWorkstreamArchived,
   useArchiveWorkstream,
   useBootstrap,
   useDetachPr,
@@ -593,6 +594,13 @@ export function Root() {
       }
     },
     [currentProjectPath, activeWorkstreamId, navigate],
+  );
+  useEffect(
+    () =>
+      onWorkstreamArchived((id) => {
+        if (currentProjectPath) dismissToProject(currentProjectPath, id);
+      }),
+    [currentProjectPath, dismissToProject],
   );
 
   const archiveOnMerge = bootstrap.data?.settings.git?.archiveOnMerge ?? false;

@@ -424,6 +424,33 @@ impl AgentControlService<'_> {
         in_project(identity, &ws.project_path)
     }
 
+    /// The user's archive, by an agent: never its own workstream, main, or one holding a Lead.
+    pub async fn archive_workstream(&self, identity: &AgentIdentity, id: &str) -> Result<()> {
+        self.require_full(identity).await?;
+        self.check_workstream(identity, id).await?;
+        if id == identity.workstream_id {
+            return Err(denied("an agent cannot archive its own workstream"));
+        }
+        let workstream = self.runtime.workstreams().find(id).await?;
+        if workstream.is_inplace() {
+            return Err(denied(
+                "the project's main checkout is not archived by an agent",
+            ));
+        }
+        let sessions = self.runtime.sessions().list(id).await?;
+        if sessions.iter().any(|s| s.lead) {
+            return Err(denied("that workstream holds the Lead"));
+        }
+        self.runtime
+            .workstreams()
+            .archive(super::workstreams::ArchiveWorkstreamRequest {
+                id: id.to_string(),
+                skip_scripts: false,
+            })
+            .await?;
+        Ok(())
+    }
+
     pub async fn check_session(&self, identity: &AgentIdentity, id: &str) -> Result<()> {
         let db = self.runtime.db.clone();
         let owned = id.to_string();

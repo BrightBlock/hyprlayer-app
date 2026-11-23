@@ -2541,6 +2541,15 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn archive_workstream_for_agent(&self, workstream_id: String) -> Result<(), WireError> {
+        let identity = self.agent_identity("archive_workstream_for_agent")?;
+        self.runtime
+            .agent_control()
+            .archive_workstream(&identity, &workstream_id)
+            .await
+            .wire()
+    }
+
     async fn request_reveal(&self, target: RevealTarget) -> Result<(), WireError> {
         let identity = self.agent_identity("request_reveal")?;
         self.runtime.agent_control().reveal(&identity, target);

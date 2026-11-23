@@ -123,7 +123,7 @@
         },
         {
           "evidence": {
-            "full": 32,
+            "full": 33,
             "readOnly": 13
           },
           "guard": "at full every tool is listed; --read-only still lists only the read tools",
@@ -240,6 +240,14 @@
           },
           "guard": "spawn_agent and reveal are agent_control_denied, and nothing was spawned",
           "ok": true
+        },
+        {
+          "evidence": {
+            "archiveWorkstream": "agent_control_denied: agent control refused this: this needs agent control at Full",
+            "workstreamOpen": true
+          },
+          "guard": "archive_workstream needs Full too, and the workstream stays",
+          "ok": true
         }
       ],
       "step": "a mutating tool is refused at read"
@@ -320,6 +328,30 @@
         }
       ],
       "step": "excluded commands are refused at full"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "elsewhere": "agent_control_denied: agent control refused this: that belongs to another project",
+            "elsewhereOpen": true,
+            "own": "agent_control_denied: agent control refused this: an agent cannot archive its own workstream",
+            "ownOpen": true
+          },
+          "guard": "its own workstream and another project's are refused, and both stay",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "otherClientHeard": true,
+            "result": "\"archived\"",
+            "shelfOpen": false
+          },
+          "guard": "the shelf is archived, and another client hears the list change without asking",
+          "ok": true
+        }
+      ],
+      "step": "the archive_workstream tool archives another workstream at full"
     },
     {
       "guards": [

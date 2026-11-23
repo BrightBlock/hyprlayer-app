@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use hyprlayer_models::goal::GoalEndReason;
-use hyprlayer_models::session::{QuestionAnswers, QuestionSubject};
+use hyprlayer_models::session::QuestionAnswers;
 use hyprlayer_models::{AgentCaller, SessionOrigin};
 use tokio::sync::{broadcast, mpsc};
 
@@ -25,7 +25,6 @@ use crate::process::binaries::{parse_semver, BinaryKind};
 use crate::review::sidecar;
 use crate::runtime::agent_control::{inject, AgentIdentity, TokenGuard};
 use crate::runtime::doc_status;
-use crate::runtime::workstreams::ArchiveWorkstreamRequest;
 use crate::runtime::HyprlayerRuntime;
 use crate::skills;
 use crate::store::{FirstTurnRecord, LogCursor, NewSession, Session, SessionLogEntry, Workstream};
@@ -385,39 +384,9 @@ impl SessionService<'_> {
         request_id: &str,
         answers: QuestionAnswers,
     ) -> Result<()> {
-        let driver = self.require_live(session_id).await?;
-        if answers.0.values().any(|label| label.trim() == "Archive") {
-            if let Some(id) = self.archive_subject(session_id, request_id).await? {
-                self.runtime
-                    .workstreams()
-                    .archive(ArchiveWorkstreamRequest {
-                        id,
-                        skip_scripts: false,
-                    })
-                    .await?;
-            }
-        }
-        driver.answer_question(request_id, answers)
-    }
-
-    async fn archive_subject(&self, session_id: &str, request_id: &str) -> Result<Option<String>> {
-        let (db, sid, rid) = (
-            self.runtime.db.clone(),
-            session_id.to_string(),
-            request_id.to_string(),
-        );
-        let (asks, _) = blocking(move || db.session_open_asks(&sid, &[rid])).await?;
-        Ok(asks.into_iter().find_map(|ask| match ask.event {
-            SessionEvent::QuestionAsk {
-                subject:
-                    Some(QuestionSubject {
-                        workstream_id,
-                        archive: true,
-                    }),
-                ..
-            } => Some(workstream_id),
-            _ => None,
-        }))
+        self.require_live(session_id)
+            .await?
+            .answer_question(request_id, answers)
     }
 
     pub async fn interrupt(&self, session_id: &str) -> Result<()> {

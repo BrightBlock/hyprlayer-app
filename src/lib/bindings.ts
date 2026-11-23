@@ -1765,7 +1765,8 @@ export type QuestionOption = {
 
 export type QuestionSubject = {
 	workstreamId: string,
-	archive: boolean,
+	/**  Always false. Desktops through 0.8.24 fail to decode a subject without it. */
+	archive?: boolean,
 };
 
 export type QuitRequested = null;

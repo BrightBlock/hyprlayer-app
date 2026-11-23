@@ -1871,6 +1871,9 @@ impl WorkstreamService<'_> {
                 .await;
         }
         self.runtime.terminals.remove_for_workstream(&id).await;
+        for agent in self.runtime.pty_agents.list(Some(&id)) {
+            self.runtime.pty_agents.release(&agent.terminal_id);
+        }
         self.runtime.scripts.clear_workstream(&id).await;
 
         // After the kills: no agent of this workstream can write a doc past this point.

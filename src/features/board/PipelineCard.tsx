@@ -10,7 +10,6 @@ import { stageLabel } from "@/lib/domain/stages";
 import { formatCompactAge, formatCompactCount } from "@/lib/format";
 import type { LeadAsk } from "@/features/lead/lead";
 import { LeadMark } from "@/features/lead/LeadChip";
-import { ArchiveOrLater } from "@/features/lead/LeadDock";
 import { useSessionStore, useWorkstreamGoal } from "@/features/session/sessionStore";
 import { columnDot, pipelineColumnOf, type PipelineLive, type PipelineSession } from "./pipeline";
 import { usePlanProgress, usePrSummary } from "./pipelineData";
@@ -85,7 +84,6 @@ export function PipelineCard({
   const askedSince = useSessionStore((s) => (ask ? (s.sessions[ask.sessionId]?.awaitingSince ?? null) : null));
   const since = ask ? askedSince : ownSince;
   const line = ask ? ask.question.questions[0]?.question : waiting ? live?.line : null;
-  const archive = ask?.subject?.archive === true;
   const frame = waiting
     ? "border-warn/40 bg-q-chip-bg/40 hover:border-warn/70"
     : "border-edge bg-panel hover:border-ink-dim/50";
@@ -95,7 +93,7 @@ export function PipelineCard({
   const harness = harnessLabel(session);
   const goal = useWorkstreamGoal(item.id);
 
-  // Archive, Later and the fold sit outside the role="button", so they stay reachable and don't open the card.
+  // The fold sits outside the role="button", so it stays reachable and doesn't open the card.
   return (
     <div className={`rounded-card border shadow-sm transition-colors ${frame}`}>
       <div
@@ -159,7 +157,7 @@ export function PipelineCard({
           )}
           <span className="ml-auto shrink-0 font-mono text-meta text-ink-4">
             {ask ? (
-              !archive && <span className="text-ink-dim">answer below ↓</span>
+              <span className="text-ink-dim">answer below ↓</span>
             ) : waiting ? (
               <span className="font-sans font-semibold text-accent">Answer</span>
             ) : percent !== null ? (
@@ -170,11 +168,6 @@ export function PipelineCard({
           </span>
         </span>
       </div>
-      {ask && archive && (
-        <span className="flex justify-end px-3 pb-[11px]">
-          <ArchiveOrLater ask={ask} workstream={view} />
-        </span>
-      )}
       {fold}
     </div>
   );
