@@ -546,7 +546,7 @@ impl SkillService<'_> {
             return report(SkillRestoreOutcome::Skipped, None, None);
         };
         let mut outcome = SkillRestoreOutcome::Ok;
-        if !layout.store_dir(folder).exists() {
+        if !layout.store_matches(folder, entry) {
             let token = uuid::Uuid::new_v4().to_string();
             let token_dir = staging_root.join(&token);
             let staged = match std::fs::create_dir_all(&token_dir) {

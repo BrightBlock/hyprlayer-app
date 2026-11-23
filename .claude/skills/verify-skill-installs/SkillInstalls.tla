@@ -289,22 +289,46 @@ RemoveFails ==
                  foreign, crashes, damage, justDone>>
 
 ----------------------------------------------------------------------------
-(* SkillService::restore_entry: refetch a missing store at the locked commit
-   (its hash matches the lock, so adopt_into_store), then Layout::relink. *)
+(* SkillService::restore_entry: a store whose content_hash differs from the lock's
+   (missing or stale) is refetched at the locked commit; its hash matches the lock,
+   so adopt_into_store sets any stale store aside, renames the copy in and removes
+   the old one. Then Layout::relink. *)
 
 RestoreStart ==
   /\ pc = "idle"
   /\ lock # "none"
   /\ justDone' = "none"
-  /\ pc' = IF store = "none" THEN "s_adopt" ELSE "s_relink"
+  /\ pc' = CASE store = lock -> "s_relink"
+            [] store = "none" -> "s_adopt"
+            [] OTHER -> "s_aside"
+  /\ oldStore' = "none"
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<fsVars, ver, states, oldStore, owned0, foreign, crashes, faults, damage>>
+  /\ UNCHANGED <<fsVars, ver, states, owned0, foreign, crashes, faults, damage>>
 
+(* rename(store_dir, .old-<token>) *)
+RestoreAside ==
+  /\ pc = "s_aside"
+  /\ oldStore' = store
+  /\ store' = "none"
+  /\ storeJunk' = storeJunk + 1
+  /\ pc' = "s_adopt"
+  /\ UNCHANGED <<link, lock, linkJunk, ver, idx, made, states, swapped, tmpLink,
+                 owned0, foreign, crashes, faults, damage, justDone>>
+
+(* rename(tmp, store_dir) *)
 RestoreAdopt ==
   /\ pc = "s_adopt"
   /\ store' = lock
-  /\ pc' = "s_relink"
+  /\ pc' = IF oldStore # "none" THEN "s_clean" ELSE "s_relink"
   /\ UNCHANGED <<link, lock, storeJunk, linkJunk, ver, idx, made, states, oldStore,
+                 swapped, tmpLink, owned0, foreign, crashes, faults, damage, justDone>>
+
+(* remove_any(.old-<token>), its error ignored *)
+RestoreClean ==
+  /\ pc = "s_clean"
+  /\ storeJunk' = storeJunk - 1
+  /\ pc' = "s_relink"
+  /\ UNCHANGED <<store, link, lock, linkJunk, ver, idx, made, states, oldStore,
                  swapped, tmpLink, owned0, foreign, crashes, faults, damage, justDone>>
 
 (* healthy and foreign are left; absent is made; dangling and text are removed then made *)
@@ -319,13 +343,17 @@ RestoreRelink ==
   /\ UNCHANGED <<store, lock, storeJunk, linkJunk, ver, made, states, oldStore,
                  swapped, tmpLink, owned0, foreign, crashes, faults, damage>>
 
+(* A failed rename(tmp, store_dir) renames the set-aside store back *)
 RestoreFails ==
-  /\ pc \in {"s_adopt", "s_relink"}
+  /\ pc \in {"s_aside", "s_adopt", "s_relink"}
   /\ faults < MaxFaults
   /\ faults' = faults + 1
+  /\ IF pc = "s_adopt" /\ oldStore # "none"
+     THEN store' = oldStore /\ storeJunk' = storeJunk - 1
+     ELSE UNCHANGED <<store, storeJunk>>
   /\ pc' = "idle"
-  /\ UNCHANGED <<fsVars, ver, idx, made, states, oldStore, swapped, tmpLink, owned0,
-                 foreign, crashes, damage, justDone>>
+  /\ UNCHANGED <<link, lock, linkJunk, ver, idx, made, states, oldStore, swapped,
+                 tmpLink, owned0, foreign, crashes, damage, justDone>>
 
 ----------------------------------------------------------------------------
 (* The server is killed mid-operation: no undo runs *)
@@ -364,7 +392,8 @@ Next ==
   \/ ReplaceSweep \/ ReplaceAside \/ ReplaceStore \/ ReplaceLink \/ ReplaceMake
   \/ ReplaceRefreshAside \/ ReplaceRefreshIn \/ ReplaceLock \/ ReplaceClean \/ ReplaceUndo
   \/ RemoveStart \/ RemoveLinks \/ RemoveStore \/ RemoveLock \/ RemoveFails
-  \/ RestoreStart \/ RestoreAdopt \/ RestoreRelink \/ RestoreFails
+  \/ RestoreStart \/ RestoreAside \/ RestoreAdopt \/ RestoreClean \/ RestoreRelink
+  \/ RestoreFails
   \/ Crash \/ Damage \/ Done
 
 Spec == Init /\ [][Next]_vars

@@ -1,7 +1,7 @@
 PASS unix TypeOK
 PASS unix ForeignUntouched
 PASS unix AppEntriesOwned
-FAIL unix FinishedOpsConsistent
+PASS unix FinishedOpsConsistent
 FAIL unix LeftoversSwept
 PASS windows TypeOK
 PASS windows ForeignUntouched

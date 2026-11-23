@@ -215,9 +215,13 @@ impl Layout {
         }
     }
 
+    pub fn store_matches(&self, folder: &str, entry: &LockEntry) -> bool {
+        content_hash(&self.store_dir(folder)).is_ok_and(|hash| hash == entry.hash)
+    }
+
     /// Local, no network: what a restore would have to repair.
     pub fn lock_state(&self, folder: &str, entry: &LockEntry, lock: &SkillLock) -> SkillLockState {
-        if !self.store_dir(folder).exists() {
+        if !self.store_matches(folder, entry) {
             return SkillLockState::Missing;
         }
         let broken = lock_targets(entry).into_iter().any(|target| {

@@ -608,19 +608,43 @@ fn replace(
     }
 }
 
-/// Moves a staged skill into a missing store dir (a restore whose bytes match the lock).
+/// Moves a staged skill whose bytes match the lock into the store dir, setting aside a
+/// missing-or-stale one until the new one is in.
 pub fn adopt_into_store(layout: &Layout, staged: &Path, folder: &str, token: &str) -> Result<()> {
     std::fs::create_dir_all(&layout.store)?;
+    let store_dir = layout.store_dir(folder);
     let tmp = layout
         .store
         .join(format!(".tmp-{token}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp)?;
+    let old = layout
+        .store
+        .join(format!(".old-{token}-{}", uuid::Uuid::new_v4()));
+    let mut set_aside = false;
     let moved = layout::copy_tree(staged, &tmp)
-        .and_then(|()| std::fs::rename(&tmp, layout.store_dir(folder)));
-    if moved.is_err() {
-        let _ = std::fs::remove_dir_all(&tmp);
+        .and_then(|()| {
+            if std::fs::symlink_metadata(&store_dir).is_ok() {
+                std::fs::rename(&store_dir, &old)?;
+                set_aside = true;
+            }
+            Ok(())
+        })
+        .and_then(|()| std::fs::rename(&tmp, &store_dir));
+    match moved {
+        Ok(()) => {
+            if set_aside {
+                remove_any(&old);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tmp);
+            if set_aside {
+                let _ = std::fs::rename(&old, &store_dir);
+            }
+            Err(e.into())
+        }
     }
-    Ok(moved?)
 }
 
 /// Token and claimed dirs older than an hour are abandoned previews or crashed installs.

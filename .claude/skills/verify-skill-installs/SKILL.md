@@ -47,17 +47,18 @@ any new action. `check.sh` gives the verdict, and `/statechart` gives the story.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails these rules on the code at the sync commit. These are findings
+The model fails the `FAIL` rules in `expected.txt` on the code at the sync commit. These are findings
 about the product, not modeling errors. Each path was walked against the code; none
 was replayed on a real filesystem.
 
-1. **`FinishedOpsConsistent` (both platforms): a crash mid-update leaves new content under the old lock, and restore calls it fine.**
-   `replace` moves the new store in before it writes the lock. A crash in between
-   leaves the store at the new commit and `skills.lock` at the old one.
-   `lock_state` and `restore_entry` check only that the store dir exists, and
-   `relink` only the links, so a restore reports `Ok` and the drift stays. Nothing
-   compares the store's `content_hash` with the lock's `hash`. In project scope
-   the committed lock then disagrees with the checkout.
+1. **Fixed: a crash mid-update left new content under the old lock, and restore called it fine.**
+   `replace` moves the new store in before it writes the lock, so a crash in between
+   leaves the store at the new commit and `skills.lock` at the old one. `lock_state`
+   and `restore_entry` now compare the store's `content_hash` with the lock's `hash`
+   (`Layout::store_matches`), and a store that differs is refetched at the locked
+   commit like a missing one: `adopt_into_store` sets the stale store aside, renames
+   the fetched copy in, and removes the old one (or renames it back on failure).
+   `FinishedOpsConsistent` passes on unix; on Windows it still fails through finding 3.
 2. **`LeftoversSwept` (both platforms): store-side leftovers are never swept.**
    A crash leaves `.tmp-<token>-*` (fresh install, update or adopt) or
    `.old-<token>-*` (update) inside the store dir, and `skills.lock.tmp-*` beside
@@ -81,7 +82,7 @@ that rule's lines in `expected.txt` to `PASS`.
 Run this from the repo root:
 
 ```sh
-git diff --stat ae3c225143b11389eff4796d43286fe08e51832e -- \
+git diff --stat 232b091dab3aa6ee28fbb81f2034aa7655fc9d06 -- \
   crates/hyprlayer-core/src/skill_sources/install.rs \
   crates/hyprlayer-core/src/skill_sources/layout.rs \
   crates/hyprlayer-core/src/skill_sources/lock.rs \
@@ -97,13 +98,13 @@ gets swept, and which calls hold the scope mutex.
 | Model action | Code (at the sync commit) |
 |---|---|
 | `Owned`, `State` | `layout::owned` / `link_state`, layout.rs:51/70 |
-| `Linked` | `layout::link_skill`, layout.rs:324 (symlink; on Windows junction or copy) |
+| `Linked` | `layout::link_skill`, layout.rs:328 (symlink; on Windows junction or copy) |
 | `InstallStart` … `InstallLock` | `install::commit`, install.rs:245: the precheck, `remove_dir_all(store_dir)`, tmp copy, rename, links, `lock::write` |
 | `InstallUndo` | `Undo::run`, install.rs:219 |
 | `ReplaceStart` … `ReplaceClean` | `install::replace`, install.rs:498: `sweep_leftovers`, set the store aside, tmp copy and rename, per-link `refresh_copy`/`set_aside`/`link_skill` (479/489), `lock::write`, `remove_any` |
 | `ReplaceUndo` | `ReplaceUndo::run`, install.rs:454 |
 | `RemoveStart` … `RemoveLock` | `install::remove`, install.rs:414 (links, store, lock; no undo) |
-| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:531 → `adopt_into_store` (install.rs:612) → `Layout::relink` (layout.rs:238) |
+| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:531: `Layout::store_matches` (layout.rs:218) → `adopt_into_store` (install.rs:613: tmp copy, set a stale store aside, rename, `remove_any`) → `Layout::relink` (layout.rs:242) |
 | atomic lock write | `lock::write`, lock.rs:73 (tmp + rename) |
 | one operation at a time | `skill_locks.lock(&key)` in `restore`/`install`/`remove`, runtime/skills.rs:518/690/704 |
 
@@ -147,4 +148,4 @@ the way a new call does. Fix the action, re-run, and say what you changed.
    after you have read the covered code at the new commit and confirmed the model
    describes it.
 
-Last confirmed against: `ae3c225143b11389eff4796d43286fe08e51832e`.
+Last confirmed against: `232b091dab3aa6ee28fbb81f2034aa7655fc9d06`.

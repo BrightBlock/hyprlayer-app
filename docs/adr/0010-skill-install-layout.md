@@ -64,9 +64,10 @@ replace branch: the store swaps in place, copy-fallback links are refreshed from
 store (old kept until the end, undone in reverse on failure), missing links return, and the
 lock's `commit`, `hash` and `installedAt` move. The lock's targets are authoritative.
 
-Restore repairs from the lock. A missing store is refetched at the locked commit: matching
-the lock's hash it is moved in, otherwise it returns for approval through the same replace
-branch. Missing, dangling and text-file links are re-created (symlink, then copy); a foreign
+Restore repairs from the lock. A store that is missing, or whose content hash differs from
+the lock's (an update cut off before its lock write), is refetched at the locked commit:
+matching the lock's hash it is moved in, setting the stale store aside until it is, otherwise
+it returns for approval through the same replace branch. Missing, dangling and text-file links are re-created (symlink, then copy); a foreign
 entry at a link path is never touched. On Windows a repaired project link shows as modified
 in `git status` until the checkout supports symlinks. Entries with an unknown `source` are
 skipped everywhere. `skillfish.json` is read-only: candidates come from the checkout's and
