@@ -1,0 +1,13 @@
+PASS SessionTurns.TypeOK
+FAIL SessionTurns.NoLostUserMessage
+FAIL SessionTurns.NoLostAgentMessage
+PASS SessionTurns.NoDoubleSend
+PASS SessionTurns.TurnProgress
+PASS SessionTurns.AskResolution
+PASS SessionTurns.InterruptSafe
+PASS RestartWake.TypeOK
+FAIL RestartWake.WakeBounded
+PASS RestartWake.NoWakeWhenArchived
+PASS SessionSync.TypeOK
+PASS SessionSync.NoSkippedSeq
+PASS SessionSync.ClientsConverge
