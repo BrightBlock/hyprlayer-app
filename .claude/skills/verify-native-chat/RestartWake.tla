@@ -13,7 +13,7 @@ VARIABLES
   alive,         \* a claude harness is live for the session
   rowLive,       \* sessions.state is starting/running/awaiting_*
   lastKind,      \* the newest userMessage/turnDone row: "user", "wake" or "done"
-  logWakes,      \* restart-wake rows since the last turnDone (unanswered_wakes)
+  wakes,         \* restart wakes recorded on the row since the last turnDone (restart_wakes)
   echoing,       \* a wake turn's echo broadcast but not yet stored by the actor
   ended,         \* sessions.ended_at is set
   pendingWake,   \* a pending_wakes row with mid_turn
@@ -22,12 +22,12 @@ VARIABLES
   received,      \* wake turns claude took in since it last finished a turn
   wokeArchived   \* a wake launched a harness in an archived workstream
 
-vars == <<up, restarts, alive, rowLive, lastKind, logWakes, echoing, ended,
+vars == <<up, restarts, alive, rowLive, lastKind, wakes, echoing, ended,
           pendingWake, waker, wsArchived, received, wokeArchived>>
 
 Init ==
   /\ up = TRUE /\ restarts = 0
-  /\ alive = TRUE /\ rowLive = TRUE /\ lastKind = "user" /\ logWakes = 0
+  /\ alive = TRUE /\ rowLive = TRUE /\ lastKind = "user" /\ wakes = 0
   /\ echoing = FALSE /\ ended = FALSE /\ pendingWake = FALSE
   /\ waker = "idle" /\ wsArchived = FALSE /\ received = 0 /\ wokeArchived = FALSE
 
@@ -42,18 +42,18 @@ Restart ==
   /\ pendingWake' = (pendingWake \/ Working)
   /\ rowLive' = FALSE
   /\ waker' = "start"
-  /\ UNCHANGED <<up, lastKind, logWakes, ended, wsArchived, received, wokeArchived>>
+  /\ UNCHANGED <<up, lastKind, wakes, ended, wsArchived, received, wokeArchived>>
 
 \* wake::check, after the overlay wait.
 WakerCheck ==
   /\ waker = "start"
-  /\ IF pendingWake /\ ~ended /\ ~wsArchived /\ logWakes < MaxRestartResumes
+  /\ IF pendingWake /\ ~ended /\ ~wsArchived /\ wakes < MaxRestartResumes
        THEN waker' = "due" /\ pendingWake' = pendingWake
        ELSE waker' = "done" /\ pendingWake' = FALSE
-  /\ UNCHANGED <<up, restarts, alive, rowLive, lastKind, logWakes, echoing, ended,
+  /\ UNCHANGED <<up, restarts, alive, rowLive, lastKind, wakes, echoing, ended,
                  wsArchived, received, wokeArchived>>
 
-\* wake_one under the op lock: resume_if_exited_held, then send_app_turn_held; then forget.
+\* wake_one under the op lock: resume_if_exited_held, record_restart_wake, then send_app_turn_held; then forget.
 \* launch_driver holds the workstream's lock and refuses an archived one (hold_unarchived);
 \* archive takes the same lock, so the two never interleave.
 WakerWake ==
@@ -62,20 +62,22 @@ WakerWake ==
   /\ IF ~alive /\ ~wsArchived
        THEN /\ alive' = TRUE /\ rowLive' = TRUE
             /\ wokeArchived' = (wokeArchived \/ wsArchived)
+            \* record_restart_wake, before send_app_turn_held
+            /\ wakes' = wakes + 1
             /\ echoing' = TRUE /\ received' = received + 1
-       ELSE UNCHANGED <<alive, rowLive, wokeArchived, echoing, received>>
-  /\ UNCHANGED <<up, restarts, lastKind, logWakes, ended, wsArchived>>
+       ELSE UNCHANGED <<alive, rowLive, wokeArchived, wakes, echoing, received>>
+  /\ UNCHANGED <<up, restarts, lastKind, ended, wsArchived>>
 
 \* The relay and the actor store the wake's UserMessage.
 StoreEcho ==
   /\ echoing
-  /\ echoing' = FALSE /\ lastKind' = "wake" /\ logWakes' = logWakes + 1
-  /\ UNCHANGED <<up, restarts, alive, rowLive, ended, pendingWake, waker,
+  /\ echoing' = FALSE /\ lastKind' = "wake"
+  /\ UNCHANGED <<up, restarts, alive, rowLive, wakes, ended, pendingWake, waker,
                  wsArchived, received, wokeArchived>>
 
 ClaudeFinishes ==
   /\ alive /\ ~echoing /\ lastKind \in {"user", "wake"}
-  /\ lastKind' = "done" /\ logWakes' = 0 /\ received' = 0
+  /\ lastKind' = "done" /\ wakes' = 0 /\ received' = 0
   /\ UNCHANGED <<up, restarts, alive, rowLive, echoing, ended, pendingWake, waker,
                  wsArchived, wokeArchived>>
 
@@ -86,7 +88,7 @@ Archive ==
   /\ wsArchived' = TRUE
   /\ IF alive THEN alive' = FALSE /\ ended' = TRUE /\ rowLive' = FALSE /\ echoing' = FALSE
               ELSE UNCHANGED <<alive, ended, rowLive, echoing>>
-  /\ UNCHANGED <<up, restarts, lastKind, logWakes, pendingWake, waker, received,
+  /\ UNCHANGED <<up, restarts, lastKind, wakes, pendingWake, waker, received,
                  wokeArchived>>
 
 \* Nothing more happens without another restart: the waker is done and the echo stored.
@@ -104,6 +106,6 @@ NoWakeWhenArchived == ~wokeArchived
 
 TypeOK ==
   /\ up \in BOOLEAN /\ alive \in BOOLEAN /\ rowLive \in BOOLEAN
-  /\ lastKind \in {"user", "wake", "done"} /\ logWakes \in Nat
+  /\ lastKind \in {"user", "wake", "done"} /\ wakes \in Nat
   /\ waker \in {"idle", "start", "due", "done"} /\ received \in Nat
 =============================================================================

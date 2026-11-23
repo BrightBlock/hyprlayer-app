@@ -18,7 +18,7 @@ VARIABLES
   \* the claude process
   alive, busy, turn, pipe, queue, cOpen, asked, out,
   \* ClaudeDriver
-  dBusy, lifecycle, waiting, pending, stdinOpen, bus,
+  dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen,
   \* SessionRegistry, the relay and the actor
   live, procs, exits, inTurn, stored,
   \* the desktop
@@ -29,14 +29,14 @@ VARIABLES
   accepted, failed, delivered, interrupts, droppedStop
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, asked, out,
-          dBusy, lifecycle, waiting, pending, stdinOpen, bus,
+          dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vOpen, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop>>
 
 claudeVars == <<alive, busy, turn, pipe, queue, cOpen, asked, out>>
-driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus>>
+driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen>>
 viewVars == <<vLive, streaming, vOpen, clicked, chip, sends>>
 heldVars == <<held, resent, toldSet>>
 
@@ -49,6 +49,7 @@ Init ==
   /\ alive = TRUE /\ busy = FALSE /\ turn = 0 /\ pipe = <<>> /\ queue = <<>>
   /\ cOpen = {} /\ asked = {} /\ out = <<>>
   /\ dBusy = FALSE /\ lifecycle = FALSE /\ waiting = {} /\ pending = {} /\ stdinOpen = TRUE /\ bus = <<>>
+  /\ eofSeen = FALSE
   /\ live = TRUE /\ procs = 1 /\ exits = 0 /\ inTurn = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vOpen = {} /\ clicked = {}
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
@@ -70,20 +71,20 @@ WriteOk(line) ==
   /\ IF alive THEN pipe' = Append(pipe, line) /\ stdinOpen' = TRUE
               ELSE pipe' = pipe /\ stdinOpen' \in BOOLEAN
 
-\* Returns "ok", "err" (stdin closed) or "gone" (no live driver).
+\* Returns "ok", "err" (stdin closed) or "gone" (no live driver, or its stdout already ended).
 SendServer(m, result) ==
-  IF ~live
+  IF ~live \/ eofSeen
     THEN result = "gone" /\ UNCHANGED <<driverVars, pipe>>
   ELSE IF stdinOpen
     THEN result = "ok" /\ EchoOrHold(m) /\ WriteOk(<<"msg", m>>)
-         /\ pending' = pending /\ lifecycle' = lifecycle
+         /\ pending' = pending /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen
   ELSE \* the echo decision runs before the write; Err takes a held echo back
     /\ result = "err"
     /\ IF (~dBusy /\ waiting = {}) \/ ~lifecycle
          THEN dBusy' = TRUE /\ bus' = Append(bus, <<"echo", m>>)
          ELSE dBusy' = dBusy /\ bus' = bus
     /\ waiting' = waiting /\ pending' = pending /\ stdinOpen' = stdinOpen /\ pipe' = pipe
-    /\ lifecycle' = lifecycle
+    /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen
 
 Outcome(m, result, kept) ==
   /\ accepted' = IF result = "ok" THEN accepted \cup {m} ELSE accepted
@@ -92,6 +93,8 @@ Outcome(m, result, kept) ==
 (* ---- the desktop's sends: deliverMessage (direct) and steerMessage ---- *)
 
 \* A first send, or a chip handed back on an exit or relaunch, flushed once the view is idle.
+\* Both keep a chip until the echo (a direct send's is unechoed, with its optimistic row);
+\* session_not_found puts the message back in the queue.
 ClientSend(m) ==
   /\ m \in Composer /\ vLive /\ sends[m] < 2
   /\ \/ chip[m] = "none" /\ sends[m] = 0
@@ -99,11 +102,11 @@ ClientSend(m) ==
   /\ LET steer == streaming /\ chip[m] = "none" IN
      \E result \in {"ok", "err", "gone"} :
        /\ SendServer(m, result)
-       \* steer keeps a chip until its echo; session_not_found keeps it queued
-       /\ chip' = [chip EXCEPT ![m] = IF steer /\ result = "ok" THEN "delivered"
-                                     ELSE IF steer /\ result = "gone" THEN "queued"
+       /\ chip' = [chip EXCEPT ![m] = IF result = "ok" /\ steer THEN "delivered"
+                                     ELSE IF result = "ok" THEN "unechoed"
+                                     ELSE IF result = "gone" THEN "queued"
                                      ELSE "none"]
-       /\ Outcome(m, result, steer)
+       /\ Outcome(m, result, TRUE)
        \* direct: an optimistic row, and the view shows the turn running
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
@@ -131,7 +134,7 @@ ClientAnswer(r) ==
   /\ IF r \in pending
        THEN pending' = pending \ {r} /\ bus' = Append(bus, <<"resolved", r>>)
        ELSE pending' = pending /\ bus' = bus
-  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting, eofSeen,
                  live, procs, exits, inTurn, stored, vLive, streaming, vOpen, chip,
                  sends, accepted, failed, delivered, interrupts, droppedStop>>
 
@@ -142,7 +145,7 @@ Interrupt ==
   \* the line carries the messages written before it, which the stop is for
   /\ WriteOk(<<"interrupt", {pipe[i][2] : i \in {j \in 1..Len(pipe) : pipe[j][1] = "msg"}}>>)
   /\ interrupts' = interrupts + 1
-  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, out, dBusy, lifecycle, waiting, eofSeen,
                  pending, bus, live, procs, exits, inTurn, stored, viewVars,
                  accepted, failed, delivered, droppedStop>>
 
@@ -265,11 +268,13 @@ DriverRead ==
           [] line[1] = "toolResult" ->
                bus' = Append(bus, <<"toolResult", line[2]>>) /\ UNCHANGED <<dBusy, waiting, pending>>
           [] line[1] = "eof" ->
-               \* read_and_wait declines every echo still waiting, then broadcasts Exited
+               \* read_and_wait marks the inbox ended (send_user_turn refuses from here),
+               \* declines every echo still waiting, then broadcasts Exited
                /\ bus' = bus \o SetToSeq({<<"declined", w>> : w \in waiting}) \o <<<<"exited">>>>
                /\ waiting' = {}
                /\ UNCHANGED <<dBusy, pending>>
   /\ Head(out)[1] /= "started" => lifecycle' = lifecycle
+  /\ eofSeen' = (eofSeen \/ Head(out)[1] = "eof")
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, stdinOpen, live,
                  procs, exits, inTurn, stored, viewVars, accepted, failed,
                  delivered, interrupts, droppedStop>>
@@ -281,7 +286,7 @@ DriverRead ==
 Relay ==
   /\ bus /= <<>>
   /\ LET ev == Head(bus)
-         handBack == [m \in Composer |-> IF chip[m] = "delivered" THEN "queued" ELSE chip[m]]
+         handBack(which) == [m \in Composer |-> IF chip[m] \in which THEN "queued" ELSE chip[m]]
      IN
      /\ inTurn' = CASE ev[1] = "echo" -> TRUE
                    [] ev[1] \in {"turnDone", "exited"} -> FALSE
@@ -302,9 +307,11 @@ Relay ==
                   [] OTHER -> vOpen
      /\ vLive' = IF ev[1] = "exited" THEN FALSE ELSE vLive
      /\ chip' = CASE ev[1] = "echo" /\ ev[2] \in Composer -> [chip EXCEPT ![ev[2]] = "none"]
-                 [] ev[1] = "declined" /\ ev[2] \in Composer /\ chip[ev[2]] = "delivered" ->
+                 [] ev[1] = "declined" /\ ev[2] \in Composer /\ chip[ev[2]] \in {"delivered", "unechoed"} ->
                       [chip EXCEPT ![ev[2]] = "queued"]
-                 [] ev[1] \in {"exited", "relaunched"} -> handBack
+                 [] ev[1] = "exited" -> handBack({"delivered", "unechoed"})
+                 \* a live relaunch follows its exit; a direct send after it may be the resume's own
+                 [] ev[1] = "relaunched" -> handBack({"delivered"})
                  [] OTHER -> chip
      \* the relay releases a held message on its echo; after an exit it tells the senders it can
      \* (the model's exits are all crashes, never a detach) and keeps the rest for the next relaunch
@@ -312,7 +319,7 @@ Relay ==
                  [] ev[1] = "exited" -> held \ toldSet
                  [] OTHER -> held
      /\ failed' = IF ev[1] = "exited" THEN failed \cup (held \cap toldSet) ELSE failed
-  /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, procs, exits,
+  /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, eofSeen, procs, exits,
                  clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop>>
 
 \* A tail read refolds the log: list_turns re-sends the stored asks open_request_ids
@@ -337,6 +344,7 @@ ClientResume ==
   /\ pipe' = SetToSeq({<<"msg", m>> : m \in again})
   /\ out' = <<>>
   /\ dBusy' = (again /= {}) /\ lifecycle' = FALSE /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
+  /\ eofSeen' = FALSE
   /\ bus' = <<<<"relaunched">>>> \o SetToSeq({<<"echo", m>> : m \in again})
   /\ live' = TRUE /\ procs' = procs + 1 /\ vLive' = TRUE
   /\ held' = again /\ resent' = resent \cup again
@@ -407,7 +415,7 @@ TypeOK ==
   /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ turn \in Nat
   /\ cOpen \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
-  /\ chip \in [Composer -> {"none", "delivered", "queued"}]
+  /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs
   /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent
 =============================================================================

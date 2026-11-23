@@ -96,10 +96,12 @@ ClientSend(m) ==
   /\ LET steer == streaming /\ chip[m] = "none" IN
      \E result \in {"ok", "err", "gone"} :
        /\ SendServer(m, result)
-       /\ chip' = [chip EXCEPT ![m] = IF steer /\ result = "ok" THEN "delivered"
-                                     ELSE IF steer /\ result = "gone" THEN "queued"
+       \* a direct send is kept as unechoed until its echo; session_not_found queues either
+       /\ chip' = [chip EXCEPT ![m] = IF result = "ok" /\ steer THEN "delivered"
+                                     ELSE IF result = "ok" THEN "unechoed"
+                                     ELSE IF result = "gone" THEN "queued"
                                      ELSE "none"]
-       /\ Outcome(m, result, steer)
+       /\ Outcome(m, result, TRUE)
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, respond, otherTools, out,
@@ -288,7 +290,7 @@ DriverRead ==
 Relay ==
   /\ bus /= <<>>
   /\ LET ev == Head(bus)
-         handBack == [m \in Composer |-> IF chip[m] = "delivered" THEN "queued" ELSE chip[m]]
+         handBack(which) == [m \in Composer |-> IF chip[m] \in which THEN "queued" ELSE chip[m]]
      IN
      /\ inTurn' = CASE ev[1] = "echo" -> TRUE
                    [] ev[1] \in {"turnDone", "exited"} -> FALSE
@@ -309,9 +311,11 @@ Relay ==
                  [] OTHER -> vSeq
      /\ vLive' = IF ev[1] = "exited" THEN FALSE ELSE vLive
      /\ chip' = CASE ev[1] = "echo" /\ ev[2] \in Composer -> [chip EXCEPT ![ev[2]] = "none"]
-                 [] ev[1] = "declined" /\ ev[2] \in Composer /\ chip[ev[2]] = "delivered" ->
+                 [] ev[1] = "declined" /\ ev[2] \in Composer /\ chip[ev[2]] \in {"delivered", "unechoed"} ->
                       [chip EXCEPT ![ev[2]] = "queued"]
-                 [] ev[1] \in {"exited", "relaunched"} -> handBack
+                 [] ev[1] = "exited" -> handBack({"delivered", "unechoed"})
+                 \* a live relaunch follows its exit; a direct send after it may be the resume's own
+                 [] ev[1] = "relaunched" -> handBack({"delivered"})
                  [] OTHER -> chip
      /\ held' = CASE ev[1] = "echo" -> held \ {ev[2]}
                  [] ev[1] = "exited" -> held \ toldSet
@@ -404,7 +408,7 @@ TypeOK ==
   /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ turn \in Nat
   /\ cOpen \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
-  /\ chip \in [Composer -> {"none", "delivered", "queued"}]
+  /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs
   /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent
 =============================================================================

@@ -154,6 +154,7 @@ export type SessionEntry = SessionView & {
   reloading?: boolean;
   drifted?: boolean;
   queued: QueuedMessage[];
+  unechoed?: QueuedMessage[];
   workingSince: number | null;
   /** Optional so setEntry's callers needn't supply it; derived on every write. */
   awaitingSince?: number | null;
@@ -186,6 +187,7 @@ export type QueuedMessage = {
   clientMessageId?: string;
   /** The newest row applied when it was handed to the harness. */
   heldAfterSeq?: number;
+  undelivered?: true;
   /** Runs once the queued text actually reaches the transcript. */
   onSent?: () => void;
 };
@@ -460,7 +462,7 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
     channels.delete(sessionId);
     const cleared = cancelPendingPrompts(current);
     setEntry(sessionId, {
-      ...undeliver(current, () => true),
+      ...returnUnechoed(undeliver(current, () => true), () => true),
       ...cleared,
       items: closeOpenAssistant(cleared.items),
       streaming: false,
@@ -479,9 +481,12 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   let settled: QueuedMessage | null = null;
   if (event.kind === "userMessage" && event.clientMessageId) {
     ({ entry: nextEntry, chip: settled } = settleDelivered(nextEntry, event.clientMessageId));
+    nextEntry = settleUnechoed(nextEntry, new Set([event.clientMessageId]));
   }
   const handedBack = handedBackBy(event);
   if (handedBack) nextEntry = undeliver(nextEntry, handedBack);
+  // A live relaunch follows its exit, which already handed these back; a later one may be this send's own resume.
+  if (handedBack && event.kind !== "relaunched") nextEntry = returnUnechoed(nextEntry, handedBack);
   if (synced) {
     if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) {
       nextEntry.appliedSeq = seq;
@@ -543,6 +548,26 @@ function undeliver(entry: SessionEntry, which: (m: QueuedMessage) => boolean): S
   return { ...entry, queued };
 }
 
+function settleUnechoed(entry: SessionEntry, echoed: Set<string>): SessionEntry {
+  if (!entry.unechoed?.some((m) => echoed.has(m.clientMessageId ?? ""))) return entry;
+  return { ...entry, unechoed: entry.unechoed.filter((m) => !echoed.has(m.clientMessageId ?? "")) };
+}
+
+function returnUnechoed(entry: SessionEntry, which: (m: QueuedMessage) => boolean): SessionEntry {
+  const back = entry.unechoed?.filter(which) ?? [];
+  if (back.length === 0) return entry;
+  const ids = new Set(back.map((m) => m.clientMessageId));
+  return {
+    ...entry,
+    items: entry.items.filter((it) => !(it.kind === "user" && it.seq == null && ids.has(it.clientMessageId ?? undefined))),
+    queued: [
+      ...back.map(({ text, attachments, promptName }) => ({ text, attachments, promptName, undelivered: true as const })),
+      ...entry.queued,
+    ],
+    unechoed: entry.unechoed?.filter((m) => !ids.has(m.clientMessageId)),
+  };
+}
+
 // The log stores no attachments, and a live echo has no createdAt: the chip supplies both.
 function settleDelivered(
   entry: SessionEntry,
@@ -568,11 +593,14 @@ function settleDelivered(
 // A fold or pull can bring a delivered message's echo, or the process end that dropped it, in without its live event.
 function settleFolded(sessionId: string): void {
   const entry = entryOf(sessionId);
-  if (!entry || !entry.queued.some(delivered)) return;
+  if (!entry || !(entry.queued.some(delivered) || entry.unechoed?.length)) return;
   const echoed = new Set<string>();
+  const stored = new Set<string>();
   let ended = -1;
   for (const item of entry.items) {
     if (item.kind === "user" && item.clientMessageId) echoed.add(item.clientMessageId);
+    // A direct send's optimistic row carries its id too.
+    if (item.kind === "user" && item.clientMessageId && item.seq != null) stored.add(item.clientMessageId);
     if ((item.kind === "exit" || item.kind === "relaunched") && item.seq != null) ended = Math.max(ended, item.seq);
   }
   let next = entry;
@@ -583,8 +611,10 @@ function settleFolded(sessionId: string): void {
     next = settled.entry;
     if (settled.chip) sent.push(settled.chip);
   }
+  next = settleUnechoed(next, stored);
   const settled = next;
-  next = undeliver(next, (m) => m.heldAfterSeq !== undefined && m.heldAfterSeq < ended);
+  const dropped = (m: QueuedMessage) => m.heldAfterSeq !== undefined && m.heldAfterSeq < ended;
+  next = returnUnechoed(undeliver(next, dropped), dropped);
   if (next === entry) return;
   setEntry(sessionId, next);
   for (const chip of sent) chip.onSent?.();
@@ -1571,7 +1601,11 @@ async function deliverMessage(
   const optimisticId = withUser.items[withUser.items.length - 1].id;
   // Only a sync server keeps a sync state; an older one ignores the base.
   const baseRev = syncOf(sessionId)?.localRev ?? null;
-  setEntry(sessionId, { ...current, ...withUser, turnAuthor: "self" });
+  const unechoed = [
+    ...(current.unechoed ?? []),
+    { text, attachments, promptName, clientMessageId, heldAfterSeq: current.appliedSeq ?? -1 },
+  ];
+  setEntry(sessionId, { ...current, ...withUser, unechoed, turnAuthor: "self" });
   // Busy from here on, so this turn's end may flush the next queued message.
   flushing.delete(sessionId);
   try {
@@ -1587,9 +1621,23 @@ async function deliverMessage(
     );
   } catch (e) {
     const latest = entryOf(sessionId);
+    const mine = (m: QueuedMessage) => m.clientMessageId === clientMessageId;
+    if (isAppError(e) && e.code === "session_not_found") {
+      if (latest) {
+        const back = returnUnechoed(latest, mine);
+        setEntry(sessionId, { ...back, ...unsentTurn(current, latest, back.items) });
+      }
+      return "queued";
+    }
     if (latest) {
       const items = latest.items.filter((it) => it.id !== optimisticId);
-      setEntry(sessionId, { ...latest, items, ...(isStaleTranscript(e) ? unsentTurn(current, latest, items) : {}) });
+      const unechoed = latest.unechoed?.filter((m) => !mine(m));
+      setEntry(sessionId, {
+        ...latest,
+        items,
+        unechoed,
+        ...(isStaleTranscript(e) ? unsentTurn(current, latest, items) : {}),
+      });
     }
     if (isStaleTranscript(e)) {
       syncInput(sessionId, {

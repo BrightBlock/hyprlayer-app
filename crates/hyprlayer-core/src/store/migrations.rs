@@ -328,6 +328,10 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (session_id, nonce)
     );
     ",
+    "
+    ALTER TABLE sessions ADD COLUMN restart_wakes INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sessions ADD COLUMN restart_wake_seq INTEGER NOT NULL DEFAULT -1;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

@@ -2191,6 +2191,63 @@ describe("reconnecting from the held cursor", () => {
     });
   });
 
+  describe.each(["claude", "codex"] as const)("a message sent straight from an idle %s chat that the harness never took in", (harness) => {
+    const EXITED: SessionEvent = { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" };
+    const queuedTexts = (id: string) => entryOf(id).queued.map((m) => m.text);
+    const shown = (id: string) => entryOf(id).items.some((it) => it.kind === "user" && it.text === "fix the build");
+    const sentId = () => (h.sendUserMessage.mock.calls as unknown[][]).slice(-1)[0][4] as string;
+
+    async function sendFromIdle(): Promise<string> {
+      const id = await startStreaming([at(0, INIT), at(1, reply("done")), at(2, TURN_DONE)]);
+      useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], harness } } }));
+      h.sendUserMessage.mockClear();
+      expect(await sendMessage(id, "fix the build")).toBe("sent");
+      expect(shown(id)).toBe(true);
+      return id;
+    }
+
+    it("goes back to the queue when the harness exits before its echo", async () => {
+      const id = await sendFromIdle();
+      stream(id, at(3, EXITED));
+      expect(queuedTexts(id)).toEqual(["fix the build"]);
+      expect(shown(id)).toBe(false);
+    });
+
+    it("goes back to the queue once a reconnect reads the exit", async () => {
+      const id = await sendFromIdle();
+      server.get(id)!.rows.push(at(3, EXITED));
+      await reconnect([]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const texts = (h.sendUserMessage.mock.calls as unknown[][]).map((c) => c[1]);
+      expect(texts).toEqual(["fix the build", "fix the build"]);
+      expect(entryOf(id).items.filter((it) => it.kind === "user" && it.text === "fix the build")).toHaveLength(1);
+    });
+
+    it("goes back to the queue when the harness declines it", async () => {
+      const id = await sendFromIdle();
+      stream(id, at(3, { kind: "commandLifecycle", commandUuid: sentId(), state: "cancelled" }));
+      expect(queuedTexts(id)).toContain("fix the build");
+      expect(shown(id)).toBe(false);
+    });
+
+    it("waits in the queue when the server refuses it as the harness exits", async () => {
+      const id = await startStreaming([at(0, INIT), at(1, reply("done")), at(2, TURN_DONE)]);
+      h.sendUserMessage.mockResolvedValueOnce({ status: "error", error: { code: "session_not_found", message: "gone" } } as never);
+      expect(await sendMessage(id, "fix the build")).toBe("queued");
+      expect(queuedTexts(id)).toEqual(["fix the build"]);
+      expect(shown(id)).toBe(false);
+      expect(entryOf(id).streaming).toBe(false);
+    });
+
+    it("stays sent once its echo arrived before the exit", async () => {
+      const id = await sendFromIdle();
+      stream(id, at(3, { kind: "userMessage", text: "fix the build", stage: null, clientMessageId: sentId() }));
+      stream(id, at(4, EXITED));
+      expect(queuedTexts(id)).toEqual([]);
+      expect(shown(id)).toBe(true);
+    });
+  });
+
   it("keeps the cursor before another device's held turn, so a reconnect reads that turn once", async () => {
     const OTHER = { clientId: "them", device: "jons-macbook-pro" };
     const id = await startStreaming(turn(10));

@@ -208,7 +208,7 @@ const UserMessage = memo(function UserMessage({
 
 // Greyed until the harness takes it in; its echo then lands as a regular message.
 function QueuedUserMessage({ message, onCancel }: { message: QueuedMessage; onCancel: (() => void) | null }) {
-  const { text, attachments, promptName, clientMessageId } = message;
+  const { text, attachments, promptName, clientMessageId, undelivered } = message;
   return (
     <div className="flex flex-col items-end">
       <div className="max-w-[85%] rounded-lg border border-dashed border-edge bg-panel-2/60 px-3.5 py-2.5 opacity-60">
@@ -222,7 +222,7 @@ function QueuedUserMessage({ message, onCancel }: { message: QueuedMessage; onCa
       </div>
       <div className="mt-1 flex items-center justify-end gap-1 text-ui-sm text-ink-dim">
         <Icon name="queued" size="xs" />
-        {clientMessageId ? "Steering" : "Queued"}
+        {clientMessageId ? "Steering" : undelivered ? "Not delivered: the session ended first. Queued to send again" : "Queued"}
         {onCancel && (
           <button
             type="button"

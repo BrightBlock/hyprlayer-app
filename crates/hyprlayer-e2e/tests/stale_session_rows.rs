@@ -266,7 +266,7 @@ async fn stale_session_rows() {
         record.clone(),
     );
 
-    j.step("a session that never answers its wake is woken three times at most");
+    j.step("a session that never answers its wake is woken three times at most, stored or not");
     let gone = crash(server).await;
     let (server, _client) = boot(&mut j, &sandbox).await;
     let third = wake_passes(&sandbox, 3).await;
@@ -274,6 +274,15 @@ async fn stale_session_rows() {
         ["loop"]["wakes"]
         .clone();
     let gone = gone && crash(server).await;
+    // As if each restart had landed before the actor stored its wake's echo.
+    let unstored = rusqlite::Connection::open(sandbox.app_data.join("hyprlayer.db"))
+        .expect("open the profile db")
+        .execute(
+            "DELETE FROM session_events
+              WHERE session_id = ?1 AND kind = 'userMessage' AND payload LIKE '%hyprlayer:restart%'",
+            rusqlite::params![looping],
+        )
+        .expect("drop the stored wakes");
     let (server, client) = boot(&mut j, &sandbox).await;
     let fourth = wake_passes(&sandbox, 4).await;
     let record = stub_record(&stubs, &names);
@@ -286,11 +295,13 @@ async fn stale_session_rows() {
         gone && third
             && fourth
             && wakes_after_third == 3
+            && unstored == 3
             && record["loop"]["wakes"] == 3
             && record["loop"]["launches"] == 4
             && capped,
         json!({
             "wakesAfterThird": wakes_after_third,
+            "wakeRowsUnstored": unstored,
             "wakesAfterFourth": record["loop"]["wakes"],
             "launches": record["loop"]["launches"],
             "capLogged": capped,

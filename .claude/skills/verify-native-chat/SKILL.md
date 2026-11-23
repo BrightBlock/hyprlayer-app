@@ -72,7 +72,7 @@ Results at the sync commit, per provider (`expected.txt`):
 
 | Rule | claude | codex | OpenCode |
 |---|---|---|---|
-| `NoLostUserMessage` | FAIL | FAIL | PASS |
+| `NoLostUserMessage` | PASS | PASS | PASS |
 | `NoLostAgentMessage` | PASS | FAIL | PASS |
 | `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
 | `TurnProgress` | PASS | FAIL | FAIL |
@@ -125,7 +125,9 @@ Findings 1 to 5 are claude's (`SessionTurns`) and the shared models'; 6 to
 14 are codex's and OpenCode's. Each path was walked step by step against the
 code. A provider FAIL counts as confirmed only once it has been reproduced live
 in a debug instance; each says "reproduced live" (by whom, and the evidence) or
-"model only".
+"model only". Findings 2 and 5 are fixed, and each was reproduced live
+before and after its fix in a debug build with the window widened by a
+scratch delay (the PR that fixed them has the evidence).
 
 1. **Fixed: `AskResolution`, `InterruptSafe`: an ask claude settled itself reopened on a reload.**
    Claude writes `control_cancel_request` for a `can_use_tool` it settles
@@ -148,30 +150,33 @@ in a debug instance; each says "reproduced live" (by whom, and the evidence) or
    said the live view stayed stuck too. It does not: real claude 2.1.330
    writes the tool's result right after the cancel (the interrogate
    workstream's trace), and that closes the card.
-2. **`NoLostUserMessage`: a direct send can vanish when claude exits.**
-   Still open after the `held_messages` fix: a desktop's sends stay out of
-   it, because a steered chip is resent by the desktop itself and a second
-   copy would break `NoDoubleSend`. The `cancelled` row `read_and_wait` now
-   writes for a held direct send names its `clientMessageId`, but
-   `deliverMessage` keeps no chip, so nothing hands it back.
-   `deliverMessage` sends with no chip, so nothing hands the message back on
+2. **Fixed: `NoLostUserMessage`: a direct send could vanish when claude exited.**
+   `deliverMessage` sent with no chip, so nothing handed the message back on
    `exited`. Two paths:
-   - The exit window (the shortest, 4 steps): claude exits; `read_and_wait`
-     broadcasts `Exited`; you send before `spawn_relay` forwards it and calls
-     `registry.remove`. `require_live` still finds the driver,
-     `send_user_turn` broadcasts the echo behind `Exited`, and `write_line`
-     returns Ok because `write_loop`'s receiver is still open (its write then
-     fails). The relay forwards `Exited` and stops, so the echo is never
-     stored. The window runs from `Exited` to `registry.remove`, normally
-     milliseconds.
-   - The held echo (5 steps, with the window closed in a scratch copy): an
-     agent's message starts a turn and the driver reads its lifecycle frame;
-     your view still shows idle, so you send directly; the inbox is not
-     `idle()` and `lifecycle` is set, so the echo waits in `Inbox.waiting`;
-     claude exits before its next step. No echo, no chip, no error: the
-     optimistic row stays until a reload drops it. A steered message
-     (`steerMessage`) is safe here: its chip goes back to the queue on
-     `exited` and is resent.
+   - The exit window (4 steps): claude exits; `read_and_wait` broadcasts
+     `Exited`; you send before `spawn_relay` forwards it and calls
+     `registry.remove`. `require_live` still found the driver,
+     `send_user_turn` broadcast the echo behind `Exited`, and `write_line`
+     returned Ok because `write_loop`'s receiver was still open. The relay
+     forwards `Exited` and stops, so the echo was never stored.
+   - The held echo (6 steps): an agent's message starts a turn and the
+     driver reads its lifecycle frame; your view still shows idle, so you
+     send directly; the inbox is not `idle()` and `lifecycle` is set, so the
+     echo waits in `Inbox.waiting`; claude exits before its next step. No
+     echo, no chip, no error: the optimistic row stayed until a reload
+     dropped it.
+   Fixed on both sides. `deliverMessage` keeps each direct send in the
+   entry's `unechoed` list until its echo; `exited`, a `cancelled`
+   `commandLifecycle` naming it, and a fold or pull that brings in an exit or
+   relaunch newer than the send (`settleFolded`, by `heldAfterSeq`) take its
+   optimistic row out and put the message back at the front of the queue.
+   A live `relaunched` does not: it follows the exit that already handed
+   them back, and a later one may be this send's own resume (the model finds
+   a double send in 20 steps if it does). `read_and_wait` marks the inbox
+   `ended` before it declines the held echoes, and `send_user_turn` then
+   refuses with `session_not_found`, which `deliverMessage` turns into a
+   queued message. The server keeps no copy of a desktop's send, so a
+   steered or direct message is resent by the desktop only.
 3. **Fixed: `NoLostAgentMessage`: an agent's message to a session whose claude exits before taking it in was lost.**
    The same two paths, and no sender retries: `message_agent` and agent wakes go
    through `SessionService::send`, restart wakes and follow-ups through
@@ -203,15 +208,18 @@ in a debug instance; each says "reproduced live" (by whom, and the evidence) or
    workstream's lock and refuses an archived workstream (`hold_unarchived`),
    and archive holds the same lock while it stops sessions and writes the
    status. The model follows the fixed code and passes.
-5. **`WakeBounded`: a restart before the wake turn is stored does not count.**
-   `unanswered_wakes` counts stored restart-wake `UserMessage` rows since the
-   last `TurnDone`. A wake whose echo is still between `send_user_turn` and the
-   actor when the server stops again is not stored, the row is `Running` again
-   (`launch_driver` set it), and its last turn kind is still the cut-off
-   `userMessage`, so `settle_stale_sessions` queues another wake. Four
-   restarts that each land in that window wake the session a fourth time.
-   The window is the relay and the actor's write, normally milliseconds, so
-   this needs a server that dies right after each wake.
+5. **Fixed: `WakeBounded`: a restart before the wake turn was stored did not count.**
+   `unanswered_wakes` counted stored restart-wake `UserMessage` rows since
+   the last `TurnDone`. A wake whose echo was still between `send_user_turn`
+   and the actor when the server stopped again was not stored, the row was
+   `Running` again (`launch_driver` set it), and its last turn kind was still
+   the cut-off `userMessage`, so `settle_stale_sessions` queued another
+   wake. Four restarts that each landed in that window woke the session a
+   fourth time. Fixed by counting attempts on the session row:
+   `wake_one` calls `record_restart_wake` after the resume and before
+   `send_app_turn_held`, and `check` reads `unanswered_restart_wakes`, which
+   counts from zero again once a `turnDone` is stored after the last
+   recorded wake (`restart_wake_seq`).
 
 6. **codex `AskResolution`, `InterruptSafe`: an approval codex settles itself stays open.**
    Reproduced live by the "Interrogate codex and opencode chat" workstream in
@@ -247,11 +255,17 @@ in a debug instance; each says "reproduced live" (by whom, and the evidence) or
    lost; finding 9), and an interrupt targets the dead turn. Shortest path
    (10 steps): you send, codex starts and finishes the turn, its response
    trails `turn/completed`.
-9. **codex `NoLostUserMessage` (model only).** The shortest path (4 steps) is
-   claude's exit window from finding 2: codex exits, `Exited` is broadcast, you
-   send before the relay drops the driver; the echo trails `Exited`. Finding 8
-   adds a codex-only path: a direct send steered into a stale turn is declined
-   with no chip to hand back.
+9. **Fixed: codex `NoLostUserMessage` (model only).** The shortest path (4
+   steps) was claude's exit window from finding 2: codex exits, `Exited` is
+   broadcast, you send before the relay drops the driver; the echo trails
+   `Exited`. Finding 8 added a codex-only path: a direct send steered into a
+   stale turn is declined with no chip to hand back. The desktop side of
+   finding 2's fix covers both, since `deliverMessage` and `handedBackBy` are
+   the same for every harness: the unechoed send goes back to the queue on
+   `exited` and on the decline (`declined_message` names its id for codex as
+   for claude). `CodexDriver::send_user_turn` does not refuse after its
+   stdout ends as claude's does, so codex's window still returns Ok; the
+   desktop resends. Not replayed against a live codex.
 10. **codex `AskVisible` (model only): another command's result closes the card.**
     codex's `PermissionAsk` has `tool_use_id: None`, so `settleAnsweredPrompt`
     decides the newest undecided card with the result's tool name. A root
@@ -302,7 +316,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat e4442013f27bb615e223fa28638fba5aeba3dc1a -- \
+git diff --stat 5605aed48d5639074ddd47d567727a00d610f14a -- \
   crates/hyprlayer-core/src/claude/driver.rs \
   crates/hyprlayer-core/src/claude/protocol.rs \
   crates/hyprlayer-core/src/codex/driver.rs \
@@ -339,14 +353,14 @@ turn, what closes an ask, or what reports the server's death.
 
 | Model action | Code (at the sync commit) |
 |---|---|
-| `EchoOrHold`, `SendServer` | `ClaudeDriver::send_user_turn`, driver.rs:304 (`Inbox::idle`, 77; `lifecycle`; echo before `write_line`, 591; `take` on Err) |
+| `EchoOrHold`, `SendServer` | `ClaudeDriver::send_user_turn`, driver.rs:306 (refuses with `session_not_found` once `Inbox.ended`, 324; `Inbox::idle`, 79; `lifecycle`; echo before `write_line`; `take` on Err); `SessionService::send` releases the reservation on that refusal |
 | `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:609 (breaks on the first failed write) |
-| `ClientSend` | `sendMessage`/`deliverMessage` (direct, optimistic row), sessionStore.ts:1480/1543; `steerMessage` (chip with a `clientMessageId`), 1607; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
+| `ClientSend` | `sendMessage`/`deliverMessage` (direct: optimistic row and an `unechoed` entry until its echo; `session_not_found` puts it back in the queue), sessionStore.ts:1510/1573; `steerMessage` (chip with a `clientMessageId`), 1655; `handedBackBy`, 532, and `returnUnechoed`, 556 (a live `relaunched` hands back steered chips only); `settleFolded`, 594; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
 | `AgentSend` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`), `send_app_turn` (follow-ups), each recording the message with `held::hold` before `send_user_turn` and releasing it on Err |
 | `ClientAnswer` | `respond_permission`, service.rs:403 → driver.rs:371 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
 | `Interrupt` | `SessionService::interrupt`, service.rs:426 → driver.rs:426; `stopSession`, sessionStore.ts:1945 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, driver.rs:634 (`Init` 657, `CommandLifecycle` → `Inbox::frame` 94, `Result` 674, `CanUseTool` 696, `ControlCancel` 710, `Exited` 763); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it declines every echo still in `Inbox.waiting` before `Exited` |
+| `DriverRead` | `read_and_wait`, driver.rs:634 (`Init` 657, `CommandLifecycle` → `Inbox::frame` 94, `Result` 674, `CanUseTool` 696, `ControlCancel` 710, `Exited` 763); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
 | `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:452 (`handedBackBy` 527), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
 | `ClientReload` | `SessionService::list_turns`, service.rs:815 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
 | `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
@@ -380,8 +394,8 @@ turn, what closes an ask, or what reports the server's death.
 | Model action | Code (at the sync commit) |
 |---|---|
 | `Restart` | server stop (harnesses die, the actor with them) and start: `settle_stale_sessions`, store/sessions.rs:687 (`is_working`, 264), from runtime/mod.rs:243; `spawn_after_restart`, wake.rs:28 |
-| `WakerCheck` | `wake_stopped` → `check`, wake.rs:49/155 (ended, archived workstream at 166, `unanswered_wakes` 300 against `MAX_RESTART_RESUMES`) |
-| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:192 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake, service.rs:1747/1808; `send_app_turn_held`) |
+| `WakerCheck` | `wake_stopped` → `check`, wake.rs:49/155 (ended, archived workstream at 166, `unanswered_restart_wakes`, 179, store/sessions.rs:1238, against `MAX_RESTART_RESUMES`) |
+| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:192 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake; `record_restart_wake`, wake.rs:210, store/sessions.rs:1250, before `send_app_turn_held`) |
 | `StoreEcho` | the wake's `UserMessage` through `spawn_relay` to `handle_event` |
 | `ClaudeFinishes` | a `TurnDone` row |
 | `Archive` | `WorkstreamService::archive` → `archive_inner`, workstreams.rs:1836/1857, under `lock_pair` (`stop_for_archive`, 2063: `end_quietly_and_await_exit`, 2081 → service.rs:882), then the status |
@@ -509,6 +523,17 @@ wrong: fix the action, re-run, and say what you changed.
      sends into the window before the relay drops the driver); or
      `ClientResume` resends nothing and keeps them held (`held::resend`
      gone).
+   - `NoLostUserMessage`: `ClientSend`'s direct send keeps no chip (`"none"`
+     instead of `"unechoed"`, `deliverMessage` before the fix): a 6-step
+     held-echo path ending in claude's exit.
+   - `NoDoubleSend`: `Relay` hands `"unechoed"` chips back on `relaunched`
+     too: a direct send right after a resume is handed back by the resume's
+     own `relaunched` and sent again (20 steps).
+   - `CodexTurns.NoLostUserMessage`: the same `"none"` for a direct send in
+     `ClientSend`: the 4-step exit window.
+   - `WakeBounded`: `WakerWake` leaves `wakes` alone and `StoreEcho` counts
+     it instead (`unanswered_wakes` over stored rows, the code before the
+     fix).
    - `SessionTurns.AskVisible`: `Relay` closes every open card on any tool
      result (closing by name instead of by `tool_use_id`).
    - `SessionTurns.InterruptHonored`: `Interrupt` writes its line ahead of
@@ -519,12 +544,12 @@ wrong: fix the action, re-run, and say what you changed.
      sends no echo.
    - `OpenCodeTurns.NoDoubleSend`: a prompt held behind a running one is also
      taken in at once.
-   - `NoLostUserMessage` (claude, codex), the codex and OpenCode FAILs, and
-     `WakeBounded` fail today; once one passes, add a break for it here.
+   - The codex and OpenCode FAILs fail today; once one passes, add a break
+     for it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
    change was meant to move, and say so in the PR.
 4. Move the sync commit (the hash in the `git diff` command above and below)
    forward only after you have read the covered code at the new commit and
    confirmed the models describe it.
 
-Last confirmed against: `e4442013f27bb615e223fa28638fba5aeba3dc1a`.
+Last confirmed against: `5605aed48d5639074ddd47d567727a00d610f14a`.

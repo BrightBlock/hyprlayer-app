@@ -262,6 +262,11 @@ const COLS: &str = "id, workstream_id, stage, harness, claude_session_id, cwd, s
                       WHERE g.session_id = sessions.id AND g.status IN ('running', 'paused')
                       ORDER BY g.started_at DESC LIMIT 1) AS goal_brief";
 
+const UNANSWERED_WAKES: &str = "CASE WHEN EXISTS (SELECT 1 FROM session_events e
+                                     WHERE e.session_id = sessions.id AND e.kind = 'turnDone'
+                                       AND e.seq > sessions.restart_wake_seq)
+                          THEN 0 ELSE sessions.restart_wakes END";
+
 /// `TurnDone` persists `Running`, so a live idle harness is told apart by its log.
 fn is_working(state: SessionState, last_turn_kind: Option<&str>) -> bool {
     match state {
@@ -1227,6 +1232,34 @@ impl Db {
                 conn.prepare("SELECT session_id, mid_turn FROM pending_wakes ORDER BY session_id")?;
             let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
             rows.collect()
+        })
+    }
+
+    pub fn unanswered_restart_wakes(&self, session_id: &str) -> Result<u32> {
+        self.with(|conn| {
+            conn.query_row(
+                &format!("SELECT {UNANSWERED_WAKES} FROM sessions WHERE id = ?1"),
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(Option::unwrap_or_default)
+        })
+    }
+
+    pub fn record_restart_wake(&self, session_id: &str) -> Result<()> {
+        self.with(|conn| {
+            conn.execute(
+                &format!(
+                    "UPDATE sessions
+                        SET restart_wakes = {UNANSWERED_WAKES} + 1,
+                            restart_wake_seq = (SELECT COALESCE(MAX(seq), -1) FROM session_events
+                                                 WHERE session_id = sessions.id)
+                      WHERE id = ?1"
+                ),
+                params![session_id],
+            )?;
+            Ok(())
         })
     }
 

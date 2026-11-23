@@ -70,6 +70,8 @@ struct Inbox {
     own: HashSet<String>,
     /// Being withdrawn: claude's `cancelled` for these is the user's, not a drop.
     cancelling: HashSet<String>,
+    /// Stdout ended: `Exited` follows, and the relay stores nothing after it.
+    ended: bool,
 }
 
 impl Inbox {
@@ -319,6 +321,11 @@ impl ClaudeDriver {
         let wire = uuid::Uuid::new_v4().to_string();
         let line = protocol::user_turn_json(&self.session_id, text, &wire);
         let mut inbox = lock(&self.inbox);
+        if inbox.ended {
+            return Err(CoreError::SessionNotFound {
+                session_id: self.session_id.clone(),
+            });
+        }
         inbox.own.insert(wire.clone());
         // Without lifecycle frames nothing would say when claude took it in: it still
         // waits in claude's queue, but echoes now.
@@ -738,11 +745,15 @@ async fn read_and_wait(
         }
     }
 
-    let dropped: Vec<SessionEvent> = lock(&inbox)
-        .waiting
-        .drain(..)
-        .filter_map(|(_, echo)| declined_message(&echo))
-        .collect();
+    let dropped: Vec<SessionEvent> = {
+        let mut inbox = lock(&inbox);
+        inbox.ended = true;
+        inbox
+            .waiting
+            .drain(..)
+            .filter_map(|(_, echo)| declined_message(&echo))
+            .collect()
+    };
     for declined in dropped {
         let _ = events.send(declined);
     }

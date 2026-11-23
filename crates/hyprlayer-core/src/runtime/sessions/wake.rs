@@ -175,7 +175,8 @@ async fn check(rt: &HyprlayerRuntime, id: &str, mid_turn: bool) -> Result<Option
         tracing::warn!("session {id}: not woken: it never started a conversation to resume");
         return Ok(None);
     }
-    let unanswered = unanswered_wakes(&log);
+    let (db, sid) = (rt.db.clone(), id.to_string());
+    let unanswered = blocking(move || db.unanswered_restart_wakes(&sid)).await?;
     if unanswered >= MAX_RESTART_RESUMES {
         tracing::warn!(
             "session {id}: not woken: the last {unanswered} restart wakes never finished a turn"
@@ -204,6 +205,9 @@ async fn wake_one(rt: &HyprlayerRuntime, wake: &Wake, text: &str) -> Result<bool
     {
         return Ok(false);
     }
+    // Before the send: a server that stops before the actor stores the wake's echo must still count it.
+    let (db, sid) = (rt.db.clone(), id.clone());
+    blocking(move || db.record_restart_wake(&sid)).await?;
     let turn = AppTurn {
         text,
         prompt_name: Some(RESTART_PROMPT_NAME),
@@ -295,19 +299,6 @@ fn background_label(name: &str, input: &str) -> Option<String> {
         .map(str::trim)
         .filter(|d| !d.is_empty());
     spawned.then(|| description.unwrap_or(name).to_string())
-}
-
-fn unanswered_wakes(log: &[SessionLogEntry]) -> u32 {
-    let wakes = log
-        .iter()
-        .rev()
-        .take_while(|entry| !matches!(entry.event, SessionEvent::TurnDone { .. }))
-        .filter(|entry| {
-            matches!(&entry.event, SessionEvent::UserMessage { prompt_name: Some(name), .. }
-                if name == RESTART_PROMPT_NAME)
-        })
-        .count();
-    u32::try_from(wakes).unwrap_or(u32::MAX)
 }
 
 fn utc_minute(at: SystemTime) -> String {

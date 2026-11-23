@@ -323,6 +323,12 @@ impl SessionService<'_> {
         if let (Err(_), Some(nonce)) = (&sent, held) {
             super::held::release(self.runtime, session_id, nonce).await;
         }
+        if let (Err(CoreError::SessionNotFound { .. }), Some(nonce)) = (&sent, nonce) {
+            self.runtime
+                .session_actors
+                .release_user_turn(session_id, nonce)
+                .await;
+        }
         sent
     }
 
@@ -371,7 +377,14 @@ impl SessionService<'_> {
         if let Some(mode) = turn.collab_mode {
             driver.set_collab_mode(Some(mode));
         }
-        driver.send_user_turn(turn.text, None, turn.prompt_name, Some(&turn.nonce))
+        let sent = driver.send_user_turn(turn.text, None, turn.prompt_name, Some(&turn.nonce));
+        if let Err(CoreError::SessionNotFound { .. }) = &sent {
+            self.runtime
+                .session_actors
+                .release_user_turn(session_id, turn.nonce)
+                .await;
+        }
+        sent
     }
 
     /// Reserves a checked or attributed send under a nonce the actor can match.

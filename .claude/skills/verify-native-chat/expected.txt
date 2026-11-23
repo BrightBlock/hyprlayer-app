@@ -1,5 +1,5 @@
 PASS SessionTurns.TypeOK
-FAIL SessionTurns.NoLostUserMessage
+PASS SessionTurns.NoLostUserMessage
 PASS SessionTurns.NoLostAgentMessage
 PASS SessionTurns.NoDoubleSend
 PASS SessionTurns.TurnProgress
@@ -8,7 +8,7 @@ PASS SessionTurns.AskVisible
 PASS SessionTurns.InterruptSafe
 PASS SessionTurns.InterruptHonored
 PASS CodexTurns.TypeOK
-FAIL CodexTurns.NoLostUserMessage
+PASS CodexTurns.NoLostUserMessage
 FAIL CodexTurns.NoLostAgentMessage
 PASS CodexTurns.NoDoubleSend
 FAIL CodexTurns.TurnProgress
@@ -26,7 +26,7 @@ FAIL OpenCodeTurns.AskVisible
 FAIL OpenCodeTurns.InterruptSafe
 FAIL OpenCodeTurns.InterruptHonored
 PASS RestartWake.TypeOK
-FAIL RestartWake.WakeBounded
+PASS RestartWake.WakeBounded
 PASS RestartWake.NoWakeWhenArchived
 PASS SessionSync.TypeOK
 PASS SessionSync.NoSkippedSeq
