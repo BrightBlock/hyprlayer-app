@@ -36,8 +36,12 @@ VARIABLES
   \* held_messages, the relay's dropped ids and resends, the desktop's chips and Stop
   held, dropped, resendDue, chip, stopped,
   \* OpenCode's history since each message's latest send: its user message created, its reply
-  \* settled, the message read by a run, its own run started; the replies the driver has shown in full
-  created, ocDone, ocRead, ocRan, shown
+  \* settled, the message read by a run, the pieces of its reply's text (1: its run's, 2: what an abort
+  \* settled); and the pieces of each reply's text the driver has shown
+  created, ocDone, ocRead, ocText, seenText,
+  \* the driver's queue of POSTs that start or stop a turn: the prompt OpenCode took last whose
+  \* user message the driver has not read yet
+  gateFor
 
 vars == <<alive, busy, current, pipe, queue, cOpen, asked, out, drops, downs,
           sent, anchored, answered, interrupted, ended, unplaced, replying, endHeld, pending, bus,
@@ -45,7 +49,7 @@ vars == <<alive, busy, current, pipe, queue, cOpen, asked, out, drops, downs,
           vLive, streaming, vOpen, clicked, sends,
           accepted, failed, delivered, interrupts, droppedStop, stopFor,
           oWaiting, unread, doneOwed, orphans, held, dropped, resendDue, chip, stopped,
-          created, ocDone, ocRead, ocRan, shown>>
+          created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 ocVars == <<alive, busy, current, pipe, queue, cOpen, asked, out, drops, downs>>
 turnVars == <<sent, anchored, answered, interrupted, ended, unplaced, replying, endHeld>>
@@ -73,7 +77,9 @@ Init ==
   /\ oWaiting = {} /\ unread = {} /\ doneOwed = FALSE /\ orphans = {}
   /\ held = {} /\ dropped = {} /\ resendDue = {} /\ chip = [m \in Composer |-> "none"]
   /\ stopped = FALSE
-  /\ created = {} /\ ocDone = {} /\ ocRead = {} /\ ocRan = {} /\ shown = {}
+  /\ created = {} /\ ocDone = {} /\ ocRead = {}
+  /\ ocText = [m \in Msgs |-> 0] /\ seenText = [m \in Msgs |-> 0]
+  /\ gateFor = None
 
 (* ---- send_user_turn: echo, begin_turn, prompt_async ---- *)
 
@@ -90,7 +96,7 @@ SendServer(m) ==
   /\ pipe' = Append(pipe, <<"prompt", m>>)
   /\ accepted' = accepted \cup {m}
   /\ created' = created \ {m} /\ ocDone' = ocDone \ {m} /\ ocRead' = ocRead \ {m}
-  /\ ocRan' = ocRan \ {m} /\ shown' = shown \ {m}
+  /\ ocText' = [ocText EXCEPT ![m] = 0] /\ seenText' = [seenText EXCEPT ![m] = 0]
 
 \* The composer steers only claude and codex; mid-turn its message waits in the local queue,
 \* so a send goes out when the view shows idle (which can lag OpenCode). It stays `unechoed`
@@ -105,7 +111,7 @@ ClientSend(m) ==
   /\ UNCHANGED <<alive, busy, current, queue, cOpen, asked, out, drops, downs, pending,
                  live, inTurn, parked, stored, vLive, vOpen, clicked, failed, delivered,
                  interrupts, droppedStop, stopFor, unread, doneOwed, orphans, held, dropped,
-                 resendDue>>
+                 resendDue, gateFor>>
 
 AgentSend(m) ==
   /\ m \in Agent /\ m \notin accepted
@@ -113,7 +119,7 @@ AgentSend(m) ==
   /\ held' = held \cup {m}
   /\ UNCHANGED <<alive, busy, current, queue, cOpen, asked, out, drops, downs, pending,
                  live, inTurn, parked, stored, viewVars, failed, delivered, interrupts, droppedStop, stopFor,
-                 unread, doneOwed, orphans, dropped, resendDue, chip, stopped>>
+                 unread, doneOwed, orphans, dropped, resendDue, chip, stopped, gateFor>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -150,19 +156,25 @@ Interrupt ==
 \* A run of m's prompt reads it and every message left unread in the history: each copy once.
 Run(m) ==
   /\ delivered' = [x \in Msgs |-> delivered[x] + (IF x = m THEN 1 ELSE 0) + (IF x \in orphans THEN 1 ELSE 0)]
-  /\ ocRead' = ocRead \cup {m} \cup orphans /\ ocRan' = ocRan \cup {m}
+  /\ ocRead' = ocRead \cup {m} \cup orphans /\ ocText' = [ocText EXCEPT ![m] = 1]
   /\ orphans' = {}
 
 Read(m) == {m} \cup orphans
 
 \* OpenCode handles one POST, in any order: each is its own request from its own task. A
 \* prompt's user message is created at once; it runs now, or after the prompt it is busy
-\* with. An abort ends the running prompt; whether the ones held behind it run is left
-\* open. A dead server fails every POST.
+\* with. An abort ends the running prompt and drops the ones held behind it (finding 16, and the
+\* 1.18.18 probes). A dead server fails every POST. Prompts and aborts go out of the driver's queue one at a
+\* time, each once the one before is answered and the last prompt's user message has been read;
+\* permission replies go out at once.
 OcRead ==
   \E i \in 1..Len(pipe) :
   LET line == pipe[i] IN
   /\ InOrder => i = 1
+  /\ line[1] /= "reply" =>
+       /\ \A j \in 1..(i - 1) : pipe[j][1] = "reply"
+       /\ gateFor = None \/ ~alive
+  /\ gateFor' = IF alive /\ line[1] = "prompt" THEN line[2] ELSE gateFor
   /\ pipe' = RemoveAt(pipe, i)
   /\ droppedStop' = (droppedStop \/ (alive /\ line[1] = "abort" /\ ~busy
                                      /\ \E j \in 1..Len(pipe) : pipe[j][1] = "prompt" /\ pipe[j][2] \in stopFor))
@@ -171,46 +183,42 @@ OcRead ==
                \* which no one hears once the relay has dropped the driver
                /\ bus' = IF line[1] = "prompt" /\ live THEN bus \o <<<<"text">>, <<"turnDone">>>> ELSE bus
                /\ failed' = IF line[1] = "prompt" /\ live THEN failed \cup {line[2]} ELSE failed
-               /\ UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, created, ocDone, ocRead, ocRan>>
+               /\ UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, created, ocDone, ocRead, ocText>>
           ELSE /\ UNCHANGED <<bus, failed>>
                /\ created' = IF line[1] = "prompt" THEN created \cup {line[2]} ELSE created
                /\ CASE line[1] = "prompt" /\ ~busy ->
                          /\ busy' = TRUE /\ current' = line[2] /\ Run(line[2])
-                         /\ out' = out \o <<<<"userMsg", line[2]>>, <<"text", line[2], Read(line[2])>>>>
+                         /\ out' = out \o <<<<"userMsg", line[2]>>, <<"text", line[2], Read(line[2]), 1>>>>
                          /\ UNCHANGED <<queue, cOpen, ocDone>>
                     [] line[1] = "prompt" ->
                          /\ queue' = Append(queue, line[2])
                          /\ out' = Append(out, <<"userMsg", line[2]>>)
-                         /\ UNCHANGED <<busy, current, cOpen, delivered, orphans, ocDone, ocRead, ocRan>>
+                         /\ UNCHANGED <<busy, current, cOpen, delivered, orphans, ocDone, ocRead, ocText>>
                     [] line[1] = "abort" /\ busy ->
                          \* the error and an idle first; then, if OpenCode had created the running
-                         \* reply, its cut-short part settles and the reply ends with MessageAbortedError;
-                         \* prompts held behind it that do not run stay in the history unread
-                         \E keep, replied \in BOOLEAN :
+                         \* reply, its cut-short part settles and the reply ends with MessageAbortedError.
+                         \* The prompts held behind it do not run, and stay in the history unread.
+                         \E replied \in BOOLEAN :
                            LET aborted == IF replied
-                                            THEN <<<<"abortErr">>, <<"idle">>, <<"text", current, {current}>>,
+                                            THEN <<<<"abortErr">>, <<"idle">>, <<"text", current, {current}, 2>>,
                                                    <<"finished", current>>>>
                                             ELSE <<<<"abortErr">>>>
                            IN
                            /\ cOpen' = {}
                            /\ ocDone' = IF replied THEN ocDone \cup {current} ELSE ocDone
-                           /\ IF keep /\ queue /= <<>>
-                                THEN /\ current' = Head(queue) /\ queue' = Tail(queue)
-                                     /\ Run(Head(queue))
-                                     /\ out' = out \o aborted \o <<<<"text", Head(queue), Read(Head(queue))>>>>
-                                     /\ UNCHANGED busy
-                                ELSE /\ busy' = FALSE /\ current' = None /\ queue' = <<>>
-                                     /\ orphans' = orphans \cup {queue[k] : k \in 1..Len(queue)}
-                                     /\ out' = out \o aborted \o <<<<"idle">>>>
-                                     /\ UNCHANGED <<delivered, ocRead, ocRan>>
+                           /\ ocText' = IF replied THEN [ocText EXCEPT ![current] = 2] ELSE ocText
+                           /\ busy' = FALSE /\ current' = None /\ queue' = <<>>
+                           /\ orphans' = orphans \cup {queue[k] : k \in 1..Len(queue)}
+                           /\ out' = out \o aborted \o <<<<"idle">>>>
+                           /\ UNCHANGED <<delivered, ocRead>>
                     [] line[1] = "abort" ->
-                         UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, ocDone, ocRead, ocRan>>
+                         UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, ocDone, ocRead, ocText>>
                     [] line[1] = "reply" /\ line[2] \in cOpen ->
                          /\ cOpen' = cOpen \ {line[2]}
                          /\ out' = Append(out, <<"replied", line[2]>>)
-                         /\ UNCHANGED <<busy, current, queue, delivered, orphans, ocDone, ocRead, ocRan>>
+                         /\ UNCHANGED <<busy, current, queue, delivered, orphans, ocDone, ocRead, ocText>>
                     [] line[1] = "reply" ->
-                         UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, ocDone, ocRead, ocRan>>
+                         UNCHANGED <<busy, current, queue, cOpen, out, delivered, orphans, ocDone, ocRead, ocText>>
   /\ UNCHANGED <<alive, asked, drops, downs, turnVars, pending, live, inTurn, parked, stored,
                  viewVars, accepted, interrupts, stopFor>>
 
@@ -237,11 +245,11 @@ OcFinish ==
   /\ ocDone' = ocDone \cup {current}
   /\ IF queue /= <<>>
        THEN /\ current' = Head(queue) /\ queue' = Tail(queue) /\ Run(Head(queue))
-            /\ out' = out \o <<<<"finished", current>>, <<"text", Head(queue), Read(Head(queue))>>>>
+            /\ out' = out \o <<<<"finished", current>>, <<"text", Head(queue), Read(Head(queue)), 1>>>>
             /\ UNCHANGED busy
        ELSE /\ busy' = FALSE /\ current' = None /\ queue' = <<>>
             /\ out' = out \o <<<<"finished", current>>, <<"idle">>>>
-            /\ UNCHANGED <<delivered, orphans, ocRead, ocRan>>
+            /\ UNCHANGED <<delivered, orphans, ocRead, ocText>>
   /\ UNCHANGED <<alive, pipe, cOpen, asked, drops, downs, turnVars, pending, bus, live,
                  inTurn, parked, stored, viewVars, accepted, failed, interrupts, droppedStop, stopFor>>
 
@@ -292,7 +300,10 @@ DriverRead ==
   /\ out /= <<>> /\ Head(out)[1] /= "connected" /\ ~(endHeld /\ Open) /\ ~doneOwed
   /\ LET ev == Head(out) IN
      /\ out' = Tail(out)
-     /\ shown' = IF ev[1] = "finished" THEN shown \cup {ev[2]} ELSE shown
+     /\ seenText' = IF ev[1] = "text" THEN [seenText EXCEPT ![ev[2]] = IF @ < ev[4] THEN ev[4] ELSE @]
+                 ELSE seenText
+     \* the user message the queue waits on lets the next POST out
+     /\ gateFor' = IF ev[1] = "userMsg" /\ ev[2] = gateFor THEN None ELSE gateFor
      /\ CASE ev[1] = "userMsg" ->
                \* message.updated, role user: the sent turn's anchor
                /\ anchored' = (anchored \/ (Open /\ ev[2] = sent))
@@ -301,9 +312,9 @@ DriverRead ==
                               oWaiting, unread, doneOwed>>
           [] ev[1] = "text" ->
                \* the step's parentID is at or past every message it read: their echoes go out
-               \* a reply a read-back after a gap already showed in full is not shown again
+               \* text a read-back after a gap already showed is not shown again
                /\ bus' = bus \o SetToSeq({<<"echo", w>> : w \in oWaiting \cap ev[3]})
-                             \o (IF ev[2] \in shown THEN <<>> ELSE <<<<"text">>>>)
+                             \o (IF ev[4] <= seenText[ev[2]] THEN <<>> ELSE <<<<"text">>>>)
                /\ oWaiting' = oWaiting \ ev[3]
                /\ replying' = (replying \/ (Open /\ ev[2] = sent))
                /\ UNCHANGED <<sent, anchored, answered, interrupted, ended, unplaced, endHeld, pending,
@@ -335,16 +346,19 @@ DriverRead ==
                \* decline_all: an idle OpenCode holds no ask, so any the driver still holds is closed
                LET closes == SetToSeq({<<"resolved", r>> : r \in pending}) IN
                /\ pending' = {}
-               /\ IF Open /\ (answered \/ interrupted)
+               \* the stop goes out only once the turn's user message is read: an idle before is not its
+               /\ IF Open /\ (answered \/ (interrupted /\ anchored))
                     THEN EndTurn(closes, replying) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
                     THEN unplaced' = TRUE /\ bus' = bus \o closes
                          /\ UNCHANGED <<ended, endHeld, oWaiting, unread, doneOwed>>
                   ELSE bus' = bus \o closes /\ UNCHANGED <<ended, unplaced, endHeld, oWaiting, unread, doneOwed>>
                /\ UNCHANGED <<sent, anchored, answered, interrupted, replying>>
+          [] ev[1] = "older" ->
+               UNCHANGED <<turnVars, pending, bus, oWaiting, unread, doneOwed>>
           [] ev[1] = "abortErr" ->
                \* session.error, MessageAbortedError: this turn's only if this driver asked
-               /\ IF Open /\ interrupted
+               /\ IF Open /\ interrupted /\ anchored
                     THEN EndTurn(<<>>, replying) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
                     THEN unplaced' = TRUE /\ UNCHANGED <<ended, endHeld, bus, oWaiting, unread, doneOwed>>
@@ -352,16 +366,21 @@ DriverRead ==
                /\ UNCHANGED <<sent, anchored, answered, interrupted, replying, pending>>
   /\ UNCHANGED <<alive, busy, current, pipe, queue, cOpen, asked, drops, downs, live, inTurn,
                  parked, stored, viewVars, accepted, failed, delivered, interrupts, droppedStop, stopFor,
-                 orphans, held, dropped, resendDue, chip, stopped, created, ocDone, ocRead, ocRan>>
+                 orphans, held, dropped, resendDue, chip, stopped, created, ocDone, ocRead, ocText>>
 
 \* The filter task reads server.connected (or Lagged) and reads back what OpenCode holds now: the
 \* session's messages (the anchor, the reply and whether it settled, the steps that read held
 \* echoes), its open asks (one it does not hold is passed on, one it holds that OpenCode dropped
-\* closes) and, if it is idle, an idle. A settled reply shown here is not shown again when its own
-\* event comes late. One step: every read follows the reconnect, so what changes after it comes live.
+\* closes) and, if it is idle, an idle. Text shown here is not shown again when its own event comes
+\* late. One step: every read follows the reconnect, so what changes after it comes
+\* live, and what was queued before it is older than the read.
 Resync ==
   /\ out /= <<>> /\ Head(out) = <<"connected">> /\ ~(endHeld /\ Open) /\ ~doneOwed
-  /\ out' = Tail(out)
+  \* an idle or error already queued ended an earlier run when OpenCode reads busy: skipped
+  /\ out' = IF busy
+              THEN [k \in 1..(Len(out) - 1) |->
+                      IF out[k + 1][1] \in {"idle", "abortErr"} THEN <<"older">> ELSE out[k + 1]]
+              ELSE Tail(out)
   /\ LET echoes == oWaiting \cap ocRead
          settles == sent /= None /\ sent \in ocDone
          anch == anchored \/ (Open /\ sent \in created)
@@ -372,20 +391,21 @@ Resync ==
          gone == pending \ cOpen
          open == (pending \ gone) \cup fresh
          pre == bus \o SetToSeq({<<"echo", w>> : w \in echoes})
-                    \o (IF ocRan \subseteq shown THEN <<>> ELSE <<<<"text">>>>)
+                    \o (IF \A m \in Msgs : ocText[m] <= seenText[m] THEN <<>> ELSE <<<<"text">>>>)
                     \o (IF settles /\ endHeld THEN <<<<"turnDone">>>> ELSE <<>>)
                     \o SetToSeq({<<"resolved", r>> : r \in gone})
                     \o SetToSeq({<<"ask", r>> : r \in fresh})
          closes == SetToSeq({<<"resolved", r>> : r \in open})
      IN
-     /\ shown' = shown \cup (ocRan \cap ocDone)
+     /\ seenText' = [m \in Msgs |-> IF seenText[m] < ocText[m] THEN ocText[m] ELSE seenText[m]]
+     /\ gateFor' = IF gateFor \in created THEN None ELSE gateFor
      /\ anchored' = anch /\ answered' = ans /\ replying' = rep
      /\ IF busy
           THEN /\ pending' = open /\ bus' = pre /\ oWaiting' = oWaiting \ echoes
                /\ endHeld' = (endHeld /\ ~settles) /\ unplaced' = unpl
                /\ UNCHANGED <<ended, unread, doneOwed>>
           ELSE /\ pending' = {}
-               /\ IF Open /\ (ans \/ interrupted)
+               /\ IF Open /\ (ans \/ (interrupted /\ anch))
                     THEN EndTurnFrom(pre \o closes, oWaiting \ echoes, rep) /\ unplaced' = unpl
                     ELSE /\ bus' = pre \o closes /\ oWaiting' = oWaiting \ echoes
                          /\ endHeld' = (endHeld /\ ~settles)
@@ -394,7 +414,7 @@ Resync ==
   /\ UNCHANGED <<alive, busy, current, pipe, queue, cOpen, asked, drops, downs, sent, interrupted,
                  live, inTurn, parked, stored, viewVars, accepted, failed, delivered, interrupts,
                  droppedStop, stopFor, orphans, held, dropped, resendDue, chip, stopped, created,
-                 ocDone, ocRead, ocRan>>
+                 ocDone, ocRead, ocText>>
 
 \* expire: an idle or error no user message claimed ends the sent turn after UNPLACED_WAIT. OpenCode
 \* creates a prompt's user message, and a dropped stream reconnects, well inside it, so the wait
@@ -407,7 +427,7 @@ Expire ==
   /\ UNCHANGED <<ocVars, sent, anchored, answered, interrupted, replying, pending, live,
                  inTurn, parked, stored, viewVars, accepted, failed, delivered, interrupts,
                  droppedStop, stopFor, orphans, held, dropped, resendDue, chip, stopped,
-                 created, ocDone, ocRead, ocRan, shown>>
+                 created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 \* SETTLE_WAIT runs out, or a send's next event comes: the held end goes out. OpenCode settles
 \* a reply it cut short well inside SETTLE_WAIT, so the wait runs out only on a reply that will
@@ -434,7 +454,7 @@ DropUnread ==
   /\ UNCHANGED <<alive, busy, current, pipe, queue, cOpen, asked, out, drops, downs, turnVars,
                  pending, live, inTurn, parked, stored, viewVars, accepted, failed, delivered,
                  interrupts, droppedStop, stopFor, held, dropped, resendDue, chip, stopped,
-                 created, ocDone, ocRead, ocRan, shown>>
+                 created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 (* ---- spawn_relay + ActorState::handle_event (author_for's next_turn), the desktop ---- *)
 
@@ -452,7 +472,7 @@ RelayExited ==
   /\ failed' = failed \cup held /\ held' = {} /\ dropped' = {}
   /\ UNCHANGED <<ocVars, turnVars, pending, stored, clicked, sends, accepted, delivered,
                  interrupts, droppedStop, stopFor, oWaiting, unread, doneOwed, orphans,
-                 resendDue, stopped, created, ocDone, ocRead, ocRan, shown>>
+                 resendDue, stopped, created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 Relay ==
   /\ bus /= <<>> /\ Head(bus) /= <<"exited">> /\ resendDue = {}
@@ -487,7 +507,7 @@ Relay ==
      /\ resendDue' = IF ev[1] = "turnDone" THEN dropped \cap held ELSE {}
   /\ UNCHANGED <<ocVars, turnVars, pending, live, vLive, clicked, sends, accepted, failed,
                  delivered, interrupts, droppedStop, stopFor, oWaiting, unread, doneOwed, orphans,
-                 stopped, created, ocDone, ocRead, ocRan, shown>>
+                 stopped, created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 \* held::send_again: OpenCode's send never fails.
 RelayResend ==
@@ -496,7 +516,7 @@ RelayResend ==
     /\ SendServer(m)
     /\ UNCHANGED <<alive, busy, current, queue, cOpen, asked, out, drops, downs, pending,
                    live, inTurn, parked, stored, viewVars, failed, delivered, interrupts,
-                   droppedStop, stopFor, unread, doneOwed, orphans, held, dropped, chip, stopped>>
+                   droppedStop, stopFor, unread, doneOwed, orphans, held, dropped, chip, stopped, gateFor>>
 
 ClientReload ==
   /\ vLive /\ live
@@ -517,17 +537,17 @@ Done == Quiet /\ UNCHANGED vars
 \* The steps that leave the driver's held echoes, OpenCode's unread history, the relay's
 \* resends and the desktop's chips as they are.
 Frame(A) == A /\ UNCHANGED <<oWaiting, unread, doneOwed, orphans, held, dropped, resendDue,
-                              chip, stopped, created, ocDone, ocRead, ocRan, shown>>
+                              chip, stopped, created, ocDone, ocRead, ocText, seenText, gateFor>>
 
 Next ==
   \/ \E m \in Composer : ClientSend(m)
   \/ \E m \in Agent : AgentSend(m)
   \/ \E r \in Asks : Frame(ClientAnswer(r) \/ OcAsk(r) \/ OcElsewhereReply(r))
   \/ Interrupt /\ UNCHANGED <<oWaiting, unread, doneOwed, orphans, held, dropped, resendDue, chip,
-                              created, ocDone, ocRead, ocRan, shown>>
-  \/ OcRead /\ UNCHANGED <<oWaiting, unread, doneOwed, held, dropped, resendDue, chip, stopped, shown>>
+                              created, ocDone, ocRead, ocText, seenText, gateFor>>
+  \/ OcRead /\ UNCHANGED <<oWaiting, unread, doneOwed, held, dropped, resendDue, chip, stopped, seenText>>
   \/ OcFinish /\ UNCHANGED <<oWaiting, unread, doneOwed, held, dropped, resendDue, chip, stopped,
-                             created, shown>>
+                             created, seenText, gateFor>>
   \/ Frame(OcDown \/ ServerExited \/ SseDrop \/ Settle \/ ClientReload)
   \/ DriverRead \/ Resync \/ Expire \/ DropUnread \/ Relay \/ RelayExited \/ RelayResend \/ Done
 
@@ -578,5 +598,5 @@ TypeOK ==
   /\ oWaiting \subseteq Msgs /\ unread \subseteq Msgs /\ orphans \subseteq Msgs
   /\ held \subseteq Agent /\ chip \in [Composer -> {"none", "unechoed", "queued", "returned"}]
   /\ created \subseteq Msgs /\ ocDone \subseteq Msgs /\ ocRead \subseteq Msgs
-  /\ ocRan \subseteq Msgs /\ shown \subseteq Msgs
+  /\ ocText \in [Msgs -> 0..2] /\ seenText \in [Msgs -> 0..2] /\ gateFor \in Msgs \cup {None}
 =============================================================================

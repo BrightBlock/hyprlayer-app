@@ -348,6 +348,41 @@ async fn opencode_resume() {
         }),
     );
 
+    j.step("a stop OpenCode gets before its prompt starts, or ahead of a newer prompt, stops only its own turn");
+    stub_delays(&sandbox, json!({ "start": 1000, "reply": 2000 }));
+    let early = "A turn stopped before OpenCode starts it.";
+    send(&mut j, &client, &id, early).await;
+    client
+        .interrupt_session(id.clone())
+        .await
+        .expect("interrupt_session");
+    let (seen, stopped_reply) = turn(&mut events, early).await;
+    let late_replies = replies_within(&mut events, Duration::from_secs(4)).await;
+    stub_delays(&sandbox, json!({ "abortDelay": 1000, "reply": 2000 }));
+    client
+        .interrupt_session(id.clone())
+        .await
+        .expect("interrupt_session");
+    let after = "A turn sent right after a stop.";
+    send(&mut j, &client, &id, after).await;
+    let (after_seen, after_reply) = turn(&mut events, after).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the early stop ends its turn with no reply after it, and a turn sent after a stop gets its reply",
+        status_of(&seen).as_deref() == Some("interrupted")
+            && stopped_reply.is_none()
+            && late_replies == 0
+            && after_reply.is_some()
+            && status_of(&after_seen).as_deref() == Some("completed"),
+        json!({
+            "stoppedStatus": status_of(&seen),
+            "stoppedReplied": stopped_reply.is_some(),
+            "repliesAfterTheStop": late_replies,
+            "afterReplied": after_reply.is_some(),
+            "afterStatus": status_of(&after_seen),
+        }),
+    );
+
     j.step("an OpenCode that ignores the prompt's messageID still ends each turn");
     stub_delays(&sandbox, json!({ "ownIds": true }));
     let own = "Answer under OpenCode's own ids.";
@@ -642,6 +677,17 @@ async fn sent(events: &mut EventStream<SessionEvent>, text: &str) {
         }
     })
     .await;
+}
+
+async fn replies_within(events: &mut EventStream<SessionEvent>, window: Duration) -> usize {
+    let mut replies = 0;
+    let _ = tokio::time::timeout(window, async {
+        while let Some(event) = events.recv().await {
+            replies += usize::from(matches!(event, SessionEvent::AssistantText { .. }));
+        }
+    })
+    .await;
+    replies
 }
 
 /// The turn ends that arrive within `window`, where a turn that ended once should see none.

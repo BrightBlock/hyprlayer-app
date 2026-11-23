@@ -21,14 +21,14 @@ PASS CodexTurns.AskVisible
 PASS CodexTurns.InterruptSafe
 PASS CodexTurns.InterruptHonored
 PASS OpenCodeTurns.TypeOK
-FAIL OpenCodeTurns.NoLostUserMessage  # finding 16 (two prompts handled out of order, then a stop): model only, not reproduced live
-FAIL OpenCodeTurns.NoLostAgentMessage  # finding 16 (two prompts handled out of order), and 13: model only, not reproduced live
+PASS OpenCodeTurns.NoLostUserMessage
+PASS OpenCodeTurns.NoLostAgentMessage
 PASS OpenCodeTurns.NoDoubleSend
-FAIL OpenCodeTurns.TurnProgress  # finding 13 (a late abort): model only, not reproduced live
+FAIL OpenCodeTurns.TurnProgress  # finding 17 (a stopped turn's reply settles after its end): model only, 0 of 2 live tries
 PASS OpenCodeTurns.AskResolution
 PASS OpenCodeTurns.AskVisible
-FAIL OpenCodeTurns.InterruptSafe  # finding 13 (a late abort): model only, not reproduced live
-FAIL OpenCodeTurns.InterruptHonored  # finding 13 (an abort handled before its prompt): model only, not reproduced live
+FAIL OpenCodeTurns.InterruptSafe  # finding 17 (a stopped turn's reply settles after its end): model only, 0 of 2 live tries
+PASS OpenCodeTurns.InterruptHonored
 PASS OpenCodeTurns-death.TypeOK
 PASS OpenCodeTurns-death.NoLostUserMessage
 PASS OpenCodeTurns-death.NoLostAgentMessage

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Handle;
-use tokio::sync::{broadcast, watch, Mutex};
+use tokio::sync::{broadcast, mpsc, watch, Mutex};
 
 use crate::agent::{declined_message, AgentDriver, KillFlag, UsageSoFar};
 use crate::claude::{ExitOutcome, SessionEvent};
@@ -706,6 +706,7 @@ pub struct OpenCodeDriver {
     /// The translator's running `cost_total`, published after every event it handles.
     cost_so_far: Arc<std::sync::Mutex<Option<f64>>>,
     sent: SharedTurn,
+    posts: Posts,
 }
 
 /// A request OpenCode waits on; a question keeps its questions to order the answers.
@@ -878,6 +879,31 @@ async fn read_json(request: reqwest::RequestBuilder) -> Option<Value> {
     response.json().await.ok()
 }
 
+type Post = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+type Posts = mpsc::UnboundedSender<(Post, Option<String>)>;
+
+/// Sends each post that starts or stops a turn once the one before is answered and the driver
+/// has read the user message of the last prompt sent: OpenCode answers prompt_async before it
+/// creates that message, drops an abort that arrives first, and can create two prompts' user
+/// messages out of order. Neither wait holds the queue for longer than `UNPLACED_WAIT`.
+fn spawn_posts(tasks: &Handle, mut user_read: watch::Receiver<String>) -> Posts {
+    let (posts, mut queued) = mpsc::unbounded_channel::<(Post, Option<String>)>();
+    let handle = tasks.clone();
+    tasks.spawn(async move {
+        let mut last: Option<String> = None;
+        while let Some((post, prompt)) = queued.recv().await {
+            if let Some(last) = &last {
+                let read = user_read.wait_for(|read| read.as_str() >= last.as_str());
+                let _ = tokio::time::timeout(UNPLACED_WAIT, read).await;
+            }
+            let _ = tokio::time::timeout(UNPLACED_WAIT, handle.spawn(post)).await;
+            last = prompt.or(last);
+        }
+    });
+    posts
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -889,6 +915,7 @@ struct Intake {
     family: std::collections::HashSet<String>,
     asks: Asks,
     tx: broadcast::Sender<SessionEvent>,
+    user_read: watch::Sender<String>,
 }
 
 impl Intake {
@@ -908,6 +935,19 @@ impl Intake {
         {
             return Vec::new();
         }
+        if ev.kind == "message.updated"
+            && ev.properties.pointer("/info/role").and_then(Value::as_str) == Some("user")
+        {
+            let id = ev.properties.pointer("/info/id").and_then(Value::as_str);
+            let id = id.unwrap_or_default();
+            self.user_read.send_if_modified(|read| {
+                let newer = id > read.as_str();
+                if newer {
+                    *read = id.to_string();
+                }
+                newer
+            });
+        }
         if let Some(closed) = track_ask(&self.asks, ev) {
             let _ = self.tx.send(closed);
         }
@@ -921,7 +961,7 @@ impl Intake {
 
     /// An ask read with no turn open can trail a resync that already ended its turn; one OpenCode
     /// no longer lists was answered meanwhile.
-    async fn stale(
+    async fn gone_ask(
         &self,
         get: &impl Fn(&str) -> reqwest::RequestBuilder,
         xlate: &Translator,
@@ -948,9 +988,10 @@ impl Intake {
         get: &impl Fn(&str) -> reqwest::RequestBuilder,
         since: u64,
         xlate: &mut Translator,
-    ) -> Vec<SessionEvent> {
-        let missed = self.missed(get, since, &xlate.settled).await;
-        missed.iter().flat_map(|ev| self.take(xlate, ev)).collect()
+    ) -> (Vec<SessionEvent>, bool) {
+        let (missed, busy) = self.missed(get, since, &xlate.settled).await;
+        let translated = missed.iter().flat_map(|ev| self.take(xlate, ev)).collect();
+        (translated, busy)
     }
 
     async fn missed(
@@ -958,7 +999,7 @@ impl Intake {
         get: &impl Fn(&str) -> reqwest::RequestBuilder,
         since: u64,
         settled: &std::collections::HashSet<String>,
-    ) -> Vec<OcEvent> {
+    ) -> (Vec<OcEvent>, bool) {
         let root = &self.root;
         let messages =
             get(&format!("/session/{root}/message")).query(&[("limit", RESYNC_MESSAGES)]);
@@ -1018,11 +1059,13 @@ impl Intake {
                 }
             }
         }
-        let idle = status.is_some_and(|all| all.get(root).is_none_or(|s| s["type"] == "idle"));
-        if idle {
+        let busy = status
+            .as_ref()
+            .map(|all| all.get(root).is_some_and(|s| s["type"] != "idle"));
+        if busy == Some(false) {
             missed.push(OcEvent::new("session.idle", json!({ "sessionID": root })));
         }
-        missed
+        (missed, busy == Some(true))
     }
 }
 
@@ -1115,11 +1158,14 @@ impl OpenCodeDriver {
 
         let mut sse_rx = server.events.subscribe();
         let asks = Asks::default();
+        let (user_read, read_up_to) = watch::channel(String::new());
+        let posts = spawn_posts(&server.tasks, read_up_to);
         let mut intake = Intake {
             root: session_id.clone(),
             family: std::collections::HashSet::from([session_id.clone()]),
             asks: asks.clone(),
             tx: events.clone(),
+            user_read,
         };
         let tx = events.clone();
         let since = now_ms();
@@ -1146,6 +1192,7 @@ impl OpenCodeDriver {
                 sent: xlate_sent,
                 ..Translator::default()
             };
+            let mut older: usize = 0;
             loop {
                 let next = match xlate.deadline() {
                     Some(at) => tokio::time::timeout_at(at.into(), sse_rx.recv()).await.ok(),
@@ -1154,7 +1201,13 @@ impl OpenCodeDriver {
                 let translated = match next {
                     None => xlate.expire(),
                     Some(Ok(ev)) if ev.kind != "server.connected" => {
-                        if intake.stale(&get, &xlate, &ev).await {
+                        // An idle or error queued before a read-back that found the session busy
+                        // ended an earlier run, not the one OpenCode runs now.
+                        let ended = matches!(ev.kind.as_str(), "session.idle" | "session.error");
+                        let ours = event_session_id(&ev) == Some(intake.root.as_str());
+                        let superseded = older > 0 && ended && ours;
+                        older = older.saturating_sub(1);
+                        if superseded || intake.gone_ask(&get, &xlate, &ev).await {
                             Vec::new()
                         } else {
                             intake.take(&mut xlate, &ev)
@@ -1162,7 +1215,10 @@ impl OpenCodeDriver {
                     }
                     // OpenCode starts every event stream with it, so one here follows a gap.
                     Some(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {
-                        intake.resync(&get, since, &mut xlate).await
+                        let queued = sse_rx.len();
+                        let (translated, busy) = intake.resync(&get, since, &mut xlate).await;
+                        older = if busy { queued } else { 0 };
+                        translated
                     }
                     Some(Err(broadcast::error::RecvError::Closed)) => break,
                 };
@@ -1205,6 +1261,7 @@ impl OpenCodeDriver {
             asks,
             cost_so_far,
             sent,
+            posts,
         });
         Ok((driver, primary_rx))
     }
@@ -1257,11 +1314,11 @@ impl OpenCodeDriver {
         });
     }
 
-    fn prompt_async(&self, body: Value) {
+    fn prompt_async(&self, body: Value, message_id: String) {
         let path = format!("/session/{}/prompt_async", self.session_id);
         let request = self.request(reqwest::Method::POST, &path).json(&body);
         let events = self.events.clone();
-        self.server.tasks.spawn(async move {
+        let post = Box::pin(async move {
             let result = request
                 .send()
                 .await
@@ -1283,6 +1340,7 @@ impl OpenCodeDriver {
                 });
             }
         });
+        let _ = self.posts.send((post, Some(message_id)));
     }
 
     fn command_async(
@@ -1301,7 +1359,7 @@ impl OpenCodeDriver {
         let mut body = json!({
             "command": command,
             "arguments": arguments,
-            "messageID": message_id,
+            "messageID": &message_id,
         });
         let mut fallback = json!({ "parts": [{ "type": "text", "text": original_text }] });
         if let Some((provider, model)) = &model {
@@ -1319,7 +1377,7 @@ impl OpenCodeDriver {
             &format!("/session/{}/prompt_async", self.session_id),
         );
         let turn = self.sent.clone();
-        self.server.tasks.spawn(async move {
+        let run = async move {
             let sent = command
                 .json(&body)
                 .send()
@@ -1351,7 +1409,13 @@ impl OpenCodeDriver {
                     thread_tokens: None,
                 });
             }
+        };
+        let tasks = self.server.tasks.clone();
+        // Sent in turn, but not awaited: /command answers only when its turn ends.
+        let started = Box::pin(async move {
+            tasks.spawn(run);
         });
+        let _ = self.posts.send((started, Some(message_id)));
     }
 
     fn take_ask(&self, request_id: &str) -> Option<Ask> {
@@ -1421,7 +1485,7 @@ impl AgentDriver for OpenCodeDriver {
         if let Some((provider, model)) = self.model.lock().ok().and_then(|m| m.clone()) {
             body["model"] = json!({ "providerID": provider, "modelID": model });
         }
-        self.prompt_async(body);
+        self.prompt_async(body, message_id);
         Ok(())
     }
 
@@ -1503,7 +1567,18 @@ impl AgentDriver for OpenCodeDriver {
             let _ = self.events.send(closed);
         }
         self.mark_turn(|turn| turn.interrupted = true);
-        self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
+        let path = format!("/session/{}/abort", self.session_id);
+        let abort = self.request(reqwest::Method::POST, &path).json(&json!({}));
+        let post = Box::pin(async move {
+            match abort.send().await {
+                Ok(resp) if !resp.status().is_success() => {
+                    tracing::warn!("opencode POST {path} returned {}", resp.status());
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("opencode POST {path} failed: {e}"),
+            }
+        });
+        let _ = self.posts.send((post, None));
         Ok(())
     }
 
@@ -1811,6 +1886,8 @@ impl Translator {
         }];
         if held.kind == "session.error" {
             out.extend(error_events(&held.properties));
+        } else if turn.interrupted {
+            out.push(self.ended_as("interrupted"));
         } else {
             out.push(self.ended_as("completed"));
         }
@@ -1961,7 +2038,9 @@ impl Translator {
                     let done = self.ended_as("completed");
                     return self.end_turn(&turn, vec![done]);
                 }
-                if turn.interrupted {
+                // The stop goes out once OpenCode created the prompt's user message; an idle
+                // before that is not its.
+                if turn.interrupted && self.anchor_of(&turn).is_some() {
                     let done = self.ended_as("interrupted");
                     return self.end_turn(&turn, vec![done]);
                 }
@@ -1972,12 +2051,8 @@ impl Translator {
                 let Some(turn) = open else {
                     return Vec::new();
                 };
-                // An abort is this turn's only if this driver asked; any other error once anchored.
-                let ours = if is_abort(p) {
-                    turn.interrupted
-                } else {
-                    self.anchor_of(&turn).is_some()
-                };
+                // An abort is this turn's only if this driver asked; any error only once anchored.
+                let ours = self.anchor_of(&turn).is_some() && (turn.interrupted || !is_abort(p));
                 if !ours {
                     self.hold_unplaced(&turn, ev);
                     return Vec::new();
@@ -2486,10 +2561,13 @@ mod tests {
         stopped.extend(x.handle(&idle()));
         assert_eq!(statuses(stopped), ["interrupted"]);
 
-        // Stopped before OpenCode took the prompt, it ends on the idle alone.
+        // Stopped before OpenCode took the prompt, it ends on the idle after its prompt's message.
         send(&x, "msg_9");
         interrupt(&x);
-        assert_eq!(statuses(x.handle(&idle())), ["interrupted"]);
+        assert_eq!(statuses(x.handle(&idle())), [] as [String; 0]);
+        let mut stopped = x.handle(&user("msg_9"));
+        stopped.extend(x.handle(&idle()));
+        assert_eq!(statuses(stopped), ["interrupted"]);
 
         // A denied permission ends the turn on its last step, though that step called a tool.
         send(&x, "msg_a");
@@ -2656,6 +2734,7 @@ mod tests {
             ("msg_2".into(), echo("two")),
             ("msg_3".into(), echo("three")),
         ];
+        x.handle(&user("msg_1"));
         let step = |id: &str, parent: &str| {
             oc(
                 "message.updated",

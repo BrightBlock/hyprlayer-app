@@ -179,6 +179,22 @@
       "guards": [
         {
           "evidence": {
+            "afterReplied": true,
+            "afterStatus": "completed",
+            "repliesAfterTheStop": 0,
+            "stoppedReplied": false,
+            "stoppedStatus": "interrupted"
+          },
+          "guard": "the early stop ends its turn with no reply after it, and a turn sent after a stop gets its reply",
+          "ok": true
+        }
+      ],
+      "step": "a stop OpenCode gets before its prompt starts, or ahead of a newer prompt, stops only its own turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "replied": true,
             "turnStatus": "completed"
           },

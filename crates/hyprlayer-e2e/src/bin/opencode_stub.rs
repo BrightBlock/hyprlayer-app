@@ -4,7 +4,9 @@
 //!
 //! `$XDG_DATA_HOME/opencode-stub/control.json` delays, in ms, the events 1.18.32 sends late:
 //! `start` (the prompt's user message), `reply`, `echo` (the user message again after the idle),
-//! `abortIdle` (an idle session's abort) and `late` (an aborted turn's reply and second idle).
+//! `abortIdle` (an idle session's abort), `late` (an aborted turn's reply and second idle) and
+//! `abortDelay` (an abort handled that long after it arrives). An abort is answered after it
+//! cancels the running turn.
 //! `"ask": true` makes each turn ask permission for bash first, and `"question": true` a question
 //! before that; `"aside": true` follows each ask with a text part. `"ownIds": true` ignores the
 //! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
@@ -205,10 +207,7 @@ impl Stub {
                 }
                 self.answer(stream, ask, *verb == "reply")
             }
-            ("POST", ["session", id, "abort"]) => {
-                respond(stream, 200, &json!(true));
-                self.abort(id);
-            }
+            ("POST", ["session", id, "abort"]) => self.abort(stream, id),
             _ => respond(stream, 404, &json!({ "name": "NotFoundError" })),
         }
     }
@@ -369,14 +368,19 @@ impl Stub {
 
     /// As 1.18.32: an idle session reports `session.idle`; a busy one an aborted error and an
     /// idle, then its reply ends in that error and a second idle follows.
-    fn abort(&self, id: &str) {
+    fn abort(&self, stream: TcpStream, id: &str) {
         let delays = self.delays();
-        let Some(running) = self.running.lock().unwrap().remove(id) else {
+        sleep(delays.abort_delay);
+        let running = self.running.lock().unwrap().remove(id);
+        if let Some(running) = &running {
+            running.aborted.store(true, Ordering::SeqCst);
+            self.asks.lock().unwrap().clear();
+        }
+        respond(stream, 200, &json!(true));
+        let Some(running) = running else {
             sleep(delays.abort_idle);
             return self.emit("session.idle", json!({ "sessionID": id }));
         };
-        running.aborted.store(true, Ordering::SeqCst);
-        self.asks.lock().unwrap().clear();
         if delays.late_ask {
             self.emit(
                 "permission.asked",
@@ -491,6 +495,7 @@ impl Stub {
             reply: ms("reply"),
             echo: ms("echo"),
             abort_idle: ms("abortIdle"),
+            abort_delay: ms("abortDelay"),
             late: ms("late"),
             ask: control["ask"].as_bool().unwrap_or(false),
             question: control["question"].as_bool().unwrap_or(false),
@@ -528,6 +533,7 @@ struct Delays {
     reply: Duration,
     echo: Duration,
     abort_idle: Duration,
+    abort_delay: Duration,
     late: Duration,
     ask: bool,
     question: bool,
