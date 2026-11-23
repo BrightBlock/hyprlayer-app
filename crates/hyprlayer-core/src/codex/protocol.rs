@@ -387,22 +387,13 @@ impl Translator {
             "thread/tokenUsage/updated" => self.token_usage(p),
             "error" => match error_text(p) {
                 Some(msg) => {
-                    let mut out = self.decline_steers();
                     self.error_reported = true;
-                    out.push(SessionEvent::AssistantText {
+                    vec![SessionEvent::AssistantText {
                         text: format!("⚠ Codex error: {msg}"),
                         parent_id: None,
                         injected: false,
                         auth_required: p.get("error").is_some_and(is_auth_failure),
-                    });
-                    out.push(SessionEvent::TurnDone {
-                        cost_usd: None,
-                        num_turns: None,
-                        context_tokens: None,
-                        turn_status: Some("failed".into()),
-                        thread_tokens: self.thread_tokens,
-                    });
-                    out
+                    }]
                 }
                 None => Vec::new(),
             },
@@ -1986,7 +1977,41 @@ mod tests {
             "error",
             &json!({ "error": { "message": "no credit" }, "willRetry": false }),
         );
+        assert_eq!(ev_names(&out), ["assistantText"]);
+    }
+
+    #[test]
+    fn a_failed_turn_ends_once_with_its_error() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("th".into());
+        let error = json!({
+            "message": "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.",
+            "codexErrorInfo": "modelNotFound", "additionalDetails": null, "misalignment": null
+        });
+        let mut out = t.notification(
+            "turn/started",
+            &json!({ "threadId": "th", "turn": { "id": "t1", "status": "inProgress", "error": null } }),
+        );
+        out.extend(t.notification(
+            "error",
+            &json!({ "error": error, "willRetry": false, "threadId": "th", "turnId": "t1" }),
+        ));
+        out.extend(t.notification(
+            "turn/completed",
+            &json!({ "threadId": "th", "turn": { "id": "t1", "status": "failed", "error": error } }),
+        ));
+
         assert_eq!(ev_names(&out), ["assistantText", "turnDone"]);
+        match (&out[0], &out[1]) {
+            (
+                SessionEvent::AssistantText { text, .. },
+                SessionEvent::TurnDone { turn_status, .. },
+            ) => {
+                assert!(text.contains("model is not supported"), "{text}");
+                assert_eq!(turn_status.as_deref(), Some("failed"));
+            }
+            other => panic!("unexpected events {other:?}"),
+        }
     }
 
     #[test]
