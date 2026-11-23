@@ -5,7 +5,9 @@ use hyprlayer_models::{SkillScope, SkillTarget, Stage};
 use crate::skills::SkillHome;
 
 use super::lock::{LockEntry, SkillLock};
-use super::{content_hash, SkillConflict, SkillConflictReason, SkillLockState};
+use super::{
+    content_hash, content_hash_without, SkillConflict, SkillConflictReason, SkillLockState,
+};
 
 const MAX_LINK_TEXT: u64 = 1024;
 
@@ -46,8 +48,8 @@ pub fn reserved(name: &str) -> bool {
     .any(|command| command.trim_start_matches('/') == name)
 }
 
-/// A link is ours when it points into this scope's store, is a copy the lock vouches for,
-/// or is a text file standing in for a committed link (a Windows checkout).
+/// A link is ours when it points into this scope's store, is a copy the lock or our marker
+/// vouches for, or is a text file standing in for a committed link (a Windows checkout).
 pub fn owned(link: &Path, store: &Path, folder: &str, lock: &SkillLock) -> bool {
     !matches!(
         link_state(link, store, folder, lock),
@@ -64,7 +66,18 @@ pub enum LinkState {
     Dangling,
     /// An owned text file standing in for a link.
     TextFile,
+    /// A copy that carries our marker but not the lock's content (a crash before the lock moved).
+    Stale,
     Foreign,
+}
+
+/// Written into every copy-fallback link, holding the hash of the rest of the copy, before the
+/// copy is renamed into place: a copy is ours even when the lock never caught up with it.
+pub const COPY_MARKER: &str = ".hyprlayer-copy";
+
+pub fn mark_copy(dir: &Path) -> std::io::Result<()> {
+    let hash = content_hash_without(dir, Some(COPY_MARKER))?;
+    std::fs::write(dir.join(COPY_MARKER), hash)
 }
 
 pub fn link_state(link: &Path, store: &Path, folder: &str, lock: &SkillLock) -> LinkState {
@@ -82,12 +95,19 @@ pub fn link_state(link: &Path, store: &Path, folder: &str, lock: &SkillLock) -> 
         };
     }
     if meta.is_dir() {
-        let vouched = lock
+        let Ok(hash) = content_hash_without(link, Some(COPY_MARKER)) else {
+            return LinkState::Foreign;
+        };
+        if lock
             .skills
             .get(folder)
-            .is_some_and(|entry| content_hash(link).is_ok_and(|hash| hash == entry.hash));
-        return if vouched {
-            LinkState::Healthy
+            .is_some_and(|entry| entry.hash == hash)
+        {
+            return LinkState::Healthy;
+        }
+        let marked = std::fs::read_to_string(link.join(COPY_MARKER)).is_ok_and(|m| m == hash);
+        return if marked {
+            LinkState::Stale
         } else {
             LinkState::Foreign
         };
@@ -253,7 +273,7 @@ impl Layout {
             let link = self.link_path(target, folder);
             matches!(
                 link_state(&link, &self.store, folder, lock),
-                LinkState::Absent | LinkState::Dangling | LinkState::TextFile
+                LinkState::Absent | LinkState::Dangling | LinkState::TextFile | LinkState::Stale
             )
         });
         if broken {
@@ -275,7 +295,7 @@ impl Layout {
             match link_state(&link, &self.store, folder, lock) {
                 LinkState::Healthy | LinkState::Foreign => continue,
                 LinkState::Absent => {}
-                LinkState::Dangling | LinkState::TextFile => {
+                LinkState::Dangling | LinkState::TextFile | LinkState::Stale => {
                     remove_link(&link).map_err(std::io::Error::other)?;
                 }
             }
@@ -381,8 +401,16 @@ pub fn link_skill(target: &Path, link: &Path, scope: SkillScope) -> std::io::Res
 
 #[cfg(windows)]
 fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir(to)?;
-    copy_tree(from, to)
+    let name = to.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = to.with_file_name(format!(".{name}.tmp-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&tmp)?;
+    let copied = copy_tree(from, &tmp)
+        .and_then(|()| mark_copy(&tmp))
+        .and_then(|()| std::fs::rename(&tmp, to));
+    if copied.is_err() {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+    copied
 }
 
 pub fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {

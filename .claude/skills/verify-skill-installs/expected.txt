@@ -5,6 +5,6 @@ PASS unix FinishedOpsConsistent
 PASS unix LeftoversSwept
 PASS windows TypeOK
 PASS windows ForeignUntouched
-FAIL windows AppEntriesOwned
-FAIL windows FinishedOpsConsistent
+PASS windows AppEntriesOwned
+PASS windows FinishedOpsConsistent
 PASS windows LeftoversSwept

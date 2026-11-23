@@ -47,8 +47,8 @@ any new action. `check.sh` gives the verdict, and `/statechart` gives the story.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails the `FAIL` rules in `expected.txt` on the code at the sync commit. These are findings
-about the product, not modeling errors. Each path was walked against the code; none
+Every rule in `expected.txt` passes on the code at the sync commit. The findings below
+were about the product, not modeling errors, and are kept for the record. Each path was walked against the code; none
 was replayed on a real filesystem.
 
 1. **Fixed: a crash mid-update left new content under the old lock, and restore called it fine.**
@@ -58,7 +58,7 @@ was replayed on a real filesystem.
    (`Layout::store_matches`), and a store that differs is refetched at the locked
    commit like a missing one: `adopt_into_store` sets the stale store aside, renames
    the fetched copy in, and removes the old one (or renames it back on failure).
-   `FinishedOpsConsistent` passes on unix; on Windows it still fails through finding 3.
+   `FinishedOpsConsistent` passes on unix; on Windows it passed only once finding 3 was fixed.
 2. **Fixed: store-side leftovers were never swept.**
    A crash leaves `.tmp-<token>-*` (fresh install, update or adopt) or
    `.old-<token>-*` (update or restore) inside the store dir, and `skills.lock.tmp-*`
@@ -70,13 +70,22 @@ was replayed on a real filesystem.
    finished remove or restore. `sweep_staging` is unchanged. `LeftoversSwept` passes
    on both platforms. The model has no `skills.lock.tmp-*` (the lock write is one
    atomic action), so that part of the sweep is checked only by reading the code.
-3. **`AppEntriesOwned`, `FinishedOpsConsistent` (Windows): a crashed copy-fallback link is disowned forever.**
-   When `link_skill` falls back to a copy, `link_state` claims that copy only while
-   the lock has an entry whose hash matches it. If a crash comes after the copy
-   but before `lock::write` (a fresh install), or after `refresh_copy` but before
-   the lock moves (an update), the copy reads as `Foreign`. After that, remove
-   leaves it, restore skips it, and install refuses the name, while the harness
-   still loads it.
+3. **Fixed: a crashed copy-fallback link was disowned forever (Windows).**
+   `link_state` claimed a copy only while the lock had an entry whose hash matched it,
+   so a crash after the copy but before `lock::write` (a fresh install), or after
+   `refresh_copy` but before the lock moved (an update), left a copy that read as
+   `Foreign`: remove left it, restore skipped it, install refused the name, and the
+   harness still loaded it. Every copy now carries `COPY_MARKER` (`.hyprlayer-copy`),
+   holding the content hash of the rest of the copy, written into the tmp copy before
+   it is renamed into place (`link_skill`'s copy fallback and `refresh_copy`). A copy
+   whose marker matches its content but not the lock's hash is `LinkState::Stale`:
+   owned, so remove takes it and install refuses the name, `lock_state` calls it
+   `Broken`, restore replaces it, and update refreshes it. A folder without the marker
+   is still claimed only by the lock's hash, as before, so a person's own folder stays
+   `Foreign`; an edited copy no longer matches its marker and turns `Foreign` too.
+   Install now also runs `sweep_leftovers` for its folder, since the copy fallback's
+   tmp sits beside the link. `AppEntriesOwned` and `FinishedOpsConsistent` pass on
+   both platforms.
 
 When one is fixed in the code, change the model to match, run `check.sh`, and flip
 that rule's lines in `expected.txt` to `PASS`.
@@ -86,7 +95,7 @@ that rule's lines in `expected.txt` to `PASS`.
 Run this from the repo root:
 
 ```sh
-git diff --stat bd55f5c98355c1df3233f05551d6b594a124d1ef -- \
+git diff --stat 4ece9ff3555e9161df0ad4149147a7cb69080b57 -- \
   crates/hyprlayer-core/src/skill_sources/install.rs \
   crates/hyprlayer-core/src/skill_sources/layout.rs \
   crates/hyprlayer-core/src/skill_sources/lock.rs \
@@ -101,15 +110,15 @@ gets swept, and which calls hold the scope mutex.
 
 | Model action | Code (at the sync commit) |
 |---|---|
-| `Owned`, `State` | `layout::owned` / `link_state`, layout.rs:51/70 |
-| `Linked` | `layout::link_skill`, layout.rs:353 (symlink; on Windows junction or copy) |
-| sweep at each start (`storeJunk' = 0`; remove and restore also `linkJunk' = 0`) | `Layout::sweep_store` (layout.rs:222) and, for remove and restore, `sweep_leftovers` (layout.rs:203), in `SkillService::restore`/`install`/`remove` under the mutex, runtime/skills.rs:521/700/718 |
+| `Owned`, `State` (a copy is `healthy` or `stale`, never `foreign`) | `layout::owned` / `link_state`, layout.rs:53/83; the marker check, `COPY_MARKER` / `mark_copy`, layout.rs:75/78 |
+| `Linked` | `layout::link_skill`, layout.rs:369 (symlink; on Windows junction or copy; the copy is `copy_dir`, layout.rs:399: tmp beside, `mark_copy`, rename) |
+| sweep at each start (`storeJunk' = 0`; install, remove and restore also `linkJunk' = 0`) | `Layout::sweep_store` (layout.rs:238) in `SkillService::restore`/`install`/`remove` under the mutex, runtime/skills.rs:521/700/718; `sweep_leftovers` (layout.rs:219) there for remove and restore, and in `install::commit` (install.rs:304) for install |
 | `InstallStart` … `InstallLock` | `install::commit`, install.rs:245: the precheck, `remove_dir_all(store_dir)`, tmp copy, rename, links, `lock::write` |
 | `InstallUndo` | `Undo::run`, install.rs:219 |
-| `ReplaceStart` … `ReplaceClean` | `install::replace`, install.rs:498: `sweep_leftovers`, set the store aside, tmp copy and rename, per-link `refresh_copy`/`set_aside`/`link_skill` (479/489), `lock::write`, `remove_any` |
-| `ReplaceUndo` | `ReplaceUndo::run`, install.rs:454 |
-| `RemoveStart` … `RemoveLock` | `install::remove`, install.rs:414 (links, store, lock; no undo) |
-| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:539: `Layout::store_matches` (layout.rs:218) → `adopt_into_store` (install.rs:613: tmp copy, set a stale store aside, rename, `remove_any`) → `Layout::relink` (layout.rs:267) |
+| `ReplaceStart` … `ReplaceClean` | `install::replace`, install.rs:500: `sweep_leftovers`, set the store aside, tmp copy and rename, per-link `refresh_copy` (tmp copy, `mark_copy`, set aside, rename)/`set_aside`/`link_skill` (480/491), `lock::write`, `remove_any` |
+| `ReplaceUndo` (each set-aside link comes back as it was, recorded in `swapped`) | `ReplaceUndo::run`, install.rs:455 |
+| `RemoveStart` … `RemoveLock` | `install::remove`, install.rs:415 (links, store, lock; no undo) |
+| `RestoreStart` … `RestoreRelink` | `SkillService::restore_entry`, runtime/skills.rs:539: `Layout::store_matches` (layout.rs:234) → `adopt_into_store` (install.rs:615: tmp copy, set a stale store aside, rename, `remove_any`) → `Layout::relink` (layout.rs:283) |
 | atomic lock write | `lock::write`, lock.rs:73 (tmp + rename) |
 | one operation at a time | `skill_locks.lock(&key)` in `restore`/`install`/`remove`, runtime/skills.rs:518/698/716 |
 
@@ -124,7 +133,9 @@ separate `let _ =` call; see the next section.
   step and 2 outside changes per behavior.
 - Left out: two link targets that share one physical dir (`link_paths` dedup);
   text-file links in the initial state (only restore and update handle them);
-  the junction step (it behaves like a symlink here); an undo that itself fails
+  the junction step (it behaves like a symlink here); the copy fallback's tmp,
+  marker write and rename (one step here, so no leftover of its own); a copy
+  someone edited (its marker stops matching and it reads as foreign); an undo that itself fails
   or is cut off part-way; power loss (no fsync anywhere); restore's
   `NeedsApproval` (a locked commit whose content no longer matches its hash);
   unknown `source` entries; two processes on one checkout (the mutex is
@@ -153,4 +164,4 @@ the way a new call does. Fix the action, re-run, and say what you changed.
    after you have read the covered code at the new commit and confirmed the model
    describes it.
 
-Last confirmed against: `bd55f5c98355c1df3233f05551d6b594a124d1ef`.
+Last confirmed against: `4ece9ff3555e9161df0ad4149147a7cb69080b57`.

@@ -5,7 +5,8 @@
    crash (nothing runs). The person or another tool may delete the store or a
    link, or put their own entry at a free link path. Operations hold the
    scope mutex, so they never overlap, and each starts by sweeping the store's
-   leftovers (storeJunk' = 0); remove and restore also sweep beside the links.
+   leftovers (storeJunk' = 0); install, remove and restore also sweep beside the
+   links (update does it in ReplaceSweep).
    See SKILL.md for the coverage map. *)
 EXTENDS Naturals, FiniteSets, Sequences
 
@@ -31,17 +32,19 @@ vars == <<store, link, lock, storeJunk, linkJunk, pc, ver, idx, made, states,
 opVars == <<pc, ver, idx, made, states, oldStore, swapped, tmpLink, owned0>>
 fsVars == <<store, link, lock, storeJunk, linkJunk>>
 
-(* layout::link_state with the lock as it is now *)
+(* layout::link_state with the lock as it is now. Every copy the app makes carries
+   COPY_MARKER, so one that isn't the lock's content is stale, never foreign. *)
 State(t) ==
   CASE link[t] = "none" -> "absent"
     [] link[t] = "foreign" -> "foreign"
     [] link[t] = "text" -> "text"
     [] link[t] = "sym" -> IF store # "none" THEN "healthy" ELSE "dangling"
-    [] OTHER -> IF lock # "none" /\ link[t] = Copy(lock) THEN "healthy" ELSE "foreign"
+    [] OTHER -> IF lock # "none" /\ link[t] = Copy(lock) THEN "healthy" ELSE "stale"
 
 Owned(t) == State(t) \notin {"absent", "foreign"}
 
-(* layout::link_skill: a symlink; on Windows the symlink may be refused and a copy of the store made *)
+(* layout::link_skill: a symlink; on Windows the symlink may be refused and a marked copy
+   of the store made (tmp beside, mark, rename: one step here) *)
 Linked == IF Windows THEN {"sym", Copy(store)} ELSE {"sym"}
 
 Init ==
@@ -66,9 +69,9 @@ InstallStart(v) ==
   /\ IF \E t \in Targets : link[t] # "none" \/ lock # "none"
      THEN pc' = "idle"
      ELSE pc' = "i_clear"
-  /\ storeJunk' = 0
+  /\ storeJunk' = 0 /\ linkJunk' = 0
   /\ made' = {} /\ swapped' = {} /\ tmpLink' = FALSE /\ idx' = 1
-  /\ UNCHANGED <<store, link, lock, linkJunk, states, oldStore, owned0, foreign,
+  /\ UNCHANGED <<store, link, lock, states, oldStore, owned0, foreign,
                  crashes, faults, damage>>
 
 (* `if store_dir.exists() { remove_dir_all }`, then the tmp copy *)
@@ -160,18 +163,18 @@ ReplaceStore ==
 NextLink == IF idx = 2 THEN pc' = "r_lock" /\ UNCHANGED idx
             ELSE pc' = "r_link" /\ idx' = idx + 1
 
-(* One link: a healthy copy is refreshed (tmp, set aside, rename); an absent or
+(* One link: an owned copy (healthy or stale) is refreshed (tmp, set aside, rename); an absent or
    text-file one is (re)made; anything else is left. *)
 ReplaceLink ==
   /\ pc = "r_link"
   /\ LET t == Order[idx] IN
-       CASE states[t] = "healthy" /\ link[t] \notin {"sym", "none"} ->
+       CASE states[t] \in {"healthy", "stale"} /\ link[t] \notin {"sym", "none"} ->
               /\ linkJunk' = linkJunk + 1 /\ tmpLink' = TRUE
               /\ pc' = "r_refresh_aside"
               /\ UNCHANGED <<link, made, swapped, idx>>
          [] states[t] = "text" ->
               /\ link' = [link EXCEPT ![t] = "none"]
-              /\ linkJunk' = linkJunk + 1 /\ swapped' = swapped \cup {t}
+              /\ linkJunk' = linkJunk + 1 /\ swapped' = swapped \cup {<<t, "text">>}
               /\ pc' = "r_make"
               /\ UNCHANGED <<made, tmpLink, idx>>
          [] states[t] = "absent" /\ link[t] = "none" ->
@@ -197,7 +200,7 @@ ReplaceRefreshAside ==
   /\ pc = "r_refresh_aside"
   /\ LET t == Order[idx] IN link' = [link EXCEPT ![t] = "none"]
   /\ linkJunk' = linkJunk + 1
-  /\ swapped' = swapped \cup {Order[idx]}
+  /\ swapped' = swapped \cup {<<Order[idx], link[Order[idx]]>>}
   /\ pc' = "r_refresh_in"
   /\ UNCHANGED <<store, lock, storeJunk, ver, idx, made, states, oldStore, tmpLink,
                  owned0, foreign, crashes, faults, damage, justDone>>
@@ -234,8 +237,8 @@ ReplaceUndo ==
   /\ faults' = faults + 1
   /\ LET restored(t) ==
            IF t \in made THEN "none"
-           ELSE IF t \in swapped
-                THEN (IF states[t] = "text" THEN "text" ELSE Copy(oldStore))
+           ELSE IF \E p \in swapped : p[1] = t
+                THEN (CHOOSE p \in swapped : p[1] = t)[2]
                 ELSE link[t]
      IN link' = [t \in Targets |-> restored(t)]
   /\ linkJunk' = linkJunk - Cardinality(swapped) - (IF tmpLink THEN 1 ELSE 0)
@@ -339,7 +342,7 @@ RestoreClean ==
   /\ UNCHANGED <<store, link, lock, linkJunk, ver, idx, made, states, oldStore,
                  swapped, tmpLink, owned0, foreign, crashes, faults, damage, justDone>>
 
-(* healthy and foreign are left; absent is made; dangling and text are removed then made *)
+(* healthy and foreign are left; absent is made; dangling, text and stale are removed then made *)
 RestoreRelink ==
   /\ pc = "s_relink"
   /\ LET t == Order[idx] IN

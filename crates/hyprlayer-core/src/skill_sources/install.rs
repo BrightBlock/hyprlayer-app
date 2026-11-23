@@ -301,6 +301,7 @@ pub fn commit(
             name: folder.to_string(),
         });
     }
+    layout.sweep_leftovers(folder);
     for &target in targets {
         let link = layout.link_path(target, folder);
         if std::fs::symlink_metadata(&link).is_ok() {
@@ -481,6 +482,7 @@ fn refresh_copy(link: &Path, store_dir: &Path, folder: &str, undo: &mut ReplaceU
     std::fs::create_dir(&tmp)?;
     undo.tmps.push(tmp.clone());
     layout::copy_tree(store_dir, &tmp)?;
+    layout::mark_copy(&tmp)?;
     set_aside(link, folder, undo)?;
     std::fs::rename(&tmp, link)?;
     Ok(())
@@ -543,7 +545,7 @@ fn replace(
             let started = Instant::now();
             let is_copy = std::fs::symlink_metadata(link).is_ok_and(|m| m.is_dir());
             let detail = match state {
-                LinkState::Healthy if is_copy => {
+                LinkState::Healthy | LinkState::Stale if is_copy => {
                     refresh_copy(link, &store_dir, folder, &mut undo)?;
                     Some("copied".to_string())
                 }

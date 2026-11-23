@@ -1,6 +1,6 @@
 # ADR 0010: Installed skills live in app-owned stores reached by per-skill links
 
-**Status:** proposed · 2026-10-05 · amended 2026-11-11 (the server's embedded orchestration plugin is per-launch, not an installed skill)
+**Status:** proposed · 2026-10-05 · amended 2026-11-11 (the server's embedded orchestration plugin is per-launch, not an installed skill) · amended 2026-11-22 (copy-fallback links carry an ownership marker)
 
 ## Decision
 
@@ -24,7 +24,8 @@ key and the remove/update key, and an update never changes it.
 **Ownership.** A link path is owned in exactly three cases: it is a link whose target
 `agents::link_targets_store` places under that scope's store; it is a real directory
 (the copy fallback) whose folder name has a lock entry and whose content hash equals the
-lock's; or it is a small regular file whose trimmed content resolves to that skill's store
+lock's, or that holds a `.hyprlayer-copy` marker equal to the content hash of the rest of
+it; or it is a small regular file whose trimmed content resolves to that skill's store
 dir (a Windows checkout of a committed symlink). `installed` on a row, the collision test and `remove_skill` share this one
 predicate. Nothing else is ever deleted.
 
@@ -35,8 +36,11 @@ CLI must not widen either over these stores. The sibling store is not a `config.
 write, so ADR-0002 needs no exception.
 
 **Windows.** Global: `symlink_dir`, then a junction on OS error 1314, then a copy. Project:
-`symlink_dir`, then a copy (a junction is absolute and useless checked in). A copy is
-recognised only through the lock and hash, and an update refreshes it.
+`symlink_dir`, then a copy (a junction is absolute and useless checked in). A copy is made
+in a tmp dir beside the link, given its marker, and renamed into place, so a crash before the
+lock write still leaves a copy the app recognises. One whose content differs from the lock's
+is stale: remove takes it, restore replaces it, and an update refreshes it. A folder without
+the marker is recognised only through the lock and hash.
 
 **Locking.** Every install, remove, update and restore holds a per-scope async mutex for
 its whole duration, keyed by the canonical path of `<config>/skills` or

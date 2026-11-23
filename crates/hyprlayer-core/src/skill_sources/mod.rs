@@ -228,8 +228,13 @@ pub struct SkillfishCandidate {
 /// Regular files only, framed `relPath ‖ 0x00 ‖ u64 BE length ‖ bytes` in byte order of
 /// the `/`-joined path. The mode bit is excluded so restore agrees across machines.
 pub fn content_hash(dir: &Path) -> std::io::Result<String> {
+    content_hash_without(dir, None)
+}
+
+pub(crate) fn content_hash_without(dir: &Path, skip: Option<&str>) -> std::io::Result<String> {
     let mut files = Vec::new();
     collect_files(dir, "", &mut files)?;
+    files.retain(|(rel, _)| Some(rel.as_str()) != skip);
     files.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
     let mut hasher = Sha256::new();
     for (rel, path) in files {
