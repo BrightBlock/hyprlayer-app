@@ -167,6 +167,24 @@ async fn opencode_resume() {
         json!({ "asked": request_id.is_some(), "turnStatus": ended }),
     );
 
+    j.step("a subagent's permission ask shows, and allowing it lets the turn finish");
+    stub_delays(&sandbox, json!({ "ask": true, "child": true }));
+    send(&mut j, &client, &id, "Have a subagent run a command.").await;
+    let delegated = permission_ask(&mut events).await;
+    if let Some(request_id) = &delegated {
+        client
+            .respond_permission(id.clone(), request_id.clone(), true, None)
+            .await
+            .expect("respond_permission");
+    }
+    let ended = turn_status(&mut events).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the subagent's ask reaches the user, and the allowed turn completes",
+        delegated.is_some() && ended.as_deref() == Some("completed"),
+        json!({ "asked": delegated.is_some(), "turnStatus": ended }),
+    );
+
     j.step("a tail read carries the asks OpenCode still waits on, until they end");
     stub_delays(
         &sandbox,
@@ -246,6 +264,7 @@ async fn opencode_resume() {
         .expect("announce_client");
     let named = [
         (request_id, "denied"),
+        (delegated, "subagent"),
         (question, "question"),
         (permission, "permission"),
         (cancelled, "cancelled"),
@@ -271,6 +290,7 @@ async fn opencode_resume() {
         closed
             == [
                 json!({ "kind": "permissionResolved", "requestId": "denied", "allow": false }),
+                json!({ "kind": "permissionResolved", "requestId": "subagent", "allow": true }),
                 json!({ "kind": "questionAnswered", "requestId": "question" }),
                 json!({ "kind": "permissionResolved", "requestId": "permission", "allow": true }),
                 json!({ "kind": "permissionResolved", "requestId": "cancelled", "allow": false }),

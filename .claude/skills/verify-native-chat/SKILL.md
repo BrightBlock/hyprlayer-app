@@ -430,7 +430,7 @@ turn, what closes an ask, or what reports the server's death.
 | `Interrupt` | `OpenCodeDriver::interrupt`, runtime.rs:1135 (drains the asks map as declined, marks the sent turn, POSTs abort) |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
 | `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
-| `DriverRead`, `Expire` | the filter task: `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379 |
+| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379 |
 | `Relay` | as `SessionTurns`, plus `author_for`'s `next_turn` (forwarder.rs:1056); OpenCode's permission names never equal a normalized tool name (`normalize_tool`, 1679), so no tool result decides a card |
 
 `RestartWake.tla`:
@@ -499,6 +499,10 @@ attachment together).
   tool result. `OpenCodeTurns`: one composer and one agent message, one ask
   id, one interrupt, one lost SSE event, one server death; no exits and no
   resume (a driver never exits except by a kill, which is left out).
+  `OpenCodeTurns-stop.cfg` checks the same rules on one composer message,
+  one ask and one stop, with OpenCode handling the driver's POSTs in the
+  order sent (`InOrder`), no lost SSE event and no server death: the stop and
+  ask paths without findings 12 to 14 in the way.
 - Assumptions about codex app-server: `turn/start` while a turn runs is
   refused (an error response; codex 0.171 instead takes the message into the
   running turn and answers with that turn's id, probe p10, which the model
@@ -515,8 +519,10 @@ attachment together).
 - Assumptions about OpenCode: a prompt POSTed while busy runs after the
   running one; an abort ends the running prompt, and the prompts held behind
   it may or may not run; the aborted reply message may or may not exist yet;
-  another OpenCode client can answer an ask (`permission.replied`). Only the
-  server death is confirmed live.
+  another OpenCode client can answer an ask (`permission.replied`); a
+  subagent's ask carries its child session's id, which `session.created`
+  names with its parent's (seen against 1.18.18). Only the server death is
+  confirmed live.
 - Left out of `CodexTurns`: codex errors (`error` posts text, the failed
   `turn/completed` after it ends the turn as `CodexFinish` does),
   `requestUserInput` questions, child threads, MCP elicitations (declined)
@@ -526,7 +532,8 @@ attachment together).
 - Left out of `OpenCodeTurns`: questions (a reply reaches OpenCode only with
   the session's `?directory=`, which every driver request carries),
   `command_async` (slash commands), the 5 s `UNPLACED_WAIT` as time (`Expire`
-  may fire any time after), compaction, child sessions, the kill path (`end`),
+  may fire any time after), compaction, a subagent's text and tools (its asks
+  are `OcAsk`s, which `admits` passes), the kill path (`end`),
   and a server that comes back.
 - Left out of `RestartWake`: orphan wakes (`queue_orphan_wakes`, mid-turn off,
   with open background tasks), the overlay wait and concurrency (a free delay
@@ -612,6 +619,9 @@ wrong: fix the action, re-run, and say what you changed.
      sends no echo.
    - `OpenCodeTurns.NoDoubleSend`: a prompt held behind a running one is also
      taken in at once.
+   - `OpenCodeTurns-stop.AskVisible`: an `OcAsk` from a subagent's session
+     never reaches the driver (the filter before `admits`; in the copy,
+     `OcAsk` may leave `out` unchanged).
    - `CodexTurns.NoLostAgentMessage` and the OpenCode FAILs fail today; once
      one passes, add a break for it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the

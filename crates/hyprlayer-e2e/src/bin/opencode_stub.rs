@@ -9,7 +9,8 @@
 //! before that; `"aside": true` follows each ask with a text part. `"ownIds": true` ignores the
 //! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
 //! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
-//! names the session only inside each message and part, as 1.0.224 does.
+//! names the session only inside each message and part, as 1.0.224 does. `"child": true` asks
+//! from a subagent's session, which 1.18.18 announces with `session.created` naming its parent.
 //!
 //! As in 1.18.18, a question's reply and reject resolve under `?directory=` (the server's own
 //! cwd when absent) and answer 404 unless that is the asking session's directory.
@@ -203,10 +204,10 @@ impl Stub {
         );
         let mut allowed = Some(true);
         if delays.question {
-            allowed = self.asked(id, assistant, true, delays.aside);
+            allowed = self.asked(id, assistant, true, &delays);
         }
         if delays.ask && allowed == Some(true) {
-            allowed = self.asked(id, assistant, false, delays.aside);
+            allowed = self.asked(id, assistant, false, &delays);
         }
         // An abort cancels the ask; the abort ends the turn.
         let Some(allowed) = allowed else { return };
@@ -241,8 +242,24 @@ impl Stub {
     }
 
     /// `None` when an abort cancelled it, which OpenCode reports with no reply event.
-    fn asked(&self, session: &str, assistant: &str, question: bool, aside: bool) -> Option<bool> {
+    fn asked(
+        &self,
+        session: &str,
+        assistant: &str,
+        question: bool,
+        delays: &Delays,
+    ) -> Option<bool> {
         let ask = format!("{}_{}", if question { "que" } else { "per" }, nanos());
+        let asker = if delays.child {
+            let child = format!("ses_stubchild{}", nanos());
+            self.emit(
+                "session.created",
+                json!({ "sessionID": child, "info": { "id": child, "parentID": session } }),
+            );
+            child
+        } else {
+            session.to_string()
+        };
         let (answer, answered) = channel();
         let directory = question
             .then(|| std::fs::read_to_string(self.directory_file(session)).unwrap_or_default());
@@ -255,16 +272,16 @@ impl Stub {
                 "options": [{ "label": "Yes", "description": "" }] }]);
             self.emit(
                 "question.asked",
-                json!({ "id": ask, "sessionID": session, "questions": questions }),
+                json!({ "id": ask, "sessionID": asker, "questions": questions }),
             );
         } else {
             self.emit(
                 "permission.asked",
-                json!({ "id": ask, "sessionID": session, "permission": "bash",
+                json!({ "id": ask, "sessionID": asker, "permission": "bash",
                         "patterns": ["echo stub"], "metadata": {} }),
             );
         }
-        if aside {
+        if delays.aside {
             self.emit(
                 "message.part.updated",
                 json!({ "sessionID": session, "part": {
@@ -283,7 +300,7 @@ impl Stub {
             (true, false) => "question.rejected",
             (false, _) => "permission.replied",
         };
-        self.emit(replied, json!({ "sessionID": session, "requestID": ask }));
+        self.emit(replied, json!({ "sessionID": asker, "requestID": ask }));
         Some(allowed)
     }
 
@@ -377,6 +394,7 @@ impl Stub {
             ask: control["ask"].as_bool().unwrap_or(false),
             question: control["question"].as_bool().unwrap_or(false),
             aside: control["aside"].as_bool().unwrap_or(false),
+            child: control["child"].as_bool().unwrap_or(false),
             own_ids: control["ownIds"].as_bool().unwrap_or(false),
             bare: control["bare"].as_bool().unwrap_or(false),
             nested: control["nested"].as_bool().unwrap_or(false),
@@ -411,6 +429,7 @@ struct Delays {
     ask: bool,
     question: bool,
     aside: bool,
+    child: bool,
     own_ids: bool,
     bare: bool,
     nested: bool,

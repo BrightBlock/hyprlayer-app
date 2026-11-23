@@ -791,6 +791,7 @@ impl OpenCodeDriver {
         let mut sse_rx = server.events.subscribe();
         let tx = events.clone();
         let sid = session_id.clone();
+        let mut family = std::collections::HashSet::from([session_id.clone()]);
         let asks = Asks::default();
         let tracked = asks.clone();
         let cost_so_far = Arc::new(std::sync::Mutex::new(None));
@@ -817,7 +818,7 @@ impl OpenCodeDriver {
                 };
                 match received {
                     Ok(ev) => {
-                        if event_session_id(&ev) != Some(sid.as_str()) {
+                        if !admits(&mut family, &sid, &ev) {
                             continue;
                         }
                         if let Some(closed) = track_ask(&tracked, &ev) {
@@ -1246,6 +1247,35 @@ fn event_session_id(ev: &OcEvent) -> Option<&str> {
     .into_iter()
     .flatten()
     .find_map(Value::as_str)
+}
+
+/// The session's own events, and only the asks of the subagent sessions under it, which
+/// OpenCode announces with a `parentID` and which wait on the same user.
+fn admits(family: &mut std::collections::HashSet<String>, root: &str, ev: &OcEvent) -> bool {
+    let Some(from) = event_session_id(ev) else {
+        return false;
+    };
+    if from == root {
+        return true;
+    }
+    let parent = ev
+        .properties
+        .pointer("/info/parentID")
+        .and_then(Value::as_str);
+    if matches!(ev.kind.as_str(), "session.created" | "session.updated")
+        && parent.is_some_and(|parent| family.contains(parent))
+    {
+        family.insert(from.to_string());
+    }
+    family.contains(from)
+        && matches!(
+            ev.kind.as_str(),
+            "permission.asked"
+                | "question.asked"
+                | "permission.replied"
+                | "question.replied"
+                | "question.rejected"
+        )
 }
 
 #[derive(Default)]

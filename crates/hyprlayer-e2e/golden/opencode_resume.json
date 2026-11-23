@@ -83,6 +83,19 @@
       "guards": [
         {
           "evidence": {
+            "asked": true,
+            "turnStatus": "completed"
+          },
+          "guard": "the subagent's ask reaches the user, and the allowed turn completes",
+          "ok": true
+        }
+      ],
+      "step": "a subagent's permission ask shows, and allowing it lets the turn finish"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "answeredDropped": true,
             "cancelCarried": true,
             "cancelDropped": true,
@@ -106,6 +119,11 @@
                 "allow": false,
                 "kind": "permissionResolved",
                 "requestId": "denied"
+              },
+              {
+                "allow": true,
+                "kind": "permissionResolved",
+                "requestId": "subagent"
               },
               {
                 "kind": "questionAnswered",

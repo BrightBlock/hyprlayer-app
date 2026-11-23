@@ -11,7 +11,8 @@ EXTENDS Integers, Sequences, FiniteSets
 CONSTANTS Composer, Agent, Asks,
           MaxInterrupts,
           MaxDrops,      \* SSE events the driver never sees (a stream reconnect, a lagged receiver)
-          MaxDowns       \* the OpenCode server dying
+          MaxDowns,      \* the OpenCode server dying
+          InOrder        \* OpenCode handles the driver's POSTs in the order it sent them
 
 Msgs == Composer \cup Agent
 
@@ -123,6 +124,7 @@ Take(m) == delivered' = [delivered EXCEPT ![m] = @ + 1]
 OcRead ==
   \E i \in 1..Len(pipe) :
   LET line == pipe[i] IN
+  /\ InOrder => i = 1
   /\ pipe' = RemoveAt(pipe, i)
   /\ droppedStop' = (droppedStop \/ (alive /\ line[1] = "abort" /\ ~busy
                                      /\ \E j \in 1..Len(pipe) : pipe[j][1] = "prompt" /\ pipe[j][2] \in stopFor))

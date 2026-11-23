@@ -25,6 +25,15 @@ FAIL OpenCodeTurns.AskResolution
 FAIL OpenCodeTurns.AskVisible
 FAIL OpenCodeTurns.InterruptSafe
 FAIL OpenCodeTurns.InterruptHonored
+PASS OpenCodeTurns-stop.TypeOK
+PASS OpenCodeTurns-stop.NoLostUserMessage
+PASS OpenCodeTurns-stop.NoLostAgentMessage
+PASS OpenCodeTurns-stop.NoDoubleSend
+PASS OpenCodeTurns-stop.TurnProgress
+FAIL OpenCodeTurns-stop.AskResolution
+PASS OpenCodeTurns-stop.AskVisible
+FAIL OpenCodeTurns-stop.InterruptSafe
+PASS OpenCodeTurns-stop.InterruptHonored
 PASS RestartWake.TypeOK
 PASS RestartWake.WakeBounded
 PASS RestartWake.NoWakeWhenArchived
