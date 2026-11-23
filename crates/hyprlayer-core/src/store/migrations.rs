@@ -311,6 +311,9 @@ const MIGRATIONS: &[&str] = &[
         mid_turn   INTEGER NOT NULL
     );
     ",
+    "
+    ALTER TABLE goals ADD COLUMN control_request TEXT;
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

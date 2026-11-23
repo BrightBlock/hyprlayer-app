@@ -30,7 +30,8 @@ use crate::runtime::goals::decide::{
 use crate::runtime::goals::{announce, Conclusion, Lease, RunnerControl};
 use crate::runtime::HyprlayerRuntime;
 use crate::store::{
-    Db, FieldOp, GoalRow, GoalStateUpdate, IterationEnd as ClosedIteration, Session, Workstream,
+    ControlRequest, Db, FieldOp, GoalRow, GoalStateUpdate, IterationEnd as ClosedIteration,
+    Session, Workstream,
 };
 
 use super::delivery::{LiveReceiver, SessionStreamError};
@@ -573,13 +574,17 @@ pub(crate) async fn run(
     let Ok(mut run) = Run::open(runtime, goal_id, control, stop, lease, owned).await else {
         return;
     };
-    let started = match mode {
-        StartMode::Normal => {
+    let started = match (run.row.control_request, mode) {
+        (Some(request), _) => {
+            let _ = run.close_cut_off(None).await;
+            Err(run.conclude(request.conclusion()).await)
+        }
+        (None, StartMode::Normal) => {
             // `GOAL_CUT_OFF` names a server restart; a crash's cut-off note is not one.
             run.cut_off = false;
             run.close_cut_off(None).await
         }
-        StartMode::Resume { step } => run.resume(step).await,
+        (None, StartMode::Resume { step }) => run.resume(step).await,
     };
     if started.is_ok() {
         let _ = run.drive().await;
@@ -1630,10 +1635,16 @@ impl Run {
     async fn conclude(&mut self, mut how: Conclusion) -> Over {
         self.lease.finishing();
         let _transition = self.lease.transition().await;
-        while let Ok(control) = self.control.try_recv() {
-            if let (RunnerControl::Stop(reason), Conclusion::Pause(..)) = (control, &how) {
-                how = Conclusion::End(reason);
-            }
+        // A stop may have gone to a runner chained after this one; the row has it either way.
+        let id = self.row.goal.id.clone();
+        let requested = self
+            .db(move |db| db.goal(&id))
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.control_request);
+        if let (Some(ControlRequest::Stop(reason)), Conclusion::Pause(..)) = (requested, &how) {
+            how = Conclusion::End(reason);
         }
         tracing::info!("goal {}: {}", self.row.goal.id, describe(&how));
         let _ = self.write(how.update()).await;

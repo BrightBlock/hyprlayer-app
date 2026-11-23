@@ -19,7 +19,7 @@ Driving == {"open", "resume", "boundary", "gate", "working", "checking",
             "c_fin", "c_lock", "c_drain", "c_write", "lift"}
 
 VARIABLES
-  status, step, iter,
+  status, step, iter, req,
   liveGen, nextGen,
   rpc, mode, rstep, earlier, fin, pend, inbox, how,
   lock,
@@ -32,7 +32,7 @@ VARIABLES
   pauseAcked, sendsSincePause, stopAcked, sendsSinceStop
 
 runnerVars == <<rpc, mode, rstep, earlier, fin, pend, inbox, how>>
-vars == <<status, step, iter, liveGen, nextGen, runnerVars, lock,
+vars == <<status, step, iter, req, liveGen, nextGen, runnerVars, lock,
           ppc, ptries, pwait, spc, stries, swait, rspc, srv, srvStep,
           waker, cut, woken, goalResumed, restarts,
           pauseAcked, sendsSincePause, stopAcked, sendsSinceStop>>
@@ -41,7 +41,7 @@ restartVars == <<srv, srvStep, waker, cut, woken, goalResumed, restarts>>
 svcVars == <<ppc, ptries, pwait, spc, stries, swait, rspc>>
 
 Init ==
-  /\ status = "running" /\ step = "working" /\ iter = 0
+  /\ status = "running" /\ step = "working" /\ iter = 0 /\ req = "none"
   /\ liveGen = 1 /\ nextGen = 2
   /\ rpc = [g \in Gens |-> IF g = 1 THEN "chain" ELSE "absent"]
   /\ mode = [g \in Gens |-> "normal"]
@@ -93,21 +93,26 @@ RunnerChain(g) ==
   /\ rpc[g] = "chain"
   /\ IF earlier[g] = 0 THEN TRUE ELSE rpc[earlier[g]] \in Dead
   /\ Goto(g, "open")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Run::open: under `transitions`, a goal that is not running has nothing to
-   drive, and the runner is marked finishing before the lock drops. *)
+   drive, and the runner is marked finishing before the lock drops. A pause or
+   stop the service accepted before a restart (`control_request`) concludes. *)
 RunnerOpen(g) ==
   /\ rpc[g] = "open"
   /\ lock = Free
   /\ IF status # "running"
      THEN /\ Goto(g, "exit")
           /\ fin' = [fin EXCEPT ![g] = TRUE]
-     ELSE /\ Goto(g, IF mode[g] = "resume" THEN "resume" ELSE "boundary")
+          /\ UNCHANGED how
+     ELSE /\ CASE req = "pause" -> Conclude(g, "pause")
+               [] req = "stop" -> Conclude(g, "end_user")
+               [] OTHER -> /\ Goto(g, IF mode[g] = "resume" THEN "resume" ELSE "boundary")
+                           /\ UNCHANGED how
           /\ UNCHANGED fin
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier,
-                 pend, inbox, how, lock, svcVars, restartVars, ackVars>>
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier,
+                 pend, inbox, lock, svcVars, restartVars, ackVars>>
 
 (* Run::resume: picks up from the step the goal went down on *)
 RunnerResume(g) ==
@@ -116,7 +121,7 @@ RunnerResume(g) ==
        [] rstep[g] = "pausing" -> Conclude(g, "pause")
        [] rstep[g] = "stopping" -> Conclude(g, "end_user")
        [] OTHER -> Goto(g, "boundary") /\ UNCHANGED how
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, lock, svcVars, restartVars, ackVars>>
 
 (* Run::apply for the control at the head of the inbox, from boundary's
@@ -134,14 +139,14 @@ RunnerApply(g) ==
      ELSE /\ step' = "stopping"
           /\ Conclude(g, "end_user")
           /\ UNCHANGED pend
-  /\ UNCHANGED <<status, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  lock, svcVars, restartVars, ackVars>>
 
 RunnerToGate(g) ==
   /\ rpc[g] = "boundary"
   /\ inbox[g] = <<>>
   /\ Goto(g, "gate")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Run::gate: a goal at its iteration limit ends; a pending pause concludes;
@@ -160,7 +165,7 @@ RunnerGate(g) ==
             /\ Goto(g, "working")
             /\ CountSend
             /\ UNCHANGED how
-  /\ UNCHANGED <<status, liveGen, nextGen, mode, rstep, earlier, fin, pend, inbox,
+  /\ UNCHANGED <<status, req, liveGen, nextGen, mode, rstep, earlier, fin, pend, inbox,
                  lock, svcVars, restartVars, pauseAcked, stopAcked>>
 
 (* Run::after -> close_iteration(.., Some(Checking)): the step is set to
@@ -169,7 +174,7 @@ RunnerTurnEnds(g) ==
   /\ rpc[g] = "working"
   /\ step' = "checking"
   /\ Goto(g, "checking")
-  /\ UNCHANGED <<status, iter, liveGen, nextGen, mode, rstep, earlier, fin, pend,
+  /\ UNCHANGED <<status, req, iter, liveGen, nextGen, mode, rstep, earlier, fin, pend,
                  inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Run::judge -> decide_boundary: met, then the iteration limit, then a pause *)
@@ -179,7 +184,7 @@ RunnerJudge(g) ==
      \/ /\ iter >= MaxIter /\ Conclude(g, "end_other")
      \/ /\ iter < MaxIter /\ pend[g] /\ Conclude(g, "pause")
      \/ /\ iter < MaxIter /\ ~pend[g] /\ Goto(g, "boundary") /\ UNCHANGED how
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, lock, svcVars, restartVars, ackVars>>
 
 (* Lease::finishing, under the `live` lock *)
@@ -187,7 +192,7 @@ RunnerFinishing(g) ==
   /\ rpc[g] = "c_fin"
   /\ fin' = [fin EXCEPT ![g] = TRUE]
   /\ Goto(g, "c_lock")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, pend,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, pend,
                  inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Lease::transition: the shared `transitions` mutex *)
@@ -196,25 +201,25 @@ RunnerLock(g) ==
   /\ lock = Free
   /\ lock' = g
   /\ Goto(g, "c_drain")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, svcVars, restartVars, ackVars>>
 
-(* conclude's try_recv loop: a stop that arrived while pausing wins *)
+(* conclude reads control_request under the lock: a stop accepted while
+   pausing wins, whichever runner's channel it went to *)
 RunnerDrain(g) ==
   /\ rpc[g] = "c_drain"
   /\ how' = [how EXCEPT ![g] =
-       IF how[g] = "pause" /\ \E i \in 1..Len(inbox[g]) : inbox[g][i] = "stop"
-       THEN "end_user" ELSE how[g]]
-  /\ inbox' = [inbox EXCEPT ![g] = <<>>]
+       IF how[g] = "pause" /\ req = "stop" THEN "end_user" ELSE how[g]]
   /\ Goto(g, "c_write")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
-                 pend, lock, svcVars, restartVars, ackVars>>
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+                 pend, inbox, lock, svcVars, restartVars, ackVars>>
 
 (* conclude's write of Conclusion::update, then the guard drops *)
 RunnerWrite(g) ==
   /\ rpc[g] = "c_write"
   /\ status' = IF how[g] = "pause" THEN "paused" ELSE "ended"
   /\ step' = "none"
+  /\ req' = "none"
   /\ lock' = Free
   /\ Goto(g, "lift")
   /\ UNCHANGED <<iter, liveGen, nextGen, mode, rstep, earlier, fin, pend, inbox,
@@ -224,7 +229,7 @@ RunnerWrite(g) ==
 RunnerLift(g) ==
   /\ rpc[g] = "lift"
   /\ Goto(g, "exit")
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
 (* Registration::drop removes the entry if it is still this generation's;
@@ -233,7 +238,7 @@ RunnerExit(g) ==
   /\ rpc[g] = "exit"
   /\ liveGen' = IF liveGen = g THEN 0 ELSE liveGen
   /\ Goto(g, "exited")
-  /\ UNCHANGED <<status, step, iter, nextGen, mode, rstep, earlier, fin, pend,
+  /\ UNCHANGED <<status, req, step, iter, nextGen, mode, rstep, earlier, fin, pend,
                  inbox, how, lock, svcVars, restartVars, ackVars>>
 
 ----------------------------------------------------------------------------
@@ -242,13 +247,13 @@ RunnerExit(g) ==
 PauseStart ==
   /\ ppc = "idle"
   /\ ppc' = "lock"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, ptries,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, ptries,
                  pwait, spc, stries, swait, rspc, restartVars, ackVars>>
 
 PauseLock ==
   /\ ppc = "lock" /\ lock = Free
   /\ lock' = P /\ ppc' = "act"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, ptries, pwait,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, ptries, pwait,
                  spc, stries, swait, rspc, restartVars, ackVars>>
 
 AckPause == pauseAcked' = TRUE /\ sendsSincePause' = 0
@@ -260,21 +265,23 @@ PauseAct ==
   /\ lock' = Free
   /\ CASE status = "paused" ->
             /\ ppc' = "done" /\ AckPause
-            /\ UNCHANGED <<status, step, inbox, pwait>>
+            /\ UNCHANGED <<status, req, step, inbox, pwait>>
        [] status = "running" /\ liveGen = 0 ->
-            /\ status' = "paused" /\ step' = "none"
+            /\ status' = IF req = "stop" THEN "ended" ELSE "paused"
+            /\ step' = "none" /\ req' = "none"
             /\ ppc' = "done" /\ AckPause
             /\ UNCHANGED <<inbox, pwait>>
        [] status = "running" /\ liveGen # 0 /\ fin[liveGen] ->
             /\ ppc' = "wait" /\ pwait' = liveGen
-            /\ UNCHANGED <<status, step, inbox, pauseAcked, sendsSincePause>>
+            /\ UNCHANGED <<status, req, step, inbox, pauseAcked, sendsSincePause>>
        [] status = "running" /\ liveGen # 0 ->
             /\ inbox' = [inbox EXCEPT ![liveGen] = Append(@, "pause")]
+            /\ req' = IF req = "stop" THEN "stop" ELSE "pause"
             /\ ppc' = "done" /\ AckPause
             /\ UNCHANGED <<status, step, pwait>>
        [] OTHER ->
             /\ ppc' = "done"
-            /\ UNCHANGED <<status, step, inbox, pwait, pauseAcked, sendsSincePause>>
+            /\ UNCHANGED <<status, req, step, inbox, pwait, pauseAcked, sendsSincePause>>
   /\ UNCHANGED <<iter, liveGen, nextGen, rpc, mode, rstep, earlier, fin, pend, how,
                  ptries, spc, stries, swait, rspc, restartVars, stopAcked,
                  sendsSinceStop>>
@@ -284,7 +291,7 @@ PauseWait ==
   /\ ppc = "wait"
   /\ ppc' = IF ptries < 1 THEN "lock" ELSE "done"
   /\ ptries' = ptries + 1
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, pwait,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, pwait,
                  spc, stries, swait, rspc, restartVars, ackVars>>
 
 ----------------------------------------------------------------------------
@@ -293,13 +300,13 @@ PauseWait ==
 StopStart ==
   /\ spc = "idle"
   /\ spc' = "lock"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
                  ptries, pwait, stries, swait, rspc, restartVars, ackVars>>
 
 StopLock ==
   /\ spc = "lock" /\ lock = Free
   /\ lock' = S /\ spc' = "act"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, ppc, ptries,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, ppc, ptries,
                  pwait, stries, swait, rspc, restartVars, ackVars>>
 
 AckStop == stopAcked' = TRUE /\ sendsSinceStop' = 0
@@ -309,16 +316,17 @@ StopAct ==
   /\ lock' = Free
   /\ CASE status = "ended" ->
             /\ spc' = "done" /\ AckStop
-            /\ UNCHANGED <<status, step, inbox, swait>>
+            /\ UNCHANGED <<status, req, step, inbox, swait>>
        [] status = "running" /\ liveGen # 0 /\ fin[liveGen] ->
             /\ spc' = "wait" /\ swait' = liveGen
-            /\ UNCHANGED <<status, step, inbox, stopAcked, sendsSinceStop>>
+            /\ UNCHANGED <<status, req, step, inbox, stopAcked, sendsSinceStop>>
        [] status = "running" /\ liveGen # 0 ->
             /\ inbox' = [inbox EXCEPT ![liveGen] = Append(@, "stop")]
+            /\ req' = "stop"
             /\ spc' = "done" /\ AckStop
             /\ UNCHANGED <<status, step, swait>>
        [] OTHER ->
-            /\ status' = "ended" /\ step' = "none"
+            /\ status' = "ended" /\ step' = "none" /\ req' = "none"
             /\ spc' = "done" /\ AckStop
             /\ UNCHANGED <<inbox, swait>>
   /\ UNCHANGED <<iter, liveGen, nextGen, rpc, mode, rstep, earlier, fin, pend, how,
@@ -329,7 +337,7 @@ StopWait ==
   /\ spc = "wait"
   /\ spc' = IF stries < 1 THEN "lock" ELSE "done"
   /\ stries' = stries + 1
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
                  ptries, pwait, swait, rspc, restartVars, ackVars>>
 
 ----------------------------------------------------------------------------
@@ -339,13 +347,13 @@ StopWait ==
 ResumeStart ==
   /\ rspc = "idle"
   /\ rspc' = "lock"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, ppc,
                  ptries, pwait, spc, stries, swait, restartVars, ackVars>>
 
 ResumeLock ==
   /\ rspc = "lock" /\ lock = Free
   /\ lock' = R /\ rspc' = "act"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, ppc, ptries,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, ppc, ptries,
                  pwait, spc, stries, swait, restartVars, ackVars>>
 
 ResumeAct ==
@@ -361,14 +369,14 @@ ResumeAct ==
        [] OTHER ->
             /\ rspc' = "done"
             /\ UNCHANGED <<status, step, pauseAcked, sendsSincePause>>
-  /\ UNCHANGED <<iter, liveGen, nextGen, runnerVars, ppc, ptries, pwait, spc,
+  /\ UNCHANGED <<iter, req, liveGen, nextGen, runnerVars, ppc, ptries, pwait, spc,
                  stries, swait, restartVars, stopAcked, sendsSinceStop>>
 
 ResumeSpawn ==
   /\ rspc = "spawn"
   /\ Spawn("normal", "none")
   /\ rspc' = "done"
-  /\ UNCHANGED <<status, step, iter, lock, ppc, ptries, pwait, spc, stries, swait,
+  /\ UNCHANGED <<status, req, step, iter, lock, ppc, ptries, pwait, spc, stries, swait,
                  restartVars, ackVars>>
 
 ----------------------------------------------------------------------------
@@ -391,7 +399,7 @@ Restart ==
   /\ cut' \in BOOLEAN
   /\ woken' = FALSE
   /\ goalResumed' = FALSE
-  /\ UNCHANGED <<status, step, iter, nextGen, mode, rstep, earlier, fin, pend, how,
+  /\ UNCHANGED <<status, req, step, iter, nextGen, mode, rstep, earlier, fin, pend, how,
                  ptries, pwait, stries, swait, srvStep, ackVars>>
 
 (* resume_one: under `transitions`, a running goal with no runner is written
@@ -399,7 +407,7 @@ Restart ==
 SrvLock ==
   /\ srv = "lock" /\ lock = Free
   /\ lock' = SR /\ srv' = "act"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, svcVars,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, svcVars,
                  srvStep, waker, cut, woken, goalResumed, restarts, ackVars>>
 
 SrvAct ==
@@ -408,27 +416,27 @@ SrvAct ==
   /\ IF status = "running" /\ liveGen = 0
      THEN /\ srvStep' = step /\ step' = "resuming" /\ srv' = "spawn"
      ELSE /\ srv' = "done" /\ UNCHANGED <<srvStep, step>>
-  /\ UNCHANGED <<status, iter, liveGen, nextGen, runnerVars, svcVars, waker, cut,
+  /\ UNCHANGED <<status, req, iter, liveGen, nextGen, runnerVars, svcVars, waker, cut,
                  woken, goalResumed, restarts, ackVars>>
 
 SrvSpawn ==
   /\ srv = "spawn"
   /\ Spawn("resume", srvStep)
   /\ srv' = "done" /\ goalResumed' = TRUE
-  /\ UNCHANGED <<status, step, iter, lock, svcVars, srvStep, waker, cut, woken,
+  /\ UNCHANGED <<status, req, step, iter, lock, svcVars, srvStep, waker, cut, woken,
                  restarts, ackVars>>
 
 (* wake::check: a session whose goal is running or paused is the goal resumer's *)
 WakerCheck ==
   /\ waker = "check"
   /\ waker' = IF cut /\ status \notin {"running", "paused"} THEN "wake" ELSE "done"
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, svcVars,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, svcVars,
                  srv, srvStep, cut, woken, goalResumed, restarts, ackVars>>
 
 WakerWake ==
   /\ waker = "wake"
   /\ waker' = "done" /\ woken' = TRUE
-  /\ UNCHANGED <<status, step, iter, liveGen, nextGen, runnerVars, lock, svcVars,
+  /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, svcVars,
                  srv, srvStep, cut, goalResumed, restarts, ackVars>>
 
 ----------------------------------------------------------------------------
@@ -459,6 +467,7 @@ Spec == Init /\ [][Next]_vars
 
 TypeOK ==
   /\ status \in {"running", "paused", "ended"}
+  /\ req \in {"none", "pause", "stop"}
   /\ liveGen \in 0..MaxGen
   /\ lock \in 0..SR
 

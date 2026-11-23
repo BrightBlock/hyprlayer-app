@@ -29,7 +29,7 @@ use crate::repo_settings;
 use crate::runtime::sessions::goal_loop::{self, StartMode};
 use crate::runtime::sessions::{LaunchSessionParams, SessionLineage, StartStageSessionRequest};
 use crate::settings::GoalSettings;
-use crate::store::{now_ms, FieldOp, GoalRow, GoalStateUpdate, NewGoal};
+use crate::store::{now_ms, ControlRequest, FieldOp, GoalRow, GoalStateUpdate, NewGoal};
 
 use super::shutdown::{self, TrackedTask};
 use super::HyprlayerRuntime;
@@ -141,6 +141,7 @@ impl Conclusion {
                 pause_reason: FieldOp::Clear,
                 end_reason: FieldOp::Set(*reason),
                 ended_at: FieldOp::Set(now_ms()),
+                control_request: FieldOp::Clear,
                 ..Default::default()
             },
             Conclusion::Pause(reason, text) => GoalStateUpdate {
@@ -149,8 +150,18 @@ impl Conclusion {
                 pause_reason: FieldOp::Set(*reason),
                 end_reason: FieldOp::Clear,
                 last_reason: text.clone().map(FieldOp::Set).unwrap_or_default(),
+                control_request: FieldOp::Clear,
                 ..Default::default()
             },
+        }
+    }
+}
+
+impl ControlRequest {
+    pub(crate) fn conclusion(self) -> Conclusion {
+        match self {
+            ControlRequest::Pause => Conclusion::Pause(GoalPauseReason::User, None),
+            ControlRequest::Stop(reason) => Conclusion::End(reason),
         }
     }
 }
@@ -529,7 +540,9 @@ async fn resume_one(
             return Ok(());
         }
         let resumes = row.restart_resumes.saturating_add(1);
-        let update = if resumes > MAX_RESTART_RESUMES {
+        // A pause or stop already accepted concludes as soon as the runner opens.
+        let looping = resumes > MAX_RESTART_RESUMES && row.control_request.is_none();
+        let update = if looping {
             let reason =
                 format!("The server restarted {resumes} times before an iteration finished");
             GoalStateUpdate {
@@ -548,7 +561,7 @@ async fn resume_one(
             return Ok(());
         };
         announce(&rt.events, &written.goal);
-        if resumes > MAX_RESTART_RESUMES {
+        if looping {
             tracing::info!("goal {goal_id}: pauses as restart_loop after {resumes} restarts");
             return Ok(());
         }
@@ -1058,19 +1071,29 @@ impl GoalService<'_> {
         let row = self.load(goal_id).await?;
         match row.goal.status {
             GoalStatus::Paused => Ok(Some(row.goal)),
-            GoalStatus::Running => match runners.send(goal_id, RunnerControl::Pause) {
-                Delivery::Delivered
-                    if matches!(row.goal.step, Some(GoalStep::Working | GoalStep::Waiting)) =>
-                {
-                    Ok(Some(with_step(row.goal, GoalStep::Pausing)))
+            GoalStatus::Running => {
+                let stopping = matches!(row.control_request, Some(ControlRequest::Stop(_)));
+                match runners.send(goal_id, RunnerControl::Pause) {
+                    Delivery::Delivered if stopping => {
+                        Ok(Some(with_step(row.goal, GoalStep::Stopping)))
+                    }
+                    Delivery::Delivered => {
+                        let goal = self.write_request(goal_id, ControlRequest::Pause).await?;
+                        if matches!(row.goal.step, Some(GoalStep::Working | GoalStep::Waiting)) {
+                            Ok(Some(with_step(goal, GoalStep::Pausing)))
+                        } else {
+                            Ok(Some(goal))
+                        }
+                    }
+                    Delivery::NoRunner => {
+                        let request = row.control_request.unwrap_or(ControlRequest::Pause);
+                        self.write_conclusion(goal_id, request.conclusion())
+                            .await
+                            .map(Some)
+                    }
+                    Delivery::Finishing => Ok(None),
                 }
-                Delivery::Delivered => Ok(Some(row.goal)),
-                Delivery::NoRunner => self
-                    .write_conclusion(goal_id, Conclusion::Pause(GoalPauseReason::User, None))
-                    .await
-                    .map(Some),
-                Delivery::Finishing => Ok(None),
-            },
+            }
             _ => Err(CoreError::GoalFinished {
                 goal_id: goal_id.to_string(),
             }),
@@ -1086,7 +1109,12 @@ impl GoalService<'_> {
         }
         if row.goal.status == GoalStatus::Running {
             match runners.send(goal_id, RunnerControl::Stop(reason)) {
-                Delivery::Delivered => return Ok(Some(with_step(row.goal, GoalStep::Stopping))),
+                Delivery::Delivered => {
+                    let goal = self
+                        .write_request(goal_id, ControlRequest::Stop(reason))
+                        .await?;
+                    return Ok(Some(with_step(goal, GoalStep::Stopping)));
+                }
                 Delivery::Finishing => return Ok(None),
                 Delivery::NoRunner => {}
             }
@@ -1100,6 +1128,14 @@ impl GoalService<'_> {
         let goal = self.write(goal_id, how.update()).await?;
         self.announce(&goal);
         Ok(goal)
+    }
+
+    async fn write_request(&self, goal_id: &str, request: ControlRequest) -> Result<Goal> {
+        let update = GoalStateUpdate {
+            control_request: FieldOp::Set(request),
+            ..Default::default()
+        };
+        self.write(goal_id, update).await
     }
 
     async fn write_running(&self, goal_id: &str) -> Result<Goal> {

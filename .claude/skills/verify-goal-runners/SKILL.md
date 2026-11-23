@@ -47,11 +47,11 @@ states, so it can list rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails three rules on the code at the sync commit. These are findings
+The model fails one rule on the code at the sync commit. It and the fixed ones below are findings
 about the product, not modeling errors. Each path below was walked step by step
 against the code. None was replayed in a running server.
 
-1. **`PauseHonored`, `StopHonored`: a pause or stop that is accepted but not yet applied dies with the server.**
+1. **Fixed: `PauseHonored`, `StopHonored`: a pause or stop that is accepted but not yet applied dies with the server.**
    `try_pause`/`try_end` return as soon as `GoalRunners::send` puts the control on
    the runner's channel (`Delivery::Delivered`), and they write nothing to the row.
    The runner reads the channel only at a select point (`working`, `check`,
@@ -65,8 +65,12 @@ against the code. None was replayed in a running server.
    Writing `Pausing`/`Stopping` into `step` in the service does not fix it. The
    model still fails with that change: `send` rewrites the step to `Working`,
    `after` rewrites it to `Checking`, and a `StartMode::Normal` spawn ignores the
-   persisted step. A requested pause or stop needs its own column that only
-   `conclude` clears and that `Run::open` reads.
+   persisted step. The accepted request now goes into `goals.control_request`
+   (`pause`, or the stop's end reason). `try_pause`/`try_end` write it on
+   `Delivered` while they hold `transitions`, a pause never overwrites a
+   pending stop, `run` concludes it as soon as `Run::open` has read the row,
+   `conclude` reads it instead of draining its own channel, and only
+   `Conclusion::update` clears it.
 2. **Fixed: `IterationCap`: a restart that cuts off the last iteration buys one more.**
    After a restart, `Run::open` closes the cut-off iteration and `drive` goes to
    `gate` → `send`, which started `iteration + 1` without comparing it with
@@ -99,7 +103,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat e569bbc1e20686c568b71fcb5661125d623dead8 -- \
+git diff --stat 642d69c598c0df9d3adb2027f34441e367ce1a7c -- \
   crates/hyprlayer-core/src/runtime/goals/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/goal_loop.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs
@@ -113,21 +117,21 @@ check commands, prompts, spend arithmetic or `decide_boundary`'s order beyond
 
 | Model action | Code (at the sync commit) |
 |---|---|
-| `Spawn` | `GoalRunners::spawn`, goals/mod.rs:378 (no-op on a live runner; chain after a finishing one) |
+| `Spawn` | `GoalRunners::spawn`, goals/mod.rs:389 (no-op on a live runner; chain after a finishing one) |
 | `RunnerChain` | the `earlier.changed()` wait in `spawn`'s task |
-| `RunnerOpen` | `Run::open`, goal_loop.rs:592 (under `transitions`: marks finishing and exits when status ≠ running) |
-| `RunnerResume` | `Run::resume`, goal_loop.rs:702 |
-| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1532/1552, from `drain_controls` (1513) or the selects in `working` (1013) and `check` (1385) |
-| `RunnerToGate`, `RunnerGate` | `boundary` (808) → `gate` (842; ends at `max_iterations`) → `send` (946) |
-| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1137 |
-| `RunnerJudge` | `judge` (1227) → `decide_boundary` → `follow` |
-| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1630 (`finishing`, `transition`, drain, write) |
-| `RunnerLift`, `RunnerExit` | `lift_cap` (1645); `Registration::drop`, goals/mod.rs:359 |
-| `Pause*` | `GoalService::pause` (698) → `try_pause` (1055), `wait_exit` (442) |
-| `Stop*` | `stop` (747) → `end` (1041) → `try_end` (1080) |
-| `Resume*` | `GoalService::resume` (713), `running_again` (292) |
+| `RunnerOpen` | `Run::open`, goal_loop.rs:597 (under `transitions`: marks finishing and exits when status ≠ running); `run` (565) concludes a `control_request` straight after |
+| `RunnerResume` | `Run::resume`, goal_loop.rs:707 |
+| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1537/1557, from `drain_controls` (1518) or the selects in `working` (1018) and `check` (1390) |
+| `RunnerToGate`, `RunnerGate` | `boundary` (813) → `gate` (847; ends at `max_iterations`) → `send` (951) |
+| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1142 |
+| `RunnerJudge` | `judge` (1232) → `decide_boundary` → `follow` |
+| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1635 (`finishing`, `transition`, read `control_request`, write; the write clears it) |
+| `RunnerLift`, `RunnerExit` | `lift_cap` (1656); `Registration::drop`, goals/mod.rs:370 |
+| `Pause*` | `GoalService::pause` (711) → `try_pause` (1068; writes `control_request` on `Delivered`), `wait_exit` (453) |
+| `Stop*` | `stop` (760) → `end` (1054) → `try_end` (1103; writes `control_request` on `Delivered`) |
+| `Resume*` | `GoalService::resume` (726), `running_again` (303) |
 | `Restart` | server exit + `stop_all`; `spawn_resumer`/`spawn_waker` from runtime/mod.rs:480 |
-| `Srv*` | `resume_running` (475) → `resume_one` (516) |
+| `Srv*` | `resume_running` (486) → `resume_one` (527) |
 | `WakerCheck`, `WakerWake` | `wake::check`, wake.rs:144–150; `wake_one` |
 
 Granularity: an action is one step only where the code makes it one. That means
@@ -172,4 +176,4 @@ what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the model describes it.
 
-Last confirmed against: `e569bbc1e20686c568b71fcb5661125d623dead8`.
+Last confirmed against: `642d69c598c0df9d3adb2027f34441e367ce1a7c`.

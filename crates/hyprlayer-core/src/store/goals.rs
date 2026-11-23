@@ -19,6 +19,29 @@ pub struct GoalRow {
     pub turn_failures: u32,
     pub harness_crashes: u32,
     pub restart_resumes: u32,
+    pub control_request: Option<ControlRequest>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlRequest {
+    Pause,
+    Stop(GoalEndReason),
+}
+
+impl ControlRequest {
+    fn as_str(self) -> &'static str {
+        match self {
+            ControlRequest::Pause => "pause",
+            ControlRequest::Stop(reason) => reason.as_str(),
+        }
+    }
+
+    fn try_parse(s: &str) -> Option<ControlRequest> {
+        match s {
+            "pause" => Some(ControlRequest::Pause),
+            _ => GoalEndReason::try_parse(s).map(ControlRequest::Stop),
+        }
+    }
 }
 
 pub struct NewGoal {
@@ -45,6 +68,7 @@ pub(crate) struct GoalStateUpdate {
     pub turn_failures: FieldOp<u32>,
     pub harness_crashes: FieldOp<u32>,
     pub restart_resumes: FieldOp<u32>,
+    pub control_request: FieldOp<ControlRequest>,
     pub last_outcome: FieldOp<GoalCheckOutcome>,
     pub last_reason: FieldOp<String>,
     pub ended_at: FieldOp<f64>,
@@ -63,8 +87,8 @@ const GOAL_COLS: &str = "id, session_id, workstream_id, source, source_ref, sour
                          max_active_secs, status, step, pause_reason, end_reason, iteration, \
                          spent_cost_usd, spent_tokens, cost_baseline_usd, token_baseline, \
                          active_ms, stall_count, check_errors, turn_failures, harness_crashes, \
-                         restart_resumes, last_outcome, last_reason, author_client_id, \
-                         author_device, started_at, updated_at, ended_at";
+                         restart_resumes, control_request, last_outcome, last_reason, \
+                         author_client_id, author_device, started_at, updated_at, ended_at";
 const ITERATION_COLS: &str = "goal_id, n, client_message_id, started_at, ended_at, turn_status, \
                               cost_usd, tokens, outcome, reason, results, progress_hash, note";
 
@@ -144,6 +168,9 @@ fn row_to_goal(row: &Row<'_>) -> rusqlite::Result<GoalRow> {
         turn_failures: count(row, "turn_failures")?,
         harness_crashes: count(row, "harness_crashes")?,
         restart_resumes: count(row, "restart_resumes")?,
+        control_request: row
+            .get::<_, Option<String>>("control_request")?
+            .and_then(|s| ControlRequest::try_parse(&s)),
     })
 }
 
@@ -315,6 +342,7 @@ impl Db {
             turn_failures: 0,
             harness_crashes: 0,
             restart_resumes: 0,
+            control_request: None,
         })
     }
 
@@ -385,6 +413,7 @@ impl Db {
         sets.put("restart_resumes", &update.restart_resumes, |v| {
             i64::from(*v)
         });
+        sets.put("control_request", &update.control_request, |v| v.as_str());
         sets.put("last_outcome", &update.last_outcome, |v| v.as_str());
         sets.put("last_reason", &update.last_reason, |v| v.clone());
         sets.put("ended_at", &update.ended_at, |v| *v);
