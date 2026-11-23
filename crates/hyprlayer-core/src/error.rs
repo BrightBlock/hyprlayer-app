@@ -273,6 +273,16 @@ pub enum CoreError {
     #[error("The Archive script failed. Fix it and retry, or skip it to archive anyway.")]
     ArchiveScriptFailed,
 
+    #[error("{title} was not archived: {cause}. It stays active{kept}.")]
+    ArchiveRolledBack {
+        title: String,
+        cause: String,
+        kept: String,
+    },
+
+    #[error("{title} is archived, so nothing starts in it.")]
+    WorkstreamArchived { title: String },
+
     #[error(fmt = fmt_script_empty)]
     ScriptEmpty { kind: ScriptKind },
 
@@ -722,6 +732,12 @@ impl CoreError {
             CoreError::ArchiveScriptFailed => {
                 Some("Re-run archive, or choose Skip to archive without the script.".into())
             }
+            CoreError::ArchiveRolledBack { .. } => {
+                Some("Fix the cause, then archive again.".into())
+            }
+            CoreError::WorkstreamArchived { .. } => {
+                Some("Restore the workstream to start agents in it.".into())
+            }
             CoreError::ScriptEmpty { .. } => {
                 Some("Add commands in Project Settings → Scripts.".into())
             }
@@ -901,6 +917,8 @@ impl CoreError {
             CoreError::WorktreeNotFound { .. } => "worktree_not_found",
             CoreError::WorktreeAlreadyAttached { .. } => "worktree_attached",
             CoreError::ArchiveScriptFailed => "archive_script_failed",
+            CoreError::ArchiveRolledBack { .. } => "archive_rolled_back",
+            CoreError::WorkstreamArchived { .. } => "workstream_archived",
             CoreError::ScriptEmpty { .. } => "script_empty",
             CoreError::WorkstreamNotArchived { .. } => "not_archived",
             CoreError::WorkstreamArchiveMissing { .. } => "archive_missing",

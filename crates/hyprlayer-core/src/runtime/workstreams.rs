@@ -1840,6 +1840,20 @@ impl WorkstreamService<'_> {
         Ok(archived)
     }
 
+    /// The workstream's own lock, held while an agent starts so an archive cannot stop agents
+    /// around one that is still starting.
+    pub(crate) async fn hold_unarchived(
+        &self,
+        id: &str,
+    ) -> Result<(Workstream, tokio::sync::OwnedMutexGuard<()>)> {
+        let held = self.runtime.workstream_locks.lock_workstream(id).await;
+        let item = self.find(id).await?;
+        if item.status == WorkstreamStatus::Archived {
+            return Err(CoreError::WorkstreamArchived { title: item.title });
+        }
+        Ok((item, held))
+    }
+
     async fn archive_inner(&self, req: ArchiveWorkstreamRequest) -> Result<Workstream> {
         ensure_running(self.runtime)?;
         let ArchiveWorkstreamRequest { id, skip_scripts } = req;
@@ -1851,49 +1865,8 @@ impl WorkstreamService<'_> {
             .await;
         let item = self.find(&id).await?;
 
-        let sessions = {
-            let db = self.runtime.db.clone();
-            let sid = id.clone();
-            blocking(move || db.list_sessions(&sid))
-                .await
-                .unwrap_or_else(|e| {
-                    tracing::warn!(
-                        "archive of {id} cannot see its sessions, so none are stopped: {e}"
-                    );
-                    Vec::new()
-                })
-        };
-        self.runtime.goals().stop_for_workstream(&id).await;
-        for session in &sessions {
-            self.runtime
-                .sessions()
-                .end_quietly_and_await_exit(&session.id)
-                .await;
-        }
-        self.runtime.terminals.remove_for_workstream(&id).await;
-        for agent in self.runtime.pty_agents.list(Some(&id)) {
-            self.runtime.pty_agents.release(&agent.terminal_id);
-        }
-        self.runtime.scripts.clear_workstream(&id).await;
-
-        // After the kills: no agent of this workstream can write a doc past this point.
-        let (pr_ref, pr) = self
-            .archive_pr_status(&item, moved_head(&item).unwrap_or_else(|| item.pr_ref()))
-            .await
-            .unzip();
-        if let Some(status) = &pr {
-            doc_status::settle_workstream(
-                self.runtime.db.clone(),
-                &self.runtime.config,
-                &id,
-                &item.project_path,
-                status.number,
-                status.state,
-            )
-            .await;
-        }
-
         if !item.app_owns_worktree() {
+            let (_, pr) = self.stop_for_archive(&item).await;
             let db = self.runtime.db.clone();
             let aid = id.clone();
             let found = pr.map(|s| (s.number, s.state));
@@ -1916,6 +1889,147 @@ impl WorkstreamService<'_> {
         let worktree_path = Path::new(&item.worktree_path);
         let archive_path = archive_dir_for(project_path, &item.slug);
         let live = worktree::is_live_worktree(worktree_path);
+        if live {
+            worktree::prepare_archive_destination(&archive_path)?;
+        }
+
+        let (pr_ref, pr) = self.stop_for_archive(&item).await;
+        let rolled_back = |cause: CoreError, pruned: bool| CoreError::ArchiveRolledBack {
+            title: item.title.clone(),
+            cause: cause.to_string(),
+            kept: if pruned {
+                ", but its agents were stopped and its git-ignored files pruned".into()
+            } else {
+                ", but its agents were stopped".into()
+            },
+        };
+
+        let mut unmapped = false;
+        if live {
+            match HyprCli::new(&self.runtime.binaries)
+                .thoughts_uninit(worktree_path)
+                .await
+            {
+                Ok(_) => unmapped = true,
+                Err(e) => tracing::warn!("thoughts uninit in worktree failed: {e}"),
+            }
+        }
+
+        let mut pruned = false;
+        if live
+            && self
+                .runtime
+                .settings
+                .get()
+                .await
+                .git
+                .prune_ignored_on_archive
+        {
+            let keep = repo_settings::read(project_path)
+                .map(|s| s.worktree.copy)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(
+                        "archive prunes every ignored file: .hyprlayer/settings.toml unreadable: {e}"
+                    );
+                    Vec::new()
+                });
+            match self
+                .runtime
+                .worktrees
+                .clean_ignored(&git, worktree_path, &keep)
+                .await
+            {
+                Ok(()) => pruned = true,
+                Err(e) => tracing::warn!("prune ignored files before archive failed: {e}"),
+            }
+        }
+
+        // Windows refuses to move a directory a watcher holds open. Holding the lock through
+        // the move stops `watch` re-arming; the UI itself only re-arms on navigation.
+        let mut watch = self.runtime.watchers.worktree_watch.lock().await;
+        let disarmed = watch.get_mut(&id).and_then(Option::take).is_some();
+        let moved = match self
+            .runtime
+            .worktrees
+            .archive(&git, project_path, worktree_path, &archive_path)
+            .await
+        {
+            Ok(moved) => moved,
+            Err(e) => {
+                if disarmed {
+                    match self.open_worktree_watch(&id).await {
+                        Ok(handle) => {
+                            watch.insert(id.clone(), handle);
+                        }
+                        Err(rearm) => tracing::warn!("worktree watch on {id} stays off: {rearm}"),
+                    }
+                }
+                drop(watch);
+                if unmapped {
+                    self.relink_thoughts(&item.project_path, worktree_path)
+                        .await;
+                }
+                return Err(rolled_back(e, pruned));
+            }
+        };
+        drop(watch);
+
+        let scan_dir = moved.then(|| archive_path.clone());
+        let base = item.base_branch.clone();
+        let merged = pr
+            .as_ref()
+            .filter(|s| s.state == pr::PrState::Merged)
+            .map(|s| s.head_ref_oid.clone())
+            .or_else(|| item.merged_pr_head().map(String::from));
+        let db = self.runtime.db.clone();
+        let aid = id.clone();
+        let found = pr.as_ref().map(|s| (s.number, s.state));
+        let recorded = blocking(move || {
+            // Scanned once: nothing writes to an archive after this.
+            let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base, merged.as_deref()));
+            db.archive_workstream(&aid)?;
+            cache_found_pr(&db, &aid, found)?;
+            match scan {
+                Some(scan) => db.cache_archive_scan(&aid, &scan, now_ms()),
+                None => Ok(()),
+            }
+        })
+        .await;
+        if let Err(e) = recorded {
+            if moved {
+                if let Err(back) = self
+                    .runtime
+                    .worktrees
+                    .restore(&git, project_path, &archive_path, worktree_path)
+                    .await
+                {
+                    tracing::error!(
+                        "archive of {id} not recorded, and its worktree stays at {}: {back}",
+                        archive_path.display()
+                    );
+                    return Err(e);
+                }
+            }
+            if unmapped {
+                self.relink_thoughts(&item.project_path, worktree_path)
+                    .await;
+            }
+            return Err(rolled_back(e, pruned));
+        }
+
+        if moved {
+            if let Err(e) = worktree::ensure_archive_excluded(project_path) {
+                tracing::warn!("could not write .git/info/exclude for archive: {e}");
+            }
+        }
+        if !unmapped {
+            if let Err(e) =
+                thoughts_links::remove_worktree_mapping(self.runtime.config.path(), worktree_path)
+            {
+                tracing::warn!("could not remove worktree mapping: {e}");
+            }
+        }
+        self.runtime.config.invalidate().await;
 
         if self
             .runtime
@@ -1943,106 +2057,53 @@ impl WorkstreamService<'_> {
                 );
             }
         }
+        self.find(&id).await
+    }
 
-        let mut unmapped = false;
-        if live {
-            match HyprCli::new(&self.runtime.binaries)
-                .thoughts_uninit(worktree_path)
+    async fn stop_for_archive(&self, item: &Workstream) -> (Option<String>, Option<pr::PrStatus>) {
+        let id = &item.id;
+        let sessions = {
+            let db = self.runtime.db.clone();
+            let sid = id.clone();
+            blocking(move || db.list_sessions(&sid))
                 .await
-            {
-                Ok(_) => unmapped = true,
-                Err(e) => tracing::warn!("thoughts uninit in worktree failed: {e}"),
-            }
-        }
-
-        if live
-            && self
-                .runtime
-                .settings
-                .get()
-                .await
-                .git
-                .prune_ignored_on_archive
-        {
-            let keep = repo_settings::read(project_path)
-                .map(|s| s.worktree.copy)
                 .unwrap_or_else(|e| {
                     tracing::warn!(
-                        "archive prunes every ignored file: .hyprlayer/settings.toml unreadable: {e}"
+                        "archive of {id} cannot see its sessions, so none are stopped: {e}"
                     );
                     Vec::new()
-                });
-            if let Err(e) = self
-                .runtime
-                .worktrees
-                .clean_ignored(&git, worktree_path, &keep)
-                .await
-            {
-                tracing::warn!("prune ignored files before archive failed: {e}");
-            }
-        }
-
-        // Windows refuses to move a directory a watcher holds open. Holding the lock through
-        // the move stops `watch` re-arming; the UI itself only re-arms on navigation.
-        let mut watch = self.runtime.watchers.worktree_watch.lock().await;
-        let disarmed = watch.get_mut(&id).and_then(Option::take).is_some();
-        let moved = match self
-            .runtime
-            .worktrees
-            .archive(&git, project_path, worktree_path, &archive_path)
-            .await
-        {
-            Ok(moved) => moved,
-            Err(e) => {
-                if disarmed {
-                    match self.open_worktree_watch(&id).await {
-                        Ok(handle) => {
-                            watch.insert(id.clone(), handle);
-                        }
-                        Err(rearm) => tracing::warn!("worktree watch on {id} stays off: {rearm}"),
-                    }
-                }
-                return Err(e);
-            }
+                })
         };
-        drop(watch);
-        if moved {
-            if let Err(e) = worktree::ensure_archive_excluded(project_path) {
-                tracing::warn!("could not write .git/info/exclude for archive: {e}");
-            }
+        self.runtime.goals().stop_for_workstream(id).await;
+        for session in &sessions {
+            self.runtime
+                .sessions()
+                .end_quietly_and_await_exit(&session.id)
+                .await;
         }
-
-        if !unmapped {
-            if let Err(e) =
-                thoughts_links::remove_worktree_mapping(self.runtime.config.path(), worktree_path)
-            {
-                tracing::warn!("could not remove worktree mapping: {e}");
-            }
+        self.runtime.terminals.remove_for_workstream(id).await;
+        for agent in self.runtime.pty_agents.list(Some(id)) {
+            self.runtime.pty_agents.release(&agent.terminal_id);
         }
-        self.runtime.config.invalidate().await;
+        self.runtime.scripts.clear_workstream(id).await;
 
-        let scan_dir = moved.then(|| archive_path.clone());
-        let base = item.base_branch.clone();
-        let merged = pr
-            .as_ref()
-            .filter(|s| s.state == pr::PrState::Merged)
-            .map(|s| s.head_ref_oid.clone())
-            .or_else(|| item.merged_pr_head().map(String::from));
-        let db = self.runtime.db.clone();
-        let aid = id.clone();
-        let found = pr.map(|s| (s.number, s.state));
-        blocking(move || {
-            // Scanned once: nothing writes to an archive after this.
-            let scan = scan_dir.map(|dir| worktree::scan_archive(&dir, &base, merged.as_deref()));
-            db.archive_workstream(&aid)?;
-            cache_found_pr(&db, &aid, found)?;
-            match scan {
-                Some(scan) => db.cache_archive_scan(&aid, &scan, now_ms()),
-                None => Ok(()),
-            }
-        })
-        .await?;
-        self.find(&id).await
+        // After the kills: no agent of this workstream can write a doc past this point.
+        let (pr_ref, pr) = self
+            .archive_pr_status(item, moved_head(item).unwrap_or_else(|| item.pr_ref()))
+            .await
+            .unzip();
+        if let Some(status) = &pr {
+            doc_status::settle_workstream(
+                self.runtime.db.clone(),
+                &self.runtime.config,
+                id,
+                &item.project_path,
+                status.number,
+                status.state,
+            )
+            .await;
+        }
+        (pr_ref, pr)
     }
 
     async fn archive_pr_status(
@@ -2173,39 +2234,50 @@ impl WorkstreamService<'_> {
         })
         .await?;
 
-        let link = match self.effective_for(&item.project_path).await {
-            Ok(effective) => {
-                let link = match thoughts_links::provision_thoughts(&destination, &effective) {
-                    Ok(link) => Some(link),
-                    Err(e) => {
-                        tracing::warn!("thoughts re-provision after restore failed: {e}");
-                        None
-                    }
-                };
-                if let Some(mapped) = effective.mapped_name.as_deref() {
-                    if let Err(e) = thoughts_links::add_worktree_mapping(
-                        self.runtime.config.path(),
-                        &destination,
-                        mapped,
-                        effective.profile_name.as_deref(),
-                    ) {
-                        tracing::warn!("could not re-add worktree mapping after restore: {e}");
-                    }
-                }
-                link
-            }
-            Err(e) => {
-                tracing::warn!("thoughts re-link after restore skipped: {e}");
-                None
-            }
-        };
-        self.runtime.config.invalidate().await;
+        let link = self.relink_thoughts(&item.project_path, &destination).await;
         if relocate.is_some() {
             self.relocate_claude_transcripts(&id, &destination).await;
         }
 
         let item = self.find(&id).await?;
         Ok(RestoreWorkstreamResult { item, link })
+    }
+
+    async fn relink_thoughts(&self, project_path: &str, worktree: &Path) -> Option<LinkStatus> {
+        let link = match self.effective_for(project_path).await {
+            Ok(effective) => {
+                let link = match thoughts_links::provision_thoughts(worktree, &effective) {
+                    Ok(link) => Some(link),
+                    Err(e) => {
+                        tracing::warn!(
+                            "thoughts re-provision in {} failed: {e}",
+                            worktree.display()
+                        );
+                        None
+                    }
+                };
+                if let Some(mapped) = effective.mapped_name.as_deref() {
+                    if let Err(e) = thoughts_links::add_worktree_mapping(
+                        self.runtime.config.path(),
+                        worktree,
+                        mapped,
+                        effective.profile_name.as_deref(),
+                    ) {
+                        tracing::warn!(
+                            "could not re-add worktree mapping for {}: {e}",
+                            worktree.display()
+                        );
+                    }
+                }
+                link
+            }
+            Err(e) => {
+                tracing::warn!("thoughts re-link of {} skipped: {e}", worktree.display());
+                None
+            }
+        };
+        self.runtime.config.invalidate().await;
+        link
     }
 
     async fn restore_destination(&self, item: &Workstream, raw: &Path) -> Result<PathBuf> {

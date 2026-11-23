@@ -213,7 +213,11 @@ impl TerminalService<'_> {
 
     pub async fn open(&self, req: OpenTerminalRequest) -> Result<TerminalAttachment> {
         ensure_running(self.runtime)?;
-        let ws = self.find_workstream(&req.workstream_id).await?;
+        let (ws, _held) = self
+            .runtime
+            .workstreams()
+            .hold_unarchived(&req.workstream_id)
+            .await?;
         let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
@@ -342,7 +346,11 @@ impl TerminalService<'_> {
         if req.command.trim().is_empty() {
             return Err(CoreError::TerminalCommandEmpty);
         }
-        let ws = self.find_workstream(&req.workstream_id).await?;
+        let (ws, _held) = self
+            .runtime
+            .workstreams()
+            .hold_unarchived(&req.workstream_id)
+            .await?;
         let env = self.runtime.child_env().await;
         let session = PtySession::spawn(SpawnTerminal {
             shell: default_shell(),
@@ -365,7 +373,11 @@ impl TerminalService<'_> {
         req: LaunchAgentRequest,
     ) -> Result<(TerminalAttachment, PtyLaunched)> {
         ensure_running(self.runtime)?;
-        let ws = self.find_workstream(&req.workstream_id).await?;
+        let (ws, _held) = self
+            .runtime
+            .workstreams()
+            .hold_unarchived(&req.workstream_id)
+            .await?;
         let configured = self.runtime.settings.get().await.multiplexer.engines;
         let engine = engines::resolve(&configured, &req.engine_id);
         if engine.command.trim().is_empty() {

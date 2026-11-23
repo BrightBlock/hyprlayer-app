@@ -73,6 +73,13 @@ impl WorkstreamLocks {
         }
     }
 
+    /// Safe outside `lock_pair`'s order only because its holder never then takes a project lock.
+    pub(crate) async fn lock_workstream(&self, workstream_id: &str) -> OwnedMutexGuard<()> {
+        checkout(&self.workstreams, workstream_id)
+            .lock_owned()
+            .await
+    }
+
     /// Locks the project key, then the workstream id, in that order — the
     /// one ordering every protected workstream operation uses, so two
     /// operations that both need both locks can never deadlock against each

@@ -460,27 +460,8 @@ impl WorktreeManager {
             return Ok(false);
         }
 
-        if dest.exists() {
-            return Err(CoreError::Io(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                format!("archive destination already exists: {}", dest.display()),
-            )));
-        }
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let from = worktree.display().to_string();
-        let to = dest.display().to_string();
-        git_in(
-            git,
-            project_repo,
-            &["worktree", "move", &from, &to],
-            &overlay,
-        )
-        .timeout(Duration::from_secs(120))
-        .run()
-        .await?;
+        prepare_archive_destination(dest)?;
+        move_worktree(git, project_repo, worktree, dest, &overlay).await?;
         Ok(true)
     }
 
@@ -507,18 +488,7 @@ impl WorktreeManager {
             std::fs::create_dir_all(parent)?;
         }
 
-        let from = archive.display().to_string();
-        let to = target.display().to_string();
-        git_in(
-            git,
-            project_repo,
-            &["worktree", "move", &from, &to],
-            &self.child_env().await,
-        )
-        .timeout(Duration::from_secs(120))
-        .run()
-        .await?;
-        Ok(())
+        move_worktree(git, project_repo, archive, target, &self.child_env().await).await
     }
 
     pub async fn clean_ignored(&self, git: &Path, worktree: &Path, keep: &[String]) -> Result<()> {
@@ -573,6 +543,127 @@ impl WorktreeManager {
             }
         }
         Ok(())
+    }
+}
+
+pub fn prepare_archive_destination(dest: &Path) -> Result<()> {
+    if dest.exists() {
+        return Err(CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("archive destination already exists: {}", dest.display()),
+        )));
+    }
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+/// `git worktree move` is a rename, which fails across filesystems (EXDEV), so there the
+/// tree is copied, git is repointed at the copy, and only then is the original removed.
+async fn move_worktree(
+    git: &Path,
+    project_repo: &Path,
+    from: &Path,
+    to: &Path,
+    overlay: &[(String, String)],
+) -> Result<()> {
+    let parent = to.parent().unwrap_or(to);
+    if same_filesystem(from, parent)? {
+        let (from, to) = (from.display().to_string(), to.display().to_string());
+        git_in(
+            git,
+            project_repo,
+            &["worktree", "move", &from, &to],
+            overlay,
+        )
+        .timeout(Duration::from_secs(120))
+        .run()
+        .await?;
+        return Ok(());
+    }
+    std::fs::create_dir(to).map_err(|e| io_at("create the destination", to, e))?;
+    let copied = match copy_worktree(from, to) {
+        Ok(()) => {
+            let to_arg = to.display().to_string();
+            git_in(git, project_repo, &["worktree", "repair", &to_arg], overlay)
+                .run()
+                .await
+                .map(drop)
+        }
+        Err(e) => Err(io_at("copy the worktree", to, e)),
+    };
+    if let Err(e) = copied {
+        if let Err(cleanup) = std::fs::remove_dir_all(to) {
+            tracing::warn!("a partial copy is left at {}: {cleanup}", to.display());
+        }
+        return Err(e);
+    }
+    if let Err(e) = std::fs::remove_dir_all(from) {
+        tracing::warn!(
+            "{} moved to {}, but the original was not fully removed: {e}",
+            from.display(),
+            to.display()
+        );
+    }
+    Ok(())
+}
+
+fn io_at(what: &str, path: &Path, e: std::io::Error) -> CoreError {
+    CoreError::Io(std::io::Error::new(
+        e.kind(),
+        format!("{what} to {}: {e}", path.display()),
+    ))
+}
+
+#[cfg(unix)]
+fn same_filesystem(a: &Path, b: &Path) -> Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(std::fs::metadata(a)?.dev() == std::fs::metadata(b)?.dev())
+}
+
+#[cfg(not(unix))]
+fn same_filesystem(a: &Path, b: &Path) -> Result<bool> {
+    let volume = |p: &Path| -> Result<OsString> {
+        let full = std::fs::canonicalize(p)?;
+        Ok(full
+            .components()
+            .next()
+            .map(|c| c.as_os_str().to_ascii_uppercase())
+            .unwrap_or_default())
+    };
+    Ok(volume(a)? == volume(b)?)
+}
+
+fn copy_worktree(from: &Path, to: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let (src, dest) = (entry.path(), to.join(entry.file_name()));
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            copy_symlink(&src, &dest)?;
+        } else if kind.is_dir() {
+            std::fs::create_dir(&dest)?;
+            copy_worktree(&src, &dest)?;
+        } else {
+            std::fs::copy(&src, &dest)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(std::fs::read_link(src)?, dest)
+}
+
+#[cfg(windows)]
+fn copy_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    let target = std::fs::read_link(src)?;
+    if std::fs::metadata(src).is_ok_and(|m| m.is_dir()) {
+        std::os::windows::fs::symlink_dir(target, dest)
+    } else {
+        std::os::windows::fs::symlink_file(target, dest)
     }
 }
 

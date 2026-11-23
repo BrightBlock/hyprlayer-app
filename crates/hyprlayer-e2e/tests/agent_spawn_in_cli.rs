@@ -6,10 +6,10 @@
 //! The lead is `goal_stub`'s claude stand-in and the engine `agent_stub`'s PTY claude.
 #![cfg(unix)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use hyprlayer_core::models::{AgentControlLevel, PermissionMode};
+use hyprlayer_core::models::{AgentControlLevel, PermissionMode, PtyLaunchSession};
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::agent_stub::{
@@ -80,6 +80,8 @@ async fn agent_spawn_in_cli() {
 
     j.step("archiving a workstream ends the PTY agent spawned into it, and only that one");
     let shelf = create_workstream(&mut j, &c, &project, "Shelved").await;
+    let shelf_slug = text(&shelf, "/item/slug");
+    let shelf_tree = PathBuf::from(text(&shelf, "/item/worktreePath"));
     let shelf = text(&shelf, "/item/id");
     let shelved = parsed(
         &mcp.call(
@@ -96,6 +98,44 @@ async fn agent_spawn_in_cli() {
     let pid_file = launch_log(&sandbox, &shelved).join("pid");
     let started = eventually(IO, || pid_file.is_file()).await;
     let pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+    let shelved_session = c
+        .list_pty_agents(Some(shelf.clone()))
+        .await
+        .expect("list_pty_agents")
+        .into_iter()
+        .find_map(|a| a.provider_session_id)
+        .unwrap_or_default();
+    j.alias(&shelved_session, "$SHELVED_SESSION");
+
+    let other = OtherFilesystem::mount(&sandbox);
+    j.alias(other.root.display().to_string(), "$OTHER_FS");
+    let archive_root = repo.join("archived-contexts");
+    std::os::unix::fs::symlink(&other.root, &archive_root).expect("link archived-contexts");
+    let archived_tree = archive_root.join(&shelf_slug);
+    std::fs::create_dir_all(&archived_tree).expect("block the archive destination");
+    let refused = j
+        .call(
+            &c,
+            Request::ArchiveWorkstream {
+                id: shelf.clone(),
+                skip_scripts: true,
+            },
+        )
+        .await
+        .err()
+        .map(|e| e.code);
+    let status = workstream_status(&mut j, &c, &project, &shelf).await;
+    let still_running = alive(pid.trim())
+        && c.list_pty_agents(Some(shelf.clone()))
+            .await
+            .is_ok_and(|a| a.iter().any(|a| a.terminal_id == shelved));
+    j.guard(
+        "an archive that cannot move the worktree fails before stopping anything: the workstream stays active, its agent running, its worktree in place",
+        refused.is_some() && status == "active" && still_running && shelf_tree.join(".git").exists(),
+        json!({ "refused": refused.is_some(), "status": status, "agentRunning": still_running, "worktreeInPlace": shelf_tree.join(".git").exists() }),
+    );
+
+    std::fs::remove_dir(&archived_tree).expect("clear the archive destination");
     j.call(
         &c,
         Request::ArchiveWorkstream {
@@ -105,6 +145,19 @@ async fn agent_spawn_in_cli() {
     )
     .await
     .expect("archive_workstream");
+    let status = workstream_status(&mut j, &c, &project, &shelf).await;
+    let listed_at = git_worktrees(&repo);
+    let tracked = listed_at.iter().any(|p| same_dir(p, &archived_tree));
+    j.note("archive_filesystem", json!(other.kind));
+    j.guard(
+        "archiving onto another filesystem copies the worktree, repoints git at the copy and removes the original",
+        status == "archived"
+            && other.distinct
+            && archived_tree.join(".git").is_file()
+            && !shelf_tree.exists()
+            && tracked,
+        json!({ "status": status, "otherFilesystem": other.distinct, "archived": archived_tree.join(".git").is_file(), "originalGone": !shelf_tree.exists(), "gitTracksTheCopy": tracked }),
+    );
     let exited = eventually(IO, || !alive(pid.trim())).await;
     let listed: Vec<String> = c
         .list_pty_agents(None)
@@ -226,7 +279,201 @@ async fn agent_spawn_in_cli() {
         json!({ "hasSessionId": chat["sessionId"].is_string(), "hasTerminalId": chat.get("terminalId").is_some() }),
     );
 
+    j.step("an archived workstream's agents never start again, across a server restart");
+    let relaunch = c
+        .pty_launch_stream(
+            shelf.clone(),
+            "claude-code".into(),
+            PtyLaunchSession {
+                session_id: Some(shelved_session.clone()),
+                resume: true,
+                bypass: true,
+                model: None,
+                permission_mode: None,
+                effort: None,
+                first_prompt: None,
+            },
+            80,
+            24,
+        )
+        .await
+        .err()
+        .map(|e| e.code);
+    j.guard(
+        "a desktop tab's resume of the archived agent is refused",
+        relaunch.as_deref() == Some("workstream_archived"),
+        json!({ "refusal": relaunch }),
+    );
+    let launched_before = launch_count(&sandbox);
+    drop(mcp);
+    let stopped = server.shutdown(&c).await;
+    let server = Server::start(&sandbox).await;
+    let c = server.client();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let ptys = c
+        .list_pty_agents(Some(shelf.clone()))
+        .await
+        .expect("list_pty_agents");
+    let sessions = c
+        .list_active_sessions()
+        .await
+        .expect("list_active_sessions")
+        .iter()
+        .filter(|a| a.session.workstream_id == shelf)
+        .count();
+    let relaunch = c
+        .pty_launch_stream(
+            shelf.clone(),
+            "claude-code".into(),
+            PtyLaunchSession {
+                session_id: Some(shelved_session.clone()),
+                resume: true,
+                bypass: true,
+                model: None,
+                permission_mode: None,
+                effort: None,
+                first_prompt: None,
+            },
+            80,
+            24,
+        )
+        .await
+        .err()
+        .map(|e| e.code);
+    let launched = launch_count(&sandbox) - launched_before;
+    j.guard(
+        "after the restart nothing runs in the archived workstream and a resume is still refused",
+        stopped.status.success()
+            && ptys.is_empty()
+            && sessions == 0
+            && relaunch.as_deref() == Some("workstream_archived")
+            && launched == 0,
+        json!({ "cleanStop": stopped.status.success(), "ptyAgents": ptys.len(), "liveSessions": sessions, "refusal": relaunch, "newLaunches": launched }),
+    );
+
+    j.step("restoring from the other filesystem moves the worktree back");
+    let restored = j
+        .call(
+            &c,
+            Request::RestoreWorkstream {
+                id: shelf.clone(),
+                target: None,
+            },
+        )
+        .await
+        .map(|v| v["item"]["status"].clone());
+    let tracked = git_worktrees(&repo)
+        .iter()
+        .any(|p| same_dir(p, &shelf_tree));
+    j.guard(
+        "the workstream is active again, its worktree back in place and known to git, and the copy gone",
+        restored.as_ref().is_ok_and(|s| s == "active")
+            && shelf_tree.join(".git").is_file()
+            && !archived_tree.exists()
+            && tracked,
+        json!({ "status": restored.ok(), "back": shelf_tree.join(".git").is_file(), "copyGone": !archived_tree.exists(), "gitTracksIt": tracked }),
+    );
+
     j.finish();
+}
+
+async fn workstream_status(j: &mut Journey, c: &RpcClient, project: &str, id: &str) -> String {
+    let all = j
+        .call(
+            c,
+            Request::ListWorkstreams {
+                project_path: project.to_string(),
+                include_archived: true,
+            },
+        )
+        .await
+        .expect("list_workstreams");
+    all.as_array()
+        .and_then(|rows| rows.iter().find(|r| text(r, "/item/id") == id))
+        .map(|r| text(r, "/item/status"))
+        .unwrap_or_default()
+}
+
+fn launch_count(sandbox: &Sandbox) -> usize {
+    std::fs::read_dir(launch_log(sandbox, ""))
+        .map(|d| d.count())
+        .unwrap_or_default()
+}
+
+fn git_worktrees(repo: &Path) -> Vec<PathBuf> {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .expect("git worktree list");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.strip_prefix("worktree "))
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// A directory on a filesystem other than the sandbox's: tmpfs on Linux, a disk image on macOS.
+struct OtherFilesystem {
+    root: PathBuf,
+    kind: &'static str,
+    distinct: bool,
+    image: Option<PathBuf>,
+}
+
+impl OtherFilesystem {
+    fn mount(sandbox: &Sandbox) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        let (root, kind, image) = if cfg!(target_os = "macos") {
+            let image = sandbox.root.join("other-fs.dmg");
+            let root = sandbox.root.join("other-fs");
+            let ok = |cmd: &mut std::process::Command| cmd.status().is_ok_and(|s| s.success());
+            assert!(
+                ok(std::process::Command::new("hdiutil")
+                    .args(["create", "-quiet", "-size", "64m", "-fs", "HFS+", "-volname", "hl-e2e"])
+                    .arg(&image))
+                    && ok(std::process::Command::new("hdiutil")
+                        .args(["attach", "-quiet", "-nobrowse", "-mountpoint"])
+                        .arg(&root)
+                        .arg(&image)),
+                "mount a disk image for a second filesystem"
+            );
+            (root, "a macOS disk image", Some(image))
+        } else {
+            let root = PathBuf::from(format!("/dev/shm/hl-e2e-{}", std::process::id()));
+            std::fs::create_dir_all(&root).expect("a directory on tmpfs");
+            (root, "tmpfs", None)
+        };
+        let dev = |p: &Path| std::fs::metadata(p).map(|m| m.dev()).ok();
+        let distinct = dev(&root).is_some() && dev(&root) != dev(&sandbox.root);
+        Self {
+            root,
+            kind,
+            distinct,
+            image,
+        }
+    }
+}
+
+impl Drop for OtherFilesystem {
+    fn drop(&mut self) {
+        if self.image.is_some() {
+            let _ = std::process::Command::new("hdiutil")
+                .args(["detach", "-quiet", "-force"])
+                .arg(&self.root)
+                .status();
+        } else {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
 }
 
 /// A titled composer lead, its first turn done, so the header naming it is fixed.

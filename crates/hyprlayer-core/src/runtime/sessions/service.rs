@@ -1682,6 +1682,11 @@ impl SessionService<'_> {
         &self,
         mut params: LaunchSessionParams,
     ) -> Result<Arc<dyn AgentDriver>> {
+        let (_, _held) = self
+            .runtime
+            .workstreams()
+            .hold_unarchived(&params.session.workstream_id)
+            .await?;
         // A relaunch that names no model keeps the session's model and effort, not the harness defaults.
         if params.resume && params.model.is_none() {
             params.model = params.session.model.clone();

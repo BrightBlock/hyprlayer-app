@@ -19,6 +19,27 @@
       "guards": [
         {
           "evidence": {
+            "agentRunning": true,
+            "refused": true,
+            "status": "active",
+            "worktreeInPlace": true
+          },
+          "guard": "an archive that cannot move the worktree fails before stopping anything: the workstream stays active, its agent running, its worktree in place",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "archived": true,
+            "gitTracksTheCopy": true,
+            "originalGone": true,
+            "otherFilesystem": true,
+            "status": "archived"
+          },
+          "guard": "archiving onto another filesystem copies the worktree, repoints git at the copy and removes the original",
+          "ok": true
+        },
+        {
+          "evidence": {
             "exited": true,
             "leadLive": true,
             "reviewerListed": true,
@@ -99,6 +120,44 @@
         }
       ],
       "step": "with app actions in a chat, spawns stay sessions"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "workstream_archived"
+          },
+          "guard": "a desktop tab's resume of the archived agent is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "cleanStop": true,
+            "liveSessions": 0,
+            "newLaunches": 0,
+            "ptyAgents": 0,
+            "refusal": "workstream_archived"
+          },
+          "guard": "after the restart nothing runs in the archived workstream and a resume is still refused",
+          "ok": true
+        }
+      ],
+      "step": "an archived workstream's agents never start again, across a server restart"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "back": true,
+            "copyGone": true,
+            "gitTracksIt": true,
+            "status": "active"
+          },
+          "guard": "the workstream is active again, its worktree back in place and known to git, and the copy gone",
+          "ok": true
+        }
+      ],
+      "step": "restoring from the other filesystem moves the worktree back"
     }
   ]
 }
