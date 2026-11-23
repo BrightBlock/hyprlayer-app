@@ -978,6 +978,76 @@ async fn agent_breadth() {
         json!({ "spawns": grandchildren }),
     );
     drop(child_mcp);
+
+    j.step("a Lead's terminal child runs in the Lead's mode and counts as driving");
+    let lead_who = parsed(&lead_mcp.call("whoami", json!({})).await);
+    let spawned = parsed(
+        &lead_mcp
+            .call(
+                "spawn_agent",
+                json!({ "terminal_engine": "claude-code", "workstream_id": ws, "title": "Lead terminal" }),
+            )
+            .await,
+    );
+    let lead_pty = text(&spawned, "/terminalId");
+    j.alias(&lead_pty, "$LEAD_PTY");
+    let pty_env = env_of(&sandbox, &lead_pty).await;
+    j.alias(
+        env_var(&pty_env, "HYPRLAYER_AGENT_TOKEN"),
+        "$LEAD_PTY_TOKEN",
+    );
+    let argv = lines(&launch_log(&sandbox, &lead_pty).join("argv"));
+    let mode_flag: Vec<&String> = argv
+        .windows(2)
+        .find(|w| w[0] == "--permission-mode")
+        .map(|w| w.iter().collect())
+        .unwrap_or_default();
+    let mut pty_mcp = McpDriver::start(&pty_env, false);
+    pty_mcp.initialize("2025-06-18").await;
+    let pty_who = parsed(&pty_mcp.call("whoami", json!({})).await);
+    let to_lead = refusal(
+        &pty_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": project_lead, "text": "E2E_FROM_LEAD_PTY" }),
+            )
+            .await,
+    );
+    drop(pty_mcp);
+    let deadline = tokio::time::Instant::now() + IO;
+    let mut delivered = false;
+    while !delivered && tokio::time::Instant::now() < deadline {
+        delivered = c
+            .get_session_log(project_lead.clone())
+            .await
+            .expect("get_session_log")
+            .iter()
+            .any(|e| matches!(&e.event, SessionEvent::UserMessage { text, .. } if text.contains("E2E_FROM_LEAD_PTY")));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let leads = j.call(&c, Request::ListLeads {}).await.expect("list_leads");
+    let listed = leads
+        .as_array()
+        .and_then(|all| all.iter().find(|l| text(l, "/projectPath") == project))
+        .cloned()
+        .unwrap_or(Value::Null);
+    j.guard(
+        "the Lead runs in auto, and a terminal child spawned with no mode launches with --permission-mode auto",
+        lead_who["permissionMode"] == json!("auto")
+            && mode_flag == ["--permission-mode", "auto"]
+            && pty_who["permissionMode"] == json!("auto"),
+        json!({ "lead": lead_who["permissionMode"], "argv": mode_flag, "child": pty_who["permissionMode"] }),
+    );
+    j.guard(
+        "so its message to the Lead is delivered, not refused for rank",
+        to_lead == "ok" && delivered,
+        json!({ "message": to_lead, "delivered": delivered }),
+    );
+    j.guard(
+        "list_leads counts the terminal child's workstream as driven",
+        listed["driving"] == json!([ws]) && listed["liveChildren"] == json!(6),
+        json!({ "driving": listed["driving"], "liveChildren": listed["liveChildren"] }),
+    );
     drop(lead_mcp);
 
     j.step("shutdown");

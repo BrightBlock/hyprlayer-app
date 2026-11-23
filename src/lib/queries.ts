@@ -756,11 +756,11 @@ export function useActiveSessions(enabled = true) {
 }
 
 // Unhooked agents publish no change events, so every mount refetches.
-export function usePtyAgents(workstreamId: string, enabled = true) {
+export function usePtyAgents(workstreamId: string | null, enabled = true) {
   return useQuery({
     queryKey: ["pty-agents", workstreamId],
     queryFn: () => unwrap(commands.listPtyAgents(workstreamId)),
-    enabled: enabled && Boolean(workstreamId),
+    enabled: enabled && workstreamId !== "",
     staleTime: 0,
   });
 }

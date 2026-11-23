@@ -727,6 +727,7 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
                         engine_id: engine_id.to_string(),
                         prompt: arg(args, "prompt").map(str::to_string),
                         bypass: args.get("bypass").and_then(Value::as_bool).unwrap_or(false),
+                        permission_mode: parsed(args, "permission_mode")?,
                         model: arg(args, "model").map(str::to_string),
                         title: arg(args, "title").map(str::to_string),
                     })

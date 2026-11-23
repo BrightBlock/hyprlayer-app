@@ -2,9 +2,11 @@ import { useMemo } from "react";
 import { useShallow } from "zustand/shallow";
 
 import type { ActiveSessionView, Session, WorkstreamView } from "@/lib/bindings";
+import type { PtyAgent } from "@/lib/domain/agentControl";
 import { goalActivity } from "@/lib/domain/goals";
-import { useActiveSessions } from "@/lib/queries";
+import { useActiveSessions, usePtyAgents } from "@/lib/queries";
 import type { AgentState } from "@/features/multiplexer/engineState";
+import { toAgentState } from "@/features/multiplexer/ptyAgentState";
 import { rollupForWorkstream, useMultiplexerStore } from "@/features/multiplexer/multiplexerStore";
 import {
   classifyEntry,
@@ -205,6 +207,18 @@ function registryFold(
   return out;
 }
 
+// A background tab never binds, so the store never holds its agent; the server's list does.
+function serverPtyFold(agents: readonly PtyAgent[]): Map<string, WorkstreamActivity> {
+  const out = new Map<string, WorkstreamActivity>();
+  for (const a of agents) {
+    if (a.hooked === false) continue;
+    const activity = PTY_TO_ACTIVITY[toAgentState(a.state, false)];
+    const cur = out.get(a.workstreamId);
+    if (!cur || RANK[activity] > RANK[cur]) out.set(a.workstreamId, activity);
+  }
+  return out;
+}
+
 export function foldFleetItem(
   view: WorkstreamView,
   picked: Picked | undefined,
@@ -258,14 +272,18 @@ export function useFleet(views: WorkstreamView[]): Fleet {
     useShallow((s) => wsIds.map((id) => rollupForWorkstream(s.agents, id) ?? "idle")),
   );
   const registry = useActiveSessions(views.length > 0);
+  const ptyAgents = usePtyAgents(null, views.length > 0);
 
   return useMemo(() => {
     const reg = registryFold(registry.data ?? []);
+    const serverPty = serverPtyFold(ptyAgents.data ?? []);
     const live: FleetItem[] = [];
     const idle: WorkstreamView[] = [];
     let queued = 0;
     views.forEach((view, i) => {
-      const pty = PTY_TO_ACTIVITY[(ptyKeys[i] ?? "idle") as AgentState] ?? "idle";
+      const local = PTY_TO_ACTIVITY[(ptyKeys[i] ?? "idle") as AgentState] ?? "idle";
+      const remote = serverPty.get(view.item.id) ?? "idle";
+      const pty = RANK[remote] > RANK[local] ? remote : local;
       const item = foldFleetItem(view, picked.get(view.item.id), pty, reg.get(view.item.id));
       queued += item?.queued ?? picked.get(view.item.id)?.queued ?? 0;
       if (item) live.push(item);
@@ -284,5 +302,5 @@ export function useFleet(views: WorkstreamView[]): Fleet {
         queued,
       },
     };
-  }, [views, picked, ptyKeys, registry.data]);
+  }, [views, picked, ptyKeys, registry.data, ptyAgents.data]);
 }

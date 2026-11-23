@@ -27,12 +27,14 @@ function persistTab(a: PtyAgent): void {
 
 // Keeps Agent sessions' list current without a refetch per change.
 function patchListed(a: PtyAgent): void {
-  queryClient.setQueryData<PtyAgent[]>(["pty-agents", a.workstreamId], (rows) => {
-    if (!rows) return rows;
-    if (a.state === "exited") return rows.filter((r) => r.terminalId !== a.terminalId);
-    if (!rows.some((r) => r.terminalId === a.terminalId)) return [...rows, a];
-    return rows.map((r) => (r.terminalId === a.terminalId ? { ...r, ...a } : r));
-  });
+  for (const scope of [a.workstreamId, null]) {
+    queryClient.setQueryData<PtyAgent[]>(["pty-agents", scope], (rows) => {
+      if (!rows) return rows;
+      if (a.state === "exited") return rows.filter((r) => r.terminalId !== a.terminalId);
+      if (!rows.some((r) => r.terminalId === a.terminalId)) return [...rows, a];
+      return rows.map((r) => (r.terminalId === a.terminalId ? { ...r, ...a } : r));
+    });
+  }
 }
 
 // A desktop that missed an agent's OpenTerminalTab adopts the PTY now, unless it closed that tab before.

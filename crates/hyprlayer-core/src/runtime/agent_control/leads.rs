@@ -37,14 +37,21 @@ impl AgentControlService<'_> {
             .filter(|l| l.lead && main.as_deref() == Some(l.workstream_id.as_str()))
             .collect();
         let leads: HashSet<&str> = lead_links.iter().map(|l| l.id.as_str()).collect();
-        let driven: HashSet<&str> = links
+        let mut driven: HashSet<String> = links
             .iter()
             .filter(|l| l.spawn_parent.as_deref().is_some_and(|p| leads.contains(p)))
-            .map(|l| l.workstream_id.as_str())
+            .map(|l| l.workstream_id.clone())
             .collect();
+        driven.extend(
+            leads
+                .iter()
+                .flat_map(|lead| self.runtime.agent_links.children_of(lead))
+                .filter_map(|child| self.runtime.pty_agents.snapshot(&child))
+                .map(|pty| pty.agent.workstream_id),
+        );
         let driving = active
             .iter()
-            .filter(|w| main.as_deref() != Some(w.id.as_str()) && driven.contains(w.id.as_str()))
+            .filter(|w| main.as_deref() != Some(w.id.as_str()) && driven.contains(&w.id))
             .map(|w| w.id.clone())
             .collect();
         let session_id = lead_links

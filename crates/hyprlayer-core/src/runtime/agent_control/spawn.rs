@@ -561,13 +561,14 @@ impl AgentControlService<'_> {
             engine_id,
             prompt,
             bypass,
+            permission_mode,
             model,
             title,
         } = request;
-        let mode = if bypass {
-            PermissionMode::BypassPermissions
+        let permission_mode = if bypass {
+            Some(PermissionMode::BypassPermissions)
         } else {
-            PermissionMode::Default
+            permission_mode
         };
         self.launch_pty_child(
             identity,
@@ -577,7 +578,7 @@ impl AgentControlService<'_> {
                 stage: None,
                 attached_docs: Vec::new(),
                 prompt,
-                permission_mode: Some(mode),
+                permission_mode,
                 model,
                 effort: None,
                 title,

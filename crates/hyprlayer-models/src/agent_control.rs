@@ -409,6 +409,8 @@ pub struct SpawnPtyAgentRequest {
     #[serde(default)]
     pub bypass: bool,
     #[serde(default)]
+    pub permission_mode: Option<PermissionMode>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub title: Option<String>,

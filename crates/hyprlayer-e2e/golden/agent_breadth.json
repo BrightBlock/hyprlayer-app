@@ -504,6 +504,41 @@
       "guards": [
         {
           "evidence": {
+            "argv": [
+              "--permission-mode",
+              "auto"
+            ],
+            "child": "auto",
+            "lead": "auto"
+          },
+          "guard": "the Lead runs in auto, and a terminal child spawned with no mode launches with --permission-mode auto",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "delivered": true,
+            "message": "ok"
+          },
+          "guard": "so its message to the Lead is delivered, not refused for rank",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "driving": [
+              "$WS"
+            ],
+            "liveChildren": 6
+          },
+          "guard": "list_leads counts the terminal child's workstream as driven",
+          "ok": true
+        }
+      ],
+      "step": "a Lead's terminal child runs in the Lead's mode and counts as driving"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },
