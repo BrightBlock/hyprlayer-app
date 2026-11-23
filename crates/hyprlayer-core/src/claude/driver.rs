@@ -698,6 +698,12 @@ async fn read_and_wait(
                             map.insert(request_id.clone(), input.clone());
                         }
                     }
+                    ParsedLine::ControlCancel { request_id } => {
+                        if let Ok(mut map) = pending_permissions.lock() {
+                            map.remove(request_id);
+                        }
+                        continue;
+                    }
                     ParsedLine::User {
                         is_replay: true, ..
                     } => continue,
@@ -891,7 +897,7 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             raw,
         }],
         ParsedLine::PermissionMode { mode } => vec![SessionEvent::PermissionModeChanged { mode }],
-        ParsedLine::ControlResponse { .. } => Vec::new(),
+        ParsedLine::ControlResponse { .. } | ParsedLine::ControlCancel { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
 }

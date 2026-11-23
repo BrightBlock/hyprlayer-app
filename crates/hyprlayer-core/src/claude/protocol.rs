@@ -13,6 +13,10 @@ pub enum ParsedLine {
     System {
         subtype: String,
     },
+    /// Claude settled an ask itself: answered over Remote Control, by a hook, or cut off by an interrupt.
+    ControlCancel {
+        request_id: String,
+    },
     Assistant {
         blocks: Vec<Block>,
         context_tokens: Option<u32>,
@@ -196,8 +200,11 @@ pub fn parse_line(line: &str) -> ParsedLine {
         },
         Some("control_request") => parse_control_request(&v),
         Some("control_response") => parse_control_response(&v),
-        Some("control_cancel_request") => ParsedLine::System {
-            subtype: "control_cancel_request".into(),
+        Some("control_cancel_request") => match str_field(&v, "request_id") {
+            Some(request_id) => ParsedLine::ControlCancel { request_id },
+            None => ParsedLine::System {
+                subtype: "control_cancel_request".into(),
+            },
         },
         Some("rate_limit_event") => ParsedLine::System {
             subtype: "rate_limit".into(),
@@ -578,11 +585,11 @@ mod tests {
     }
 
     #[test]
-    fn control_cancel_request_is_system() {
+    fn control_cancel_request_names_its_ask() {
         let line = r#"{"type":"control_cancel_request","request_id":"365bf5ed-5f59-4b2e-8b6b-c0a731c086b0"}"#;
         assert!(matches!(
             parse_line(line),
-            ParsedLine::System { subtype } if subtype == "control_cancel_request"
+            ParsedLine::ControlCancel { request_id } if request_id == "365bf5ed-5f59-4b2e-8b6b-c0a731c086b0"
         ));
     }
 

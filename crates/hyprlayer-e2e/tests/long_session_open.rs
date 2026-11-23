@@ -83,8 +83,18 @@ fn long_turn() -> String {
 }
 
 /// Asks for a Bash call, then keeps working without an answer, so the ask falls out of the tail.
+/// An ask claude settled itself goes first, as one answered on claude.ai would.
 fn asking_turn() -> String {
     let ask = [
+        json!({"type":"assistant","message":{"role":"assistant","content":[
+            {"type":"tool_use","id":"toolu_gone","name":"Bash","input":{"command":"ls"}}]},
+            "session_id":"%SID%"}),
+        json!({"type":"control_request","request_id":"req-gone","request":{"subtype":"can_use_tool",
+            "tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_gone"}}),
+        json!({"type":"control_cancel_request","request_id":"req-gone"}),
+        json!({"type":"user","message":{"role":"user","content":[
+            {"type":"tool_result","tool_use_id":"toolu_gone","content":"README.md","is_error":false}]},
+            "session_id":"%SID%"}),
         json!({"type":"assistant","message":{"role":"assistant","content":[
             {"type":"tool_use","id":"toolu_ask","name":"Bash","input":{"command":"make deploy"}}]},
             "session_id":"%SID%"}),
