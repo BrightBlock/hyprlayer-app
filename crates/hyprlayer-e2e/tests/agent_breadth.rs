@@ -949,6 +949,7 @@ async fn agent_breadth() {
     let mut child_mcp = McpDriver::start(&env_of(&sandbox, &lead_children[0].1).await, false);
     child_mcp.initialize("2025-06-18").await;
     let mut grandchildren = Vec::new();
+    let mut grandchild_ids = Vec::new();
     for n in 1..=5 {
         let spawned = child_mcp
             .call(
@@ -956,10 +957,9 @@ async fn agent_breadth() {
                 json!({ "prompt": format!("E2E_GRANDCHILD_{n}"), "title": format!("Grandchild {n}"), "harness": "claude" }),
             )
             .await;
-        j.alias(
-            text(&parsed(&spawned), "/sessionId"),
-            format!("$GRANDCHILD_{n}"),
-        );
+        let id = text(&parsed(&spawned), "/sessionId");
+        j.alias(&id, format!("$GRANDCHILD_{n}"));
+        grandchild_ids.push(id);
         grandchildren.push(refusal(&spawned));
     }
     j.guard(
@@ -978,6 +978,37 @@ async fn agent_breadth() {
             && grandchildren[4].starts_with("agent_limit_reached: ")
             && grandchildren[4].contains("already has 4 live children, the Max live children"),
         json!({ "spawns": grandchildren }),
+    );
+
+    j.step("a Lead's messages to its own child are not agent hops; a non-Lead's still are");
+    update_settings(&mut j, &c, |s| s.agent_control.max_agent_hops = 2).await;
+    let mut from_lead = Vec::new();
+    for n in 1..=3 {
+        let sent = lead_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": lead_children[0].1, "text": format!("E2E_LEAD_HOP_{n}") }),
+            )
+            .await;
+        from_lead.push(refusal(&sent));
+    }
+    let mut from_child = Vec::new();
+    for n in 1..=3 {
+        let sent = child_mcp
+            .call(
+                "message_agent",
+                json!({ "session_id": grandchild_ids[0], "text": format!("E2E_CHILD_HOP_{n}") }),
+            )
+            .await;
+        from_child.push(refusal(&sent));
+    }
+    update_settings(&mut j, &c, |s| s.agent_control.max_agent_hops = 6).await;
+    j.guard(
+        "with Max agent hops at 2, all three of the Lead's messages reach its child, and the child's third to its own child is agent_limit_reached",
+        from_lead.iter().all(|r| r == "ok")
+            && from_child[..2].iter().all(|r| r == "ok")
+            && from_child[2].starts_with("agent_limit_reached: "),
+        json!({ "fromLead": from_lead, "fromChild": from_child }),
     );
     drop(child_mcp);
 

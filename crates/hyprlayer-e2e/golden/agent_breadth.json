@@ -505,6 +505,27 @@
       "guards": [
         {
           "evidence": {
+            "fromChild": [
+              "ok",
+              "ok",
+              "agent_limit_reached: an agent limit was reached: Grandchild 1 got 2 agent messages with no human turn between (Max agent hops)"
+            ],
+            "fromLead": [
+              "ok",
+              "ok",
+              "ok"
+            ]
+          },
+          "guard": "with Max agent hops at 2, all three of the Lead's messages reach its child, and the child's third to its own child is agent_limit_reached",
+          "ok": true
+        }
+      ],
+      "step": "a Lead's messages to its own child are not agent hops; a non-Lead's still are"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "argv": [
               "--permission-mode",
               "auto"

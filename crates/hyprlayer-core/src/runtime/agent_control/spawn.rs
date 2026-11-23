@@ -345,7 +345,8 @@ impl AgentControlService<'_> {
         }
     }
 
-    /// An attributed, headed turn into a session in the caller's project; hop-counted once delivered.
+    /// An attributed, headed turn into a session in the caller's project; hop-counted once delivered,
+    /// unless a Lead sends it to an agent it spawned: that relays the user's own work.
     pub async fn send_message(
         &self,
         identity: &AgentIdentity,
@@ -363,8 +364,15 @@ impl AgentControlService<'_> {
         self.check_workstream(identity, &target.workstream_id)
             .await?;
         self.check_message_rank(identity, &target).await?;
-        self.admit_hop(session_id, &target.workstream_id, &session_label(&target))
-            .await?;
+        let counted = !(identity.lead
+            && self
+                .check_descendant(identity, session_id, false)
+                .await
+                .is_ok());
+        if counted {
+            self.admit_hop(session_id, &target.workstream_id, &session_label(&target))
+                .await?;
+        }
         if !sessions.is_live(session_id).await {
             let workstream = self
                 .runtime
@@ -434,7 +442,9 @@ impl AgentControlService<'_> {
                 },
             )
             .await?;
-        self.record_hop(session_id).await;
+        if counted {
+            self.record_hop(session_id).await;
+        }
         Ok(())
     }
 
@@ -773,7 +783,7 @@ impl AgentControlService<'_> {
         Ok(Some(agent))
     }
 
-    /// A headed, hop-counted paste into a PTY agent the caller spawned.
+    /// A headed paste into a PTY agent the caller spawned; hop-counted unless the caller is a Lead.
     pub async fn send_pty_message(
         &self,
         identity: &AgentIdentity,
@@ -793,16 +803,20 @@ impl AgentControlService<'_> {
         if let Some(reason) = paste_refusal(agents, terminal_id) {
             return Err(denied(reason));
         }
-        self.admit_hop(
-            terminal_id,
-            &target.agent.workstream_id,
-            &target.agent.engine_id,
-        )
-        .await?;
+        if !identity.lead {
+            self.admit_hop(
+                terminal_id,
+                &target.agent.workstream_id,
+                &target.agent.engine_id,
+            )
+            .await?;
+        }
         // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
         agents.owe_prompt(terminal_id, PROMPT_ACK);
         paste(agents, terminal_id, &target.session, &text).await?;
-        self.record_hop(terminal_id).await;
+        if !identity.lead {
+            self.record_hop(terminal_id).await;
+        }
         Ok(())
     }
 
