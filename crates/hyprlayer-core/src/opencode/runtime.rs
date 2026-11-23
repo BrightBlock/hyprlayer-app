@@ -1299,10 +1299,15 @@ struct Translator {
     ended: Option<String>,
     /// An idle or error that came before the anchor, when, and the sent turn it waits on.
     unplaced: Option<(std::time::Instant, String, OcEvent)>,
+    open_reply: Option<String>,
+    held_end: Option<(std::time::Instant, Vec<SessionEvent>)>,
 }
 
 /// How long an unplaced idle or error waits for the anchor before it ends the turn anyway.
 const UNPLACED_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a turn's end waits for its open reply; 1.18.18 settles an aborted one within 300 ms.
+const SETTLE_WAIT: Duration = Duration::from_secs(3);
 
 /// A step's message completes with `finish: tool-calls` while the turn goes on.
 fn reply_finished(info: &Value) -> bool {
@@ -1310,6 +1315,11 @@ fn reply_finished(info: &Value) -> bool {
     set(info.get("error"))
         || (set(info.pointer("/time/completed"))
             && info.get("finish").and_then(Value::as_str) != Some("tool-calls"))
+}
+
+fn message_settled(info: &Value) -> bool {
+    let set = |v: Option<&Value>| v.is_some_and(|v| !v.is_null());
+    set(info.get("error")) || set(info.pointer("/time/completed"))
 }
 
 fn is_abort(p: &Value) -> bool {
@@ -1377,23 +1387,32 @@ impl Translator {
             .map(|(_, anchor)| anchor.as_str())
     }
 
-    fn completed(&self) -> SessionEvent {
+    fn ended_as(&self, status: &str) -> SessionEvent {
         SessionEvent::TurnDone {
             cost_usd: Some(self.cost_total),
             num_turns: None,
             context_tokens: self.context_tokens,
-            turn_status: Some("completed".into()),
+            turn_status: Some(status.into()),
             thread_tokens: None,
         }
     }
 
     fn deadline(&self) -> Option<std::time::Instant> {
-        self.unplaced.as_ref().map(|(at, _, _)| *at + UNPLACED_WAIT)
+        let unplaced = self.unplaced.as_ref().map(|(at, _, _)| *at + UNPLACED_WAIT);
+        let held = self.held_end.as_ref().map(|(at, _)| *at + SETTLE_WAIT);
+        unplaced.into_iter().chain(held).min()
+    }
+
+    fn expire(&mut self) -> Vec<SessionEvent> {
+        let mut out = self.release_end();
+        out.extend(self.expire_unplaced());
+        self.open_reply = None;
+        out
     }
 
     /// No user message matched the prompt, so the held event ends the turn as any
     /// idle or error did before turns were bound to their reply.
-    fn expire(&mut self) -> Vec<SessionEvent> {
+    fn expire_unplaced(&mut self) -> Vec<SessionEvent> {
         let Some((_, waited_on, held)) = self.unplaced.take() else {
             return Vec::new();
         };
@@ -1416,12 +1435,45 @@ impl Translator {
         if held.kind == "session.error" {
             out.extend(error_events(&held.properties));
         } else {
-            out.push(self.completed());
+            out.push(self.ended_as("completed"));
         }
         out
     }
 
+    /// OpenCode ends a turn before it settles the parts of the reply it cut short, so the end
+    /// waits for that reply, and goes out before anything of a turn sent after it.
+    fn end_turn(&mut self, turn: String, events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+        self.ended = Some(turn);
+        if self.open_reply.is_none() {
+            return events;
+        }
+        self.held_end = Some((std::time::Instant::now(), events));
+        Vec::new()
+    }
+
+    fn release_end(&mut self) -> Vec<SessionEvent> {
+        match self.held_end.take() {
+            Some((_, events)) => {
+                self.open_reply = None;
+                events
+            }
+            None => Vec::new(),
+        }
+    }
+
     fn handle(&mut self, ev: &OcEvent) -> Vec<SessionEvent> {
+        let mut out = match self.open_turn() {
+            Some(_) => self.release_end(),
+            None => Vec::new(),
+        };
+        out.extend(self.translate(ev));
+        if self.open_reply.is_none() {
+            out.extend(self.release_end());
+        }
+        out
+    }
+
+    fn translate(&mut self, ev: &OcEvent) -> Vec<SessionEvent> {
         let p = &ev.properties;
         let open = self.open_turn();
         match ev.kind.as_str() {
@@ -1445,6 +1497,12 @@ impl Translator {
                         if role == "assistant" && newer && reply_finished(info) {
                             self.answered = Some(turn.id.clone());
                         }
+                        if role == "assistant" && newer && !message_settled(info) {
+                            self.open_reply = Some(id.to_string());
+                        }
+                    }
+                    if message_settled(info) && self.open_reply.as_deref() == Some(id) {
+                        self.open_reply = None;
                     }
                     self.roles.insert(id.to_string(), role.to_string());
                 }
@@ -1514,18 +1572,12 @@ impl Translator {
                 };
                 let answered = self.answered.as_ref() == Some(&turn.id) || turn.refused;
                 if answered {
-                    self.ended = Some(turn.id);
-                    return vec![self.completed()];
+                    let done = self.ended_as("completed");
+                    return self.end_turn(turn.id, vec![done]);
                 }
                 if turn.interrupted {
-                    self.ended = Some(turn.id);
-                    return vec![SessionEvent::TurnDone {
-                        cost_usd: Some(self.cost_total),
-                        num_turns: None,
-                        context_tokens: self.context_tokens,
-                        turn_status: Some("interrupted".into()),
-                        thread_tokens: None,
-                    }];
+                    let done = self.ended_as("interrupted");
+                    return self.end_turn(turn.id, vec![done]);
                 }
                 self.hold_unplaced(&turn, ev);
                 Vec::new()
@@ -1544,8 +1596,7 @@ impl Translator {
                     self.hold_unplaced(&turn, ev);
                     return Vec::new();
                 }
-                self.ended = Some(turn.id);
-                error_events(p)
+                self.end_turn(turn.id, error_events(p))
             }
             _ => Vec::new(),
         }
@@ -2074,6 +2125,111 @@ mod tests {
         x.handle(&idle());
         send(&x, "msg_h");
         assert_eq!(statuses(x.expire()), [] as [String; 0]);
+    }
+
+    #[test]
+    fn a_stopped_turn_ends_after_the_parts_opencode_settles_for_it() {
+        let part = |part: Value| oc("message.part.updated", json!({ "part": part }));
+        let aborted = |id: &str| {
+            oc(
+                "message.updated",
+                json!({ "info": {
+                    "id": id, "role": "assistant",
+                    "error": { "name": "MessageAbortedError", "data": { "message": "Aborted" } },
+                    "time": { "completed": 2 },
+                } }),
+            )
+        };
+        let ends_last = |events: &[SessionEvent]| {
+            let done = events
+                .iter()
+                .position(|e| matches!(e, SessionEvent::TurnDone { .. }));
+            done.is_some_and(|at| at + 1 == events.len())
+        };
+        let mut x = Translator::default();
+
+        // 1.18.18 settles the running tool after the abort's error and idle, then the reply.
+        send(&x, "msg_1");
+        let tool = |state: Value| {
+            part(json!({
+                "id": "prt_t", "type": "tool", "messageID": "msg_2", "callID": "call_1",
+                "tool": "bash", "state": state,
+            }))
+        };
+        let mut events = Vec::new();
+        for ev in [
+            user("msg_1"),
+            reply("msg_2", None),
+            tool(json!({ "status": "running", "input": { "command": "sleep 40" } })),
+        ] {
+            events.extend(x.handle(&ev));
+        }
+        interrupt(&x);
+        for ev in [
+            error("MessageAbortedError"),
+            idle(),
+            tool(json!({
+                "status": "completed", "input": { "command": "sleep 40" },
+                "output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
+            })),
+            aborted("msg_2"),
+            idle(),
+        ] {
+            events.extend(x.handle(&ev));
+        }
+        assert!(
+            ends_last(&events),
+            "the tool's result follows the turn's end: {events:?}"
+        );
+        assert!(events.iter().any(
+            |e| matches!(e, SessionEvent::ToolResult { tool_use_id, .. } if tool_use_id == "call_1")
+        ));
+        assert_eq!(statuses(events), ["interrupted"]);
+
+        send(&x, "msg_3");
+        let mut events = Vec::new();
+        for ev in [
+            user("msg_3"),
+            reply("msg_4", None),
+            oc(
+                "message.part.delta",
+                json!({ "messageID": "msg_4", "partID": "prt_x", "field": "text", "delta": "1\n2" }),
+            ),
+        ] {
+            events.extend(x.handle(&ev));
+        }
+        interrupt(&x);
+        for ev in [
+            error("MessageAbortedError"),
+            idle(),
+            part(json!({
+                "id": "prt_x", "type": "text", "messageID": "msg_4", "text": "1\n2\n3",
+                "time": { "start": 1, "end": 2 },
+            })),
+            aborted("msg_4"),
+            idle(),
+        ] {
+            events.extend(x.handle(&ev));
+        }
+        assert!(
+            ends_last(&events),
+            "the text follows the turn's end: {events:?}"
+        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::AssistantText { text, .. } if text == "1\n2\n3")));
+
+        send(&x, "msg_5");
+        x.handle(&user("msg_5"));
+        x.handle(&reply("msg_6", None));
+        interrupt(&x);
+        let mut events = x.handle(&error("MessageAbortedError"));
+        events.extend(x.handle(&idle()));
+        if events.is_empty() {
+            assert!(x.deadline().is_some(), "a held end never expires");
+            events = x.expire();
+        }
+        assert_eq!(statuses(events), ["interrupted"]);
     }
 
     #[test]

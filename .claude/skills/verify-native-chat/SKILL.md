@@ -430,7 +430,8 @@ turn, what closes an ask, or what reports the server's death.
 | `Interrupt` | `OpenCodeDriver::interrupt`, runtime.rs:1135 (drains the asks map as declined, marks the sent turn, POSTs abort) |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
 | `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
-| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379 |
+| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it |
+| `Settle` | the held end released by `expire` (`SETTLE_WAIT`, 3 s) or by a newer turn's next event (`Translator::handle`) |
 | `Relay` | as `SessionTurns`, plus `author_for`'s `next_turn` (forwarder.rs:1056); OpenCode's permission names never equal a normalized tool name (`normalize_tool`, 1679), so no tool result decides a card |
 
 `RestartWake.tla`:
@@ -518,7 +519,10 @@ attachment together).
   codex 0.171 (the interrogate workstream's probes p1, p4, p8a).
 - Assumptions about OpenCode: a prompt POSTed while busy runs after the
   running one; an abort ends the running prompt, and the prompts held behind
-  it may or may not run; the aborted reply message may or may not exist yet;
+  it may or may not run; the aborted reply message may or may not exist yet,
+  and if it does, its cut-short part and its MessageAbortedError come after
+  the abort's error and idle, well inside `SETTLE_WAIT` (under 300 ms against
+  1.18.18), so `Settle` runs out only on a reply that will not settle;
   another OpenCode client can answer an ask (`permission.replied`); a
   subagent's ask carries its child session's id, which `session.created`
   names with its parent's (seen against 1.18.18). Only the server death is
@@ -622,6 +626,10 @@ wrong: fix the action, re-run, and say what you changed.
    - `OpenCodeTurns-stop.AskVisible`: an `OcAsk` from a subagent's session
      never reaches the driver (the filter before `admits`; in the copy,
      `OcAsk` may leave `out` unchanged).
+   - `OpenCodeTurns-stop.TurnProgress`: `EndTurn` sends the `TurnDone` at
+     once while the reply is open (the translator before `end_turn`): the
+     stopped reply's last part lands after it and the desktop shows working
+     (16 steps).
    - `CodexTurns.NoLostAgentMessage` and the OpenCode FAILs fail today; once
      one passes, add a break for it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
