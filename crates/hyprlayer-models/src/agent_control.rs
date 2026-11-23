@@ -480,4 +480,6 @@ pub enum MessageDelivery {
     Sent,
     /// Mid-turn, a slash command or what follows one waits for the agent's next idle.
     Queued,
+    /// The running turn was stopped, and the message is the agent's next turn.
+    Interrupted,
 }

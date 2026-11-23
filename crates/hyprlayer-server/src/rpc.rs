@@ -349,9 +349,9 @@ hyprlayer_proto::commands! {
     SpawnSession: spawn_session(request: SpawnSessionRequest) -> Session;
     SpawnAgent: spawn_agent(request: SpawnSessionRequest) -> SpawnedAgent;
     WaitSession: wait_session(session_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
-    SendAgentMessage: send_agent_message(session_id: String, text: String) -> ();
+    SendAgentMessage: send_agent_message(session_id: String, text: String, interrupt: bool) -> MessageDelivery;
     SpawnPtyAgent: spawn_pty_agent(request: SpawnPtyAgentRequest) -> PtyAgent;
-    SendPtyMessage: send_pty_message(terminal_id: String, text: String) -> MessageDelivery;
+    SendPtyMessage: send_pty_message(terminal_id: String, text: String, interrupt: bool) -> MessageDelivery;
     ReadTerminal: read_terminal(terminal_id: String, lines: u32) -> String;
     WaitPtyAgent: wait_pty_agent(terminal_id: String, until: WaitUntil, timeout_ms: u32) -> WaitOutcome;
     InterruptPtyAgent: interrupt_pty_agent(terminal_id: String) -> ();

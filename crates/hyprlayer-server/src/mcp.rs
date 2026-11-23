@@ -130,7 +130,10 @@ fn wait_props() -> Value {
 }
 
 fn text_prop() -> Value {
-    json!({ "text": { "type": "string", "description": "Required: the message to send. The field is `text`; `message` is accepted too." } })
+    json!({
+        "text": { "type": "string", "description": "Required: the message to send. The field is `text`; `message` is accepted too." },
+        "delivery": { "type": "string", "enum": ["queue", "interrupt"], "description": "queue (the default) lands as a person's message sent mid-turn does: at the agent's next tool call or turn end. interrupt first stops the running turn, cutting off a running command, which can leave partial work such as half an install, then sends this as the agent's next turn. Use it for holds, stops and scope changes that must land before the current command finishes." },
+    })
 }
 
 fn with_props(mut base: Value, extra: Value) -> Value {
@@ -493,9 +496,20 @@ fn required<'a>(args: &'a Value, key: &str) -> Result<&'a str, WireError> {
 fn delivered(delivery: MessageDelivery) -> &'static str {
     match delivery {
         MessageDelivery::Sent => "sent",
+        MessageDelivery::Interrupted => {
+            "interrupted: the agent's running turn was stopped, and this message is its next turn"
+        }
         MessageDelivery::Queued => {
             "queued: the agent is mid-turn, so this slash command, or a message behind one, is typed at its next idle"
         }
+    }
+}
+
+fn interrupts(args: &Value) -> Result<bool, WireError> {
+    match arg(args, "delivery") {
+        None | Some("queue") => Ok(false),
+        Some("interrupt") => Ok(true),
+        Some(_) => Err(bad_args("`delivery` is `queue` or `interrupt`")),
     }
 }
 
@@ -781,26 +795,35 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             }
         }
         "message_agent" => {
-            let text = message_text(args)?;
+            let (text, interrupt) = (message_text(args)?, interrupts(args)?);
             let delivery = match target(args)? {
                 Target::Session(id) => {
-                    client.send_agent_message(id.into(), text.into()).await?;
-                    MessageDelivery::Sent
+                    client
+                        .send_agent_message(id.into(), text.into(), interrupt)
+                        .await?
                 }
-                Target::Terminal(id) => client.send_pty_message(id.into(), text.into()).await?,
+                Target::Terminal(id) => {
+                    client
+                        .send_pty_message(id.into(), text.into(), interrupt)
+                        .await?
+                }
             };
             Ok(json!(delivered(delivery)))
         }
         "prompt_and_wait" => {
-            let text = message_text(args)?;
+            let (text, interrupt) = (message_text(args)?, interrupts(args)?);
             let (until, timeout_ms) = wait_args(args)?;
             match target(args)? {
                 Target::Session(id) => {
-                    client.send_agent_message(id.into(), text.into()).await?;
+                    client
+                        .send_agent_message(id.into(), text.into(), interrupt)
+                        .await?;
                     encode(client.wait_session(id.into(), until, timeout_ms).await?)
                 }
                 Target::Terminal(id) => {
-                    client.send_pty_message(id.into(), text.into()).await?;
+                    client
+                        .send_pty_message(id.into(), text.into(), interrupt)
+                        .await?;
                     encode(client.wait_pty_agent(id.into(), until, timeout_ms).await?)
                 }
             }

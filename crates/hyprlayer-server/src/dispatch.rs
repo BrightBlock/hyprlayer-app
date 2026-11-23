@@ -2474,11 +2474,16 @@ impl Dispatch for Server {
             .wire()
     }
 
-    async fn send_agent_message(&self, session_id: String, text: String) -> Result<(), WireError> {
+    async fn send_agent_message(
+        &self,
+        session_id: String,
+        text: String,
+        interrupt: bool,
+    ) -> Result<MessageDelivery, WireError> {
         let identity = self.agent_identity("send_agent_message")?;
         self.runtime
             .agent_control()
-            .send_message(&identity, &session_id, &text)
+            .send_message(&identity, &session_id, &text, interrupt)
             .await
             .wire()
     }
@@ -2496,11 +2501,12 @@ impl Dispatch for Server {
         &self,
         terminal_id: String,
         text: String,
+        interrupt: bool,
     ) -> Result<MessageDelivery, WireError> {
         let identity = self.agent_identity("send_pty_message")?;
         self.runtime
             .agent_control()
-            .send_pty_message(&identity, &terminal_id, &text)
+            .send_pty_message(&identity, &terminal_id, &text, interrupt)
             .await
             .wire()
     }

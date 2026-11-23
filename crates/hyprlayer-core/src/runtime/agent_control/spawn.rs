@@ -45,6 +45,9 @@ const PROMPT_QUIET: Duration = Duration::from_secs(3);
 pub(super) const PROMPT_ACK: Duration = Duration::from_secs(10);
 /// The TUI must see the paste end before the Enter, or the Enter joins the paste.
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
+const INTERRUPT_SETTLE: Duration = Duration::from_secs(10);
+/// Apart enough that the TUI reads two Esc keys, not one escape sequence.
+const ESC_GAP: Duration = Duration::from_millis(500);
 const READ_LINES_CAP: u32 = 500;
 
 /// What a spawn may start, once every refusal has been ruled out.
@@ -353,7 +356,8 @@ impl AgentControlService<'_> {
         identity: &AgentIdentity,
         session_id: &str,
         text: &str,
-    ) -> Result<()> {
+        interrupt: bool,
+    ) -> Result<MessageDelivery> {
         self.require_full(identity).await?;
         let sessions = self.runtime.sessions();
         let target = sessions
@@ -424,6 +428,16 @@ impl AgentControlService<'_> {
                 .resume_if_exited_held(session, workstream.project_path, &guard)
                 .await?;
         }
+        let interrupted = interrupt && !is_idle(&self.runtime.session_actors, session_id).await;
+        if interrupted {
+            sessions.interrupt(session_id).await?;
+            let deadline = Instant::now() + INTERRUPT_SETTLE;
+            while !is_idle(&self.runtime.session_actors, session_id).await
+                && Instant::now() < deadline
+            {
+                tokio::time::sleep(POLL).await;
+            }
+        }
         let label = self.caller_label(identity).await;
         let text = pipeline::headed(&header(identity, &label), text);
         sessions
@@ -446,7 +460,10 @@ impl AgentControlService<'_> {
         if counted {
             self.record_hop(session_id).await;
         }
-        Ok(())
+        Ok(match interrupted {
+            true => MessageDelivery::Interrupted,
+            false => MessageDelivery::Sent,
+        })
     }
 
     /// A message steers its target, so one running above the caller must be the caller's own child.
@@ -790,6 +807,7 @@ impl AgentControlService<'_> {
         identity: &AgentIdentity,
         terminal_id: &str,
         text: &str,
+        interrupt: bool,
     ) -> Result<MessageDelivery> {
         self.require_full(identity).await?;
         let target = self.pty_target(identity, terminal_id).await?;
@@ -812,21 +830,39 @@ impl AgentControlService<'_> {
             )
             .await?;
         }
-        let delivery =
-            if agents.holds(terminal_id) || command_while_busy(agents, terminal_id, &text) {
-                if agents.hold(terminal_id, text) == Some(true) {
-                    tokio::spawn(deliver_held(
-                        self.runtime.pty_agents.clone(),
-                        terminal_id.to_string(),
-                    ));
-                }
-                MessageDelivery::Queued
-            } else {
-                // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
-                agents.owe_prompt(terminal_id, PROMPT_ACK);
-                paste(agents, terminal_id, &target.session, &text).await?;
-                MessageDelivery::Sent
-            };
+        let busy = agents
+            .snapshot(terminal_id)
+            .is_some_and(|now| now.agent.state != PtyAgentState::Idle || now.prompt_owed);
+        let interrupted = interrupt && busy;
+        if interrupted {
+            if !target.agent.hooked {
+                return Err(denied(
+                    "that agent's engine reports no state, so nothing would say when an interrupt ended its turn",
+                ));
+            }
+            interrupt_turn(agents, terminal_id, &target.session).await?;
+            agents.note_input(terminal_id);
+        }
+        let delivery = if interrupted
+            || agents.holds(terminal_id)
+            || command_while_busy(agents, terminal_id, &text)
+        {
+            if agents.hold(terminal_id, text) == Some(true) {
+                tokio::spawn(deliver_held(
+                    self.runtime.pty_agents.clone(),
+                    terminal_id.to_string(),
+                ));
+            }
+            match interrupted {
+                true => MessageDelivery::Interrupted,
+                false => MessageDelivery::Queued,
+            }
+        } else {
+            // Before the write, so a fast `UserPromptSubmit` settles it rather than racing it.
+            agents.owe_prompt(terminal_id, PROMPT_ACK);
+            paste(agents, terminal_id, &target.session, &text).await?;
+            MessageDelivery::Sent
+        };
         if !identity.lead {
             self.record_hop(terminal_id).await;
         }
@@ -855,8 +891,7 @@ impl AgentControlService<'_> {
         self.require_full(identity).await?;
         let target = self.pty_target(identity, terminal_id).await?;
         self.check_descendant(identity, terminal_id, false).await?;
-        target.session.write_input(b"\x1b")?;
-        Ok(())
+        interrupt_turn(&self.runtime.pty_agents, terminal_id, &target.session).await
     }
 
     /// The PTY agent's screen as plain text: its last `lines` lines, at most 500.
@@ -1165,6 +1200,26 @@ async fn deliver_held(agents: Arc<PtyAgents>, terminal_id: String) {
         }
         tokio::time::sleep(POLL).await;
     }
+}
+
+/// In claude's vim mode the first Esc only leaves INSERT, so a second one stops the turn.
+async fn interrupt_turn(agents: &PtyAgents, terminal_id: &str, pty: &PtySession) -> Result<()> {
+    let inserting = agents
+        .snapshot(terminal_id)
+        .and_then(|now| now.screen?.rows())
+        .is_some_and(|rows| {
+            rows.iter()
+                .rev()
+                .filter(|r| !r.trim().is_empty())
+                .take(4)
+                .any(|r| r.contains("-- INSERT --"))
+        });
+    pty.write_input(b"\x1b")?;
+    if inserting {
+        tokio::time::sleep(ESC_GAP).await;
+        pty.write_input(b"\x1b")?;
+    }
+    Ok(())
 }
 
 /// Bracketed paste, then Enter on its own: a CR inside the paste is a newline to the TUI. Call it

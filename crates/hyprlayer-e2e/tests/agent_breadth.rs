@@ -289,6 +289,37 @@ async fn agent_breadth() {
         json!({ "reply": held, "typedWhileBusy": typed_while_busy, "typedAtIdle": typed_at_idle }),
     );
 
+    j.step("an interrupting message stops the turn and is the next one");
+    c.terminal_write(term.clone(), hyprlayer_e2e::keystrokes("hold\r"))
+        .await
+        .expect("terminal_write");
+    let deadline = tokio::time::Instant::now() + IO;
+    while tokio::time::Instant::now() < deadline
+        && pty_state(&c, &ws, &term).await.as_deref() != Some("working")
+    {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let reply = tool_text(
+        &mcp.call(
+            "message_agent",
+            json!({ "terminal_id": term, "text": "work\nE2E_INTERRUPT", "delivery": "interrupt" }),
+        )
+        .await,
+    );
+    // The stub reads lines, so the Esc leads the paste that follows the settle.
+    let expected = vec![
+        format!("\x1b\x1b[200~{header}"),
+        String::new(),
+        "work".into(),
+        "E2E_INTERRUPT\x1b[201~".into(),
+    ];
+    let typed = eventually(IO, || lines(&stdin).ends_with(&expected)).await;
+    j.guard(
+        "mid-turn, delivery interrupt sends Esc, and once the turn settles the message is typed as the next turn",
+        reply.starts_with("\"interrupted: ") && typed,
+        json!({ "reply": reply, "typedAfterTheEsc": typed }),
+    );
+
     j.step("a message is refused while the target shows a prompt");
     let stdin = log.join("stdin.log");
     let typed = lines(&stdin).len();

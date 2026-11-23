@@ -122,6 +122,19 @@
       "guards": [
         {
           "evidence": {
+            "reply": "\"interrupted: the agent's running turn was stopped, and this message is its next turn\"",
+            "typedAfterTheEsc": true
+          },
+          "guard": "mid-turn, delivery interrupt sends Esc, and once the turn settles the message is typed as the next turn",
+          "ok": true
+        }
+      ],
+      "step": "an interrupting message stops the turn and is the next one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "refusal": "agent_control_denied: agent control refused this: the agent is showing a prompt",
             "state": "idle",
             "typedSince": 0

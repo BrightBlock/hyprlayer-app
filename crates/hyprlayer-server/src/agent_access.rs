@@ -136,6 +136,11 @@ pub(crate) fn access(request: &Request) -> Access {
             Access::Full(Scope::Workstream(request.workstream_id.clone()))
         }
         Request::WaitSession { session_id, .. } => Access::Full(Scope::Session(session_id.clone())),
+        Request::SendAgentMessage {
+            session_id,
+            interrupt: true,
+            ..
+        } => descendant(session_id),
         Request::SendAgentMessage { session_id, .. } => {
             Access::Full(Scope::Session(session_id.clone()))
         }
