@@ -2155,6 +2155,42 @@ describe("reconnecting from the held cursor", () => {
     expect(syncOf(exited)?.resetRev).toBe(7);
   });
 
+  describe("a mid-turn message the harness held when its process ended", () => {
+    const TOOL: SessionEvent = { kind: "toolUse", id: "t1", name: "Bash", input: "{}", parentId: null };
+    const held = (id: string) => entryOf(id).queued.map((m) => ({ text: m.text, held: m.clientMessageId !== undefined }));
+    const sends = () => (h.sendUserMessage.mock.calls as unknown[][]).map((c) => c[1]);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    async function steerMidTurn(): Promise<string> {
+      const id = await startStreaming([at(0, INIT), at(1, TOOL)]);
+      useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], harness: "claude" } } }));
+      h.sendUserMessage.mockClear();
+      await sendMessage(id, "also run the tests", [], null, undefined, true);
+      expect(held(id)).toEqual([{ text: "also run the tests", held: true }]);
+      return id;
+    }
+
+    it("is sent again once a reconnect reads the relaunch after a server restart", async () => {
+      const id = await steerMidTurn();
+      server.get(id)!.rows.push(at(2, { kind: "relaunched", quiet: true }), at(3, INIT));
+      await reconnect([id]);
+      const done = [at(4, reply("back after the restart")), at(5, TURN_DONE)];
+      server.get(id)!.rows.push(...done);
+      for (const row of done) stream(id, row);
+      await settle();
+      await settle();
+      expect(sends()).toEqual(["also run the tests", "also run the tests"]);
+    });
+
+    it("goes back to the queue once a reconnect reads the crash", async () => {
+      const id = await steerMidTurn();
+      server.get(id)!.rows.push(at(2, { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" }));
+      await reconnect([]);
+      await settle();
+      expect(held(id).every((chip) => !chip.held)).toBe(true);
+    });
+  });
+
   it("keeps the cursor before another device's held turn, so a reconnect reads that turn once", async () => {
     const OTHER = { clientId: "them", device: "jons-macbook-pro" };
     const id = await startStreaming(turn(10));

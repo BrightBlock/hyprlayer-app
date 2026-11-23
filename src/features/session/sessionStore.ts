@@ -184,6 +184,8 @@ export type QueuedMessage = {
   promptName: string | null;
   /** Set while the harness holds it for its next step; its echo carries this id. */
   clientMessageId?: string;
+  /** The newest row applied when it was handed to the harness. */
+  heldAfterSeq?: number;
   /** Runs once the queued text actually reaches the transcript. */
   onSent?: () => void;
 };
@@ -563,13 +565,15 @@ function settleDelivered(
   return { entry: { ...entry, queued }, chip };
 }
 
-// A fold or pull can bring a delivered message's echo in without its live event.
+// A fold or pull can bring a delivered message's echo, or the process end that dropped it, in without its live event.
 function settleFolded(sessionId: string): void {
   const entry = entryOf(sessionId);
   if (!entry || !entry.queued.some(delivered)) return;
   const echoed = new Set<string>();
+  let ended = -1;
   for (const item of entry.items) {
     if (item.kind === "user" && item.clientMessageId) echoed.add(item.clientMessageId);
+    if ((item.kind === "exit" || item.kind === "relaunched") && item.seq != null) ended = Math.max(ended, item.seq);
   }
   let next = entry;
   const sent: QueuedMessage[] = [];
@@ -579,9 +583,12 @@ function settleFolded(sessionId: string): void {
     next = settled.entry;
     if (settled.chip) sent.push(settled.chip);
   }
+  const settled = next;
+  next = undeliver(next, (m) => m.heldAfterSeq !== undefined && m.heldAfterSeq < ended);
   if (next === entry) return;
   setEntry(sessionId, next);
   for (const chip of sent) chip.onSent?.();
+  if (next !== settled) flushQueuedMessage(sessionId);
 }
 
 // Claude and codex take a message in at their next step, as their own CLIs do. Another
@@ -1605,7 +1612,7 @@ async function steerMessage(
   const current = entryOf(sessionId);
   if (!current) return "dropped";
   const clientMessageId = crypto.randomUUID();
-  const chip: QueuedMessage = { ...message, clientMessageId };
+  const chip: QueuedMessage = { ...message, clientMessageId, heldAfterSeq: current.appliedSeq ?? -1 };
   const queued = at === "front" ? [chip, ...current.queued] : [...current.queued, chip];
   setEntry(sessionId, { ...current, queued });
   try {
