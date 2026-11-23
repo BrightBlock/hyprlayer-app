@@ -24,10 +24,10 @@ PASS OpenCodeTurns.TypeOK
 FAIL OpenCodeTurns.NoLostUserMessage  # finding 16 (two prompts handled out of order, then a stop): model only, not reproduced live
 FAIL OpenCodeTurns.NoLostAgentMessage  # finding 16 (two prompts handled out of order), and 13: model only, not reproduced live
 PASS OpenCodeTurns.NoDoubleSend
-FAIL OpenCodeTurns.TurnProgress  # finding 14 (a lost idle), and 13: model only, not reproduced live
-FAIL OpenCodeTurns.AskResolution  # findings 13 and 14 together: model only, not reproduced live
-FAIL OpenCodeTurns.AskVisible  # finding 14 (a lost permission.asked): model only, not reproduced live
-FAIL OpenCodeTurns.InterruptSafe  # findings 13 and 14 together: model only, not reproduced live
+FAIL OpenCodeTurns.TurnProgress  # finding 13 (a late abort): model only, not reproduced live
+PASS OpenCodeTurns.AskResolution
+PASS OpenCodeTurns.AskVisible
+FAIL OpenCodeTurns.InterruptSafe  # finding 13 (a late abort): model only, not reproduced live
 FAIL OpenCodeTurns.InterruptHonored  # finding 13 (an abort handled before its prompt): model only, not reproduced live
 PASS OpenCodeTurns-death.TypeOK
 PASS OpenCodeTurns-death.NoLostUserMessage

@@ -318,6 +318,36 @@ async fn opencode_resume() {
         json!({ "turnStatus": stopped, "openAsks": left_open.len() }),
     );
 
+    j.step("what the event stream lost while it reconnected is read back from OpenCode");
+    stub_delays(&sandbox, json!({ "ask": true, "cut": "permission.asked" }));
+    send(&mut j, &client, &id, "Run a command whose ask is lost.").await;
+    let lost_ask = permission_ask(&mut events).await;
+    if let Some(request_id) = &lost_ask {
+        client
+            .respond_permission(id.clone(), request_id.clone(), true, None)
+            .await
+            .expect("respond_permission");
+    }
+    let allowed = turn_status(&mut events).await;
+    stub_delays(&sandbox, json!({ "cut": "message.updated" }));
+    let unseen = "A turn whose every event is lost.";
+    send(&mut j, &client, &id, unseen).await;
+    let (seen, replied) = turn(&mut events, unseen).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the lost ask shows and its turn completes, and a turn with no event seen shows its reply and ends",
+        lost_ask.is_some()
+            && allowed.as_deref() == Some("completed")
+            && replied.is_some()
+            && status_of(&seen).as_deref() == Some("completed"),
+        json!({
+            "askShown": lost_ask.is_some(),
+            "askTurnStatus": allowed,
+            "replied": replied.is_some(),
+            "turnStatus": status_of(&seen),
+        }),
+    );
+
     j.step("an OpenCode that ignores the prompt's messageID still ends each turn");
     stub_delays(&sandbox, json!({ "ownIds": true }));
     let own = "Answer under OpenCode's own ids.";

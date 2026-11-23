@@ -33,6 +33,7 @@ const labels: Record<string, string> = {
   ServerExited: "the server reports the OpenCode server's death",
   SseDrop: "an event never reaches the server",
   DriverRead: "the server reads OpenCode's event",
+  Resync: "the server reads back what OpenCode holds after the stream reconnects",
   Expire: "an unclaimed idle ends the turn",
   Settle: "the held turn end goes out",
   DropUnread: "the server deletes what the stopped turn left unread and hands it back",

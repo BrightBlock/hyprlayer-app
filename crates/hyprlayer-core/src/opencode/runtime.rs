@@ -23,6 +23,8 @@ const EXIT_POLL: Duration = Duration::from_millis(250);
 /// Under the desktop's three seconds before a stop escalates to a kill.
 const DELETE_TRIES: u32 = 20;
 const DELETE_RETRY: Duration = Duration::from_millis(100);
+const RESYNC_MESSAGES: u32 = 50;
+const RESYNC_WAIT: Duration = Duration::from_secs(5);
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
@@ -39,6 +41,15 @@ fn supported_auth_content(content: &str) -> Option<String> {
 struct OcEvent {
     kind: String,
     properties: Value,
+}
+
+impl OcEvent {
+    fn new(kind: &str, properties: Value) -> Self {
+        Self {
+            kind: kind.to_string(),
+            properties,
+        }
+    }
 }
 
 pub struct OpenCodeServerConfig {
@@ -782,9 +793,7 @@ impl Turns {
     }
 
     fn begin(&mut self) -> String {
-        let sent_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
+        let sent_at = now_ms();
         let id = message_id(sent_at);
         self.latest = Some(SentTurn {
             id: id.clone(),
@@ -862,6 +871,159 @@ async fn delete_message(delete: &impl Fn(&str) -> reqwest::RequestBuilder, id: &
     }
     tracing::warn!("opencode DELETE message {id}: the session stayed busy");
     false
+}
+
+async fn read_json(request: reqwest::RequestBuilder) -> Option<Value> {
+    let response = request.send().await.ok()?.error_for_status().ok()?;
+    response.json().await.ok()
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+struct Intake {
+    root: String,
+    family: std::collections::HashSet<String>,
+    asks: Asks,
+    tx: broadcast::Sender<SessionEvent>,
+}
+
+impl Intake {
+    fn take(&mut self, xlate: &mut Translator, ev: &OcEvent) -> Vec<SessionEvent> {
+        if !admits(&mut self.family, &self.root, ev) {
+            return Vec::new();
+        }
+        // One read back after a gap may arrive again live; once is enough.
+        let asked = matches!(ev.kind.as_str(), "permission.asked" | "question.asked");
+        let id = str_field(&ev.properties, "id");
+        if asked
+            && self
+                .asks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key(&id)
+        {
+            return Vec::new();
+        }
+        if let Some(closed) = track_ask(&self.asks, ev) {
+            let _ = self.tx.send(closed);
+        }
+        if ev.kind == "session.idle" {
+            for closed in decline_all(&self.asks) {
+                let _ = self.tx.send(closed);
+            }
+        }
+        xlate.handle(ev)
+    }
+
+    /// An ask read with no turn open can trail a resync that already ended its turn; one OpenCode
+    /// no longer lists was answered meanwhile.
+    async fn stale(
+        &self,
+        get: &impl Fn(&str) -> reqwest::RequestBuilder,
+        xlate: &Translator,
+        ev: &OcEvent,
+    ) -> bool {
+        let list = match ev.kind.as_str() {
+            "permission.asked" => "/permission",
+            "question.asked" => "/question",
+            _ => return false,
+        };
+        if xlate.open_turn().is_some() {
+            return false;
+        }
+        let id = str_field(&ev.properties, "id");
+        read_json(get(list))
+            .await
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|open| !open.iter().any(|ask| ask["id"] == id))
+    }
+
+    async fn resync(
+        &mut self,
+        get: &impl Fn(&str) -> reqwest::RequestBuilder,
+        since: u64,
+        xlate: &mut Translator,
+    ) -> Vec<SessionEvent> {
+        let missed = self.missed(get, since, &xlate.settled).await;
+        missed.iter().flat_map(|ev| self.take(xlate, ev)).collect()
+    }
+
+    async fn missed(
+        &self,
+        get: &impl Fn(&str) -> reqwest::RequestBuilder,
+        since: u64,
+        settled: &std::collections::HashSet<String>,
+    ) -> Vec<OcEvent> {
+        let root = &self.root;
+        let messages =
+            get(&format!("/session/{root}/message")).query(&[("limit", RESYNC_MESSAGES)]);
+        let (permissions, questions, status, messages) = tokio::join!(
+            read_json(get("/permission")),
+            read_json(get("/question")),
+            read_json(get("/session/status")),
+            read_json(messages),
+        );
+        let mut missed = Vec::new();
+        let unsettled = |m: &&Value| {
+            let created = m.pointer("/info/time/created").and_then(Value::as_u64);
+            let id = m.pointer("/info/id").and_then(Value::as_str);
+            created.is_some_and(|at| at >= since) && id.is_some_and(|id| !settled.contains(id))
+        };
+        for message in messages
+            .as_ref()
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(unsettled)
+        {
+            let info = json!({ "sessionID": root, "info": message["info"] });
+            missed.push(OcEvent::new("message.updated", info));
+            for part in message["parts"].as_array().into_iter().flatten() {
+                let part = json!({ "sessionID": root, "part": part });
+                missed.push(OcEvent::new("message.part.updated", part));
+            }
+        }
+        if let (Some(Value::Array(permissions)), Some(Value::Array(questions))) =
+            (&permissions, &questions)
+        {
+            let listed = |id: &str| permissions.iter().chain(questions).any(|a| a["id"] == id);
+            let gone: Vec<String> = self
+                .asks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .keys()
+                .filter(|id| !listed(id))
+                .cloned()
+                .collect();
+            for id in gone {
+                let reply = json!({ "sessionID": root, "requestID": id, "reply": "reject" });
+                missed.push(OcEvent::new("permission.replied", reply));
+            }
+            for (kind, open) in [
+                ("permission.asked", permissions),
+                ("question.asked", questions),
+            ] {
+                let ours = |ask: &&Value| {
+                    ask["sessionID"]
+                        .as_str()
+                        .is_some_and(|from| self.family.contains(from))
+                };
+                for ask in open.iter().filter(ours) {
+                    missed.push(OcEvent::new(kind, ask.clone()));
+                }
+            }
+        }
+        let idle = status.is_some_and(|all| all.get(root).is_none_or(|s| s["type"] == "idle"));
+        if idle {
+            missed.push(OcEvent::new("session.idle", json!({ "sessionID": root })));
+        }
+        missed
+    }
 }
 
 /// An id in OpenCode's ascending format, which orders a session's messages: the low 48 bits of
@@ -952,11 +1114,26 @@ impl OpenCodeDriver {
         }
 
         let mut sse_rx = server.events.subscribe();
-        let tx = events.clone();
-        let sid = session_id.clone();
-        let mut family = std::collections::HashSet::from([session_id.clone()]);
         let asks = Asks::default();
-        let tracked = asks.clone();
+        let mut intake = Intake {
+            root: session_id.clone(),
+            family: std::collections::HashSet::from([session_id.clone()]),
+            asks: asks.clone(),
+            tx: events.clone(),
+        };
+        let tx = events.clone();
+        let since = now_ms();
+        let get = {
+            let client = server.client.clone();
+            let base_url = server.base_url.clone();
+            let directory = cwd.to_string();
+            move |path: &str| {
+                client
+                    .get(format!("{base_url}{path}"))
+                    .query(&[("directory", &directory)])
+                    .timeout(RESYNC_WAIT)
+            }
+        };
         let cost_so_far = Arc::new(std::sync::Mutex::new(None));
         let published_cost = cost_so_far.clone();
         let sent = SharedTurn::default();
@@ -976,27 +1153,22 @@ impl OpenCodeDriver {
                 };
                 let translated = match next {
                     None => xlate.expire(),
-                    Some(Ok(ev)) => {
-                        if !admits(&mut family, &sid, &ev) {
-                            continue;
+                    Some(Ok(ev)) if ev.kind != "server.connected" => {
+                        if intake.stale(&get, &xlate, &ev).await {
+                            Vec::new()
+                        } else {
+                            intake.take(&mut xlate, &ev)
                         }
-                        if let Some(closed) = track_ask(&tracked, &ev) {
-                            let _ = tx.send(closed);
-                        }
-                        if ev.kind == "session.idle" {
-                            for closed in decline_all(&tracked) {
-                                let _ = tx.send(closed);
-                            }
-                        }
-                        let translated = xlate.handle(&ev);
-                        if let Ok(mut so_far) = published_cost.lock() {
-                            *so_far = Some(xlate.cost_total);
-                        }
-                        translated
                     }
-                    Some(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                    // OpenCode starts every event stream with it, so one here follows a gap.
+                    Some(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {
+                        intake.resync(&get, since, &mut xlate).await
+                    }
                     Some(Err(broadcast::error::RecvError::Closed)) => break,
                 };
+                if let Ok(mut so_far) = published_cost.lock() {
+                    *so_far = Some(xlate.cost_total);
+                }
                 // Handed back ahead of the turn's end, and before a held end can be let out, so
                 // a resend after it reads alone.
                 let unread = std::mem::take(&mut xlate.unread);
@@ -1499,6 +1671,7 @@ struct Translator {
     open_reply: Option<String>,
     held_end: Option<(std::time::Instant, Vec<SessionEvent>)>,
     unread: Vec<(String, SessionEvent)>,
+    settled: std::collections::HashSet<String>,
 }
 
 /// How long an unplaced idle or error waits for the anchor before it ends the turn anyway.
@@ -1709,6 +1882,9 @@ impl Translator {
                     if message_settled(info) && self.open_reply.as_deref() == Some(id) {
                         self.open_reply = None;
                     }
+                    if role == "user" || message_settled(info) {
+                        self.settled.insert(id.to_string());
+                    }
                     if let Some(parent) = info.get("parentID").and_then(Value::as_str) {
                         out = turns(&self.sent).read_up_to(parent);
                     }
@@ -1737,7 +1913,9 @@ impl Translator {
                 if !pid.is_empty() {
                     self.delta_parts.insert(pid.to_string());
                 }
-                if self.part_types.get(pid).map(String::as_str) == Some("reasoning") {
+                if self.part_types.get(pid).map(String::as_str) == Some("reasoning")
+                    || self.text_done.contains(pid)
+                {
                     return Vec::new();
                 }
                 let field = p.get("field").and_then(Value::as_str).unwrap_or("text");
@@ -1824,9 +2002,11 @@ impl Translator {
             .unwrap_or_default()
             .to_string();
         let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
-        if !pid.is_empty() {
-            self.part_types.insert(pid.clone(), ptype.to_string());
-        }
+        let known = !pid.is_empty()
+            && self
+                .part_types
+                .insert(pid.clone(), ptype.to_string())
+                .is_some();
         let mid = part
             .get("messageID")
             .and_then(Value::as_str)
@@ -1919,7 +2099,7 @@ impl Translator {
                     _ => {}
                 }
             }
-            "step-finish" => {
+            "step-finish" if !known => {
                 let cost = part.get("cost").and_then(Value::as_f64);
                 let ctx = part.get("tokens").map(|t| {
                     let f = |k: &str| t.get(k).and_then(Value::as_f64).unwrap_or(0.0);

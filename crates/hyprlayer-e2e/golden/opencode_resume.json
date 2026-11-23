@@ -164,6 +164,21 @@
       "guards": [
         {
           "evidence": {
+            "askShown": true,
+            "askTurnStatus": "completed",
+            "replied": true,
+            "turnStatus": "completed"
+          },
+          "guard": "the lost ask shows and its turn completes, and a turn with no event seen shows its reply and ends",
+          "ok": true
+        }
+      ],
+      "step": "what the event stream lost while it reconnected is read back from OpenCode"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "replied": true,
             "turnStatus": "completed"
           },

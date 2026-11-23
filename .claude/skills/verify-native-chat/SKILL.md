@@ -1,6 +1,6 @@
 ---
 name: verify-native-chat
-description: Model-check the native chat (composer) session protocol with TLA+ for each provider (claude, codex app-server, OpenCode): user messages reaching the harness exactly once, permission asks clearing, turns ending, interrupts, server-restart wakes, and a desktop converging on the session's event log. Use before merging any change to claude/driver.rs (Inbox, send_user_turn, respond_permission, interrupt, write_loop, read_and_wait), claude/protocol.rs's control lines, codex/driver.rs (send_user_turn, steer, interrupt, respond_permission, read_and_wait, route_incoming) or codex/protocol.rs's Translator (active_turn, requested_turn, steering, pending_approvals, turn/completed, item_completed), opencode/runtime.rs (OpenCodeDriver send_user_turn, respond_permission, interrupt, track_ask, the Translator's handle/expire, spawn_sse), runtime/sessions/service.rs (send, send_app_turn_held, respond_permission, interrupt, launch_driver, spawn_relay, list_turns), forwarder.rs (handle_event, author_for, close_turn, attach_after, register_after), delivery.rs, wake.rs, store/sessions.rs's settle_stale_sessions, WorkstreamService::archive, hyprlayer-server's forward_session, or src/features/session's sessionStore.ts (dispatch, applyEvent, handedBackBy, deliverMessage, steerMessage, stopSession, pullNow), transcriptSync.ts (route, mergeEntries) and transcript.ts's ask handling, and whenever a message is reported lost or sent twice, an ask will not clear, a session stays working, or a restart wakes a session it should not.
+description: Model-check the native chat (composer) session protocol with TLA+ for each provider (claude, codex app-server, OpenCode): user messages reaching the harness exactly once, permission asks clearing, turns ending, interrupts, server-restart wakes, and a desktop converging on the session's event log. Use before merging any change to claude/driver.rs (Inbox, send_user_turn, respond_permission, interrupt, write_loop, read_and_wait), claude/protocol.rs's control lines, codex/driver.rs (send_user_turn, steer, interrupt, respond_permission, read_and_wait, route_incoming) or codex/protocol.rs's Translator (active_turn, requested_turn, steering, pending_approvals, turn/completed, item_completed), opencode/runtime.rs (OpenCodeDriver send_user_turn, respond_permission, interrupt, track_ask, Intake's take/stale/resync, the Translator's handle/expire, spawn_sse), runtime/sessions/service.rs (send, send_app_turn_held, respond_permission, interrupt, launch_driver, spawn_relay, list_turns), forwarder.rs (handle_event, author_for, close_turn, attach_after, register_after), delivery.rs, wake.rs, store/sessions.rs's settle_stale_sessions, WorkstreamService::archive, hyprlayer-server's forward_session, or src/features/session's sessionStore.ts (dispatch, applyEvent, handedBackBy, deliverMessage, steerMessage, stopSession, pullNow), transcriptSync.ts (route, mergeEntries) and transcript.ts's ask handling, and whenever a message is reported lost or sent twice, an ask will not clear, a session stays working, or a restart wakes a session it should not.
 ---
 
 # Verify the native chat
@@ -41,8 +41,9 @@ the same) and the same rule names, so each rule is checked per provider.
   prompt behind a running one, aborting, asking, another OpenCode client
   answering, dying, and SSE events the driver never sees; the filter task's
   `track_ask` and Translator turn ending (`sent`, anchor, `answered`,
-  `interrupted`, the unplaced idle and its expiry); and the shared relay,
-  actor (including `next_turn`) and desktop.
+  `interrupted`, the unplaced idle and its expiry), and its read-back of
+  OpenCode's state after a gap in the stream (`Resync`); and the shared
+  relay, actor (including `next_turn`) and desktop.
 - `RestartWake.tla` covers one session cut off mid-turn by server restarts:
   `settle_stale_sessions` queuing its wake, `wake::check` and `wake_one`, the
   wake turn's echo on its way to the log, and archiving the workstream.
@@ -86,8 +87,8 @@ Results at the sync commit, per provider (`expected.txt`):
 | `NoLostAgentMessage` | PASS | PASS | FAIL |
 | `NoDoubleSend` | PASS | PASS | PASS |
 | `TurnProgress` | PASS | PASS | FAIL |
-| `AskResolution` | PASS | PASS | FAIL |
-| `AskVisible` | PASS | PASS | FAIL |
+| `AskResolution` | PASS | PASS | PASS |
+| `AskVisible` | PASS | PASS | PASS |
 | `SenderTold` | PASS | PASS | not modeled |
 | `AskClosesOnAnswer` | PASS | not modeled | not modeled |
 | `ResolvedOnce` | PASS | not modeled | not modeled |
@@ -126,7 +127,7 @@ when you can (nexus is shared):
 sh .claude/skills/verify-native-chat/check.sh'`; that shell has no mise shims on
 `PATH`, so name the java binary under `~/.local/share/mise/installs/java/`.
 Distinct states in each model's passing run: `SessionTurns` 10.0 M,
-`CodexTurns` 0.72 M, `OpenCodeTurns` 2.9 M (`-stop` 2.2 k, `-death` 298),
+`CodexTurns` 0.72 M, `OpenCodeTurns` 8.0 M (`-stop` 2.3 k, `-death` 372),
 `SessionSync` 58 k, `RestartWake` 251. `OUT=dir` keeps the logs:
 `$OUT/<Model>.<Rule>/tlc.out` for each FAIL, `$OUT/<Model>.pass/tlc.out` for the
 run every PASS shares. `check.sh CodexTurns` checks one model and skips the
@@ -348,7 +349,7 @@ scratch delay (the PR that fixed them has the evidence).
     child exit and every driver on the server sends `Exited` (crashed), about
     0.1 s after a SIGKILL in the E2E (`ServerExited`). `OpenCodeTurns-death`
     passes both rules and fails both again without `ServerExited`; the main
-    config still fails both on findings 13 and 14's paths.
+    config still fails `TurnProgress` on finding 13's path.
 13. **OpenCode `InterruptSafe`, `TurnProgress`, `InterruptHonored` (model only): a late abort.**
     `prompt_async`, the abort and each permission reply are separate HTTP
     requests from separate tasks, so OpenCode can handle them in any order. An
@@ -365,15 +366,39 @@ scratch delay (the PR that fixed them has the evidence).
     new prompt to its end. Not fixed: ordering the driver's POSTs would queue a
     stop behind a slash command's `/command`, which answers only when its turn
     ends.
-14. **OpenCode `AskVisible`, `TurnProgress` (model only): a lost SSE event.** An
-    SSE event the driver never sees (a reconnect gap in `spawn_sse`, or the
-    filter task's receiver lagging, which it skips with `continue`) leaves an
-    ask OpenCode waits on that the desktop never shows (8 steps), or, when the
-    lost event is the idle, a turn that never ends (10 steps). Not reproduced
-    live: it needs the stream to drop with the server alive or 1024 events of
-    lag. Not fixed: the fix is a resync of pending asks (`GET /permission`,
-    `GET /question`) and of the session's status on every `server.connected`
-    and every lag, more than a hardening of a path no one has seen.
+14. **Fixed (not reproduced live): OpenCode `AskVisible`, `TurnProgress`, `AskResolution`: a lost SSE event.**
+    An SSE event the driver never saw (a reconnect gap in `spawn_sse`, or the
+    filter task's receiver lagging, which it skipped with `continue`) left an
+    ask OpenCode waits on that the desktop never showed (9 steps), or, when
+    the lost event was the reply's end or the idle, a turn that never ended
+    (10 steps). Not reproduced against a live `opencode serve`: it needs the
+    stream to drop with the server alive, or 1024 events of lag. Now OpenCode's
+    `server.connected` (the first record of every stream) and a `Lagged`
+    receiver start `Intake::resync`: `GET /permission`, `/question`,
+    `/session/status` and the session's 50 newest messages, each with the
+    session's `?directory=` (shapes probed against 1.18.18: a listed ask is
+    the `*.asked` event's properties, a busy session is `{"type":"busy"}`
+    and an idle one is absent), handled as the lost events would have been:
+    the messages created since the driver started that it has not seen
+    settled, a reply closing each ask it holds that OpenCode no longer
+    lists, every listed ask of the session or a subagent session it
+    adopted, and an idle when OpenCode lists the session as not busy.
+    Nothing goes out twice: an ask the driver holds is not passed on again,
+    parts, tools and deltas of a part already shown in full are skipped, and
+    a step's cost is counted once. The reads come after the stream is back,
+    so events OpenCode sent between the reconnect and the reads arrive after
+    the read-back; an ask among them that OpenCode no longer lists and that
+    arrives with no turn open is skipped (`Intake::stale`, one more `GET`).
+    e2e: `opencode_resume`, step "what the event stream lost while it
+    reconnected is read back from OpenCode" (the stub cuts the stream in
+    place of a `permission.asked`, and of a turn's first event). In a copy
+    with no stop and POSTs in order (one composer and one agent message,
+    one lost event, one death) every rule passes; with `Resync` reading
+    nothing (the driver before the fix) `AskVisible` fails in 9 steps and
+    `TurnProgress` in 10. `AskResolution` also passes on the main config
+    now: its shortest path needed a lost reply event as well as the late
+    abort. Not covered: a lost `session.created` leaves that subagent
+    session unadopted, so its asks stay unseen.
 15. **Fixed (found by the model, not reproduced live): OpenCode `AskResolution`,
     `InterruptSafe`: an ask raised as the stop lands stays open.** `interrupt`
     declines the asks the driver holds, but OpenCode can raise one while the
@@ -574,8 +599,9 @@ turn, what closes an ask, or what reports the server's death.
 | `ServerExited` | `OpenCodeServer::watch_exit` (polls the child every 250 ms; `end_sessions` publishes one `Exited`, crashed), then each driver's filter task forwards it after the SSE events it already has |
 | `RelayExited` | `spawn_relay` on `Exited`: drops the driver; the desktop's `exited` reducer ends working and expires the cards; the composer's own unechoed message goes back to its queue (`chip`), and the held agent messages are reported (`held::report_undelivered`, counted as `failed`) |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
-| `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
-| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), `decline_all` on the session's idle, then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291, and an assistant's `parentID` releases the waiting echoes at or before it, `read_up_to`; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it; `Translator::end` moves a stopped turn's waiting messages to `unread`, and the filter task sends the turn's events only after `forget_unread` |
+| `SseDrop` | `spawn_sse` (reconnects after a gap; OpenCode starts the new stream with `server.connected`), or the filter task's receiver lagging (`RecvError::Lagged`) |
+| `Resync` | the filter task on `server.connected` or `Lagged`: `Intake::resync` → `missed` (`GET /permission`, `/question`, `/session/status`, `/session/:id/message?limit=50`, each with `?directory=`; the messages created since the driver started and not seen settled, as `message.updated` and `message.part.updated`; `permission.replied` for each held ask not listed; `*.asked` for each listed ask of the family; `session.idle` if the session is not busy), each through `Intake::take`. The model reads OpenCode's state in one step after the reconnect |
+| `DriverRead`, `Expire` | the filter task: `Intake::take`: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), an ask already in the asks map is not passed on again, `Intake::stale` skips an ask read with no turn open that OpenCode no longer lists, `track_ask` (closes an ask a reply took), `decline_all` on the session's idle, then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291, and an assistant's `parentID` releases the waiting echoes at or before it, `read_up_to`; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it; `Translator::end` moves a stopped turn's waiting messages to `unread`, and the filter task sends the turn's events only after `forget_unread` |
 | `Settle` | the held end released by `expire` (`SETTLE_WAIT`, 3 s) or by a newer turn's next event (`Translator::handle`) |
 | `DropUnread` | `forget_unread`, awaited by the filter task: `delete_message` for each (409 retried for about 2 s), a `cancelled` lifecycle for each deleted, then the turn's events; one not deleted goes back to `Turns.waiting`. The model deletes when OpenCode is alive and idle, as one step |
 | `RelayResend` | as `SessionTurns` (OpenCode's `send_user_turn` never fails) |
@@ -677,8 +703,11 @@ attachment together).
   1.18.18), so `Settle` runs out only on a reply that will not settle;
   another OpenCode client can answer an ask (`permission.replied`); a
   subagent's ask carries its child session's id, which `session.created`
-  names with its parent's (seen against 1.18.18). Only the server death is
-  confirmed live.
+  names with its parent's (seen against 1.18.18). OpenCode creates a
+  prompt's user message, and a dropped stream reconnects, well inside
+  `UNPLACED_WAIT`, so `Expire` runs out only on a user message that will
+  never be read (none in the pipe, in `out` or behind a pending
+  `server.connected`). Only the server death is confirmed live.
 - Left out of `CodexTurns`: codex errors (`error` posts text, the failed
   `turn/completed` after it ends the turn as `CodexFinish` does),
   `requestUserInput` questions, child threads, MCP elicitations (declined)
@@ -689,7 +718,11 @@ attachment together).
   the session's `?directory=`, which every driver request carries),
   `command_async` (slash commands), the 5 s `UNPLACED_WAIT` as time (`Expire`
   may fire any time after), compaction, a subagent's text and tools (its asks
-  are `OcAsk`s, which `admits` passes), the kill path (`end`), a deliberate
+  are `OcAsk`s, which `admits` passes), the resync's reads as separate
+  requests (the model reads OpenCode's state in one step; a status read in
+  the 40 to 80 ms between a prompt's user message and its run, measured on
+  a cold 1.18.18 instance, reads idle), a turn longer than the 50 messages
+  the resync reads, a lost `session.created`, the kill path (`end`), a deliberate
   kill of a live server (`kill_blocking` on app quit or when `ensure` replaces
   it, which sends `Exited` detached), and a server that comes back.
 - Left out of `RestartWake`: orphan wakes (`queue_orphan_wakes`, mid-turn off,
@@ -821,12 +854,15 @@ wrong: fix the action, re-run, and say what you changed.
    - `OpenCodeTurns-stop.TurnProgress`: `EndTurn` sends the `TurnDone` at
      once while the reply is open (the translator before `end_turn`): the
      stopped reply's last part lands after it and the desktop shows working
-     (16 steps).
+     (16 steps at #547; 15 with the read-back).
    - `CodexTurns.NoLostAgentMessage`: `Relay` never fills `resendDue`
      (`send_dropped` gone), a 14-step path where codex ends the turn
      without committing the agent's steer.
-   - The OpenCode FAILs fail today; once one passes, add a break for it
-     here.
+   - `OpenCodeTurns.AskVisible`, `TurnProgress`, in a copy with no stop and
+     POSTs in order: `Resync` reads nothing (the driver before the resync):
+     a lost ask, 9 steps; a lost reply end, 10 steps.
+   - The other OpenCode FAILs fail today; once one passes, add a break for
+     it here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
    change was meant to move, and say so in the PR.
 4. Move the sync commit (the hash in the `git diff` command above and below)

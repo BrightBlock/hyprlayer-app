@@ -12,7 +12,10 @@
 //! names the session only inside each message and part, as 1.0.224 does. `"child": true` asks
 //! from a subagent's session, which 1.18.18 announces with `session.created` naming its parent.
 //! `"lateAsk": true` asks for permission as an abort lands, and the abort cancels the ask with no
-//! reply event.
+//! reply event. `"cut": "<event type>"` closes every event stream in place of the turn's first
+//! event of that type; the events sent before the driver reconnects are lost, as in a gap, and
+//! each new stream starts with `server.connected`. `GET /permission`, `/question`,
+//! `/session/status` and `/session/:id/message` answer from the stub's state, as 1.18.18 does.
 //!
 //! As in 1.18.18, a question's reply and reject resolve under `?directory=` (the server's own
 //! cwd when absent) and answer 404 unless that is the asking session's directory.
@@ -40,12 +43,15 @@ struct Request {
 struct Running {
     user: String,
     assistant: String,
+    created: u64,
     aborted: AtomicBool,
 }
 
 struct Ask {
     directory: Option<String>,
     answer: Sender<bool>,
+    question: bool,
+    request: Value,
 }
 
 struct Stub {
@@ -54,6 +60,8 @@ struct Stub {
     running: Mutex<HashMap<String, Arc<Running>>>,
     asks: Mutex<HashMap<String, Ask>>,
     last_id: Mutex<u64>,
+    messages: Mutex<HashMap<String, Vec<Value>>>,
+    cut: Mutex<Option<String>>,
 }
 
 fn main() {
@@ -77,6 +85,8 @@ fn main() {
         running: Mutex::new(HashMap::new()),
         asks: Mutex::new(HashMap::new()),
         last_id: Mutex::new(0),
+        messages: Mutex::new(HashMap::new()),
+        cut: Mutex::new(None),
     });
     for stream in listener.incoming().flatten() {
         let stub = stub.clone();
@@ -98,9 +108,39 @@ impl Stub {
             ),
             ("GET", ["global", "event"]) => {
                 let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-                if stream.write_all(head.as_bytes()).is_ok() {
+                let connected = "data: {\"type\":\"server.connected\",\"properties\":{}}\n\n";
+                if stream.write_all(head.as_bytes()).is_ok()
+                    && stream.write_all(connected.as_bytes()).is_ok()
+                {
                     self.subscribers.lock().unwrap().push(stream);
                 }
+            }
+            ("GET", ["permission" | "question"]) => {
+                let question = segments[0] == "question";
+                let asks = self.asks.lock().unwrap();
+                let pending: Vec<&Value> = asks
+                    .values()
+                    .filter(|ask| ask.question == question)
+                    .map(|ask| &ask.request)
+                    .collect();
+                respond(stream, 200, &json!(pending))
+            }
+            ("GET", ["session", "status"]) => {
+                let busy: serde_json::Map<String, Value> = self
+                    .running
+                    .lock()
+                    .unwrap()
+                    .keys()
+                    .map(|id| (id.clone(), json!({ "type": "busy" })))
+                    .collect();
+                respond(stream, 200, &Value::Object(busy))
+            }
+            ("GET", ["session", id, "message"]) => {
+                let all = self.messages.lock().unwrap().get(*id).cloned();
+                let all = all.unwrap_or_default();
+                let limit = param(&request.query, "limit").and_then(|n| n.parse().ok());
+                let skip = all.len().saturating_sub(limit.unwrap_or(all.len()));
+                respond(stream, 200, &json!(all[skip..]))
             }
             ("GET", ["config", "providers"]) => {
                 let models: serde_json::Map<String, Value> = MODELS
@@ -178,11 +218,13 @@ impl Stub {
         while self.subscribers.lock().unwrap().is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
+        self.cut.lock().unwrap().clone_from(&delays.cut);
         sleep(delays.start);
         let created = (!delays.bare).then(|| nanos() / 1_000_000);
         let running = Arc::new(Running {
             assistant: self.new_id(delays.bare),
             user,
+            created: (nanos() / 1_000_000) as u64,
             aborted: AtomicBool::new(false),
         });
         let (user, assistant) = (&running.user, &running.assistant);
@@ -202,7 +244,7 @@ impl Stub {
         }
         self.emit(
             "message.updated",
-            assistant_info(id, assistant, user, json!({})),
+            assistant_info(id, assistant, user, settled(&running, None)),
         );
         let mut allowed = Some(true);
         if delays.question {
@@ -216,7 +258,7 @@ impl Stub {
         if !allowed {
             // 1.18.32 ends a denied turn on its tool-calls step, with no error.
             self.running.lock().unwrap().remove(id);
-            let step = json!({ "finish": "tool-calls", "time": { "created": 1, "completed": 2 } });
+            let step = settled(&running, Some(json!({ "finish": "tool-calls" })));
             self.emit("message.updated", assistant_info(id, assistant, user, step));
             self.emit("session.idle", json!({ "sessionID": id }));
             return;
@@ -233,7 +275,7 @@ impl Stub {
                 "type": "text", "text": reply, "time": { "start": 1, "end": 2 },
             } }),
         );
-        let finished = json!({ "finish": "stop", "time": { "created": 1, "completed": 2 } });
+        let finished = settled(&running, Some(json!({ "finish": "stop" })));
         self.emit(
             "message.updated",
             assistant_info(id, assistant, user, finished),
@@ -265,24 +307,29 @@ impl Stub {
         let (answer, answered) = channel();
         let directory = question
             .then(|| std::fs::read_to_string(self.directory_file(session)).unwrap_or_default());
-        self.asks
-            .lock()
-            .unwrap()
-            .insert(ask.clone(), Ask { directory, answer });
-        if question {
+        let request = if question {
             let questions = json!([{ "question": "Proceed?", "header": "Stub",
                 "options": [{ "label": "Yes", "description": "" }] }]);
-            self.emit(
-                "question.asked",
-                json!({ "id": ask, "sessionID": asker, "questions": questions }),
-            );
+            json!({ "id": ask, "sessionID": asker, "questions": questions })
         } else {
-            self.emit(
-                "permission.asked",
-                json!({ "id": ask, "sessionID": asker, "permission": "bash",
-                        "patterns": ["echo stub"], "metadata": {} }),
-            );
-        }
+            json!({ "id": ask, "sessionID": asker, "permission": "bash",
+                    "patterns": ["echo stub"], "metadata": {}, "always": [] })
+        };
+        self.asks.lock().unwrap().insert(
+            ask.clone(),
+            Ask {
+                directory,
+                answer,
+                question,
+                request: request.clone(),
+            },
+        );
+        let kind = if question {
+            "question.asked"
+        } else {
+            "permission.asked"
+        };
+        self.emit(kind, request);
         if delays.aside {
             self.emit(
                 "message.part.updated",
@@ -341,7 +388,7 @@ impl Stub {
         self.emit("session.error", json!({ "sessionID": id, "error": error }));
         self.emit("session.idle", json!({ "sessionID": id }));
         sleep(delays.late);
-        let aborted = json!({ "error": error, "time": { "created": 1, "completed": 2 } });
+        let aborted = settled(&running, Some(json!({ "error": error })));
         self.emit(
             "message.updated",
             assistant_info(id, &running.assistant, &running.user, aborted),
@@ -350,6 +397,7 @@ impl Stub {
     }
 
     fn emit(&self, kind: &str, mut properties: Value) {
+        self.record(kind, &properties);
         let message = matches!(kind, "message.updated" | "message.part.updated");
         if let Some(p) = properties
             .as_object_mut()
@@ -361,10 +409,54 @@ impl Stub {
             "data: {}\n\n",
             json!({ "type": kind, "properties": properties })
         );
-        self.subscribers
-            .lock()
-            .unwrap()
-            .retain_mut(|s| s.write_all(record.as_bytes()).is_ok());
+        let mut subscribers = self.subscribers.lock().unwrap();
+        let mut cut = self.cut.lock().unwrap();
+        if cut.as_deref() == Some(kind) {
+            *cut = None;
+            for stream in subscribers.drain(..) {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+            return;
+        }
+        subscribers.retain_mut(|s| s.write_all(record.as_bytes()).is_ok());
+    }
+
+    fn record(&self, kind: &str, properties: &Value) {
+        let (info, part) = match kind {
+            "message.updated" => (properties.get("info"), None),
+            "message.part.updated" => (None, properties.get("part")),
+            _ => return,
+        };
+        let field = |v: Option<&Value>, key: &str| {
+            v.and_then(|v| v.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let Some(session) = field(info.or(part), "sessionID") else {
+            return;
+        };
+        let Some(message) = field(info, "id").or_else(|| field(part, "messageID")) else {
+            return;
+        };
+        let mut all = self.messages.lock().unwrap();
+        let messages = all.entry(session).or_default();
+        let at = match messages.iter().position(|m| m["info"]["id"] == message) {
+            Some(at) => at,
+            None => {
+                messages.push(json!({ "info": { "id": message }, "parts": [] }));
+                messages.len() - 1
+            }
+        };
+        let entry = &mut messages[at];
+        if let Some(info) = info {
+            entry["info"] = info.clone();
+        }
+        if let (Some(part), Some(parts)) = (part, entry["parts"].as_array_mut()) {
+            match parts.iter_mut().find(|p| p["id"] == part["id"]) {
+                Some(known) => *known = part.clone(),
+                None => parts.push(part.clone()),
+            }
+        }
     }
 
     /// 1.18.32's ascending id: the low 48 bits of `ms * 0x1000 + counter`, counter from 1.
@@ -409,6 +501,7 @@ impl Stub {
             nested: control["nested"].as_bool().unwrap_or(false),
             fail: control["fail"].as_str().map(str::to_string),
             late_ask: control["lateAsk"].as_bool().unwrap_or(false),
+            cut: control["cut"].as_str().map(str::to_string),
         }
     }
 
@@ -445,6 +538,7 @@ struct Delays {
     nested: bool,
     fail: Option<String>,
     late_ask: bool,
+    cut: Option<String>,
 }
 
 fn user_info(session: &str, id: &str, created: Option<u128>) -> Value {
@@ -453,6 +547,16 @@ fn user_info(session: &str, id: &str, created: Option<u128>) -> Value {
         info["time"] = json!({ "created": created as u64 });
     }
     json!({ "sessionID": session, "info": info })
+}
+
+fn settled(running: &Running, end: Option<Value>) -> Value {
+    let mut time = json!({ "created": running.created });
+    let Some(mut end) = end else {
+        return json!({ "time": time });
+    };
+    time["completed"] = json!((nanos() / 1_000_000) as u64);
+    end["time"] = time;
+    end
 }
 
 fn assistant_info(session: &str, id: &str, parent: &str, extra: Value) -> Value {
