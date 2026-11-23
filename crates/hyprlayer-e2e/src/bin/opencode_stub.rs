@@ -10,6 +10,9 @@
 //! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
 //! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
 //! names the session only inside each message and part, as 1.0.224 does.
+//!
+//! As in 1.18.18, a question's reply and reject resolve under `?directory=` (the server's own
+//! cwd when absent) and answer 404 unless that is the asking session's directory.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -27,6 +30,7 @@ const MODELS: [&str; 2] = ["stub-free", "stub-other-free"];
 struct Request {
     method: String,
     path: String,
+    query: String,
     body: Value,
 }
 
@@ -36,11 +40,16 @@ struct Running {
     aborted: AtomicBool,
 }
 
+struct Ask {
+    directory: Option<String>,
+    answer: Sender<bool>,
+}
+
 struct Stub {
     root: PathBuf,
     subscribers: Mutex<Vec<TcpStream>>,
     running: Mutex<HashMap<String, Arc<Running>>>,
-    asks: Mutex<HashMap<String, Sender<bool>>>,
+    asks: Mutex<HashMap<String, Ask>>,
     last_id: Mutex<u64>,
 }
 
@@ -106,6 +115,8 @@ impl Stub {
             ("POST", ["session"]) => {
                 let id = format!("ses_stub{}", nanos());
                 self.save(&id, &[]);
+                let directory = param(&request.query, "directory").unwrap_or_default();
+                std::fs::write(self.directory_file(&id), directory).expect("save a directory");
                 respond(stream, 200, &json!({ "id": id }))
             }
             ("GET", ["session", id]) => match self.load(id) {
@@ -142,7 +153,15 @@ impl Stub {
                 let allowed = request.body["response"] != "reject";
                 self.answer(stream, ask, allowed);
             }
-            ("POST", ["question", ask, verb]) => self.answer(stream, ask, *verb == "reply"),
+            ("POST", ["question", ask, verb]) => {
+                let directory = param(&request.query, "directory");
+                if !self.asked_in(ask, directory) {
+                    let message = format!("Question request not found: {ask}");
+                    let body = json!({ "_tag": "QuestionNotFoundError", "requestID": ask, "message": message });
+                    return respond(stream, 404, &body);
+                }
+                self.answer(stream, ask, *verb == "reply")
+            }
             ("POST", ["session", id, "abort"]) => {
                 respond(stream, 200, &json!(true));
                 self.abort(id);
@@ -225,7 +244,12 @@ impl Stub {
     fn asked(&self, session: &str, assistant: &str, question: bool, aside: bool) -> Option<bool> {
         let ask = format!("{}_{}", if question { "que" } else { "per" }, nanos());
         let (answer, answered) = channel();
-        self.asks.lock().unwrap().insert(ask.clone(), answer);
+        let directory = question
+            .then(|| std::fs::read_to_string(self.directory_file(session)).unwrap_or_default());
+        self.asks
+            .lock()
+            .unwrap()
+            .insert(ask.clone(), Ask { directory, answer });
         if question {
             let questions = json!([{ "question": "Proceed?", "header": "Stub",
                 "options": [{ "label": "Yes", "description": "" }] }]);
@@ -267,8 +291,14 @@ impl Stub {
         let waiting = self.asks.lock().unwrap().remove(ask);
         respond(stream, 200, &json!(true));
         if let Some(waiting) = waiting {
-            let _ = waiting.send(allowed);
+            let _ = waiting.answer.send(allowed);
         }
+    }
+
+    fn asked_in(&self, ask: &str, directory: Option<&str>) -> bool {
+        let asks = self.asks.lock().unwrap();
+        asks.get(ask)
+            .is_some_and(|waiting| waiting.directory.as_deref() == directory)
     }
 
     /// As 1.18.32: an idle session reports `session.idle`; a busy one an aborted error and an
@@ -358,6 +388,11 @@ impl Stub {
         self.root.join("sessions").join(format!("{id}.json"))
     }
 
+    /// The session's `?directory=` as its create sent it, still encoded.
+    fn directory_file(&self, id: &str) -> PathBuf {
+        self.root.join("sessions").join(format!("{id}.directory"))
+    }
+
     fn load(&self, id: &str) -> Option<Vec<String>> {
         serde_json::from_slice(&std::fs::read(self.file(id)).ok()?).ok()
     }
@@ -413,7 +448,8 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
     let mut words = line.split_whitespace();
     let method = words.next()?.to_string();
     let target = words.next()?;
-    let path = target.split('?').next().unwrap_or_default().to_string();
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let (path, query) = (path.to_string(), query.to_string());
     let mut length = 0;
     loop {
         let mut header = String::new();
@@ -433,8 +469,15 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
     Some(Request {
         method,
         path,
+        query,
         body: serde_json::from_slice(&body).unwrap_or(Value::Null),
     })
+}
+
+fn param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix(key)?.strip_prefix('='))
 }
 
 fn respond(mut stream: TcpStream, status: u16, body: &Value) {

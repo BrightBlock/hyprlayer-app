@@ -854,6 +854,15 @@ impl OpenCodeDriver {
         Ok((driver, primary_rx))
     }
 
+    /// OpenCode resolves a request that names no directory in its own cwd, where a worktree
+    /// session's questions are not found.
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.server
+            .client
+            .request(method, format!("{}{path}", self.server.base_url))
+            .query(&[("directory", &self.cwd)])
+    }
+
     fn end(&self, outcome: ExitOutcome) {
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));
         if let Ok(mut guard) = self.filter_task.try_lock() {
@@ -869,28 +878,44 @@ impl OpenCodeDriver {
     }
 
     fn post_async(&self, path: String, body: Value) {
-        let client = self.server.client.clone();
-        let url = format!("{}{}", self.server.base_url, path);
+        let request = self.request(reqwest::Method::POST, &path).json(&body);
         self.server.tasks.spawn(async move {
-            match client.post(&url).json(&body).send().await {
+            match request.send().await {
                 Ok(resp) if !resp.status().is_success() => {
-                    tracing::warn!("opencode POST {url} returned {}", resp.status());
+                    tracing::warn!("opencode POST {path} returned {}", resp.status());
                 }
                 Ok(_) => {}
-                Err(e) => tracing::warn!("opencode POST {url} failed: {e}"),
+                Err(e) => tracing::warn!("opencode POST {path} failed: {e}"),
             }
         });
     }
 
     fn prompt_async(&self, body: Value) {
-        self.request_async(
-            format!(
-                "{}/session/{}/prompt_async",
-                self.server.base_url, self.session_id
-            ),
-            body,
-            None,
-        );
+        let path = format!("/session/{}/prompt_async", self.session_id);
+        let request = self.request(reqwest::Method::POST, &path).json(&body);
+        let events = self.events.clone();
+        self.server.tasks.spawn(async move {
+            let result = request
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status);
+            if let Err(e) = result {
+                tracing::warn!("opencode request failed: {e}");
+                let _ = events.send(SessionEvent::AssistantText {
+                    text: format!("⚠ OpenCode request failed: {e}"),
+                    parent_id: None,
+                    injected: false,
+                    auth_required: false,
+                });
+                let _ = events.send(SessionEvent::TurnDone {
+                    cost_usd: None,
+                    num_turns: None,
+                    context_tokens: None,
+                    turn_status: Some("failed".into()),
+                    thread_tokens: None,
+                });
+            }
+        });
     }
 
     fn command_async(&self, command: &str, arguments: &str, original_text: &str) {
@@ -911,22 +936,18 @@ impl OpenCodeDriver {
             fallback["model"] = json!({ "providerID": provider, "modelID": model });
         }
 
-        let client = self.server.client.clone();
         let events = self.events.clone();
-        let command_url = format!(
-            "{}/session/{}/command",
-            self.server.base_url, self.session_id
+        let command = self.request(
+            reqwest::Method::POST,
+            &format!("/session/{}/command", self.session_id),
         );
-        let prompt_url = format!(
-            "{}/session/{}/prompt_async",
-            self.server.base_url, self.session_id
+        let prompt = self.request(
+            reqwest::Method::POST,
+            &format!("/session/{}/prompt_async", self.session_id),
         );
-        let directory = self.cwd.clone();
         let turn = self.sent.clone();
         self.server.tasks.spawn(async move {
-            let sent = client
-                .post(command_url)
-                .query(&[("directory", directory)])
+            let sent = command
                 .json(&body)
                 .send()
                 .await
@@ -936,44 +957,12 @@ impl OpenCodeDriver {
                 "opencode command failed; delivering the turn as a plain prompt: {command_error}"
             );
             fallback["messageID"] = json!(begin_turn(&turn));
-            let delivered = client
-                .post(prompt_url)
+            let delivered = prompt
                 .json(&fallback)
                 .send()
                 .await
                 .and_then(reqwest::Response::error_for_status);
             if let Err(e) = delivered {
-                tracing::warn!("opencode request failed: {e}");
-                let _ = events.send(SessionEvent::AssistantText {
-                    text: format!("⚠ OpenCode request failed: {e}"),
-                    parent_id: None,
-                    injected: false,
-                    auth_required: false,
-                });
-                let _ = events.send(SessionEvent::TurnDone {
-                    cost_usd: None,
-                    num_turns: None,
-                    context_tokens: None,
-                    turn_status: Some("failed".into()),
-                    thread_tokens: None,
-                });
-            }
-        });
-    }
-
-    fn request_async(&self, url: String, body: Value, directory: Option<String>) {
-        let client = self.server.client.clone();
-        let events = self.events.clone();
-        self.server.tasks.spawn(async move {
-            let mut request = client.post(url).json(&body);
-            if let Some(directory) = directory {
-                request = request.query(&[("directory", directory)]);
-            }
-            let result = request
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            if let Err(e) = result {
                 tracing::warn!("opencode request failed: {e}");
                 let _ = events.send(SessionEvent::AssistantText {
                     text: format!("⚠ OpenCode request failed: {e}"),
@@ -1011,11 +1000,9 @@ impl OpenCodeDriver {
     }
 
     pub async fn delete_session(&self) {
-        let url = format!("{}/session/{}", self.server.base_url, self.session_id);
+        let path = format!("/session/{}", self.session_id);
         if let Err(e) = self
-            .server
-            .client
-            .delete(url)
+            .request(reqwest::Method::DELETE, &path)
             .send()
             .await
             .and_then(reqwest::Response::error_for_status)

@@ -346,7 +346,11 @@ now posts only its text and `turn/completed` ends the turn once (a
 (`mcpServer/elicitation/request` with `_meta.codex_approval_kind`
 `mcp_tool_call`) in `auto_decline`, so no card showed and the tool failed; it
 is now a `PermissionAsk` named `mcp__<server>__<tool>`, answered `accept` or
-`decline` (a `codex::driver` test). Other elicitations are still declined.
+`decline` (a `codex::driver` test). Other elicitations are still declined. An
+OpenCode question's reply named no `?directory=`, so OpenCode looked it up in
+its own cwd (the home directory), answered 404, and the turn waited on the
+question forever; every driver request now names the session's directory
+(`OpenCodeDriver::request`).
 
 When one of these is fixed in the code, change the model to match, run
 `check.sh`, and change that rule's line in `expected.txt` to `PASS`.
@@ -519,9 +523,11 @@ attachment together).
   and MCP tool approvals (asked like any approval, but outside the model),
   rewind, collaboration mode, a refused steer while live
   (the end-of-turn decline stands for both).
-- Left out of `OpenCodeTurns`: questions, `command_async` (slash commands),
-  the 5 s `UNPLACED_WAIT` as time (`Expire` may fire any time after), compaction,
-  child sessions, the kill path (`end`), and a server that comes back.
+- Left out of `OpenCodeTurns`: questions (a reply reaches OpenCode only with
+  the session's `?directory=`, which every driver request carries),
+  `command_async` (slash commands), the 5 s `UNPLACED_WAIT` as time (`Expire`
+  may fire any time after), compaction, child sessions, the kill path (`end`),
+  and a server that comes back.
 - Left out of `RestartWake`: orphan wakes (`queue_orphan_wakes`, mid-turn off,
   with open background tasks), the overlay wait and concurrency (a free delay
   between check and wake stands in for them), goals (the goal resumer's
