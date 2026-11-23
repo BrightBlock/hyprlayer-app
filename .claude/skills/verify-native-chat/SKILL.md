@@ -130,7 +130,9 @@ when you can (nexus is shared):
 `/home/jt/.cache/mac-run.sh <worktree> <run-name> 'JAVA=<mise java> WORKERS=12
 sh .claude/skills/verify-native-chat/check.sh'`; that shell has no mise shims on
 `PATH`, so name the java binary under `~/.local/share/mise/installs/java/`.
-Distinct states in each model's passing run: `SessionTurns` 10.0 M,
+Distinct states in each model's passing run: `SessionTurns` 76.5 M (10.0 M
+before `gone`, the withdrawn asks awaiting their result; 8 min on nexus with
+`WORKERS=4`),
 `CodexTurns` 0.72 M, `OpenCodeTurns` 1.3 M (`-stop` 2.2 k, `-death` 372),
 `SessionSync` 58 k, `RestartWake` 251. `OUT=dir` keeps the logs:
 `$OUT/<Model>.<Rule>/tlc.out` for each FAIL, `$OUT/<Model>.pass/tlc.out` for the
@@ -505,8 +507,13 @@ scratch delay (the PR that fixed them has the evidence).
     log held no resolution. The cancel now emits the same event
     `respond_permission` or `answer_question` would, once: an id already
     answered here is no longer pending, and a later click finds none. A
-    permission answered elsewhere records `allow: true`, which removes the
-    card; the tool's result shows what ran or the denial. The actor also
+    permission answered elsewhere is recorded as withdrawn (`withdrawn: true`,
+    whose `allow` claims nothing), which removes the card. When the tool's
+    result shows it ran (no error) or was refused (claude 2.1.330's rejection
+    or "Permission to use … has been denied" text), a second
+    `PermissionResolved` after the result records that outcome; an interrupt
+    writes the rejection text, so it logs as denied. #561 first logged every
+    withdrawal as `allow: true`, which `long_session_open` caught. The actor also
     sets the row back to running once the last open ask is resolved
     (`settles_last_ask`), and `wait_agent`'s `asks_after` and the goal gate end
     their wait on a resolution as on a tool result; before, both paths read
@@ -616,7 +623,7 @@ turn, what closes an ask, or what reports the server's death.
 | `ClientAnswer` | `respond_permission`, service.rs:416 → driver.rs:378 (emits `PermissionResolved` only when `pending_permissions` held the id; `answer_question` the same with `QuestionAnswered`); a card is answered once |
 | `Interrupt` | `SessionService::interrupt`, service.rs:439 → driver.rs:433; `stopSession`, sessionStore.ts:1993 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeToolDone`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below); `ClaudeRemoteAnswer` is an answer on claude.ai or from a PermissionRequest hook: a deny writes the cancel and the error result together, an allow writes the cancel and `ClaudeToolDone` writes the result once the tool has run |
-| `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207, which takes the id out of `pending_permissions` and, when it was there, emits the event the answer path emits (`QuestionAnswered` for an `AskUserQuestion`, else `PermissionResolved` with `allow: true`); a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
+| `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207, which takes the id out of `pending_permissions` and, when it was there, emits the event the answer path emits (`QuestionAnswered` for an `AskUserQuestion`, else `PermissionResolved` with `withdrawn: true`, and the ask's tool use id joins `withdrawn_tools`); a tool result passes through as `ToolResult`, followed by `PermissionResolved` with the outcome when it is a withdrawn ask's and `withdrawn_outcome` reads one (the model's `outcome`, which `ResolvedOnce` does not count; `gone` is `withdrawn_tools`, cleared by `Result` and the end of stdout); at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
 | `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, keeps the ids of `cancelled` lifecycles, sends each event on, after a `TurnDone` sends the held ones among those ids again (`RelayResend`) before reading on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867); `handBack`: after the desktop's Stop (`stopped`, set by `stopSession` and cleared by `sendMessage`) a handed-back chip goes to the composer (`"returned"`) instead of the queue |
 | `RelayResend` | `held::send_dropped` → `send_again`, held.rs: `reserve_user_turn` and `send_user_turn` with the held nonce; an Err reports a sender who can be told and drops its row, and keeps one no one would hear about |
 | `ClientReload` | `SessionService::list_turns`, service.rs:828 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |

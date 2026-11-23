@@ -290,11 +290,11 @@ async fn opencode_resume() {
         "each ask has one closing row, with how it closed",
         closed
             == [
-                json!({ "kind": "permissionResolved", "requestId": "denied", "allow": false }),
-                json!({ "kind": "permissionResolved", "requestId": "subagent", "allow": true }),
+                json!({ "kind": "permissionResolved", "requestId": "denied", "allow": false, "withdrawn": false }),
+                json!({ "kind": "permissionResolved", "requestId": "subagent", "allow": true, "withdrawn": false }),
                 json!({ "kind": "questionAnswered", "requestId": "question" }),
-                json!({ "kind": "permissionResolved", "requestId": "permission", "allow": true }),
-                json!({ "kind": "permissionResolved", "requestId": "cancelled", "allow": false }),
+                json!({ "kind": "permissionResolved", "requestId": "permission", "allow": true, "withdrawn": false }),
+                json!({ "kind": "permissionResolved", "requestId": "cancelled", "allow": false, "withdrawn": false }),
             ],
         json!({ "closed": closed }),
     );

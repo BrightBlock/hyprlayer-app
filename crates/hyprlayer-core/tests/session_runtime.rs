@@ -528,6 +528,7 @@ async fn a_session_needs_no_one_once_every_open_ask_is_resolved() {
     let resolved = |id: &str| SessionEvent::PermissionResolved {
         request_id: id.into(),
         allow: true,
+        withdrawn: false,
     };
     let state = || db.get_session("s1").unwrap().unwrap().state;
 

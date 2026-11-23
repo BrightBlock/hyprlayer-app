@@ -800,7 +800,11 @@ fn decline_all(asks: &Asks) -> Vec<SessionEvent> {
 /// The row that closes an ask; a question's carries no decision.
 fn closing(request_id: String, ask: &Ask, allow: bool) -> SessionEvent {
     match ask {
-        Ask::Permission => SessionEvent::PermissionResolved { request_id, allow },
+        Ask::Permission => SessionEvent::PermissionResolved {
+            request_id,
+            allow,
+            withdrawn: false,
+        },
         Ask::Question(_) => SessionEvent::QuestionAnswered { request_id },
     }
 }

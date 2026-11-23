@@ -104,14 +104,27 @@
             "inTailRead": true,
             "logged": [
               {
+                "allow": false,
+                "kind": "permissionResolved",
+                "requestId": "req-gone",
+                "withdrawn": true
+              },
+              {
                 "allow": true,
                 "kind": "permissionResolved",
-                "requestId": "req-ask"
+                "requestId": "req-gone",
+                "withdrawn": false
+              },
+              {
+                "allow": true,
+                "kind": "permissionResolved",
+                "requestId": "req-ask",
+                "withdrawn": false
               }
             ],
             "openRequestIds": []
           },
-          "guard": "the log closes the ask by its id, and the tail read says nothing still waits",
+          "guard": "the log closes each ask by its id, and the tail read says nothing still waits",
           "ok": true
         },
         {

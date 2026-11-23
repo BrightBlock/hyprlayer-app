@@ -445,11 +445,16 @@ async fn long_session_open() {
         .and_then(|page| serde_json::to_value(page).ok())
         .map(|page| page["openRequestIds"].clone());
     j.guard(
-        "the log closes the ask by its id, and the tail read says nothing still waits",
-        logged == [json!({ "kind": "permissionResolved", "requestId": "req-ask", "allow": true })]
-            && tail_rows == logged
+        "the log closes each ask by its id, and the tail read says nothing still waits",
+        logged
+            == [
+                json!({ "kind": "permissionResolved", "requestId": "req-gone", "allow": false, "withdrawn": true }),
+                json!({ "kind": "permissionResolved", "requestId": "req-gone", "allow": true, "withdrawn": false }),
+                json!({ "kind": "permissionResolved", "requestId": "req-ask", "allow": true, "withdrawn": false }),
+            ]
+            && logged.get(2..) == Some(tail_rows.as_slice())
             && waiting == Some(json!([])),
-        json!({ "logged": logged, "inTailRead": tail_rows == logged, "openRequestIds": waiting }),
+        json!({ "logged": logged, "inTailRead": logged.get(2..) == Some(tail_rows.as_slice()), "openRequestIds": waiting }),
     );
     let withheld = phone.get_session_log(asker.clone()).await.ok().map(|log| {
         log.iter()

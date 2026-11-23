@@ -560,7 +560,7 @@ const PermissionCard = memo(function PermissionCard({
     );
   }
   if (item.decision !== null) {
-    if (item.decision === "allow") return null;
+    if (item.decision === "allow" || item.decision === "withdrawn") return null;
     return (
       <div className="flex items-center gap-2 text-ui text-ink-dim">
         <Icon name="permissions" size="xs" />
@@ -1379,7 +1379,7 @@ function ItemList({
     it.kind === "tool" && (childrenByParent.has(it.toolUseId) || Boolean(planCards?.revisions.has(it.toolUseId)));
   const visible = items.filter(
     (it) =>
-      (it.kind !== "permission" || it.decision !== "allow") &&
+      (it.kind !== "permission" || (it.decision !== "allow" && it.decision !== "withdrawn")) &&
       (it.kind !== "tool" || !isHiddenTool(it)) &&
       (it.kind !== "relaunched" || !it.quiet),
   );

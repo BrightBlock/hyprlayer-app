@@ -18,8 +18,8 @@ Msgs == Composer \cup Agent
 VARIABLES
   \* the claude process
   alive, busy, turn, pipe, queue, cOpen, cRun, asked, out,
-  \* ClaudeDriver
-  dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen,
+  \* ClaudeDriver; gone: asks claude withdrew whose tool result has not been read
+  dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen, gone,
   \* SessionRegistry, the relay and the actor
   live, procs, exits, inTurn, stored,
   \* the desktop
@@ -38,7 +38,7 @@ VARIABLES
   restarts
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out,
-          dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen,
+          dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen, gone,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vOpen, clicked, chip, sends,
           held, resent, toldSet,
@@ -46,7 +46,7 @@ vars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out,
           dropped, resendDue, stopped, resolves, checking, checkProc, restarts>>
 
 claudeVars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out>>
-driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen>>
+driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen, gone>>
 viewVars == <<vLive, streaming, vOpen, clicked, chip, sends>>
 heldVars == <<held, resent, toldSet>>
 
@@ -59,7 +59,7 @@ Init ==
   /\ alive = TRUE /\ busy = FALSE /\ turn = 0 /\ pipe = <<>> /\ queue = <<>>
   /\ cOpen = {} /\ cRun = {} /\ asked = {} /\ out = <<>>
   /\ dBusy = FALSE /\ lifecycle = FALSE /\ waiting = {} /\ pending = {} /\ stdinOpen = TRUE /\ bus = <<>>
-  /\ eofSeen = FALSE
+  /\ eofSeen = FALSE /\ gone = {}
   /\ live = TRUE /\ procs = 1 /\ exits = 0 /\ inTurn = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vOpen = {} /\ clicked = {}
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
@@ -89,14 +89,14 @@ SendServer(m, result) ==
     THEN result = "gone" /\ UNCHANGED <<driverVars, pipe>>
   ELSE IF stdinOpen
     THEN result = "ok" /\ EchoOrHold(m) /\ WriteOk(<<"msg", m>>)
-         /\ pending' = pending /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen
+         /\ pending' = pending /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen /\ gone' = gone
   ELSE \* the echo decision runs before the write; Err takes a held echo back
     /\ result = "err"
     /\ IF (~dBusy /\ waiting = {}) \/ ~lifecycle
          THEN dBusy' = TRUE /\ bus' = Append(bus, <<"echo", m>>)
          ELSE dBusy' = dBusy /\ bus' = bus
     /\ waiting' = waiting /\ pending' = pending /\ stdinOpen' = stdinOpen /\ pipe' = pipe
-    /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen
+    /\ lifecycle' = lifecycle /\ eofSeen' = eofSeen /\ gone' = gone
 
 Outcome(m, result, kept) ==
   /\ accepted' = IF result = "ok" THEN accepted \cup {m} ELSE accepted
@@ -162,7 +162,7 @@ ClientAnswer(r) ==
        THEN pending' = pending \ {r} /\ bus' = Append(bus, <<"resolved", r>>)
        ELSE pending' = pending /\ bus' = bus
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, cRun, asked, out, dBusy, lifecycle, waiting,
-                 eofSeen, live, procs, exits, inTurn, stored, vLive, streaming, vOpen, chip,
+                 eofSeen, gone, live, procs, exits, inTurn, stored, vLive, streaming, vOpen, chip,
                  sends, accepted, failed, delivered, interrupts, droppedStop>>
 
 \* SessionService::interrupt from anyone: the composer's stop (which declines a parked ask
@@ -175,7 +175,7 @@ Interrupt ==
   \* the composer's Stop, or another's
   /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, resolves, checking, checkProc, restarts>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, cRun, asked, out, dBusy, lifecycle, waiting, eofSeen,
-                 pending, bus, live, procs, exits, inTurn, stored, viewVars,
+                 gone, pending, bus, live, procs, exits, inTurn, stored, viewVars,
                  accepted, failed, delivered, droppedStop>>
 
 (* ---- claude ---- *)
@@ -303,24 +303,35 @@ DriverRead ==
                     ELSE waiting' = waiting /\ bus' = bus
                /\ pending' = pending
           [] line[1] = "result" ->
-               dBusy' = FALSE /\ bus' = Append(bus, <<"turnDone">>) /\ UNCHANGED <<waiting, pending>>
+               dBusy' = FALSE /\ bus' = Append(bus, <<"turnDone">>) /\ gone' = {}
+               /\ UNCHANGED <<waiting, pending>>
           [] line[1] = "ask" ->
                pending' = pending \cup {line[2]} /\ bus' = Append(bus, <<"ask", line[2]>>)
                /\ UNCHANGED <<dBusy, waiting>>
           [] line[1] = "cancel" ->
                \* ParsedLine::ControlCancel: an ask still in pending_permissions leaves it, resolved
+               \* as withdrawn, with no outcome
                /\ pending' = pending \ {line[2]}
-               /\ bus' = IF line[2] \in pending THEN Append(bus, <<"resolved", line[2]>>) ELSE bus
+               /\ IF line[2] \in pending
+                    THEN bus' = Append(bus, <<"resolved", line[2]>>) /\ gone' = gone \cup {line[2]}
+                    ELSE bus' = bus /\ gone' = gone
                /\ UNCHANGED <<dBusy, waiting>>
           [] line[1] = "toolResult" ->
-               bus' = Append(bus, <<"toolResult", line[2]>>) /\ UNCHANGED <<dBusy, waiting, pending>>
+               \* withdrawn_outcome: a withdrawn ask's result that shows it ran or was denied is
+               \* logged as that outcome after it; a result that shows neither adds no row
+               /\ gone' = gone \ {line[2]}
+               /\ bus' = IF line[2] \in gone
+                          THEN bus \o <<<<"toolResult", line[2]>>, <<"outcome", line[2]>>>>
+                          ELSE Append(bus, <<"toolResult", line[2]>>)
+               /\ UNCHANGED <<dBusy, waiting, pending>>
           [] line[1] = "eof" ->
                \* read_and_wait marks the inbox ended (send_user_turn refuses from here),
                \* declines every echo still waiting, then broadcasts Exited
                /\ bus' = bus \o SetToSeq({<<"declined", w>> : w \in waiting}) \o <<<<"exited">>>>
-               /\ waiting' = {}
+               /\ waiting' = {} /\ gone' = {}
                /\ UNCHANGED <<dBusy, pending>>
   /\ Head(out)[1] /= "started" => lifecycle' = lifecycle
+  /\ Head(out)[1] \notin {"cancel", "toolResult", "result", "eof"} => gone' = gone
   /\ eofSeen' = (eofSeen \/ Head(out)[1] = "eof")
   /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, cRun, asked, stdinOpen, live,
                  procs, exits, inTurn, stored, viewVars, accepted, failed,
@@ -350,7 +361,7 @@ Relay ==
                       [] ev[1] \in {"turnDone", "exited"} -> FALSE
                       [] OTHER -> streaming
      /\ vOpen' = CASE ev[1] = "ask" -> vOpen \cup {ev[2]}
-                  [] ev[1] \in {"resolved", "toolResult"} -> vOpen \ {ev[2]}
+                  [] ev[1] \in {"resolved", "toolResult", "outcome"} -> vOpen \ {ev[2]}
                   [] ev[1] = "exited" -> {}
                   [] OTHER -> vOpen
      /\ vLive' = IF ev[1] = "exited" THEN FALSE ELSE vLive
@@ -373,7 +384,7 @@ Relay ==
                     [] OTHER -> dropped
      /\ resendDue' = IF ev[1] = "turnDone" THEN dropped \cap held ELSE {}
      /\ resolves' = IF ev[1] = "resolved" THEN [resolves EXCEPT ![ev[2]] = @ + 1] ELSE resolves
-  /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, eofSeen, procs, exits,
+  /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, eofSeen, gone, procs, exits,
                  clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop,
                  stopped, checking, checkProc, restarts>>
 
@@ -426,7 +437,7 @@ ClientResume ==
   /\ pipe' = SetToSeq({<<"msg", m>> : m \in again})
   /\ out' = <<>>
   /\ dBusy' = (again /= {}) /\ lifecycle' = FALSE /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
-  /\ eofSeen' = FALSE
+  /\ eofSeen' = FALSE /\ gone' = {}
   /\ bus' = <<<<"relaunched">>>> \o SetToSeq({<<"echo", m>> : m \in again})
   /\ live' = TRUE /\ procs' = procs + 1 /\ vLive' = TRUE
   /\ held' = again /\ resent' = resent \cup again
@@ -509,7 +520,7 @@ InterruptSafe ==
 
 TypeOK ==
   /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ turn \in Nat
-  /\ cOpen \subseteq Asks /\ cRun \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
+  /\ cOpen \subseteq Asks /\ cRun \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks /\ gone \subseteq Asks
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued", "returned"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs

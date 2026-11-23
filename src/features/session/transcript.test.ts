@@ -784,6 +784,33 @@ describe("answered asks on a reload", () => {
     ]);
   });
 
+  it("closes a withdrawn ask without a decision until its outcome is logged", () => {
+    const withdrawn = (requestId: string): SessionEvent => ({
+      kind: "permissionResolved",
+      requestId,
+      allow: false,
+      withdrawn: true,
+    });
+    const view = reduceAll([
+      { kind: "userMessage", text: "go", stage: null },
+      { kind: "permissionAsk", requestId: "ran", toolName: "Bash", input: "{}" },
+      { kind: "permissionAsk", requestId: "denied", toolName: "Bash", input: "{}" },
+      { kind: "permissionAsk", requestId: "unclear", toolName: "Bash", input: "{}" },
+      withdrawn("ran"),
+      withdrawn("denied"),
+      withdrawn("unclear"),
+      resolved("ran", true),
+      resolved("denied", false),
+    ]);
+    const decisions = view.items.flatMap((it) => (it.kind === "permission" ? [[it.requestId, it.decision]] : []));
+    expect(decisions).toEqual([
+      ["ran", "allow"],
+      ["denied", "deny"],
+      ["unclear", "withdrawn"],
+    ]);
+    expect(hasPendingPermission(view)).toBe(false);
+  });
+
   it("leaves another ask waiting when one of two is answered", () => {
     const view = reduceAll([
       { kind: "userMessage", text: "go", stage: null },

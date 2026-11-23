@@ -444,6 +444,7 @@ impl CodexDriver {
         let _ = self.events.send(SessionEvent::PermissionResolved {
             request_id: request_id.to_string(),
             allow,
+            withdrawn: false,
         });
         self.reply(rpc_id, approval_reply(&kind, allow, message))
     }
@@ -1628,6 +1629,7 @@ mod tests {
             [SessionEvent::PermissionResolved {
                 request_id: "th:exec-1".into(),
                 allow: false,
+                withdrawn: false,
             }]
         );
 
@@ -1654,6 +1656,7 @@ mod tests {
             [SessionEvent::PermissionResolved {
                 request_id: "th:exec-2".into(),
                 allow: true,
+                withdrawn: false,
             }]
         );
     }

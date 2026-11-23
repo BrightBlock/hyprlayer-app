@@ -391,6 +391,7 @@ impl ClaudeDriver {
             let _ = self.events.send(SessionEvent::PermissionResolved {
                 request_id: request_id.to_string(),
                 allow,
+                withdrawn: false,
             });
         }
         self.write_line(protocol::permission_response_json(
@@ -641,6 +642,19 @@ async fn stderr_loop(stderr: tokio::process::ChildStderr, ring: Arc<StdMutex<Vec
 struct PendingAsk {
     input: Value,
     question: bool,
+    tool_use_id: Option<String>,
+}
+
+// Claude Code 2.1.330's texts for a tool that never ran: a rejection (a deny elsewhere, or an
+// interrupt), and a rule's or hook's denial.
+fn withdrawn_outcome(content: &str, is_error: bool) -> Option<bool> {
+    let denied = content.contains("The user doesn't want to proceed with this tool use")
+        || (content.contains("Permission to use ") && content.contains(" has been denied"));
+    match (is_error, denied) {
+        (false, _) => Some(true),
+        (true, true) => Some(false),
+        (true, false) => None,
+    }
 }
 
 fn asked_questions<'a>(tool_name: &str, input: &'a Value) -> Option<&'a Value> {
@@ -667,6 +681,7 @@ async fn read_and_wait(
     let mut saw_error_result = false;
     let mut model: Option<String> = None;
     let mut sent_window: Option<u32> = None;
+    let mut withdrawn_tools: HashMap<String, String> = HashMap::new();
     let mut lines = BufReader::new(stdout).lines();
 
     loop {
@@ -698,6 +713,7 @@ async fn read_and_wait(
                         ..
                     } => {
                         lock(&inbox).busy = false;
+                        withdrawn_tools.clear();
                         saw_result = true;
                         saw_error_result |= *is_error;
                         if let (Some(cost), Ok(mut so_far)) = (total_cost_usd, cost_so_far.lock()) {
@@ -717,7 +733,7 @@ async fn read_and_wait(
                         request_id,
                         tool_name,
                         input,
-                        ..
+                        tool_use_id,
                     } => {
                         if let Ok(mut map) = pending_permissions.lock() {
                             let question = asked_questions(tool_name, input).is_some();
@@ -726,6 +742,7 @@ async fn read_and_wait(
                                 PendingAsk {
                                     input: input.clone(),
                                     question,
+                                    tool_use_id: tool_use_id.clone(),
                                 },
                             );
                         }
@@ -744,14 +761,17 @@ async fn read_and_wait(
                             .and_then(|mut map| map.remove(request_id));
                         if let Some(ask) = withdrawn {
                             let request_id = request_id.clone();
-                            let _ = events.send(if ask.question {
-                                SessionEvent::QuestionAnswered { request_id }
-                            } else {
-                                // The tool's result shows what the other answerer chose.
-                                SessionEvent::PermissionResolved {
-                                    request_id,
-                                    allow: true,
-                                }
+                            if ask.question {
+                                let _ = events.send(SessionEvent::QuestionAnswered { request_id });
+                                continue;
+                            }
+                            if let Some(tool_use_id) = ask.tool_use_id {
+                                withdrawn_tools.insert(tool_use_id, request_id.clone());
+                            }
+                            let _ = events.send(SessionEvent::PermissionResolved {
+                                request_id,
+                                allow: false,
+                                withdrawn: true,
                             });
                         }
                         continue;
@@ -773,7 +793,27 @@ async fn read_and_wait(
                     _ => {}
                 }
                 for event in parsed_to_events(parsed) {
+                    let settled = match &event {
+                        SessionEvent::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                            ..
+                        } => withdrawn_tools.remove(tool_use_id).and_then(|request_id| {
+                            withdrawn_outcome(content, *is_error).map(|allow| {
+                                SessionEvent::PermissionResolved {
+                                    request_id,
+                                    allow,
+                                    withdrawn: false,
+                                }
+                            })
+                        }),
+                        _ => None,
+                    };
                     let _ = events.send(event);
+                    if let Some(settled) = settled {
+                        let _ = events.send(settled);
+                    }
                 }
             }
             Ok(None) => break,
@@ -1389,6 +1429,13 @@ mod tests {
             r#"{"type":"control_cancel_request","request_id":"perm"}"#,
             r#"{"type":"control_cancel_request","request_id":"question"}"#,
             r#"{"type":"control_cancel_request","request_id":"never-asked"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_perm","content":"","is_error":false}]}}"#,
+            r#"{"type":"control_request","request_id":"ruled","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm x"},"tool_use_id":"toolu_ruled"}}"#,
+            r#"{"type":"control_cancel_request","request_id":"ruled"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_ruled","content":"Permission to use Bash has been denied.","is_error":true}]}}"#,
+            r#"{"type":"control_request","request_id":"unclear","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"make"},"tool_use_id":"toolu_unclear"}}"#,
+            r#"{"type":"control_cancel_request","request_id":"unclear"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_unclear","content":"Exit code 2","is_error":true}]}}"#,
         ];
         let script = dir.path().join("claude");
         let body: String = lines.iter().map(|l| format!("echo '{l}'\n")).collect();
@@ -1437,9 +1484,14 @@ mod tests {
             matches!(
                 resolutions.as_slice(),
                 [
-                    SessionEvent::PermissionResolved { request_id: p, allow: true },
+                    SessionEvent::PermissionResolved { request_id: p, withdrawn: true, .. },
                     SessionEvent::QuestionAnswered { request_id: q },
-                ] if p == "perm" && q == "question"
+                    SessionEvent::PermissionResolved { request_id: ran, allow: true, withdrawn: false },
+                    SessionEvent::PermissionResolved { request_id: r, withdrawn: true, .. },
+                    SessionEvent::PermissionResolved { request_id: denied, allow: false, withdrawn: false },
+                    SessionEvent::PermissionResolved { request_id: u, withdrawn: true, .. },
+                ] if p == "perm" && q == "question" && ran == "perm" && r == "ruled"
+                    && denied == "ruled" && u == "unclear"
             ),
             "{resolutions:?}"
         );

@@ -463,6 +463,7 @@ impl Translator {
             return vec![SessionEvent::PermissionResolved {
                 request_id,
                 allow: false,
+                withdrawn: false,
             }];
         }
         let question = self

@@ -238,6 +238,9 @@ pub enum SessionEvent {
     PermissionResolved {
         request_id: String,
         allow: bool,
+        // The harness withdrew the ask without saying how it was settled; `allow` claims nothing.
+        #[serde(default)]
+        withdrawn: bool,
     },
     QuestionAnswered {
         request_id: String,

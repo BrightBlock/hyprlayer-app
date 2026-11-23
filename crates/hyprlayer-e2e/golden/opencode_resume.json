@@ -118,12 +118,14 @@
               {
                 "allow": false,
                 "kind": "permissionResolved",
-                "requestId": "denied"
+                "requestId": "denied",
+                "withdrawn": false
               },
               {
                 "allow": true,
                 "kind": "permissionResolved",
-                "requestId": "subagent"
+                "requestId": "subagent",
+                "withdrawn": false
               },
               {
                 "kind": "questionAnswered",
@@ -132,12 +134,14 @@
               {
                 "allow": true,
                 "kind": "permissionResolved",
-                "requestId": "permission"
+                "requestId": "permission",
+                "withdrawn": false
               },
               {
                 "allow": false,
                 "kind": "permissionResolved",
-                "requestId": "cancelled"
+                "requestId": "cancelled",
+                "withdrawn": false
               }
             ]
           },

@@ -498,7 +498,7 @@ async fn transcript_sync() {
     j.guard(
         "A's stream carries its answer as a logged row",
         answer_rows
-            == [json!({ "kind": "permissionResolved", "requestId": request_id, "allow": true })],
+            == [json!({ "kind": "permissionResolved", "requestId": request_id, "allow": true, "withdrawn": false })],
         json!({ "answerRows": answer_rows.len() }),
     );
     let (rev, cursor) = pull(&mut j, &b.client, &sid, b_cursor).await;

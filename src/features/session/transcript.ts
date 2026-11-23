@@ -16,7 +16,7 @@ import { parseToolInput } from "./toolDisplay";
 export type { Question, QuestionOption, SessionState };
 
 // "expired": the ask died with its harness process, so no answer can reach it.
-export type PermissionDecision = "allow" | "deny" | "expired";
+export type PermissionDecision = "allow" | "deny" | "expired" | "withdrawn";
 
 export type PendingQuestion = {
   requestId: string;
@@ -841,7 +841,7 @@ function reduceEventInner(view: SessionView, event: SessionEvent, seq: number | 
     }
 
     case "permissionResolved":
-      return closeAsk(view, event.requestId, event.allow ? "allow" : "deny");
+      return closeAsk(view, event.requestId, event.withdrawn ? "withdrawn" : event.allow ? "allow" : "deny");
 
     case "questionAnswered":
       return closeQuestion(view, event.requestId);
@@ -1019,7 +1019,7 @@ export function resolveQuestion(view: SessionView, requestId: string): SessionVi
 // A logged answer leaves `streaming` alone: the ask kept it up while the turn ran.
 function closeAsk(view: SessionView, requestId: string, decision: PermissionDecision): SessionView {
   const items = view.items.map((item) =>
-    item.kind === "permission" && item.requestId === requestId && item.decision === null
+    item.kind === "permission" && item.requestId === requestId && (item.decision === null || item.decision === "withdrawn")
       ? { ...item, decision }
       : item,
   );
