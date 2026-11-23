@@ -122,6 +122,7 @@ fi
 SHA="$(git -C "$SRC_DIR" rev-parse --verify "$REF^{commit}" 2>/dev/null)" \
   || die "no such ref in the build clone: $REF"
 SHORT="${SHA:0:8}"  # fixed width: --short varies by repo, and --remote compares versions across hosts
+COMMITS="$(git -C "$SRC_DIR" rev-list --count "$SHA")"
 SUBJECT="$(git -C "$SRC_DIR" log -1 --format=%s "$SHA")"
 
 install_remotes() {
@@ -155,14 +156,15 @@ cd "$SRC_DIR"
 # package.json only bumps in the release commit, so a build off untagged main would
 # report the *previous* release and the updater would offer an upgrade to the one it
 # already contains. Take the newest tag instead, and keep the sha as build metadata
-# (`+`, not `-`) so semver reads it as equal to that release rather than older.
+# (`+`, not `-`) so semver reads it as equal to that release rather than older. The
+# commit count before the sha is what lets the app order two dev builds.
 VERSION="$(node -p 'require("./package.json").version')"
 LATEST_TAG="$(git -C "$SRC_DIR" tag --list 'v[0-9]*' --sort=-v:refname | head -1)"
 if [[ -n "$LATEST_TAG" ]]; then
   VERSION="$(printf '%s\n%s\n' "$VERSION" "${LATEST_TAG#v}" | sort -V | tail -1)"
 fi
 if [[ $VERSION_SUFFIX -eq 1 ]]; then
-  BUILD_VERSION="$VERSION+dev.$SHORT"
+  BUILD_VERSION="$VERSION+dev.$COMMITS.$SHORT"
 else
   BUILD_VERSION="$VERSION"
 fi

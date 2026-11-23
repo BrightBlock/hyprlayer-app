@@ -20,13 +20,14 @@ pub enum Fit {
     TooOld,
     /// Usable, but older than the server this app ships.
     Older,
-    /// The shipped release, but a different dev build of it; only `exact_fit` says so.
+    /// The shipped release, but a different dev build of it that commit counts
+    /// cannot order; only `exact_fit` says so.
     OtherBuild,
     /// The shipped version or newer.
     Current,
 }
 
-/// Build metadata is dropped: a dev build stamped `0.8.3+dev.<sha>` is 0.8.3.
+/// Build metadata is dropped: a dev build stamped `0.8.3+dev.<commits>.<sha>` is 0.8.3.
 pub fn parse(version: &str) -> Option<Version> {
     let mut parsed = Version::parse(version.trim()).ok()?;
     parsed.build = semver::BuildMetadata::EMPTY;
@@ -42,10 +43,21 @@ pub fn fit(reported: Option<&str>) -> Fit {
     fit_against(reported, SERVER_VERSION)
 }
 
-/// `fit` for a server this app may restart. Dev installs stamp `+dev.<sha>` on
-/// an unchanged release version, so only the full string tells their builds apart.
+/// `fit` for a server this app may restart. Dev installs stamp `+dev.<commits>.<sha>`
+/// on an unchanged release version, so only the build metadata tells their builds
+/// apart, and only the commit count orders them.
 pub fn exact_fit(reported: Option<&str>) -> Fit {
     exact_fit_against(reported, SERVER_VERSION)
+}
+
+/// The commit count a dev install stamps; `None` for releases and for the older
+/// `+dev.<sha>` stamp, whose sha may itself be all digits.
+fn dev_commits(version: &str) -> Option<u64> {
+    let version = Version::parse(version.trim()).ok()?;
+    match version.build.as_str().split('.').collect::<Vec<_>>()[..] {
+        ["dev", commits, _sha] => commits.parse().ok(),
+        _ => None,
+    }
 }
 
 fn fit_against(reported: Option<&str>, shipped: &str) -> Fit {
@@ -66,10 +78,13 @@ fn exact_fit_against(reported: Option<&str>, shipped: &str) -> Fit {
     let other_build = reported.map(str::trim).is_some_and(|reported| {
         reported != shipped && (reported.contains('+') || shipped.contains('+'))
     });
-    if fit == Fit::Current && other_build {
-        Fit::OtherBuild
-    } else {
-        fit
+    if fit != Fit::Current || !other_build {
+        return fit;
+    }
+    match (reported.and_then(dev_commits), dev_commits(shipped)) {
+        (Some(reported), Some(shipped)) if reported > shipped => Fit::Current,
+        (Some(reported), Some(shipped)) if reported < shipped => Fit::Older,
+        _ => Fit::OtherBuild,
     }
 }
 
@@ -147,6 +162,32 @@ mod tests {
         assert_eq!(exact_fit_against(Some(DEV_B), DEV_A), Fit::OtherBuild);
         assert_eq!(exact_fit_against(Some(RELEASE), DEV_A), Fit::OtherBuild);
         assert_eq!(exact_fit_against(Some(DEV_A), RELEASE), Fit::OtherBuild);
+    }
+
+    const DEV_100: &str = "999.1.0+dev.100.aaaaaaaa";
+    const DEV_101: &str = "999.1.0+dev.101.bbbbbbbb";
+
+    #[test]
+    fn the_commit_count_orders_dev_builds_of_the_same_release() {
+        assert_eq!(exact_fit_against(Some(DEV_101), DEV_100), Fit::Current);
+        assert_eq!(exact_fit_against(Some(DEV_100), DEV_101), Fit::Older);
+        assert_eq!(exact_fit_against(Some(DEV_100), DEV_100), Fit::Current);
+    }
+
+    #[test]
+    fn dev_builds_a_commit_count_cannot_order_stay_other_builds() {
+        let same_count_other_branch = "999.1.0+dev.100.cccccccc";
+        assert_eq!(
+            exact_fit_against(Some(same_count_other_branch), DEV_100),
+            Fit::OtherBuild
+        );
+        assert_eq!(exact_fit_against(Some(DEV_A), DEV_100), Fit::OtherBuild);
+        assert_eq!(exact_fit_against(Some(DEV_100), DEV_A), Fit::OtherBuild);
+        assert_eq!(exact_fit_against(Some(RELEASE), DEV_100), Fit::OtherBuild);
+        assert_eq!(
+            exact_fit_against(Some("999.1.0+dev.12345678"), DEV_100),
+            Fit::OtherBuild
+        );
     }
 
     #[test]

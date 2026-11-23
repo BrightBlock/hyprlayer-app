@@ -174,7 +174,9 @@ if (-not $NoFetch) {
 
 $Sha = GitLine @('-C', $SrcDir, 'rev-parse', '--verify', "$Ref^{commit}")
 if (-not $Sha) { throw "no such ref in the build clone: $Ref" }
-$Short   = GitLine @('-C', $SrcDir, 'rev-parse', '--short', $Sha)
+# Fixed width, as in dev-install-linux.sh: the app compares this stamp with a remote host's.
+$Short   = $Sha.Substring(0, 8)
+$Commits = GitLine @('-C', $SrcDir, 'rev-list', '--count', $Sha)
 $Subject = GitLine @('-C', $SrcDir, 'log', '-1', '--format=%s', $Sha)
 
 $StampSha = if (Test-Path $Stamp) { ([string](Get-Content $Stamp -Raw)).Trim() } else { '' }
@@ -195,14 +197,15 @@ Set-Location $SrcDir
 # package.json only bumps in the release commit, so a build off untagged main would
 # report the *previous* release and the updater would offer an upgrade to the one it
 # already contains. Take the newest tag instead, and keep the sha as build metadata
-# ('+', not '-') so semver reads it as equal to that release rather than older.
+# ('+', not '-') so semver reads it as equal to that release rather than older. The
+# commit count before the sha is what lets the app order two dev builds.
 $Version = (Get-Content (Join-Path $SrcDir 'package.json') -Raw | ConvertFrom-Json).version
 $LatestTag = GitLine @('-C', $SrcDir, 'tag', '--list', 'v[0-9]*', '--sort=-v:refname')
 if ($LatestTag) {
   $tagVersion = $LatestTag.TrimStart('v')
   if ([version]$tagVersion -gt [version]$Version) { $Version = $tagVersion }
 }
-$BuildVersion = if ($NoVersionSuffix) { $Version } else { "$Version+dev.$Short" }
+$BuildVersion = if ($NoVersionSuffix) { $Version } else { "$Version+dev.$Commits.$Short" }
 
 $Overlay = 'src-tauri/tauri.devinstall.conf.json'
 $OverlayJs = Join-Path $CacheDir 'overlay.js'
