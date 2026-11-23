@@ -129,6 +129,10 @@ fn wait_props() -> Value {
     })
 }
 
+fn text_prop() -> Value {
+    json!({ "text": { "type": "string", "description": "Required: the message to send. The field is `text`; `message` is accepted too." } })
+}
+
 fn with_props(mut base: Value, extra: Value) -> Value {
     if let (Some(props), Value::Object(extra)) = (base["properties"].as_object_mut(), extra) {
         props.extend(extra);
@@ -284,7 +288,7 @@ const TOOLS: [Tool; 33] = [
         schema: || {
             with_props(
                 agent_arg(),
-                json!({ "text": { "type": "string", "description": "Required." } }),
+                text_prop(),
             )
         },
     },
@@ -296,7 +300,7 @@ const TOOLS: [Tool; 33] = [
             with_props(
                 with_props(
                     agent_arg(),
-                    json!({ "text": { "type": "string", "description": "Required." } }),
+                    text_prop(),
                 ),
                 wait_props(),
             )
@@ -484,6 +488,12 @@ fn arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 fn required<'a>(args: &'a Value, key: &str) -> Result<&'a str, WireError> {
     arg(args, key).ok_or_else(|| bad_args(format!("`{key}` is required")))
+}
+
+fn message_text(args: &Value) -> Result<&str, WireError> {
+    arg(args, "text")
+        .or_else(|| arg(args, "message"))
+        .ok_or_else(|| bad_args("`text` is required: the message to send"))
 }
 
 /// A closed-vocabulary argument, read through its own serde names.
@@ -762,7 +772,7 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             }
         }
         "message_agent" => {
-            let text = required(args, "text")?;
+            let text = message_text(args)?;
             match target(args)? {
                 Target::Session(id) => client.send_agent_message(id.into(), text.into()).await?,
                 Target::Terminal(id) => client.send_pty_message(id.into(), text.into()).await?,
@@ -770,7 +780,7 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             Ok(json!("sent"))
         }
         "prompt_and_wait" => {
-            let text = required(args, "text")?;
+            let text = message_text(args)?;
             let (until, timeout_ms) = wait_args(args)?;
             match target(args)? {
                 Target::Session(id) => {
@@ -1138,4 +1148,20 @@ fn read_only_refusal(name: &str) -> WireError {
 
 fn error_reply(id: Value, code: i32, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_message_reads_text_or_its_message_alias() {
+        assert_eq!(message_text(&json!({ "text": "hi" })).unwrap(), "hi");
+        assert_eq!(message_text(&json!({ "message": "hi" })).unwrap(), "hi");
+        assert_eq!(
+            message_text(&json!({ "text": "a", "message": "b" })).unwrap(),
+            "a"
+        );
+        assert!(message_text(&json!({ "session_id": "s" })).is_err());
+    }
 }
