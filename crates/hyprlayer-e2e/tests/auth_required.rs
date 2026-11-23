@@ -28,13 +28,13 @@ while [ $# -gt 0 ]; do
 done
 root="$(dirname "$0")/.."
 [ -n "$sid" ] && printf '%s %s\n' "$how" "$sid" >> "$root/spawns.log"
-printf '{"type":"system","subtype":"init","session_id":"%s","model":"claude-e2e","tools":[]}\n' "$sid"
 turn=0
 while IFS= read -r line; do
   case "$line" in
     *control_response*) continue ;;
   esac
   turn=$((turn + 1))
+  printf '{"type":"system","subtype":"init","session_id":"%s","model":"claude-e2e","tools":[]}\n' "$sid"
   case "$line" in
     *SUBAGENT*)
       printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Please run /login"}]},"parent_tool_use_id":"toolu_sub","error":"authentication_failed","session_id":"%s"}\n' "$sid"
