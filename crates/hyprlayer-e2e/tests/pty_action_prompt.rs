@@ -98,7 +98,6 @@ async fn pty_action_prompt() {
         &[plan_doc.as_str()],
     )
     .await;
-    // The review-notes line outruns the stub's cooked-mode line limit; claude reads raw.
     let stdin = log.join("stdin.log");
     let opened = eventually(IO, || {
         lines(&stdin)

@@ -205,6 +205,8 @@ if [ -z "$tui" ]; then
     f=""; [ -n "$moded" ] && f=$(footer)
     printf '\033[2J\033[H\n%s\n\342\235\257\302\240\033[2mTry "work"\033[22m\n%s\n%s' "$rule" "$rule" "$f"
   }
+  # Non-canonical, as claude reads: macOS drops a cooked line past MAX_CANON (1024 bytes) unread.
+  stty -icanon min 1 time 0
   box
   hook SessionStart "$(ev SessionStart ',"source":"startup"')"
   while IFS= read -r line; do
@@ -507,6 +509,7 @@ hook() {
   if [ "$out" = "{}" ]; then echo ok >> "$dir/acks.log"; else printf 'bad:%s\n' "$out" >> "$dir/acks.log"; fi
 }
 ev() { printf '{"session_id":"%s","turn_id":"turn-1","hook_event_name":"%s"%s}' "$sid" "$1" "$2"; }
+stty -icanon min 1 time 0
 hook SessionStart "$(ev SessionStart ',"source":"startup"')"
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$dir/stdin.log"
