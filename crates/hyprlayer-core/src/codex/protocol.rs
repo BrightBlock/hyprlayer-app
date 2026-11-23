@@ -128,6 +128,8 @@ pub struct Translator {
     root_rpc: Option<u64>,
     pub active_turn: Option<String>,
     pub requested_turn: Option<String>,
+    pub pending_turn_starts: HashSet<u64>,
+    pub deferred_interrupt: Option<u64>,
     started_tools: HashSet<String>,
     // Child transcript events stay hidden, but file-change approvals omit the
     // proposed patch and need the preceding item/started payload for context.
@@ -200,6 +202,34 @@ impl Translator {
             .drain(..)
             .filter_map(|(_, echo)| declined_message(&echo))
             .collect()
+    }
+
+    pub fn turn_start_answered(&mut self, rpc_id: u64, turn: Option<&str>) {
+        if !self.pending_turn_starts.remove(&rpc_id) {
+            return;
+        }
+        if let Some(turn) = turn {
+            self.requested_turn = Some(turn.to_string());
+        }
+        if self.pending_turn_starts.is_empty() && self.running_turn().is_none() {
+            self.deferred_interrupt = None;
+        }
+    }
+
+    pub fn running_turn(&self) -> Option<&str> {
+        self.active_turn
+            .as_deref()
+            .or(self.requested_turn.as_deref())
+    }
+
+    pub fn started_turn_interrupt(&mut self) -> Option<Value> {
+        let turn = self.active_turn.clone()?;
+        let id = self.deferred_interrupt.take()?;
+        Some(json!({
+            "id": id,
+            "method": "turn/interrupt",
+            "params": { "threadId": self.root_thread_id, "turnId": turn },
+        }))
     }
 
     // codex replays thread history right behind a resume response, so the read

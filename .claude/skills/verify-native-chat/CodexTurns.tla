@@ -14,25 +14,27 @@ Msgs == Composer \cup Agent
 
 VARIABLES
   \* codex app-server: the turn it runs, requests not yet read, accepted steers not yet
-  \* committed, open approvals, turn/start responses not yet written, lines out
-  alive, busy, turn, pipe, queue, cOpen, asked, respond, otherTools, out,
-  \* CodexDriver: Translator.active_turn / requested_turn (0 = none), steering, pending_approvals
-  dActive, dReq, waiting, pending, stdinOpen, bus,
+  \* committed, open approvals, the message of a turn it accepted and has not begun, lines out
+  alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
+  \* CodexDriver: Translator.active_turn / requested_turn (0 = none), steering, pending_approvals,
+  \* how many turn/starts have no response read (pending_turn_starts), a stop waiting for
+  \* turn/started (deferred_interrupt), turn ids whose turn/start task has not run
+  dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask,
   live, procs, exits, inTurn, stored,
   \* the desktop; vSeq is the open permission cards, oldest first
   vLive, streaming, vSeq, clicked, chip, sends,
   held, resent, toldSet,
   accepted, failed, delivered, interrupts, droppedStop
 
-vars == <<alive, busy, turn, pipe, queue, cOpen, asked, respond, otherTools, out,
-          dActive, dReq, waiting, pending, stdinOpen, bus,
+vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
+          dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vSeq, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop>>
 
-codexVars == <<alive, busy, turn, pipe, queue, cOpen, asked, respond, otherTools, out>>
-driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus>>
+codexVars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out>>
+driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask>>
 viewVars == <<vLive, streaming, vSeq, clicked, chip, sends>>
 heldVars == <<held, resent, toldSet>>
 
@@ -47,8 +49,9 @@ vOpen == Range(vSeq)
 
 Init ==
   /\ alive = TRUE /\ busy = FALSE /\ turn = 0 /\ pipe = <<>> /\ queue = <<>>
-  /\ cOpen = {} /\ asked = {} /\ respond = {} /\ otherTools = 0 /\ out = <<>>
+  /\ cOpen = {} /\ asked = {} /\ starting = {} /\ otherTools = 0 /\ out = <<>>
   /\ dActive = 0 /\ dReq = 0 /\ waiting = {} /\ pending = {} /\ stdinOpen = TRUE /\ bus = <<>>
+  /\ dStarts = 0 /\ dIntr = FALSE /\ dTask = {}
   /\ live = TRUE /\ procs = 1 /\ exits = 0 /\ inTurn = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vSeq = <<>> /\ clicked = {}
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
@@ -75,13 +78,14 @@ SendServer(m, result) ==
     THEN IF stdinOpen
            THEN /\ result = "ok" /\ waiting' = waiting \cup {m}
                 /\ WriteOk(<<"steer", m, Running>>)
-                /\ UNCHANGED <<dActive, dReq, pending, bus>>
+                /\ UNCHANGED <<dActive, dReq, pending, bus, dStarts, dIntr, dTask>>
            ELSE result = "err" /\ UNCHANGED <<driverVars, pipe>>
   ELSE /\ bus' = Append(bus, <<"echo", m>>)
+       /\ dStarts' = dStarts + 1
        /\ IF stdinOpen
             THEN result = "ok" /\ WriteOk(<<"start", m>>)
             ELSE result = "err" /\ UNCHANGED <<pipe, stdinOpen>>
-       /\ UNCHANGED <<dActive, dReq, waiting, pending>>
+       /\ UNCHANGED <<dActive, dReq, waiting, pending, dIntr, dTask>>
 
 Outcome(m, result, kept) ==
   /\ accepted' = IF result = "ok" THEN accepted \cup {m} ELSE accepted
@@ -104,7 +108,7 @@ ClientSend(m) ==
        /\ Outcome(m, result, TRUE)
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
-  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, respond, otherTools, out,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
                  live, procs, exits, inTurn, stored, vLive, vSeq, clicked, delivered,
                  interrupts, droppedStop>>
 
@@ -113,7 +117,7 @@ AgentSend(m) ==
   /\ \E result \in {"ok", "err", "gone"} :
        /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
        /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
-  /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, respond, otherTools, out, live,
+  /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, starting, otherTools, out, live,
                  procs, exits, inTurn, stored, viewVars, resent, toldSet, delivered,
                  interrupts, droppedStop>>
 
@@ -128,48 +132,54 @@ ClientAnswer(r) ==
        THEN /\ pending' = pending \ {r} /\ bus' = Append(bus, <<"resolved", r>>)
             /\ WriteOk(<<"answer", r>>)
        ELSE UNCHANGED <<pending, bus, pipe, stdinOpen>>
-  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, respond, otherTools, out,
-                 dActive, dReq, waiting, live, procs, exits, inTurn, stored, vLive,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
+                 dActive, dReq, waiting, dStarts, dIntr, dTask, live, procs, exits, inTurn, stored, vLive,
                  streaming, vSeq, chip, sends, accepted, failed, delivered, interrupts,
                  droppedStop>>
 
-\* CodexDriver::interrupt needs a turn id: with none known it returns Ok and sends nothing,
-\* though codex may already run (or be about to run) a turn the driver has not heard of.
+\* CodexDriver::interrupt sends turn/interrupt only for the turn turn/started named. Before
+\* that, while a turn/start is unanswered or its response named the turn, the stop waits
+\* (deferred_interrupt); with neither it returns Ok and sends nothing, though codex may
+\* already run (or be about to run) a turn.
 Interrupt ==
   /\ interrupts < MaxInterrupts /\ live /\ stdinOpen
   /\ interrupts' = interrupts + 1
-  /\ IF Running /= 0
-       THEN WriteOk(<<"interrupt", Running>>) /\ UNCHANGED droppedStop
-       ELSE /\ UNCHANGED <<pipe, stdinOpen>>
-            /\ droppedStop' = (droppedStop \/ (alive /\ (busy \/ \E i \in 1..Len(pipe) : pipe[i][1] = "start")))
-  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, respond, otherTools, out,
-                 dActive, dReq, waiting, pending, bus, live, procs, exits, inTurn, stored,
-                 viewVars, accepted, failed, delivered>>
+  /\ IF dActive /= 0
+       THEN WriteOk(<<"interrupt", dActive>>) /\ UNCHANGED <<droppedStop, dIntr>>
+     ELSE IF dReq /= 0 \/ dStarts > 0
+       THEN dIntr' = TRUE /\ UNCHANGED <<pipe, stdinOpen, droppedStop>>
+     ELSE /\ UNCHANGED <<pipe, stdinOpen, dIntr>>
+          /\ droppedStop' = (droppedStop \/ (alive /\ (busy \/ starting /= {} \/
+                                                      \E i \in 1..Len(pipe) : pipe[i][1] = "start")))
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
+                 dActive, dReq, waiting, pending, bus, dStarts, dTask, live, procs, exits,
+                 inTurn, stored, viewVars, accepted, failed, delivered>>
 
 (* ---- codex app-server ---- *)
 
 Take(m) == delivered' = [delivered EXCEPT ![m] = @ + 1]
 
-\* codex reads one request. turn/start while a turn runs is either refused or started
-\* after it (the model allows both); a steer is accepted only into the turn it names.
+\* codex reads one request. turn/start is answered as codex accepts the turn, before it begins
+\* it (turn/started); one read while a turn runs or is about to is refused. A steer is
+\* accepted only into the running turn it names, and an interrupt only once the turn began:
+\* before turn/started codex answers "no active turn to interrupt" and runs the turn.
 CodexRead ==
   /\ alive /\ pipe /= <<>>
   /\ LET line == Head(pipe) IN
      /\ pipe' = Tail(pipe)
-     /\ CASE line[1] = "start" /\ ~busy ->
-               /\ busy' = TRUE /\ turn' = turn + 1 /\ Take(line[2])
-               /\ respond' = respond \cup {turn + 1}
-               /\ out' = out \o <<<<"turnStarted", turn + 1>>, <<"userMsg", line[2]>>>>
-               /\ UNCHANGED <<queue, cOpen>>
+     /\ CASE line[1] = "start" /\ ~busy /\ starting = {} ->
+               /\ turn' = turn + 1 /\ Take(line[2]) /\ starting' = {line[2]}
+               /\ out' = Append(out, <<"startOk", turn + 1>>)
+               /\ UNCHANGED <<busy, queue, cOpen, droppedStop>>
           [] line[1] = "start" ->
                /\ out' = Append(out, <<"startErr", line[2]>>)
-               /\ UNCHANGED <<busy, turn, respond, queue, cOpen, delivered>>
+               /\ UNCHANGED <<busy, turn, starting, queue, cOpen, delivered, droppedStop>>
           [] line[1] = "steer" /\ busy /\ line[3] = turn ->
                /\ queue' = Append(queue, line[2])
-               /\ UNCHANGED <<busy, turn, respond, out, cOpen, delivered>>
+               /\ UNCHANGED <<busy, turn, starting, out, cOpen, delivered, droppedStop>>
           [] line[1] = "steer" ->
                /\ out' = Append(out, <<"steerErr", line[2]>>)
-               /\ UNCHANGED <<busy, turn, respond, queue, cOpen, delivered>>
+               /\ UNCHANGED <<busy, turn, starting, queue, cOpen, delivered, droppedStop>>
           [] line[1] = "interrupt" /\ busy /\ line[2] = turn ->
                \* codex settles its open approvals itself: turn/completed, then
                \* serverRequest/resolved for each; whether each one's item completes
@@ -179,33 +189,34 @@ CodexRead ==
                     out' = out \o SetToSeq({<<"toolResult", r>> : r \in settled})
                                \o <<<<"turnCompleted">>>>
                                \o SetToSeq({<<"srvResolved", r>> : r \in cOpen})
-               /\ UNCHANGED <<turn, respond, delivered>>
+               /\ UNCHANGED <<turn, starting, delivered, droppedStop>>
           [] line[1] = "interrupt" ->
-               UNCHANGED <<busy, turn, respond, queue, cOpen, out, delivered>>
+               \* refused; a stop for the turn codex is about to begin is lost, and it runs
+               /\ droppedStop' = (droppedStop \/ (starting /= {} /\ line[2] = turn))
+               /\ UNCHANGED <<busy, turn, starting, queue, cOpen, out, delivered>>
           [] line[1] = "answer" /\ line[2] \in cOpen ->
                /\ cOpen' = cOpen \ {line[2]}
                /\ out' = Append(out, <<"toolResult", line[2]>>)
-               /\ UNCHANGED <<busy, turn, respond, queue, delivered>>
+               /\ UNCHANGED <<busy, turn, starting, queue, delivered, droppedStop>>
           [] line[1] = "answer" ->
-               UNCHANGED <<busy, turn, respond, queue, cOpen, out, delivered>>
+               UNCHANGED <<busy, turn, starting, queue, cOpen, out, delivered, droppedStop>>
   /\ UNCHANGED <<heldVars, alive, asked, otherTools, driverVars, live, procs, exits, inTurn,
-                 stored, viewVars, accepted, failed, interrupts, droppedStop>>
+                 stored, viewVars, accepted, failed, interrupts>>
 
-\* The turn/start response, written by the request handler; it can trail the turn's notifications.
-CodexRespond ==
-  /\ alive /\ respond /= {}
-  /\ \E t \in respond :
-       /\ respond' = respond \ {t}
-       /\ out' = Append(out, <<"startOk", t>>)
-  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, otherTools,
-                 driverVars, live, procs, exits, inTurn, stored, viewVars, accepted, failed,
-                 delivered, interrupts, droppedStop>>
+\* codex begins the turn it accepted: turn/started, then the user message.
+CodexBegin ==
+  /\ alive /\ starting /= {}
+  /\ busy' = TRUE /\ starting' = {}
+  /\ out' = out \o <<<<"turnStarted", turn>>, <<"userMsg", CHOOSE m \in starting : TRUE>>>>
+  /\ UNCHANGED <<heldVars, alive, turn, pipe, queue, cOpen, asked, otherTools, driverVars,
+                 live, procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
+                 interrupts, droppedStop>>
 
 CodexAsk(r) ==
   /\ alive /\ busy /\ r \notin asked
   /\ asked' = asked \cup {r} /\ cOpen' = cOpen \cup {r}
   /\ out' = Append(out, <<"ask", r>>)
-  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, respond, otherTools, driverVars,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, starting, otherTools, driverVars,
                  live, procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts, droppedStop>>
 
@@ -214,7 +225,7 @@ CodexOtherTool ==
   /\ alive /\ busy /\ otherTools < MaxOtherTools
   /\ otherTools' = otherTools + 1
   /\ out' = Append(out, <<"toolResult", "none">>)
-  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, respond, driverVars,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, starting, driverVars,
                  live, procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts, droppedStop>>
 
@@ -223,7 +234,7 @@ CodexCommitSteer ==
   /\ alive /\ busy /\ queue /= <<>> /\ cOpen = {}
   /\ Take(Head(queue)) /\ queue' = Tail(queue)
   /\ out' = Append(out, <<"userMsg", Head(queue)>>)
-  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, cOpen, asked, respond, otherTools,
+  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, cOpen, asked, starting, otherTools,
                  driverVars, live, procs, exits, inTurn, stored, viewVars, accepted, failed,
                  interrupts, droppedStop>>
 
@@ -231,14 +242,14 @@ CodexCommitSteer ==
 CodexFinish ==
   /\ alive /\ busy /\ cOpen = {}
   /\ busy' = FALSE /\ queue' = <<>> /\ out' = Append(out, <<"turnCompleted">>)
-  /\ UNCHANGED <<heldVars, alive, turn, pipe, cOpen, asked, respond, otherTools, driverVars,
+  /\ UNCHANGED <<heldVars, alive, turn, pipe, cOpen, asked, starting, otherTools, driverVars,
                  live, procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
                  interrupts, droppedStop>>
 
 CodexExit ==
   /\ alive /\ exits < MaxExits
   /\ alive' = FALSE /\ busy' = FALSE /\ cOpen' = {} /\ pipe' = <<>> /\ queue' = <<>>
-  /\ respond' = {}
+  /\ starting' = {}
   /\ out' = Append(out, <<"eof">>)
   /\ exits' = exits + 1
   /\ UNCHANGED <<heldVars, turn, asked, otherTools, driverVars, live, procs, inTurn, stored,
@@ -246,13 +257,15 @@ CodexExit ==
 
 (* ---- read_and_wait -> route_incoming -> Translator ---- *)
 
+Notices == {"turnStarted", "userMsg", "turnCompleted", "toolResult", "srvResolved"}
+
 DriverRead ==
   /\ out /= <<>>
   /\ LET line == Head(out) IN
      /\ out' = Tail(out)
      /\ CASE line[1] = "startOk" ->
-               \* the spawned turn/start task sets requested_turn from the response
-               dReq' = line[2] /\ UNCHANGED <<dActive, waiting, pending, bus>>
+               \* the reader hands the response to the spawned turn/start task (StartTask)
+               dTask' = dTask \cup {line[2]} /\ UNCHANGED <<dActive, dReq, waiting, pending, bus>>
           [] line[1] = "turnStarted" ->
                dActive' = line[2] /\ UNCHANGED <<dReq, waiting, pending, bus>>
           [] line[1] = "userMsg" ->
@@ -289,9 +302,28 @@ DriverRead ==
           [] line[1] = "eof" ->
                \* replies still pending fail; their tasks' events trail Exited, which ends the relay
                bus' = Append(bus, <<"exited">>) /\ UNCHANGED <<dActive, dReq, waiting, pending>>
-  /\ UNCHANGED <<heldVars, alive, busy, turn, pipe, queue, cOpen, asked, respond, otherTools,
-                 stdinOpen, live, procs, exits, inTurn, stored, viewVars, accepted, failed,
+     /\ IF line[1] = "startOk" THEN TRUE ELSE UNCHANGED dTask
+     \* the refused turn/start's task: turn_start_answered
+     /\ dStarts' = IF line[1] = "startErr" THEN dStarts - 1 ELSE dStarts
+     /\ CASE line[1] \in Notices /\ dIntr /\ dActive' /= 0 ->
+               \* route_incoming, after a notification: the stop that waited for turn/started
+               /\ dIntr' = FALSE
+               /\ IF stdinOpen THEN WriteOk(<<"interrupt", dActive'>>) ELSE UNCHANGED <<pipe, stdinOpen>>
+          [] line[1] = "startErr" /\ dStarts' = 0 /\ dActive = 0 /\ dReq = 0 ->
+               dIntr' = FALSE /\ UNCHANGED <<pipe, stdinOpen>>
+          [] OTHER -> UNCHANGED <<dIntr, pipe, stdinOpen>>
+  /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools,
+                 live, procs, exits, inTurn, stored, viewVars, accepted, failed,
                  delivered, interrupts, droppedStop>>
+
+\* The turn/start task send_user_turn spawned runs once the reader handed it the response,
+\* at any later point: turn_start_answered sets requested_turn.
+StartTask ==
+  /\ \E t \in dTask :
+       /\ dTask' = dTask \ {t} /\ dReq' = t /\ dStarts' = dStarts - 1
+  /\ UNCHANGED <<heldVars, codexVars, dActive, waiting, pending, stdinOpen, bus, dIntr, live,
+                 procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
+                 interrupts, droppedStop>>
 
 (* ---- spawn_relay + ActorState::handle_event, and the desktop's applyEvent ---- *)
 
@@ -329,8 +361,8 @@ Relay ==
                  [] ev[1] = "exited" -> held \ toldSet
                  [] OTHER -> held
      /\ failed' = IF ev[1] = "exited" THEN failed \cup (held \cap toldSet) ELSE failed
-  /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, procs, exits,
-                 clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop>>
+  /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, dStarts, dIntr, dTask,
+                 procs, exits, clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop>>
 
 \* A tail read: list_turns re-sends the stored asks pending_requests names; settleUnwaitedAsks
 \* closes the rest.
@@ -348,10 +380,11 @@ ClientResume ==
       lost == held \cap resent
   IN
   /\ ~vLive /\ ~live /\ procs < MaxProcs
-  /\ alive' = TRUE /\ busy' = FALSE /\ queue' = <<>> /\ cOpen' = {} /\ respond' = {}
+  /\ alive' = TRUE /\ busy' = FALSE /\ queue' = <<>> /\ cOpen' = {} /\ starting' = {}
   /\ pipe' = SetToSeq({<<"start", m>> : m \in again})
   /\ out' = <<>>
   /\ dActive' = 0 /\ dReq' = 0 /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
+  /\ dStarts' = Cardinality(again) /\ dIntr' = FALSE /\ dTask' = {}
   /\ bus' = <<<<"relaunched">>>> \o SetToSeq({<<"echo", m>> : m \in again})
   /\ live' = TRUE /\ procs' = procs + 1 /\ vLive' = TRUE
   /\ held' = again /\ resent' = resent \cup again
@@ -362,8 +395,8 @@ ClientResume ==
 (* ---- the rules ---- *)
 
 Quiet ==
-  /\ out = <<>> /\ bus = <<>>
-  /\ alive => (~busy /\ pipe = <<>> /\ queue = <<>> /\ respond = {})
+  /\ out = <<>> /\ bus = <<>> /\ dTask = {}
+  /\ alive => (~busy /\ pipe = <<>> /\ queue = <<>> /\ starting = {})
 
 Done == Quiet /\ UNCHANGED vars
 
@@ -372,8 +405,8 @@ Next ==
   \/ \E m \in Agent : AgentSend(m)
   \/ \E r \in Asks : ClientAnswer(r) \/ CodexAsk(r)
   \/ Interrupt
-  \/ CodexRead \/ CodexRespond \/ CodexOtherTool \/ CodexCommitSteer \/ CodexFinish \/ CodexExit
-  \/ DriverRead \/ Relay \/ ClientReload \/ ClientResume \/ Done
+  \/ CodexRead \/ CodexBegin \/ CodexOtherTool \/ CodexCommitSteer \/ CodexFinish \/ CodexExit
+  \/ DriverRead \/ StartTask \/ Relay \/ ClientReload \/ ClientResume \/ Done
 
 Spec == Init /\ [][Next]_vars
 
@@ -415,6 +448,7 @@ InterruptHonored == ~droppedStop
 TypeOK ==
   /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ turn \in Nat
   /\ cOpen \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
+  /\ starting \subseteq Msgs /\ dStarts \in Nat /\ dIntr \in BOOLEAN /\ dTask \subseteq Nat
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs

@@ -325,7 +325,7 @@ impl CodexDriver {
             .state
             .lock()
             .ok()
-            .and_then(|s| s.active_turn.clone().or_else(|| s.requested_turn.clone()));
+            .and_then(|s| s.running_turn().map(str::to_string));
         if let (Some(turn), Some(client)) = (running, client_message_id) {
             return self.steer(&turn, client, text, echo);
         }
@@ -344,36 +344,33 @@ impl CodexDriver {
             thread_model.as_deref(),
         );
 
-        let rx = self.request_channel("turn/start", params)?;
+        let rpc_id = self.next_rpc_id();
+        if let Ok(mut s) = self.state.lock() {
+            s.pending_turn_starts.insert(rpc_id);
+        }
+        let rx = self.open_request(rpc_id, "turn/start", params)?;
         let events = self.events.clone();
         let state = self.state.clone();
         tokio::spawn(async move {
-            match rx.await {
-                Ok(Err(e)) => {
-                    let _ = events.send(SessionEvent::AssistantText {
-                        text: format!("⚠ Codex request failed: {e}"),
-                        parent_id: None,
-                        injected: false,
-                        auth_required: false,
-                    });
-                    let _ = events.send(SessionEvent::TurnDone {
-                        cost_usd: None,
-                        num_turns: None,
-                        context_tokens: None,
-                        turn_status: Some("failed".into()),
-                        thread_tokens: None,
-                    });
-                }
-                Ok(Ok(result)) => {
-                    let id = result
-                        .get("turn")
-                        .and_then(|t| t.get("id"))
-                        .and_then(Value::as_str);
-                    if let (Some(id), Ok(mut s)) = (id, state.lock()) {
-                        s.requested_turn = Some(id.to_string());
-                    }
-                }
-                Err(_) => {}
+            let Ok(reply) = rx.await else { return };
+            let turn = reply.as_ref().ok().and_then(|r| r.pointer("/turn/id"));
+            if let Ok(mut s) = state.lock() {
+                s.turn_start_answered(rpc_id, turn.and_then(Value::as_str));
+            }
+            if let Err(e) = reply {
+                let _ = events.send(SessionEvent::AssistantText {
+                    text: format!("⚠ Codex request failed: {e}"),
+                    parent_id: None,
+                    injected: false,
+                    auth_required: false,
+                });
+                let _ = events.send(SessionEvent::TurnDone {
+                    cost_usd: None,
+                    num_turns: None,
+                    context_tokens: None,
+                    turn_status: Some("failed".into()),
+                    thread_tokens: None,
+                });
             }
         });
         Ok(())
@@ -487,11 +484,13 @@ impl CodexDriver {
     }
 
     pub fn interrupt(&self) -> Result<()> {
-        let turn_id = self
-            .state
-            .lock()
-            .ok()
-            .and_then(|s| s.active_turn.clone().or_else(|| s.requested_turn.clone()));
+        let turn_id = self.state.lock().ok().and_then(|mut s| {
+            let starting = s.requested_turn.is_some() || !s.pending_turn_starts.is_empty();
+            if s.active_turn.is_none() && starting {
+                s.deferred_interrupt = Some(self.next_rpc_id());
+            }
+            s.active_turn.clone()
+        });
         let Some(turn_id) = turn_id else {
             return Ok(());
         };
@@ -912,13 +911,17 @@ fn route_incoming(
             false
         }
         Incoming::Notification { method, params } => {
-            let (closes_root, out) = match state.lock() {
+            let (closes_root, out, stop) = match state.lock() {
                 Ok(mut s) => (
                     method == "thread/closed" && !s.is_child_thread(&params),
                     s.notification(&method, &params),
+                    s.started_turn_interrupt(),
                 ),
-                Err(_) => (method == "thread/closed", Vec::new()),
+                Err(_) => (method == "thread/closed", Vec::new(), None),
             };
+            if let Some(stop) = stop {
+                write_line(stdin_tx, stop);
+            }
             for event in out {
                 let _ = events.send(event);
             }
@@ -954,9 +957,12 @@ fn auto_decline(stdin_tx: &mpsc::WeakUnboundedSender<String>, id: &Value, method
         }),
         _ => json!({}),
     };
-    let line = format!("{}\n", json!({ "id": id, "result": result }));
+    write_line(stdin_tx, json!({ "id": id, "result": result }));
+}
+
+fn write_line(stdin_tx: &mpsc::WeakUnboundedSender<String>, value: Value) {
     if let Some(tx) = stdin_tx.upgrade() {
-        let _ = tx.send(line);
+        let _ = tx.send(format!("{value}\n"));
     }
 }
 
@@ -1655,6 +1661,114 @@ mod tests {
                 request_id: "th:exec-2".into(),
                 allow: true,
             }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stop_before_codex_starts_the_turn_interrupts_it_once_started() {
+        let mut state = Translator::default();
+        state.set_root_thread_id("t1".into());
+        let (driver, mut codex) = fake_driver(true, state);
+        let feed = |line: String| {
+            route_incoming(
+                decode_line(&line).expect("a JSON-RPC line"),
+                &driver.events,
+                &driver.pending,
+                &driver.state,
+                &driver.stdin_tx.downgrade(),
+            );
+        };
+        let mut written = || -> Vec<Value> {
+            std::iter::from_fn(|| codex.requests.try_recv().ok())
+                .map(|line| serde_json::from_str(line.trim()).unwrap())
+                .collect()
+        };
+        let accepted = |start: &Value, turn: &str| {
+            format!(
+                r#"{{"id":{},"result":{{"turn":{{"id":"{turn}","status":"inProgress"}}}}}}"#,
+                start["id"]
+            )
+        };
+        let started = |turn: &str| {
+            format!(
+                r#"{{"method":"turn/started","params":{{"threadId":"t1","turn":{{"id":"{turn}","status":"inProgress"}}}}}}"#
+            )
+        };
+        let completed = |turn: &str| {
+            format!(
+                r#"{{"method":"turn/completed","params":{{"threadId":"t1","turn":{{"id":"{turn}","status":"interrupted","error":null}}}}}}"#
+            )
+        };
+        let interrupt_of = |turn: &str| {
+            vec![(
+                json!("turn/interrupt"),
+                json!({ "threadId": "t1", "turnId": turn }),
+            )]
+        };
+        let stops = |lines: Vec<Value>| -> Vec<(Value, Value)> {
+            lines
+                .into_iter()
+                .map(|line| (line["method"].clone(), line["params"].clone()))
+                .collect()
+        };
+        let none = Vec::<(Value, Value)>::new();
+
+        driver.interrupt().unwrap();
+        assert_eq!(stops(written()), none, "nothing runs to stop");
+
+        driver
+            .send_user_turn("write a story", None, None, Some("c1"))
+            .unwrap();
+        let start = written();
+        driver.interrupt().unwrap();
+        feed(accepted(&start[0], "turn-1"));
+        tokio::task::yield_now().await;
+        assert_eq!(
+            stops(written()),
+            none,
+            "codex refuses a stop before turn/started"
+        );
+        feed(started("turn-1"));
+        assert_eq!(stops(written()), interrupt_of("turn-1"));
+        feed(completed("turn-1"));
+
+        driver
+            .send_user_turn("again", None, None, Some("c2"))
+            .unwrap();
+        let start = written();
+        feed(accepted(&start[0], "turn-2"));
+        tokio::task::yield_now().await;
+        driver.interrupt().unwrap();
+        assert_eq!(
+            stops(written()),
+            none,
+            "codex refuses a stop before turn/started"
+        );
+        feed(started("turn-2"));
+        assert_eq!(stops(written()), interrupt_of("turn-2"));
+        feed(completed("turn-2"));
+
+        driver
+            .send_user_turn("refused", None, None, Some("c3"))
+            .unwrap();
+        let refused = written();
+        driver.interrupt().unwrap();
+        feed(format!(
+            r#"{{"id":{},"error":{{"code":-32600,"message":"no"}}}}"#,
+            refused[0]["id"]
+        ));
+        tokio::task::yield_now().await;
+        driver
+            .send_user_turn("once more", None, None, Some("c4"))
+            .unwrap();
+        let start = written();
+        feed(accepted(&start[0], "turn-4"));
+        tokio::task::yield_now().await;
+        feed(started("turn-4"));
+        assert_eq!(
+            stops(written()),
+            none,
+            "a refused turn's stop is not carried over"
         );
     }
 }

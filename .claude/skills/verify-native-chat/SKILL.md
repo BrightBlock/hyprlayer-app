@@ -23,10 +23,13 @@ the same) and the same rule names, so each rule is checked per provider.
   exit, asks closed by an answer or by their tool's result, reloads, resume).
 - `CodexTurns.tla` covers one codex app-server session: `CodexDriver`'s
   `send_user_turn` (a steer into the turn it knows of, else an echo and
-  `turn/start`), `interrupt` (needs a turn id), `respond_permission`, and the
+  `turn/start`), `interrupt` (sends only for the turn `turn/started` named;
+  before that the stop waits for it), `respond_permission`, and the
   Translator's `active_turn`, `requested_turn` (set by the `turn/start`
-  task), `steering` and `pending_approvals`; codex reading requests, writing
-  the `turn/start` response at any point after it starts the turn, asking,
+  task), `pending_turn_starts`, `deferred_interrupt`, `steering` and
+  `pending_approvals`; codex reading requests, answering a `turn/start` as it
+  accepts the turn and beginning it (`turn/started`) a step later, refusing
+  an interrupt until then, asking,
   committing steers at its next step, and settling its own approvals on an
   interrupt (`serverRequest/resolved` after `turn/completed`); and the shared
   relay, actor and desktop, where a codex ask names the call it gates
@@ -80,7 +83,7 @@ Results at the sync commit, per provider (`expected.txt`):
 | `AskResolution` | PASS | PASS | FAIL |
 | `AskVisible` | PASS | PASS | FAIL |
 | `InterruptSafe` | PASS | FAIL | FAIL |
-| `InterruptHonored` | PASS | FAIL | FAIL |
+| `InterruptHonored` | PASS | PASS | FAIL |
 
 ## Run it
 
@@ -252,13 +255,12 @@ scratch delay (the PR that fixed them has the evidence).
    same way.
 8. **codex `TurnProgress`, `InterruptSafe`: a stale `requested_turn` (model only).**
    The `turn/start` task sets `requested_turn` from the response whenever it
-   runs, after any `turn/completed` that cleared it: codex writing the response
-   after a short turn's notifications, or the task merely scheduled late. The
-   driver then believes a turn runs: the next message is sent as `turn/steer`
-   into the finished turn and declined (a direct send keeps no chip, so it is
-   lost; finding 9), and an interrupt targets the dead turn. Shortest path
-   (10 steps): you send, codex starts and finishes the turn, its response
-   trails `turn/completed`.
+   runs, after any `turn/completed` the reader already handled. The driver
+   then believes a turn runs: the next message is sent as `turn/steer` into
+   the finished turn and declined, and a stop waits for a `turn/started`
+   that only the next turn sends. Shortest path (11 steps): you send, codex
+   answers, starts and finishes the turn, the reader reads all of it, then
+   the task runs (`StartTask`).
 9. **Fixed: codex `NoLostUserMessage` (model only).** The shortest path (4
    steps) was claude's exit window from finding 2: codex exits, `Exited` is
    broadcast, you send before the relay drops the driver; the echo trails
@@ -284,11 +286,24 @@ scratch delay (the PR that fixed them has the evidence).
     matches a card by `tool_use_id` when it has one. An MCP tool approval
     names no call and is still matched by its `mcp__` name (outside the
     model).
-11. **codex `InterruptHonored` (model only): stop before the driver knows the turn id is dropped.**
-    `CodexDriver::interrupt` returns Ok and sends nothing when neither
-    `active_turn` nor `requested_turn` is set: from `turn/start` until its
-    response or `turn/started` is read. Shortest path (2 steps): you send,
-    you press stop.
+11. **Fixed: codex `InterruptHonored`: a stop before codex started the turn was dropped.**
+    Reproduced live on the Mac debug app (codex 0.170, gpt-6.2-sol):
+    `interrupt_session` 16 ms after `send_user_message` was dropped and the
+    turn ran to completion (about 41 s). `CodexDriver::interrupt` returned
+    Ok and sent nothing when neither `active_turn` nor `requested_turn` was
+    set: from `turn/start` until its response or `turn/started` is read
+    (2 steps: you send, you press stop). A turn id alone is not enough:
+    codex 0.171 refuses a `turn/interrupt` sent after the `turn/start`
+    response and before `turn/started` ("no active turn to interrupt",
+    probe p13) and runs the turn to `completed`; a first fix that sent the
+    stop on the response's id failed live that way (13 ms, a 30 s turn), and
+    the model now has codex refuse it. Fixed: `interrupt` sends at once only
+    for `active_turn`. Before it, while a `turn/start` is unanswered
+    (`pending_turn_starts`) or its response named the turn
+    (`requested_turn`), the stop reserves an rpc id (`deferred_interrupt`)
+    and `route_incoming` sends `turn/interrupt` right after the
+    `turn/started` it reads; a refused `turn/start` that leaves no turn and
+    no other start drops the waiting stop.
 12. **OpenCode `TurnProgress`, `AskResolution`: a server death is never reported.**
     `TurnProgress` reproduced live by the interrogate workstream: with `opencode
     serve` killed mid-turn (a Bash call sleeping 90 s), the turn never ends and
@@ -388,9 +403,9 @@ turn, what closes an ask, or what reports the server's death.
 |---|---|
 | `SendServer`, `WriteOk` | `CodexDriver::send_user_turn`, codex/driver.rs:310 (`active_turn` or `requested_turn`: `steer`, 382, with the echo in `steering`, protocol.rs:187; none: echo, then `turn/start`), `write`, 639, `write_loop`, 807 |
 | `ClientAnswer` | `respond_permission`, codex/driver.rs:439 (an id not in `pending_approvals` returns Ok and writes nothing) |
-| `Interrupt` | `CodexDriver::interrupt`, codex/driver.rs:489 (no turn id: returns Ok, sends nothing) |
-| `CodexRead`, `CodexRespond`, `CodexAsk`, `CodexOtherTool`, `CodexCommitSteer`, `CodexFinish`, `CodexExit` | codex app-server's own behaviour (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: the `turn/start` task sets `requested_turn`, 373; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `serverRequest/resolved` → `settle` (drops the approval with that rpc id, `PermissionResolved {allow: false}`); `Exited`, driver.rs:889 |
+| `Interrupt` | `CodexDriver::interrupt` (`active_turn`: sends `turn/interrupt`; none while `requested_turn` is set or `pending_turn_starts` is not empty: reserves `deferred_interrupt`; neither: returns Ok, sends nothing) |
+| `CodexRead`, `CodexBegin`, `CodexAsk`, `CodexOtherTool`, `CodexCommitSteer`, `CodexFinish`, `CodexExit` | codex app-server's own behaviour (see the assumptions below) |
+| `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: a `turn/start` response goes to the task `send_user_turn` spawned (`StartTask`), whose `turn_start_answered` sets `requested_turn` and drops the rpc id from `pending_turn_starts` (and `deferred_interrupt` when a refusal leaves no turn and no other start); after each notification, `started_turn_interrupt` sends the deferred stop once `turn/started` named the turn; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `serverRequest/resolved` → `settle` (drops the approval with that rpc id, `PermissionResolved {allow: false}`); `Exited`, driver.rs:889 |
 | `Relay` | as `SessionTurns`, with `settleAnsweredPrompt`, transcript.ts:403, deciding a codex card by its `tool_use_id`, the approval's `itemId` (`gated_call` in codex/protocol.rs) |
 | `ClientResume` | `thread/resume` in a fresh app-server and driver, then `held::resend` |
 
@@ -475,10 +490,12 @@ attachment together).
 - Assumptions about codex app-server: `turn/start` while a turn runs is
   refused (an error response); a steer is accepted only into the running turn
   it names; codex drops steers it never committed when the turn ends (the
-  driver's own comment); on `turn/interrupt` it settles its open approvals,
+  driver's own comment); it answers `turn/start` as it accepts the turn and
+  sends `turn/started` after that (all 26 captured turns, 4 to 33 ms later),
+  and refuses `turn/interrupt` in between ("no active turn to interrupt",
+  probe p13); on `turn/interrupt` it settles its open approvals,
   writes `turn/completed` and then `serverRequest/resolved` for each, and
-  may or may not complete their items; the `turn/start` response may trail
-  the turn's notifications. The self-settled approval and its
+  may or may not complete their items. The self-settled approval and its
   `serverRequest/resolved` after `turn/completed` are confirmed against
   codex 0.171 (the interrogate workstream's probes p1, p4, p8a).
 - Assumptions about OpenCode: a prompt POSTed while busy runs after the
@@ -565,6 +582,11 @@ wrong: fix the action, re-run, and say what you changed.
    - `CodexTurns.AskVisible`: `Relay` closes the newest open card on any
      tool result (by name, the code before the fix): 11 steps, a Bash call
      that asked nothing finishes while another waits on its approval.
+   - `CodexTurns.InterruptHonored`: `Interrupt` sends on any turn id it
+     knows (`requested_turn` too) and waits only when it knows none (the
+     first fix): 6 steps, an agent's message, codex answers the
+     `turn/start`, the task stores the id, stop, codex refuses the
+     interrupt before `turn/started`.
    - `CodexTurns.NoDoubleSend`: codex keeps an uncommitted steer across the
      end of its turn and commits it later, while the driver declines it.
    - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`: `send_user_turn`

@@ -15,7 +15,7 @@ FAIL CodexTurns.TurnProgress
 PASS CodexTurns.AskResolution
 PASS CodexTurns.AskVisible
 FAIL CodexTurns.InterruptSafe
-FAIL CodexTurns.InterruptHonored
+PASS CodexTurns.InterruptHonored
 PASS OpenCodeTurns.TypeOK
 PASS OpenCodeTurns.NoLostUserMessage
 PASS OpenCodeTurns.NoLostAgentMessage
