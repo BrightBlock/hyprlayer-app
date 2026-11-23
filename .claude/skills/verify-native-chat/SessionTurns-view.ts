@@ -35,6 +35,7 @@ const labels: Record<string, string> = {
   ClaudeExit: "claude exits",
   DriverRead: "the server reads claude's output",
   Relay: "the server stores the event",
+  RelayResend: "the server sends a dropped message again",
   ClientRecv: "the app receives the event",
   ClientReload: "the app reloads the transcript",
   ClientResume: "you resume the session",

@@ -938,6 +938,34 @@ async fn agent_spawn_and_message() {
         json!({ "sent": held_crash, "exited": exited, "senderTold": report, "loggedAsRead": logged }),
     );
 
+    j.step("a message its harness dropped when the turn ended is sent as the next turn");
+    let dropper = start_session(&mut j, &c, &ws, "Dropper", "$DROPPER").await;
+    control_for(&sandbox, &dropper, "queue-drop", "2");
+    let held_drop = hold_a_message(&c, &sandbox, &mut lead_mcp, &dropper, "E2E_HELD_DROP").await;
+    let reread = eventually(IO, || {
+        stub_user_lines(&sandbox, &dropper)
+            .iter()
+            .filter(|w| w.ends_with("E2E_HELD_DROP"))
+            .count()
+            == 2
+    })
+    .await;
+    let mut stored = 0;
+    let deadline = tokio::time::Instant::now() + IO;
+    while stored == 0 && tokio::time::Instant::now() < deadline {
+        stored = user_turns(&c, &dropper)
+            .await
+            .iter()
+            .filter(|t| t.0 == format!("agent:{lead}") && t.2.ends_with("E2E_HELD_DROP"))
+            .count();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    j.guard(
+        "the harness reads it again as a turn of its own, and the log holds it once, from its sender",
+        held_drop && reread && stored == 1,
+        json!({ "sent": held_drop, "readAgain": reread, "storedTimes": stored }),
+    );
+
     j.step("a message its harness held when the server stopped is set up");
     let keeper = start_session(&mut j, &c, &ws, "Keeper", "$KEEPER").await;
     control_for(&sandbox, &keeper, "queue", "2");

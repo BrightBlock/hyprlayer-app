@@ -482,6 +482,20 @@
       "guards": [
         {
           "evidence": {
+            "readAgain": true,
+            "sent": true,
+            "storedTimes": 1
+          },
+          "guard": "the harness reads it again as a turn of its own, and the log holds it once, from its sender",
+          "ok": true
+        }
+      ],
+      "step": "a message its harness dropped when the turn ended is sent as the next turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "held": true
           },
           "guard": "the keeper's harness holds the message mid-turn",

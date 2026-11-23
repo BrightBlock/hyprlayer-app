@@ -84,30 +84,75 @@ pub(super) async fn resend(rt: &HyprlayerRuntime, session_id: &str, driver: &dyn
         "it was sent again after the session restarted, and the session stopped again before reading it",
     );
     for held in resend {
-        let reserved = rt
-            .session_actors
-            .reserve_user_turn(
-                session_id,
-                held.nonce.clone(),
-                None,
-                held.author.clone(),
-                false,
-            )
-            .await;
-        let sent = reserved.and_then(|()| {
-            driver.send_user_turn(
-                &held.text,
-                None,
-                held.prompt_name.as_deref(),
-                Some(&held.nonce),
-            )
-        });
-        match sent {
-            Ok(()) => tracing::info!("session {session_id}: resent a message it held at exit"),
-            Err(e) => {
-                tracing::warn!("session {session_id}: a held message was not resent: {e}");
-                report(rt, vec![held], "the relaunched session refused it");
+        send_again(
+            rt,
+            session_id,
+            driver,
+            held,
+            "the relaunched session refused it",
+        )
+        .await;
+    }
+}
+
+pub(super) async fn send_dropped(rt: &HyprlayerRuntime, session_id: &str, nonces: Vec<String>) {
+    let Some(driver) = rt.session_registry.get(session_id).await else {
+        return;
+    };
+    let (db, sid) = (rt.db.clone(), session_id.to_string());
+    let held = match blocking(move || db.held_messages(&sid)).await {
+        Ok(held) => held,
+        Err(e) => {
+            tracing::warn!("session {session_id}: its held messages were not read: {e}");
+            return;
+        }
+    };
+    for held in held.into_iter().filter(|h| nonces.contains(&h.nonce)) {
+        send_again(
+            rt,
+            session_id,
+            driver.as_ref(),
+            held,
+            "the session dropped it unread and then refused it",
+        )
+        .await;
+    }
+}
+
+async fn send_again(
+    rt: &HyprlayerRuntime,
+    session_id: &str,
+    driver: &dyn AgentDriver,
+    held: HeldMessage,
+    refused: &str,
+) {
+    let reserved = rt
+        .session_actors
+        .reserve_user_turn(
+            session_id,
+            held.nonce.clone(),
+            None,
+            held.author.clone(),
+            false,
+        )
+        .await;
+    let sent = reserved.and_then(|()| {
+        driver.send_user_turn(
+            &held.text,
+            None,
+            held.prompt_name.as_deref(),
+            Some(&held.nonce),
+        )
+    });
+    match sent {
+        Ok(()) => tracing::info!("session {session_id}: sent a held message again"),
+        Err(e) => {
+            tracing::warn!("session {session_id}: a held message was not sent again: {e}");
+            // One no one would hear about waits for the next relaunch instead.
+            if held.sender.is_some() {
+                release(rt, session_id, &held.nonce).await;
             }
+            report(rt, vec![held], refused);
         }
     }
 }

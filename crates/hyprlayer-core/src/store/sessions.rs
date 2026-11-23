@@ -1355,6 +1355,10 @@ impl Db {
         })
     }
 
+    pub fn held_messages(&self, session_id: &str) -> Result<Vec<HeldMessage>> {
+        self.with(|conn| held_rows(conn, session_id))
+    }
+
     pub fn held_session_ids(&self) -> Result<Vec<String>> {
         self.with(|conn| {
             let mut stmt = conn.prepare("SELECT DISTINCT session_id FROM held_messages")?;

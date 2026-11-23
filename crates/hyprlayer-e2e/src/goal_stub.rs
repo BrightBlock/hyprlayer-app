@@ -11,8 +11,8 @@ use crate::Sandbox;
 /// for the reply; `ask` streams a parallel call's second `tool_use` and a subagent's text and
 /// tool result while pending), `crash` / `crash-once` (`exit 1` mid-turn; `-once` deletes itself),
 /// `crash-after` (`exit 1` after the turn's result), `queue` (take the turn's message in, start a
-/// tool, report the next message as queued and wait for the end of stdin) and `queue-crash` (as
-/// `queue`, then `exit 1`).
+/// tool, report the next message as queued and wait for the end of stdin), `queue-crash` (as
+/// `queue`, then `exit 1`) and `queue-drop` (as `queue`, then cancel that message and end the turn).
 /// `slow-exit` is read at launch, and so is `noinit`, under which the launch reports no init and
 /// answers nothing; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
 /// and, on an optional second line, the turn that ticks every box in it. Launches log to `argv.log`
@@ -148,7 +148,7 @@ while IFS= read -r line; do
     result success false 1 ',"terminal_reason":"aborted_streaming"'
     continue
   fi
-  if ctl queue || ctl queue-crash; then
+  if ctl queue || ctl queue-crash || ctl queue-drop; then
     lifecycle() {
       printf '{"type":"command_lifecycle","command_uuid":"%s","state":"%s"}\n' \
         "$(printf '%s' "$1" | sed -n 's/.*"uuid":"\([^"]*\)".*/\1/p')" "$2"
@@ -160,6 +160,11 @@ while IFS= read -r line; do
       case "$next" in *'"type":"user"'*) lifecycle "$next" queued; break ;; esac
     done
     ctl queue-crash && exit 1
+    if ctl queue-drop; then
+      lifecycle "$next" cancelled
+      result success false 1 ""
+      continue
+    fi
     cat >/dev/null
     exit 0
   fi

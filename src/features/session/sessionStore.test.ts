@@ -21,6 +21,7 @@ const h = vi.hoisted(() => {
     };
   });
   const sendUserMessage = vi.fn(async () => ({ status: "ok", data: null }));
+  const cancelQueuedMessage = vi.fn(async () => ({ status: "ok", data: false }));
   // A ResumedSession whose harness is unknown, so a busy send queues for the turn's end.
   const RESUMED = { session: {}, permissionMode: null };
   const resumeSession = vi.fn(async () => ({ status: "ok", data: RESUMED }));
@@ -67,6 +68,7 @@ const h = vi.hoisted(() => {
     state,
     startStageSession,
     sendUserMessage,
+    cancelQueuedMessage,
     RESUMED,
     resumeSession,
     interruptSession,
@@ -94,6 +96,7 @@ vi.mock("../../lib/bindings", () => ({
   commands: {
     startStageSession: h.startStageSession,
     sendUserMessage: h.sendUserMessage,
+    cancelQueuedMessage: h.cancelQueuedMessage,
     resumeSession: h.resumeSession,
     interruptSession: h.interruptSession,
     killSession: h.killSession,
@@ -539,6 +542,78 @@ describe("parked-turn recovery (permission mode change / stop)", () => {
     const entry = entryOf(id);
     expect(entry.pendingPermission).toBeNull();
     expect(isBusy(entry)).toBe(false);
+  });
+
+  describe("a message the harness never took in", () => {
+    const INTERRUPTED = { ...TURN_DONE, turnStatus: "interrupted" } as SessionEvent;
+    const dropped = (id: string): SessionEvent => ({ kind: "commandLifecycle", commandUuid: id, state: "cancelled" });
+    const sends = () => (h.sendUserMessage.mock.calls as unknown[][]).map((c) => c[1]);
+    const lastSendId = () => (h.sendUserMessage.mock.lastCall as unknown[])[4] as string;
+    const shown = (id: string) => entryOf(id).items.flatMap((it) => (it.kind === "user" ? [it.text] : []));
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    const on = (id: string, harness: "codex" | "opencode") =>
+      useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], harness } } }));
+
+    it("goes back to the composer on Stop when codex could not withdraw the steer", async () => {
+      const id = await startBusySession();
+      on(id, "codex");
+      emit(INIT);
+      emit(PERMISSION_ASK);
+      h.sendUserMessage.mockClear();
+      await sendMessage(id, "also run the tests", [], null, undefined, true);
+      const composer: string[] = [];
+
+      await stopSession(id, (messages) => composer.push(...messages.map((m) => m.text)));
+      emit({ kind: "permissionResolved", requestId: "req-1", allow: false });
+      emit(dropped(lastSendId()));
+      emit(INTERRUPTED);
+      await settle();
+
+      expect({ sends: sends(), composer, queued: queued(id), working: isWorking(entryOf(id)) }).toEqual({
+        sends: ["also run the tests"],
+        composer: ["also run the tests"],
+        queued: [],
+        working: false,
+      });
+    });
+
+    it("goes back to the composer on Stop when it was sent straight to a turn the harness was still running", async () => {
+      const id = await startBusySession();
+      on(id, "opencode");
+      emit(INIT);
+      emit(TURN_DONE);
+      await sendMessage(id, "and the docs");
+      const composer: string[] = [];
+
+      const stopping = stopSession(id, (messages) => composer.push(...messages.map((m) => m.text)));
+      emit(dropped(lastSendId()));
+      emit(INTERRUPTED);
+      await stopping;
+      await settle();
+
+      expect({ sends: sends(), composer, shown: shown(id), queued: queued(id) }).toEqual({
+        sends: ["and the docs"],
+        composer: ["and the docs"],
+        shown: ["kick off"],
+        queued: [],
+      });
+    });
+
+    it("is sent again once the turn ends when codex dropped a steer no one stopped", async () => {
+      const id = await startBusySession();
+      on(id, "codex");
+      emit(INIT);
+      h.sendUserMessage.mockClear();
+      await sendMessage(id, "also run the tests", [], null, undefined, true);
+      emit(dropped(lastSendId()));
+      emit(TURN_DONE);
+      await settle();
+
+      expect({ sends: sends(), queued: queued(id) }).toEqual({
+        sends: ["also run the tests", "also run the tests"],
+        queued: [],
+      });
+    });
   });
 
   function emitParallelAsks(): void {

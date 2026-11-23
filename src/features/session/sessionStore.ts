@@ -254,6 +254,7 @@ async function recapIfAway(sessionId: string, workstreamId: string, endedAt: num
 function forgetSession(sessionId: string): void {
   channels.delete(sessionId);
   held.delete(sessionId);
+  stopped.delete(sessionId);
   endBackfill(sessionId);
   armedResumes.delete(sessionId);
   forgetSync(sessionId);
@@ -484,9 +485,12 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
     nextEntry = settleUnechoed(nextEntry, new Set([event.clientMessageId]));
   }
   const handedBack = handedBackBy(event);
-  if (handedBack) nextEntry = undeliver(nextEntry, handedBack);
-  // A live relaunch follows its exit, which already handed these back; a later one may be this send's own resume.
-  if (handedBack && event.kind !== "relaunched") nextEntry = returnUnechoed(nextEntry, handedBack);
+  let returned: QueuedMessage[] = [];
+  if (handedBack) {
+    // A live relaunch follows its exit, which already handed these back; a later one may be this send's own resume.
+    const unechoed = event.kind !== "relaunched";
+    ({ entry: nextEntry, returned } = handBack(sessionId, nextEntry, handedBack, unechoed));
+  }
   if (synced) {
     if (seq !== null && seq > (nextEntry.appliedSeq ?? -1)) {
       nextEntry.appliedSeq = seq;
@@ -496,6 +500,7 @@ function applyEvent(sessionId: string, event: SessionEvent, synced: Routed | nul
   }
   setEntry(sessionId, nextEntry, { at });
   settled?.onSent?.();
+  if (returned.length > 0) stopped.get(sessionId)?.(returned);
   if (event.kind === "permissionModeChanged") {
     setSessionPermissionMode(current.workstreamId, sessionId, event.mode);
   }
@@ -539,6 +544,23 @@ function handedBackBy(event: SessionEvent): ((m: QueuedMessage) => boolean) | nu
     default:
       return null;
   }
+}
+
+// Set by Stop until the user sends again: what comes back meanwhile is theirs to edit, not to resend.
+const stopped = new Map<string, (messages: QueuedMessage[]) => void>();
+
+function handBack(
+  sessionId: string,
+  entry: SessionEntry,
+  which: (m: QueuedMessage) => boolean,
+  unechoed: boolean,
+): { entry: SessionEntry; returned: QueuedMessage[] } {
+  const chips = undeliver(entry, which);
+  const back = unechoed ? returnUnechoed(chips, which) : chips;
+  if (back === entry || !stopped.has(sessionId)) return { entry: back, returned: [] };
+  // Both put what they hand back in the queue as new objects.
+  const returned = back.queued.filter((m) => !entry.queued.includes(m));
+  return { entry: { ...back, queued: back.queued.filter((m) => !returned.includes(m)) }, returned };
 }
 
 /** Back to the local queue, which sends them once the session is idle. */
@@ -613,11 +635,12 @@ function settleFolded(sessionId: string): void {
   }
   next = settleUnechoed(next, stored);
   const settled = next;
-  const dropped = (m: QueuedMessage) => m.heldAfterSeq !== undefined && m.heldAfterSeq < ended;
-  next = returnUnechoed(undeliver(next, dropped), dropped);
+  const back = handBack(sessionId, next, (m) => m.heldAfterSeq !== undefined && m.heldAfterSeq < ended, true);
+  next = back.entry;
   if (next === entry) return;
   setEntry(sessionId, next);
   for (const chip of sent) chip.onSent?.();
+  if (back.returned.length > 0) stopped.get(sessionId)?.(back.returned);
   if (next !== settled) flushQueuedMessage(sessionId);
 }
 
@@ -1517,6 +1540,7 @@ export async function sendMessage(
 ): Promise<SendOutcome> {
   const current = entryOf(sessionId);
   if (!current) return "dropped";
+  stopped.delete(sessionId);
   if (channels.has(sessionId) && isBusy(current)) {
     const message: QueuedMessage = { text, attachments, promptName, onSent };
     if (steer && steersInto(current)) return steerMessage(sessionId, message);
@@ -1995,6 +2019,7 @@ export async function stopSession(
   returnQueued: (messages: QueuedMessage[]) => void,
 ): Promise<void> {
   if (!channels.has(sessionId)) return;
+  stopped.set(sessionId, returnQueued);
   if (entryOf(sessionId)?.queued.length) {
     const withdrawn = await withdrawQueued(sessionId);
     if (withdrawn.length > 0) returnQueued(withdrawn);

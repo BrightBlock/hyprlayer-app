@@ -41,6 +41,7 @@ const labels: Record<string, string> = {
   CodexExit: "codex exits",
   DriverRead: "the server reads codex's output",
   Relay: "the server stores the event",
+  RelayResend: "the server sends a dropped message again",
   ClientReload: "the app reloads the transcript",
   ClientResume: "you resume the session",
   Done: "everything settles",

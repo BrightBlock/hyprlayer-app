@@ -77,7 +77,7 @@ Results at the sync commit, per provider (`expected.txt`):
 | Rule | claude | codex | OpenCode |
 |---|---|---|---|
 | `NoLostUserMessage` | PASS | PASS | PASS |
-| `NoLostAgentMessage` | PASS | FAIL | PASS |
+| `NoLostAgentMessage` | PASS | PASS | PASS |
 | `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
 | `TurnProgress` | PASS | PASS | FAIL |
 | `AskResolution` | PASS | PASS | FAIL |
@@ -242,18 +242,26 @@ scratch delay (the PR that fixed them has the evidence).
    `PermissionResolved {allow: false}` or `QuestionAnswered`; an ask the user
    already answered is gone and emits nothing. `InterruptSafe` failed on
    finding 8's stale turn id until that was fixed too.
-7. **codex `NoLostAgentMessage`: a steer codex never commits is dropped while the session stays live.**
+7. **Fixed: codex `NoLostAgentMessage`: a steer codex never committed was dropped while the session stayed live.**
    The mechanism was reproduced live by the interrogate workstream (a steer
    codex drops on an interrupt is never resent or reported); the
    end-of-turn path below is model only. An agent's message to a busy session
    goes out as `turn/steer` with its echo in `steering` and the message in
    `held_messages`. If codex accepts it and then completes the turn before
    its next step, `turn/completed` runs `decline_steers`: a `cancelled`
-   `CommandLifecycle`, and no echo. The desktop's chip goes back to its queue
-   on that row, but nothing on the server reacts to it, so the agent's message
-   stays held, unread and untold, until the next relaunch. Shortest path (13
-   steps). A refused steer (`expectedTurnId` no longer running) declines the
-   same way.
+   `CommandLifecycle`, and no echo. Nothing on the server reacted to it, so
+   the agent's message stayed held, unread and untold, until the next
+   relaunch (13 steps). A refused steer (`expectedTurnId` no longer running)
+   declines the same way. The relay now keeps the ids cancelled during a
+   turn and, once that turn's `TurnDone` has gone to the actor, sends each
+   held one again as the next turn (`held::send_dropped`, `RelayResend`); a
+   refused resend is reported. e2e: `agent_spawn_and_message`, step "a
+   message its harness dropped when the turn ended is sent as the next
+   turn". The rule passes with finding 8 fixed, and fails again (14 steps)
+   with the resend removed; before finding 8's fix it still failed on that
+   finding's path, where the stale `requested_turn` made the agent's first
+   send a steer into a finished turn that codex refused with no `TurnDone`
+   after it.
 8. **Fixed: codex `TurnProgress`, `InterruptSafe`: a stale `requested_turn` (model only).**
    The `turn/start` task set `requested_turn` from the response whenever it
    ran, after any `turn/completed` the reader had already handled. The
@@ -426,7 +434,8 @@ turn, what closes an ask, or what reports the server's death.
 | `Interrupt` | `SessionService::interrupt`, service.rs:439 → driver.rs:433; `stopSession`, sessionStore.ts:1993 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below) |
 | `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
-| `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
+| `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, keeps the ids of `cancelled` lifecycles, sends each event on, after a `TurnDone` sends the held ones among those ids again (`RelayResend`) before reading on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867); `handBack`: after the desktop's Stop (`stopped`, set by `stopSession` and cleared by `sendMessage`) a handed-back chip goes to the composer (`"returned"`) instead of the queue |
+| `RelayResend` | `held::send_dropped` → `send_again`, held.rs: `reserve_user_turn` and `send_user_turn` with the held nonce; an Err reports a sender who can be told and drops its row, and keeps one no one would hear about |
 | `ClientReload` | `SessionService::list_turns`, service.rs:828 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
 | `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
 
@@ -661,8 +670,11 @@ wrong: fix the action, re-run, and say what you changed.
      once while the reply is open (the translator before `end_turn`): the
      stopped reply's last part lands after it and the desktop shows working
      (16 steps).
-   - `CodexTurns.NoLostAgentMessage` and the OpenCode FAILs fail today; once
-     one passes, add a break for it here.
+   - `CodexTurns.NoLostAgentMessage`: `Relay` never fills `resendDue`
+     (`send_dropped` gone), a 14-step path where codex ends the turn
+     without committing the agent's steer.
+   - The OpenCode FAILs fail today; once one passes, add a break for it
+     here.
 3. Run `check.sh`. Update `expected.txt` only for a rule whose verdict the
    change was meant to move, and say so in the PR.
 4. Move the sync commit (the hash in the `git diff` command above and below)

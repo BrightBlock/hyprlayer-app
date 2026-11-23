@@ -9,7 +9,7 @@ PASS SessionTurns.InterruptSafe
 PASS SessionTurns.InterruptHonored
 PASS CodexTurns.TypeOK
 PASS CodexTurns.NoLostUserMessage
-FAIL CodexTurns.NoLostAgentMessage
+PASS CodexTurns.NoLostAgentMessage
 PASS CodexTurns.NoDoubleSend
 PASS CodexTurns.TurnProgress
 PASS CodexTurns.AskResolution

@@ -2302,9 +2302,22 @@ fn spawn_relay(
     tokio::spawn(async move {
         // Revoked when the relay ends, not when this function returns.
         let _token = token;
+        let mut dropped = Vec::new();
         while let Some(event) = pending.recv().await {
             let rt = runtime.upgrade();
             let terminal = matches!(event, SessionEvent::Exited { .. });
+            // A harness drops a message ahead of its turn's end or its exit; a resend waits for the
+            // turn's end, since an exiting harness would take it and never read it.
+            if let SessionEvent::CommandLifecycle {
+                command_uuid,
+                state,
+            } = &event
+            {
+                if state == "cancelled" {
+                    dropped.push(command_uuid.clone());
+                }
+            }
+            let turn_ended = matches!(event, SessionEvent::TurnDone { .. });
             if let Some(rt) = &rt {
                 // Keeps a resume asking for the new mode from relaunching.
                 if let SessionEvent::PermissionModeChanged { mode } = event {
@@ -2326,6 +2339,11 @@ fn spawn_relay(
                 matches!(&event, SessionEvent::Exited { outcome, .. } if outcome.is_reportable());
             if ingress.send(event).await.is_err() {
                 break;
+            }
+            if turn_ended && !dropped.is_empty() {
+                if let Some(rt) = &rt {
+                    super::held::send_dropped(rt, &session_id, std::mem::take(&mut dropped)).await;
+                }
             }
             if terminal {
                 if let Some(rt) = &rt {
