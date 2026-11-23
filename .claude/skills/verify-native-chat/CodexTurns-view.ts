@@ -40,7 +40,6 @@ const labels: Record<string, string> = {
   CodexFinish: "codex finishes the turn",
   CodexExit: "codex exits",
   DriverRead: "the server reads codex's output",
-  StartTask: "the server's turn request task stores the turn id",
   Relay: "the server stores the event",
   ClientReload: "the app reloads the transcript",
   ClientResume: "you resume the session",

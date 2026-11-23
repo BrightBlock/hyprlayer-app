@@ -11,10 +11,10 @@ PASS CodexTurns.TypeOK
 PASS CodexTurns.NoLostUserMessage
 FAIL CodexTurns.NoLostAgentMessage
 PASS CodexTurns.NoDoubleSend
-FAIL CodexTurns.TurnProgress
+PASS CodexTurns.TurnProgress
 PASS CodexTurns.AskResolution
 PASS CodexTurns.AskVisible
-FAIL CodexTurns.InterruptSafe
+PASS CodexTurns.InterruptSafe
 PASS CodexTurns.InterruptHonored
 PASS OpenCodeTurns.TypeOK
 PASS OpenCodeTurns.NoLostUserMessage

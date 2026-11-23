@@ -350,14 +350,8 @@ impl CodexDriver {
         }
         let rx = self.open_request(rpc_id, "turn/start", params)?;
         let events = self.events.clone();
-        let state = self.state.clone();
         tokio::spawn(async move {
-            let Ok(reply) = rx.await else { return };
-            let turn = reply.as_ref().ok().and_then(|r| r.pointer("/turn/id"));
-            if let Ok(mut s) = state.lock() {
-                s.turn_start_answered(rpc_id, turn.and_then(Value::as_str));
-            }
-            if let Err(e) = reply {
+            if let Ok(Err(e)) = rx.await {
                 let _ = events.send(SessionEvent::AssistantText {
                     text: format!("⚠ Codex request failed: {e}"),
                     parent_id: None,
@@ -1769,6 +1763,67 @@ mod tests {
             stops(written()),
             none,
             "a refused turn's stop is not carried over"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_ended_is_not_steered_into_or_interrupted() {
+        let mut state = Translator::default();
+        state.set_root_thread_id("t1".into());
+        let (driver, mut codex) = fake_driver(true, state);
+        let feed = |line: String| {
+            route_incoming(
+                decode_line(&line).expect("a JSON-RPC line"),
+                &driver.events,
+                &driver.pending,
+                &driver.state,
+                &driver.stdin_tx.downgrade(),
+            );
+        };
+        let mut written = || -> Vec<Value> {
+            std::iter::from_fn(|| codex.requests.try_recv().ok())
+                .map(|line| serde_json::from_str(line.trim()).unwrap())
+                .collect()
+        };
+
+        driver
+            .send_user_turn("hello", None, None, Some("c1"))
+            .unwrap();
+        let start = written();
+        feed(format!(
+            r#"{{"id":{},"result":{{"turn":{{"id":"turn-1","status":"inProgress"}}}}}}"#,
+            start[0]["id"]
+        ));
+        feed(
+            r#"{"method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn-1","status":"inProgress"}}}"#
+                .into(),
+        );
+        feed(
+            r#"{"method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn-1","status":"completed","error":null}}}"#
+                .into(),
+        );
+        tokio::task::yield_now().await;
+
+        driver.interrupt().unwrap();
+        assert_eq!(written(), Vec::<Value>::new(), "no turn runs to stop");
+        driver
+            .send_user_turn("next", None, None, Some("c2"))
+            .unwrap();
+        let next = written();
+        let methods: Vec<_> = next.iter().map(|l| l["method"].clone()).collect();
+        assert_eq!(methods, [json!("turn/start")]);
+        feed(format!(
+            r#"{{"id":{},"result":{{"turn":{{"id":"turn-2","status":"inProgress"}}}}}}"#,
+            next[0]["id"]
+        ));
+        feed(
+            r#"{"method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn-2","status":"inProgress"}}}"#
+                .into(),
+        );
+        assert_eq!(
+            written(),
+            Vec::<Value>::new(),
+            "the next turn is not stopped"
         );
     }
 }

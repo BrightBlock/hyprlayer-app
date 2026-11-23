@@ -18,8 +18,8 @@ VARIABLES
   alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
   \* CodexDriver: Translator.active_turn / requested_turn (0 = none), steering, pending_approvals,
   \* how many turn/starts have no response read (pending_turn_starts), a stop waiting for
-  \* turn/started (deferred_interrupt), turn ids whose turn/start task has not run
-  dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask,
+  \* turn/started (deferred_interrupt)
+  dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr,
   live, procs, exits, inTurn, stored,
   \* the desktop; vSeq is the open permission cards, oldest first
   vLive, streaming, vSeq, clicked, chip, sends,
@@ -27,14 +27,14 @@ VARIABLES
   accepted, failed, delivered, interrupts, droppedStop
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
-          dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask,
+          dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr,
           live, procs, exits, inTurn, stored,
           vLive, streaming, vSeq, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop>>
 
 codexVars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out>>
-driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr, dTask>>
+driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr>>
 viewVars == <<vLive, streaming, vSeq, clicked, chip, sends>>
 heldVars == <<held, resent, toldSet>>
 
@@ -51,7 +51,7 @@ Init ==
   /\ alive = TRUE /\ busy = FALSE /\ turn = 0 /\ pipe = <<>> /\ queue = <<>>
   /\ cOpen = {} /\ asked = {} /\ starting = {} /\ otherTools = 0 /\ out = <<>>
   /\ dActive = 0 /\ dReq = 0 /\ waiting = {} /\ pending = {} /\ stdinOpen = TRUE /\ bus = <<>>
-  /\ dStarts = 0 /\ dIntr = FALSE /\ dTask = {}
+  /\ dStarts = 0 /\ dIntr = FALSE
   /\ live = TRUE /\ procs = 1 /\ exits = 0 /\ inTurn = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vSeq = <<>> /\ clicked = {}
   /\ chip = [m \in Composer |-> "none"] /\ sends = [m \in Composer |-> 0]
@@ -78,14 +78,14 @@ SendServer(m, result) ==
     THEN IF stdinOpen
            THEN /\ result = "ok" /\ waiting' = waiting \cup {m}
                 /\ WriteOk(<<"steer", m, Running>>)
-                /\ UNCHANGED <<dActive, dReq, pending, bus, dStarts, dIntr, dTask>>
+                /\ UNCHANGED <<dActive, dReq, pending, bus, dStarts, dIntr>>
            ELSE result = "err" /\ UNCHANGED <<driverVars, pipe>>
   ELSE /\ bus' = Append(bus, <<"echo", m>>)
        /\ dStarts' = dStarts + 1
        /\ IF stdinOpen
             THEN result = "ok" /\ WriteOk(<<"start", m>>)
             ELSE result = "err" /\ UNCHANGED <<pipe, stdinOpen>>
-       /\ UNCHANGED <<dActive, dReq, waiting, pending, dIntr, dTask>>
+       /\ UNCHANGED <<dActive, dReq, waiting, pending, dIntr>>
 
 Outcome(m, result, kept) ==
   /\ accepted' = IF result = "ok" THEN accepted \cup {m} ELSE accepted
@@ -133,7 +133,7 @@ ClientAnswer(r) ==
             /\ WriteOk(<<"answer", r>>)
        ELSE UNCHANGED <<pending, bus, pipe, stdinOpen>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
-                 dActive, dReq, waiting, dStarts, dIntr, dTask, live, procs, exits, inTurn, stored, vLive,
+                 dActive, dReq, waiting, dStarts, dIntr, live, procs, exits, inTurn, stored, vLive,
                  streaming, vSeq, chip, sends, accepted, failed, delivered, interrupts,
                  droppedStop>>
 
@@ -152,7 +152,7 @@ Interrupt ==
           /\ droppedStop' = (droppedStop \/ (alive /\ (busy \/ starting /= {} \/
                                                       \E i \in 1..Len(pipe) : pipe[i][1] = "start")))
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
-                 dActive, dReq, waiting, pending, bus, dStarts, dTask, live, procs, exits,
+                 dActive, dReq, waiting, pending, bus, dStarts, live, procs, exits,
                  inTurn, stored, viewVars, accepted, failed, delivered>>
 
 (* ---- codex app-server ---- *)
@@ -264,8 +264,8 @@ DriverRead ==
   /\ LET line == Head(out) IN
      /\ out' = Tail(out)
      /\ CASE line[1] = "startOk" ->
-               \* the reader hands the response to the spawned turn/start task (StartTask)
-               dTask' = dTask \cup {line[2]} /\ UNCHANGED <<dActive, dReq, waiting, pending, bus>>
+               \* observe_response sets requested_turn, in the order codex wrote the lines
+               dReq' = line[2] /\ UNCHANGED <<dActive, waiting, pending, bus>>
           [] line[1] = "turnStarted" ->
                dActive' = line[2] /\ UNCHANGED <<dReq, waiting, pending, bus>>
           [] line[1] = "userMsg" ->
@@ -302,9 +302,8 @@ DriverRead ==
           [] line[1] = "eof" ->
                \* replies still pending fail; their tasks' events trail Exited, which ends the relay
                bus' = Append(bus, <<"exited">>) /\ UNCHANGED <<dActive, dReq, waiting, pending>>
-     /\ IF line[1] = "startOk" THEN TRUE ELSE UNCHANGED dTask
-     \* the refused turn/start's task: turn_start_answered
-     /\ dStarts' = IF line[1] = "startErr" THEN dStarts - 1 ELSE dStarts
+     \* observe_response -> turn_start_answered
+     /\ dStarts' = IF line[1] \in {"startOk", "startErr"} THEN dStarts - 1 ELSE dStarts
      /\ CASE line[1] \in Notices /\ dIntr /\ dActive' /= 0 ->
                \* route_incoming, after a notification: the stop that waited for turn/started
                /\ dIntr' = FALSE
@@ -315,15 +314,6 @@ DriverRead ==
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools,
                  live, procs, exits, inTurn, stored, viewVars, accepted, failed,
                  delivered, interrupts, droppedStop>>
-
-\* The turn/start task send_user_turn spawned runs once the reader handed it the response,
-\* at any later point: turn_start_answered sets requested_turn.
-StartTask ==
-  /\ \E t \in dTask :
-       /\ dTask' = dTask \ {t} /\ dReq' = t /\ dStarts' = dStarts - 1
-  /\ UNCHANGED <<heldVars, codexVars, dActive, waiting, pending, stdinOpen, bus, dIntr, live,
-                 procs, exits, inTurn, stored, viewVars, accepted, failed, delivered,
-                 interrupts, droppedStop>>
 
 (* ---- spawn_relay + ActorState::handle_event, and the desktop's applyEvent ---- *)
 
@@ -361,7 +351,7 @@ Relay ==
                  [] ev[1] = "exited" -> held \ toldSet
                  [] OTHER -> held
      /\ failed' = IF ev[1] = "exited" THEN failed \cup (held \cap toldSet) ELSE failed
-  /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, dStarts, dIntr, dTask,
+  /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, dStarts, dIntr,
                  procs, exits, clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop>>
 
 \* A tail read: list_turns re-sends the stored asks pending_requests names; settleUnwaitedAsks
@@ -384,7 +374,7 @@ ClientResume ==
   /\ pipe' = SetToSeq({<<"start", m>> : m \in again})
   /\ out' = <<>>
   /\ dActive' = 0 /\ dReq' = 0 /\ waiting' = {} /\ pending' = {} /\ stdinOpen' = TRUE
-  /\ dStarts' = Cardinality(again) /\ dIntr' = FALSE /\ dTask' = {}
+  /\ dStarts' = Cardinality(again) /\ dIntr' = FALSE
   /\ bus' = <<<<"relaunched">>>> \o SetToSeq({<<"echo", m>> : m \in again})
   /\ live' = TRUE /\ procs' = procs + 1 /\ vLive' = TRUE
   /\ held' = again /\ resent' = resent \cup again
@@ -395,7 +385,7 @@ ClientResume ==
 (* ---- the rules ---- *)
 
 Quiet ==
-  /\ out = <<>> /\ bus = <<>> /\ dTask = {}
+  /\ out = <<>> /\ bus = <<>>
   /\ alive => (~busy /\ pipe = <<>> /\ queue = <<>> /\ starting = {})
 
 Done == Quiet /\ UNCHANGED vars
@@ -406,7 +396,7 @@ Next ==
   \/ \E r \in Asks : ClientAnswer(r) \/ CodexAsk(r)
   \/ Interrupt
   \/ CodexRead \/ CodexBegin \/ CodexOtherTool \/ CodexCommitSteer \/ CodexFinish \/ CodexExit
-  \/ DriverRead \/ StartTask \/ Relay \/ ClientReload \/ ClientResume \/ Done
+  \/ DriverRead \/ Relay \/ ClientReload \/ ClientResume \/ Done
 
 Spec == Init /\ [][Next]_vars
 
@@ -448,7 +438,7 @@ InterruptHonored == ~droppedStop
 TypeOK ==
   /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ turn \in Nat
   /\ cOpen \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
-  /\ starting \subseteq Msgs /\ dStarts \in Nat /\ dIntr \in BOOLEAN /\ dTask \subseteq Nat
+  /\ starting \subseteq Msgs /\ dStarts \in Nat /\ dIntr \in BOOLEAN
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs

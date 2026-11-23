@@ -204,7 +204,7 @@ impl Translator {
             .collect()
     }
 
-    pub fn turn_start_answered(&mut self, rpc_id: u64, turn: Option<&str>) {
+    fn turn_start_answered(&mut self, rpc_id: u64, turn: Option<&str>) {
         if !self.pending_turn_starts.remove(&rpc_id) {
             return;
         }
@@ -240,6 +240,8 @@ impl Translator {
     }
 
     pub fn observe_response(&mut self, rpc_id: u64, result: &Result<Value, String>) {
+        let turn = result.as_ref().ok().and_then(|r| r.pointer("/turn/id"));
+        self.turn_start_answered(rpc_id, turn.and_then(Value::as_str));
         if self.root_rpc != Some(rpc_id) {
             return;
         }
