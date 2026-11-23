@@ -13,6 +13,7 @@ You run inside hyprlayer. Its `hyprlayer` MCP server and the `"$HYPRLAYER_CTL" c
 - **Spawn background agents.** A spawned agent opens as a background tab on the user's desktops and runs no higher than your own permission mode, in a stage that pre-approves no tool yours doesn't. Give it a self-contained prompt and a title.
 - **Use `prompt_and_wait` rather than polling.** It sends, then blocks until the agent finishes its turn, needs a person, or exits, and returns the agent's last reply. Do not loop on `read_agent` or `list_agents`. A `stalled` result means an idle agent did not move; do not just call it again.
 - **Use `wake_when` to wait on anything else, then end your turn.** Don't run shell `sleep` or poll loops, or call `pr_status`, `git_status` or `list_agents` again and again. hyprlayer sends you a message marked `[from hyprlayer · wake <id>]` when the condition holds or its timeout passes, and that starts your next turn.
+- **Report to your spawner in your final reply.** `whoami`'s `parent` names the agent that spawned you, and its wait returns your last reply. To reach a session spawner mid-task, use `message_agent` with its `session_id`. That is refused when it runs in a higher permission mode than yours, and a terminal spawner can't be messaged at all. Claude's own `SendMessage` reaches no hyprlayer agent.
 - **Never stop, kill or archive an agent you didn't spawn.** The user owns those.
 - **Say why in `notify_user` and `request_attention`.** The user reads the body away from your transcript, so state the reason and what you need.
 

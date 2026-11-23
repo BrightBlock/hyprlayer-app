@@ -262,7 +262,7 @@ impl AgentControlService<'_> {
             .await?;
         let session = started.session;
         let mut launch = started.launch;
-        launch.prefix_prompt(&header(identity, &label));
+        launch.frame_prompt(&header(identity, &label), &spawner_note(identity, &label));
         sessions
             .start_detached(launch, Some(author(identity, label)))
             .await?;
@@ -412,7 +412,7 @@ impl AgentControlService<'_> {
                 .await?;
         }
         let label = self.caller_label(identity).await;
-        let text = format!("{}\n\n{text}", header(identity, &label));
+        let text = pipeline::headed(&header(identity, &label), text);
         sessions
             .send(
                 session_id,
@@ -722,12 +722,20 @@ impl AgentControlService<'_> {
                 .sessions()
                 .pty_first_prompt(&check.workstream, engines::harness_of(&agent.engine_id), fp)
                 .await;
-            let text = format!("{text}\n\n{}", header(identity, &label));
+            let text = format!(
+                "{text}\n\n{}\n\n{}",
+                header(identity, &label),
+                spawner_note(identity, &label)
+            );
             send_first_prompt(self.runtime.pty_agents.clone(), &agent.terminal_id, text);
         } else if let (Some(prompt), Some(snapshot)) =
             (prompt.filter(|p| !p.trim().is_empty()), snapshot)
         {
-            let text = format!("{}\n\n{prompt}", header(identity, &label));
+            let text = format!(
+                "{}\n\n{}",
+                pipeline::headed(&header(identity, &label), &prompt),
+                spawner_note(identity, &label)
+            );
             // A wait right after the spawn must not see the pre-prompt idle as the agent's answer.
             self.runtime
                 .pty_agents
@@ -754,7 +762,7 @@ impl AgentControlService<'_> {
         self.check_unhooked_input(identity, target.agent.hooked)
             .await?;
         let label = self.caller_label(identity).await;
-        let text = format!("{}\n\n{text}", header(identity, &label));
+        let text = pipeline::headed(&header(identity, &label), text);
         let agents = &self.runtime.pty_agents;
         let _input = target.input.lock().await;
         // Read under the lock: a bar change or message that held it may have moved the agent on.
@@ -1014,6 +1022,22 @@ fn header(identity: &AgentIdentity, label: &str) -> String {
     format!("[from agent \"{label}\" · {}]", identity.caller.id())
 }
 
+/// Claude's own `SendMessage` reaches only the sessions its CLI tracks, never a hyprlayer agent.
+fn spawner_note(identity: &AgentIdentity, label: &str) -> String {
+    let id = identity.caller.id();
+    match identity.caller {
+        AgentCaller::Session { .. } => format!(
+            "Your spawner is {label} (session {id}). Your final reply is your report. To message it \
+             mid-task, use mcp__hyprlayer__message_agent with session_id {id}, not SendMessage; it \
+             is refused if that session runs in a higher permission mode than yours."
+        ),
+        AgentCaller::Terminal { .. } => format!(
+            "Your spawner is {label} (terminal {id}). Your final reply is your report; a terminal \
+             agent can't be messaged by the agents it spawns, and SendMessage can't reach it."
+        ),
+    }
+}
+
 /// The `agent:` prefix is how desktops tell an agent's turn from a person's.
 fn author(identity: &AgentIdentity, label: String) -> ClientRef {
     ClientRef {
@@ -1061,8 +1085,27 @@ pub(super) async fn paste(
 ) -> Result<()> {
     // An ESC in the text could end the paste early and type the rest as keys.
     let text = text.replace('\x1b', "");
+    let claude = agents
+        .snapshot(terminal_id)
+        .is_some_and(|now| engines::harness_of(&now.agent.engine_id) == Some(Harness::Claude));
+    let mut text = text.as_str();
+    if let Some((command, rest)) = pipeline::leading_command(text).filter(|_| claude) {
+        // claude reads a slash command inside a bracketed paste as plain text, so the command line
+        // is typed; the rest pasted after it on the same input becomes the command's arguments.
+        pty.write_input(command.as_bytes())?;
+        tokio::time::sleep(PASTE_SETTLE).await;
+        if rest.trim().is_empty() {
+            return submit(agents, terminal_id, pty);
+        }
+        pty.write_input(b" ")?;
+        text = rest;
+    }
     pty.write_input(format!("\x1b[200~{text}\x1b[201~").as_bytes())?;
     tokio::time::sleep(PASTE_SETTLE).await;
+    submit(agents, terminal_id, pty)
+}
+
+fn submit(agents: &PtyAgents, terminal_id: &str, pty: &PtySession) -> Result<()> {
     // A prompt that opened since would take the Enter as its answer.
     let clear = agents.snapshot(terminal_id).is_some_and(|now| {
         !asking(now.agent.state)

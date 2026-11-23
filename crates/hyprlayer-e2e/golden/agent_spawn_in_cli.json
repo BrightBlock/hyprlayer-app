@@ -9,7 +9,7 @@
             "hasSessionId": false,
             "matchesThePaste": true
           },
-          "guard": "a PTY agent, not a session, typed the prompt with the caller's header after it",
+          "guard": "a PTY agent, not a session, typed the prompt with the caller's header and spawner note after it",
           "ok": true
         }
       ],
@@ -38,7 +38,7 @@
             "opensWithTheSkill": true,
             "planActive": true
           },
-          "guard": "the paste opens with /implement_plan under Implement's deny list, in the bypass caller's mode, and the plan turns active",
+          "guard": "/implement_plan is typed with the rest pasted as its arguments, under Implement's deny list, in the bypass caller's mode, and the plan turns active",
           "ok": true
         }
       ],

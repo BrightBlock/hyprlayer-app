@@ -8,7 +8,7 @@
             "firstLine": "/commit",
             "matchesThePaste": true
           },
-          "guard": "the TUI reads the commit prompt as one bracketed paste, then Enter",
+          "guard": "the TUI reads /commit typed and the rest of the prompt as one bracketed paste after it, then Enter",
           "ok": true
         }
       ],
@@ -47,7 +47,7 @@
             "deniesPush": true,
             "opensWithTheSkill": true
           },
-          "guard": "the paste opens with /implement_plan, in the mode and deny list a native Implement starts with",
+          "guard": "/implement_plan is typed with the rest pasted as its arguments, in the mode and deny list a native Implement starts with",
           "ok": true
         },
         {

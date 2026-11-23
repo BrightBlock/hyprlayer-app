@@ -939,10 +939,15 @@ pub fn tool_failed(result: &Value) -> bool {
     result["isError"] == json!(true)
 }
 
-/// The bracketed paste the stub reads, line by line, as it logs them.
-pub fn pasted(prompt: &str) -> Vec<String> {
-    format!("\x1b[200~{prompt}\x1b[201~")
-        .split('\n')
-        .map(str::to_string)
-        .collect()
+/// What the stub reads of a prompt sent to claude, line by line, as it logs them: a leading slash
+/// command typed, and the rest as one bracketed paste after it.
+pub fn delivered(prompt: &str) -> Vec<String> {
+    match hyprlayer_core::pipeline::leading_command(prompt) {
+        Some((command, rest)) if rest.trim().is_empty() => command.to_string(),
+        Some((command, rest)) => format!("{command} \x1b[200~{rest}\x1b[201~"),
+        None => format!("\x1b[200~{prompt}\x1b[201~"),
+    }
+    .split('\n')
+    .map(str::to_string)
+    .collect()
 }

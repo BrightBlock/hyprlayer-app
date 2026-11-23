@@ -1,5 +1,5 @@
 //! App actions run in a PTY agent: a desktop launch carrying a stage's first prompt gets it
-//! composed by the server and pasted once the TUI is ready, Claude with its slash command and
+//! composed by the server and delivered once the TUI is ready, Claude with its slash command and
 //! other engines with the skill named in prose.
 //!
 //! The engines are `agent_stub`'s PTY claude; nothing here covers the real binaries.
@@ -12,7 +12,7 @@ use hyprlayer_core::models::{PtyFirstPrompt, PtyLaunchSession};
 use hyprlayer_core::pipeline;
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::Stage;
-use hyprlayer_e2e::agent_stub::{install, launch_log, lines, pasted, set_engine, PTY_CLAUDE};
+use hyprlayer_e2e::agent_stub::{delivered, install, launch_log, lines, set_engine, PTY_CLAUDE};
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server};
 use hyprlayer_server::client::RpcClient;
@@ -40,10 +40,10 @@ async fn pty_action_prompt() {
 
     j.step("commit in claude opens with its slash command");
     let commit_log = launch(&sandbox, &c, &ws, "claude-code", Stage::Commit, "", &[]).await;
-    let expected = pasted(pipeline::COMMIT_PROMPT_DEFAULT);
+    let expected = delivered(pipeline::COMMIT_PROMPT_DEFAULT);
     let typed = typed_once(&commit_log, &expected).await;
     j.guard(
-        "the TUI reads the commit prompt as one bracketed paste, then Enter",
+        "the TUI reads /commit typed and the rest of the prompt as one bracketed paste after it, then Enter",
         typed,
         json!({ "matchesThePaste": typed, "firstLine": first_line(pipeline::COMMIT_PROMPT_DEFAULT) }),
     );
@@ -55,7 +55,7 @@ async fn pty_action_prompt() {
         pipeline::PTY_SHIP_PROMPT_TEMPLATE.replace("{{base_branch}}", &base),
         pipeline::PTY_SHIP_DESCRIBE
     );
-    let typed = typed_once(&log, &pasted(&ship)).await;
+    let typed = typed_once(&log, &delivered(&ship)).await;
     j.guard(
         "ship's prompt ends by asking for /describe_pr, since no follow-up turn comes",
         typed,
@@ -74,7 +74,7 @@ async fn pty_action_prompt() {
     )
     .await;
     let validate = format!("/validate_plan\n\nRelevant documents:\n- {PLAN}");
-    let typed = typed_once(&log, &pasted(&validate)).await;
+    let typed = typed_once(&log, &delivered(&validate)).await;
     j.guard(
         "the plan rides after the skill, as a native start lists it",
         typed,
@@ -99,9 +99,13 @@ async fn pty_action_prompt() {
     )
     .await;
     // The review-notes line outruns the stub's cooked-mode line limit; claude reads raw.
-    let opening = ["\x1b[200~/implement_plan".to_string(), String::new()];
     let stdin = log.join("stdin.log");
-    let opened = eventually(IO, || lines(&stdin).starts_with(&opening)).await;
+    let opened = eventually(IO, || {
+        lines(&stdin)
+            .first()
+            .is_some_and(|line| line.starts_with("/implement_plan \x1b[200~"))
+    })
+    .await;
     let argv = lines(&log.join("argv"));
     let accepts_edits = argv
         .windows(2)
@@ -110,7 +114,7 @@ async fn pty_action_prompt() {
         .windows(2)
         .any(|w| w[0] == "--disallowedTools" && w[1] == "Bash(git push:*)");
     j.guard(
-        "the paste opens with /implement_plan, in the mode and deny list a native Implement starts with",
+        "/implement_plan is typed with the rest pasted as its arguments, in the mode and deny list a native Implement starts with",
         opened && accepts_edits && denies_push,
         json!({ "opensWithTheSkill": opened, "acceptsEdits": accepts_edits, "deniesPush": denies_push }),
     );
@@ -136,7 +140,7 @@ async fn pty_action_prompt() {
     let instruction = "CI checks are failing on PR #7.";
     let log = launch(&sandbox, &c, &ws, "gemini", Stage::Revise, instruction, &[]).await;
     let revise = format!("{}\n\n{instruction}", pipeline::REVISE_PROMPT);
-    let typed = typed_once(&log, &pasted(&revise)).await;
+    let typed = typed_once(&log, &delivered(&revise)).await;
     j.guard(
         "the instruction follows the revise prompt, unchanged for an engine without slash skills",
         typed,
@@ -147,7 +151,7 @@ async fn pty_action_prompt() {
     let log = launch(&sandbox, &c, &ws, "gemini", Stage::Commit, "", &[]).await;
     let prose =
         pipeline::COMMIT_PROMPT_NO_ASK_TOOL.replacen("/commit", "Use the `commit` skill.", 1);
-    let typed = typed_once(&log, &pasted(&prose)).await;
+    let typed = typed_once(&log, &delivered(&prose)).await;
     j.guard(
         "no leading /commit for a TUI that would refuse it, and no AskUserQuestion it may lack",
         typed,

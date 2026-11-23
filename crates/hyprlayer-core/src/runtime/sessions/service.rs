@@ -148,9 +148,12 @@ impl LaunchAndConverseParams {
         self.report_only = true;
     }
 
-    /// A line ahead of the first turn, so the harness knows who is asking.
-    pub(crate) fn prefix_prompt(&mut self, header: &str) {
-        self.wire_prompt = format!("{header}\n\n{}", self.wire_prompt);
+    /// Who is asking, ahead of the first turn, and how to reach them, after it.
+    pub(crate) fn frame_prompt(&mut self, header: &str, trailer: &str) {
+        self.wire_prompt = format!(
+            "{}\n\n{trailer}",
+            pipeline::headed(header, &self.wire_prompt)
+        );
     }
 
     fn into_parts(self) -> (LaunchSessionParams, FirstTurn) {

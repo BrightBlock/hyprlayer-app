@@ -1,5 +1,5 @@
 //! With app actions in a CLI, an agent's spawn_agent and approve_plan start a PTY agent in the
-//! default engine: the stage's prompt is composed and pasted with the caller's header after it,
+//! default engine: the stage's prompt is composed and delivered with the caller's header after it,
 //! and the stage's deny list still applies. A pinned harness, a stage on an engine without its
 //! guardrails, an unhooked TUI for a non-bypass caller, or the setting off keeps a session.
 //!
@@ -13,7 +13,7 @@ use hyprlayer_core::models::{AgentControlLevel, PermissionMode};
 use hyprlayer_core::runtime::library::CreateDocumentRequest;
 use hyprlayer_core::{Harness, SessionEvent, Stage};
 use hyprlayer_e2e::agent_stub::{
-    agent_env, env_var, install, launch_log, lines, pasted, set_engine, set_level, tool_failed,
+    agent_env, delivered, env_var, install, launch_log, lines, set_engine, set_level, tool_failed,
     tool_text, update_settings, McpDriver, PTY_CLAUDE,
 };
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
@@ -63,11 +63,16 @@ async fn agent_spawn_in_cli() {
         .to_string();
     j.alias(&terminal, "$REVIEWER");
     let log = launch_log(&sandbox, &terminal);
-    let expected = pasted(&format!("E2E_REVIEW\n\n{header}"));
+    let note = format!(
+        "Your spawner is Lead (session {lead}). Your final reply is your report. To message it \
+         mid-task, use mcp__hyprlayer__message_agent with session_id {lead}, not SendMessage; it \
+         is refused if that session runs in a higher permission mode than yours."
+    );
+    let expected = delivered(&format!("E2E_REVIEW\n\n{header}\n\n{note}"));
     let stdin = log.join("stdin.log");
     let typed = eventually(IO, || lines(&stdin) == expected).await;
     j.guard(
-        "a PTY agent, not a session, typed the prompt with the caller's header after it",
+        "a PTY agent, not a session, typed the prompt with the caller's header and spawner note after it",
         !terminal.is_empty() && spawned.get("sessionId").is_none() && typed,
         json!({ "engineId": spawned["engineId"], "hasSessionId": spawned.get("sessionId").is_some(), "matchesThePaste": typed }),
     );
@@ -108,9 +113,13 @@ async fn agent_spawn_in_cli() {
         .to_string();
     j.alias(&implement, "$IMPLEMENT");
     let log = launch_log(&sandbox, &implement);
-    let opening = ["\x1b[200~/implement_plan".to_string(), String::new()];
     let stdin = log.join("stdin.log");
-    let opened = eventually(IO, || lines(&stdin).starts_with(&opening)).await;
+    let opened = eventually(IO, || {
+        lines(&stdin)
+            .first()
+            .is_some_and(|line| line.starts_with("/implement_plan \x1b[200~"))
+    })
+    .await;
     let argv = lines(&log.join("argv"));
     let denies_push = argv
         .windows(2)
@@ -118,7 +127,7 @@ async fn agent_spawn_in_cli() {
     let bypasses = argv.iter().any(|a| a == "--dangerously-skip-permissions");
     let active = eventually(IO, || plan_status(&plan) == "active").await;
     j.guard(
-        "the paste opens with /implement_plan under Implement's deny list, in the bypass caller's mode, and the plan turns active",
+        "/implement_plan is typed with the rest pasted as its arguments, under Implement's deny list, in the bypass caller's mode, and the plan turns active",
         opened && denies_push && bypasses && active,
         json!({ "opensWithTheSkill": opened, "deniesPush": denies_push, "bypasses": bypasses, "planActive": active }),
     );

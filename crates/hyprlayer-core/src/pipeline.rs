@@ -540,6 +540,29 @@ pub fn recover_input(stage: Stage, prompt: &str) -> Option<String> {
     (!input.is_empty()).then(|| input.to_string())
 }
 
+/// A first line a CLI's prompt runs as a command (`/name` and arguments), and the text after it.
+/// A trailing `\` is left out: Enter after it is a newline in claude's input, not a submit.
+pub fn leading_command(text: &str) -> Option<(&str, &str)> {
+    let (line, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let line = line.trim_end();
+    let name = line.strip_prefix('/')?.split(' ').next()?;
+    let named = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':'));
+    (named && !line.chars().any(char::is_control) && !line.ends_with('\\'))
+        .then_some((line, rest.trim_start_matches(['\r', '\n'])))
+}
+
+/// `header` above `text`, or under its leading command, which runs only as the first line.
+pub fn headed(header: &str, text: &str) -> String {
+    match leading_command(text) {
+        Some((command, rest)) if rest.trim().is_empty() => format!("{command}\n\n{header}"),
+        Some((command, rest)) => format!("{command}\n\n{header}\n\n{rest}"),
+        None => format!("{header}\n\n{text}"),
+    }
+}
+
 const DOCS_HEADER: &str = "\n\nRelevant documents:";
 
 pub fn append_docs(mut prompt: String, attached_docs: &[String]) -> String {
@@ -815,6 +838,27 @@ fn fill(template: &str, vars: &[(&str, &str)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn leading_command_is_only_a_first_line_slash_name() {
+        assert_eq!(
+            leading_command("/pstack:poteto-mode fix it\n\nmore"),
+            Some(("/pstack:poteto-mode fix it", "more"))
+        );
+        assert_eq!(leading_command("/create_plan"), Some(("/create_plan", "")));
+        assert_eq!(leading_command("/home/me/file.txt read it"), None);
+        assert_eq!(leading_command(" /create_plan"), None);
+        assert_eq!(leading_command("/create_plan x \\\nmore"), None);
+        assert_eq!(leading_command("/create_plan \tx"), None);
+        assert_eq!(leading_command("please /create_plan"), None);
+    }
+
+    #[test]
+    fn headed_puts_the_header_under_a_leading_command() {
+        assert_eq!(headed("[h]", "/x a\nb"), "/x a\n\n[h]\n\nb");
+        assert_eq!(headed("[h]", "/x"), "/x\n\n[h]");
+        assert_eq!(headed("[h]", "do it"), "[h]\n\ndo it");
+    }
     use hyprlayer_models::goal::GoalLimits;
 
     fn compose(stage: Stage, input: &str, base: &str, bodies: &ActionPromptBodies) -> String {
