@@ -1952,7 +1952,8 @@ impl Translator {
                         if role == "assistant" && newer && reply_finished(info) {
                             self.answered = Some(turn.id.clone());
                         }
-                        if role == "assistant" && newer && !message_settled(info) {
+                        // Any reply still running, though older than a message sent mid-turn.
+                        if role == "assistant" && !message_settled(info) {
                             self.open_reply = Some(id.to_string());
                         }
                     }
@@ -2716,6 +2717,30 @@ mod tests {
             assert!(x.deadline().is_some(), "a held end never expires");
             events = x.expire();
         }
+        assert_eq!(statuses(events), ["interrupted"]);
+
+        send(&x, "msg_7");
+        x.handle(&user("msg_7"));
+        send(&x, "msg_9");
+        let mut events = x.handle(&reply("msg_8", None));
+        events.extend(x.handle(&user("msg_9")));
+        interrupt(&x);
+        for ev in [
+            error("MessageAbortedError"),
+            idle(),
+            part(json!({
+                "id": "prt_y", "type": "text", "messageID": "msg_8", "text": "cut short",
+                "time": { "start": 1, "end": 2 },
+            })),
+            aborted("msg_8"),
+            idle(),
+        ] {
+            events.extend(x.handle(&ev));
+        }
+        assert!(
+            ends_last(&events),
+            "the running reply's text follows the turn's end: {events:?}"
+        );
         assert_eq!(statuses(events), ["interrupted"]);
     }
 

@@ -22,8 +22,8 @@ VARIABLES
   \* OpenCode: up, the prompt it runs, prompts it holds behind it, POSTs not yet handled,
   \* open asks, SSE events out
   alive, busy, current, pipe, queue, cOpen, asked, out, drops, downs,
-  \* OpenCodeDriver: the asks map, the sent turn and the Translator's view of it (its open
-  \* reply, and a turn end held until that reply settles)
+  \* OpenCodeDriver: the asks map, the sent turn and the Translator's view of it (the reply
+  \* still open, whichever turn it answers, and a turn end held until that reply settles)
   sent, anchored, answered, interrupted, ended, unplaced, replying, endHeld, pending, bus,
   \* the forwarder actor: in_turn, and a message that arrived mid-turn (next_turn)
   live, inTurn, parked, stored,
@@ -67,7 +67,7 @@ Init ==
   /\ alive = TRUE /\ busy = FALSE /\ current = None /\ pipe = <<>> /\ queue = <<>>
   /\ cOpen = {} /\ asked = {} /\ out = <<>> /\ drops = 0 /\ downs = 0
   /\ sent = None /\ anchored = FALSE /\ answered = FALSE /\ interrupted = FALSE
-  /\ ended = FALSE /\ unplaced = FALSE /\ replying = FALSE /\ endHeld = FALSE
+  /\ ended = FALSE /\ unplaced = FALSE /\ replying = None /\ endHeld = FALSE
   /\ pending = {} /\ bus = <<>>
   /\ live = TRUE /\ inTurn = FALSE /\ parked = FALSE /\ stored = {}
   /\ vLive = TRUE /\ streaming = FALSE /\ vOpen = {} /\ clicked = {}
@@ -316,15 +316,16 @@ DriverRead ==
                /\ bus' = bus \o SetToSeq({<<"echo", w>> : w \in oWaiting \cap ev[3]})
                              \o (IF ev[4] <= seenText[ev[2]] THEN <<>> ELSE <<<<"text">>>>)
                /\ oWaiting' = oWaiting \ ev[3]
-               /\ replying' = (replying \/ (Open /\ ev[2] = sent))
+               \* the reply it starts is the open reply, whichever turn it answers
+               /\ replying' = IF Open /\ ev[4] = 1 THEN ev[2] ELSE replying
                /\ UNCHANGED <<sent, anchored, answered, interrupted, ended, unplaced, endHeld, pending,
                               unread, doneOwed>>
           [] ev[1] = "finished" ->
                \* an assistant message newer than the anchor finished: only a reply to the sent turn;
-               \* the sent turn's reply settling lets a held end out
+               \* the open reply settling lets a held end out
                /\ answered' = (answered \/ (Open /\ ev[2] = sent))
-               /\ IF ev[2] = sent
-                    THEN /\ replying' = FALSE /\ endHeld' = FALSE
+               /\ IF ev[2] = replying
+                    THEN /\ replying' = None /\ endHeld' = FALSE
                          /\ bus' = IF endHeld THEN Append(bus, <<"turnDone">>) ELSE bus
                     ELSE UNCHANGED <<replying, endHeld, bus>>
                /\ UNCHANGED <<sent, anchored, interrupted, ended, unplaced, pending, oWaiting,
@@ -348,7 +349,7 @@ DriverRead ==
                /\ pending' = {}
                \* the stop goes out only once the turn's user message is read: an idle before is not its
                /\ IF Open /\ (answered \/ (interrupted /\ anchored))
-                    THEN EndTurn(closes, replying) /\ UNCHANGED unplaced
+                    THEN EndTurn(closes, replying /= None) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
                     THEN unplaced' = TRUE /\ bus' = bus \o closes
                          /\ UNCHANGED <<ended, endHeld, oWaiting, unread, doneOwed>>
@@ -359,7 +360,7 @@ DriverRead ==
           [] ev[1] = "abortErr" ->
                \* session.error, MessageAbortedError: this turn's only if this driver asked
                /\ IF Open /\ interrupted /\ anchored
-                    THEN EndTurn(<<>>, replying) /\ UNCHANGED unplaced
+                    THEN EndTurn(<<>>, replying /= None) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
                     THEN unplaced' = TRUE /\ UNCHANGED <<ended, endHeld, bus, oWaiting, unread, doneOwed>>
                   ELSE UNCHANGED <<ended, unplaced, endHeld, bus, oWaiting, unread, doneOwed>>
@@ -382,10 +383,10 @@ Resync ==
                       IF out[k + 1][1] \in {"idle", "abortErr"} THEN <<"older">> ELSE out[k + 1]]
               ELSE Tail(out)
   /\ LET echoes == oWaiting \cap ocRead
-         settles == sent /= None /\ sent \in ocDone
+         settles == replying /= None /\ replying \in ocDone
          anch == anchored \/ (Open /\ sent \in created)
-         ans == answered \/ (Open /\ settles)
-         rep == IF settles THEN FALSE ELSE replying \/ (Open /\ busy /\ current = sent)
+         ans == answered \/ (Open /\ sent /= None /\ sent \in ocDone)
+         rep == IF Open /\ busy THEN current ELSE IF settles THEN None ELSE replying
          unpl == unplaced /\ ~(Open /\ sent \in created)
          fresh == cOpen \ pending
          gone == pending \ cOpen
@@ -406,7 +407,7 @@ Resync ==
                /\ UNCHANGED <<ended, unread, doneOwed>>
           ELSE /\ pending' = {}
                /\ IF Open /\ (ans \/ (interrupted /\ anch))
-                    THEN EndTurnFrom(pre \o closes, oWaiting \ echoes, rep) /\ unplaced' = unpl
+                    THEN EndTurnFrom(pre \o closes, oWaiting \ echoes, rep /= None) /\ unplaced' = unpl
                     ELSE /\ bus' = pre \o closes /\ oWaiting' = oWaiting \ echoes
                          /\ endHeld' = (endHeld /\ ~settles)
                          /\ unplaced' = IF Open /\ ~anch THEN TRUE ELSE unpl
@@ -423,8 +424,8 @@ Expire ==
   /\ unplaced /\ Open /\ ~anchored /\ ~doneOwed
   /\ ~InSeq(<<"prompt", sent>>, pipe) /\ ~InSeq(<<"userMsg", sent>>, out)
   /\ ~InSeq(<<"connected">>, out)
-  /\ unplaced' = FALSE /\ EndTurn(<<>>, FALSE)
-  /\ UNCHANGED <<ocVars, sent, anchored, answered, interrupted, replying, pending, live,
+  /\ unplaced' = FALSE /\ EndTurn(<<>>, FALSE) /\ replying' = None
+  /\ UNCHANGED <<ocVars, sent, anchored, answered, interrupted, pending, live,
                  inTurn, parked, stored, viewVars, accepted, failed, delivered, interrupts,
                  droppedStop, stopFor, orphans, held, dropped, resendDue, chip, stopped,
                  created, ocDone, ocRead, ocText, seenText, gateFor>>
@@ -433,8 +434,8 @@ Expire ==
 \* a reply it cut short well inside SETTLE_WAIT, so the wait runs out only on a reply that will
 \* not settle.
 Settle ==
-  /\ endHeld /\ ~doneOwed /\ ~InSeq(<<"finished", sent>>, out)
-  /\ endHeld' = FALSE /\ replying' = FALSE
+  /\ endHeld /\ ~doneOwed /\ ~InSeq(<<"finished", replying>>, out)
+  /\ endHeld' = FALSE /\ replying' = None
   /\ bus' = Append(bus, <<"turnDone">>)
   /\ UNCHANGED <<ocVars, sent, anchored, answered, interrupted, ended, unplaced, pending, live,
                  inTurn, parked, stored, viewVars, accepted, failed, delivered, interrupts,
@@ -591,7 +592,7 @@ InterruptSafe ==
 InterruptHonored == ~droppedStop
 
 TypeOK ==
-  /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ replying \in BOOLEAN /\ endHeld \in BOOLEAN
+  /\ alive \in BOOLEAN /\ busy \in BOOLEAN /\ replying \in Msgs \cup {None} /\ endHeld \in BOOLEAN
   /\ cOpen \subseteq Asks /\ asked \subseteq Asks /\ pending \subseteq Asks
   /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs

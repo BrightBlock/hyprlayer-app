@@ -24,10 +24,10 @@ PASS OpenCodeTurns.TypeOK
 PASS OpenCodeTurns.NoLostUserMessage
 PASS OpenCodeTurns.NoLostAgentMessage
 PASS OpenCodeTurns.NoDoubleSend
-FAIL OpenCodeTurns.TurnProgress  # finding 17 (a stopped turn's reply settles after its end): model only, 0 of 2 live tries
+PASS OpenCodeTurns.TurnProgress
 PASS OpenCodeTurns.AskResolution
 PASS OpenCodeTurns.AskVisible
-FAIL OpenCodeTurns.InterruptSafe  # finding 17 (a stopped turn's reply settles after its end): model only, 0 of 2 live tries
+PASS OpenCodeTurns.InterruptSafe
 PASS OpenCodeTurns.InterruptHonored
 PASS OpenCodeTurns-death.TypeOK
 PASS OpenCodeTurns-death.NoLostUserMessage
