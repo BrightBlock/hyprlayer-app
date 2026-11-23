@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
-import { Button, ErrorNote, IconButton, Spinner, Toggle } from "@/components/ui";
+import { Button, ErrorNote, IconButton, Spinner } from "@/components/ui";
 import type { LeadView, WorkstreamView } from "@/lib/bindings";
 import { openExternalUrl } from "@/lib/browser";
 import { formatCompactAge } from "@/lib/format";
@@ -239,7 +239,7 @@ export function LeadDock({
       };
 
   const header = (expandedHeader: boolean) => (
-    <div className="flex h-[34px] shrink-0 items-center gap-2.5 px-6">
+    <div className="flex h-[34px] shrink-0 items-center gap-2.5 pr-1.5 pl-6">
       <button
         type="button"
         onClick={() => go(expandedHeader ? "minimize" : "expand")}
@@ -352,6 +352,9 @@ function RemoteControl({ view }: { view: LeadView }) {
             .show(`Couldn't turn Remote Control ${enabled ? "on" : "off"}`, errorMessage(e), { tone: "bad" }),
       },
     );
+  const label = remoteControl
+    ? "Reachable from the Claude app · click to stop"
+    : "Local only · click to reach from the Claude app";
   const copy = (link: string) =>
     void navigator.clipboard.writeText(link).then(() => useToast.getState().show("Remote Control link copied", link));
 
@@ -375,18 +378,17 @@ function RemoteControl({ view }: { view: LeadView }) {
       {remoteControl && !url && !set.isPending && (
         <span className="text-meta text-ink-4">Link shows while the Lead runs</span>
       )}
-      {set.isPending && <Spinner size="xs" />}
-      <Toggle
-        checked={remoteControl}
+      <IconButton
+        active={remoteControl}
+        aria-pressed={remoteControl}
+        aria-label={label}
+        title={label}
         disabled={set.isPending}
-        onChange={toggle}
-        aria-label="Remote Control"
-        className="text-meta text-ink-dim"
+        onClick={() => toggle(!remoteControl)}
+        className="h-6 w-6"
       >
-        <span title="Reach this Lead from the Claude app on your phone. It switches on the running Lead, without a restart.">
-          Remote
-        </span>
-      </Toggle>
+        {set.isPending ? <Spinner size="xs" /> : <Icon name={remoteControl ? "leadRemote" : "leadLocal"} size="xs" />}
+      </IconButton>
     </span>
   );
 }
