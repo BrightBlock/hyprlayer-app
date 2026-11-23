@@ -95,7 +95,7 @@ that rule's lines in `expected.txt` to `PASS`.
 Run this from the repo root:
 
 ```sh
-git diff --stat 4ece9ff3555e9161df0ad4149147a7cb69080b57 -- \
+git diff --stat b34aba24157c3e53870f9aa0296b5878e8e79ece -- \
   crates/hyprlayer-core/src/skill_sources/install.rs \
   crates/hyprlayer-core/src/skill_sources/layout.rs \
   crates/hyprlayer-core/src/skill_sources/lock.rs \
@@ -164,4 +164,4 @@ the way a new call does. Fix the action, re-run, and say what you changed.
    after you have read the covered code at the new commit and confirmed the model
    describes it.
 
-Last confirmed against: `4ece9ff3555e9161df0ad4149147a7cb69080b57`.
+Last confirmed against: `b34aba24157c3e53870f9aa0296b5878e8e79ece`.
