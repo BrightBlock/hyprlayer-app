@@ -848,6 +848,10 @@ impl Run {
         if spend_reached(&self.row.goal, self.session.harness) {
             return Ok(Gate::End(spend_limit(self.session.harness)));
         }
+        // A restart that cut off the last iteration reaches here without a judge.
+        if self.row.goal.iteration >= self.row.goal.limits.max_iterations {
+            return Ok(Gate::End(GoalEndReason::IterationLimit));
+        }
         let rt = self.runtime()?;
         let sessions = rt.sessions();
         let session_id = self.session.id.clone();

@@ -47,7 +47,7 @@ states, so it can list rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails four rules on the code at the sync commit. These are findings
+The model fails three rules on the code at the sync commit. These are findings
 about the product, not modeling errors. Each path below was walked step by step
 against the code. None was replayed in a running server.
 
@@ -67,11 +67,12 @@ against the code. None was replayed in a running server.
    `after` rewrites it to `Checking`, and a `StartMode::Normal` spawn ignores the
    persisted step. A requested pause or stop needs its own column that only
    `conclude` clears and that `Run::open` reads.
-2. **`IterationCap`: a restart that cuts off the last iteration buys one more.**
+2. **Fixed: `IterationCap`: a restart that cuts off the last iteration buys one more.**
    After a restart, `Run::open` closes the cut-off iteration and `drive` goes to
-   `gate` → `send`, which start `iteration + 1` without comparing it with
+   `gate` → `send`, which started `iteration + 1` without comparing it with
    `max_iterations`. Only `decide_boundary` (in `judge`) and `recover` (the crash
-   path) check the limit.
+   path) checked the limit. `gate` now ends the goal as `iteration_limit` once
+   the count reaches `max_iterations`, after the spend check and before a pause.
 3. **Fixed: `NoStrandedGoal`: a runner that exits from `Run::open` is never marked finishing.**
    `Run::open` returned `Err(Over)` when the goal was not running, without
    `lease.finishing()`. A `spawn` in that window saw a live, non-finishing
@@ -98,7 +99,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat cec5abd86213b5b286241d591d6115af6974caa9 -- \
+git diff --stat e569bbc1e20686c568b71fcb5661125d623dead8 -- \
   crates/hyprlayer-core/src/runtime/goals/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/goal_loop.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs
@@ -116,12 +117,12 @@ check commands, prompts, spend arithmetic or `decide_boundary`'s order beyond
 | `RunnerChain` | the `earlier.changed()` wait in `spawn`'s task |
 | `RunnerOpen` | `Run::open`, goal_loop.rs:592 (under `transitions`: marks finishing and exits when status ≠ running) |
 | `RunnerResume` | `Run::resume`, goal_loop.rs:702 |
-| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1528/1548, from `drain_controls` (1509) or the selects in `working` (1009) and `check` (1381) |
-| `RunnerToGate`, `RunnerGate` | `boundary` (808) → `gate` (842) → `send` (942) |
-| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1133 |
-| `RunnerJudge` | `judge` (1223) → `decide_boundary` → `follow` |
-| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1626 (`finishing`, `transition`, drain, write) |
-| `RunnerLift`, `RunnerExit` | `lift_cap` (1641); `Registration::drop`, goals/mod.rs:359 |
+| `RunnerApply` | `apply`/`request_pause`, goal_loop.rs:1532/1552, from `drain_controls` (1513) or the selects in `working` (1013) and `check` (1385) |
+| `RunnerToGate`, `RunnerGate` | `boundary` (808) → `gate` (842; ends at `max_iterations`) → `send` (946) |
+| `RunnerTurnEnds` | `after` → `close_iteration(.., Some(Checking))`, goal_loop.rs:1137 |
+| `RunnerJudge` | `judge` (1227) → `decide_boundary` → `follow` |
+| `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1630 (`finishing`, `transition`, drain, write) |
+| `RunnerLift`, `RunnerExit` | `lift_cap` (1645); `Registration::drop`, goals/mod.rs:359 |
 | `Pause*` | `GoalService::pause` (698) → `try_pause` (1055), `wait_exit` (442) |
 | `Stop*` | `stop` (747) → `end` (1041) → `try_end` (1080) |
 | `Resume*` | `GoalService::resume` (713), `running_again` (292) |
@@ -171,4 +172,4 @@ what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the model describes it.
 
-Last confirmed against: `cec5abd86213b5b286241d591d6115af6974caa9`.
+Last confirmed against: `e569bbc1e20686c568b71fcb5661125d623dead8`.

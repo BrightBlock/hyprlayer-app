@@ -144,18 +144,22 @@ RunnerToGate(g) ==
   /\ UNCHANGED <<status, step, iter, liveGen, nextGen, mode, rstep, earlier, fin,
                  pend, inbox, how, lock, svcVars, restartVars, ackVars>>
 
-(* Run::gate: a pending pause concludes; otherwise Run::send starts iteration
-   iter+1 and writes step Working. No iteration cap is checked here. *)
+(* Run::gate: a goal at its iteration limit ends; a pending pause concludes;
+   otherwise Run::send starts iteration iter+1 and writes step Working. *)
 RunnerGate(g) ==
   /\ rpc[g] = "gate"
-  /\ IF pend[g]
-     THEN /\ Conclude(g, "pause")
-          /\ UNCHANGED <<step, iter, sendsSincePause, sendsSinceStop>>
-     ELSE /\ iter' = iter + 1
-          /\ step' = "working"
-          /\ Goto(g, "working")
-          /\ CountSend
-          /\ UNCHANGED how
+  /\ CASE iter >= MaxIter ->
+            /\ Conclude(g, "end_other")
+            /\ UNCHANGED <<step, iter, sendsSincePause, sendsSinceStop>>
+       [] pend[g] ->
+            /\ Conclude(g, "pause")
+            /\ UNCHANGED <<step, iter, sendsSincePause, sendsSinceStop>>
+       [] OTHER ->
+            /\ iter' = iter + 1
+            /\ step' = "working"
+            /\ Goto(g, "working")
+            /\ CountSend
+            /\ UNCHANGED how
   /\ UNCHANGED <<status, liveGen, nextGen, mode, rstep, earlier, fin, pend, inbox,
                  lock, svcVars, restartVars, pauseAcked, stopAcked>>
 

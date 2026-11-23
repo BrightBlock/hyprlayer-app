@@ -2,6 +2,6 @@ PASS TypeOK
 PASS SingleDriver
 FAIL PauseHonored
 FAIL StopHonored
-FAIL IterationCap
+PASS IterationCap
 PASS NoStrandedGoal
 FAIL CutOffSessionPickedUp
