@@ -1863,6 +1863,9 @@ fn normalize_tool(tool: &str, mut input: Value) -> (String, Value) {
         "webfetch" => "WebFetch",
         "task" => {
             rename(&mut input, "subagentType", "subagent_type");
+            if let Some(obj) = input.as_object_mut() {
+                obj.insert("run_in_background".into(), Value::Bool(false));
+            }
             "Task"
         }
         "todowrite" => "TodoWrite",
@@ -1924,6 +1927,24 @@ mod tests {
         assert_eq!(
             input,
             json!({ "file_path": "/w/a.txt", "old_string": "a", "new_string": "b" })
+        );
+    }
+
+    #[test]
+    fn an_opencode_task_reads_as_a_subagent_that_finishes_inside_its_turn() {
+        let (name, input) = normalize_tool(
+            "task",
+            json!({ "description": "Run echo", "prompt": "echo hi", "subagentType": "general" }),
+        );
+        assert_eq!(name, "Task");
+        assert_eq!(
+            input,
+            json!({
+                "description": "Run echo",
+                "prompt": "echo hi",
+                "subagent_type": "general",
+                "run_in_background": false
+            })
         );
     }
 
