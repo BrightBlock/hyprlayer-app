@@ -40,6 +40,7 @@ const labels: Record<string, string> = {
   RelayResend: "the server sends a dropped message again",
   ClientRecv: "the app receives the event",
   ClientReload: "the app reloads the transcript",
+  ClientRestart: "you reload the app window",
   ClientResume: "you resume the session",
   Done: "everything settles",
 };

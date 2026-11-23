@@ -2276,6 +2276,28 @@ describe("reconnecting from the held cursor", () => {
       await settle();
       expect(held(id).every((chip) => !chip.held)).toBe(true);
     });
+
+    it("goes back to the queue after a reload missed the crash", async () => {
+      const id = await steerMidTurn();
+      dropSession(id);
+      server.get(id)!.rows.push(at(2, { kind: "exited", outcome: "crashed", code: 1, stderrTail: "" }));
+      h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [] });
+      await restoreSessionIfNeeded(id, "ws1", "general");
+      await whenBackfilled(id);
+      await settle();
+      await settle();
+      expect(sends()).toEqual(["also run the tests", "also run the tests"]);
+    });
+
+    it("still waits for its turn after a reload, behind a turn that keeps running", async () => {
+      const id = await startStreaming([at(0, INIT), at(1, TOOL)]);
+      expect(await sendMessage(id, "after this one")).toBe("queued");
+      dropSession(id);
+      h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [] });
+      await restoreSessionIfNeeded(id, "ws1", "general");
+      await whenBackfilled(id);
+      expect(held(id)).toEqual([{ text: "after this one", held: false }]);
+    });
   });
 
   describe.each(["claude", "codex"] as const)("a message sent straight from an idle %s chat that the harness never took in", (harness) => {
@@ -2308,6 +2330,18 @@ describe("reconnecting from the held cursor", () => {
       const texts = (h.sendUserMessage.mock.calls as unknown[][]).map((c) => c[1]);
       expect(texts).toEqual(["fix the build", "fix the build"]);
       expect(entryOf(id).items.filter((it) => it.kind === "user" && it.text === "fix the build")).toHaveLength(1);
+    });
+
+    it("goes back to the queue after a reload missed the exit", async () => {
+      const id = await sendFromIdle();
+      dropSession(id);
+      server.get(id)!.rows.push(at(3, EXITED));
+      h.listActiveSessions.mockResolvedValueOnce({ status: "ok", data: [] });
+      await restoreSessionIfNeeded(id, "ws1", "general");
+      await whenBackfilled(id);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const texts = (h.sendUserMessage.mock.calls as unknown[][]).map((c) => c[1]);
+      expect(texts).toEqual(["fix the build", "fix the build"]);
     });
 
     it("goes back to the queue when the harness declines it", async () => {

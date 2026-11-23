@@ -7,7 +7,8 @@
    desktop steps are SessionTurns' (claude); SKILL.md maps every action to the code. *)
 EXTENDS Integers, Sequences, FiniteSets
 
-CONSTANTS Composer, Agent, Asks, MaxProcs, MaxExits, MaxInterrupts,
+CONSTANTS MaxRestarts,  \* desktop reloads
+          Composer, Agent, Asks, MaxProcs, MaxExits, MaxInterrupts,
           MaxOtherTools  \* results of tool calls that asked nothing, on the root thread
 
 Msgs == Composer \cup Agent
@@ -29,7 +30,8 @@ VARIABLES
   \* the desktop: set by its Stop until you send again
   dropped, resendDue, stopped,
   \* SessionService::send past require_live and not yet sent: the message and the process it saw
-  checking, checkProc
+  checking, checkProc,
+  restarts
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
           dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr,
@@ -37,7 +39,7 @@ vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, ou
           vLive, streaming, vSeq, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop,
-          dropped, resendDue, stopped, checking, checkProc>>
+          dropped, resendDue, stopped, checking, checkProc, restarts>>
 
 codexVars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out>>
 driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr>>
@@ -64,7 +66,7 @@ Init ==
   /\ held = {} /\ resent = {} /\ toldSet \in SUBSET Agent
   /\ accepted = {} /\ failed = {} /\ delivered = [m \in Msgs |-> 0]
   /\ interrupts = 0 /\ droppedStop = FALSE
-  /\ dropped = {} /\ resendDue = {} /\ stopped = FALSE /\ checking = {} /\ checkProc = 0
+  /\ dropped = {} /\ resendDue = {} /\ stopped = FALSE /\ checking = {} /\ checkProc = 0 /\ restarts = 0
 
 (* ---- CodexDriver::send_user_turn, steer and write, under the op lock ---- *)
 
@@ -115,7 +117,7 @@ ClientSend(m) ==
        /\ Outcome(m, result, TRUE)
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
-  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue, checking, checkProc>>
+  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue, checking, checkProc, restarts>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
                  live, procs, exits, inTurn, stored, vLive, vSeq, clicked, delivered,
                  interrupts, droppedStop>>
@@ -130,7 +132,7 @@ AgentCheck(m) ==
        ELSE failed' = failed \cup {m} /\ UNCHANGED <<checking, checkProc, accepted>>
   /\ UNCHANGED <<codexVars, driverVars, live, procs, exits, inTurn, stored, viewVars,
                  held, resent, toldSet, delivered, interrupts, droppedStop,
-                 dropped, resendDue, stopped>>
+                 dropped, resendDue, stopped, restarts>>
 
 \* The driver it found has gone: codex's send_user_turn still returns Ok, and its echo reaches
 \* no relay. The relay's report and any relaunch's resend ran before the row existed, so the
@@ -155,7 +157,7 @@ AgentHold(m) ==
             /\ UNCHANGED <<driverVars, pipe>>
   /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, starting, otherTools, out, live,
                  procs, exits, inTurn, stored, viewVars, resent, toldSet, delivered,
-                 interrupts, droppedStop, dropped, resendDue, stopped>>
+                 interrupts, droppedStop, dropped, resendDue, stopped, restarts>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -188,7 +190,7 @@ Interrupt ==
           /\ droppedStop' = (droppedStop \/ (alive /\ (busy \/ starting /= {} \/
                                                       \E i \in 1..Len(pipe) : pipe[i][1] = "start")))
   \* the composer's Stop, or another's: an agent's stop_agent, a goal
-  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, checking, checkProc>>
+  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, checking, checkProc, restarts>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
                  dActive, dReq, waiting, pending, bus, dStarts, live, procs, exits,
                  inTurn, stored, viewVars, accepted, failed, delivered>>
@@ -397,7 +399,7 @@ Relay ==
      /\ resendDue' = IF ev[1] = "turnDone" THEN dropped \cap held ELSE {}
   /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, dStarts, dIntr,
                  procs, exits, clicked, sends, resent, toldSet, accepted, delivered, interrupts,
-                 droppedStop, stopped, checking, checkProc>>
+                 droppedStop, stopped, checking, checkProc, restarts>>
 
 \* held::send_again: a held message the harness dropped goes out again, to the live driver; one
 \* it refuses is reported to a sender who can be told, and otherwise kept for the next relaunch.
@@ -410,7 +412,7 @@ RelayResend ==
          /\ failed' = IF result /= "ok" /\ m \in toldSet THEN failed \cup {m} ELSE failed
     /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, starting, otherTools, out, live, procs,
                    exits, inTurn, stored, viewVars, resent, toldSet, accepted, delivered,
-                   interrupts, droppedStop, dropped, stopped, checking, checkProc>>
+                   interrupts, droppedStop, dropped, stopped, checking, checkProc, restarts>>
 
 \* A tail read: list_turns re-sends the stored asks pending_requests names; settleUnwaitedAsks
 \* closes the rest.
@@ -420,6 +422,16 @@ ClientReload ==
   /\ UNCHANGED <<heldVars, codexVars, driverVars, live, procs, exits, inTurn, stored,
                  vLive, streaming, clicked, chip, sends, accepted, failed, delivered,
                  interrupts, droppedStop>>
+
+\* The desktop window reloads, as in SessionTurns: the view refolds and the kept sends come back.
+ClientRestart ==
+  /\ restarts < MaxRestarts
+  /\ restarts' = restarts + 1
+  /\ vLive' = live /\ streaming' = (live /\ inTurn)
+  /\ vSeq' = IF live THEN SetToSeq(pending \cap stored) ELSE <<>>
+  /\ UNCHANGED <<heldVars, codexVars, driverVars, live, procs, exits, inTurn, stored,
+                 clicked, chip, sends, accepted, failed, delivered, interrupts, droppedStop,
+                 dropped, resendDue, stopped, checking, checkProc>>
 
 \* ResumeSession: thread/resume in a fresh app-server and driver, Relaunched; held::resend
 \* sends each held message once to the idle driver, which echoes it and starts a turn.
@@ -449,7 +461,7 @@ Quiet ==
 Done == Quiet /\ UNCHANGED vars
 
 \* The steps that leave the relay's resends and the desktop's Stop as they are.
-Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped, checking, checkProc>>
+Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped, checking, checkProc, restarts>>
 
 Next ==
   \/ \E m \in Composer : ClientSend(m)
@@ -458,7 +470,7 @@ Next ==
   \/ Interrupt
   \/ Frame(CodexRead \/ CodexBegin \/ CodexOtherTool \/ CodexCommitSteer \/ CodexFinish \/ CodexExit)
   \/ Frame(DriverRead \/ ClientReload \/ ClientResume)
-  \/ Relay \/ RelayResend \/ Done
+  \/ Relay \/ RelayResend \/ ClientRestart \/ Done
 
 Spec == Init /\ [][Next]_vars
 

@@ -229,6 +229,35 @@ function setEntry(sessionId: string, next: SessionEntry, clock: { at?: number; c
   }
   if (isWorking(next)) lastWorkingAt.set(next.workstreamId, Date.now());
   if (!prev) scheduleWatch();
+  if (prev?.queued !== next.queued || prev?.unechoed !== next.unechoed) keepUnsent(sessionId, next);
+}
+
+const unsentKey = (sessionId: string) => `hyprlayer:unsent:${sessionId}`;
+
+function storable({ onSent: _, ...message }: QueuedMessage): QueuedMessage {
+  return message;
+}
+
+function keepUnsent(sessionId: string, entry: SessionEntry): void {
+  const queued = entry.queued.map(storable);
+  const unechoed = (entry.unechoed ?? []).map(storable);
+  try {
+    if (queued.length === 0 && unechoed.length === 0) localStorage.removeItem(unsentKey(sessionId));
+    else localStorage.setItem(unsentKey(sessionId), JSON.stringify({ queued, unechoed }));
+  } catch (e) {
+    log.warn("session", `keeping ${sessionId}'s unsent messages failed`, e);
+  }
+}
+
+function unsentFromLastLoad(sessionId: string): Pick<SessionEntry, "queued" | "unechoed"> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(unsentKey(sessionId)) ?? "null") as Pick<
+      SessionEntry,
+      "queued" | "unechoed"
+    > | null;
+    if (stored && Array.isArray(stored.queued) && Array.isArray(stored.unechoed)) return stored;
+  } catch {}
+  return { queued: [], unechoed: [] };
 }
 
 // Keyed by the turn's end, so a turn that ends mid-request still gets its own.
@@ -2471,10 +2500,11 @@ export async function restoreSessionIfNeeded(
       permissionMode: followsSession ? requested : permissionMode,
       workingSince: null,
       taskStartedAt: {},
-      queued: [],
+      ...unsentFromLastLoad(sessionId),
       goal: row?.session.goal ?? null,
     });
     foldLoaded(sessionId, read);
+    settleFolded(sessionId);
     startBackfill(sessionId, read, live);
     if (live) await resumeSession(sessionId, { cursor: position.cursor });
   } catch (error) {

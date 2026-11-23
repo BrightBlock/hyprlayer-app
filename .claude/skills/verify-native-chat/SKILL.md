@@ -468,6 +468,15 @@ scratch delay (the PR that fixed them has the evidence).
     send at `require_live` found that relaunch path (`NoLostAgentMessage`, 7
     steps) before the resend branch was added.
 
+20. **Fixed: `NoLostUserMessage`: a desktop reload dropped the sends it had not seen stored.**
+    Queued chips, steered chips and direct sends waiting for their echo lived
+    only in the entry's memory. Reproduced live: a message queued behind an
+    open ask was gone after a reload, and a steered message whose claude was
+    killed right after a reload was never resent; the log held only its
+    `commandLifecycle cancelled`. They are now kept in `localStorage` per
+    session and handed back by the first fold after the reload. With
+    `ClientRestart` dropping every chip, `NoLostUserMessage` fails.
+
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
 not in the models: a failed codex turn ended twice (`error` {willRetry:
@@ -540,6 +549,7 @@ turn, what closes an ask, or what reports the server's death.
 | `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, keeps the ids of `cancelled` lifecycles, sends each event on, after a `TurnDone` sends the held ones among those ids again (`RelayResend`) before reading on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867); `handBack`: after the desktop's Stop (`stopped`, set by `stopSession` and cleared by `sendMessage`) a handed-back chip goes to the composer (`"returned"`) instead of the queue |
 | `RelayResend` | `held::send_dropped` → `send_again`, held.rs: `reserve_user_turn` and `send_user_turn` with the held nonce; an Err reports a sender who can be told and drops its row, and keeps one no one would hear about |
 | `ClientReload` | `SessionService::list_turns`, service.rs:828 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
+| `ClientRestart` | the desktop window reloading: `restoreSessionIfNeeded` folds the log (`settleUnwaitedAsks` when live, prompts expired when not) and takes the queued, steered and unechoed sends `keepUnsent` wrote to `localStorage` on every `setEntry` that changed them (`unsentFromLastLoad`), then `settleFolded` hands back those an exit or relaunch newer than `heldAfterSeq` dropped. Bounded at one reload (`MaxRestarts`); `CodexTurns` has it too |
 | `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
 
 `CodexTurns.tla` (the service, relay, actor and desktop rows are as in `SessionTurns`):
@@ -735,6 +745,8 @@ wrong: fix the action, re-run, and say what you changed.
      ignored): the relay sends into a retired actor.
    - `SessionSync.NoSkippedSeq`, `ClientsConverge`: `Reopen` replays from
      `applied + 2` (an `attach_from` that skips the row after the cursor).
+   - `SessionTurns.NoLostUserMessage`: `ClientRestart` sets every chip to
+     `"none"` (the desktop before it kept unsent messages across a reload).
    - `CodexTurns.NoLostAgentMessage`: `AgentHold` only reports a late row and
      never sends it to a relaunched driver: 7 steps, an agent passes
      `require_live`, codex exits, the driver reads eof, the relay drops the
