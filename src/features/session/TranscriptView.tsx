@@ -36,6 +36,8 @@ import { backgroundTasksFromItems } from "./backgroundTask";
 import { AttachmentCards } from "./AttachmentCard";
 import { FileCard } from "./FileCard";
 import { PromptCard } from "./PromptCard";
+import { IncomingMessageCard } from "./IncomingMessageCard";
+import { parseIncomingMessage } from "./incomingMessage";
 import { STEP_ROW, STEP_ROW_STATIC, StepChevron } from "./stepRow";
 import type { Attachment } from "./attachments";
 import type { QueuedMessage } from "./sessionStore";
@@ -164,7 +166,9 @@ const UserMessage = memo(function UserMessage({
   selfClientId: string | null;
 }) {
   // Unknown identity attributes nothing, as in routing.
-  const remote = author && selfClientId !== null && author.clientId !== selfClientId ? author : null;
+  const incoming = promptName ? null : parseIncomingMessage(text);
+  const remote =
+    !incoming && author && selfClientId !== null && author.clientId !== selfClientId ? author : null;
   const workstreamId = useContext(PlanCardsContext)?.workstreamId ?? null;
   const ReviewCard = promptName === REVIEW_PROMPT ? reviewCardComponent() : null;
   return (
@@ -177,7 +181,9 @@ const UserMessage = memo(function UserMessage({
           </span>
         )}
         {text &&
-          (ReviewCard && promptName ? (
+          (incoming ? (
+            <IncomingMessageCard message={incoming} workstreamId={workstreamId} />
+          ) : ReviewCard && promptName ? (
             <ReviewCard
               text={text}
               workstreamId={workstreamId}

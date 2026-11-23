@@ -1,5 +1,6 @@
 // The one module that imports lucide-react (ESLint enforces it); components use semantic names.
 import {
+  AlarmClock,
   Archive,
   ArrowDown,
   ArrowDownWideNarrow,
@@ -246,6 +247,7 @@ const ICONS = {
   upload: Upload,
   users: Users,
   validate: CircleCheck,
+  wake: AlarmClock,
   windowMinimize: Minus,
   windowMaximize: Square,
   windowRestore: Copy,
