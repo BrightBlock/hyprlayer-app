@@ -2015,7 +2015,7 @@ export type Session = {
 	effort?: string | null,
 	/**  The mode its start, last launch or last mode change asked for; `None` is Auto, the stage's own. */
 	requestedPermissionMode?: PermissionMode | null,
-	permissionMode: PermissionMode,
+	permissionMode?: PermissionMode | null,
 	lead?: boolean,
 };
 

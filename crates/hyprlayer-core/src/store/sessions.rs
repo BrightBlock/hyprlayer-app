@@ -322,8 +322,9 @@ fn row_to_session(row: &Row<'_>) -> rusqlite::Result<Session> {
         parent_session_id: row.get("parent_session_id")?,
         effort: row.get("effort")?,
         requested_permission_mode,
-        permission_mode: requested_permission_mode
-            .unwrap_or(pipeline::policy_for(stage).permission_mode),
+        permission_mode: Some(
+            requested_permission_mode.unwrap_or(pipeline::policy_for(stage).permission_mode),
+        ),
         // A Lead is a user's session; `origin = 'lead'` parses as `User` on an older server too.
         lead: origin == LEAD_ORIGIN,
     })
@@ -390,7 +391,7 @@ impl Db {
             parent_session_id: None,
             effort: None,
             requested_permission_mode: None,
-            permission_mode: pipeline::policy_for(new.stage).permission_mode,
+            permission_mode: Some(pipeline::policy_for(new.stage).permission_mode),
             lead: false,
         };
         self.with(|conn| {
