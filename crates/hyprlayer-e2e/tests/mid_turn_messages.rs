@@ -21,7 +21,8 @@ const QUIET: Duration = Duration::from_millis(800);
 /// Every line it reads is appended to `<sandbox>/harness.log`. A turn whose
 /// text carries `E2E_STEER` or `E2E_WITHDRAW` starts a tool and reads the next
 /// line while it "runs", the way claude queues input that arrives mid-turn.
-/// `E2E_STOP` ends on that line as 2.1.330 ends a turn stopped mid-tool.
+/// `E2E_STOP` ends on that line as 2.1.330 ends a turn stopped mid-tool. A Ship session's
+/// first turn stopped that way must not be followed by its describe turn.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 sid=""
 while [ $# -gt 0 ]; do
@@ -326,6 +327,46 @@ async fn mid_turn_messages() {
         "the turn reports interrupted, not failed",
         status.as_deref() == Some("interrupted"),
         json!({ "turnStatus": status }),
+    );
+
+    j.step("a stopped Ship turn sends no follow-up");
+    let (ship, _prompt, _stream_id, mut ship_events) = client
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::Ship,
+            "E2E_STOP ship it".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Claude),
+                client_message_id: Some("ship-turn".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start_stage_session");
+    j.alias(&ship.id, "$SHIP");
+    // A Ship launch returns only once its first turn has ended, so the stop runs beside it.
+    let stop = async {
+        recv_until(&mut ship_events, |e| {
+            matches!(e, SessionEvent::ToolUse { .. })
+        })
+        .await;
+        client
+            .interrupt_session(ship.id.clone())
+            .await
+            .expect("interrupt_session");
+        recv_until(&mut ship_events, is_turn_done).await;
+        quiet(&mut ship_events).await
+    };
+    let (launched, after) = tokio::join!(client.launch_and_converse(ship.id.clone()), stop);
+    launched.expect("launch_and_converse");
+    let followed = after
+        .iter()
+        .any(|e| matches!(e, SessionEvent::UserMessage { .. }));
+    j.guard(
+        "no describe turn starts after the stop",
+        !followed,
+        json!({ "followUpSent": followed }),
     );
 
     j.finish();

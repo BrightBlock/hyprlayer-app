@@ -1389,6 +1389,19 @@ async fn hold_a_message(
             .any(|w| w == "E2E_BUSY")
     })
     .await;
+    // The stub writes its lifecycle frame before the tool; only once the driver has read that
+    // frame does it hold a mid-turn message instead of echoing it at once.
+    let deadline = tokio::time::Instant::now() + IO;
+    while !c
+        .get_session_log(target.to_string())
+        .await
+        .expect("get_session_log")
+        .iter()
+        .any(|e| matches!(&e.event, SessionEvent::ToolUse { id, .. } if id == "toolu-long"))
+        && tokio::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let sent = sender
         .call(
             "message_agent",

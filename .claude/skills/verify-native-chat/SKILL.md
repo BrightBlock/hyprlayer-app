@@ -316,7 +316,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 5605aed48d5639074ddd47d567727a00d610f14a -- \
+git diff --stat b9c008a0acf0f956d8e444ccfbb6d67a0f72fbec -- \
   crates/hyprlayer-core/src/claude/driver.rs \
   crates/hyprlayer-core/src/claude/protocol.rs \
   crates/hyprlayer-core/src/codex/driver.rs \
@@ -354,15 +354,15 @@ turn, what closes an ask, or what reports the server's death.
 | Model action | Code (at the sync commit) |
 |---|---|
 | `EchoOrHold`, `SendServer` | `ClaudeDriver::send_user_turn`, driver.rs:306 (refuses with `session_not_found` once `Inbox.ended`, 324; `Inbox::idle`, 79; `lifecycle`; echo before `write_line`; `take` on Err); `SessionService::send` releases the reservation on that refusal |
-| `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:609 (breaks on the first failed write) |
+| `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:616 (breaks on the first failed write) |
 | `ClientSend` | `sendMessage`/`deliverMessage` (direct: optimistic row and an `unechoed` entry until its echo; `session_not_found` puts it back in the queue), sessionStore.ts:1510/1573; `steerMessage` (chip with a `clientMessageId`), 1655; `handedBackBy`, 532, and `returnUnechoed`, 556 (a live `relaunched` hands back steered chips only); `settleFolded`, 594; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
 | `AgentSend` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`), `send_app_turn` (follow-ups), each recording the message with `held::hold` before `send_user_turn` and releasing it on Err |
-| `ClientAnswer` | `respond_permission`, service.rs:403 → driver.rs:371 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
-| `Interrupt` | `SessionService::interrupt`, service.rs:426 → driver.rs:426; `stopSession`, sessionStore.ts:1945 |
+| `ClientAnswer` | `respond_permission`, service.rs:416 → driver.rs:378 (emits `PermissionResolved` only when `pending_permissions` held the id); a card is answered once |
+| `Interrupt` | `SessionService::interrupt`, service.rs:439 → driver.rs:433; `stopSession`, sessionStore.ts:1993 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below) |
-| `DriverRead` | `read_and_wait`, driver.rs:634 (`Init` 657, `CommandLifecycle` → `Inbox::frame` 94, `Result` 674, `CanUseTool` 696, `ControlCancel` 710, `Exited` 763); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
-| `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:452 (`handedBackBy` 527), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
-| `ClientReload` | `SessionService::list_turns`, service.rs:815 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
+| `DriverRead` | `read_and_wait`, driver.rs:641 (`Init` 664, `CommandLifecycle` → `Inbox::frame` 96, `Result` 681, `CanUseTool` 703, `ControlCancel` 717, `Exited` 774); `control_cancel_request` → `ParsedLine::ControlCancel`, protocol.rs:207; a tool result passes through as `ToolResult`; at the end of stdout it sets `Inbox.ended`, 750, and declines every echo still in `Inbox.waiting` before `Exited` |
+| `Relay` | `spawn_relay`, service.rs (its reader stops at `Exited`; its forwarder releases a held message on its `UserMessage`, sends each event on, and after a reportable `Exited` calls `registry.remove` then `held::report_undelivered` for the messages whose sender can be told); `ActorState::handle_event`, forwarder.rs:856 (`author_for` 1056, `close_turn` 1124); the desktop's `applyEvent`, sessionStore.ts:454 (`handedBackBy` 532), `reduceEvent`'s `permissionAsk`/`permissionResolved` (`closeAsk`, transcript.ts:1011), `toolResult` (772, `settleAnsweredPrompt` 403), `turnDone` (853, `parkedState` 351), `exited` (867) |
+| `ClientReload` | `SessionService::list_turns`, service.rs:828 (re-sends the stored asks `pending_requests` names; `open_request_ids`), `settleUnwaitedAsks`, transcript.ts:1031 |
 | `ClientResume` | `ResumeSession` → `launch_driver`, service.rs (fresh driver and inbox, `Relaunched`, then `held::resend`: each held message once more, in order; one already resent is reported) |
 
 `CodexTurns.tla` (the service, relay, actor and desktop rows are as in `SessionTurns`):
@@ -393,12 +393,12 @@ turn, what closes an ask, or what reports the server's death.
 
 | Model action | Code (at the sync commit) |
 |---|---|
-| `Restart` | server stop (harnesses die, the actor with them) and start: `settle_stale_sessions`, store/sessions.rs:687 (`is_working`, 264), from runtime/mod.rs:243; `spawn_after_restart`, wake.rs:28 |
+| `Restart` | server stop (harnesses die, the actor with them) and start: `settle_stale_sessions`, store/sessions.rs:698 (`is_working`, 271), from runtime/mod.rs:243; `spawn_after_restart`, wake.rs:28 |
 | `WakerCheck` | `wake_stopped` → `check`, wake.rs:49/155 (ended, archived workstream at 166, `unanswered_restart_wakes`, 179, store/sessions.rs:1238, against `MAX_RESTART_RESUMES`) |
-| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:192 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake; `record_restart_wake`, wake.rs:210, store/sessions.rs:1250, before `send_app_turn_held`) |
+| `WakerWake` | `wake_and_forget` → `wake_one`, wake.rs:193 (`resume_if_exited_held`; `launch_driver` holds the workstream lock and refuses an archived one, `hold_unarchived`, workstreams.rs:1845, then sets `Running` and deletes the pending wake; `record_restart_wake`, wake.rs:210, store/sessions.rs:1250, before `send_app_turn_held`) |
 | `StoreEcho` | the wake's `UserMessage` through `spawn_relay` to `handle_event` |
 | `ClaudeFinishes` | a `TurnDone` row |
-| `Archive` | `WorkstreamService::archive` → `archive_inner`, workstreams.rs:1836/1857, under `lock_pair` (`stop_for_archive`, 2063: `end_quietly_and_await_exit`, 2081 → service.rs:882), then the status |
+| `Archive` | `WorkstreamService::archive` → `archive_inner`, workstreams.rs:1836/1857, under `lock_pair` (`stop_for_archive`, 2063: `end_quietly_and_await_exit`, 2081 → service.rs:895), then the status |
 
 `SessionSync.tla`:
 
@@ -406,8 +406,8 @@ turn, what closes an ask, or what reports the server's death.
 |---|---|
 | `Store` | `handle_event`'s persist then fan-out, forwarder.rs:856; `LiveAttachment::deliver`/`try_deliver`/`mark_lagged`, delivery.rs:130/108/119 |
 | `Forward` | `forward_session`, streams.rs:1411 (the `Lagged` arm at 1443 → `attach_after`, forwarder.rs:571, and `register_after`, 626, in one actor turn) |
-| `Receive` | `dispatch`, sessionStore.ts:355 → `route`, transcriptSync.ts:267 (skip, hold, flush via `applyHeld` 427, apply) |
-| `PullRead`, `PullApply` | `pullNow`, sessionStore.ts:1728 → `list_turns`; `mergeEntries`, transcriptSync.ts:352; `trimHeld`, sessionStore.ts:444 |
+| `Receive` | `dispatch`, sessionStore.ts:357 → `route`, transcriptSync.ts:267 (skip, hold, flush via `applyHeld`, sessionStore.ts:429, apply) |
+| `PullRead`, `PullApply` | `pullNow`, sessionStore.ts:1776 → `list_turns`; `mergeEntries`, transcriptSync.ts:352; `trimHeld`, sessionStore.ts:446 |
 
 Granularity: an action is one step only where the code makes it one. That
 means a service call under the session's op lock with the driver's inbox mutex
@@ -552,4 +552,4 @@ wrong: fix the action, re-run, and say what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the models describe it.
 
-Last confirmed against: `5605aed48d5639074ddd47d567727a00d610f14a`.
+Last confirmed against: `b9c008a0acf0f956d8e444ccfbb6d67a0f72fbec`.

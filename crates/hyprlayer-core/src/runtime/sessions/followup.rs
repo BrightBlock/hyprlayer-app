@@ -59,6 +59,12 @@ pub(crate) async fn await_followup(
     };
     match followup {
         Followup::ShipDescribe => {
+            if status.as_deref().map(TurnStatus::parse) != Some(TurnStatus::Completed) {
+                tracing::info!(
+                    "session {session_id}: the ship turn ended with status {status:?}; no describe follow-up"
+                );
+                return None;
+            }
             tracing::info!("session {session_id}: sending the ship describe follow-up");
             Some(FollowupTurn {
                 prompt: pipeline::SHIP_DESCRIBE_PROMPT,

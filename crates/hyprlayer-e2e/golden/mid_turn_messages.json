@@ -197,6 +197,18 @@
         }
       ],
       "step": "a stop mid-tool ends the turn as interrupted"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "followUpSent": false
+          },
+          "guard": "no describe turn starts after the stop",
+          "ok": true
+        }
+      ],
+      "step": "a stopped Ship turn sends no follow-up"
     }
   ]
 }
