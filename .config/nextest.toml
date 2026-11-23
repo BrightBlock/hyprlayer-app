@@ -16,11 +16,6 @@ slow-timeout = { period = "120s", terminate-after = 30 }
 filter = '(binary_id(hyprlayer-app) & test(=tests::typescript_bindings_export)) | (binary_id(hyprlayer-core::compat_contract) & test(=generated_bindings_match_the_pinned_v0_7_excerpts))'
 test-group = 'bindings'
 
-[[profile.default.overrides]]
-filter = 'binary_id(hyprlayer-e2e::transport_fairness)'
-# Its throttled links take about 3.5 min alone; under the gate's load that nears its 5 min kill.
-slow-timeout = { period = "120s", terminate-after = 5 }
-
 [profile.gate]
 fail-fast = false
 # Hang guard: 3× the slowest local E2E binary (account_sign_in, 25 s), at least 5 min.

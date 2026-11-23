@@ -649,6 +649,10 @@ Before is `67ef402f`:
 | Revisions to a stalled reader through two 120-step turns: delivered / missed / ends on the latest | 210 / 276 / no | 4 / 0 / yes |
 | `SessionRevised` per 120-step turn to a device streaming it, and to one only watching | 242, 242 | 1, 242 |
 
+`transport_fairness.rs` was removed on 2026-11-22. Its timing guards failed
+intermittently: the far-link guard failed a full-suite run at a stack tip that does not
+touch the transport. Nothing guards the figures below now; they stand as measured.
+
 The turns, the link window, the client's lanes and the request slots are guarded by
 `crates/hyprlayer-e2e/tests/transport_fairness.rs` (2026-11-20). Before is `8edf381b`,
 rerun on `b2eb8713`; the far-link rows' before is this change's fixed 128 KiB window, the
