@@ -375,9 +375,9 @@ ResumeAct ==
 ResumeSpawn ==
   /\ rspc = "spawn"
   /\ Spawn("normal", "none")
-  /\ rspc' = "done"
+  /\ rspc' = "done" /\ goalResumed' = TRUE
   /\ UNCHANGED <<status, req, step, iter, lock, ppc, ptries, pwait, spc, stries, swait,
-                 restartVars, ackVars>>
+                 srv, srvStep, waker, cut, woken, restarts, ackVars>>
 
 ----------------------------------------------------------------------------
 (* A server restart: runners, channels, locks and calls in flight are gone;
@@ -426,10 +426,11 @@ SrvSpawn ==
   /\ UNCHANGED <<status, req, step, iter, lock, svcVars, srvStep, waker, cut, woken,
                  restarts, ackVars>>
 
-(* wake::check: a session whose goal is running or paused is the goal resumer's *)
+(* wake::check, after resume_running's pass in the same task: a session
+   whose goal is running is the goal resumer's *)
 WakerCheck ==
-  /\ waker = "check"
-  /\ waker' = IF cut /\ status \notin {"running", "paused"} THEN "wake" ELSE "done"
+  /\ waker = "check" /\ srv = "done"
+  /\ waker' = IF cut /\ status # "running" THEN "wake" ELSE "done"
   /\ UNCHANGED <<status, req, step, iter, liveGen, nextGen, runnerVars, lock, svcVars,
                  srv, srvStep, cut, woken, goalResumed, restarts, ackVars>>
 
@@ -490,7 +491,7 @@ IterationCap == iter <= MaxIter
 NoStrandedGoal == Quiet => status # "running"
 
 (* A session cut off by a restart mid-turn is picked up again: woken by the
-   waker, or resumed by the goal resumer. *)
+   waker, or its goal resumed by the goal resumer or by a person. *)
 CutOffSessionPickedUp == (Quiet /\ cut) => (woken \/ goalResumed)
 
 =============================================================================

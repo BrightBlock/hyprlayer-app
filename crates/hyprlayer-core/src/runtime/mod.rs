@@ -498,8 +498,8 @@ impl HyprlayerRuntime {
         let title_task =
             sessions::titles::spawn_worker(self.session_titler.clone(), Arc::downgrade(self));
 
-        let goal_task = goals::spawn_resumer(self.goal_runners.clone(), Arc::downgrade(self));
-        let wake_task = sessions::wake::spawn_waker(Arc::downgrade(self));
+        let restart_task =
+            sessions::wake::spawn_after_restart(self.goal_runners.clone(), Arc::downgrade(self));
 
         // A required tool is usually installed from a terminal, outside the
         // app. Coming back to the window re-reads the login shell's `PATH`;
@@ -578,8 +578,7 @@ impl HyprlayerRuntime {
             sweep_task,
             account_task,
             title_task,
-            goal_task,
-            wake_task,
+            restart_task,
             rescan_task,
             fetch_task,
         ]);

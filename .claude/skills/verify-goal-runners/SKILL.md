@@ -1,6 +1,6 @@
 ---
 name: verify-goal-runners
-description: Model-check the goal runner protocol (one runner per goal; pause, stop and resume; server restarts; the restart resumer and waker) with TLA+. Use before merging any change to runtime/goals/mod.rs, sessions/goal_loop.rs's run/open/resume/boundary/gate/send/after/judge/check/apply/conclude, or sessions/wake.rs's check, and whenever a goal is reported stuck running, running twice, or ignoring a pause or stop.
+description: Model-check the goal runner protocol (one runner per goal; pause, stop and resume; server restarts; the restart resumer and waker) with TLA+. Use before merging any change to runtime/goals/mod.rs, sessions/goal_loop.rs's run/open/resume/boundary/gate/send/after/judge/check/apply/conclude, or sessions/wake.rs's check and spawn_after_restart, and whenever a goal is reported stuck running, running twice, or ignoring a pause or stop.
 ---
 
 # Verify the goal runners
@@ -20,7 +20,7 @@ of those steps, up to the bounds in `GoalRunners.cfg`.
 | `StopHonored` | After a stop is accepted, at most the iteration being sent goes out, and the goal never shows paused. | A stopped goal comes back, or keeps spending. |
 | `IterationCap` | A goal never sends more iterations than `max_iterations`. | One turn beyond the limit the user set. |
 | `NoStrandedGoal` | Once everything settles, a running goal has a runner. | The UI shows "running" and nothing happens until someone presses resume. |
-| `CutOffSessionPickedUp` | A session whose turn a restart cut off is woken, or its goal is resumed. | The session's own turn stays dead after a restart. |
+| `CutOffSessionPickedUp` | A session whose turn a restart cut off is woken, or its goal is resumed (by the resumer or by you). | The session's own turn stays dead after a restart. |
 | `TypeOK` | The variables stay in their domains. | None, it only guards the model. |
 
 ## Run it
@@ -47,8 +47,8 @@ states, so it can list rules as not checked. `check.sh` gives the verdict.
 
 ## Known findings (the baseline in `expected.txt`)
 
-The model fails one rule on the code at the sync commit. It and the fixed ones below are findings
-about the product, not modeling errors. Each path below was walked step by step
+The model passes every rule on the code at the sync commit. The four findings
+below were found about the product, not modeling errors, and are now fixed. Each path below was walked step by step
 against the code. None was replayed in a running server.
 
 1. **Fixed: `PauseHonored`, `StopHonored`: a pause or stop that is accepted but not yet applied dies with the server.**
@@ -89,11 +89,17 @@ against the code. None was replayed in a running server.
    holds `transitions`. Marking finishing without the lock is not enough: split
    into a read step and a mark step, the model fails again (a resume writes
    running and its `spawn` no-ops between them).
-4. **`CutOffSessionPickedUp`: a session whose goal is paused is never woken.**
-   `wake::check` skips any session with `session.goal` set ("a running or paused
+4. **Fixed: `CutOffSessionPickedUp`: a session whose goal is paused is never woken.**
+   `wake::check` skipped any session with `session.goal` set ("a running or paused
    goal is the goal resumer's"), but `resume_running` reads only
-   `GoalStatus::Running`. This may be intended. It is a finding until the owner
-   says so.
+   `GoalStatus::Running`. The owner chose to wake it. `wake::check` now skips
+   only a running goal's session. That alone still fails: the waker and the
+   resumer were separate tasks, so the waker could see the goal running and
+   skip it, a pause land, and the resumer then see it paused and skip it too.
+   `spawn_after_restart` now runs `resume_running` and then the waker in one
+   task. The rule also counts a person's resume after the restart as the goal
+   being resumed (`ResumeSpawn` sets `goalResumed`); without that it fails on
+   restart, pause, resumer skips, you resume, waker sees running, you stop.
 
 When one of these is fixed in the code, change the model to match, run
 `check.sh`, and change that rule's line in `expected.txt` to `PASS`.
@@ -103,7 +109,7 @@ When one of these is fixed in the code, change the model to match, run
 Run this from the repo root:
 
 ```sh
-git diff --stat 642d69c598c0df9d3adb2027f34441e367ce1a7c -- \
+git diff --stat cfd68fef2fb64b101f837ae5fdd21f6312ade7fb -- \
   crates/hyprlayer-core/src/runtime/goals/mod.rs \
   crates/hyprlayer-core/src/runtime/sessions/goal_loop.rs \
   crates/hyprlayer-core/src/runtime/sessions/wake.rs
@@ -127,12 +133,12 @@ check commands, prompts, spend arithmetic or `decide_boundary`'s order beyond
 | `RunnerJudge` | `judge` (1232) → `decide_boundary` → `follow` |
 | `RunnerFinishing` … `RunnerWrite` | `conclude`, goal_loop.rs:1635 (`finishing`, `transition`, read `control_request`, write; the write clears it) |
 | `RunnerLift`, `RunnerExit` | `lift_cap` (1656); `Registration::drop`, goals/mod.rs:370 |
-| `Pause*` | `GoalService::pause` (711) → `try_pause` (1068; writes `control_request` on `Delivered`), `wait_exit` (453) |
-| `Stop*` | `stop` (760) → `end` (1054) → `try_end` (1103; writes `control_request` on `Delivered`) |
-| `Resume*` | `GoalService::resume` (726), `running_again` (303) |
-| `Restart` | server exit + `stop_all`; `spawn_resumer`/`spawn_waker` from runtime/mod.rs:480 |
-| `Srv*` | `resume_running` (486) → `resume_one` (527) |
-| `WakerCheck`, `WakerWake` | `wake::check`, wake.rs:144–150; `wake_one` |
+| `Pause*` | `GoalService::pause` (699) → `try_pause` (1056; writes `control_request` on `Delivered`), `wait_exit` (453) |
+| `Stop*` | `stop` (748) → `end` (1042) → `try_end` (1091; writes `control_request` on `Delivered`) |
+| `Resume*` | `GoalService::resume` (714), `running_again` (303) |
+| `Restart` | server exit + `stop_all`; `spawn_after_restart` (wake.rs:28, from runtime/mod.rs:481) runs the `Srv*` steps, then the waker's |
+| `Srv*` | `resume_running` (474) → `resume_one` (515) |
+| `WakerCheck`, `WakerWake` | `wake::check`, wake.rs:152–159 (skips a running goal's session); `wake_one` (189) |
 
 Granularity: an action is one step only where the code makes it one. That means
 a section under the `live` mutex (`spawn`, `send`, `finishing`,
@@ -176,4 +182,4 @@ what you changed.
    forward only after you have read the covered code at the new commit and
    confirmed the model describes it.
 
-Last confirmed against: `642d69c598c0df9d3adb2027f34441e367ce1a7c`.
+Last confirmed against: `cfd68fef2fb64b101f837ae5fdd21f6312ade7fb`.

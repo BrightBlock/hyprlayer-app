@@ -4,4 +4,4 @@ PASS PauseHonored
 PASS StopHonored
 PASS IterationCap
 PASS NoStrandedGoal
-FAIL CutOffSessionPickedUp
+PASS CutOffSessionPickedUp

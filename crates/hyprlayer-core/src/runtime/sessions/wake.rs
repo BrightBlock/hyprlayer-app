@@ -1,14 +1,14 @@
 use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use hyprlayer_models::WorkstreamStatus;
+use hyprlayer_models::{GoalStatus, WorkstreamStatus};
 use serde_json::Value;
 use tokio::task::JoinSet;
 
 use crate::claude::SessionEvent;
 use crate::error::Result;
 use crate::pipeline::RESTART_PROMPT_NAME;
-use crate::runtime::goals::{MAX_RESTART_RESUMES, OVERLAY_WAIT};
+use crate::runtime::goals::{resume_running, GoalRunners, MAX_RESTART_RESUMES, OVERLAY_WAIT};
 use crate::runtime::shutdown::TrackedTask;
 use crate::runtime::HyprlayerRuntime;
 use crate::store::{utc_date, Session, SessionLogEntry};
@@ -25,11 +25,19 @@ struct Wake {
     tasks: Vec<String>,
 }
 
-pub(crate) fn spawn_waker(runtime: Weak<HyprlayerRuntime>) -> TrackedTask {
+pub(crate) fn spawn_after_restart(
+    runners: Arc<GoalRunners>,
+    runtime: Weak<HyprlayerRuntime>,
+) -> TrackedTask {
     let restarted_at = utc_minute(SystemTime::now());
     TrackedTask::spawn(move |stop| async move {
+        // Waking only after the resumer's pass: a goal it skipped as paused is then this pass's to wake.
+        let pickup = async {
+            resume_running(&runners, &runtime).await;
+            wake_stopped(&runtime, &restarted_at).await;
+        };
         tokio::select! {
-            () = wake_stopped(&runtime, &restarted_at) => {}
+            () = pickup => {}
             () = stop.notified() => {}
         }
     })
@@ -146,8 +154,9 @@ async fn check(rt: &HyprlayerRuntime, id: &str, mid_turn: bool) -> Result<Option
     let Some(session) = sessions.get(id).await? else {
         return Ok(None);
     };
-    // A running or paused goal is the goal resumer's.
-    if session.ended_at.is_some() || session.archived_at.is_some() || session.goal.is_some() {
+    // A running goal is the goal resumer's; a paused one's session is woken like any other.
+    let goal_running = matches!(&session.goal, Some(goal) if goal.status == GoalStatus::Running);
+    if session.ended_at.is_some() || session.archived_at.is_some() || goal_running {
         return Ok(None);
     }
     let workstream = rt.workstreams().find(&session.workstream_id).await?;

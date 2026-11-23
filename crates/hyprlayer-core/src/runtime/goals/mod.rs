@@ -471,19 +471,7 @@ impl GoalRunners {
 }
 
 /// Re-arms the goals a previous server left running, once a client's environment is back.
-pub(crate) fn spawn_resumer(
-    runners: Arc<GoalRunners>,
-    runtime: Weak<HyprlayerRuntime>,
-) -> TrackedTask {
-    TrackedTask::spawn(move |stop| async move {
-        tokio::select! {
-            () = resume_running(&runners, &runtime) => {}
-            () = stop.notified() => {}
-        }
-    })
-}
-
-async fn resume_running(runners: &Arc<GoalRunners>, runtime: &Weak<HyprlayerRuntime>) {
+pub(crate) async fn resume_running(runners: &Arc<GoalRunners>, runtime: &Weak<HyprlayerRuntime>) {
     let Some(rt) = runtime.upgrade() else {
         return;
     };
