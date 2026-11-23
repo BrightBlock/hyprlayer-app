@@ -731,6 +731,20 @@ fn track_ask(asks: &Asks, ev: &OcEvent) -> Option<SessionEvent> {
     }
 }
 
+/// OpenCode's abort cancels its asks without a reply event, and an idle session holds none.
+fn decline_all(asks: &Asks) -> Vec<SessionEvent> {
+    let mut cancelled: Vec<(String, Ask)> = asks
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .drain()
+        .collect();
+    cancelled.sort_by(|a, b| a.0.cmp(&b.0));
+    cancelled
+        .into_iter()
+        .map(|(request_id, ask)| closing(request_id, &ask, false))
+        .collect()
+}
+
 /// The row that closes an ask; a question's carries no decision.
 fn closing(request_id: String, ask: &Ask, allow: bool) -> SessionEvent {
     match ask {
@@ -889,6 +903,11 @@ impl OpenCodeDriver {
                         }
                         if let Some(closed) = track_ask(&tracked, &ev) {
                             let _ = tx.send(closed);
+                        }
+                        if ev.kind == "session.idle" {
+                            for closed in decline_all(&tracked) {
+                                let _ = tx.send(closed);
+                            }
                         }
                         let translated = xlate.handle(&ev);
                         if let Ok(mut so_far) = published_cost.lock() {
@@ -1200,16 +1219,8 @@ impl AgentDriver for OpenCodeDriver {
     }
 
     fn interrupt(&self) -> CoreResult<()> {
-        // OpenCode's abort cancels its asks without a reply event, so the stop declines them.
-        let mut cancelled: Vec<(String, Ask)> = self
-            .asks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain()
-            .collect();
-        cancelled.sort_by(|a, b| a.0.cmp(&b.0));
-        for (request_id, ask) in cancelled {
-            let _ = self.events.send(closing(request_id, &ask, false));
+        for closed in decline_all(&self.asks) {
+            let _ = self.events.send(closed);
         }
         self.mark_turn(|turn| turn.interrupted = true);
         self.post_async(format!("/session/{}/abort", self.session_id), json!({}));

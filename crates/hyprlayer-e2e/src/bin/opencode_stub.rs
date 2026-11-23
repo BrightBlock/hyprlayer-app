@@ -11,6 +11,8 @@
 //! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
 //! names the session only inside each message and part, as 1.0.224 does. `"child": true` asks
 //! from a subagent's session, which 1.18.18 announces with `session.created` naming its parent.
+//! `"lateAsk": true` asks for permission as an abort lands, and the abort cancels the ask with no
+//! reply event.
 //!
 //! As in 1.18.18, a question's reply and reject resolve under `?directory=` (the server's own
 //! cwd when absent) and answer 404 unless that is the asking session's directory.
@@ -328,6 +330,13 @@ impl Stub {
         };
         running.aborted.store(true, Ordering::SeqCst);
         self.asks.lock().unwrap().clear();
+        if delays.late_ask {
+            self.emit(
+                "permission.asked",
+                json!({ "id": format!("per_{}", nanos()), "sessionID": id, "permission": "bash",
+                        "patterns": ["echo stub"], "metadata": {} }),
+            );
+        }
         let error = json!({ "name": "MessageAbortedError", "data": { "message": "Aborted" } });
         self.emit("session.error", json!({ "sessionID": id, "error": error }));
         self.emit("session.idle", json!({ "sessionID": id }));
@@ -399,6 +408,7 @@ impl Stub {
             bare: control["bare"].as_bool().unwrap_or(false),
             nested: control["nested"].as_bool().unwrap_or(false),
             fail: control["fail"].as_str().map(str::to_string),
+            late_ask: control["lateAsk"].as_bool().unwrap_or(false),
         }
     }
 
@@ -434,6 +444,7 @@ struct Delays {
     bare: bool,
     nested: bool,
     fail: Option<String>,
+    late_ask: bool,
 }
 
 fn user_info(session: &str, id: &str, created: Option<u128>) -> Value {

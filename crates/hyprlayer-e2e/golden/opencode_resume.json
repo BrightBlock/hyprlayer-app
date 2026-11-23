@@ -151,6 +151,19 @@
       "guards": [
         {
           "evidence": {
+            "openAsks": 0,
+            "turnStatus": "interrupted"
+          },
+          "guard": "the turn ends interrupted, with no ask left open",
+          "ok": true
+        }
+      ],
+      "step": "an ask OpenCode raises as the stop lands closes with the stopped turn"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "replied": true,
             "turnStatus": "completed"
           },

@@ -231,9 +231,10 @@ SseDrop ==
 Open == sent /= None /\ ~ended
 
 \* end_turn: a turn that ends while its reply is open holds its TurnDone until that reply settles.
-EndTurn ==
+EndTurn(closes) ==
   /\ ended' = TRUE
-  /\ IF replying THEN held' = TRUE /\ UNCHANGED bus ELSE bus' = Append(bus, <<"turnDone">>) /\ UNCHANGED held
+  /\ IF replying THEN held' = TRUE /\ bus' = bus \o closes
+                  ELSE bus' = bus \o closes \o <<<<"turnDone">>>> /\ UNCHANGED held
 
 \* A turn sent after the held end lets it out before anything else is read.
 DriverRead ==
@@ -268,16 +269,19 @@ DriverRead ==
                     ELSE UNCHANGED <<pending, bus>>
                /\ UNCHANGED turnVars
           [] ev[1] = "idle" ->
+               \* decline_all: an idle OpenCode holds no ask, so any the driver still holds is closed
+               LET closes == SetToSeq({<<"resolved", r>> : r \in pending}) IN
+               /\ pending' = {}
                /\ IF Open /\ (answered \/ interrupted)
-                    THEN EndTurn /\ UNCHANGED unplaced
+                    THEN EndTurn(closes) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
-                    THEN unplaced' = TRUE /\ UNCHANGED <<ended, held, bus>>
-                  ELSE UNCHANGED <<ended, unplaced, held, bus>>
-               /\ UNCHANGED <<sent, anchored, answered, interrupted, replying, pending>>
+                    THEN unplaced' = TRUE /\ bus' = bus \o closes /\ UNCHANGED <<ended, held>>
+                  ELSE bus' = bus \o closes /\ UNCHANGED <<ended, unplaced, held>>
+               /\ UNCHANGED <<sent, anchored, answered, interrupted, replying>>
           [] ev[1] = "abortErr" ->
                \* session.error, MessageAbortedError: this turn's only if this driver asked
                /\ IF Open /\ interrupted
-                    THEN EndTurn /\ UNCHANGED unplaced
+                    THEN EndTurn(<<>>) /\ UNCHANGED unplaced
                   ELSE IF Open /\ ~anchored
                     THEN unplaced' = TRUE /\ UNCHANGED <<ended, held, bus>>
                   ELSE UNCHANGED <<ended, unplaced, held, bus>>

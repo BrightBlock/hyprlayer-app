@@ -20,11 +20,11 @@ PASS OpenCodeTurns.TypeOK
 PASS OpenCodeTurns.NoLostUserMessage
 PASS OpenCodeTurns.NoLostAgentMessage
 PASS OpenCodeTurns.NoDoubleSend
-FAIL OpenCodeTurns.TurnProgress
-FAIL OpenCodeTurns.AskResolution
-FAIL OpenCodeTurns.AskVisible
-FAIL OpenCodeTurns.InterruptSafe
-FAIL OpenCodeTurns.InterruptHonored
+FAIL OpenCodeTurns.TurnProgress  # finding 14 (a lost idle), and 13: model only, not reproduced live
+FAIL OpenCodeTurns.AskResolution  # findings 13 and 14 together: model only, not reproduced live
+FAIL OpenCodeTurns.AskVisible  # finding 14 (a lost permission.asked): model only, not reproduced live
+FAIL OpenCodeTurns.InterruptSafe  # findings 13 and 14 together: model only, not reproduced live
+FAIL OpenCodeTurns.InterruptHonored  # finding 13 (an abort handled before its prompt): model only, not reproduced live
 PASS OpenCodeTurns-death.TypeOK
 PASS OpenCodeTurns-death.NoLostUserMessage
 PASS OpenCodeTurns-death.NoLostAgentMessage
@@ -39,9 +39,9 @@ PASS OpenCodeTurns-stop.NoLostUserMessage
 PASS OpenCodeTurns-stop.NoLostAgentMessage
 PASS OpenCodeTurns-stop.NoDoubleSend
 PASS OpenCodeTurns-stop.TurnProgress
-FAIL OpenCodeTurns-stop.AskResolution
+PASS OpenCodeTurns-stop.AskResolution
 PASS OpenCodeTurns-stop.AskVisible
-FAIL OpenCodeTurns-stop.InterruptSafe
+PASS OpenCodeTurns-stop.InterruptSafe
 PASS OpenCodeTurns-stop.InterruptHonored
 PASS RestartWake.TypeOK
 PASS RestartWake.WakeBounded

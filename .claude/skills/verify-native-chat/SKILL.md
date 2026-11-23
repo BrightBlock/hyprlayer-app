@@ -101,7 +101,8 @@ shortest path that breaks any of them, that rule is FAIL, and TLC runs again
 without it, so each FAIL's trace is its own shortest path and the passing rules
 share one full run. TLC's deadlock check is on: each model's `Done` action marks
 its real end states. It prints `PASS`/`FAIL` per rule, compares the list with
-`expected.txt`, and exits non-zero when they differ.
+`expected.txt` (a `#` starts a note to the end of the line), and exits
+non-zero when they differ.
 
 Timing, all 33 rules: 32 s on the Mac with `WORKERS=12` (18 cores), 51 s on
 nexus with `WORKERS=4`. Run it on the Mac when you can (nexus is shared):
@@ -334,11 +335,28 @@ scratch delay (the PR that fixed them has the evidence).
     with deaths and drops off): someone presses stop, you send, OpenCode
     handles the prompt and then the abort. `InterruptHonored` (3 steps): an
     abort handled before the prompt it was for does nothing, and the turn runs
-    to the end.
-14. **OpenCode `AskVisible` (model only): a lost `permission.asked`.** An SSE
-    event the driver never sees (a reconnect gap in `spawn_sse`, or the filter
-    task's receiver lagging, which it skips with `continue`) leaves an ask
-    OpenCode waits on that the desktop never shows (8 steps).
+    to the end. Not reproduced live: twice on the Mac (stop and an immediate
+    send, also fired concurrently) OpenCode aborted the old turn and ran the
+    new prompt to its end. Not fixed: ordering the driver's POSTs would queue a
+    stop behind a slash command's `/command`, which answers only when its turn
+    ends.
+14. **OpenCode `AskVisible`, `TurnProgress` (model only): a lost SSE event.** An
+    SSE event the driver never sees (a reconnect gap in `spawn_sse`, or the
+    filter task's receiver lagging, which it skips with `continue`) leaves an
+    ask OpenCode waits on that the desktop never shows (8 steps), or, when the
+    lost event is the idle, a turn that never ends (10 steps). Not reproduced
+    live: it needs the stream to drop with the server alive or 1024 events of
+    lag. Not fixed: the fix is a resync of pending asks (`GET /permission`,
+    `GET /question`) and of the session's status on every `server.connected`
+    and every lag, more than a hardening of a path no one has seen.
+15. **Fixed (found by the model, not reproduced live): OpenCode `AskResolution`,
+    `InterruptSafe`: an ask raised as the stop lands stays open.** `interrupt`
+    declines the asks the driver holds, but OpenCode can raise one while the
+    abort is on its way; the abort then cancels it with no reply event, and the
+    card stays after the turn ended. `OpenCodeTurns-stop` (13 steps): you send,
+    OpenCode starts and asks, you press stop before the driver reads the ask,
+    OpenCode handles the abort. Now the session's `session.idle` declines every
+    ask the driver still holds (`decline_all`: an idle OpenCode holds none).
 
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
@@ -435,7 +453,7 @@ turn, what closes an ask, or what reports the server's death.
 | `RelayExited` | `spawn_relay` on `Exited`: drops the driver; the desktop's `exited` reducer ends working and expires the cards; the composer's own unechoed message is handed back and an agent's reported (`held::report_undelivered`), both counted as `failed` |
 | `OcRead`, `OcAsk`, `OcElsewhereReply`, `OcFinish`, `OcDown` | OpenCode's own behaviour (see the assumptions below) |
 | `SseDrop` | `spawn_sse`, runtime.rs:412 (reconnects after a gap), the filter task's `RecvError::Lagged(_) => continue`, 834 |
-| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it |
+| `DriverRead`, `Expire` | the filter task: `admits` (the session's own events, and of the subagent sessions under it only their asks and replies), `track_ask`, 643 (closes an ask a reply took), `decline_all` on the session's idle, then `Translator::handle`, 1407 (`message.updated`, 1411: anchor and `answered` via `reply_finished`, 1291; `session.idle`, 1494; `session.error`, 1516, an abort is ours only if `interrupted`), `expire`, 1379; `end_turn` holds a turn's end while its reply is open (`open_reply`) until that reply's `message.updated` settles it |
 | `Settle` | the held end released by `expire` (`SETTLE_WAIT`, 3 s) or by a newer turn's next event (`Translator::handle`) |
 | `Relay` | as `SessionTurns`, plus `author_for`'s `next_turn` (forwarder.rs:1056); OpenCode's permission names never equal a normalized tool name (`normalize_tool`, 1679), so no tool result decides a card |
 
@@ -637,6 +655,8 @@ wrong: fix the action, re-run, and say what you changed.
    - `OpenCodeTurns-death.TurnProgress`, `AskResolution`: no `ServerExited`
      (the driver before `watch_exit`; the copy also drops `Quiet`'s
      `alive \/ ~live`, since nothing is then in flight).
+   - `OpenCodeTurns-stop.AskResolution`, `InterruptSafe`: `DriverRead`
+     closes nothing on an idle (the filter task before `decline_all`).
    - `OpenCodeTurns-stop.TurnProgress`: `EndTurn` sends the `TurnDone` at
      once while the reply is open (the translator before `end_turn`): the
      stopped reply's last part lands after it and the desktop shows working

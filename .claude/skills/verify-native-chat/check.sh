@@ -71,7 +71,7 @@ echo "logs: $out"
 if [ $# -gt 0 ]; then
   exit 0
 fi
-if diff -u "$here/expected.txt" "$got"; then
+if sed 's/[[:space:]]*#.*//' "$here/expected.txt" | diff -u - "$got"; then
   echo "matches expected.txt"
 else
   echo "differs from expected.txt"

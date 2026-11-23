@@ -299,6 +299,25 @@ async fn opencode_resume() {
         json!({ "closed": closed }),
     );
 
+    j.step("an ask OpenCode raises as the stop lands closes with the stopped turn");
+    stub_delays(&sandbox, json!({ "reply": 2000, "lateAsk": true }));
+    let late = "A turn stopped as it asks.";
+    send(&mut j, &client, &id, late).await;
+    sent(&mut events, late).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    client
+        .interrupt_session(id.clone())
+        .await
+        .expect("interrupt_session");
+    let stopped = turn_status(&mut events).await;
+    let left_open = open_asks(&client, &id).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the turn ends interrupted, with no ask left open",
+        stopped.as_deref() == Some("interrupted") && left_open.is_empty(),
+        json!({ "turnStatus": stopped, "openAsks": left_open.len() }),
+    );
+
     j.step("an OpenCode that ignores the prompt's messageID still ends each turn");
     stub_delays(&sandbox, json!({ "ownIds": true }));
     let own = "Answer under OpenCode's own ids.";
