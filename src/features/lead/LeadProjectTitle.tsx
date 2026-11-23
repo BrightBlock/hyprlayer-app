@@ -17,14 +17,17 @@ export function LeadProjectTitle({
 
   return (
     <>
-      <span className="relative flex shrink-0" title={needsYou > 0 ? `Lead · ${needsYou} needs you` : "Lead"}>
-        <RepoAvatar source={source} name={name} size={22} className="rounded-md" />
-        {needsYou > 0 && (
-          <span
-            aria-hidden="true"
-            className="absolute -right-px -bottom-px h-2 w-2 rounded-full border-[1.5px] border-panel bg-warn"
-          />
-        )}
+      <span className="flex shrink-0" title={needsYou > 0 ? `Lead · ${needsYou} needs you` : "Lead"}>
+        <RepoAvatar
+          source={source}
+          name={name}
+          size={22}
+          className={
+            needsYou > 0
+              ? "rounded-md shadow-[0_0_6px_1px_color-mix(in_srgb,var(--color-warn)_45%,transparent)]"
+              : "rounded-md"
+          }
+        />
       </span>
       <span className="truncate">{name}</span>
     </>
