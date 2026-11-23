@@ -472,7 +472,7 @@ impl Translator {
                 }
                 vec![SessionEvent::PermissionAsk {
                     request_id,
-                    tool_use_id: None,
+                    tool_use_id: gated_call(p),
                     tool_name: "Bash".into(),
                     input: Value::Object(input).to_string(),
                 }]
@@ -490,7 +490,7 @@ impl Translator {
                 }
                 vec![SessionEvent::PermissionAsk {
                     request_id,
-                    tool_use_id: None,
+                    tool_use_id: gated_call(p),
                     tool_name: "Edit".into(),
                     input: Value::Object(input).to_string(),
                 }]
@@ -509,7 +509,7 @@ impl Translator {
                 );
                 vec![SessionEvent::PermissionAsk {
                     request_id,
-                    tool_use_id: None,
+                    tool_use_id: gated_call(p),
                     tool_name: "Permissions".into(),
                     input: json!({
                         "cwd": p.get("cwd").cloned().unwrap_or(Value::Null),
@@ -758,6 +758,10 @@ fn thread_total(total: &Value) -> Option<u32> {
         .saturating_sub(field("cachedInputTokens").unwrap_or(0))
         .saturating_add(field("outputTokens").unwrap_or(0));
     Some(tokens.min(u32::MAX as u64) as u32)
+}
+
+fn gated_call(p: &Value) -> Option<String> {
+    p.get("itemId").and_then(Value::as_str).map(str::to_string)
 }
 
 fn approval_request_id(p: &Value, rpc_id: &Value) -> String {
@@ -2044,6 +2048,66 @@ mod tests {
         assert_eq!(
             approval_reply(kind, false, None),
             json!({ "decision": "decline" })
+        );
+    }
+
+    #[test]
+    fn an_approval_names_the_call_it_gates() {
+        let mut t = Translator::default();
+        t.set_root_thread_id("th".into());
+        let command = |id: &str, status: &str| {
+            json!({ "threadId": "th", "turnId": "t1", "item": {
+                "type": "commandExecution", "id": id, "command": "bash", "cwd": "/w",
+                "status": status, "aggregatedOutput": "", "exitCode": 0 } })
+        };
+        let gating = |item: &str| {
+            json!({ "threadId": "th", "turnId": "t1", "itemId": item,
+                "command": "curl -sI https://example.com", "cwd": "/w", "permissions": {} })
+        };
+        let mut out = t.notification("item/started", &command("exec-curl", "inProgress"));
+        out.extend(t.server_request(
+            &json!(0),
+            "item/commandExecution/requestApproval",
+            &gating("exec-curl"),
+        ));
+        out.extend(t.server_request(
+            &json!(1),
+            "item/fileChange/requestApproval",
+            &gating("patch-1"),
+        ));
+        out.extend(t.server_request(
+            &json!(2),
+            "item/permissions/requestApproval",
+            &gating("perm-1"),
+        ));
+        out.extend(t.notification("item/started", &command("exec-ls", "inProgress")));
+        out.extend(t.notification("item/completed", &command("exec-ls", "completed")));
+
+        let asks: Vec<_> = out
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::PermissionAsk { tool_use_id, .. } => Some(tool_use_id.as_deref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asks, [Some("exec-curl"), Some("patch-1"), Some("perm-1")]);
+        let calls: Vec<_> = out
+            .iter()
+            .filter_map(|e| match e {
+                SessionEvent::ToolUse { id, .. } => Some(("use", id.as_str())),
+                SessionEvent::ToolResult { tool_use_id, .. } => {
+                    Some(("result", tool_use_id.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                ("use", "exec-curl"),
+                ("use", "exec-ls"),
+                ("result", "exec-ls")
+            ]
         );
     }
 

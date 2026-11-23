@@ -306,15 +306,15 @@ Relay ==
      /\ stored' = IF ev[1] \in {"echo", "ask"} THEN stored \cup {ev[2]} ELSE stored
      /\ live' = IF ev[1] = "exited" THEN FALSE ELSE live
      /\ bus' = IF ev[1] = "exited" THEN <<>> ELSE Tail(bus)
-     \* codex's asks carry no tool_use_id, so settleAnsweredPrompt decides the newest
-     \* undecided card with the result's tool name (all of the model's asks are Bash)
+     \* each ask names the call it gates (tool_use_id), so settleAnsweredPrompt decides
+     \* only that call's card; a result for a call that asked nothing decides none
      /\ streaming' = CASE ev[1] \in {"echo", "ask"} -> TRUE
-                      [] ev[1] = "toolResult" /\ vSeq /= <<>> -> TRUE
+                      [] ev[1] = "toolResult" /\ InSeq(ev[2], vSeq) -> TRUE
                       [] ev[1] \in {"turnDone", "exited"} -> FALSE
                       [] OTHER -> streaming
      /\ vSeq' = CASE ev[1] = "ask" -> Append(vSeq, ev[2])
                  [] ev[1] = "resolved" -> Remove(vSeq, ev[2])
-                 [] ev[1] = "toolResult" /\ vSeq /= <<>> -> SubSeq(vSeq, 1, Len(vSeq) - 1)
+                 [] ev[1] = "toolResult" -> Remove(vSeq, ev[2])
                  [] ev[1] = "exited" -> <<>>
                  [] OTHER -> vSeq
      /\ vLive' = IF ev[1] = "exited" THEN FALSE ELSE vLive

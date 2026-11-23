@@ -28,8 +28,9 @@ the same) and the same rule names, so each rule is checked per provider.
   task), `steering` and `pending_approvals`; codex reading requests, writing
   the `turn/start` response at any point after it starts the turn, asking,
   committing steers at its next step, and settling its own approvals on an
-  interrupt (`serverRequest/resolved` after `turn/completed`); and the shared relay, actor and desktop, where a codex ask (no
-  `tool_use_id`) is closed by the newest tool result with its tool's name.
+  interrupt (`serverRequest/resolved` after `turn/completed`); and the shared
+  relay, actor and desktop, where a codex ask names the call it gates
+  (`tool_use_id`) and is closed by that call's result.
 - `OpenCodeTurns.tla` covers one session on the shared OpenCode server:
   `OpenCodeDriver`'s `send_user_turn` (echo, `begin_turn`, `prompt_async`),
   `respond_permission`, `interrupt` (drains the asks map, marks the sent
@@ -77,7 +78,7 @@ Results at the sync commit, per provider (`expected.txt`):
 | `NoDoubleSend` | PASS | PASS | PASS (no resend path exists) |
 | `TurnProgress` | PASS | FAIL | FAIL |
 | `AskResolution` | PASS | PASS | FAIL |
-| `AskVisible` | PASS | FAIL | FAIL |
+| `AskVisible` | PASS | PASS | FAIL |
 | `InterruptSafe` | PASS | FAIL | FAIL |
 | `InterruptHonored` | PASS | FAIL | FAIL |
 
@@ -269,13 +270,20 @@ scratch delay (the PR that fixed them has the evidence).
    for claude). `CodexDriver::send_user_turn` does not refuse after its
    stdout ends as claude's does, so codex's window still returns Ok; the
    desktop resends. Not replayed against a live codex.
-10. **codex `AskVisible` (model only): another command's result closes the card.**
-    codex's `PermissionAsk` has `tool_use_id: None`, so `settleAnsweredPrompt`
-    decides the newest undecided card with the result's tool name. A root
-    thread Bash call that needed no approval, finishing while another waits on
-    its approval, closes that card; codex waits on an ask no one sees until a
-    reload. Shortest path (11 steps). Needs two root-thread Bash calls in one
-    turn, one auto-approved.
+10. **Fixed: codex `AskVisible`: another command's result closed the card.**
+    Reproduced live on the Mac debug app (codex 0.170, gpt-6.2-sol): in Auto
+    mode, of two parallel Bash calls `curl` waited on approval while `sleep 3;
+    ls -la` ran unasked, and ls's result closed the curl card: no card,
+    "Running curl · 45s", `openRequestIds` still naming the ask, codex
+    waiting. Denying one of two parallel asks closed the other card too.
+    codex's `PermissionAsk` had `tool_use_id: None`, so `settleAnsweredPrompt`
+    decided the newest undecided card with the result's tool name. Shortest
+    path (11 steps). Fixed: command, file-change and permissions approvals
+    name the call they gate (`tool_use_id` is the request's `itemId`, the id
+    of the call's `toolUse` and `toolResult`), and the desktop already
+    matches a card by `tool_use_id` when it has one. An MCP tool approval
+    names no call and is still matched by its `mcp__` name (outside the
+    model).
 11. **codex `InterruptHonored` (model only): stop before the driver knows the turn id is dropped.**
     `CodexDriver::interrupt` returns Ok and sends nothing when neither
     `active_turn` nor `requested_turn` is set: from `turn/start` until its
@@ -383,7 +391,7 @@ turn, what closes an ask, or what reports the server's death.
 | `Interrupt` | `CodexDriver::interrupt`, codex/driver.rs:489 (no turn id: returns Ok, sends nothing) |
 | `CodexRead`, `CodexRespond`, `CodexAsk`, `CodexOtherTool`, `CodexCommitSteer`, `CodexFinish`, `CodexExit` | codex app-server's own behaviour (see the assumptions below) |
 | `DriverRead` | `read_and_wait`, codex/driver.rs:832 → `route_incoming`, 896 → `Translator`: the `turn/start` task sets `requested_turn`, 373; `turn/started`, protocol.rs:316; `item_completed`'s `userMessage` releases a steer's echo, 631; a refused steer's task takes it and sends `declined_message`; a failed `turn/start` sends a failed `TurnDone`; `turn/completed`, 330, clears both ids and runs `decline_steers`, 197; `server_request`, 424 (`pending_approvals`); `serverRequest/resolved` → `settle` (drops the approval with that rpc id, `PermissionResolved {allow: false}`); `Exited`, driver.rs:889 |
-| `Relay` | as `SessionTurns`, with `settleAnsweredPrompt`, transcript.ts:403, deciding a codex card by tool name (codex asks have `tool_use_id: None`, protocol.rs:431) |
+| `Relay` | as `SessionTurns`, with `settleAnsweredPrompt`, transcript.ts:403, deciding a codex card by its `tool_use_id`, the approval's `itemId` (`gated_call` in codex/protocol.rs) |
 | `ClientResume` | `thread/resume` in a fresh app-server and driver, then `held::resend` |
 
 `OpenCodeTurns.tla` (the relay, actor and desktop rows are as in `SessionTurns`):
@@ -554,6 +562,9 @@ wrong: fix the action, re-run, and say what you changed.
    - `CodexTurns.AskResolution`: `DriverRead` ignores `srvResolved` (the
      code before the fix): a 15-step path, an agent's message, codex asks,
      stop, the desktop keeps the ask after `turnDone`.
+   - `CodexTurns.AskVisible`: `Relay` closes the newest open card on any
+     tool result (by name, the code before the fix): 11 steps, a Bash call
+     that asked nothing finishes while another waits on its approval.
    - `CodexTurns.NoDoubleSend`: codex keeps an uncommitted steer across the
      end of its turn and commits it later, while the driver declines it.
    - `OpenCodeTurns.NoLostUserMessage`, `NoLostAgentMessage`: `send_user_turn`

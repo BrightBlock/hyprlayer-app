@@ -13,7 +13,7 @@ FAIL CodexTurns.NoLostAgentMessage
 PASS CodexTurns.NoDoubleSend
 FAIL CodexTurns.TurnProgress
 PASS CodexTurns.AskResolution
-FAIL CodexTurns.AskVisible
+PASS CodexTurns.AskVisible
 FAIL CodexTurns.InterruptSafe
 FAIL CodexTurns.InterruptHonored
 PASS OpenCodeTurns.TypeOK
