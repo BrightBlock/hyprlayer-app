@@ -1,6 +1,7 @@
 //! Two parallel calls to one MCP tool each ask for permission: every ask names
 //! its own tool use, live and on replay, and answering one leaves the other
-//! waiting. Init carries the MCP servers' real names, which tool ids mangle.
+//! waiting. Init carries the MCP servers' real names, which tool ids mangle. An
+//! MCP server asking the user for input is declined, so its call returns.
 #![cfg(unix)]
 
 use std::time::Duration;
@@ -14,7 +15,8 @@ use hyprlayer_server::streams::StreamStartOpts;
 const IO: Duration = Duration::from_secs(20);
 
 /// On a `PARALLEL_ASKS` turn, calls one tool twice, asks for both, and returns
-/// each call's result only once its own ask is answered.
+/// each call's result only once its own ask is answered. On an `ELICIT` turn, an MCP
+/// tool asks the user for input and returns whatever action the reply carried.
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
 sid=""
 while [ $# -gt 0 ]; do
@@ -44,6 +46,16 @@ while IFS= read -r line; do
         esac
         printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_%s","content":"issue %s","is_error":false}]},"session_id":"%s"}\n' "$t" "$t" "$sid"
       done
+      ;;
+    *ELICIT*)
+      printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_e","name":"mcp__probe__confirm","input":{}}]},"session_id":"%s"}\n' "$sid"
+      printf '{"type":"control_request","request_id":"req-e","request":{"subtype":"elicitation","mcp_server_name":"probe","message":"Deploy to production?","mode":"form","requested_schema":{"type":"object","properties":{"ok":{"type":"boolean"}}}}}\n'
+      IFS= read -r response || exit 0
+      case "$response" in
+        *'"req-e"'*'"decline"'*) action=decline ;;
+        *) action=none ;;
+      esac
+      printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_e","content":"elicitation %s","is_error":false}]},"session_id":"%s"}\n' "$action" "$sid"
       ;;
   esac
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"%s","num_turns":%s,"total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}\n' "$sid" "$turn"
@@ -110,6 +122,29 @@ async fn parallel_permission_asks() {
                 .iter()
                 .any(|e| matches!(e, SessionEvent::TurnDone { .. })),
         json!({ "results": results_of(&after) }),
+    );
+
+    j.step("an MCP server asks the user for input");
+    client
+        .send_user_message(session.clone(), "ELICIT".into(), vec![], None, None, None)
+        .await
+        .expect("send_user_message");
+    let after = recv_until(&mut events, |e| matches!(e, SessionEvent::TurnDone { .. })).await;
+    let returned = after.iter().find_map(|e| match e {
+        SessionEvent::ToolResult {
+            tool_use_id,
+            content,
+            ..
+        } if tool_use_id == "toolu_e" => Some(content.clone()),
+        _ => None,
+    });
+    let ended = after
+        .iter()
+        .any(|e| matches!(e, SessionEvent::TurnDone { .. }));
+    j.guard(
+        "it is declined, so the call returns and the turn ends",
+        returned.as_deref() == Some("elicitation decline") && ended,
+        json!({ "result": returned, "turnEnded": ended }),
     );
 
     j.step("replay the log");

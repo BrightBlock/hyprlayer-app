@@ -35,6 +35,10 @@ pub enum ParsedLine {
         text: String,
         parent_id: Option<String>,
     },
+    /// An MCP server asking the user for input; we have no form for it.
+    Elicitation {
+        request_id: String,
+    },
     CanUseTool {
         request_id: String,
         tool_name: String,
@@ -305,7 +309,16 @@ fn parse_control_response(v: &Value) -> ParsedLine {
 }
 
 fn parse_control_request(v: &Value) -> ParsedLine {
-    parse_can_use_tool(v).unwrap_or_else(|| ParsedLine::Unknown { raw: v.to_string() })
+    parse_can_use_tool(v)
+        .or_else(|| parse_elicitation(v))
+        .unwrap_or_else(|| ParsedLine::Unknown { raw: v.to_string() })
+}
+
+fn parse_elicitation(v: &Value) -> Option<ParsedLine> {
+    (request_field(v.get("request")?, "subtype") == Some("elicitation")).then_some(())?;
+    Some(ParsedLine::Elicitation {
+        request_id: str_field(v, "request_id")?,
+    })
 }
 
 fn parse_can_use_tool(v: &Value) -> Option<ParsedLine> {
@@ -429,6 +442,18 @@ pub fn user_turn_json(session_id: &str, text: &str, uuid: &str) -> String {
         "parent_tool_use_id": null,
         "session_id": session_id,
         "uuid": uuid,
+    })
+    .to_string()
+}
+
+pub fn elicitation_decline_json(request_id: &str) -> String {
+    json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": request_id,
+            "response": { "action": "decline" },
+        },
     })
     .to_string()
 }

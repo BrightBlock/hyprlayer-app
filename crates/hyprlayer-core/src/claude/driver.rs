@@ -271,6 +271,7 @@ impl ClaudeDriver {
             pending_controls.clone(),
             inbox.clone(),
             cost_so_far.clone(),
+            stdin_tx.downgrade(),
         ));
 
         Ok((
@@ -640,6 +641,7 @@ async fn read_and_wait(
     pending_controls: Arc<StdMutex<HashMap<String, oneshot::Sender<Value>>>>,
     inbox: Arc<StdMutex<Inbox>>,
     cost_so_far: Arc<StdMutex<Option<f64>>>,
+    stdin: mpsc::WeakUnboundedSender<String>,
 ) {
     let mut saw_result = false;
     let mut saw_error_result = false;
@@ -697,6 +699,13 @@ async fn read_and_wait(
                         if let Ok(mut map) = pending_permissions.lock() {
                             map.insert(request_id.clone(), input.clone());
                         }
+                    }
+                    ParsedLine::Elicitation { request_id } => {
+                        if let Some(stdin) = stdin.upgrade() {
+                            let _ =
+                                stdin.send(protocol::elicitation_decline_json(request_id) + "\n");
+                        }
+                        continue;
                     }
                     ParsedLine::ControlCancel { request_id } => {
                         if let Ok(mut map) = pending_permissions.lock() {
@@ -897,7 +906,9 @@ pub(crate) fn parsed_to_events(parsed: ParsedLine) -> Vec<SessionEvent> {
             raw,
         }],
         ParsedLine::PermissionMode { mode } => vec![SessionEvent::PermissionModeChanged { mode }],
-        ParsedLine::ControlResponse { .. } | ParsedLine::ControlCancel { .. } => Vec::new(),
+        ParsedLine::ControlResponse { .. }
+        | ParsedLine::ControlCancel { .. }
+        | ParsedLine::Elicitation { .. } => Vec::new(),
         ParsedLine::System { .. } => Vec::new(),
     }
 }

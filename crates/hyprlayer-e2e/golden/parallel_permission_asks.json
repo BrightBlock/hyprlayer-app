@@ -64,6 +64,19 @@
       "guards": [
         {
           "evidence": {
+            "result": "elicitation decline",
+            "turnEnded": true
+          },
+          "guard": "it is declined, so the call returns and the turn ends",
+          "ok": true
+        }
+      ],
+      "step": "an MCP server asks the user for input"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "asks": [
               [
                 "req-a",
