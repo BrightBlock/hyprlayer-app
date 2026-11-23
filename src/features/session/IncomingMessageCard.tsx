@@ -1,31 +1,62 @@
 import { Icon, type IconName } from "@/components/Icon";
+import { reattachPtyAgent } from "@/features/multiplexer/ptyAgentBridge";
 import { selectAgentTab } from "@/features/search/selectAgentTab";
+import { goToWorkstream } from "@/lib/appNav";
 import { openExternalUrl } from "@/lib/browser";
+import { commands } from "@/lib/bindings";
+import { unwrap } from "@/lib/ipc";
+import { log } from "@/lib/log";
+import { workstreamSessionsQuery } from "@/lib/queries";
+import { queryClient } from "@/lib/queryClient";
+import { useToast } from "@/lib/toast";
 
 import type { IncomingLink, IncomingMessage } from "./incomingMessage";
 import { focusShell, updateWorkstreamTabs, useWorkstreamTabsStore } from "./workstreamTabs";
 
 const ICON: Record<IncomingMessage["kind"], IconName> = { wake: "wake", agent: "agents", hyprlayer: "server" };
 
-function focusAgent(workstreamId: string, id: string): void {
-  const shell = useWorkstreamTabsStore
-    .getState()
-    .byWs[workstreamId]?.shells.find((s) => s.sessionId === id || s.ptyAgent?.terminalId === id);
-  if (!shell) {
-    void selectAgentTab(workstreamId, id);
-    return;
+type Sender = { workstreamId: string; open: () => void };
+
+async function findSender(id: string, workstreamIds: string[]): Promise<Sender | null> {
+  for (const [workstreamId, tabs] of Object.entries(useWorkstreamTabsStore.getState().byWs)) {
+    const shell = tabs.shells.find((s) => s.sessionId === id || s.ptyAgent?.terminalId === id);
+    if (shell) {
+      const open = () =>
+        updateWorkstreamTabs((all) => {
+          const ws = all[workstreamId];
+          return ws ? { ...all, [workstreamId]: focusShell(ws, shell.id) } : all;
+        });
+      return { workstreamId, open };
+    }
   }
-  updateWorkstreamTabs((all) => {
-    const ws = all[workstreamId];
-    return ws ? { ...all, [workstreamId]: focusShell(ws, shell.id) } : all;
-  });
+  const terminal = (await unwrap(commands.listPtyAgents(null))).find((a) => a.terminalId === id);
+  if (terminal) return { workstreamId: terminal.workstreamId, open: () => reattachPtyAgent(terminal) };
+  const lists = await Promise.all(
+    workstreamIds.map((wsId) => queryClient.fetchQuery(workstreamSessionsQuery(wsId)).catch(() => [])),
+  );
+  const workstreamId = workstreamIds.find((_, i) => lists[i].some((s) => s.id === id));
+  return workstreamId ? { workstreamId, open: () => void selectAgentTab(workstreamId, id) } : null;
 }
 
-function LinkButton({ link, workstreamId }: { link: IncomingLink; workstreamId: string | null }) {
-  if (link.kind === "agent" && !workstreamId) return null;
+async function openSender(id: string): Promise<void> {
+  const workstreams = await unwrap(commands.listAllWorkstreams());
+  const sender = await findSender(
+    id,
+    workstreams.map((w) => w.item.id),
+  );
+  const view = sender && workstreams.find((w) => w.item.id === sender.workstreamId);
+  if (!sender || !view) {
+    useToast.getState().show("Agent not found", "It has ended, or its workstream is archived.", { tone: "warn" });
+    return;
+  }
+  goToWorkstream({ projectPath: view.item.projectPath, workstreamId: view.item.id });
+  sender.open();
+}
+
+function LinkButton({ link }: { link: IncomingLink }) {
   const onClick = () => {
     if (link.kind === "pr") void openExternalUrl(link.url);
-    else if (workstreamId) focusAgent(workstreamId, link.id);
+    else openSender(link.id).catch((e) => log.warn("incoming-message", "the sender did not open", e));
   };
   return (
     <button
@@ -40,13 +71,7 @@ function LinkButton({ link, workstreamId }: { link: IncomingLink; workstreamId: 
   );
 }
 
-export function IncomingMessageCard({
-  message,
-  workstreamId,
-}: {
-  message: IncomingMessage;
-  workstreamId: string | null;
-}) {
+export function IncomingMessageCard({ message }: { message: IncomingMessage }) {
   const { kind, title, body, ids, links } = message;
   return (
     <div className="flex flex-col gap-1">
@@ -56,7 +81,7 @@ export function IncomingMessageCard({
           <span className="truncate font-medium text-ink">{title}</span>
         </span>
         {links.map((link) => (
-          <LinkButton key={link.kind === "pr" ? link.url : link.id} link={link} workstreamId={workstreamId} />
+          <LinkButton key={link.kind === "pr" ? link.url : link.id} link={link} />
         ))}
       </div>
       {body && <p className="selectable whitespace-pre-wrap break-words text-body text-ink">{body}</p>}

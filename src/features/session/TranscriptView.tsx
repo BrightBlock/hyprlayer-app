@@ -182,7 +182,7 @@ const UserMessage = memo(function UserMessage({
         )}
         {text &&
           (incoming ? (
-            <IncomingMessageCard message={incoming} workstreamId={workstreamId} />
+            <IncomingMessageCard message={incoming} />
           ) : ReviewCard && promptName ? (
             <ReviewCard
               text={text}

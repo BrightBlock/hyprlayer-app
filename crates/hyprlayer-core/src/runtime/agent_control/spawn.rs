@@ -995,7 +995,7 @@ impl AgentControlService<'_> {
         ))
     }
 
-    /// How a message names its sender: a session's title, or a terminal's engine.
+    /// How a message names its sender: its title, or a terminal's engine when it has none.
     async fn caller_label(&self, identity: &AgentIdentity) -> String {
         if identity.lead {
             return super::leads::LEAD_TITLE.to_string();
@@ -1013,7 +1013,10 @@ impl AgentControlService<'_> {
                 .list(Some(&identity.workstream_id))
                 .into_iter()
                 .find(|a| &a.terminal_id == terminal_id)
-                .map_or_else(|| "a terminal agent".to_string(), |a| a.engine_id),
+                .map_or_else(
+                    || "a terminal agent".to_string(),
+                    |a| a.title.unwrap_or(a.engine_id),
+                ),
         }
     }
 }
