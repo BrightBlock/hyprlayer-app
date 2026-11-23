@@ -23,6 +23,14 @@ import { PrStatusBar, QuotaLow } from "./PrStatusBar";
 import { AttachPrDialog } from "./AttachPrDialog";
 import { ArchiveWorkstreamDialog } from "./ArchiveWorkstreamDialog";
 
+function TailFirst({ text, className = "" }: { text: string; className?: string }) {
+  return (
+    <span dir="rtl" className={`min-w-0 truncate text-left ${className}`}>
+      <bdi>{text}</bdi>
+    </span>
+  );
+}
+
 function fastForwardLabel(upstream: string, behind: number): string {
   return `Pull ${upstream}, fast-forwarding ${behind} commit${behind === 1 ? "" : "s"} in`;
 }
@@ -69,17 +77,15 @@ function BranchTargetRow({
           }
         >
           <Icon name="branch" size="xs" className={detached ? "text-warn-ink" : "text-ok"} />
-          <span className="min-w-0 truncate text-meta text-ink">
-            {detached ? "detached HEAD" : branch}
-          </span>
+          <TailFirst className="text-meta text-ink" text={detached ? "detached HEAD" : branch} />
         </span>
         <span className="shrink-0 text-ink-dim">→</span>
-        <div className="relative shrink-0">
+        <div className="relative min-w-0 max-w-[45%] shrink-0">
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
             disabled={setBase.isPending}
-            className="inline-flex items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 text-meta text-ink hover:bg-edge/50 disabled:opacity-60"
+            className="inline-flex max-w-full items-center gap-1 rounded-md border border-edge bg-panel px-2 py-1 text-meta text-ink hover:bg-edge/50 disabled:opacity-60"
             title={
               retargeted
                 ? `The PR targets ${prBase}; this workstream targets ${view.item.baseBranch} , click to change`
@@ -88,10 +94,11 @@ function BranchTargetRow({
             aria-label="Change target branch"
           >
             {setBase.isPending && <Spinner size="xs" />}
-            <span className={`max-w-[110px] truncate ${retargeted ? "text-warn-ink" : ""}`}>
-              {retargeted ? prBase : baseShort}
-            </span>
-            <Icon name="chevronDown" size="xs" className="text-ink-dim" />
+            <TailFirst
+              className={retargeted ? "text-warn-ink" : ""}
+              text={retargeted ? prBase : baseShort}
+            />
+            <Icon name="chevronDown" size="xs" className="shrink-0 text-ink-dim" />
           </button>
           {open && (
             <>
@@ -181,15 +188,15 @@ function BranchTargetRow({
         <ErrorNote error={pullBranch.error} onDismiss={() => pullBranch.reset()} />
       )}
       {retargeted && (
-        <div className="flex items-center gap-2 px-1 text-ui-sm text-warn-ink">
-          <span className="min-w-0 flex-1 truncate">
+        <div className="space-y-0.5 px-1 text-ui-sm leading-prose [overflow-wrap:anywhere]">
+          <p className="text-warn-ink">
             The PR targets {prBase}, not {baseShort}
-          </span>
+          </p>
           <button
             type="button"
             disabled={setBase.isPending}
             onClick={() => setBase.mutate(`origin/${prBase}`)}
-            className="shrink-0 font-medium text-accent hover:underline disabled:opacity-60"
+            className="text-left font-medium text-accent hover:underline disabled:opacity-60"
           >
             Use origin/{prBase}
           </button>
@@ -243,15 +250,19 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
   return (
     <>
       <div className="shrink-0 border-b border-edge">
-        <div className="flex h-9 items-center justify-between px-3">
+        <div className="flex h-9 items-center justify-between gap-2 px-3">
           <span className="text-label text-ink-dim">Git</span>
           {view && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <AheadBehind
                 ahead={view.git.base.ahead}
                 behind={view.git.base.behind}
                 against={shortBranch(view.item.baseBranch)}
               />
+              <span className="flex min-w-0 max-w-40 text-ui-sm text-ink-dim">
+                vs&nbsp;
+                <TailFirst text={shortBranch(view.item.baseBranch)} />
+              </span>
               <IconButton
                 onClick={() => refresh.mutate()}
                 disabled={refresh.isPending}
@@ -296,7 +307,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     type="button"
                     disabled={pulling}
                     onClick={() => (fastForward ? pullBranch.mutate() : pull.mutate())}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-edge bg-panel text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
+                    className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-edge bg-panel px-2.5 text-body font-medium text-ink-dim hover:bg-edge/50 hover:text-ink disabled:opacity-60"
                     title={
                       fastForward
                         ? fastForwardLabel(fastForward.name, behind)
@@ -311,6 +322,7 @@ export function GitPanel({ view }: { view: WorkstreamView | null }) {
                     }
                   >
                     {pulling ? <Spinner size="sm" /> : <Icon name="pull" size="sm" />}
+                    {fastForward ? "Pull" : "Update"}
                   </button>
                 )}
               </div>

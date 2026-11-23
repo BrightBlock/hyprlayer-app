@@ -99,10 +99,11 @@ export function PrStatusBar({
         type="button"
         onClick={() => void openExternalUrl(data.url)}
         title={`${data.title}\n${data.url}`}
-        className={`${pill} border-edge bg-edge/40 text-ink-dim hover:bg-edge/70 hover:text-ink`}
+        className={`${pill} border-edge bg-edge/40 text-ink hover:bg-edge/70`}
       >
         <Icon name="pullRequest" size="sm" />
         PR #{data.number}
+        <Icon name="external" size="xs" className="text-ink-dim" />
       </button>
       {data.state === "closed" && (
         <span className={`${pill} border-edge bg-panel text-ink-dim`}>Closed</span>
@@ -177,6 +178,9 @@ export function PrStatusBar({
         >
           Archive
         </PillButton>
+      )}
+      {isOpen && !canMerge && !merge.isPending && (
+        <p className="basis-full text-ui-sm leading-prose text-ink-dim">{mergeTitle()}</p>
       )}
     </div>
   );
