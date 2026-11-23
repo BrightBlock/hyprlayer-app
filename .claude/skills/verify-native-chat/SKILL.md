@@ -67,6 +67,7 @@ first eight; "the harness" is claude, codex or OpenCode.
 | `AskResolution` | Once nothing is in flight, every ask the desktop shows open, live or after a reload, is one the harness still waits on. | "Needs approval" stays after the turn ended, and the composer queues your next message instead of sending it (`isBusy`). |
 | `AskVisible` | While the harness waits on an ask and nothing is in flight, the desktop shows it. | The harness waits forever on an approval no one can see. |
 | `SessionTurns.AskClosesOnAnswer` | Once the driver and relay have caught up, the desktop shows no ask claude stopped waiting on, even while the tool it allowed still runs. | An ask answered on claude.ai keeps its Allow/Deny card and "Waiting for approval" until the tool finishes, and the composer queues your next message (`isBusy`). |
+| `SenderTold` | Once an exited session is quiet, no agent message whose sender can be told is still held untold. (`SessionTurns`, `CodexTurns`.) | `message_agent` returns sent, the harness had already exited, and the sender hears nothing until the next relaunch or restart sweep. |
 | `SessionTurns.ResolvedOnce` | An ask's resolution reaches the log once, whoever answered it. | A card answered here and elsewhere at once records two answers. |
 | `InterruptSafe` | After an interrupt, a live session settles idle: no turn, no held echo, no open ask. | Stop leaves the session looking busy, so the next message does not go out. |
 | `InterruptHonored` | An interrupt is never dropped while a message sent before it is still to run (codex: while codex runs or is about to run a turn the driver has no id for). | You press stop and the turn runs to the end anyway. |
@@ -87,6 +88,7 @@ Results at the sync commit, per provider (`expected.txt`):
 | `TurnProgress` | PASS | PASS | FAIL |
 | `AskResolution` | PASS | PASS | FAIL |
 | `AskVisible` | PASS | PASS | FAIL |
+| `SenderTold` | PASS | PASS | not modeled |
 | `AskClosesOnAnswer` | PASS | not modeled | not modeled |
 | `ResolvedOnce` | PASS | not modeled | not modeled |
 | `InterruptSafe` | PASS | PASS | FAIL |
@@ -448,6 +450,24 @@ scratch delay (the PR that fixed them has the evidence).
     feeding it, and keeps its revision state in `sessions.actor_state` for the
     next one.
 
+19. **Fixed: `CodexTurns.SenderTold`: an agent's message recorded just after the relay's report went untold.**
+    `SessionService::send` checks `require_live`, then records the row and
+    sends. If the harness exited in between, the relay's report ran before the
+    row existed. Claude's driver refuses a send after eof (#527), so the row
+    is released and `message_agent` returns the error; codex's
+    `send_user_turn` returns Ok after its stdout ends, so the row stayed until
+    the next relaunch or restart sweep and the sender heard nothing.
+    Reproduced live with codex and a scratch 10 s delay after `require_live`:
+    `message-agent` returned "sent" 10 s after codex was killed, the row
+    stayed and no wake reached the sender. The send now settles its own row
+    when the driver it used is no longer registered (`recover_late_hold`):
+    sent to a relaunched driver if one came up in between (`launch_driver`
+    takes no op lock, so a resume can run between `require_live` and the
+    hold, and its resend then found no row), else reported to a sender who
+    can be told, else kept for the next relaunch. Splitting the model's agent
+    send at `require_live` found that relaunch path (`NoLostAgentMessage`, 7
+    steps) before the resend branch was added.
+
 Not in the models and found by the interrogate workstream (reproduced live):
 a stopped Ship turn still sends its follow-up, on every provider. Fixed and
 not in the models: a failed codex turn ended twice (`error` {willRetry:
@@ -512,7 +532,7 @@ turn, what closes an ask, or what reports the server's death.
 | `EchoOrHold`, `SendServer` | `ClaudeDriver::send_user_turn`, driver.rs:306 (refuses with `session_not_found` once `Inbox.ended`, 324; `Inbox::idle`, 79; `lifecycle`; echo before `write_line`; `take` on Err); `SessionService::send` releases the reservation on that refusal |
 | `WriteOk` | `write_line` → `stdin_tx`, and `write_loop`, driver.rs:616 (breaks on the first failed write) |
 | `ClientSend` | `sendMessage`/`deliverMessage` (direct: optimistic row and an `unechoed` entry until its echo; `session_not_found` puts it back in the queue), sessionStore.ts:1510/1573; `steerMessage` (chip with a `clientMessageId`), 1655; `handedBackBy`, 532, and `returnUnechoed`, 556 (a live `relaunched` hands back steered chips only); `settleFolded`, 594; the resend of a handed-back chip by `flushQueuedMessage`; server side `SessionService::send`, service.rs:271 |
-| `AgentSend` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`), `send_app_turn` (follow-ups), each recording the message with `held::hold` before `send_user_turn` and releasing it on Err |
+| `AgentCheck`, `AgentHold` | `SessionService::send` with an agent author (agent_control/wake.rs, `message_agent`) and `send_app_turn` (follow-ups), split at the awaits between `require_live` and `send_user_turn` (the reservation, the archive flag, `held::hold`); each releases the row on Err. `launch_driver` takes no op lock, so a resume can come between. After an Ok send whose driver is no longer the registered one, `held::recover_late_hold` settles this send's own row, if unsent: sent again to a relaunched driver (`send_again`), else reported to a sender who can be told, else kept for the next relaunch. In `SessionTurns` claude's driver refuses once its stdout ended, so that branch is unreachable and left out |
 | `ClientAnswer` | `respond_permission`, service.rs:416 → driver.rs:378 (emits `PermissionResolved` only when `pending_permissions` held the id; `answer_question` the same with `QuestionAnswered`); a card is answered once |
 | `Interrupt` | `SessionService::interrupt`, service.rs:439 → driver.rs:433; `stopSession`, sessionStore.ts:1993 |
 | `ClaudeRead`, `ClaudeAsk`, `ClaudeTakeQueued`, `ClaudeRemoteAnswer`, `ClaudeToolDone`, `ClaudeFinish`, `ClaudeStartQueued`, `ClaudeExit` | claude's own behaviour on stream-json (see the assumptions below); `ClaudeRemoteAnswer` is an answer on claude.ai or from a PermissionRequest hook: a deny writes the cancel and the error result together, an allow writes the cancel and `ClaudeToolDone` writes the result once the tool has run |
@@ -603,10 +623,8 @@ attachment together).
 - `held_messages` in `SessionTurns`: every exit is a crash, so a detach
   (server stop, `kill_for_relaunch`) keeps all held messages as a crash keeps
   the untold ones; `toldSet` picks at Init which agent messages have a sender
-  to tell. Left out: an agent send that passes `require_live` before the relay
-  drops the driver and records its message after the relay's report (the
-  message stays in `held_messages` until the next relaunch or restart sweep),
-  a second resend (bounded by two processes), and the restart sweep.
+  to tell. Left out: a second resend (bounded by two processes), and the
+  restart sweep.
 - Left out of `SessionTurns`: relay lag (since #521 `spawn_relay` drains the
   broadcast into an unbounded buffer, so it lags only if that reader falls
   `EVENT_CHANNEL_CAP` behind; the model's relay never lags), subagent asks,
@@ -717,6 +735,16 @@ wrong: fix the action, re-run, and say what you changed.
      ignored): the relay sends into a retired actor.
    - `SessionSync.NoSkippedSeq`, `ClientsConverge`: `Reopen` replays from
      `applied + 2` (an `attach_from` that skips the row after the cursor).
+   - `CodexTurns.NoLostAgentMessage`: `AgentHold` only reports a late row and
+     never sends it to a relaunched driver: 7 steps, an agent passes
+     `require_live`, codex exits, the driver reads eof, the relay drops the
+     driver, you resume (its resend finds no row), the send records its row,
+     the relaunch is relayed; a message with no sender stays held in a live,
+     quiet session.
+   - `CodexTurns.SenderTold`: `AgentHold` keeps a late row held instead of
+     reporting it (the code before `recover_late_hold`): 5 steps, an agent
+     passes `require_live`, codex exits, the driver reads eof, the relay
+     reports and drops the driver, the send records its row.
    - `NoWakeWhenArchived`: `WakerWake` launches without the `~wsArchived`
      test (`hold_unarchived` gone).
    - `AskResolution`, `InterruptSafe`: `DriverRead` leaves `pending` alone on

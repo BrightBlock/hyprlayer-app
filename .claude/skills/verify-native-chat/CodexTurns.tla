@@ -27,7 +27,9 @@ VARIABLES
   accepted, failed, delivered, interrupts, droppedStop,
   \* the relay: messages a harness declined this turn, and held ones it is sending again;
   \* the desktop: set by its Stop until you send again
-  dropped, resendDue, stopped
+  dropped, resendDue, stopped,
+  \* SessionService::send past require_live and not yet sent: the message and the process it saw
+  checking, checkProc
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out,
           dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr,
@@ -35,7 +37,7 @@ vars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, ou
           vLive, streaming, vSeq, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop,
-          dropped, resendDue, stopped>>
+          dropped, resendDue, stopped, checking, checkProc>>
 
 codexVars == <<alive, busy, turn, pipe, queue, cOpen, asked, starting, otherTools, out>>
 driverVars == <<dActive, dReq, waiting, pending, stdinOpen, bus, dStarts, dIntr>>
@@ -62,7 +64,7 @@ Init ==
   /\ held = {} /\ resent = {} /\ toldSet \in SUBSET Agent
   /\ accepted = {} /\ failed = {} /\ delivered = [m \in Msgs |-> 0]
   /\ interrupts = 0 /\ droppedStop = FALSE
-  /\ dropped = {} /\ resendDue = {} /\ stopped = FALSE
+  /\ dropped = {} /\ resendDue = {} /\ stopped = FALSE /\ checking = {} /\ checkProc = 0
 
 (* ---- CodexDriver::send_user_turn, steer and write, under the op lock ---- *)
 
@@ -113,19 +115,47 @@ ClientSend(m) ==
        /\ Outcome(m, result, TRUE)
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
-  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue>>
+  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue, checking, checkProc>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
                  live, procs, exits, inTurn, stored, vLive, vSeq, clicked, delivered,
                  interrupts, droppedStop>>
 
-AgentSend(m) ==
-  /\ m \in Agent /\ m \notin accepted \cup failed
-  /\ \E result \in {"ok", "err", "gone"} :
-       /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
-       /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
+\* SessionService::send under the op lock: require_live, then (after the reservation and the
+\* archive flag) the held_messages row and send_user_turn on the driver it found. launch_driver
+\* takes no op lock, so a resume can come between.
+AgentCheck(m) ==
+  /\ m \in Agent /\ m \notin accepted \cup failed \cup checking
+  /\ IF live
+       THEN checking' = checking \cup {m} /\ checkProc' = procs /\ UNCHANGED <<accepted, failed>>
+       ELSE failed' = failed \cup {m} /\ UNCHANGED <<checking, checkProc, accepted>>
+  /\ UNCHANGED <<codexVars, driverVars, live, procs, exits, inTurn, stored, viewVars,
+                 held, resent, toldSet, delivered, interrupts, droppedStop,
+                 dropped, resendDue, stopped>>
+
+\* The driver it found has gone: codex's send_user_turn still returns Ok, and its echo reaches
+\* no relay. The relay's report and any relaunch's resend ran before the row existed, so the
+\* send settles its own row (recover_late_hold): to the relaunched driver if one is live, as
+\* send_again does; else reported when its sender can be told, or kept for the next relaunch.
+AgentHold(m) ==
+  /\ m \in checking
+  /\ checking' = checking \ {m} /\ checkProc' = 0
+  /\ IF live /\ procs = checkProc
+       THEN \E result \in {"ok", "err", "gone"} :
+              /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
+              /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
+       ELSE IF live
+       THEN \E result \in {"ok", "err", "gone"} :
+              /\ SendServer(m, result)
+              /\ accepted' = accepted \cup {m}
+              /\ failed' = IF result /= "ok" /\ m \in toldSet THEN failed \cup {m} ELSE failed
+              /\ held' = IF result /= "ok" /\ m \in toldSet THEN held ELSE held \cup {m}
+       ELSE /\ accepted' = accepted \cup {m}
+            /\ failed' = IF m \in toldSet THEN failed \cup {m} ELSE failed
+            /\ held' = IF m \in toldSet THEN held ELSE held \cup {m}
+            /\ UNCHANGED <<driverVars, pipe>>
   /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, starting, otherTools, out, live,
                  procs, exits, inTurn, stored, viewVars, resent, toldSet, delivered,
-                 interrupts, droppedStop>>
+                 interrupts, droppedStop, dropped, resendDue, stopped>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -158,7 +188,7 @@ Interrupt ==
           /\ droppedStop' = (droppedStop \/ (alive /\ (busy \/ starting /= {} \/
                                                       \E i \in 1..Len(pipe) : pipe[i][1] = "start")))
   \* the composer's Stop, or another's: an agent's stop_agent, a goal
-  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue>>
+  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, checking, checkProc>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, asked, starting, otherTools, out,
                  dActive, dReq, waiting, pending, bus, dStarts, live, procs, exits,
                  inTurn, stored, viewVars, accepted, failed, delivered>>
@@ -367,7 +397,7 @@ Relay ==
      /\ resendDue' = IF ev[1] = "turnDone" THEN dropped \cap held ELSE {}
   /\ UNCHANGED <<codexVars, dActive, dReq, waiting, pending, stdinOpen, dStarts, dIntr,
                  procs, exits, clicked, sends, resent, toldSet, accepted, delivered, interrupts,
-                 droppedStop, stopped>>
+                 droppedStop, stopped, checking, checkProc>>
 
 \* held::send_again: a held message the harness dropped goes out again, to the live driver; one
 \* it refuses is reported to a sender who can be told, and otherwise kept for the next relaunch.
@@ -380,7 +410,7 @@ RelayResend ==
          /\ failed' = IF result /= "ok" /\ m \in toldSet THEN failed \cup {m} ELSE failed
     /\ UNCHANGED <<alive, busy, turn, queue, cOpen, asked, starting, otherTools, out, live, procs,
                    exits, inTurn, stored, viewVars, resent, toldSet, accepted, delivered,
-                   interrupts, droppedStop, dropped, stopped>>
+                   interrupts, droppedStop, dropped, stopped, checking, checkProc>>
 
 \* A tail read: list_turns re-sends the stored asks pending_requests names; settleUnwaitedAsks
 \* closes the rest.
@@ -413,17 +443,17 @@ ClientResume ==
 (* ---- the rules ---- *)
 
 Quiet ==
-  /\ out = <<>> /\ bus = <<>> /\ resendDue = {}
+  /\ out = <<>> /\ bus = <<>> /\ resendDue = {} /\ checking = {}
   /\ alive => (~busy /\ pipe = <<>> /\ queue = <<>> /\ starting = {})
 
 Done == Quiet /\ UNCHANGED vars
 
 \* The steps that leave the relay's resends and the desktop's Stop as they are.
-Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped>>
+Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped, checking, checkProc>>
 
 Next ==
   \/ \E m \in Composer : ClientSend(m)
-  \/ \E m \in Agent : Frame(AgentSend(m))
+  \/ \E m \in Agent : AgentCheck(m) \/ AgentHold(m)
   \/ \E r \in Asks : Frame(ClientAnswer(r) \/ CodexAsk(r))
   \/ Interrupt
   \/ Frame(CodexRead \/ CodexBegin \/ CodexOtherTool \/ CodexCommitSteer \/ CodexFinish \/ CodexExit)
@@ -451,6 +481,9 @@ NoLostAgentMessage == \A m \in Agent : Kept(m)
 
 NoDoubleSend == \A m \in Msgs : delivered[m] <= 1
 
+\* Once an exited session is quiet, no message whose sender can be told is still held untold.
+SenderTold == (Quiet /\ ~live) => held \cap toldSet = {}
+
 TurnProgress ==
   Quiet => /\ ~inTurn /\ ~streaming
            /\ alive => (Running = 0 /\ waiting = {})
@@ -474,5 +507,5 @@ TypeOK ==
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued", "returned"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs
-  /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent
+  /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent /\ checking \subseteq Agent
 =============================================================================

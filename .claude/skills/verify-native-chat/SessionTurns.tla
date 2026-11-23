@@ -31,7 +31,9 @@ VARIABLES
   \* the desktop: set by its Stop until you send again
   dropped, resendDue, stopped,
   \* how many times each ask's resolution reached the log
-  resolves
+  resolves,
+  \* SessionService::send past require_live and not yet sent: the message and the process it saw
+  checking, checkProc
 
 vars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out,
           dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen,
@@ -39,7 +41,7 @@ vars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out,
           vLive, streaming, vOpen, clicked, chip, sends,
           held, resent, toldSet,
           accepted, failed, delivered, interrupts, droppedStop,
-          dropped, resendDue, stopped, resolves>>
+          dropped, resendDue, stopped, resolves, checking, checkProc>>
 
 claudeVars == <<alive, busy, turn, pipe, queue, cOpen, cRun, asked, out>>
 driverVars == <<dBusy, lifecycle, waiting, pending, stdinOpen, bus, eofSeen>>
@@ -63,6 +65,7 @@ Init ==
   /\ accepted = {} /\ failed = {} /\ delivered = [m \in Msgs |-> 0]
   /\ interrupts = 0 /\ droppedStop = FALSE
   /\ dropped = {} /\ resendDue = {} /\ stopped = FALSE /\ resolves = [r \in Asks |-> 0]
+  /\ checking = {} /\ checkProc = 0
 
 (* ---- ClaudeDriver::send_user_turn plus write_line, under the op lock ---- *)
 
@@ -117,20 +120,34 @@ ClientSend(m) ==
        \* direct: an optimistic row, and the view shows the turn running
        /\ streaming' = (streaming \/ (~steer /\ result = "ok"))
   /\ sends' = [sends EXCEPT ![m] = @ + 1]
-  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue, resolves>>
+  /\ stopped' = FALSE /\ UNCHANGED <<dropped, resendDue, resolves, checking, checkProc>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, cRun, asked, out, live, procs, exits,
                  inTurn, stored, vLive, vOpen, clicked, delivered,
                  interrupts, droppedStop>>
 
-\* SessionService::send records an agent's message in held_messages before send_user_turn and
-\* removes it again on Err.
-AgentSend(m) ==
-  /\ m \in Agent /\ m \notin accepted \cup failed
-  /\ \E result \in {"ok", "err", "gone"} :
-       /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
-       /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
+\* SessionService::send under the op lock: require_live, then the held_messages row and
+\* send_user_turn on the driver it found, which it removes again on Err. launch_driver takes no
+\* op lock, so a resume can come between; the driver it found then refuses (Inbox.ended).
+AgentCheck(m) ==
+  /\ m \in Agent /\ m \notin accepted \cup failed \cup checking
+  /\ IF live
+       THEN checking' = checking \cup {m} /\ checkProc' = procs /\ UNCHANGED <<failed>>
+       ELSE failed' = failed \cup {m} /\ UNCHANGED <<checking, checkProc>>
+  /\ UNCHANGED <<claudeVars, driverVars, live, procs, exits, inTurn, stored, viewVars,
+                 held, resent, toldSet, accepted, delivered, interrupts, droppedStop,
+                 dropped, resendDue, stopped, resolves>>
+
+AgentHold(m) ==
+  /\ m \in checking
+  /\ checking' = checking \ {m} /\ checkProc' = 0
+  /\ IF procs = checkProc
+       THEN \E result \in {"ok", "err", "gone"} :
+              /\ SendServer(m, result) /\ Outcome(m, result, FALSE)
+              /\ held' = IF result = "ok" THEN held \cup {m} ELSE held
+       ELSE /\ Outcome(m, "gone", FALSE) /\ UNCHANGED <<driverVars, pipe, held>>
   /\ UNCHANGED <<alive, busy, turn, queue, cOpen, cRun, asked, out, live, procs, exits,
-                 inTurn, stored, viewVars, resent, toldSet, delivered, interrupts, droppedStop>>
+                 inTurn, stored, viewVars, resent, toldSet, delivered, interrupts, droppedStop,
+                 dropped, resendDue, stopped, resolves>>
 
 (* ---- respond_permission and interrupt ---- *)
 
@@ -154,7 +171,7 @@ Interrupt ==
   /\ WriteOk(<<"interrupt", {pipe[i][2] : i \in {j \in 1..Len(pipe) : pipe[j][1] = "msg"}}>>)
   /\ interrupts' = interrupts + 1
   \* the composer's Stop, or another's
-  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, resolves>>
+  /\ stopped' \in {stopped, TRUE} /\ UNCHANGED <<dropped, resendDue, resolves, checking, checkProc>>
   /\ UNCHANGED <<heldVars, alive, busy, turn, queue, cOpen, cRun, asked, out, dBusy, lifecycle, waiting, eofSeen,
                  pending, bus, live, procs, exits, inTurn, stored, viewVars,
                  accepted, failed, delivered, droppedStop>>
@@ -356,7 +373,7 @@ Relay ==
      /\ resolves' = IF ev[1] = "resolved" THEN [resolves EXCEPT ![ev[2]] = @ + 1] ELSE resolves
   /\ UNCHANGED <<claudeVars, dBusy, lifecycle, waiting, pending, stdinOpen, eofSeen, procs, exits,
                  clicked, sends, resent, toldSet, accepted, delivered, interrupts, droppedStop,
-                 stopped>>
+                 stopped, checking, checkProc>>
 
 \* held::send_again: a held message the harness dropped goes out again, to the live driver; one
 \* it refuses is reported to a sender who can be told, and otherwise kept for the next relaunch.
@@ -369,7 +386,7 @@ RelayResend ==
          /\ failed' = IF result /= "ok" /\ m \in toldSet THEN failed \cup {m} ELSE failed
     /\ UNCHANGED <<alive, busy, turn, queue, cOpen, cRun, asked, out, live, procs, exits, inTurn,
                    stored, viewVars, resent, toldSet, accepted, delivered, interrupts,
-                   droppedStop, dropped, stopped, resolves>>
+                   droppedStop, dropped, stopped, resolves, checking, checkProc>>
 
 \* A tail read refolds the log: list_turns re-sends the stored asks open_request_ids
 \* (pending_requests) names, even when their results lie outside the page, and
@@ -405,17 +422,17 @@ ClientResume ==
 
 \* Nothing left that could still move: no line or event in flight, claude idle or dead.
 Quiet ==
-  /\ out = <<>> /\ bus = <<>> /\ resendDue = {}
+  /\ out = <<>> /\ bus = <<>> /\ resendDue = {} /\ checking = {}
   /\ alive => (~busy /\ pipe = <<>> /\ queue = <<>>)
 
 Done == Quiet /\ UNCHANGED vars
 
 \* The steps that leave the relay's resends and the desktop's Stop as they are.
-Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped, resolves>>
+Frame(A) == A /\ UNCHANGED <<dropped, resendDue, stopped, resolves, checking, checkProc>>
 
 Next ==
   \/ \E m \in Composer : ClientSend(m)
-  \/ \E m \in Agent : Frame(AgentSend(m))
+  \/ \E m \in Agent : AgentCheck(m) \/ AgentHold(m)
   \/ \E r \in Asks : Frame(ClientAnswer(r) \/ ClaudeAsk(r) \/ ClaudeRemoteAnswer(r) \/ ClaudeToolDone(r))
   \/ Interrupt
   \/ Frame(ClaudeRead \/ ClaudeTakeQueued \/ ClaudeFinish \/ ClaudeStartQueued \/ ClaudeExit)
@@ -444,6 +461,9 @@ NoLostUserMessage == \A m \in Composer : Kept(m)
 NoLostAgentMessage == \A m \in Agent : Kept(m)
 
 NoDoubleSend == \A m \in Msgs : delivered[m] <= 1
+
+\* Once an exited session is quiet, no message whose sender can be told is still held untold.
+SenderTold == (Quiet /\ ~live) => held \cap toldSet = {}
 
 TurnProgress ==
   Quiet => /\ ~inTurn /\ ~streaming
@@ -477,5 +497,5 @@ TypeOK ==
   /\ waiting \subseteq Msgs /\ vOpen \subseteq Asks /\ stored \subseteq Msgs \cup Asks
   /\ chip \in [Composer -> {"none", "delivered", "unechoed", "queued", "returned"}]
   /\ accepted \subseteq Msgs /\ failed \subseteq Msgs
-  /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent
+  /\ held \subseteq Agent /\ resent \subseteq Agent /\ toldSet \subseteq Agent /\ checking \subseteq Agent
 =============================================================================

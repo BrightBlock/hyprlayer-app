@@ -1,6 +1,7 @@
 PASS SessionTurns.TypeOK
 PASS SessionTurns.NoLostUserMessage
 PASS SessionTurns.NoLostAgentMessage
+PASS SessionTurns.SenderTold
 PASS SessionTurns.NoDoubleSend
 PASS SessionTurns.TurnProgress
 PASS SessionTurns.AskResolution
@@ -12,6 +13,7 @@ PASS SessionTurns.InterruptHonored
 PASS CodexTurns.TypeOK
 PASS CodexTurns.NoLostUserMessage
 PASS CodexTurns.NoLostAgentMessage
+PASS CodexTurns.SenderTold
 PASS CodexTurns.NoDoubleSend
 PASS CodexTurns.TurnProgress
 PASS CodexTurns.AskResolution

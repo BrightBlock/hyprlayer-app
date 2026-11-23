@@ -23,7 +23,8 @@ export const colors = { ended: "purple", turn: "blue", idle: "teal" };
 
 const labels: Record<string, string> = {
   ClientSend: "you send a message",
-  AgentSend: "an agent sends a message",
+  AgentCheck: "an agent's send finds the session live",
+  AgentHold: "the send records the message and hands it to the driver",
   ClientAnswer: "you answer the ask",
   Interrupt: "someone presses stop",
   ClaudeRead: "claude reads its input",

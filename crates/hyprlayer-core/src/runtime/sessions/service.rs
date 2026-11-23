@@ -323,6 +323,15 @@ impl SessionService<'_> {
         if let (Err(_), Some(nonce)) = (&sent, held) {
             super::held::release(self.runtime, session_id, nonce).await;
         }
+        if let (Ok(()), Some(nonce)) = (&sent, held) {
+            let still_live = self
+                .live_driver(session_id)
+                .await
+                .is_some_and(|live| Arc::ptr_eq(&live, &driver));
+            if !still_live {
+                super::held::recover_late_hold(self.runtime, session_id, nonce).await;
+            }
+        }
         if let (Err(CoreError::SessionNotFound { .. }), Some(nonce)) = (&sent, nonce) {
             self.runtime
                 .session_actors

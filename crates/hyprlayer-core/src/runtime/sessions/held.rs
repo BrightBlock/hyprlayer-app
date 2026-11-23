@@ -68,6 +68,39 @@ pub(crate) async fn report_undelivered(
     }
 }
 
+/// A message recorded after its driver left: the relay's report, or a relaunch's resend, may
+/// already have run without it.
+pub(super) async fn recover_late_hold(rt: &HyprlayerRuntime, session_id: &str, nonce: &str) {
+    let (db, sid) = (rt.db.clone(), session_id.to_string());
+    let held = match blocking(move || db.held_messages(&sid)).await {
+        Ok(held) => held
+            .into_iter()
+            .find(|held| held.nonce == nonce && !held.resent),
+        Err(e) => {
+            tracing::warn!("session {session_id}: its held messages were not read: {e}");
+            return;
+        }
+    };
+    let Some(held) = held else { return };
+    match rt.session_registry.get(session_id).await {
+        Some(driver) => {
+            send_again(
+                rt,
+                session_id,
+                driver.as_ref(),
+                held,
+                "the relaunched session refused it",
+            )
+            .await
+        }
+        None if held.sender.is_some() => {
+            release(rt, session_id, nonce).await;
+            report(rt, vec![held], "the session exited before reading it");
+        }
+        None => {}
+    }
+}
+
 /// On a relaunch: sends each held message again, once, in order; one already resent is reported lost.
 pub(super) async fn resend(rt: &HyprlayerRuntime, session_id: &str, driver: &dyn AgentDriver) {
     let (db, sid) = (rt.db.clone(), session_id.to_string());
