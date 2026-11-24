@@ -5,7 +5,7 @@ import type { MergeMethod, WorkstreamView } from "@/lib/bindings";
 import { knownPr, prFailureText } from "@/lib/domain/pr";
 import { useBootstrap, useMergePr, useWorkstreamPr } from "@/lib/queries";
 import { addressPrFeedback } from "@/features/session/sessionStore";
-import { MenuItem, Popover, Spinner } from "@/components/ui";
+import { ErrorNote, MenuItem, Popover, Spinner } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 
 const pill =
@@ -181,6 +181,11 @@ export function PrStatusBar({
       )}
       {isOpen && !canMerge && !merge.isPending && (
         <p className="basis-full text-ui-sm leading-prose text-ink-dim">{mergeTitle()}</p>
+      )}
+      {merge.error != null && (
+        <div className="basis-full">
+          <ErrorNote error={merge.error} onDismiss={() => merge.reset()} />
+        </div>
       )}
     </div>
   );

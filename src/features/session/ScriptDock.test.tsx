@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.hoisted(() => {
@@ -17,7 +17,7 @@ vi.hoisted(() => {
 });
 
 import { ScriptDock } from "./ScriptDock";
-import { requestRun, useScriptsStore } from "./scriptsStore";
+import { addDockTerminal, requestRun, selectDockTab, setRunning, useScriptsStore } from "./scriptsStore";
 
 const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
@@ -35,7 +35,14 @@ const b = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/bindings", () => b);
 
-vi.mock("./ScriptRunView", () => ({ ScriptRunView: () => <div data-testid="run-view" /> }));
+type RunViewProps = { attachId: string | null; onStarted?: (id: string) => void; onExit?: () => void };
+const runView = vi.hoisted(() => ({ props: null as RunViewProps | null }));
+vi.mock("./ScriptRunView", () => ({
+  ScriptRunView: (props: RunViewProps) => {
+    runView.props = props;
+    return <div data-testid="run-view" data-attach={props.attachId ?? ""} />;
+  },
+}));
 vi.mock("./ScriptOutputView", () => ({
   ScriptOutputView: ({ output }: { output: string }) => <div data-testid="output-view">{output}</div>,
 }));
@@ -53,6 +60,7 @@ const scripts = (run: string) => ({ data: { setup: "", run, archive: "" }, isPen
 
 beforeEach(() => {
   vi.clearAllMocks();
+  runView.props = null;
   useScriptsStore.setState({ dock: {}, running: {}, pendingRun: {}, activeWorkstream: null });
   q.useBootstrap.mockReturnValue({ data: { settings: { keybindings: { overrides: {} } } } });
   q.useScriptOutput.mockReturnValue({ data: null, isLoading: false });
@@ -135,5 +143,36 @@ describe("ScriptDock clear output", () => {
     fireEvent.click(screen.getByLabelText("Clear output"));
 
     expect(b.commands.scriptClearOutput).toHaveBeenCalledWith(WS, "run", "pty-7");
+  });
+});
+
+describe("ScriptDock after its own run exits", () => {
+  it("attaches to the next run started elsewhere", () => {
+    q.useScripts.mockReturnValue(scripts("pnpm dev"));
+    selectDockTab(WS, "run");
+    const { rerender } = renderDock();
+
+    fireEvent.click(screen.getByRole("button", { name: /Start Run/ }));
+    act(() => runView.props!.onStarted!("pty-1"));
+    act(() => runView.props!.onExit!());
+    expect(screen.getByTestId("run-view").getAttribute("data-attach")).toBe("pty-1");
+
+    act(() => setRunning(WS, { port: null }));
+    q.useScriptRuntime.mockReturnValue({ data: { runTerminalId: "pty-2", port: null, statuses: [] } });
+    rerender(<ScriptDock workstreamId={WS} projectPath="/p" onEditScripts={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /Stop/ })).toBeTruthy();
+    expect(screen.getByTestId("run-view").getAttribute("data-attach")).toBe("pty-2");
+  });
+});
+
+describe("ScriptDock close terminal", () => {
+  it("is a button not nested in the tab button", () => {
+    addDockTerminal(WS);
+    renderDock();
+    const close = screen.getAllByLabelText("Close terminal")[0];
+
+    expect(close.tagName).toBe("BUTTON");
+    expect(close.parentElement?.closest("button")).toBeNull();
   });
 });

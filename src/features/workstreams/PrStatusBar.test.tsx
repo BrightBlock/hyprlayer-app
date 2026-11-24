@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +12,11 @@ const q = vi.hoisted(() => ({
   useBootstrap: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => q);
+const mergeWorkstreamPr = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/bindings", async (orig) => {
+  const actual = await orig<typeof import("@/lib/bindings")>();
+  return { ...actual, commands: { ...actual.commands, mergeWorkstreamPr } };
+});
 vi.mock("@/features/session/sessionStore", () => ({ addressPrFeedback: vi.fn() }));
 const opener = vi.hoisted(() => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => opener);
@@ -198,5 +204,31 @@ describe("PrStatusBar merge menu", () => {
     expect(menu?.style.top).toBe("124px");
     expect(menu?.style.left).toBe("900px");
     expect(menu?.style.right).toBe("");
+  });
+});
+
+describe("PrStatusBar merge failure", () => {
+  it("tells the user why a merge failed", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/queries")>("@/lib/queries");
+    mergeWorkstreamPr.mockResolvedValue({
+      status: "error",
+      error: {
+        code: "gh_failed",
+        message: "Pull request #42 is not mergeable: base branch policy prohibits the merge",
+        remedy: null,
+      },
+    });
+    q.useWorkstreamPr.mockReturnValue({ data: { kind: "found", pr: makePr() } });
+    q.useMergePr.mockImplementation(actual.useMergePr);
+    q.useBootstrap.mockReturnValue({ data: { settings: { git: { automerge: false } } } });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <PrStatusBar view={VIEW} onArchive={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(mergeBtn());
+    fireEvent.click(screen.getByText("Squash and merge"));
+    expect(await screen.findByText(/not mergeable/)).toBeTruthy();
+    expect(mergeWorkstreamPr).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,7 +9,8 @@ import { deliverReview } from "@/features/session/sessionStore";
 
 type DeliverableRound = { number: number; commentCount: number };
 
-// Rounds waiting behind a running turn; Resend must not queue a second copy.
+// Rounds being handed over or waiting behind a running turn; Resend must not send a second copy.
+const sendingRounds = new Set<string>();
 const queuedRounds = new Set<string>();
 // Rounds whose text reached the harness but were never marked; Resend only re-marks them.
 const sentRounds = new Set<string>();
@@ -47,8 +48,9 @@ export function useReviewDelivery(workstreamId: string, implement: Session | nul
 
   const deliver = async (round: DeliverableRound, message: string): Promise<void> => {
     const key = `${workstreamId}:${round.number}`;
-    if (queuedRounds.has(key)) return;
+    if (sendingRounds.has(key) || queuedRounds.has(key)) return;
     if (sentRounds.has(key)) return remark(round);
+    sendingRounds.add(key);
     setDelivering(true);
     try {
       const outcome = await deliverReview(workstreamId, implement, message, () => {
@@ -60,6 +62,7 @@ export function useReviewDelivery(workstreamId: string, implement: Session | nul
     } catch {
       failed(() => deliver(round, message));
     } finally {
+      sendingRounds.delete(key);
       setDelivering(false);
     }
   };

@@ -100,7 +100,7 @@ export function ScriptDock({
 
   const liveRunId = runtime.data?.runTerminalId ?? null;
   useEffect(() => {
-    if (liveRunId && !view) {
+    if (liveRunId && (!view || (view.exited && view.attachId !== liveRunId))) {
       setView({ kind: "run", gen: ++genRef.current, attachId: liveRunId, exited: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,20 +215,8 @@ export function ScriptDock({
               onClick={() => selectDockTab(workstreamId, { term: t })}
               icon={<Icon name="terminal" size="sm" />}
               label={shellName}
-            >
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label="Close terminal"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTerm(t);
-                }}
-                className="ml-0.5 grid h-4 w-4 place-items-center rounded text-ink-dim/70 hover:bg-panel-2 hover:text-ink"
-              >
-                <Icon name="close" size="xs" />
-              </span>
-            </DockTab>
+              onClose={() => closeTerm(t)}
+            />
           ))}
         </ScrollableTabStrip>
 
@@ -321,28 +309,41 @@ function DockTab({
   icon,
   label,
   children,
+  onClose,
 }: {
   active: boolean;
   onClick: () => void;
   icon: ReactNode;
   label: string;
   children?: ReactNode;
+  onClose?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cx(
-        "flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border px-3 text-ui whitespace-nowrap",
+        "flex h-[30px] shrink-0 items-center rounded-lg border text-ui whitespace-nowrap",
+        onClose ? "pr-1.5" : "",
         active
           ? "border-edge bg-panel-2 font-semibold text-ink"
           : "border-transparent font-medium text-ink-dim hover:text-ink",
       )}
     >
-      <span className={active ? "text-accent" : "text-ink-dim"}>{icon}</span>
-      {label}
-      {children}
-    </button>
+      <button type="button" onClick={onClick} className={cx("flex h-full items-center gap-1.5 pl-3", onClose ? "pr-1" : "pr-3")}>
+        <span className={active ? "text-accent" : "text-ink-dim"}>{icon}</span>
+        {label}
+        {children}
+      </button>
+      {onClose && (
+        <button
+          type="button"
+          aria-label="Close terminal"
+          onClick={onClose}
+          className="grid h-4 w-4 place-items-center rounded text-ink-dim/70 hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink"
+        >
+          <Icon name="close" size="xs" />
+        </button>
+      )}
+    </div>
   );
 }
 
