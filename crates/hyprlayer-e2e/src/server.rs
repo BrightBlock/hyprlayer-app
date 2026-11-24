@@ -19,6 +19,7 @@ pub struct Server {
     child: Child,
     socket: PathBuf,
     stderr: PathBuf,
+    opencode_pid: PathBuf,
     /// The connection that proved the server is listening. Kept, because a
     /// dropped `RpcClient` leaves its connection open until the server closes it.
     client: Option<Arc<RpcClient>>,
@@ -48,6 +49,9 @@ impl Server {
             child,
             socket: sandbox.socket(),
             stderr,
+            opencode_pid: sandbox
+                .app_data
+                .join(hyprlayer_core::opencode::runtime::OPENCODE_PID_FILE),
             client: None,
         };
         server.wait_until_listening().await;
@@ -129,6 +133,18 @@ impl Server {
             status,
             still_listening,
         }
+    }
+}
+
+/// `kill_on_drop` signals the server alone, and `opencode serve` runs in a process group of its
+/// own, so a test that ends or panics without a shutdown would leave it behind.
+impl Drop for Server {
+    fn drop(&mut self) {
+        if !matches!(self.child.try_wait(), Ok(None)) {
+            return;
+        }
+        let _ = self.child.start_kill();
+        hyprlayer_core::process::orphan::reap_now(&self.opencode_pid);
     }
 }
 

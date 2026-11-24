@@ -25,9 +25,11 @@ const PICKER_OPEN: Duration = Duration::from_secs(3);
 /// A TUI busy running a statusLine reads its input late; the Enter waits for the echo.
 const ECHO_WAIT: Duration = Duration::from_secs(2);
 const KEY_SETTLE: Duration = Duration::from_millis(400);
+/// How long a read waits for a screen it knows, or a key for what it moved: a loaded machine
+/// paints late, and a read mid-repaint sees no picker at all.
+const SCREEN_WAIT: Duration = Duration::from_secs(5);
 const CONFIRM: Duration = Duration::from_secs(5);
 const DIALOG_CONFIRM: Duration = Duration::from_secs(3);
-const MODE_SETTLE: Duration = Duration::from_secs(1);
 const PLAN_CONFIRM: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(50);
 const MAX_PRESSES: usize = 6;
@@ -112,10 +114,12 @@ impl PtyControlService<'_> {
             // An earlier switch's note for this model would confirm this one before claude acts.
             let screen_confirms = !switch_noted(&drive.rows()?, &label);
             let _pending = PendingSwitch::arm(&drive.agents, terminal_id);
-            drive.key_when(
-                |rows| highlighted(rows).as_deref() == Some(label.as_str()),
-                SESSION_ONLY,
-            )?;
+            drive
+                .key_soon(
+                    |rows| highlighted(rows).as_deref() == Some(label.as_str()),
+                    SESSION_ONLY,
+                )
+                .await?;
             drive.confirm_model(&label, screen_confirms).await
         }
         .await;
@@ -161,10 +165,14 @@ impl PtyControlService<'_> {
                 return Err(failed("claude's /effort picker didn't open"));
             }
             drive.slide_to(effort).await?;
-            drive.key_when(
-                |rows| effort_slider(rows).and_then(|s| s.selected()).as_deref() == Some(effort),
-                SESSION_ONLY,
-            )?;
+            drive
+                .key_soon(
+                    |rows| {
+                        effort_slider(rows).and_then(|s| s.selected()).as_deref() == Some(effort)
+                    },
+                    SESSION_ONLY,
+                )
+                .await?;
             Ok(drive
                 .until_reported(CONFIRM, |s| s.effort.as_deref() == Some(effort))
                 .await)
@@ -195,7 +203,7 @@ impl PtyControlService<'_> {
             .ok_or_else(|| failed(format!("claude has no {mode} permission mode")))?;
         let drive = self.begin(terminal_id).await?;
         let start = drive
-            .settled(footer_mode)
+            .settled_some(footer_mode)
             .await?
             .ok_or_else(|| failed("claude's footer shows no permission mode"))?;
         let reached = if start == want {
@@ -209,7 +217,7 @@ impl PtyControlService<'_> {
             drive.cycle_to(start, want).await?
         };
         // Every mode shift+tab passed through took effect, so the bar shows where it stopped.
-        if let Some(now) = drive.screen.rows().as_deref().and_then(footer_mode) {
+        if let Ok(Some(now)) = drive.settled_some(footer_mode).await {
             self.runtime
                 .pty_agents
                 .set_permission_mode(terminal_id, now);
@@ -257,6 +265,9 @@ impl PtyControlService<'_> {
             terminal_id: terminal_id.to_string(),
             _input: input,
         };
+        drive
+            .until(SCREEN_WAIT, |rows| ready(rows) || covered(rows))
+            .await?;
         if !drive.settled(ready).await? {
             return Err(failed("the agent is showing a prompt"));
         }
@@ -314,9 +325,9 @@ impl Drive {
         self.key(bytes)
     }
 
-    /// `key_when` once `on` holds, within `KEY_SETTLE`: a TUI repainting between keys reads blank for a moment.
+    /// `key_when` once `on` holds, within `SCREEN_WAIT`: a TUI repainting between keys reads blank for a moment.
     async fn key_soon(&self, on: impl Fn(&[String]) -> bool, bytes: &[u8]) -> Result<()> {
-        let deadline = Instant::now() + KEY_SETTLE;
+        let deadline = Instant::now() + SCREEN_WAIT;
         while !self.asking() && !on(&self.rows()?) && Instant::now() < deadline {
             tokio::time::sleep(POLL).await;
         }
@@ -379,21 +390,43 @@ impl Drive {
         }
     }
 
-    /// One key while `on` holds, then what `read` settles on, or the old value after `within`.
+    /// `read` once it shows something and two polls agree, or `None` after `SCREEN_WAIT`: a
+    /// picker read mid-repaint is gone for a moment, not closed.
+    async fn settled_some<T: PartialEq>(
+        &self,
+        read: impl Fn(&[String]) -> Option<T>,
+    ) -> Result<Option<T>> {
+        let deadline = Instant::now() + SCREEN_WAIT;
+        let mut last = None;
+        loop {
+            let now = read(&self.rows()?);
+            if now.is_some() && now == last {
+                return Ok(now);
+            }
+            if Instant::now() >= deadline {
+                return Ok(now.or(last));
+            }
+            last = now;
+            tokio::time::sleep(POLL).await;
+        }
+    }
+
+    /// One key once `on` holds, then the new value `read` settles on, or the old one when nothing
+    /// moved within `SCREEN_WAIT`.
     async fn press<T: PartialEq>(
         &self,
         key: &[u8],
-        within: Duration,
         on: impl Fn(&[String]) -> bool,
-        read: impl Fn(&[String]) -> T,
-    ) -> Result<T> {
-        let before = self.settled(&read).await?;
-        self.key_when(on, key)?;
-        let deadline = Instant::now() + within;
+        read: impl Fn(&[String]) -> Option<T>,
+    ) -> Result<Option<T>> {
+        let before = self.settled_some(&read).await?;
+        self.key_soon(on, key).await?;
+        let deadline = Instant::now() + SCREEN_WAIT;
         loop {
             tokio::time::sleep(POLL).await;
-            if read(&self.rows()?) != before {
-                return self.settled(&read).await;
+            let now = read(&self.rows()?);
+            if now.is_some() && now != before {
+                return self.settled_some(&read).await;
             }
             if Instant::now() >= deadline {
                 return Ok(before);
@@ -404,30 +437,44 @@ impl Drive {
     /// Types a bare slash command onto the empty input line and submits it only once the line
     /// reads exactly that.
     async fn command(&self, command: &str) -> Result<()> {
-        for ch in command.chars() {
-            self.key_soon(ready, ch.to_string().as_bytes()).await?;
+        for (at, ch) in command.char_indices() {
+            if let Err(e) = self.key_soon(ready, ch.to_string().as_bytes()).await {
+                self.erase(&command[..at]).await;
+                return Err(e);
+            }
             tokio::time::sleep(TYPE_GAP).await;
         }
         tokio::time::sleep(BEFORE_ENTER).await;
-        let shows =
-            |rows: &[String]| ready(rows) && input_line(rows).map(input_text) == Some(command);
+        let shows = |rows: &[String]| shows_line(rows, command);
         let typed = self.until(ECHO_WAIT, shows).await? && self.settled(shows).await?;
         if typed {
             return self.key_when(shows, ENTER);
         }
-        // An Enter on anything else could submit a draft or pick a row. The line started empty, so
-        // once it shows exactly the command, that many backspaces remove only what was typed.
-        let ours = self.until(ECHO_WAIT, shows).await?;
-        if ours {
-            for _ in command.chars() {
-                self.key_soon(ready, BACKSPACE).await?;
-            }
-        }
-        Err(failed(if ours {
+        Err(failed(if self.erase(command).await {
             format!("the agent's input didn't take {command}, so nothing was sent")
         } else {
             format!("the agent's input didn't take {command}, so nothing was sent; it may still hold part of it")
         }))
+    }
+
+    /// An Enter on anything else could submit a draft or pick a row. The line started empty, so
+    /// once it shows exactly `typed`, that many backspaces remove only what was typed.
+    async fn erase(&self, typed: &str) -> bool {
+        if typed.is_empty() {
+            return true;
+        }
+        if !matches!(
+            self.until(ECHO_WAIT, |rows| shows_line(rows, typed)).await,
+            Ok(true)
+        ) {
+            return false;
+        }
+        for _ in typed.chars() {
+            if self.key_soon(ready, BACKSPACE).await.is_err() {
+                return false;
+            }
+        }
+        true
     }
 
     /// Arrows wrap through every row and "More models", one press per re-read. The route never
@@ -435,7 +482,7 @@ impl Drive {
     async fn highlight(&self, label: &str) -> Result<()> {
         for pressed in 0..=MAX_PRESSES {
             let picker = self
-                .settled(model_picker)
+                .settled_some(|rows| model_picker(rows).filter(|p| p.highlighted.is_some()))
                 .await?
                 .ok_or_else(|| failed("claude's /model picker closed"))?;
             let target = picker
@@ -467,7 +514,6 @@ impl Drive {
             };
             self.press(
                 key,
-                KEY_SETTLE,
                 |rows| model_picker(rows).is_some(),
                 |rows| model_picker(rows).and_then(|p| p.highlighted),
             )
@@ -507,38 +553,41 @@ impl Drive {
         }
     }
 
-    /// ←/→ stop at the ends, so counting from the left end lands without reading every step.
+    /// ←/→ one level a press, each read back before the next.
     async fn slide_to(&self, effort: &str) -> Result<()> {
-        let slider = self
-            .settled(effort_slider)
-            .await?
-            .ok_or_else(|| failed("claude's /effort picker closed"))?;
+        let at = |rows: &[String]| effort_slider(rows).and_then(|s| s.selected_index());
+        let on = |rows: &[String]| effort_slider(rows).is_some();
+        let closed = || failed("claude's /effort picker closed");
+        let slider = self.settled_some(effort_slider).await?.ok_or_else(closed)?;
         let target = slider
             .levels
             .iter()
             .position(|(level, _)| level == effort)
             .ok_or_else(|| failed(format!("this model has no {effort} effort")))?;
-        let selected = |rows: &[String]| effort_slider(rows).and_then(|s| s.selected());
-        let on = |rows: &[String]| effort_slider(rows).is_some();
-        for _ in 1..slider.levels.len() {
-            self.press(LEFT, KEY_SETTLE, on, selected).await?;
+        let mut now = self.settled_some(at).await?.ok_or_else(closed)?;
+        for _ in 0..slider.levels.len() {
+            if now == target {
+                return Ok(());
+            }
+            let key = if now > target { LEFT } else { RIGHT };
+            match self.press(key, on, at).await? {
+                Some(moved) if moved != now => now = moved,
+                _ => break,
+            }
         }
-        for _ in 0..target {
-            self.press(RIGHT, KEY_SETTLE, on, selected).await?;
+        if now == target {
+            return Ok(());
         }
-        match self.settled(selected).await? {
-            Some(level) if level == effort => Ok(()),
-            _ => Err(failed(format!(
-                "claude's /effort slider didn't reach {effort}"
-            ))),
-        }
+        Err(failed(format!(
+            "claude's /effort slider didn't reach {effort}"
+        )))
     }
 
     /// shift+tab one press at a time; back at the start means the ring doesn't hold `want`.
     async fn cycle_to(&self, start: &str, want: &str) -> Result<bool> {
         for _ in 0..MAX_PRESSES {
             let on = |rows: &[String]| ready(rows) && footer_mode(rows).is_some();
-            match self.press(SHIFT_TAB, MODE_SETTLE, on, footer_mode).await? {
+            match self.press(SHIFT_TAB, on, footer_mode).await? {
                 Some(now) if now == want => return Ok(true),
                 Some(now) if now != start => {}
                 _ => return Ok(false),
@@ -549,23 +598,20 @@ impl Drive {
 
     /// One Esc per picker or dialog seen on screen, the next only once that one has gone: an Esc
     /// anywhere else interrupts the turn. A dialog's Esc returns to the picker, so two at most.
+    /// A screen mid-repaint shows neither the input box nor a picker, so each read waits for one.
     async fn dismiss(&self) {
-        let dialog = |rows: &[String]| rows.iter().any(|r| r.contains(SWITCH_DIALOG));
         for _ in 0..2 {
-            let Some(was_dialog) = self
-                .screen
-                .rows()
-                .filter(|rows| showing_picker(rows))
-                .map(|rows| dialog(&rows))
-            else {
+            let Ok(Some(Shown::Picker { dialog })) = self.settled_some(shown).await else {
                 return;
             };
             if self.key(ESC).is_err() {
                 return;
             }
             let gone = self
-                .until(DIALOG_CONFIRM, |rows| {
-                    !showing_picker(rows) || dialog(rows) != was_dialog
+                .until(DIALOG_CONFIRM, |rows| match shown(rows) {
+                    Some(Shown::Input) => true,
+                    Some(Shown::Picker { dialog: now }) => now != dialog,
+                    None => false,
                 })
                 .await;
             if !matches!(gone, Ok(true)) {
@@ -666,12 +712,16 @@ struct EffortSlider {
 }
 
 impl EffortSlider {
-    fn selected(&self) -> Option<String> {
+    fn selected_index(&self) -> Option<usize> {
         let marker = self.marker?;
-        self.levels
-            .iter()
-            .min_by_key(|(level, col)| (col + level.len() / 2).abs_diff(marker))
-            .map(|(level, _)| level.clone())
+        (0..self.levels.len()).min_by_key(|&i| {
+            let (level, col) = &self.levels[i];
+            (col + level.len() / 2).abs_diff(marker)
+        })
+    }
+
+    fn selected(&self) -> Option<String> {
+        Some(self.levels[self.selected_index()?].0.clone())
     }
 }
 
@@ -763,6 +813,10 @@ fn input_line(rows: &[String]) -> Option<&str> {
     input_row(rows).map(|at| rows[at].as_str())
 }
 
+fn shows_line(rows: &[String], text: &str) -> bool {
+    ready(rows) && input_line(rows).map(input_text) == Some(text)
+}
+
 /// Text on the input line in `bright`, the same screen without its dim cells.
 fn has_draft(rows: &[String], bright: &[String]) -> bool {
     input_row(rows)
@@ -780,6 +834,25 @@ fn highlighted(rows: &[String]) -> Option<String> {
 /// The prompt's own `❯` and the no-break space after it are not input.
 fn input_text(line: &str) -> &str {
     line.trim_start_matches('❯').trim()
+}
+
+#[derive(PartialEq)]
+enum Shown {
+    Input,
+    Picker { dialog: bool },
+}
+
+/// The input box, a picker or dialog over it, or `None` for a screen mid-repaint.
+fn shown(rows: &[String]) -> Option<Shown> {
+    if input_line(rows).is_some() {
+        Some(Shown::Input)
+    } else if showing_picker(rows) {
+        Some(Shown::Picker {
+            dialog: rows.iter().any(|r| r.contains(SWITCH_DIALOG)),
+        })
+    } else {
+        None
+    }
 }
 
 /// A picker or dialog replaces the input box, so the same words in the conversation don't count.

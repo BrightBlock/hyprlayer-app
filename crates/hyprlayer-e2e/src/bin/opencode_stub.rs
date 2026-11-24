@@ -84,6 +84,8 @@ fn main() {
     let root = PathBuf::from(data).join("opencode-stub");
     std::fs::create_dir_all(root.join("sessions")).expect("create the session store");
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind the port");
+    #[cfg(unix)]
+    exit_with_parent();
     let stub = Arc::new(Stub {
         root,
         subscribers: Mutex::new(Vec::new()),
@@ -103,6 +105,19 @@ fn main() {
             }
         });
     }
+}
+
+/// The driver runs `opencode serve` in a process group of its own, so no signal to a killed
+/// server, or to a test nextest timed out, reaches it; reparented, it exits.
+#[cfg(unix)]
+fn exit_with_parent() {
+    let parent = std::os::unix::process::parent_id();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(200));
+        if std::os::unix::process::parent_id() != parent {
+            std::process::exit(0);
+        }
+    });
 }
 
 impl Stub {
