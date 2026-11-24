@@ -504,12 +504,7 @@ impl SessionService<'_> {
     /// server's own registry decides which models exist.
     pub async fn set_model(&self, session_id: &str, model: Option<String>) -> Result<()> {
         if let Some(model_id) = model.as_deref() {
-            let session =
-                self.get(session_id)
-                    .await?
-                    .ok_or_else(|| CoreError::SessionNotFound {
-                        session_id: session_id.to_string(),
-                    })?;
+            let session = self.require_row(session_id).await?;
             self.check_model(session.harness, model_id).await?;
         }
         // opencode and codex report a model only at spawn, so a relaunch reads the switch from the row.
@@ -1178,7 +1173,7 @@ impl SessionService<'_> {
             let worktree = ws.worktree_path.clone();
             tokio::task::spawn_blocking(move || {
                 crate::gitops::prompt_git_vars(
-                    std::path::Path::new(&worktree),
+                    Path::new(&worktree),
                     want_changed,
                     want_diff,
                     want_last,
@@ -1265,12 +1260,9 @@ impl SessionService<'_> {
     ) {
         if stage == Stage::Implement {
             let worktree = ws.worktree_path.clone();
-            let excluded = blocking(move || {
-                Ok(sidecar::ensure_review_dir_excluded(std::path::Path::new(
-                    &worktree,
-                ))?)
-            })
-            .await;
+            let excluded =
+                blocking(move || Ok(sidecar::ensure_review_dir_excluded(Path::new(&worktree))?))
+                    .await;
             if let Err(e) = excluded {
                 tracing::warn!(
                     "workstream {}: could not exclude the review dir: {e}",
@@ -1413,7 +1405,7 @@ impl SessionService<'_> {
 
         Ok(StartedStageSession {
             session: session.clone(),
-            prompt: prompt.clone(),
+            prompt,
             launch: LaunchAndConverseParams {
                 session,
                 project_path: workstream.project_path,
@@ -2069,7 +2061,7 @@ impl SessionService<'_> {
                 let mut env = self.runtime.child_env().await;
                 env.extend(identity_env);
                 let mut skill_roots = skills::skill_roots(
-                    Some(std::path::Path::new(&session.cwd)),
+                    Some(Path::new(&session.cwd)),
                     &self.runtime.skills().skill_home(),
                 );
                 if let Some(plugin) = endpoint.and_then(|endpoint| endpoint.plugin_dir.as_ref()) {
@@ -2148,7 +2140,7 @@ impl SessionService<'_> {
                 }
                 let library = &settings.agents;
                 let drafts: Vec<String> = agents::list_agents(
-                    Some(std::path::Path::new(project_path)),
+                    Some(Path::new(project_path)),
                     Some(&self.runtime.environment.home_dir),
                     None,
                 )

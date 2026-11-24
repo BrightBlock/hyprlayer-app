@@ -403,10 +403,10 @@ async fn validate(
             },
         }
     };
-    let live_cost = match &guard.0 {
-        Some(driver) => driver.usage_so_far().cost_usd,
-        None => None,
-    };
+    let live_cost = guard
+        .0
+        .as_ref()
+        .and_then(|driver| driver.usage_so_far().cost_usd);
     // Claude and OpenCode price a turn only at its end, so a cut-off turn may report nothing.
     let mut spent = state.partial().cost_usd.or(live_cost).unwrap_or(0.0);
     if let Some(cancelled) = cancelled {

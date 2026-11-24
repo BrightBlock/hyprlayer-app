@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::task::JoinHandle;
 
 use hyprlayer_models::{
     ClientRef, GoalStatus, RevisedTurn, RuntimeEvent, SessionOrigin, SessionTurns, UiRequest,
@@ -21,6 +20,7 @@ use crate::store::{
 };
 
 use super::delivery::{LiveAttachment, SessionAttachment, SessionDelivery, INGRESS_CAPACITY};
+use super::service::blocking;
 use super::workflow_bridge::{self, WorkflowChannel};
 
 pub(crate) struct RewindOutcome {
@@ -116,8 +116,6 @@ pub struct ActorRevState {
 pub(crate) struct ActorHandle {
     pub ingress: mpsc::Sender<SessionEvent>,
     control: mpsc::UnboundedSender<Control>,
-    #[allow(dead_code)]
-    join: JoinHandle<()>,
 }
 
 impl ActorHandle {
@@ -328,13 +326,6 @@ fn actor_gone() -> CoreError {
     CoreError::Io(std::io::Error::other("session actor is no longer running"))
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    match tokio::task::spawn_blocking(f).await {
-        Ok(result) => result,
-        Err(join_err) => Err(CoreError::Io(std::io::Error::other(join_err.to_string()))),
-    }
-}
-
 pub(crate) const ACTOR_IDLE: Duration = Duration::from_secs(60);
 
 pub(crate) fn spawn(
@@ -348,7 +339,7 @@ pub(crate) fn spawn(
     let (ingress_tx, ingress_rx) = mpsc::channel(INGRESS_CAPACITY);
     let (control_tx, control_rx) = mpsc::unbounded_channel();
     let ingress_sender = ingress_tx.clone();
-    let join = tokio::spawn(async move {
+    tokio::spawn(async move {
         let state = ActorState::new(
             session_id,
             db,
@@ -364,7 +355,6 @@ pub(crate) fn spawn(
     ActorHandle {
         ingress: ingress_tx,
         control: control_tx,
-        join,
     }
 }
 
@@ -746,9 +736,7 @@ impl ActorState {
     }
 
     fn set_workflow(&mut self, workflow: WorkflowChannel) {
-        let pump =
-            workflow_bridge::spawn_workflow_ingress_pump(&workflow, self.ingress_sender.clone());
-        drop(pump);
+        workflow_bridge::spawn_workflow_ingress_pump(&workflow, self.ingress_sender.clone());
         self.workflow = Some(workflow);
     }
 
@@ -1440,7 +1428,6 @@ impl ActorState {
         self.lapsed.remove(at).map(|(_, author)| author)
     }
 
-    /// The `ReleaseUserTurn` arm: releasing an unknown nonce is a silent no-op.
     fn release_reservation(&mut self, id: &str) {
         if self.reservations.remove(id).is_some() {
             self.announce_revision(self.current_author());
