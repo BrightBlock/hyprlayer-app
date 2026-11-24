@@ -207,6 +207,11 @@ export const commands = {
 	opencodeAuthList: () => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_auth_list")),
 	opencodeSetProviderKey: (provider: string, key: string) => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_set_provider_key", { provider, key })),
 	opencodeRemoveProvider: (provider: string) => typedError<OpencodeAuthEntry[], AppError>(__TAURI_INVOKE("opencode_remove_provider", { provider })),
+	opencodeSignInMethods: () => typedError<OpencodeSignInMethod[], AppError>(__TAURI_INVOKE("opencode_sign_in_methods")),
+	opencodeBeginSignIn: (provider: string, methodId: string) => typedError<OpencodeSignInAttempt, AppError>(__TAURI_INVOKE("opencode_begin_sign_in", { provider, methodId })),
+	opencodeSignInStatus: (provider: string, attemptId: string) => typedError<OpencodeSignInStatus, AppError>(__TAURI_INVOKE("opencode_sign_in_status", { provider, attemptId })),
+	opencodeCompleteSignIn: (provider: string, attemptId: string, code: string) => typedError<OpencodeSignInStatus, AppError>(__TAURI_INVOKE("opencode_complete_sign_in", { provider, attemptId, code })),
+	opencodeCancelSignIn: (provider: string, attemptId: string) => typedError<null, AppError>(__TAURI_INVOKE("opencode_cancel_sign_in", { provider, attemptId })),
 	opencodeSetDefaultModel: (model: string | null) => typedError<null, AppError>(__TAURI_INVOKE("opencode_set_default_model", { model })),
 	installOpencode: () => typedError<null, AppError>(__TAURI_INVOKE("install_opencode")),
 	claudeSyncModels: (add: string[], seen: string[]) => typedError<AppSettings, AppError>(__TAURI_INVOKE("claude_sync_models", { add, seen })),
@@ -1511,6 +1516,29 @@ export type OpencodeCatalog = {
 	providers: CatalogProvider[],
 	source: string,
 };
+
+/**
+ *  A sign-in under way: the page to open, what to tell the user, and whether a pasted
+ *  address or code can finish it (a browser that cannot reach the server's loopback).
+ */
+export type OpencodeSignInAttempt = {
+	provider: string,
+	attemptId: string,
+	url: string,
+	instructions: string,
+	/**  `code`: the user pastes a code; `auto`: OpenCode finishes it, or a pasted address does. */
+	needsCode: boolean,
+	acceptsPaste: boolean,
+};
+
+/**  A provider sign-in OpenCode offers (OAuth: a browser or a device code). */
+export type OpencodeSignInMethod = {
+	provider: string,
+	methodId: string,
+	label: string,
+};
+
+export type OpencodeSignInStatus = { state: "pending" } | { state: "complete" } | { state: "failed"; message: string };
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "dontAsk" | "bypassPermissions";
 

@@ -5,6 +5,7 @@ import type { AppSettings, BinaryStatus, OpenCodeSettings } from "@/lib/bindings
 import {
   useInstallOpencode,
   useOpencodeAuth,
+  useOpencodeSignInMethods,
   useOpencodeCatalog,
   useRedetectBinaries,
   useRefreshOpencodeCatalog,
@@ -31,6 +32,7 @@ import { Icon } from "@/components/Icon";
 import { BinaryCard } from "@/features/settings/BinaryCard";
 import { ProviderPickerModal } from "./ProviderPickerModal";
 import { ModelPickerModal } from "./ModelPickerModal";
+import { OpenCodeSignInDialog } from "./OpenCodeSignInDialog";
 
 const DOCS_URL = "https://opencode.ai/docs";
 
@@ -50,11 +52,15 @@ export function OpenCodeHarnessTab({
 
   const [providerOpen, setProviderOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [signingIn, setSigningIn] = useState<string | null>(null);
 
   const providers = useMemo(() => catalog.data?.providers ?? [], [catalog.data]);
   const opencode: OpenCodeSettings = settings.providers?.opencode ?? { selectedModels: [] };
   const selectedModels = opencode.selectedModels ?? [];
   const installed = status?.state.state === "ok";
+  const signInMethods = useOpencodeSignInMethods(installed);
+  const methodsFor = (provider: string) =>
+    (signInMethods.data ?? []).filter((m) => m.provider.toLowerCase() === provider.toLowerCase());
 
   const providerById = useMemo(() => {
     const map = new Map<string, (typeof providers)[number]>();
@@ -166,8 +172,13 @@ export function OpenCodeHarnessTab({
                   {supported && e.remedy && <p className="text-ui text-warn-ink">{e.remedy}</p>}
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
+                  {supported && e.remedy && methodsFor(e.provider).length > 0 && (
+                    <Button size="sm" onClick={() => setSigningIn(e.provider)}>
+                      Sign in
+                    </Button>
+                  )}
                   <Badge tone={supported && !e.remedy ? "dim" : "warn"}>
-                    {!supported ? "unsupported" : e.remedy ? "not usable" : "key set"}
+                    {!supported ? "unsupported" : e.remedy ? "not usable" : e.kind === "signIn" ? "signed in" : "key set"}
                   </Badge>
                   <button
                     type="button"
@@ -287,7 +298,15 @@ export function OpenCodeHarnessTab({
         onClose={() => setProviderOpen(false)}
         providers={providers}
         configured={configured}
+        signInMethods={signInMethods.data ?? []}
       />
+      {signingIn && (
+        <OpenCodeSignInDialog
+          providerName={providerName.get(signingIn.toLowerCase()) ?? signingIn}
+          methods={methodsFor(signingIn)}
+          onClose={() => setSigningIn(null)}
+        />
+      )}
       <ModelPickerModal
         open={modelOpen}
         onClose={() => setModelOpen(false)}

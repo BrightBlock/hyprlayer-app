@@ -348,6 +348,33 @@
       "guards": [
         {
           "evidence": {
+            "offered": true,
+            "reply": "model=stub-keyed earlier=[Start on a model OpenCode lacks. | Still there? | A turn the server dies in. | Back after the crash? | A turn running as the key lands. | First turn with the new key.]",
+            "signedIn": true,
+            "status": {
+              "state": "complete"
+            },
+            "turnStatus": "completed"
+          },
+          "guard": "the sign-in completes, the provider lists as signed in, and a turn runs on its model",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "listed": [
+              "openai"
+            ]
+          },
+          "guard": "removing it drops the sign-in",
+          "ok": true
+        }
+      ],
+      "step": "a provider signs in through hyprlayer's OpenCode server and its models run"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "binary": {
               "min": "2.4.0",
               "state": "tooOld"

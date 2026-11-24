@@ -26,7 +26,9 @@ use hyprlayer_core::models::goal::{Goal, GoalDetail, GoalSpec};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
-use hyprlayer_core::opencode::config::OpencodeAuthEntry;
+use hyprlayer_core::opencode::config::{
+    OpencodeAuthEntry, OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus,
+};
 use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::{self, ScriptSettings};
@@ -2051,6 +2053,63 @@ impl Dispatch for Server {
         self.runtime
             .providers()
             .opencode_remove_provider(&provider)
+            .await
+            .wire()
+    }
+
+    async fn opencode_sign_in_methods(&self) -> Result<Vec<OpencodeSignInMethod>, WireError> {
+        self.runtime
+            .providers()
+            .opencode_sign_in_methods()
+            .await
+            .wire()
+    }
+
+    async fn opencode_begin_sign_in(
+        &self,
+        provider: String,
+        method_id: String,
+    ) -> Result<OpencodeSignInAttempt, WireError> {
+        self.runtime
+            .providers()
+            .opencode_begin_sign_in(&provider, &method_id)
+            .await
+            .wire()
+    }
+
+    async fn opencode_sign_in_status(
+        &self,
+        provider: String,
+        attempt_id: String,
+    ) -> Result<OpencodeSignInStatus, WireError> {
+        self.runtime
+            .providers()
+            .opencode_sign_in_status(&provider, &attempt_id)
+            .await
+            .wire()
+    }
+
+    async fn opencode_complete_sign_in(
+        &self,
+        provider: String,
+        attempt_id: String,
+        code: String,
+    ) -> Result<OpencodeSignInStatus, WireError> {
+        self.runtime
+            .providers()
+            .opencode_complete_sign_in(&provider, &attempt_id, &code)
+            .await
+            .wire()
+    }
+
+    async fn opencode_cancel_sign_in(
+        &self,
+        provider: String,
+        attempt_id: String,
+    ) -> Result<(), WireError> {
+        self.runtime
+            .providers()
+            .opencode_cancel_sign_in(&provider, &attempt_id)
             .await
             .wire()
     }

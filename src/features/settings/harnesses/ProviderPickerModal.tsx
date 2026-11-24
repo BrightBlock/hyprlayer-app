@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 
-import type { CatalogProvider } from "@/lib/bindings";
+import type { CatalogProvider, OpencodeSignInMethod } from "@/lib/bindings";
 import { isFreeOpencodeModel } from "@/lib/domain/harnessing";
 import { useSetOpencodeProviderKey } from "@/lib/queries";
 import { Button, Dialog, ErrorNote, TextInput } from "@/components/ui";
 import { reauthSucceeded } from "@/lib/reauth";
 import { Icon } from "@/components/Icon";
+import { OpenCodeSignInDialog } from "./OpenCodeSignInDialog";
 
 const FEATURED = 7;
 
@@ -14,11 +15,13 @@ export function ProviderPickerModal({
   onClose,
   providers,
   configured,
+  signInMethods,
 }: {
   open: boolean;
   onClose: () => void;
   providers: CatalogProvider[];
   configured: Set<string>;
+  signInMethods: OpencodeSignInMethod[];
 }) {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -48,7 +51,12 @@ export function ProviderPickerModal({
   return (
     <Dialog open={open} onClose={close} title="Providers" size="xl">
       {picked ? (
-        <KeyEntry provider={picked} onBack={() => setPicked(null)} onDone={close} />
+        <KeyEntry
+          provider={picked}
+          methods={signInMethods.filter((m) => m.provider.toLowerCase() === picked.id.toLowerCase())}
+          onBack={() => setPicked(null)}
+          onDone={close}
+        />
       ) : (
         <>
           <div className="group/search relative mb-3">
@@ -107,14 +115,17 @@ export function ProviderPickerModal({
 
 function KeyEntry({
   provider,
+  methods,
   onBack,
   onDone,
 }: {
   provider: CatalogProvider;
+  methods: OpencodeSignInMethod[];
   onBack: () => void;
   onDone: () => void;
 }) {
   const [key, setKey] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
   const save = useSetOpencodeProviderKey();
   const envHint = provider.env[0];
   const hasFreeModels = provider.models.some((m) => isFreeOpencodeModel(m.id));
@@ -159,6 +170,25 @@ function KeyEntry({
           straight from <span className="text-ink">Add models</span>. A key is only required for its
           paid models.
         </p>
+      )}
+
+      {methods.length > 0 && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2">
+          <p className="text-ui text-ink-dim">Sign in with your {provider.name} account instead of a key.</p>
+          <Button size="sm" onClick={() => setSigningIn(true)}>
+            Sign in
+          </Button>
+        </div>
+      )}
+      {signingIn && (
+        <OpenCodeSignInDialog
+          providerName={provider.name}
+          methods={methods}
+          onClose={() => {
+            setSigningIn(false);
+            onDone();
+          }}
+        />
       )}
 
       <label className="mb-1 mt-4 block text-ui font-medium text-ink-dim">

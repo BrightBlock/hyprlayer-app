@@ -36,8 +36,83 @@ pub struct ApiKeys {
     pub unusable: Vec<String>,
 }
 
-fn unusable_remedy(provider: &str) -> String {
-    format!("OpenCode 2 can't use this sign-in. Add an API key for {provider} here.")
+fn unusable_remedy(_provider: &str) -> String {
+    "OpenCode 2 can't use this sign-in. Sign in again here, or add an API key.".into()
+}
+
+/// A provider sign-in OpenCode offers (OAuth: a browser or a device code).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct OpencodeSignInMethod {
+    pub provider: String,
+    pub method_id: String,
+    pub label: String,
+}
+
+/// A sign-in under way: the page to open, what to tell the user, and whether a pasted
+/// address or code can finish it (a browser that cannot reach the server's loopback).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase")]
+pub struct OpencodeSignInAttempt {
+    pub provider: String,
+    pub attempt_id: String,
+    pub url: String,
+    pub instructions: String,
+    /// `code`: the user pastes a code; `auto`: OpenCode finishes it, or a pasted address does.
+    pub needs_code: bool,
+    pub accepts_paste: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "camelCase", tag = "state")]
+pub enum OpencodeSignInStatus {
+    Pending,
+    Complete,
+    Failed { message: String },
+}
+
+/// The providers signed in through hyprlayer's OpenCode server, whose credentials live in its
+/// own data dir. Kept apart from `auth.json`, which OpenCode 1 and other tools read too.
+pub fn list_sign_ins(path: &Path) -> Vec<String> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub fn set_signed_in(path: &Path, provider: &str, signed_in: bool) -> Result<()> {
+    let _guard = write_lock();
+    let mut all = list_sign_ins(path);
+    all.retain(|p| p != provider);
+    if signed_in {
+        all.push(provider.to_string());
+        all.sort();
+    }
+    write_json_atomic(path, &json!(all), 0o600)
+}
+
+/// `auth.json`'s entries with the sign-ins made through hyprlayer: a provider signed in that way
+/// reads as such, in place of an `auth.json` entry OpenCode 2 cannot use.
+pub fn list_auth_with_sign_ins(auth: &Path, sign_ins: &Path) -> Result<Vec<OpencodeAuthEntry>> {
+    let signed: Vec<String> = list_sign_ins(sign_ins);
+    let mut out: Vec<OpencodeAuthEntry> = list_auth(auth)?
+        .into_iter()
+        .filter(|e| !(e.remedy.is_some() && signed.contains(&e.provider)))
+        .collect();
+    for provider in signed {
+        if !out.iter().any(|e| e.provider == provider) {
+            out.push(OpencodeAuthEntry {
+                provider,
+                kind: "signIn".into(),
+                remedy: None,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.provider.cmp(&b.provider));
+    Ok(out)
 }
 
 pub fn api_keys(path: &Path) -> Result<ApiKeys> {
@@ -303,9 +378,37 @@ mod tests {
         assert_eq!(entries[0].provider, "anthropic");
         assert_eq!(
             entries[0].remedy.as_deref(),
-            Some("OpenCode 2 can't use this sign-in. Add an API key for anthropic here.")
+            Some("OpenCode 2 can't use this sign-in. Sign in again here, or add an API key.")
         );
         assert!(entries[1].remedy.is_none());
+    }
+
+    #[test]
+    fn a_sign_in_made_here_replaces_the_flagged_entry() {
+        let (auth_path, config_path) = temp_paths("signin");
+        let sign_ins = config_path.with_file_name("sign-ins.json");
+        std::fs::write(
+            &auth_path,
+            r#"{"openai":{"type":"oauth","refresh":"r","access":"a","expires":1},"xai":{"type":"api","key":"k"}}"#,
+        )
+        .unwrap();
+        set_signed_in(&sign_ins, "openai", true).unwrap();
+        set_signed_in(&sign_ins, "poe", true).unwrap();
+        let entries = list_auth_with_sign_ins(&auth_path, &sign_ins).unwrap();
+        let shown: Vec<(&str, &str, bool)> = entries
+            .iter()
+            .map(|e| (e.provider.as_str(), e.kind.as_str(), e.remedy.is_some()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("openai", "signIn", false),
+                ("poe", "signIn", false),
+                ("xai", "api", false)
+            ]
+        );
+        set_signed_in(&sign_ins, "poe", false).unwrap();
+        assert_eq!(list_sign_ins(&sign_ins), ["openai"]);
     }
 
     #[test]

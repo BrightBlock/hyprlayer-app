@@ -269,7 +269,9 @@ an internal type, and they are supported for that reason.
 `opencode_server_if_running()`, `invalidate_opencode_server()`,
 `opencode_catalog(bool)`, `opencode_auth_list()`,
 `opencode_set_provider_key(&str, &str)`, `opencode_remove_provider(&str)`,
-`opencode_set_default_model(Option<String>)`.
+`opencode_set_default_model(Option<String>)`, `opencode_sign_in_methods()`,
+`opencode_begin_sign_in(&str, &str)`, `opencode_sign_in_status(&str, &str)`,
+`opencode_complete_sign_in(&str, &str, &str)`, `opencode_cancel_sign_in(&str, &str)`.
 
 Network calls go through the internal `ProviderHttp` port, which GETs and
 form-POSTs to `String`; the desktop shell has no HTTP client of its own.
@@ -280,8 +282,10 @@ refuses an older, unparseable or OpenCode 1 binary before it spawns one
 `RuntimePaths::opencode_auth_file` and `opencode_config_file`. Setting or removing a
 key invalidates the cached `opencode serve`, which copies `auth.json`'s API keys into
 its own credential store (`/api/credential`) only when it spawns; a v1 sign-in in
-`auth.json` cannot be copied and lists with a remedy. A malformed `auth.json` fails
-the call instead of being overwritten.
+`auth.json` cannot be copied and lists with a remedy. A sign-in runs on that server
+(`/api/integration/:id/connect/oauth`), so its credential stays in the server's data
+dir; `opencode-sign-ins.json` under the app data dir records which providers it
+holds. A malformed `auth.json` fails the call instead of being overwritten.
 
 ### `SessionService`
 

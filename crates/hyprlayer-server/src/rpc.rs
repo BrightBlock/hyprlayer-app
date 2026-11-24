@@ -26,7 +26,9 @@ use hyprlayer_core::models::goal::{Goal, GoalDetail, GoalSpec};
 use hyprlayer_core::models::session::QuestionAnswers;
 use hyprlayer_core::models::{SkillScope, SkillTarget};
 use hyprlayer_core::opencode::catalog::OpencodeCatalog;
-use hyprlayer_core::opencode::config::OpencodeAuthEntry;
+use hyprlayer_core::opencode::config::{
+    OpencodeAuthEntry, OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus,
+};
 use hyprlayer_core::pr::{MergeMethod, PrLookup, PrStatus, PrSummary};
 use hyprlayer_core::process::binaries::{BinaryKind, BinaryStatus};
 use hyprlayer_core::repo_settings::ScriptSettings;
@@ -317,6 +319,11 @@ hyprlayer_proto::commands! {
     OpencodeAuthList: opencode_auth_list() -> Vec<OpencodeAuthEntry>;
     OpencodeSetProviderKey: opencode_set_provider_key(provider: String, key: String) -> Vec<OpencodeAuthEntry>;
     OpencodeRemoveProvider: opencode_remove_provider(provider: String) -> Vec<OpencodeAuthEntry>;
+    OpencodeSignInMethods: opencode_sign_in_methods() -> Vec<OpencodeSignInMethod>;
+    OpencodeBeginSignIn: opencode_begin_sign_in(provider: String, method_id: String) -> OpencodeSignInAttempt;
+    OpencodeSignInStatus: opencode_sign_in_status(provider: String, attempt_id: String) -> OpencodeSignInStatus;
+    OpencodeCompleteSignIn: opencode_complete_sign_in(provider: String, attempt_id: String, code: String) -> OpencodeSignInStatus;
+    OpencodeCancelSignIn: opencode_cancel_sign_in(provider: String, attempt_id: String) -> ();
     SetOpencodeDefaultModel: set_opencode_default_model(model: Option<String>) -> ();
     InstallOpencode: install_opencode() -> ();
     ClaudeAuthStatus: claude_auth_status() -> ClaudeAuthStatus;

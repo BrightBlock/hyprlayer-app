@@ -634,6 +634,72 @@ async fn opencode_resume() {
         json!({ "released": released }),
     );
 
+    j.step("a provider signs in through hyprlayer's OpenCode server and its models run");
+    let methods = client
+        .opencode_sign_in_methods()
+        .await
+        .expect("opencode_sign_in_methods");
+    let offered = methods
+        .iter()
+        .any(|m| m.provider == "stubauth" && m.method_id == "device");
+    let attempt = client
+        .opencode_begin_sign_in("stubauth".into(), "device".into())
+        .await
+        .expect("opencode_begin_sign_in");
+    let mut status = None;
+    for _ in 0..5 {
+        let read = client
+            .opencode_sign_in_status("stubauth".into(), attempt.attempt_id.clone())
+            .await
+            .expect("opencode_sign_in_status");
+        let done = read != hyprlayer_core::opencode::config::OpencodeSignInStatus::Pending;
+        status = Some(read);
+        if done {
+            break;
+        }
+    }
+    let listed = client
+        .opencode_auth_list()
+        .await
+        .expect("opencode_auth_list");
+    let signed_in = listed
+        .iter()
+        .any(|e| e.provider == "stubauth" && e.kind == "signIn" && e.remedy.is_none());
+    j.call(
+        &client,
+        Request::SetSessionModel {
+            session_id: retried.clone(),
+            model: Some("stubauth/stub-keyed".into()),
+        },
+    )
+    .await
+    .expect("set_session_model");
+    drop(events);
+    let mut events = resume(&client, &retried).await;
+    let signed = "First turn on the signed-in provider.";
+    send(&mut j, &client, &retried, signed).await;
+    let (seen, reply) = turn(&mut events, signed).await;
+    let after_remove = client
+        .opencode_remove_provider("stubauth".into())
+        .await
+        .expect("opencode_remove_provider");
+    j.guard(
+        "the sign-in completes, the provider lists as signed in, and a turn runs on its model",
+        offered
+            && status == Some(hyprlayer_core::opencode::config::OpencodeSignInStatus::Complete)
+            && attempt.instructions == "Enter code: STUB-CODE"
+            && signed_in
+            && model_of(&reply) == Some("stub-keyed")
+            && status_of(&seen).as_deref() == Some("completed"),
+        json!({ "offered": offered, "status": status, "signedIn": signed_in, "reply": reply,
+                "turnStatus": status_of(&seen) }),
+    );
+    j.guard(
+        "removing it drops the sign-in",
+        !after_remove.iter().any(|e| e.provider == "stubauth"),
+        json!({ "listed": after_remove.iter().map(|e| e.provider.clone()).collect::<Vec<_>>() }),
+    );
+
     j.step("an OpenCode 1 binary is refused before it runs, with how to fix it");
     drop(events);
     sandbox.stage_tool("opencode", "#!/bin/sh\necho 1.19.6\n");

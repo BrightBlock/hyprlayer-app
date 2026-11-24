@@ -2,7 +2,9 @@ use tauri::State;
 
 use hyprlayer_core::claude::ClaudeProbe;
 use hyprlayer_core::codex::CodexProbe;
-use hyprlayer_core::opencode::config::OpencodeAuthEntry;
+use hyprlayer_core::opencode::config::{
+    OpencodeAuthEntry, OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus,
+};
 
 use crate::error::{AppError, CmdResult};
 use crate::state::AppState;
@@ -42,6 +44,75 @@ pub async fn opencode_set_provider_key(
     state
         .client()?
         .opencode_set_provider_key(provider, key)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn opencode_sign_in_methods(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<OpencodeSignInMethod>> {
+    state
+        .client()?
+        .opencode_sign_in_methods()
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn opencode_begin_sign_in(
+    state: State<'_, AppState>,
+    provider: String,
+    method_id: String,
+) -> CmdResult<OpencodeSignInAttempt> {
+    state
+        .client()?
+        .opencode_begin_sign_in(provider, method_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn opencode_sign_in_status(
+    state: State<'_, AppState>,
+    provider: String,
+    attempt_id: String,
+) -> CmdResult<OpencodeSignInStatus> {
+    state
+        .client()?
+        .opencode_sign_in_status(provider, attempt_id)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn opencode_complete_sign_in(
+    state: State<'_, AppState>,
+    provider: String,
+    attempt_id: String,
+    code: String,
+) -> CmdResult<OpencodeSignInStatus> {
+    state
+        .client()?
+        .opencode_complete_sign_in(provider, attempt_id, code)
+        .await
+        .map_err(AppError::from)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn opencode_cancel_sign_in(
+    state: State<'_, AppState>,
+    provider: String,
+    attempt_id: String,
+) -> CmdResult<()> {
+    state
+        .client()?
+        .opencode_cancel_sign_in(provider, attempt_id)
         .await
         .map_err(AppError::from)
 }

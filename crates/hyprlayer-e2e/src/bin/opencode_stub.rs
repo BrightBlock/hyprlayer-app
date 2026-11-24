@@ -14,6 +14,8 @@
 //! as a stop lands; the stop drops the ask with no reply event, as 2.4.1 does. `"cut": "<event
 //! type>"` closes every event stream in place of the next event of that type; the events sent
 //! before the driver reconnects are lost, and each new stream starts with `server.connected`.
+//! `stubauth` offers an OAuth device sign-in: its attempt completes on the second status read and
+//! stores a credential under the label the sign-in asked for.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -61,6 +63,8 @@ struct Stub {
     asks: Mutex<HashMap<String, Ask>>,
     cut: Mutex<Option<String>>,
     ids: AtomicU64,
+    /// Sign-in attempts: their label and how often their status was read.
+    attempts: Mutex<HashMap<String, (String, u32)>>,
 }
 
 fn main() {
@@ -87,6 +91,7 @@ fn main() {
         asks: Mutex::new(HashMap::new()),
         cut: Mutex::new(None),
         ids: AtomicU64::new(0),
+        attempts: Mutex::new(HashMap::new()),
     });
     let auth = format!("Basic {}", base64(&format!("opencode:{password}")));
     for stream in listener.incoming().flatten() {
@@ -131,6 +136,51 @@ impl Stub {
                 respond(stream, 200, &json!({ "data": models }))
             }
             ("GET", ["command" | "skill"]) => respond(stream, 200, &json!({ "data": [] })),
+            ("GET", ["integration"]) => {
+                respond(stream, 200, &json!({ "data": [stub_integration()] }))
+            }
+            ("GET", ["integration", "stubauth"]) => {
+                respond(stream, 200, &json!({ "data": stub_integration() }))
+            }
+            ("POST", ["integration", "stubauth", "connect", "oauth"]) => {
+                let id = format!("con_{}", self.next());
+                let label = request.body["label"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                self.attempts.lock().unwrap().insert(id.clone(), (label, 0));
+                respond(
+                    stream,
+                    200,
+                    &json!({ "data": {
+                    "attemptID": id, "url": "https://example.invalid/device", "instructions": "Enter code: STUB-CODE",
+                    "mode": "auto", "time": { "created": now(), "expires": now() + 600_000 },
+                } }),
+                )
+            }
+            ("GET", ["integration", "stubauth", "connect", "oauth", attempt]) => {
+                let done = {
+                    let mut attempts = self.attempts.lock().unwrap();
+                    attempts.get_mut(*attempt).map(|(label, reads)| {
+                        *reads += 1;
+                        (*reads >= 2).then(|| label.clone())
+                    })
+                };
+                match done {
+                    None => respond(stream, 404, &json!({ "_tag": "NotFoundError" })),
+                    Some(None) => respond(stream, 200, &json!({ "data": { "status": "pending" } })),
+                    Some(Some(label)) => {
+                        if self.attempts.lock().unwrap().remove(*attempt).is_some() {
+                            let mut all = self.credentials();
+                            all.push(json!({ "id": format!("crd_{}", self.next()), "integrationID": "stubauth",
+                                "label": label, "active": true,
+                                "value": { "type": "oauth", "methodID": "device", "refresh": "r", "access": "a", "expires": 1 } }));
+                            self.save_credentials(&all);
+                        }
+                        respond(stream, 200, &json!({ "data": { "status": "complete" } }))
+                    }
+                }
+            }
             ("GET", ["credential"]) => respond(stream, 200, &json!({ "data": self.credentials() })),
             ("POST", ["credential"]) => {
                 let mut all = self.credentials();
@@ -692,6 +742,13 @@ struct Control {
     late_ask: bool,
     fail: Option<String>,
     cut: Option<String>,
+}
+
+fn stub_integration() -> Value {
+    json!({ "id": "stubauth", "name": "Stub Auth", "connections": [], "methods": [
+        { "type": "key" },
+        { "id": "device", "type": "oauth", "label": "Sign in with Stub Auth" },
+    ] })
 }
 
 fn push(session: &mut Value, message: Value) {

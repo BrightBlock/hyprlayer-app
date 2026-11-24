@@ -18,6 +18,7 @@ use tokio::sync::{broadcast, watch, Mutex};
 pub use crate::opencode::driver::OpenCodeDriver;
 
 use crate::claude::{ExitOutcome, SessionEvent};
+use crate::opencode::config::{OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus};
 use crate::opencode::driver::model_ref;
 use crate::opencode::support::opencode_provider_is_supported;
 use crate::opencode::translate::{parse_sse_record, OcEvent};
@@ -27,8 +28,9 @@ const EXIT_POLL: Duration = Duration::from_millis(250);
 const MODEL_WAIT_TRIES: u32 = 40;
 /// OpenCode 2's Basic-auth username; only the password can change.
 const SERVER_USER: &str = "opencode";
-/// The label of the credentials hyprlayer stores; the sync leaves every other one alone.
+/// The labels of the credentials hyprlayer stores; the sync leaves every other one alone.
 const KEY_LABEL: &str = "hyprlayer";
+const SIGN_IN_LABEL: &str = "hyprlayer-sign-in";
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
@@ -45,6 +47,8 @@ pub struct OpenCodeServerConfig {
     pub data_dir: PathBuf,
     pub home: PathBuf,
     pub auth_file: PathBuf,
+    /// The providers signed in through this server (`config::list_sign_ins`).
+    pub sign_ins_file: PathBuf,
     pub pid_file: PathBuf,
     /// The attaching client's env overlay, baked in at spawn. First attach wins:
     /// this server is cached for the profile's lifetime (ADR-0009).
@@ -210,6 +214,7 @@ impl OpenCodeServer {
             data_dir,
             home,
             auth_file,
+            sign_ins_file,
             pid_file,
             overlay,
         } = config;
@@ -315,7 +320,7 @@ impl OpenCodeServer {
             return Err("`opencode serve` did not become ready in time".into());
         }
 
-        server.sync_credentials(&auth_file).await;
+        server.sync_credentials(&auth_file, &sign_ins_file).await;
         server.model_context = server.fetch_model_context().await;
         if server.model_context.is_empty() {
             tracing::warn!("opencode serve on port {port} listed no models in time");
@@ -404,11 +409,12 @@ impl OpenCodeServer {
         Ok(body.get_mut("data").map(Value::take).unwrap_or(Value::Null))
     }
 
-    /// The server's API-key credentials made to match the app's `auth.json`: a key is added or
-    /// replaced, one whose entry the user removed is deleted. OpenCode 2 cannot take a v1
-    /// sign-in (it records no sign-in method), so such an entry is skipped and named in the log.
-    /// Only credentials hyprlayer labelled are touched.
-    async fn sync_credentials(&self, auth_file: &Path) {
+    /// The server's credentials made to match the app's records: an API key from `auth.json` is
+    /// added or replaced and one the user removed is deleted; a sign-in made here stays while
+    /// its provider is still signed in. OpenCode 2 cannot take a v1 sign-in (it records no
+    /// sign-in method), so such an entry is skipped and named in the log. Only credentials
+    /// hyprlayer labelled are touched.
+    async fn sync_credentials(&self, auth_file: &Path, sign_ins_file: &Path) {
         let wanted = match crate::opencode::config::api_keys(auth_file) {
             Ok(keys) => keys,
             Err(e) => {
@@ -416,7 +422,8 @@ impl OpenCodeServer {
                 return;
             }
         };
-        for provider in &wanted.unusable {
+        let signed_in = crate::opencode::config::list_sign_ins(sign_ins_file);
+        for provider in wanted.unusable.iter().filter(|p| !signed_in.contains(p)) {
             tracing::warn!(
                 "opencode provider {provider} has a sign-in OpenCode 2 cannot use; its sessions run without it"
             );
@@ -438,27 +445,20 @@ impl OpenCodeServer {
                     .unwrap_or_default()
             };
             let (id, integration, label) = (field("id"), field("integrationID"), field("label"));
-            if label != KEY_LABEL {
-                continue;
-            }
             let key = credential.pointer("/value/key").and_then(Value::as_str);
-            let matches = wanted
-                .keys
-                .get(integration)
-                .is_some_and(|k| Some(k.as_str()) == key);
-            if matches && kept.insert(integration.to_string()) {
-                continue;
-            }
-            let removed = self
-                .request(reqwest::Method::DELETE, &format!("/credential/{id}"))
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            if let Err(e) = removed {
-                tracing::warn!(
-                    "opencode credential for {integration} not removed: {}",
-                    e.without_url()
-                );
+            let keep = match label {
+                KEY_LABEL => {
+                    let matches = wanted
+                        .keys
+                        .get(integration)
+                        .is_some_and(|k| Some(k.as_str()) == key);
+                    matches && kept.insert(integration.to_string())
+                }
+                SIGN_IN_LABEL => signed_in.iter().any(|p| p == integration),
+                _ => true,
+            };
+            if !keep {
+                self.delete_credential(id, integration).await;
             }
         }
         for (provider, key) in wanted.keys {
@@ -485,6 +485,199 @@ impl OpenCodeServer {
         }
     }
 
+    async fn delete_credential(&self, id: &str, integration: &str) {
+        let removed = self
+            .request(reqwest::Method::DELETE, &format!("/credential/{id}"))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status);
+        if let Err(e) = removed {
+            tracing::warn!(
+                "opencode credential for {integration} not removed: {}",
+                e.without_url()
+            );
+        }
+    }
+
+    /// Deletes the sign-ins made here for `provider`, as removing it in Settings does.
+    pub async fn remove_sign_in(&self, provider: &str) {
+        let Ok(Value::Array(existing)) = self.get_data("/credential").await else {
+            return;
+        };
+        for credential in existing {
+            let field = |key: &str| {
+                credential
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            };
+            if field("integrationID") == provider && field("label") == SIGN_IN_LABEL {
+                self.delete_credential(field("id"), provider).await;
+            }
+        }
+    }
+
+    /// The OAuth sign-ins OpenCode offers for supported providers, leaving out a method whose
+    /// form asks for a value it gives no default for.
+    pub async fn sign_in_methods(&self) -> Result<Vec<OpencodeSignInMethod>, String> {
+        let integrations = self.get_data("/integration").await?;
+        let mut out = Vec::new();
+        for integration in integrations.as_array().into_iter().flatten() {
+            let provider = integration
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if provider.is_empty() || !opencode_provider_is_supported(provider) {
+                continue;
+            }
+            for method in integration
+                .get("methods")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let answerable = method
+                    .get("form")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .all(|field| field_default(field).is_some() || !field_required(field));
+                if method.get("type").and_then(Value::as_str) != Some("oauth") || !answerable {
+                    continue;
+                }
+                let (Some(id), label) = (
+                    method.get("id").and_then(Value::as_str),
+                    method
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or(provider),
+                ) else {
+                    continue;
+                };
+                out.push(OpencodeSignInMethod {
+                    provider: provider.to_string(),
+                    method_id: id.to_string(),
+                    label: label.to_string(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub async fn begin_sign_in(
+        &self,
+        provider: &str,
+        method_id: &str,
+    ) -> Result<OpencodeSignInAttempt, String> {
+        let methods = self.get_data(&format!("/integration/{provider}")).await?;
+        let form = methods
+            .get("methods")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|m| m.get("id").and_then(Value::as_str) == Some(method_id))
+            .and_then(|m| m.get("form"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let answer: serde_json::Map<String, Value> = form
+            .iter()
+            .filter_map(|field| {
+                Some((
+                    field.get("key")?.as_str()?.to_string(),
+                    field_default(field)?,
+                ))
+            })
+            .collect();
+        let mut body = json!({ "methodID": method_id, "label": SIGN_IN_LABEL });
+        if !answer.is_empty() {
+            body["answer"] = Value::Object(answer);
+        }
+        let mut started: Value = self
+            .request(
+                reqwest::Method::POST,
+                &format!("/integration/{provider}/connect/oauth"),
+            )
+            .json(&body)
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| e.without_url().to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        let attempt = started
+            .get_mut("data")
+            .map(Value::take)
+            .unwrap_or(Value::Null);
+        let text = |key: &str| {
+            attempt
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let attempt_id = text("attemptID");
+        if attempt_id.is_empty() {
+            return Err("OpenCode started no sign-in".into());
+        }
+        Ok(OpencodeSignInAttempt {
+            provider: provider.to_string(),
+            attempt_id,
+            url: text("url"),
+            instructions: text("instructions"),
+            needs_code: text("mode") == "code",
+            accepts_paste: attempt.get("paste").and_then(Value::as_bool) == Some(true),
+        })
+    }
+
+    pub async fn sign_in_status(
+        &self,
+        provider: &str,
+        attempt: &str,
+    ) -> Result<OpencodeSignInStatus, String> {
+        let path = format!("/integration/{provider}/connect/oauth/{attempt}");
+        let status = self.get_data(&path).await?;
+        Ok(match status.get("status").and_then(Value::as_str) {
+            Some("complete") => OpencodeSignInStatus::Complete,
+            Some("pending") => OpencodeSignInStatus::Pending,
+            other => OpencodeSignInStatus::Failed {
+                message: status
+                    .pointer("/error/message")
+                    .or_else(|| status.get("message"))
+                    .and_then(Value::as_str)
+                    .map_or_else(
+                        || format!("the sign-in ended: {}", other.unwrap_or("unknown")),
+                        str::to_string,
+                    ),
+            },
+        })
+    }
+
+    /// A code, or the address a browser that could not reach the server's loopback landed on.
+    pub async fn complete_sign_in(
+        &self,
+        provider: &str,
+        attempt: &str,
+        code: &str,
+    ) -> Result<(), String> {
+        let path = format!("/integration/{provider}/connect/oauth/{attempt}/complete");
+        self.request(reqwest::Method::POST, &path)
+            .json(&json!({ "code": code }))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map(|_| ())
+            .map_err(|e| e.without_url().to_string())
+    }
+
+    pub async fn cancel_sign_in(&self, provider: &str, attempt: &str) {
+        let path = format!("/integration/{provider}/connect/oauth/{attempt}");
+        let _ = self.request(reqwest::Method::DELETE, &path).send().await;
+    }
+
+    /// OpenCode answers `/api/info` before it has loaded its models (2.4.1: about 300 ms
+    /// later), so this waits a bounded while for a non-empty list.
     async fn fetch_model_context(&self) -> HashMap<String, u32> {
         for _ in 0..MODEL_WAIT_TRIES {
             match self.get_data("/model").await {
@@ -731,6 +924,22 @@ fn spawn_sse(server: &OpenCodeServer) {
             _ = exited.wait_for(Option::is_some) => {}
         }
     });
+}
+
+fn field_required(field: &Value) -> bool {
+    field.get("required").and_then(Value::as_bool) == Some(true)
+}
+
+/// The answer a form field gives itself: its default, or the only option a required one has.
+fn field_default(field: &Value) -> Option<Value> {
+    if let Some(default) = field.get("default").filter(|d| !d.is_null()) {
+        return Some(default.clone());
+    }
+    let options = field.get("options").and_then(Value::as_array)?;
+    match options.as_slice() {
+        [only] => only.get("value").cloned(),
+        _ => None,
+    }
 }
 
 fn free_port() -> Result<u16, String> {

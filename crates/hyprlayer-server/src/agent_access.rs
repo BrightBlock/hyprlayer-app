@@ -338,6 +338,11 @@ pub(crate) fn access(request: &Request) -> Access {
         | Request::OpencodeAuthList { .. }
         | Request::OpencodeSetProviderKey { .. }
         | Request::OpencodeRemoveProvider { .. }
+        | Request::OpencodeSignInMethods { .. }
+        | Request::OpencodeBeginSignIn { .. }
+        | Request::OpencodeSignInStatus { .. }
+        | Request::OpencodeCompleteSignIn { .. }
+        | Request::OpencodeCancelSignIn { .. }
         | Request::SetOpencodeDefaultModel { .. }
         | Request::InstallOpencode { .. }
         | Request::ClaudeAuthStatus { .. }

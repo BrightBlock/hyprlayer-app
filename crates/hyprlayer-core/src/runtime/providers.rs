@@ -9,9 +9,15 @@ use crate::claude::{self, SessionEvent};
 use crate::codex::{self, CodexDriver, CodexPosture, SpawnConfig as CodexSpawnConfig};
 use crate::error::{CoreError, Result};
 use crate::opencode::catalog::{self, OpencodeCatalog};
-use crate::opencode::config::{self as opencode_config, OpencodeAuthEntry};
+use crate::opencode::config::{
+    self as opencode_config, OpencodeAuthEntry, OpencodeSignInAttempt, OpencodeSignInMethod,
+    OpencodeSignInStatus,
+};
 use crate::opencode::runtime::{OpenCodeDriver, OpenCodeServer, OpenCodeServerConfig};
 use crate::opencode::support::{opencode_model_is_supported, opencode_provider_is_supported};
+
+/// Under the app data dir: the providers signed in through hyprlayer's OpenCode server.
+const OPENCODE_SIGN_INS_FILE: &str = "opencode-sign-ins.json";
 use crate::process::binaries::BinaryKind;
 use crate::process::Exec;
 use crate::settings::ClaudeSettings;
@@ -779,6 +785,7 @@ impl ProviderService<'_> {
                 data_dir: self.runtime.paths.app_data_dir.join("opencode"),
                 home: self.runtime.environment.home_dir.clone(),
                 auth_file: self.runtime.paths.opencode_auth_file.clone(),
+                sign_ins_file: self.opencode_sign_ins_file(),
                 pid_file: self
                     .runtime
                     .paths
@@ -835,9 +842,85 @@ impl ProviderService<'_> {
         })
     }
 
+    fn opencode_sign_ins_file(&self) -> std::path::PathBuf {
+        self.runtime.paths.app_data_dir.join(OPENCODE_SIGN_INS_FILE)
+    }
+
+    fn opencode_auth_entries(&self) -> Result<Vec<OpencodeAuthEntry>> {
+        opencode_config::list_auth_with_sign_ins(
+            &self.runtime.paths.opencode_auth_file,
+            &self.opencode_sign_ins_file(),
+        )
+    }
+
     pub async fn opencode_auth_list(&self) -> Result<Vec<OpencodeAuthEntry>> {
         ensure_running(self.runtime)?;
-        opencode_config::list_auth(&self.runtime.paths.opencode_auth_file)
+        self.opencode_auth_entries()
+    }
+
+    pub async fn opencode_sign_in_methods(&self) -> Result<Vec<OpencodeSignInMethod>> {
+        let server = self.opencode_server().await?;
+        server
+            .sign_in_methods()
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })
+    }
+
+    /// Starts a sign-in on hyprlayer's own OpenCode server, so the credential lands in its data
+    /// dir. The desktop opens the returned page; a remote server's loopback is out of the
+    /// browser's reach, and the attempt then takes the address the browser landed on.
+    pub async fn opencode_begin_sign_in(
+        &self,
+        provider: &str,
+        method_id: &str,
+    ) -> Result<OpencodeSignInAttempt> {
+        if !opencode_provider_is_supported(provider) {
+            return Err(CoreError::OpencodeProviderKeyUnsupported {
+                provider: provider.to_string(),
+            });
+        }
+        let server = self.opencode_server().await?;
+        server
+            .begin_sign_in(provider, method_id)
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })
+    }
+
+    pub async fn opencode_sign_in_status(
+        &self,
+        provider: &str,
+        attempt_id: &str,
+    ) -> Result<OpencodeSignInStatus> {
+        let server = self.opencode_server().await?;
+        let status = server
+            .sign_in_status(provider, attempt_id)
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })?;
+        if status == OpencodeSignInStatus::Complete {
+            opencode_config::set_signed_in(&self.opencode_sign_ins_file(), provider, true)?;
+        }
+        Ok(status)
+    }
+
+    pub async fn opencode_complete_sign_in(
+        &self,
+        provider: &str,
+        attempt_id: &str,
+        code: &str,
+    ) -> Result<OpencodeSignInStatus> {
+        let server = self.opencode_server().await?;
+        server
+            .complete_sign_in(provider, attempt_id, code)
+            .await
+            .map_err(|detail| CoreError::Opencode { detail })?;
+        self.opencode_sign_in_status(provider, attempt_id).await
+    }
+
+    pub async fn opencode_cancel_sign_in(&self, provider: &str, attempt_id: &str) -> Result<()> {
+        if let Some(server) = self.opencode_server_if_running().await {
+            server.cancel_sign_in(provider, attempt_id).await;
+        }
+        Ok(())
     }
 
     pub async fn opencode_set_provider_key(
@@ -855,15 +938,19 @@ impl ProviderService<'_> {
         opencode_config::set_provider_key(auth_file, provider, key)?;
         // The server syncs its credentials from auth.json only when it spawns.
         self.invalidate_opencode_server().await;
-        opencode_config::list_auth(auth_file)
+        self.opencode_auth_entries()
     }
 
     pub async fn opencode_remove_provider(&self, provider: &str) -> Result<Vec<OpencodeAuthEntry>> {
         ensure_running(self.runtime)?;
         let auth_file = &self.runtime.paths.opencode_auth_file;
         opencode_config::remove_provider(auth_file, provider)?;
+        opencode_config::set_signed_in(&self.opencode_sign_ins_file(), provider, false)?;
+        if let Some(server) = self.opencode_server_if_running().await {
+            server.remove_sign_in(provider).await;
+        }
         self.invalidate_opencode_server().await;
-        opencode_config::list_auth(auth_file)
+        self.opencode_auth_entries()
     }
 
     pub async fn opencode_set_default_model(&self, model: Option<String>) -> Result<()> {

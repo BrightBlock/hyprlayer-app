@@ -1729,6 +1729,56 @@ export function useRemoveOpencodeProvider() {
   });
 }
 
+export function useOpencodeSignInMethods(enabled: boolean) {
+  return useQuery({
+    queryKey: ["opencode-sign-in-methods"],
+    queryFn: () => unwrap(commands.opencodeSignInMethods()),
+    enabled,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useBeginOpencodeSignIn() {
+  return useMutation({
+    mutationFn: ({ provider, methodId }: { provider: string; methodId: string }) =>
+      unwrap(commands.opencodeBeginSignIn(provider, methodId)),
+  });
+}
+
+/** Polls an attempt until it ends; a completed one refreshes the provider list and catalog. */
+export function useOpencodeSignInStatus(provider: string, attemptId: string | null) {
+  return useQuery({
+    queryKey: ["opencode-sign-in", provider, attemptId],
+    queryFn: async () => {
+      const status = await unwrap(commands.opencodeSignInStatus(provider, attemptId ?? ""));
+      if (status.state === "complete") settleOpencodeSignIn();
+      return status;
+    },
+    enabled: attemptId !== null,
+    refetchInterval: (query) => (query.state.data?.state === "pending" || !query.state.data ? 1500 : false),
+  });
+}
+
+export function useCompleteOpencodeSignIn() {
+  return useMutation({
+    mutationFn: ({ provider, attemptId, code }: { provider: string; attemptId: string; code: string }) =>
+      unwrap(commands.opencodeCompleteSignIn(provider, attemptId, code)),
+    onSuccess: (status, { provider, attemptId }) => {
+      queryClient.setQueryData(["opencode-sign-in", provider, attemptId], status);
+      if (status.state === "complete") settleOpencodeSignIn();
+    },
+  });
+}
+
+export function cancelOpencodeSignIn(provider: string, attemptId: string): void {
+  void unwrap(commands.opencodeCancelSignIn(provider, attemptId)).catch(() => {});
+}
+
+function settleOpencodeSignIn(): void {
+  void queryClient.invalidateQueries({ queryKey: ["opencode-auth"] });
+  void queryClient.invalidateQueries({ queryKey: ["opencode-catalog"] });
+}
+
 export function useSetOpencodeDefaultModel() {
   return useMutation({
     mutationFn: (model: string | null) => unwrap(commands.opencodeSetDefaultModel(model)),
