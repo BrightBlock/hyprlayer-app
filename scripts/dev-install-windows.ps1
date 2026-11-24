@@ -276,6 +276,23 @@ if (-not $env:RC) {
   else { Warn 'rc.exe not found under Windows Kits; winres may fail' }
 }
 
+# ghostty-vt's build script runs the Zig that mise.toml pins. The sidecar build finds it
+# through mise for its own compile only, and tauri's compile of the app reruns that build
+# script under other RUSTFLAGS, so it must reach this process too.
+if (-not $env:ZIG) {
+  $mise = (Get-Command mise -ErrorAction SilentlyContinue).Source
+  $wingetMise = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\mise.exe'
+  if (-not $mise -and (Test-Path $wingetMise)) { $mise = $wingetMise }
+  if ($mise) {
+    Run ('"' + $mise + '" trust "' + $SrcDir + '"')
+    Run ('"' + $mise + '" install zig')
+    $env:ZIG = ([string](& $mise which zig)).Trim()
+    Step ('Pinned ZIG=' + $env:ZIG)
+  } elseif (-not (Get-Command zig -ErrorAction SilentlyContinue)) {
+    throw 'ghostty-vt needs Zig 0.16.0: install mise (winget install jdx.mise) or set ZIG to a zig.exe'
+  }
+}
+
 Step "Building $AppName $BuildVersion (release profile, no bundler)"
 Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
