@@ -1304,6 +1304,7 @@ export function PaneSeparator({
   className,
   onResize,
   onEnd,
+  "data-tour": tour,
 }: {
   label: string;
   size: number;
@@ -1315,11 +1316,14 @@ export function PaneSeparator({
   className?: string;
   onResize: (size: number) => void;
   onEnd?: () => void;
+  /** The guided tour's anchor id. */
+  "data-tour"?: string;
 }) {
   const vertical = axis === "x";
   return (
     <div
       role="separator"
+      data-tour={tour}
       tabIndex={0}
       aria-orientation={vertical ? "vertical" : "horizontal"}
       aria-label={label}

@@ -104,6 +104,7 @@ import { closeAgentSessions } from "@/features/session/agentSessionsStore";
 import { useMultiplexer } from "@/features/multiplexer/engines";
 import { commands, type EditorTarget } from "@/lib/bindings";
 import { SearchPalette } from "@/features/search/SearchPalette";
+import { Tour } from "@/features/tour/Tour";
 import { toggleSearch } from "@/features/search/searchStore";
 import { FullDiskAccessNotice } from "@/features/system/FullDiskAccessNotice";
 import { ServerDisconnectedNotice } from "@/features/system/ServerDisconnectedNotice";
@@ -1199,6 +1200,7 @@ export function Root() {
                   className="flex h-6 w-6 items-center justify-center rounded text-ink-dim hover:bg-edge/60 hover:text-ink"
                   title="Add project"
                   aria-label="Add project"
+                  data-tour="projects.add"
                 >
                   <Icon name="add" size="sm" />
                 </button>
@@ -1783,6 +1785,7 @@ export function Root() {
       />
 
       <SearchPalette />
+      <Tour suspended={onOnboarding} />
       <PromptPalette activeWorkstream={activeWorkstream ?? null} />
       <PromptArgsDialog />
       <ShipCheckDialog />

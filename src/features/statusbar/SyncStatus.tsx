@@ -73,6 +73,7 @@ export function SyncStatus({
       aria-label={title}
       aria-haspopup="dialog"
       aria-expanded={menuOpen && connected}
+      data-tour="statusbar.server"
       className={cx(BAR_BUTTON, "text-ink-dim hover:text-ink")}
     >
       {updating ? (

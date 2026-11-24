@@ -51,7 +51,7 @@ export function LeadPanel({
       <Section title="Queue" count={queued.length}>
         {queued.length === 0 ? <Empty>Nothing queued</Empty> : <LeadQueueList projectPath={projectPath} items={queued} />}
       </Section>
-      <Section title="Running" count={driving.length}>
+      <Section title="Running" count={driving.length} tour="lead.panel.running">
         {driving.length === 0 ? (
           <Empty>No workstreams running</Empty>
         ) : (
@@ -74,9 +74,19 @@ export function LeadPanel({
   );
 }
 
-function Section({ title, count, children }: { title: string; count?: ReactNode; children: ReactNode }) {
+function Section({
+  title,
+  count,
+  tour,
+  children,
+}: {
+  title: string;
+  count?: ReactNode;
+  tour?: string;
+  children: ReactNode;
+}) {
   return (
-    <section className="border-b border-edge last:border-b-0">
+    <section data-tour={tour} className="border-b border-edge last:border-b-0">
       <h3 className="flex h-9 items-center gap-2 px-3 text-ink-dim">
         <span className="text-label">{title}</span>
         {count !== undefined && <span className="ml-auto text-meta">{count}</span>}

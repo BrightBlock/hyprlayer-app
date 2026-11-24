@@ -1095,6 +1095,7 @@ export function ProjectPage() {
     <div
       key={shell.id}
       data-tab-id={shell.id}
+      data-tour={opts.active && (shell.ptyAgent || shell.sessionId) ? "agent.tab" : undefined}
       role="tab"
       aria-selected={opts.active}
       onPointerDown={(e) =>

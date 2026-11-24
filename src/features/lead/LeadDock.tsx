@@ -266,7 +266,7 @@ export function LeadDock({
 
   return (
     <>
-      <div ref={docked} inert={phase !== "closed"} className="shrink-0 border-t border-edge bg-panel">
+      <div ref={docked} inert={phase !== "closed"} data-tour="lead.dock" className="shrink-0 border-t border-edge bg-panel">
         {header(false)}
         <div className="px-6 pt-1 pb-3.5">
           {ask && (
@@ -280,7 +280,10 @@ export function LeadDock({
               }
             />
           )}
-          <div className="rounded-card border border-edge bg-surface focus-within:border-ink-dim/70">
+          <div
+            data-tour="lead.dock.input"
+            className="rounded-card border border-edge bg-surface focus-within:border-ink-dim/70"
+          >
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             <form onSubmit={submit} className="flex items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
               <input
@@ -368,6 +371,7 @@ function RemoteControl({ view }: { view: LeadView }) {
         </>
       )}
       <IconButton
+        data-tour="lead.dock.remote"
         active={remoteControl}
         aria-pressed={remoteControl}
         aria-label={label}

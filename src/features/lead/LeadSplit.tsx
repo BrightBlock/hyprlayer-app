@@ -41,6 +41,7 @@ export function LeadDockSplit({
         <>
           <PaneSeparator
             label="Resize the Lead panel"
+            data-tour="lead.panel.edge"
             direction={-1}
             size={width}
             min={LEAD_DOCK_MIN}
