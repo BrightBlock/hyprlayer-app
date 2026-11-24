@@ -702,6 +702,26 @@ async fn pty_hook_signals() {
             && bargv.get(8) == Some(&bsid),
         json!({ "hooked": launched.hooked, "flags": flags, "sessionIdAfterFlag": bargv.get(8) == Some(&bsid) }),
     );
+    let bypass_env = agent_env(&sandbox, &bterm);
+    c.report_agent_signal(
+        env_var(&bypass_env, "HYPRLAYER_AGENT_TOKEN").to_string(),
+        hyprlayer_core::models::AgentSignal {
+            event: "UserPromptSubmit".into(),
+            permission_mode: Some("default".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("report_agent_signal");
+    let mut bypass_mcp = McpDriver::start(&bypass_env, false);
+    bypass_mcp.initialize("2025-06-18").await;
+    let lowered = whoami(&mut bypass_mcp).await;
+    drop(bypass_mcp);
+    j.guard(
+        "a bypass PTY agent that reports default mode loses bypass's control level",
+        lowered["permissionMode"] == "default" && lowered["level"] == "read",
+        json!({ "permissionMode": lowered["permissionMode"], "level": lowered["level"] }),
+    );
     type_line(&c, &bterm, "exit").await;
     wait_for_exit(&mut bypass_events, IO).await;
     set_engine(&mut j, &c, "claude-code", &pty_claude, &[]).await;

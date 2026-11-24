@@ -185,7 +185,14 @@ impl AgentControlService<'_> {
                 .permission_mode(session_id)
                 .await
                 .or(identity.launch_mode),
-            AgentCaller::Terminal { .. } => identity.launch_mode,
+            // Only ever lower: the terminal's own hooks report its mode, and a hook can be forged.
+            AgentCaller::Terminal { terminal_id } => {
+                let reported = self.runtime.pty_agents.permission_mode(terminal_id);
+                match (identity.launch_mode, reported) {
+                    (Some(launch), Some(now)) => Some(spawn::lower(launch, now)),
+                    (launch, _) => launch,
+                }
+            }
         }
     }
 

@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use hyprlayer_models::{
-    AgentSignal, AgentStatusReport, PtyAgent, PtyAgentState, RuntimeEvent, UiRequest,
+    AgentSignal, AgentStatusReport, PermissionMode, PtyAgent, PtyAgentState, RuntimeEvent,
+    UiRequest,
 };
 use tokio::sync::broadcast;
 
@@ -332,6 +333,16 @@ impl PtyAgents {
         lock(&self.entries)
             .get(terminal_id)
             .is_some_and(|e| e.switch_pending)
+    }
+
+    pub(crate) fn permission_mode(&self, terminal_id: &str) -> Option<PermissionMode> {
+        lock(&self.entries)
+            .get(terminal_id)?
+            .agent
+            .status
+            .permission_mode
+            .as_deref()
+            .and_then(PermissionMode::try_parse)
     }
 
     /// A mode the change driver read off claude's footer; no hook reports a shift+tab.

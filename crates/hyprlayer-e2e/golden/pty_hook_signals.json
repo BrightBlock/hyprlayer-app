@@ -508,6 +508,14 @@
           },
           "guard": "injected flags, then the engine's args, the session id and the bypass flag",
           "ok": true
+        },
+        {
+          "evidence": {
+            "level": "read",
+            "permissionMode": "default"
+          },
+          "guard": "a bypass PTY agent that reports default mode loses bypass's control level",
+          "ok": true
         }
       ],
       "step": "engine args and bypass follow the injected flags"

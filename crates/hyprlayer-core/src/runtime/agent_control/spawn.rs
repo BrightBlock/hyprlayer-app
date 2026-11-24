@@ -1363,6 +1363,14 @@ fn asks_after(asking: bool, event: &SessionEvent) -> bool {
     }
 }
 
+pub(super) fn lower(a: PermissionMode, b: PermissionMode) -> PermissionMode {
+    if rank(b) < rank(a) {
+        b
+    } else {
+        a
+    }
+}
+
 /// Plan < DontAsk < Default < AcceptEdits < Auto < Bypass: a child never runs above its parent.
 fn rank(mode: PermissionMode) -> u8 {
     match mode {
