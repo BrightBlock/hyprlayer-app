@@ -1345,6 +1345,12 @@ export type HostStats = {
 	memoryTotal: number | null,
 	swapUsed: number | null,
 	swapTotal: number | null,
+	/**  Overall usage since the previous refresh; `None` until a second refresh. */
+	cpuPercent?: number | null,
+	/**  Oldest first, one sample per 3 s. */
+	cpuHistory?: (number | null)[] | null,
+	/**  `None` where free memory does not leave file cache as the remainder (macOS). */
+	memoryFree?: number | null,
 };
 
 export type HostsFile = {

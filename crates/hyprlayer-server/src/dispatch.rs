@@ -3175,10 +3175,10 @@ impl Dispatch for Server {
     }
 
     async fn host_stats(&self) -> Result<HostStats, WireError> {
-        tokio::task::spawn_blocking(hyprlayer_core::host_stats::host_stats)
+        self.runtime
+            .host_stats()
             .await
-            .map_err(|e| WireError::internal(e.to_string()))?
-            .map_err(|e| WireError::internal(e.to_string()))
+            .ok_or_else(|| WireError::internal("host stats are not available on this host"))
     }
 }
 

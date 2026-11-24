@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 
 import { Icon } from "@/components/Icon";
 import { cx, IconButton } from "@/components/ui";
-import type { HostStats, LeadQueueItem, WorkstreamView } from "@/lib/bindings";
-import { formatBytes } from "@/lib/format";
+import type { LeadQueueItem, WorkstreamView } from "@/lib/bindings";
 import { errorMessage } from "@/lib/ipc";
 import { useHostStats, useLeadQueue, useRemoveLeadQueueItem } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import { pipelineColumnOf, prNumberOf } from "@/features/board/pipeline";
+import { HostMeters, hostRows } from "./HostMeters";
 import { useProjectLead } from "./lead";
 
 const STEPS = ["plan", "build", "validate", "merged"];
@@ -77,14 +77,14 @@ export function LeadPanel({
           <Stat label="Agents" value={`${lead.view.liveChildren}/${lead.settings.maxLiveChildren}`} />
           <Stat label="Workstreams" value={String(others.length)} />
           <Stat label="Open PRs" value={String(others.filter(hasOpenPr).length)} />
-          <HostRows />
         </dl>
       </Section>
+      <HostSection />
     </div>
   );
 }
 
-function Section({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
+function Section({ title, count, children }: { title: string; count?: ReactNode; children: ReactNode }) {
   return (
     <section className="border-b border-edge last:border-b-0">
       <h3 className="flex h-9 items-center gap-2 px-3 text-ink-dim">
@@ -109,26 +109,22 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function hostRows(stats: HostStats): [string, string][] {
-  const load = stats.load ? stats.load.map((n) => (n ?? 0).toFixed(2)).join(" ") : "n/a";
-  const used = (a: number | null, b: number | null) =>
-    b ? `${formatBytes(a ?? 0)} of ${formatBytes(b)}` : "none";
-  return [
-    ["Load", `${load} (${stats.cpus} cores)`],
-    ["Memory", used(stats.memoryUsed, stats.memoryTotal)],
-    ["Swap", used(stats.swapUsed, stats.swapTotal)],
-  ];
-}
-
-function HostRows() {
+function HostSection() {
   const stats = useHostStats().data;
   if (!stats) return null;
+  const cpu = stats.cpuPercent;
   return (
-    <>
-      {hostRows(stats).map(([label, value]) => (
-        <Stat key={label} label={label} value={value} />
-      ))}
-    </>
+    <Section title="Host" count={`${stats.cpus} cores`}>
+      {cpu == null ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 pb-3 text-meta">
+          {hostRows(stats).map(([label, value]) => (
+            <Stat key={label} label={label} value={value} />
+          ))}
+        </dl>
+      ) : (
+        <HostMeters stats={stats} cpuPercent={cpu} />
+      )}
+    </Section>
   );
 }
 

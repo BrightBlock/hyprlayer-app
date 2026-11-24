@@ -644,10 +644,14 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
 ### Motion (2026-10-01)
 
 - **Tokens** live in `src/index.css` `@theme`: `--duration-instant` 80ms, `quick` 140ms,
-  `base` 200ms, `gentle` 280ms, `slow` 400ms; `--ease-out` (entering), `--ease-in`
+  `base` 200ms, `gentle` 280ms, `slow` 400ms, `settle` 600ms (the Lead panel's host meters,
+  once on mount, transform only, off under `data-still-motion` and reduced motion); `--ease-out` (entering), `--ease-in`
   (leaving), `--ease-std` (moves, resizes, and the default for every `transition-*`
   utility, which runs at `quick`). `linear` is for spinners and progress only. New motion
   uses these, never a literal duration or curve.
+- **Host meters keep their own colour scale.** `--color-meter-ok`/`warn`/`bad` (and the percent's
+  `meter-warn-ink`/`meter-bad-ink`) are fixed per light and dark, never the theme's `ok`: an Omarchy
+  palette maps its green slot to `ok`, and some palettes have no green.
 - **Overlays enter from their anchor.** `Popover`, `DropdownSelect` and `ContextMenu` use
   `animate-pop-in` (scale .96, `base`, origin at the anchor's edge); `Dialog` fades its scrim
   (`animate-fade-in`) and rises its panel (`animate-dialog-in`, 8px from .98, `gentle`).

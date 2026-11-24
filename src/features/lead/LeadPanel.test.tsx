@@ -89,4 +89,32 @@ describe("LeadPanel", () => {
     expect(await screen.findByText("Agents")).toBeTruthy();
     expect(screen.getByText("3/6")).toBeTruthy();
   });
+
+  it("falls back to text rows when the server sends no CPU usage", async () => {
+    renderPanel();
+    expect(await screen.findByText("Host")).toBeTruthy();
+    expect(screen.getByText("1.00 2.00 3.00 (8 cores)")).toBeTruthy();
+    expect(screen.getByText("1.0 GB of 2.0 GB")).toBeTruthy();
+    expect(screen.queryByRole("meter")).toBeNull();
+  });
+
+  it("draws meters when the server sends CPU usage", async () => {
+    ipc.hostStats.mockReturnValue(
+      ok({
+        load: [1, 2, 3],
+        cpus: 8,
+        memoryUsed: 1e9,
+        memoryTotal: 2e9,
+        swapUsed: 0,
+        swapTotal: 0,
+        cpuPercent: 40,
+        cpuHistory: [40],
+        memoryFree: 5e8,
+      }),
+    );
+    renderPanel();
+    expect(await screen.findByRole("meter", { name: "CPU usage" })).toBeTruthy();
+    expect(screen.getByText("8 cores")).toBeTruthy();
+    expect(screen.getByText("none on this host")).toBeTruthy();
+  });
 });

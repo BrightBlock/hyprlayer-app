@@ -35,7 +35,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, watch, Mutex as AsyncMutex, Notify};
 
 use hyprlayer_models::runtime::ThoughtsIndexUpdateKind;
-use hyprlayer_models::RuntimeEvent;
+use hyprlayer_models::{HostStats, RuntimeEvent};
+
+use crate::host_stats::HostSampler;
 
 pub use crate::env::{RuntimeEnvironment, RuntimePaths};
 
@@ -152,6 +154,8 @@ pub struct HyprlayerRuntime {
     /// Sessions whose harness the last server run left running; only their next relaunch is announced.
     cut_off: std::sync::Mutex<HashSet<String>>,
     remote_control_urls: std::sync::Mutex<HashMap<String, String>>,
+    /// `None` where sysinfo cannot read this OS.
+    host: Option<Arc<HostSampler>>,
     _profile_lock: ProfileLock,
 }
 
@@ -347,6 +351,7 @@ impl HyprlayerRuntime {
             coordinator: ShutdownCoordinator::new(),
             tasks: AsyncMutex::new(Vec::new()),
             cut_off: std::sync::Mutex::new(cut_off),
+            host: HostSampler::new().ok().map(Arc::new),
             remote_control_urls: std::sync::Mutex::default(),
             _profile_lock: profile_lock,
         }))
@@ -575,8 +580,26 @@ impl HyprlayerRuntime {
             }
         });
 
+        let host = self.host.clone();
+        let host_task = TrackedTask::spawn(move |stop| async move {
+            let Some(host) = host else { return };
+            loop {
+                // Registered before the tick: `notify_waiters` keeps no permit for a late listener.
+                let stopped = stop.notified();
+                tokio::pin!(stopped);
+                stopped.as_mut().enable();
+                let sampler = host.clone();
+                let _ = tokio::task::spawn_blocking(move || sampler.tick()).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(crate::host_stats::SAMPLE_EVERY) => {}
+                    _ = stopped => return,
+                }
+            }
+        });
+
         self.tasks.lock().await.extend([
             startup_task,
+            host_task,
             config_task,
             pr_watcher_task,
             sweep_task,
@@ -589,6 +612,12 @@ impl HyprlayerRuntime {
         ]);
 
         Ok(())
+    }
+
+    /// `None` where sysinfo cannot read this OS, or the read panicked.
+    pub async fn host_stats(&self) -> Option<HostStats> {
+        let host = self.host.clone()?;
+        tokio::task::spawn_blocking(move || host.stats()).await.ok()
     }
 
     pub fn set_foreground(&self, foreground: bool) {

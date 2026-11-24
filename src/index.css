@@ -60,6 +60,7 @@
   --duration-base: 200ms;
   --duration-gentle: 280ms;
   --duration-slow: 400ms;
+  --duration-settle: 600ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-std: cubic-bezier(0.2, 0, 0, 1);
@@ -93,6 +94,14 @@
   --color-edge-2: color-mix(in srgb, var(--color-edge) 68%, var(--color-panel));
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 15%, var(--color-panel));
   --color-track: color-mix(in srgb, var(--color-ink-dim) 55%, var(--color-panel));
+  --color-meter-track: color-mix(in srgb, var(--color-ink-dim) 16%, var(--color-panel));
+  --color-meter-cache: color-mix(in srgb, var(--color-info) 45%, var(--color-panel));
+  /* The host meters' btop scale is fixed, not the theme's `ok`: an Omarchy palette may map green to orange. */
+  --color-meter-ok: #57c23a;
+  --color-meter-warn: #f2b92f;
+  --color-meter-bad: #ff4d68;
+  --color-meter-warn-ink: #f2b92f;
+  --color-meter-bad-ink: #ff7389;
   --color-info: var(--color-brand);
   --color-warn-ink: var(--color-warn);
   --color-bad-ink: var(--color-bad);
@@ -233,6 +242,13 @@ html.light {
   --color-accent-soft: color-mix(in srgb, var(--color-accent) 6.3%, var(--color-panel));
   --color-radio-border: #c9c9c9;
   --color-track: color-mix(in srgb, var(--color-ink-dim) 26.7%, var(--color-panel));
+  --color-meter-track: color-mix(in srgb, var(--color-ink-dim) 13%, var(--color-panel));
+  --color-meter-cache: color-mix(in srgb, var(--color-info) 35%, var(--color-panel));
+  --color-meter-ok: #368813;
+  --color-meter-warn: #e0a400;
+  --color-meter-bad: #ef0028;
+  --color-meter-warn-ink: #7a5a00;
+  --color-meter-bad-ink: #b80020;
 
   --color-ship: #047857;
   --color-commit: #0f766e;
@@ -723,6 +739,48 @@ a {
 .task-toast.is-folded::before,
 .task-toast.is-folded::after {
   content: none;
+}
+
+/* btop's fixed gradient: a fuller bar reaches into warmer colours. */
+.host-meter-fill {
+  background: linear-gradient(
+    90deg,
+    var(--color-meter-ok) 0%,
+    var(--color-meter-ok) 50%,
+    var(--color-meter-warn) 72%,
+    var(--color-meter-bad) 92%
+  );
+}
+.host-meter-ticks {
+  background: repeating-linear-gradient(90deg, transparent 0 5px, var(--color-panel) 5px 6px);
+}
+/* One settle on mount, transform only so the compositor runs it; later polls jump. */
+@keyframes host-meter-reveal {
+  from { transform: translateX(-100%); }
+}
+@keyframes host-meter-unreveal {
+  from { transform: translateX(100%); }
+}
+@keyframes host-meter-grow {
+  from { transform: scaleX(0); }
+}
+.host-meter-reveal {
+  animation: host-meter-reveal var(--duration-settle) var(--ease-out) backwards;
+}
+.host-meter-unreveal {
+  animation: host-meter-unreveal var(--duration-settle) var(--ease-out) backwards;
+}
+.host-meter-grow {
+  transform-origin: left;
+  animation: host-meter-grow var(--duration-settle) var(--ease-out) backwards;
+}
+[data-still-motion] :is(.host-meter-reveal, .host-meter-unreveal, .host-meter-grow) {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.host-meter-reveal, .host-meter-unreveal, .host-meter-grow) {
+    animation: none;
+  }
 }
 
 @keyframes step-in {

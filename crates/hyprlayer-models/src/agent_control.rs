@@ -107,6 +107,15 @@ pub struct HostStats {
     pub memory_total: f64,
     pub swap_used: f64,
     pub swap_total: f64,
+    /// Overall usage since the previous refresh; `None` until a second refresh.
+    #[serde(default)]
+    pub cpu_percent: Option<f32>,
+    /// Oldest first, one sample per 3 s.
+    #[serde(default)]
+    pub cpu_history: Option<Vec<f32>>,
+    /// `None` where free memory does not leave file cache as the remainder (macOS).
+    #[serde(default)]
+    pub memory_free: Option<f64>,
 }
 
 /// The agent a control call speaks for: a composer session or a PTY terminal.
