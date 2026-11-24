@@ -6,6 +6,7 @@ pub mod text;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError};
 use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -37,6 +38,8 @@ const MARK_BYTES: u64 = 1024;
 const READ_QUEUE_CHUNKS: usize = 16;
 /// How long an exited child's output may take to reach EOF before the exit is signalled anyway.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
+#[cfg(unix)]
+const HANGUP_GRACE: Duration = Duration::from_millis(100);
 const IDLE_COMPRESS: Duration = Duration::from_millis(250);
 
 pub use hyprlayer_models::terminal::TerminalEvent;
@@ -569,6 +572,7 @@ pub struct PtySession {
     sizing: Arc<Sizing>,
     #[cfg(unix)]
     pid: Option<u32>,
+    killed: Arc<AtomicBool>,
     pub workstream_id: String,
 }
 
@@ -623,6 +627,7 @@ impl PtySession {
             }
         });
 
+        let killed = Arc::new(AtomicBool::new(false));
         let session = Arc::new(Self {
             killer: StdMutex::new(killer),
             writer,
@@ -633,6 +638,7 @@ impl PtySession {
             }),
             #[cfg(unix)]
             pid,
+            killed: killed.clone(),
             workstream_id: cfg.workstream_id,
         });
 
@@ -712,6 +718,10 @@ impl PtySession {
                 // ConPTY's reader sees EOF only once conhost closes its output, which a hung one never does.
                 close_master();
                 let _ = drained_rx.recv_timeout(EXIT_DRAIN);
+            } else if killed.load(Ordering::SeqCst) {
+                // A job that ignored the hangup still holds the slave, so the reader may never see EOF.
+                let _ = drained_rx.recv_timeout(EXIT_DRAIN);
+                close_master();
             } else {
                 // A Unix reader reaches EOF once every holder of the slave is gone, background jobs included.
                 let _ = drained_rx.recv();
@@ -784,10 +794,15 @@ impl PtySession {
     }
 
     pub fn kill(&self) {
+        self.killed.store(true, Ordering::SeqCst);
         #[cfg(unix)]
         if let Some(pid) = self.pid {
             let pgid = unsafe { libc::getpgid(pid as libc::pid_t) };
             if pgid > 0 {
+                // An interactive shell runs each background job in its own group and forwards a
+                // hangup to them, but a SIGKILLed shell forwards nothing: hang up first.
+                unsafe { libc::killpg(pgid, libc::SIGHUP) };
+                std::thread::sleep(HANGUP_GRACE);
                 unsafe { libc::killpg(pgid, libc::SIGKILL) };
             }
         }
@@ -1341,5 +1356,64 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         assert!(gone, "backgrounded child {child_pid} survived kill()");
+    }
+
+    #[tokio::test]
+    async fn kill_hangs_up_an_interactive_shells_background_jobs() {
+        let s = PtySession::spawn(SpawnTerminal {
+            shell: PathBuf::from("/bin/bash"),
+            args: vec!["--norc".into(), "-i".into()],
+            cwd: std::env::temp_dir(),
+            cols: 80,
+            rows: 24,
+            env: vec![],
+            workstream_id: "test-jobs".into(),
+        })
+        .expect("spawn pty");
+        let mut rx = s.subscribe();
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        s.write_input(b"sleep 600 & echo PID:$!\n").unwrap();
+        let mut seen = String::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let job: i32 = loop {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "never saw pid: {seen:?}"
+            );
+            if let Ok(Some(TerminalChunk::Output { bytes, .. })) =
+                tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
+            {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+                if let Some(pid) = seen
+                    .lines()
+                    .find_map(|l| l.strip_prefix("PID:"))
+                    .and_then(|p| p.trim().parse::<i32>().ok())
+                    .filter(|_| {
+                        seen.rsplit_once("PID:")
+                            .and_then(|(_, after)| after.split_once('\n'))
+                            .is_some_and(|(_, prompt)| prompt.contains("$ "))
+                    })
+                {
+                    break pid;
+                }
+            }
+        };
+        // Linux bash defers a hangup that lands before its prompt is reading input.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        s.kill();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline
+            && (unsafe { libc::kill(job, 0) } == 0 || rx.exited().is_none())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let alive = unsafe { libc::kill(job, 0) } == 0;
+        unsafe { libc::kill(job, libc::SIGKILL) };
+        assert!(!alive, "background job {job} survived kill()");
+        assert!(
+            rx.exited().is_some(),
+            "the killed terminal never reported its exit"
+        );
     }
 }
