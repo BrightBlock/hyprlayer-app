@@ -160,11 +160,3 @@ export function RadioRow({
   );
 }
 
-export function SoonBadge() {
-  return (
-    <span className="shrink-0 rounded bg-brand/15 px-1.5 py-0.5 text-tag text-brand">
-      Soon
-    </span>
-  );
-}
-

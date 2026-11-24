@@ -51,7 +51,7 @@ export function liveTone(item: FleetItem): { dot: string; pulse: boolean; border
 }
 
 
-export type HeroStatus = { dot: string; pulse: boolean; text: string };
+type HeroStatus = { dot: string; pulse: boolean; text: string };
 
 export function heroStatus(
   counts: { running: number; needsYou: number; review: number; errors: number; queued: number },

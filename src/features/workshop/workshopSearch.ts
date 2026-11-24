@@ -1,6 +1,6 @@
 export type WorkshopSection = "agents" | "system" | "skills" | "prompts";
 
-export const WORKSHOP_SECTIONS: readonly WorkshopSection[] = ["agents", "system", "skills", "prompts"];
+const WORKSHOP_SECTIONS: readonly WorkshopSection[] = ["agents", "system", "skills", "prompts"];
 
 export type WorkshopSearch = {
   section?: string;

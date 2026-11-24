@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Failure modes, written before the code (one `it` each for 1-10; 11 lives in events.test.ts, 12 in agents.test.ts):
+// Failure modes (one `it` each for 1-10; 11 lives in events.test.ts, 12 in agents.test.ts):
 //  1. Signed out shows the thoughts handle's initials (old Avatar leaking) instead of the grey mark.
 //  2. Signed in shows initials of something other than `author.name`.
 //  3. A one-word name ("octocat") gives one letter instead of "OC".

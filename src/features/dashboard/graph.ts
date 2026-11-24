@@ -1,20 +1,20 @@
 import type { DocMeta } from "@/lib/bindings";
 import { docTitle } from "@/features/library/text";
 
-export type GraphNode = {
+type GraphNode = {
   id: string;
   title: string;
   type: string;
   degree: number;
 };
 
-export type GraphEdge = { source: string; target: string; kind: "ref" | "topic" };
+type GraphEdge = { source: string; target: string; kind: "ref" | "topic" };
 
 export type Graph = { nodes: GraphNode[]; edges: GraphEdge[] };
 
 const TOPIC_GROUP_MAX = 6;
 
-export const NEBULA_COLORS = [
+const NEBULA_COLORS = [
   "var(--color-nebula-1)",
   "var(--color-nebula-2)",
   "var(--color-nebula-3)",
@@ -139,7 +139,7 @@ export function buildGraph(docs: DocMeta[]): Graph {
 
 export type Point = { x: number; y: number };
 
-export type SimulateOptions = {
+type SimulateOptions = {
   width: number;
   height: number;
   iterations?: number;

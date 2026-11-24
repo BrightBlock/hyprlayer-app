@@ -1,14 +1,14 @@
 import type { ArchiveInfo, ArchivedWorkstreamView } from "@/lib/bindings";
 import { appOwnsWorktree } from "@/lib/domain/projects";
 
-export const PURGE_WARNING_DAYS = 7;
+const PURGE_WARNING_DAYS = 7;
 
 const DAY_MS = 86_400_000;
 
-export type ArchiveBase = "merged" | "superseded" | "abandoned";
+type ArchiveBase = "merged" | "superseded" | "abandoned";
 export type ArchiveTone = ArchiveBase | "purge" | "neutral";
 
-export type ArchiveStatus = {
+type ArchiveStatus = {
   /** Null for an open or unknown PR: no base tag is claimed. */
   base: ArchiveBase | null;
   tone: ArchiveTone;
@@ -29,7 +29,7 @@ export type ArchiveRow = {
 
 export type DeleteLoss = { uncommitted: number; unpushed: number; unchecked: boolean };
 
-export function daysUntilPurge(purgeInMs: number): number {
+function daysUntilPurge(purgeInMs: number): number {
   return Math.max(0, Math.ceil(purgeInMs / DAY_MS));
 }
 

@@ -19,7 +19,7 @@ type Props = {
   onKeep: () => void;
 };
 
-export function metaLine(row: ArchiveRow, now: number): string {
+function metaLine(row: ArchiveRow, now: number): string {
   const { item, info, archiveExists } = row.view;
   const size = !archiveExists
     ? "files missing"

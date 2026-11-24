@@ -1,7 +1,7 @@
 import type { ArchivedWorkstreamView, Harness, WorkstreamView } from "@/lib/bindings";
 import type { FleetActivity } from "@/features/dashboard/fleet";
 
-export type PipelineKey = "planning" | "implementing" | "waiting" | "review" | "merged";
+type PipelineKey = "planning" | "implementing" | "waiting" | "review" | "merged";
 
 export type PipelineLive = { activity: FleetActivity; sessionId: string | null; line: string | null };
 
@@ -98,7 +98,7 @@ export function triageKeyOf(live: PipelineLive | undefined): TriageKey {
 
 export type BoardChild = { view: WorkstreamView; column: PipelineKey };
 
-export type BoardCard = BoardChild & { parent: WorkstreamView | null; children: BoardChild[] };
+type BoardCard = BoardChild & { parent: WorkstreamView | null; children: BoardChild[] };
 
 export function boardColumns(
   views: WorkstreamView[],

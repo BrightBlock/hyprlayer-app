@@ -36,7 +36,7 @@ export type FleetItem = {
   queued: number;
 };
 
-export type Fleet = {
+type Fleet = {
   live: FleetItem[];
   idle: WorkstreamView[];
   counts: { running: number; needsYou: number; review: number; errors: number; queued: number };

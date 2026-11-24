@@ -2,9 +2,9 @@ import type { WorkstreamActivity } from "@/features/session/sessionStore";
 
 export { fuzzyScore } from "@/lib/fuzzy";
 
-export type SearchResultKind = "workstream" | "agent" | "doc" | "file";
+type SearchResultKind = "workstream" | "agent" | "doc" | "file";
 
-export type NavTarget =
+type NavTarget =
   | { type: "workstream"; projectPath: string; workstreamId: string }
   | { type: "agent"; projectPath: string; workstreamId: string; sessionId: string }
   | { type: "doc"; id: string }

@@ -17,7 +17,7 @@ export function CheckDot({ className }: { className: string }) {
   );
 }
 
-export type StepProps = {
+type StepProps = {
   title: ReactNode;
   lede?: ReactNode;
   children: ReactNode;

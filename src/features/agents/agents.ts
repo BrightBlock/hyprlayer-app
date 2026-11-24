@@ -61,7 +61,7 @@ export type AgentSection = "agents" | "system";
 
 export type EditorTab = "setup" | "prompt" | "capabilities" | "permissions" | "collaborators";
 
-export const EDITOR_TABS: ReadonlyArray<{ key: EditorTab; label: string }> = [
+const EDITOR_TABS: ReadonlyArray<{ key: EditorTab; label: string }> = [
   { key: "setup", label: "Setup" },
   { key: "prompt", label: "Prompt" },
   { key: "capabilities", label: "Capabilities" },
@@ -282,7 +282,7 @@ export function folderOf(agent: AgentFile, overlay: Overlay, groupUncategorized:
   return groupUncategorized ? phaseFolder(agent) : "";
 }
 
-export type FolderOf = (agent: AgentFile) => string;
+type FolderOf = (agent: AgentFile) => string;
 
 export function folderResolver(
   library: AgentLibrarySettings | undefined,
@@ -446,7 +446,7 @@ export type BundleFailure = {
   stillOn: string | null;
 };
 
-export type BundleChipState =
+type BundleChipState =
   | { kind: "unknown"; detail: string }
   | {
       kind: "upToDate";

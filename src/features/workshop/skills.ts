@@ -83,7 +83,7 @@ export function attachedAgents(skill: SkillFile, agents: readonly AgentFile[]): 
 }
 
 // Anthropic's guidance keeps a SKILL.md body under 5k tokens; ~4 chars per token.
-export const SKILL_TOKEN_BUDGET = 5000;
+const SKILL_TOKEN_BUDGET = 5000;
 
 export function skillTokenLine(s: SkillFile): string {
   return `~${formatCompactCount(s.chars / 4)} / ${formatCompactCount(SKILL_TOKEN_BUDGET)} tokens`;
@@ -127,9 +127,7 @@ export function preapprovedTools(s: SkillFile): string[] {
   return raw.split(",").map((t) => t.trim()).filter(Boolean);
 }
 
-export const MODELLED_KEYS = ["name", "description", "allowed-tools", "model", "argument-hint", "disable-model-invocation"];
-
-export type SkillFileRow = {
+type SkillFileRow = {
   path: string;
   name: string;
   depth: number;
