@@ -520,6 +520,7 @@ impl SocketServer {
                             self.clients.clone(),
                             self.stop.clone(),
                         ));
+                        while connections.try_join_next().is_some() {}
                     }
                     Err(e) => {
                         tracing::warn!("accept failed: {e}");
