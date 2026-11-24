@@ -416,12 +416,10 @@ impl Outbound {
         self.0.features.link_credit
     }
 
-    /// Whether the peer announced `RAW_TERMINAL`.
     pub fn raw_terminal(&self) -> bool {
         self.0.features.raw_terminal
     }
 
-    /// Whether the peer announced `TERMINAL_SIZE`.
     pub fn terminal_size(&self) -> bool {
         self.0.features.terminal_size
     }

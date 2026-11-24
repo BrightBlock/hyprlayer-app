@@ -53,7 +53,6 @@ impl Body {
         }
     }
 
-    /// Appends the frame's bytes `range` to `out`.
     pub(crate) fn extend(&self, range: std::ops::Range<usize>, out: &mut Vec<u8>) {
         let (head, raw, tail) = match self {
             Body::Bytes(bytes) => return out.extend_from_slice(&bytes[range]),

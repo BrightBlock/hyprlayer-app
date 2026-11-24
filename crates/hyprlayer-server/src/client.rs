@@ -668,7 +668,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
         .drain()
         .map(|(_, tx)| tx)
         .collect();
-    let waiters_len = waiters.len();
+    let failed_calls = waiters.len();
     for tx in waiters {
         let _ = tx.send(Err(WireError::disconnected()));
     }
@@ -678,7 +678,6 @@ async fn read_loop<R: AsyncRead + Unpin>(
         .drain()
         .map(|(_, tx)| tx)
         .collect();
-    let failed_calls = waiters_len;
     let failed_opens = stream_waiters.len();
     for tx in stream_waiters {
         let _ = tx.send(Err(WireError::disconnected()));

@@ -1,8 +1,7 @@
 //! The command table: one line per request/response command, generating the
 //! `Request` and `Response` enums, the server's `Dispatch` trait, and the typed
 //! methods on `RpcClient`. It lives here rather than in `hyprlayer-proto`
-//! because its types are core's (ADR-0009, Phase 2 note). The 11 streaming
-//! commands join in Phase 4.
+//! because its types are core's (ADR-0009, Phase 2 note).
 //!
 //! Arguments mirror the Tauri command's; results are the core service's own
 //! DTOs where one exists, or one of the mirror structs below where the desktop
