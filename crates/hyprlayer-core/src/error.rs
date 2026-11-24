@@ -421,6 +421,9 @@ pub enum CoreError {
     #[error("Couldn't install OpenCode via npm. {detail}")]
     OpencodeInstallFailed { detail: String },
 
+    #[error("`opencode` {found} is not supported; hyprlayer runs OpenCode 2 (@opencode/cli 2.4 or later).")]
+    OpencodeUnsupported { found: String },
+
     #[error("That install method isn't available on this platform.")]
     CliInstallUnsupported,
 
@@ -657,6 +660,9 @@ impl CoreError {
                  You can also use Locate… to point at an existing opencode.exe."
                     .into(),
             ),
+            CoreError::OpencodeUnsupported { .. } => {
+                Some("Install @opencode/cli 2.4 or later.".into())
+            }
             CoreError::OpencodeInstallFailed { .. } => Some(
                 "Install Node.js/npm, or install OpenCode with Scoop \
                  (scoop install opencode), Chocolatey (choco install opencode), or WSL. \
@@ -978,6 +984,7 @@ impl CoreError {
             CoreError::AccountUnreachable { .. } => "account_unreachable",
             CoreError::NpmMissing => "npm_missing",
             CoreError::OpencodeInstallFailed { .. } => "opencode_install_failed",
+            CoreError::OpencodeUnsupported { .. } => "opencode_unsupported",
             CoreError::CliInstallUnsupported => "cli_install_unsupported",
             CoreError::RemoteUnsupported { .. } => "remote_unsupported",
             CoreError::WorkstreamFolderNoGit => "folder_no_git",

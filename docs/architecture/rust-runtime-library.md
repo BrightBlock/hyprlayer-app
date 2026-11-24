@@ -274,10 +274,14 @@ an internal type, and they are supported for that reason.
 Network calls go through the internal `ProviderHttp` port, which GETs and
 form-POSTs to `String`; the desktop shell has no HTTP client of its own.
 
-The OpenCode key and default-model methods edit `RuntimePaths::opencode_auth_file`
-and `opencode_config_file`. Setting or removing a key invalidates the cached
-`opencode serve`, which reads `auth.json` only when it spawns. A malformed
-`auth.json` fails the call instead of being overwritten.
+OpenCode means OpenCode 2 (`@opencode/cli` 2.4 or later); `opencode_server()`
+refuses an older, unparseable or OpenCode 1 binary before it spawns one
+(`opencode_unsupported`). The OpenCode key and default-model methods edit
+`RuntimePaths::opencode_auth_file` and `opencode_config_file`. Setting or removing a
+key invalidates the cached `opencode serve`, which copies `auth.json`'s API keys into
+its own credential store (`/api/credential`) only when it spawns; a v1 sign-in in
+`auth.json` cannot be copied and lists with a remedy. A malformed `auth.json` fails
+the call instead of being overwritten.
 
 ### `SessionService`
 

@@ -673,10 +673,10 @@ function settleFolded(sessionId: string): void {
   if (next !== settled) flushQueuedMessage(sessionId);
 }
 
-// Claude and codex take a message in at their next step, as their own CLIs do. Another
-// device's turn would refuse it as stale, and a starting session may have no harness yet.
+// Claude, codex and OpenCode take a message in at their next step, as their own CLIs do.
+// Another device's turn would refuse it as stale, and a starting session may have no harness yet.
 function steersInto(entry: SessionEntry): boolean {
-  if (entry.harness !== "claude" && entry.harness !== "codex") return false;
+  if (entry.harness !== "claude" && entry.harness !== "codex" && entry.harness !== "opencode") return false;
   return entry.state !== "starting" && entry.turnAuthor !== "other";
 }
 

@@ -295,13 +295,13 @@ impl SettingsService<'_> {
         #[cfg(not(windows))]
         let args = vec![
             "-lc".to_string(),
-            "curl -fsSL https://opencode.ai/install | bash".to_string(),
+            "curl -fsSL https://opencode.ai/v2/install | bash".to_string(),
         ];
         #[cfg(windows)]
         let args = vec![
             "-NoProfile".to_string(),
             "-Command".to_string(),
-            "npm install -g opencode-ai".to_string(),
+            "npm install -g @opencode/cli".to_string(),
         ];
 
         let result = Exec::new(&shell)

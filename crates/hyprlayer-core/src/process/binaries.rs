@@ -50,8 +50,8 @@ impl BinaryKind {
     fn min_version(self) -> Option<(&'static str, [u64; 3])> {
         match self {
             BinaryKind::Claude => Some(("2.1.0", [2, 1, 0])),
-            // First release sending `permission.asked`; the routes the driver needs are older.
-            BinaryKind::OpenCode => Some(("1.0.224", [1, 0, 224])),
+            // OpenCode 2's server API; 1.x (`opencode-ai`) speaks the retired v1 API.
+            BinaryKind::OpenCode => Some(("2.4.0", [2, 4, 0])),
             BinaryKind::Codex => Some(("0.155.1", [0, 155, 1])),
             _ => None,
         }
@@ -59,6 +59,11 @@ impl BinaryKind {
 
     fn requires_version(self) -> bool {
         matches!(self, BinaryKind::Hyprlayer)
+    }
+
+    /// A version that doesn't parse can't be told from an unsupported one, so it is refused.
+    fn refuses_unknown_version(self) -> bool {
+        matches!(self, BinaryKind::OpenCode)
     }
 
     pub fn optional(self) -> bool {
@@ -190,6 +195,13 @@ impl BinaryResolver {
         let status = self.status(kind).await;
         match (&status.state, &status.path) {
             (BinaryState::Ok, Some(path)) => Ok(PathBuf::from(path)),
+            (BinaryState::TooOld { .. }, _) if kind == BinaryKind::OpenCode => {
+                Err(crate::CoreError::OpencodeUnsupported {
+                    found: status
+                        .version
+                        .unwrap_or_else(|| "of an unknown version".into()),
+                })
+            }
             (BinaryState::TooOld { min }, _) => Err(crate::CoreError::BinaryTooOld {
                 name: kind.command_name().into(),
                 found: status.version.unwrap_or_else(|| "unknown".into()),
@@ -309,7 +321,10 @@ fn missing_status(kind: BinaryKind, overridden: bool) -> BinaryStatus {
 fn state_for(kind: BinaryKind, version: Option<&str>) -> BinaryState {
     match (version, kind.min_version()) {
         (Some(v), Some((min_str, min))) => {
-            if parse_semver(v).is_some_and(|found| found < min) {
+            let parsed = parse_semver(v);
+            if parsed.is_some_and(|found| found < min)
+                || (parsed.is_none() && kind.refuses_unknown_version())
+            {
                 BinaryState::TooOld {
                     min: min_str.to_string(),
                 }
@@ -318,6 +333,9 @@ fn state_for(kind: BinaryKind, version: Option<&str>) -> BinaryState {
             }
         }
         (None, _) if kind.requires_version() => BinaryState::Missing,
+        (None, Some((min_str, _))) if kind.refuses_unknown_version() => BinaryState::TooOld {
+            min: min_str.to_string(),
+        },
         _ => BinaryState::Ok,
     }
 }
@@ -585,29 +603,61 @@ mod tests {
     }
 
     #[test]
-    fn opencode_below_the_first_release_the_driver_can_run_is_too_old() {
-        let min = "1.0.224".to_string();
-        assert_eq!(
-            state_for(BinaryKind::OpenCode, Some("1.0.223")),
-            BinaryState::TooOld { min: min.clone() }
-        );
-        assert_eq!(
-            state_for(BinaryKind::OpenCode, Some("1.0.224")),
-            BinaryState::Ok
-        );
-        let error = crate::CoreError::BinaryTooOld {
-            name: "opencode".into(),
-            found: "1.0.223".into(),
-            min,
+    fn opencode_below_2_4_unparseable_or_v1_is_unsupported() {
+        let min = "2.4.0".to_string();
+        for found in [
+            Some("2.3.2"),
+            Some("1.19.6"),
+            Some("1.0.224"),
+            Some("nightly"),
+            None,
+        ] {
+            assert_eq!(
+                state_for(BinaryKind::OpenCode, found),
+                BinaryState::TooOld { min: min.clone() },
+                "{found:?}"
+            );
+        }
+        for found in ["2.4.0", "2.4.1", "v2.5.0", "3.0.0"] {
+            assert_eq!(
+                state_for(BinaryKind::OpenCode, Some(found)),
+                BinaryState::Ok,
+                "{found}"
+            );
+        }
+        let error = crate::CoreError::OpencodeUnsupported {
+            found: "1.19.6".into(),
         };
         assert_eq!(
             error.to_string(),
-            "`opencode` 1.0.223 is older than the minimum supported 1.0.224"
+            "`opencode` 1.19.6 is not supported; hyprlayer runs OpenCode 2 (@opencode/cli 2.4 or later)."
         );
         assert_eq!(
             error.remedy().as_deref(),
-            Some("Update `opencode` to version 1.0.224 or newer.")
+            Some("Install @opencode/cli 2.4 or later.")
         );
+    }
+
+    #[tokio::test]
+    async fn requiring_an_unsupported_opencode_fails_before_any_spawn() {
+        let dir = std::env::temp_dir().join(format!("hl-oc-gate-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
+        for (version, found) in [("1.19.6", "1.19.6"), ("garbled", "of an unknown version")] {
+            let bin = dir.join(format!("opencode-{version}"));
+            std::fs::write(&bin, format!("#!/bin/sh\necho {version}\n")).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            resolver.set_override(BinaryKind::OpenCode, Some(bin)).await;
+            match resolver.require(BinaryKind::OpenCode).await {
+                Err(crate::CoreError::OpencodeUnsupported { found: got }) => assert_eq!(got, found),
+                other => panic!("{version}: expected OpencodeUnsupported, got {other:?}"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

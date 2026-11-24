@@ -159,12 +159,15 @@ export function OpenCodeHarnessTab({
                 key={e.provider}
                 className="flex items-center justify-between gap-3 rounded-md border border-edge bg-panel-2 px-3 py-2"
               >
-                <span className="min-w-0 truncate text-body text-ink">
-                  {providerName.get(e.provider.toLowerCase()) ?? e.provider}
-                </span>
+                <div className="min-w-0">
+                  <span className="block truncate text-body text-ink">
+                    {providerName.get(e.provider.toLowerCase()) ?? e.provider}
+                  </span>
+                  {supported && e.remedy && <p className="text-ui text-warn-ink">{e.remedy}</p>}
+                </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <Badge tone={supported ? "dim" : "warn"}>
-                    {supported ? "key set" : "unsupported"}
+                  <Badge tone={supported && !e.remedy ? "dim" : "warn"}>
+                    {!supported ? "unsupported" : e.remedy ? "not usable" : "key set"}
                   </Badge>
                   <button
                     type="button"

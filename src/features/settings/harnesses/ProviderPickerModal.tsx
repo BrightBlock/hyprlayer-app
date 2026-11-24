@@ -175,8 +175,8 @@ function KeyEntry({
         }}
       />
       <p className="mt-1 text-ui text-ink-dim">
-        Saved to OpenCode’s <code className="font-mono">auth.json</code> (0600) so the opencode CLI
-        uses it.
+        Saved to OpenCode’s <code className="font-mono">auth.json</code> (0600), and handed to
+        Hyprlayer’s OpenCode server.
       </p>
 
       {save.isError && (

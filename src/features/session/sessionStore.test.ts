@@ -281,6 +281,15 @@ describe("conversation steering (mid-turn message queue)", () => {
     expect(queued(id)).toEqual(["later"]);
   });
 
+  it("steers a message into a running OpenCode turn, as into claude's and codex's", async () => {
+    const id = await startBusySession();
+    useSessionStore.setState((s) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], harness: "opencode" } } }));
+    emit(INIT);
+    await sendMessage(id, "and then the docs", [], null, undefined, true);
+
+    expect(h.sendUserMessage).toHaveBeenCalledWith(id, "and then the docs", [], null, expect.any(String), null);
+  });
+
   it("cancelQueuedMessage drops a message before it's delivered", async () => {
     const id = await startBusySession();
     await sendMessage(id, "keep");

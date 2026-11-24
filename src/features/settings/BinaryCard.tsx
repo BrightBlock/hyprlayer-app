@@ -20,7 +20,13 @@ export function BinaryCard({ status }: { status: BinaryStatus }) {
 
   const tone = status.state.state === "ok" ? "ok" : status.optional ? "warn" : "bad";
   const label =
-    status.state.state === "ok" ? "Found" : status.state.state === "tooOld" ? "Too old" : "Missing";
+    status.state.state === "ok"
+      ? "Found"
+      : status.state.state !== "tooOld"
+        ? "Missing"
+        : status.kind === "opencode"
+          ? "Unsupported"
+          : "Too old";
 
   async function pickBinary() {
     const picked = await open({ multiple: false, directory: false, title: `Locate ${status.name}` });
@@ -44,9 +50,14 @@ export function BinaryCard({ status }: { status: BinaryStatus }) {
             {status.path}
           </p>
         )}
-        {status.state.state === "tooOld" && (
-          <p className="mt-1 text-ui text-warn-ink">Minimum supported version: {status.state.min}</p>
-        )}
+        {status.state.state === "tooOld" &&
+          (status.kind === "opencode" ? (
+            <p className="mt-1 text-ui text-warn-ink">
+              Hyprlayer runs OpenCode 2. Install @opencode/cli 2.4 or later.
+            </p>
+          ) : (
+            <p className="mt-1 text-ui text-warn-ink">Minimum supported version: {status.state.min}</p>
+          ))}
         {override.isError && (
           <p className="selectable mt-1 text-ui text-bad">
             Couldn't save the override: {errorMessage(override.error)}
