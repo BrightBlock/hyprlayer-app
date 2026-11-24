@@ -11,6 +11,10 @@ if [ -z "${TLA2TOOLS:-}" ]; then
   TLA2TOOLS=$(mise where "$tlc_pin")/tla2tools.jar
 fi
 java=${JAVA:-java}
+# A mise `java` shim with no version set fails; fall back to an installed one.
+if [ -z "${JAVA:-}" ] && ! "$java" -version >/dev/null 2>&1; then
+  java=$(ls -d "${MISE_DATA_DIR:-$HOME/.local/share/mise}"/installs/java/*/bin/java 2>/dev/null | tail -1)
+fi
 workers=${WORKERS:-4}
 out=${OUT:-$(mktemp -d)}
 mkdir -p "$out"
