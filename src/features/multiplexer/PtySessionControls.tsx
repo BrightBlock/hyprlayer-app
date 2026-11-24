@@ -44,7 +44,7 @@ type ModelControls = Pick<SessionControlsSnapshot, "model" | "effort">;
 /** What a relaunch carries over, since claude's session-only changes die with its process. */
 export type RelaunchKeep = { model?: string; permissionMode?: string; effort?: string };
 /** What a model relaunch starts with: the picked model in the session's mode and effort. */
-export type ModelRelaunch = RelaunchKeep & { model: string };
+type ModelRelaunch = RelaunchKeep & { model: string };
 
 /** Publishes a PTY agent's controls to the status bar, and carries out its changes. */
 export function PtySessionControls({

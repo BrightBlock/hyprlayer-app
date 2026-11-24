@@ -47,7 +47,7 @@ const NOOP = () => {};
 
 /**
  * Installing an executable on someone else's machine is a real action, so it
- * names the version and the step it is on (plan Phase 7 §4). The host is named
+ * names the version and the step it is on. The host is named
  * once, in the dialog header above — not again on every line here.
  */
 function ServerInstall({ host, onWork }: { host: Host; onWork: (work: string | null) => void }) {
@@ -251,8 +251,7 @@ export function HostsDialog() {
   const lost = connection?.state === "lost";
   const error = (lost && reconnect.keyChanged) || connection?.error;
   const message = error ? errorMessage(error) : null;
-  // `remote_cli_missing` is the one failure provisioning answers — Phase 1 named
-  // it as the trigger this phase would give it.
+  // `remote_cli_missing` is the one failure provisioning answers.
   const showInstall = Boolean(connection?.host) && connection?.error?.code === "remote_cli_missing";
   const tooOld = Boolean(connection?.host) && connection?.error?.code === SERVER_OUTDATED;
   const showUpdate = (connection?.state === "connected" && connection.serverOutdated) || tooOld;

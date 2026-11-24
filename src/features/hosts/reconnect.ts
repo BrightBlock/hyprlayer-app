@@ -25,7 +25,7 @@ function nextAttempt(): Promise<void> {
 }
 
 /** Jumps the timer — the user coming back is the strongest signal a retry is worth making. */
-export function reconnectNow(): void {
+function reconnectNow(): void {
   wake?.();
 }
 

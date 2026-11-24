@@ -9,8 +9,7 @@ type Props = {
   disabled: boolean;
 };
 
-// Carries forward the whole-YAML access CodeMirror gave before live preview took over
-// the body; it is the only in-app path for unknown keys, comments, and repair.
+// It is the only in-app path for unknown keys, comments, and repair.
 export function RawFrontmatter({ doc, raw, setRaw, draftNonEmpty, disabled }: Props) {
   if (raw === null) {
     if (doc.fmError) {

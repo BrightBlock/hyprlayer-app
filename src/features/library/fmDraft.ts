@@ -20,7 +20,7 @@ export type SchemaKey = (typeof SCHEMA_KEYS)[number];
 const _complete: Exclude<Exclude<keyof Frontmatter, "extra">, SchemaKey> extends never ? true : never = true;
 void _complete;
 
-export type DraftValue =
+type DraftValue =
   | { kind: "str"; value: string }
   | { kind: "list"; values: string[] }
   | { kind: "remove" };

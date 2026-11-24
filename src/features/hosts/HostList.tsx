@@ -43,7 +43,7 @@ const ROW_BUTTON =
 
 // The bordered-row anatomy the Prompts sidebar uses (ADR-0006, "Agents: sidebar
 // shell"), not rowClass — these rows carry several controls.
-// Every control is in flow now, so the row needs no reserved gutter; the header
+// Every control is in flow, so the row needs no reserved gutter; the header
 // shares this inset, and `ROW_BUTTON`, so its `+` lands in the kebab's column.
 const ROW_INSET_RIGHT = "pr-1.5";
 const ROW_BASE = `flex items-center gap-2 rounded-md border pl-2.5 ${ROW_INSET_RIGHT} py-1 transition-colors`;
@@ -53,8 +53,7 @@ const ROW_IDLE = "border-transparent text-ink hover:bg-edge/40";
 const BLANK_ADD: DraftRow = { label: "", destination: "" };
 
 // Rows reorder on pointer events, not HTML5 drag-and-drop: the window runs with
-// Tauri's `dragDropEnabled` (the composer needs it for file drops,
-// SessionChat.tsx:1300), and that native handler swallows dragstart before the
+// Tauri's `dragDropEnabled` (the composer needs it for file drops), and that native handler swallows dragstart before the
 // webview sees it. `index.css` also disables -webkit-user-drag app-wide.
 const DRAG_THRESHOLD_PX = 4;
 
@@ -293,9 +292,7 @@ export function HostList({ value, onChange, onSelect, activeWork, disabled }: Pr
             const canInstall = !probe?.ok && probe?.code === NO_SERVER;
             // Probe results only. The live connection is not repeated here: the
             // dialog header already carries it, and this row is already marked
-            // as the active one by its check and tint — so a "Connected" chip
-            // said the same thing a third time, on the one row that could not
-            // have meant anything else.
+            // as the active one by its check and tint.
             const status = probe?.ok
               ? { dot: "bg-ok", tone: "text-ink-dim", label: "Answered", detail: null }
               : probe

@@ -16,7 +16,7 @@ export type ResolvedEngine = {
   builtin: boolean;
 };
 
-export type ResolvedMultiplexer = {
+type ResolvedMultiplexer = {
   enabled: boolean;
   defaultEngineId: string;
   notifyOnBlocked: boolean;
@@ -27,7 +27,7 @@ export type ResolvedMultiplexer = {
 
 export const DEFAULT_ENGINE_ID = "claude-code";
 
-export const BUILTIN_ENGINES: ResolvedEngine[] = [
+const BUILTIN_ENGINES: ResolvedEngine[] = [
   { id: "claude-code", label: "Claude Code", glyph: "✻", accentToken: "--color-accent", command: "claude", args: [], enabled: true, builtin: true },
   { id: "codex", label: "Codex", glyph: "◆", accentToken: "--color-validate", command: "codex", args: [], enabled: true, builtin: true },
   { id: "gemini", label: "Gemini", glyph: "✦", accentToken: "--color-brand", command: "gemini", args: [], enabled: true, builtin: true },
@@ -71,7 +71,7 @@ export const engineLabel = (engineId: string): string =>
 export const enabledEngines = (cfg: ResolvedMultiplexer): ResolvedEngine[] =>
   cfg.engines.filter((e) => e.enabled);
 
-export const engineById = (
+const engineById = (
   cfg: ResolvedMultiplexer,
   id: string | undefined,
 ): ResolvedEngine | undefined => (id ? cfg.engines.find((e) => e.id === id) : undefined);
@@ -122,7 +122,7 @@ const ENGINE_SESSIONS: Record<string, EngineSession> = {
 
 const NO_SESSION: EngineSession = { mode: "none", bypass: [] };
 
-export function engineSession(engineId: string): EngineSession {
+function engineSession(engineId: string): EngineSession {
   return Object.prototype.hasOwnProperty.call(ENGINE_SESSIONS, engineId) ? ENGINE_SESSIONS[engineId] : NO_SESSION;
 }
 

@@ -51,7 +51,7 @@ type Runtime = {
 };
 
 /** `exited`: an adopted terminal that is gone; the tab shows it ended instead of launching a copy. */
-export type AgentLaunch = { terminalId: string; providerSessionId?: string; exited?: boolean };
+type AgentLaunch = { terminalId: string; providerSessionId?: string; exited?: boolean };
 
 const runtimes = new Map<string, Runtime>();
 

@@ -18,7 +18,7 @@ import { closeAgent, ensureAgent } from "./agentRuntime";
 import { actionEngine, resolveMultiplexer } from "./engines";
 import { agentKey, useMultiplexerStore } from "./multiplexerStore";
 
-export type ActionAgent = { stage: StageKey; input?: string; attachedDocs?: string[]; title: string };
+type ActionAgent = { stage: StageKey; input?: string; attachedDocs?: string[]; title: string };
 
 /** The server waits this long for a TUI to take its first prompt. */
 const PROMPT_WINDOW_MS = 60_000;
