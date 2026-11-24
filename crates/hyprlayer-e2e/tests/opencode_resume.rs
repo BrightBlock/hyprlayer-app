@@ -1,6 +1,7 @@
-//! An OpenCode session resumed after a server restart, or relaunched on another model,
+//! An OpenCode 2 session resumed after a server restart, or relaunched on another model,
 //! continues the same OpenCode session, so the model keeps the earlier turns. When OpenCode
-//! no longer has it, the resume starts a new one and says so.
+//! no longer has it, the resume starts a new one and says so. Mid-turn messages are steered in,
+//! stops withdraw what OpenCode has not read, and an OpenCode 1 binary is refused.
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
@@ -106,13 +107,7 @@ async fn opencode_resume() {
         json!({ "reply": switched, "harnessSession": restarted }),
     );
 
-    // The echo lands after the new driver subscribes, the abort's idle after the echo, and the
-    // next turn's user message after both.
-    j.step("a relaunch right after a turn ignores the echo and the abort that trail it");
-    stub_delays(
-        &sandbox,
-        json!({ "echo": 1000, "abortIdle": 1400, "start": 2200 }),
-    );
+    j.step("a relaunch right after a turn ends the next turn once, with its own reply");
     let before = "One more before the relaunch.";
     send(&mut j, &client, &id, before).await;
     turn(&mut events, before).await;
@@ -128,25 +123,63 @@ async fn opencode_resume() {
         json!({ "reply": relaunched, "laterTurnEnds": extra }),
     );
 
-    j.step("a send right after a mid-turn restart outlasts the aborted turn's late idle");
-    stub_delays(&sandbox, json!({ "reply": 2000, "late": 800 }));
+    // The relaunch's stop is slow to land; the next send waits for it rather than being stopped.
+    j.step("a send right after a mid-turn relaunch waits for the stop of the turn it replaced");
+    stub_delays(&sandbox, json!({ "reply": 2000, "abortDelay": 800 }));
     let long = "A long turn.";
     send(&mut j, &client, &id, long).await;
     sent(&mut events, long).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     drop(events);
     let mut events = restart(&client, &id).await;
+    stub_delays(&sandbox, json!({}));
     let next = "First after the mid-turn restart.";
     send(&mut j, &client, &id, next).await;
-    let (_, after_abort) = turn(&mut events, next).await;
+    let (seen, after_abort) = turn(&mut events, next).await;
     let extra = turn_ends(&mut events, Duration::from_millis(1500)).await;
     j.guard(
-        "the turn ends once, with its own reply",
-        recalls(&after_abort) && extra == 0,
-        json!({ "reply": after_abort, "laterTurnEnds": extra }),
+        "the turn ends once, completed, with its own reply",
+        recalls(&after_abort) && status_of(&seen).as_deref() == Some("completed") && extra == 0,
+        json!({ "reply": after_abort, "turnStatus": status_of(&seen), "laterTurnEnds": extra }),
     );
 
-    j.step("a turn whose permission the user denies ends");
+    j.step("a message sent mid-turn is steered into the running turn and echoed when OpenCode reads it");
+    stub_delays(&sandbox, json!({ "reply": 1500 }));
+    let running = "A turn to steer into.";
+    send(&mut j, &client, &id, running).await;
+    sent(&mut events, running).await;
+    let steer = "Steered in mid-turn.";
+    send_steer(&mut j, &client, &id, steer, "steer-read").await;
+    let steered = steered_turn(&mut events, steer).await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the steer's echo follows the first reply, its own reply follows it, and the turn ends once",
+        steered.echo_after_reply && steered.replied && steered.turn_ends == 1,
+        json!({ "echoAfterFirstReply": steered.echo_after_reply, "steerReplied": steered.replied,
+                "turnEnds": steered.turn_ends }),
+    );
+
+    j.step("a stop withdraws a steer OpenCode has not read and hands it back before the turn ends");
+    stub_delays(&sandbox, json!({ "reply": 2000 }));
+    let stopped_long = "A turn stopped with a steer waiting.";
+    send(&mut j, &client, &id, stopped_long).await;
+    sent(&mut events, stopped_long).await;
+    send_steer(&mut j, &client, &id, "Never read.", "steer-withdrawn").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    client
+        .interrupt_session(id.clone())
+        .await
+        .expect("interrupt_session");
+    let back = hand_back(&mut events, "steer-withdrawn").await;
+    stub_delays(&sandbox, json!({}));
+    j.guard(
+        "the steer comes back cancelled and unechoed, ahead of the interrupted end",
+        back.cancelled_before_end && !back.echoed && back.status.as_deref() == Some("interrupted"),
+        json!({ "cancelledBeforeEnd": back.cancelled_before_end, "echoed": back.echoed,
+                "turnStatus": back.status }),
+    );
+
+    j.step("a turn whose permission the user denies ends, as OpenCode 2 ends it: interrupted");
     stub_delays(&sandbox, json!({ "ask": true }));
     send(&mut j, &client, &id, "Run a command.").await;
     let request_id = permission_ask(&mut events).await;
@@ -163,8 +196,8 @@ async fn opencode_resume() {
     .expect("respond_permission");
     let ended = turn_status(&mut events).await;
     j.guard(
-        "the denied turn ends as completed",
-        request_id.is_some() && ended.as_deref() == Some("completed"),
+        "the denied turn ends as interrupted",
+        request_id.is_some() && ended.as_deref() == Some("interrupted"),
         json!({ "asked": request_id.is_some(), "turnStatus": ended }),
     );
 
@@ -383,52 +416,20 @@ async fn opencode_resume() {
         }),
     );
 
-    j.step("an OpenCode that ignores the prompt's messageID still ends each turn");
-    stub_delays(&sandbox, json!({ "ownIds": true }));
-    let own = "Answer under OpenCode's own ids.";
-    send(&mut j, &client, &id, own).await;
-    let (seen, replied) = turn(&mut events, own).await;
-    j.guard(
-        "its reply ends the turn",
-        replied.is_some() && status_of(&seen).as_deref() == Some("completed"),
-        json!({ "replied": replied.is_some(), "turnStatus": status_of(&seen) }),
-    );
-    stub_delays(&sandbox, json!({ "ownIds": true, "fail": "model gone" }));
+    j.step("a turn that fails before any reply ends once, as failed");
+    stub_delays(&sandbox, json!({ "fail": "model gone" }));
     let failing = "Fail before replying.";
     send(&mut j, &client, &id, failing).await;
     let (seen, said) = turn(&mut events, failing).await;
     let extra = turn_ends(&mut events, Duration::from_millis(1500)).await;
+    stub_delays(&sandbox, json!({}));
     j.guard(
-        "a turn that fails before any reply ends once, as failed",
-        status_of(&seen).as_deref() == Some("failed") && extra == 0,
+        "it ends once as failed, and the transcript says why",
+        status_of(&seen).as_deref() == Some("failed")
+            && said.as_deref() == Some("⚠ OpenCode error: model gone")
+            && extra == 0,
         json!({ "said": said, "turnStatus": status_of(&seen), "laterTurnEnds": extra }),
     );
-    stub_delays(&sandbox, json!({ "bare": true }));
-    let bare = "Answer under ids the driver cannot place.";
-    send(&mut j, &client, &id, bare).await;
-    let (seen, replied) = turn(&mut events, bare).await;
-    let notice = notices(&seen);
-    j.guard(
-        "the turn still ends, and the transcript says why",
-        replied.is_some() && status_of(&seen).as_deref() == Some("completed") && notice.len() == 1,
-        json!({ "replied": replied.is_some(), "turnStatus": status_of(&seen), "notice": notice }),
-    );
-    stub_delays(&sandbox, json!({}));
-
-    j.step(
-        "an OpenCode that names the session only inside each message ends the turn on its reply",
-    );
-    stub_delays(&sandbox, json!({ "nested": true }));
-    let nested = "Answer with the session named only inside the message.";
-    send(&mut j, &client, &id, nested).await;
-    let (seen, replied) = turn(&mut events, nested).await;
-    let notice = notices(&seen);
-    j.guard(
-        "its reply ends the turn, with no fallback notice",
-        replied.is_some() && status_of(&seen).as_deref() == Some("completed") && notice.is_empty(),
-        json!({ "replied": replied.is_some(), "turnStatus": status_of(&seen), "notice": notice }),
-    );
-    stub_delays(&sandbox, json!({}));
 
     j.step("a resume after OpenCode's data is wiped starts a new session and says so");
     drop(events);
@@ -594,7 +595,7 @@ async fn opencode_resume() {
     };
     let notice = seen.iter().any(reload_notice);
     let stored_notices = client
-        .get_session_log(retried)
+        .get_session_log(retried.clone())
         .await
         .expect("get_session_log")
         .iter()
@@ -633,8 +634,49 @@ async fn opencode_resume() {
         json!({ "released": released }),
     );
 
-    j.step("shutdown");
+    j.step("an OpenCode 1 binary is refused before it runs, with how to fix it");
     drop(events);
+    sandbox.stage_tool("opencode", "#!/bin/sh\necho 1.19.6\n");
+    let statuses = client.redetect_binaries().await.expect("redetect_binaries");
+    let opencode = statuses
+        .iter()
+        .find(|s| s.kind == hyprlayer_core::process::binaries::BinaryKind::OpenCode)
+        .map(|s| serde_json::to_value(&s.state).unwrap_or_default());
+    let (gated, _, _, _gated_events) = client
+        .start_stage_session_stream(
+            ws.clone(),
+            Stage::General,
+            "Start on OpenCode 1.".into(),
+            vec![],
+            StreamStartOpts {
+                harness: Some(Harness::Opencode),
+                model: Some("opencode/stub-free".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("start_stage_session");
+    j.alias(&gated.id, "$GATED");
+    // Checked at every launch, before the running server is reused or a new one starts.
+    let refused = j
+        .call(
+            &client,
+            Request::LaunchAndConverse {
+                session_id: gated.id.clone(),
+            },
+        )
+        .await
+        .err()
+        .map(|e| json!({ "code": e.code, "remedy": e.remedy }));
+    j.guard(
+        "the binary reads unsupported and a launch fails with the remedy",
+        opencode == Some(json!({ "state": "tooOld", "min": "2.4.0" }))
+            && refused
+                == Some(json!({ "code": "opencode_unsupported", "remedy": "Install @opencode/cli 2.4 or later." })),
+        json!({ "binary": opencode, "refused": refused }),
+    );
+
+    j.step("shutdown");
     let stopped = server.shutdown(&client).await;
     j.guard(
         "shutdown stops the server cleanly",
@@ -694,6 +736,100 @@ async fn send(j: &mut Journey, client: &RpcClient, id: &str, text: &str) {
     )
     .await
     .expect("send_user_message");
+}
+
+/// A send that carries a client message id, as the composer's steer does.
+async fn send_steer(j: &mut Journey, client: &RpcClient, id: &str, text: &str, cmid: &str) {
+    j.call(
+        client,
+        Request::SendUserMessage {
+            session_id: id.to_string(),
+            text: text.into(),
+            attached_docs: vec![],
+            prompt_name: None,
+            client_message_id: Some(cmid.into()),
+            base_rev: None,
+        },
+    )
+    .await
+    .expect("send_user_message");
+}
+
+struct Steered {
+    echo_after_reply: bool,
+    replied: bool,
+    turn_ends: usize,
+}
+
+/// Reads a running turn into which `steer` was sent, until its end and a quiet second after.
+async fn steered_turn(events: &mut EventStream<SessionEvent>, steer: &str) -> Steered {
+    let mut out = Steered {
+        echo_after_reply: false,
+        replied: false,
+        turn_ends: 0,
+    };
+    let (mut replies, mut echoed) = (0, false);
+    let _ = tokio::time::timeout(IO, async {
+        while let Some(event) = events.recv().await {
+            match &event {
+                SessionEvent::AssistantText { .. } => {
+                    replies += 1;
+                    out.replied |= echoed;
+                }
+                SessionEvent::UserMessage { text, .. } if text == steer => {
+                    echoed = true;
+                    out.echo_after_reply = replies == 1;
+                }
+                SessionEvent::TurnDone { .. } => {
+                    out.turn_ends += 1;
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await;
+    out.turn_ends += turn_ends(events, Duration::from_millis(1000)).await;
+    out
+}
+
+struct HandBack {
+    cancelled_before_end: bool,
+    echoed: bool,
+    status: Option<String>,
+}
+
+async fn hand_back(events: &mut EventStream<SessionEvent>, cmid: &str) -> HandBack {
+    let mut out = HandBack {
+        cancelled_before_end: false,
+        echoed: false,
+        status: None,
+    };
+    let mut cancelled = false;
+    let _ = tokio::time::timeout(IO, async {
+        while let Some(event) = events.recv().await {
+            match event {
+                SessionEvent::CommandLifecycle {
+                    command_uuid,
+                    state,
+                } if command_uuid == cmid && state == "cancelled" => {
+                    cancelled = true;
+                }
+                SessionEvent::UserMessage {
+                    client_message_id: Some(id),
+                    ..
+                } if id == cmid => out.echoed = true,
+                SessionEvent::TurnDone { turn_status, .. } => {
+                    out.cancelled_before_end = cancelled;
+                    out.status = turn_status;
+                    return;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await;
+    out
 }
 
 /// The row's stored harness session id.

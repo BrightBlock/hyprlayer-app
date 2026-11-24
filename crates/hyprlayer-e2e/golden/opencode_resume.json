@@ -51,33 +51,62 @@
           "ok": true
         }
       ],
-      "step": "a relaunch right after a turn ignores the echo and the abort that trail it"
+      "step": "a relaunch right after a turn ends the next turn once, with its own reply"
     },
     {
       "guards": [
         {
           "evidence": {
             "laterTurnEnds": 0,
-            "reply": "model=stub-other-free earlier=[Remember NONCE-7Q2X. | What was the nonce? | Repeat the nonce. | One more before the relaunch. | First after the relaunch. | A long turn.]"
+            "reply": "model=stub-other-free earlier=[Remember NONCE-7Q2X. | What was the nonce? | Repeat the nonce. | One more before the relaunch. | First after the relaunch. | A long turn.]",
+            "turnStatus": "completed"
           },
-          "guard": "the turn ends once, with its own reply",
+          "guard": "the turn ends once, completed, with its own reply",
           "ok": true
         }
       ],
-      "step": "a send right after a mid-turn restart outlasts the aborted turn's late idle"
+      "step": "a send right after a mid-turn relaunch waits for the stop of the turn it replaced"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "echoAfterFirstReply": true,
+            "steerReplied": true,
+            "turnEnds": 1
+          },
+          "guard": "the steer's echo follows the first reply, its own reply follows it, and the turn ends once",
+          "ok": true
+        }
+      ],
+      "step": "a message sent mid-turn is steered into the running turn and echoed when OpenCode reads it"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "cancelledBeforeEnd": true,
+            "echoed": false,
+            "turnStatus": "interrupted"
+          },
+          "guard": "the steer comes back cancelled and unechoed, ahead of the interrupted end",
+          "ok": true
+        }
+      ],
+      "step": "a stop withdraws a steer OpenCode has not read and hands it back before the turn ends"
     },
     {
       "guards": [
         {
           "evidence": {
             "asked": true,
-            "turnStatus": "completed"
+            "turnStatus": "interrupted"
           },
-          "guard": "the denied turn ends as completed",
+          "guard": "the denied turn ends as interrupted",
           "ok": true
         }
       ],
-      "step": "a turn whose permission the user denies ends"
+      "step": "a turn whose permission the user denies ends, as OpenCode 2 ends it: interrupted"
     },
     {
       "guards": [
@@ -199,48 +228,15 @@
       "guards": [
         {
           "evidence": {
-            "replied": true,
-            "turnStatus": "completed"
-          },
-          "guard": "its reply ends the turn",
-          "ok": true
-        },
-        {
-          "evidence": {
             "laterTurnEnds": 0,
             "said": "⚠ OpenCode error: model gone",
             "turnStatus": "failed"
           },
-          "guard": "a turn that fails before any reply ends once, as failed",
-          "ok": true
-        },
-        {
-          "evidence": {
-            "notice": [
-              "OpenCode reported no message matching this prompt, so its turn ended on the next idle or error"
-            ],
-            "replied": true,
-            "turnStatus": "completed"
-          },
-          "guard": "the turn still ends, and the transcript says why",
+          "guard": "it ends once as failed, and the transcript says why",
           "ok": true
         }
       ],
-      "step": "an OpenCode that ignores the prompt's messageID still ends each turn"
-    },
-    {
-      "guards": [
-        {
-          "evidence": {
-            "notice": [],
-            "replied": true,
-            "turnStatus": "completed"
-          },
-          "guard": "its reply ends the turn, with no fallback notice",
-          "ok": true
-        }
-      ],
-      "step": "an OpenCode that names the session only inside each message ends the turn on its reply"
+      "step": "a turn that fails before any reply ends once, as failed"
     },
     {
       "guards": [
@@ -347,6 +343,25 @@
         }
       ],
       "step": "a provider key added mid-session reaches the session's next turn, not the running one"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "binary": {
+              "min": "2.4.0",
+              "state": "tooOld"
+            },
+            "refused": {
+              "code": "opencode_unsupported",
+              "remedy": "Install @opencode/cli 2.4 or later."
+            }
+          },
+          "guard": "the binary reads unsupported and a launch fails with the remedy",
+          "ok": true
+        }
+      ],
+      "step": "an OpenCode 1 binary is refused before it runs, with how to fix it"
     },
     {
       "guards": [

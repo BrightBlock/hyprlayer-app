@@ -1,40 +1,32 @@
-//! `opencode serve` for E2E: the routes the OpenCode driver calls, shaped as 1.18.32 answers them.
-//! Sessions live under `$XDG_DATA_HOME`, so they survive a restart and vanish with a data wipe.
-//! A turn replies `model=<model> earlier=[<this session's earlier prompts>]`. Besides the
-//! `opencode` models it serves `<provider>/stub-keyed` for each provider in the
-//! `OPENCODE_AUTH_CONTENT` it was spawned with, and fails a turn on any other model.
+//! `opencode serve` for E2E: the OpenCode 2 routes the driver calls, shaped as 2.4.1 answers
+//! them, behind HTTP Basic auth with the password from `OPENCODE_SERVER_PASSWORD`. Sessions and
+//! credentials live under `$XDG_DATA_HOME`, so they survive a restart and vanish with a data wipe.
+//! A run answers each message it reads with `model=<model> earlier=[<this session's earlier
+//! prompts>]`. Besides the `opencode` models it serves `<provider>/stub-keyed` for each provider
+//! holding a credential, and fails a run on any other model.
 //!
-//! `$XDG_DATA_HOME/opencode-stub/control.json` delays, in ms, the events 1.18.32 sends late:
-//! `start` (the prompt's user message), `reply`, `echo` (the user message again after the idle),
-//! `abortIdle` (an idle session's abort), `late` (an aborted turn's reply and second idle) and
-//! `abortDelay` (an abort handled that long after it arrives). An abort is answered after it
-//! cancels the running turn.
-//! `"ask": true` makes each turn ask permission for bash first, and `"question": true` a question
-//! before that; `"aside": true` follows each ask with a text part. `"ownIds": true` ignores the
-//! prompt's messageID; `"bare": true` also mints ids that sort below the driver's and omits
-//! `time.created`; `"fail": "<message>"` fails each turn before any reply. `"nested": true`
-//! names the session only inside each message and part, as 1.0.224 does. `"child": true` asks
-//! from a subagent's session, which 1.18.18 announces with `session.created` naming its parent.
-//! `"lateAsk": true` asks for permission as an abort lands, and the abort cancels the ask with no
-//! reply event. `"cut": "<event type>"` closes every event stream in place of the turn's first
-//! event of that type; the events sent before the driver reconnects are lost, as in a gap, and
-//! each new stream starts with `server.connected`. `GET /permission`, `/question`,
-//! `/session/status` and `/session/:id/message` answer from the stub's state, as 1.18.18 does.
-//!
-//! As in 1.18.18, a question's reply and reject resolve under `?directory=` (the server's own
-//! cwd when absent) and answer 404 unless that is the asking session's directory.
+//! `$XDG_DATA_HOME/opencode-stub/control.json` shapes each run: `start` and `reply` delay, in ms,
+//! the delivery of a message and its reply; `abortDelay` delays a stop's handling. `"ask": true`
+//! asks permission for bash before each reply, and `"question": true` a form before that;
+//! `"aside": true` follows each ask with a text. `"child": true` asks from a subagent's session,
+//! announced with `session.created` naming its parent, and answered only under that session.
+//! `"fail": "<message>"` fails each run before any reply. `"lateAsk": true` asks for permission
+//! as a stop lands; the stop drops the ask with no reply event, as 2.4.1 does. `"cut": "<event
+//! type>"` closes every event stream in place of the next event of that type; the events sent
+//! before the driver reconnects are lost, and each new stream starts with `server.connected`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+const VERSION: &str = "2.4.1";
 const MODELS: [&str; 2] = ["stub-free", "stub-other-free"];
 const KEYED_MODEL: &str = "stub-keyed";
 
@@ -42,38 +34,39 @@ struct Request {
     method: String,
     path: String,
     query: String,
+    authorized: bool,
     body: Value,
 }
 
-struct Running {
-    user: String,
-    assistant: String,
-    created: u64,
-    aborted: AtomicBool,
+/// An ask a run waits on: `Some(true)` allowed or answered, `Some(false)` refused.
+struct Ask {
+    owner: String,
+    answer: Sender<bool>,
+    request: Value,
+    form: bool,
 }
 
-struct Ask {
-    directory: Option<String>,
-    answer: Sender<bool>,
-    question: bool,
-    request: Value,
+#[derive(Default)]
+struct Live {
+    inbox: VecDeque<(String, String)>,
+    running: bool,
+    stop: Arc<AtomicBool>,
 }
 
 struct Stub {
     root: PathBuf,
-    keyed: Vec<String>,
     subscribers: Mutex<Vec<TcpStream>>,
-    running: Mutex<HashMap<String, Arc<Running>>>,
+    live: Mutex<HashMap<String, Live>>,
+    ended: Condvar,
     asks: Mutex<HashMap<String, Ask>>,
-    last_id: Mutex<u64>,
-    messages: Mutex<HashMap<String, Vec<Value>>>,
     cut: Mutex<Option<String>>,
+    ids: AtomicU64,
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version") {
-        println!("1.18.32");
+        println!("opencode v{VERSION}");
         return;
     }
     let port: u16 = args
@@ -82,357 +75,525 @@ fn main() {
         .and_then(|pair| pair[1].parse().ok())
         .expect("--port");
     let data = std::env::var_os("XDG_DATA_HOME").expect("XDG_DATA_HOME");
+    let password = std::env::var("OPENCODE_SERVER_PASSWORD").expect("a server password");
     let root = PathBuf::from(data).join("opencode-stub");
-    let keyed = std::env::var("OPENCODE_AUTH_CONTENT")
-        .ok()
-        .and_then(|auth| serde_json::from_str::<serde_json::Map<String, Value>>(&auth).ok())
-        .map(|auth| auth.keys().cloned().collect())
-        .unwrap_or_default();
     std::fs::create_dir_all(root.join("sessions")).expect("create the session store");
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind the port");
     let stub = Arc::new(Stub {
         root,
-        keyed,
         subscribers: Mutex::new(Vec::new()),
-        running: Mutex::new(HashMap::new()),
+        live: Mutex::new(HashMap::new()),
+        ended: Condvar::new(),
         asks: Mutex::new(HashMap::new()),
-        last_id: Mutex::new(0),
-        messages: Mutex::new(HashMap::new()),
         cut: Mutex::new(None),
+        ids: AtomicU64::new(0),
     });
+    let auth = format!("Basic {}", base64(&format!("opencode:{password}")));
     for stream in listener.incoming().flatten() {
-        let stub = stub.clone();
-        std::thread::spawn(move || stub.serve(stream));
+        let (stub, auth) = (stub.clone(), auth.clone());
+        std::thread::spawn(move || {
+            if let Some(request) = read_request(&stream, &auth) {
+                stub.serve(stream, request);
+            }
+        });
     }
 }
 
 impl Stub {
-    fn serve(self: Arc<Self>, mut stream: TcpStream) {
-        let Some(request) = read_request(&stream) else {
-            return;
-        };
-        let segments: Vec<&str> = request.path.trim_matches('/').split('/').collect();
+    fn serve(self: Arc<Self>, mut stream: TcpStream, request: Request) {
+        if !request.authorized {
+            return respond(stream, 401, &json!({ "_tag": "UnauthorizedError" }));
+        }
+        let path = request.path.strip_prefix("/api").unwrap_or("");
+        let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
         match (request.method.as_str(), segments.as_slice()) {
-            ("GET", ["global", "health"]) => respond(
+            ("GET", ["info"]) => respond(
                 stream,
                 200,
-                &json!({ "healthy": true, "version": "1.18.32" }),
+                &json!({ "version": VERSION, "pid": std::process::id(), "urls": [], "paths": { "tmp": "/tmp" } }),
             ),
-            ("GET", ["global", "event"]) => {
+            ("GET", ["event"]) => {
                 let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-                let connected = "data: {\"type\":\"server.connected\",\"properties\":{}}\n\n";
+                let connected = "data: {\"type\":\"server.connected\",\"data\":{}}\n\n";
                 if stream.write_all(head.as_bytes()).is_ok()
                     && stream.write_all(connected.as_bytes()).is_ok()
                 {
                     self.subscribers.lock().unwrap().push(stream);
                 }
             }
-            ("GET", ["permission" | "question"]) => {
-                let question = segments[0] == "question";
-                let asks = self.asks.lock().unwrap();
-                let pending: Vec<&Value> = asks
-                    .values()
-                    .filter(|ask| ask.question == question)
-                    .map(|ask| &ask.request)
-                    .collect();
-                respond(stream, 200, &json!(pending))
-            }
-            ("GET", ["session", "status"]) => {
-                let busy: serde_json::Map<String, Value> = self
-                    .running
-                    .lock()
-                    .unwrap()
-                    .keys()
-                    .map(|id| (id.clone(), json!({ "type": "busy" })))
-                    .collect();
-                respond(stream, 200, &Value::Object(busy))
-            }
-            ("GET", ["session", id, "message"]) => {
-                let all = self.messages.lock().unwrap().get(*id).cloned();
-                let all = all.unwrap_or_default();
-                let limit = param(&request.query, "limit").and_then(|n| n.parse().ok());
-                let skip = all.len().saturating_sub(limit.unwrap_or(all.len()));
-                respond(stream, 200, &json!(all[skip..]))
-            }
-            ("GET", ["config", "providers"]) => {
-                let listed = |ids: &[&str]| -> serde_json::Map<String, Value> {
-                    ids.iter()
-                        .map(|id| {
-                            let model =
-                                json!({ "id": id, "name": id, "limit": { "context": 200000 } });
-                            (id.to_string(), model)
-                        })
-                        .collect()
-                };
-                let mut providers = vec![json!({ "id": "opencode", "models": listed(&MODELS) })];
-                for provider in &self.keyed {
-                    providers.push(json!({ "id": provider, "models": listed(&[KEYED_MODEL]) }));
+            ("GET", ["model"]) => {
+                let model = |provider: &str, id: &str| json!({ "id": id, "providerID": provider, "name": id, "limit": { "context": 200000, "output": 8192 } });
+                let mut models: Vec<Value> =
+                    MODELS.iter().map(|id| model("opencode", id)).collect();
+                for provider in self.keyed() {
+                    models.push(model(&provider, KEYED_MODEL));
                 }
-                respond(
-                    stream,
-                    200,
-                    &json!({ "providers": providers, "default": {} }),
-                )
+                respond(stream, 200, &json!({ "data": models }))
             }
-            ("GET", ["command"]) => respond(stream, 200, &json!([])),
+            ("GET", ["command" | "skill"]) => respond(stream, 200, &json!({ "data": [] })),
+            ("GET", ["credential"]) => respond(stream, 200, &json!({ "data": self.credentials() })),
+            ("POST", ["credential"]) => {
+                let mut all = self.credentials();
+                let id = format!("crd_{}", self.next());
+                let entry = json!({
+                    "id": id, "integrationID": request.body["integrationID"],
+                    "label": request.body["label"], "active": true, "value": request.body["value"],
+                });
+                all.push(entry.clone());
+                self.save_credentials(&all);
+                respond(stream, 200, &json!({ "data": entry }))
+            }
+            ("DELETE", ["credential", id]) => {
+                let mut all = self.credentials();
+                all.retain(|c| c["id"] != *id);
+                self.save_credentials(&all);
+                respond_empty(stream)
+            }
             ("POST", ["session"]) => {
-                let id = format!("ses_stub{}", nanos());
-                self.save(&id, &[]);
-                let directory = param(&request.query, "directory").unwrap_or_default();
-                std::fs::write(self.directory_file(&id), directory).expect("save a directory");
-                respond(stream, 200, &json!({ "id": id }))
+                let id = format!("ses_stub{}", self.next());
+                let model = request.body.pointer("/model/id").and_then(Value::as_str);
+                let provider = request
+                    .body
+                    .pointer("/model/providerID")
+                    .and_then(Value::as_str);
+                let session = json!({
+                    "model": model.map(|m| json!({ "id": m, "providerID": provider })),
+                    "directory": request.body.pointer("/location/directory"),
+                    "prompts": [], "messages": [],
+                });
+                self.save(&id, &session);
+                respond(stream, 200, &json!({ "data": { "id": id } }))
+            }
+            ("GET", ["session", "active"]) => {
+                let live = self.live.lock().unwrap();
+                let active: serde_json::Map<String, Value> = live
+                    .iter()
+                    .filter(|(_, l)| l.running)
+                    .map(|(id, _)| (id.clone(), json!({ "type": "running" })))
+                    .collect();
+                respond(stream, 200, &json!({ "data": active }))
             }
             ("GET", ["session", id]) => match self.load(id) {
-                Some(_) => respond(stream, 200, &json!({ "id": id })),
+                Some(_) => respond(stream, 200, &json!({ "data": { "id": id } })),
                 None => not_found(stream, id),
             },
             ("DELETE", ["session", id]) => {
                 let _ = std::fs::remove_file(self.file(id));
-                respond(stream, 200, &json!(true))
+                respond_empty(stream)
             }
-            ("POST", ["session", id, "prompt_async"]) => {
-                let Some(mut prompts) = self.load(id) else {
+            ("POST", ["session", id, "model"]) => {
+                let Some(mut session) = self.load(id) else {
                     return not_found(stream, id);
                 };
-                let body = &request.body;
-                let text = body.pointer("/parts/0/text").and_then(Value::as_str);
-                let model = body.pointer("/model/modelID").and_then(Value::as_str);
-                let reply = format!(
-                    "model={} earlier=[{}]",
-                    model.unwrap_or("default"),
-                    prompts.join(" | ")
-                );
-                prompts.push(text.unwrap_or_default().to_string());
-                self.save(id, &prompts);
-                let mut control = self.delays();
-                if let Some(unknown) = self.unknown_model(body) {
-                    control.fail = Some(format!("Model not found: {unknown}"));
+                session["model"] = request.body["model"].clone();
+                self.save(id, &session);
+                respond_empty(stream)
+            }
+            ("GET", ["session", id, "message"]) => {
+                let Some(session) = self.load(id) else {
+                    return not_found(stream, id);
+                };
+                let mut messages = session["messages"].as_array().cloned().unwrap_or_default();
+                if param(&request.query, "order") == Some("desc") {
+                    messages.reverse();
                 }
-                let user = match body.get("messageID").and_then(Value::as_str) {
-                    Some(user) if !control.own_ids && !control.bare => user.to_string(),
-                    _ => self.new_id(control.bare),
+                let limit = param(&request.query, "limit").and_then(|n| n.parse().ok());
+                messages.truncate(limit.unwrap_or(messages.len()));
+                respond(stream, 200, &json!({ "data": messages, "cursor": {} }))
+            }
+            ("POST", ["session", id, "prompt"]) => {
+                if self.load(id).is_none() {
+                    return not_found(stream, id);
+                }
+                let message = request.body["id"].as_str().unwrap_or_default().to_string();
+                let text = request.body["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let entry = json!({ "id": message, "sessionID": id, "type": "user",
+                    "payload": { "text": text }, "delivery": "steer" });
+                respond(stream, 200, &json!({ "data": entry }));
+                self.emit(
+                    "session.inbox.enqueued",
+                    json!({ "sessionID": id, "inboxID": message,
+                    "item": { "type": "user", "payload": { "text": text }, "delivery": "steer" } }),
+                );
+                self.admit(id, message, text);
+            }
+            ("GET", ["session", id, "inbox"]) => {
+                let live = self.live.lock().unwrap();
+                let inbox: Vec<Value> = live
+                    .get(*id)
+                    .map(|l| {
+                        l.inbox
+                            .iter()
+                            .map(|(m, _)| json!({ "id": m, "type": "user" }))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                respond(stream, 200, &json!({ "data": inbox }))
+            }
+            ("DELETE", ["session", id, "inbox", message]) => {
+                let removed = {
+                    let mut live = self.live.lock().unwrap();
+                    let inbox = &mut live.entry(id.to_string()).or_default().inbox;
+                    let before = inbox.len();
+                    inbox.retain(|(m, _)| m != message);
+                    before != inbox.len()
                 };
                 respond_empty(stream);
-                self.turn(id, user, &reply, control);
-            }
-            ("POST", ["session", _, "permissions", ask]) => {
-                let allowed = request.body["response"] != "reject";
-                self.answer(stream, ask, allowed);
-            }
-            ("POST", ["question", ask, verb]) => {
-                let directory = param(&request.query, "directory");
-                if !self.asked_in(ask, directory) {
-                    let message = format!("Question request not found: {ask}");
-                    let body = json!({ "_tag": "QuestionNotFoundError", "requestID": ask, "message": message });
-                    return respond(stream, 404, &body);
+                if removed {
+                    self.emit(
+                        "session.inbox.cancelled",
+                        json!({ "sessionID": id, "inboxID": message }),
+                    );
                 }
-                self.answer(stream, ask, *verb == "reply")
             }
-            ("POST", ["session", id, "abort"]) => self.abort(stream, id),
-            _ => respond(stream, 404, &json!({ "name": "NotFoundError" })),
+            ("PATCH", ["session", id, "inbox", _]) => {
+                respond_empty(stream);
+                self.wake(id);
+            }
+            ("POST", ["session", id, "interrupt"]) => self.interrupt(stream, id),
+            ("GET", ["session", id, kind @ ("permission" | "form")]) => {
+                let form = *kind == "form";
+                let asks = self.asks.lock().unwrap();
+                let open: Vec<&Value> = asks
+                    .values()
+                    .filter(|ask| ask.form == form && ask.owner == *id)
+                    .map(|ask| &ask.request)
+                    .collect();
+                respond(stream, 200, &json!({ "data": open }))
+            }
+            ("POST", ["session", owner, "permission", ask, "reply"]) => {
+                let allowed = request.body["decision"] != "reject";
+                self.answer(
+                    stream,
+                    owner,
+                    ask,
+                    allowed,
+                    "permission.replied",
+                    json!({
+                        "sessionID": owner, "requestID": ask, "reply": request.body["decision"],
+                    }),
+                );
+            }
+            ("POST", ["session", owner, "form", ask, "reply"]) => {
+                self.answer(
+                    stream,
+                    owner,
+                    ask,
+                    true,
+                    "form.replied",
+                    json!({
+                        "sessionID": owner, "id": ask, "answer": request.body["answer"],
+                    }),
+                );
+            }
+            ("DELETE", ["session", owner, "form", ask]) => {
+                self.answer(
+                    stream,
+                    owner,
+                    ask,
+                    false,
+                    "form.cancelled",
+                    json!({ "sessionID": owner, "id": ask }),
+                );
+            }
+            _ => respond(stream, 404, &json!({ "_tag": "NotFoundError" })),
         }
     }
 
-    fn turn(&self, id: &str, user: String, reply: &str, delays: Delays) {
+    /// Admitted into an idle session, a message starts its run at once.
+    fn admit(self: &Arc<Self>, id: &str, message: String, text: String) {
+        let start = {
+            let mut live = self.live.lock().unwrap();
+            let session = live.entry(id.to_string()).or_default();
+            session.inbox.push_back((message, text));
+            !std::mem::replace(&mut session.running, true)
+        };
+        if start {
+            self.start(id);
+        }
+    }
+
+    fn wake(self: &Arc<Self>, id: &str) {
+        let start = {
+            let mut live = self.live.lock().unwrap();
+            let session = live.entry(id.to_string()).or_default();
+            !session.inbox.is_empty() && !std::mem::replace(&mut session.running, true)
+        };
+        if start {
+            self.start(id);
+        }
+    }
+
+    fn start(self: &Arc<Self>, id: &str) {
+        let stop = Arc::new(AtomicBool::new(false));
+        self.live.lock().unwrap().get_mut(id).unwrap().stop = stop.clone();
+        self.emit("session.execution.started", json!({ "sessionID": id }));
+        let (stub, id) = (self.clone(), id.to_string());
+        std::thread::spawn(move || stub.run(&id, &stop));
+    }
+
+    /// Reads the inbox until it is empty, answering each message, then ends.
+    fn run(&self, id: &str, stop: &AtomicBool) {
         let deadline = Instant::now() + Duration::from_secs(5);
         while self.subscribers.lock().unwrap().is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
-        self.cut.lock().unwrap().clone_from(&delays.cut);
-        sleep(delays.start);
-        let created = (!delays.bare).then(|| nanos() / 1_000_000);
-        let running = Arc::new(Running {
-            assistant: self.new_id(delays.bare),
-            user,
-            created: (nanos() / 1_000_000) as u64,
-            aborted: AtomicBool::new(false),
-        });
-        let (user, assistant) = (&running.user, &running.assistant);
-        self.running
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), running.clone());
-        self.emit("message.updated", user_info(id, user, created));
-        if let Some(message) = &delays.fail {
-            // As 1.18.32 fails an unknown model: no reply, and the error again after the idle.
-            self.running.lock().unwrap().remove(id);
-            let error = json!({ "name": "UnknownError", "data": { "message": message } });
-            self.emit("session.error", json!({ "sessionID": id, "error": error }));
-            self.emit("session.idle", json!({ "sessionID": id }));
-            self.emit("session.error", json!({ "sessionID": id, "error": error }));
-            return;
+        let control = self.control();
+        self.cut.lock().unwrap().clone_from(&control.cut);
+        loop {
+            if !pause(control.start, stop) {
+                return self.stopped(id, stop);
+            }
+            let next = self
+                .live
+                .lock()
+                .unwrap()
+                .get_mut(id)
+                .and_then(|l| l.inbox.pop_front());
+            let Some((message, text)) = next else {
+                break;
+            };
+            let Some(mut session) = self.load(id) else {
+                break;
+            };
+            self.emit(
+                "session.inbox.delivered",
+                json!({ "sessionID": id, "inboxID": message }),
+            );
+            let model = session["model"].clone();
+            let prompts: Vec<String> =
+                serde_json::from_value(session["prompts"].clone()).unwrap_or_default();
+            let reply = format!(
+                "model={} earlier=[{}]",
+                model["id"].as_str().unwrap_or("default"),
+                prompts.join(" | ")
+            );
+            let mut all = prompts;
+            all.push(text.clone());
+            session["prompts"] = json!(all);
+            push(
+                &mut session,
+                json!({ "id": message, "type": "user", "text": text, "time": { "created": now() } }),
+            );
+            self.save(id, &session);
+            let failure = control.fail.clone().or_else(|| self.unknown_model(&model));
+            if let Some(failure) = failure {
+                let error = json!({ "type": "provider.unknown", "message": failure });
+                self.end(id, "failed", json!({ "sessionID": id, "error": error }));
+                return;
+            }
+            let assistant = format!("msg_stub{}", self.next());
+            self.emit(
+                "session.step.started",
+                json!({ "sessionID": id, "assistantMessageID": assistant,
+                "agent": "build", "model": model, "started": now() }),
+            );
+            for (on, form) in [(control.question, true), (control.ask, false)] {
+                match on.then(|| self.asked(id, &assistant, form, &control, stop)) {
+                    Some(Asked::Stopped) => return self.stopped(id, stop),
+                    Some(Asked::Refused) => {
+                        return self.end(
+                            id,
+                            "interrupted",
+                            json!({ "sessionID": id, "reason": "shutdown" }),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            if !pause(control.reply, stop) {
+                return self.stopped(id, stop);
+            }
+            let content = json!([{ "type": "text", "text": reply }]);
+            self.emit("session.text.delta", json!({ "sessionID": id, "assistantMessageID": assistant, "ordinal": 0, "delta": reply }));
+            self.emit("session.text.ended", json!({ "sessionID": id, "assistantMessageID": assistant, "ordinal": 0, "text": reply }));
+            self.emit("session.step.ended", json!({ "sessionID": id, "assistantMessageID": assistant, "finish": "stop",
+                "cost": 0.0, "tokens": { "input": 10, "output": 5, "reasoning": 0, "cache": { "read": 0, "write": 0 } } }));
+            if let Some(mut session) = self.load(id) {
+                push(
+                    &mut session,
+                    json!({ "id": assistant, "type": "assistant", "agent": "build", "content": content, "time": { "created": now() } }),
+                );
+                self.save(id, &session);
+            }
         }
-        self.emit(
-            "message.updated",
-            assistant_info(id, assistant, user, settled(&running, None)),
-        );
-        let mut allowed = Some(true);
-        if delays.question {
-            allowed = self.asked(id, assistant, true, &delays);
-        }
-        if delays.ask && allowed == Some(true) {
-            allowed = self.asked(id, assistant, false, &delays);
-        }
-        // An abort cancels the ask; the abort ends the turn.
-        let Some(allowed) = allowed else { return };
-        if !allowed {
-            // 1.18.32 ends a denied turn on its tool-calls step, with no error.
-            self.running.lock().unwrap().remove(id);
-            let step = settled(&running, Some(json!({ "finish": "tool-calls" })));
-            self.emit("message.updated", assistant_info(id, assistant, user, step));
-            self.emit("session.idle", json!({ "sessionID": id }));
-            return;
-        }
-        sleep(delays.reply);
-        if running.aborted.load(Ordering::SeqCst) {
-            return;
-        }
-        self.running.lock().unwrap().remove(id);
-        self.emit(
-            "message.part.updated",
-            json!({ "sessionID": id, "part": {
-                "id": format!("prt_{}", nanos()), "sessionID": id, "messageID": assistant,
-                "type": "text", "text": reply, "time": { "start": 1, "end": 2 },
-            } }),
-        );
-        let finished = settled(&running, Some(json!({ "finish": "stop" })));
-        self.emit(
-            "message.updated",
-            assistant_info(id, assistant, user, finished),
-        );
-        self.emit("session.idle", json!({ "sessionID": id }));
-        sleep(delays.echo);
-        self.emit("message.updated", user_info(id, user, created));
+        self.end(id, "succeeded", json!({ "sessionID": id }));
     }
 
-    /// `None` when an abort cancelled it, which OpenCode reports with no reply event.
+    /// Whether the run goes on: a refusal or a stop ends it.
     fn asked(
         &self,
         session: &str,
         assistant: &str,
-        question: bool,
-        delays: &Delays,
-    ) -> Option<bool> {
-        let ask = format!("{}_{}", if question { "que" } else { "per" }, nanos());
-        let asker = if delays.child {
-            let child = format!("ses_stubchild{}", nanos());
+        form: bool,
+        control: &Control,
+        stop: &AtomicBool,
+    ) -> Asked {
+        let ask = format!("{}_{}", if form { "frm" } else { "per" }, self.next());
+        let owner = if control.child {
+            let child = format!("ses_stubchild{}", self.next());
             self.emit(
                 "session.created",
-                json!({ "sessionID": child, "info": { "id": child, "parentID": session } }),
+                json!({ "sessionID": child, "parentID": session }),
             );
             child
         } else {
             session.to_string()
         };
         let (answer, answered) = channel();
-        let directory = question
-            .then(|| std::fs::read_to_string(self.directory_file(session)).unwrap_or_default());
-        let request = if question {
-            let questions = json!([{ "question": "Proceed?", "header": "Stub",
-                "options": [{ "label": "Yes", "description": "" }] }]);
-            json!({ "id": ask, "sessionID": asker, "questions": questions })
+        let request = if form {
+            json!({ "id": ask, "sessionID": owner, "title": "Questions", "fields": [{
+                "key": "q0", "title": "Stub", "description": "Proceed?", "type": "string",
+                "options": [{ "value": "yes", "label": "Yes" }],
+            }] })
         } else {
-            json!({ "id": ask, "sessionID": asker, "permission": "bash",
-                    "patterns": ["echo stub"], "metadata": {}, "always": [] })
+            json!({ "id": ask, "sessionID": owner, "action": "bash", "resources": ["echo stub"],
+                    "source": { "type": "tool", "messageID": assistant, "id": format!("call_{ask}") } })
         };
+        let asked = request.clone();
         self.asks.lock().unwrap().insert(
             ask.clone(),
             Ask {
-                directory,
+                owner,
                 answer,
-                question,
-                request: request.clone(),
+                request,
+                form,
             },
         );
-        let kind = if question {
-            "question.asked"
+        if form {
+            self.emit("form.created", json!({ "form": asked }));
         } else {
-            "permission.asked"
-        };
-        self.emit(kind, request);
-        if delays.aside {
+            self.emit("permission.asked", asked);
+        }
+        if control.aside {
             self.emit(
-                "message.part.updated",
-                json!({ "sessionID": session, "part": {
-                    "id": format!("prt_{}", nanos()), "sessionID": session, "messageID": assistant,
-                    "type": "text", "text": format!("waiting on {ask}"), "time": { "start": 1, "end": 2 },
-                } }),
+                "session.text.ended",
+                json!({ "sessionID": session, "assistantMessageID": assistant,
+                "ordinal": self.next(), "text": format!("waiting on {ask}") }),
             );
         }
-        let allowed = match answered.recv_timeout(Duration::from_secs(30)) {
-            Ok(allowed) => allowed,
-            Err(RecvTimeoutError::Disconnected) => return None,
-            Err(RecvTimeoutError::Timeout) => false,
-        };
-        let replied = match (question, allowed) {
-            (true, true) => "question.replied",
-            (true, false) => "question.rejected",
-            (false, _) => "permission.replied",
-        };
-        self.emit(replied, json!({ "sessionID": asker, "requestID": ask }));
-        Some(allowed)
-    }
-
-    fn answer(&self, stream: TcpStream, ask: &str, allowed: bool) {
-        let waiting = self.asks.lock().unwrap().remove(ask);
-        respond(stream, 200, &json!(true));
-        if let Some(waiting) = waiting {
-            let _ = waiting.answer.send(allowed);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            match answered.recv_timeout(Duration::from_millis(50)) {
+                Ok(true) => return Asked::Allowed,
+                // As 2.4.1: a refusal fails the tool and ends the run, interrupted.
+                Ok(false) => {
+                    self.emit("session.tool.failed", json!({ "sessionID": session, "assistantMessageID": assistant,
+                        "id": format!("call_{ask}"), "error": { "type": "aborted", "message": "The user declined this tool call" } }));
+                    return Asked::Refused;
+                }
+                Err(RecvTimeoutError::Disconnected) => return Asked::Stopped,
+                Err(RecvTimeoutError::Timeout) if stop.load(Ordering::SeqCst) => {
+                    self.asks.lock().unwrap().remove(&ask);
+                    return Asked::Stopped;
+                }
+                Err(RecvTimeoutError::Timeout) if Instant::now() > deadline => {
+                    return Asked::Stopped
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+            }
         }
     }
 
-    fn asked_in(&self, ask: &str, directory: Option<&str>) -> bool {
-        let asks = self.asks.lock().unwrap();
-        asks.get(ask)
-            .is_some_and(|waiting| waiting.directory.as_deref() == directory)
+    fn answer(
+        &self,
+        stream: TcpStream,
+        owner: &str,
+        ask: &str,
+        allowed: bool,
+        kind: &str,
+        event: Value,
+    ) {
+        let waiting = {
+            let mut asks = self.asks.lock().unwrap();
+            match asks.get(ask) {
+                Some(waiting) if waiting.owner == owner => asks.remove(ask),
+                _ => None,
+            }
+        };
+        let Some(waiting) = waiting else {
+            let body = json!({ "_tag": "NotFoundError", "message": format!("No pending request {ask} in {owner}") });
+            return respond(stream, 404, &body);
+        };
+        respond_empty(stream);
+        self.emit(kind, event);
+        let _ = waiting.answer.send(allowed);
     }
 
-    /// As 1.18.32: an idle session reports `session.idle`; a busy one an aborted error and an
-    /// idle, then its reply ends in that error and a second idle follows.
-    fn abort(&self, stream: TcpStream, id: &str) {
-        let delays = self.delays();
-        sleep(delays.abort_delay);
-        let running = self.running.lock().unwrap().remove(id);
-        if let Some(running) = &running {
-            running.aborted.store(true, Ordering::SeqCst);
-            self.asks.lock().unwrap().clear();
-        }
-        respond(stream, 200, &json!(true));
-        let Some(running) = running else {
-            sleep(delays.abort_idle);
-            return self.emit("session.idle", json!({ "sessionID": id }));
+    /// As 2.4.1: a running session's run stops, dropping its asks with no reply; an idle one's
+    /// stop is a no-op. Answered once the run has ended.
+    fn interrupt(&self, stream: TcpStream, id: &str) {
+        let control = self.control();
+        std::thread::sleep(control.abort_delay);
+        let stop = {
+            let live = self.live.lock().unwrap();
+            live.get(id).filter(|l| l.running).map(|l| l.stop.clone())
         };
-        if delays.late_ask {
+        let Some(stop) = stop else {
+            return respond(stream, 200, &json!({ "interrupted": false }));
+        };
+        if control.late_ask {
             self.emit(
                 "permission.asked",
-                json!({ "id": format!("per_{}", nanos()), "sessionID": id, "permission": "bash",
-                        "patterns": ["echo stub"], "metadata": {} }),
+                json!({ "id": format!("per_{}", self.next()), "sessionID": id,
+                "action": "bash", "resources": ["echo stub"] }),
             );
         }
-        let error = json!({ "name": "MessageAbortedError", "data": { "message": "Aborted" } });
-        self.emit("session.error", json!({ "sessionID": id, "error": error }));
-        self.emit("session.idle", json!({ "sessionID": id }));
-        sleep(delays.late);
-        let aborted = settled(&running, Some(json!({ "error": error })));
-        self.emit(
-            "message.updated",
-            assistant_info(id, &running.assistant, &running.user, aborted),
-        );
-        self.emit("session.idle", json!({ "sessionID": id }));
+        stop.store(true, Ordering::SeqCst);
+        let mut live = self.live.lock().unwrap();
+        while live.get(id).is_some_and(|l| l.running) {
+            live = self
+                .ended
+                .wait_timeout(live, Duration::from_secs(5))
+                .unwrap()
+                .0;
+        }
+        drop(live);
+        respond(stream, 200, &json!({ "interrupted": true }))
     }
 
-    fn emit(&self, kind: &str, mut properties: Value) {
-        self.record(kind, &properties);
-        let message = matches!(kind, "message.updated" | "message.part.updated");
-        if let Some(p) = properties
-            .as_object_mut()
-            .filter(|_| message && self.delays().nested)
-        {
-            p.remove("sessionID");
+    fn stopped(&self, id: &str, stop: &AtomicBool) {
+        if stop.load(Ordering::SeqCst) {
+            self.asks.lock().unwrap().retain(|_, ask| ask.owner != id);
+            self.end(
+                id,
+                "interrupted",
+                json!({ "sessionID": id, "reason": "user" }),
+            );
+        } else {
+            self.end(
+                id,
+                "failed",
+                json!({ "sessionID": id, "error": { "type": "timeout", "message": "no answer" } }),
+            );
         }
+    }
+
+    fn end(&self, id: &str, outcome: &str, event: Value) {
+        if let Some(mut session) = self.load(id) {
+            push(
+                &mut session,
+                json!({ "id": format!("msg_stub{}", self.next()), "type": "idle", "outcome": outcome, "time": { "created": now() } }),
+            );
+            self.save(id, &session);
+        }
+        {
+            let mut live = self.live.lock().unwrap();
+            if let Some(l) = live.get_mut(id) {
+                l.running = false;
+            }
+        }
+        self.emit(&format!("session.execution.{outcome}"), event);
+        self.ended.notify_all();
+    }
+
+    fn emit(&self, kind: &str, data: Value) {
         let record = format!(
             "data: {}\n\n",
-            json!({ "type": kind, "properties": properties })
+            json!({ "id": format!("evt_{}", self.next()), "type": kind, "data": data })
         );
         let mut subscribers = self.subscribers.lock().unwrap();
         let mut cut = self.cut.lock().unwrap();
@@ -446,173 +607,141 @@ impl Stub {
         subscribers.retain_mut(|s| s.write_all(record.as_bytes()).is_ok());
     }
 
-    fn record(&self, kind: &str, properties: &Value) {
-        let (info, part) = match kind {
-            "message.updated" => (properties.get("info"), None),
-            "message.part.updated" => (None, properties.get("part")),
-            _ => return,
-        };
-        let field = |v: Option<&Value>, key: &str| {
-            v.and_then(|v| v.get(key))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        };
-        let Some(session) = field(info.or(part), "sessionID") else {
-            return;
-        };
-        let Some(message) = field(info, "id").or_else(|| field(part, "messageID")) else {
-            return;
-        };
-        let mut all = self.messages.lock().unwrap();
-        let messages = all.entry(session).or_default();
-        let at = match messages.iter().position(|m| m["info"]["id"] == message) {
-            Some(at) => at,
-            None => {
-                messages.push(json!({ "info": { "id": message }, "parts": [] }));
-                messages.len() - 1
-            }
-        };
-        let entry = &mut messages[at];
-        if let Some(info) = info {
-            entry["info"] = info.clone();
-        }
-        if let (Some(part), Some(parts)) = (part, entry["parts"].as_array_mut()) {
-            match parts.iter_mut().find(|p| p["id"] == part["id"]) {
-                Some(known) => *known = part.clone(),
-                None => parts.push(part.clone()),
-            }
-        }
+    fn next(&self) -> u64 {
+        let n = self.ids.fetch_add(1, Ordering::SeqCst);
+        (now() * 1000) + n
     }
 
-    /// 1.18.32's ascending id: the low 48 bits of `ms * 0x1000 + counter`, counter from 1.
-    fn message_id(&self) -> String {
-        let ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock after 1970")
-            .as_millis() as u64;
-        let mut last = self.last_id.lock().unwrap();
-        *last = (ms * 0x1000 + 1).max(*last + 1);
-        format!("msg_{:012x}stubstubstubst", *last & 0xffff_ffff_ffff)
+    fn keyed(&self) -> Vec<String> {
+        self.credentials()
+            .iter()
+            .filter_map(|c| c["integrationID"].as_str().map(str::to_string))
+            .collect()
     }
 
-    /// Ids from a version whose scheme sorts below the driver's, in place of 1.18.32's.
-    fn new_id(&self, bare: bool) -> String {
-        if !bare {
-            return self.message_id();
-        }
-        let mut last = self.last_id.lock().unwrap();
-        *last += 1;
-        format!("msg_0{:025}", *last)
-    }
-
-    fn unknown_model(&self, body: &Value) -> Option<String> {
-        let provider = body.pointer("/model/providerID")?.as_str()?;
-        let model = body.pointer("/model/modelID")?.as_str()?;
+    fn unknown_model(&self, model: &Value) -> Option<String> {
+        let provider = model.get("providerID")?.as_str()?;
+        let id = model.get("id")?.as_str()?;
         let served = match provider {
-            "opencode" => MODELS.contains(&model),
-            _ => self.keyed.iter().any(|p| p == provider) && model == KEYED_MODEL,
+            "opencode" => MODELS.contains(&id),
+            _ => self.keyed().iter().any(|p| p == provider) && id == KEYED_MODEL,
         };
-        (!served).then(|| format!("{provider}/{model}"))
+        (!served).then(|| format!("Model not found: {provider}/{id}"))
     }
 
-    fn delays(&self) -> Delays {
+    fn control(&self) -> Control {
         let control: Value = std::fs::read(self.root.join("control.json"))
             .ok()
             .and_then(|raw| serde_json::from_slice(&raw).ok())
             .unwrap_or(Value::Null);
         let ms = |key: &str| Duration::from_millis(control[key].as_u64().unwrap_or(0));
-        Delays {
+        let on = |key: &str| control[key].as_bool().unwrap_or(false);
+        Control {
             start: ms("start"),
             reply: ms("reply"),
-            echo: ms("echo"),
-            abort_idle: ms("abortIdle"),
             abort_delay: ms("abortDelay"),
-            late: ms("late"),
-            ask: control["ask"].as_bool().unwrap_or(false),
-            question: control["question"].as_bool().unwrap_or(false),
-            aside: control["aside"].as_bool().unwrap_or(false),
-            child: control["child"].as_bool().unwrap_or(false),
-            own_ids: control["ownIds"].as_bool().unwrap_or(false),
-            bare: control["bare"].as_bool().unwrap_or(false),
-            nested: control["nested"].as_bool().unwrap_or(false),
+            ask: on("ask"),
+            question: on("question"),
+            aside: on("aside"),
+            child: on("child"),
+            late_ask: on("lateAsk"),
             fail: control["fail"].as_str().map(str::to_string),
-            late_ask: control["lateAsk"].as_bool().unwrap_or(false),
             cut: control["cut"].as_str().map(str::to_string),
         }
+    }
+
+    fn credentials(&self) -> Vec<Value> {
+        std::fs::read(self.root.join("credentials.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_slice(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_credentials(&self, all: &[Value]) {
+        std::fs::write(self.root.join("credentials.json"), json!(all).to_string())
+            .expect("save credentials");
     }
 
     fn file(&self, id: &str) -> PathBuf {
         self.root.join("sessions").join(format!("{id}.json"))
     }
 
-    /// The session's `?directory=` as its create sent it, still encoded.
-    fn directory_file(&self, id: &str) -> PathBuf {
-        self.root.join("sessions").join(format!("{id}.directory"))
-    }
-
-    fn load(&self, id: &str) -> Option<Vec<String>> {
+    fn load(&self, id: &str) -> Option<Value> {
         serde_json::from_slice(&std::fs::read(self.file(id)).ok()?).ok()
     }
 
-    fn save(&self, id: &str, prompts: &[String]) {
-        std::fs::write(self.file(id), json!(prompts).to_string()).expect("save a session");
+    fn save(&self, id: &str, session: &Value) {
+        std::fs::write(self.file(id), session.to_string()).expect("save a session");
     }
 }
 
-struct Delays {
+enum Asked {
+    Allowed,
+    Refused,
+    Stopped,
+}
+
+struct Control {
     start: Duration,
     reply: Duration,
-    echo: Duration,
-    abort_idle: Duration,
     abort_delay: Duration,
-    late: Duration,
     ask: bool,
     question: bool,
     aside: bool,
     child: bool,
-    own_ids: bool,
-    bare: bool,
-    nested: bool,
-    fail: Option<String>,
     late_ask: bool,
+    fail: Option<String>,
     cut: Option<String>,
 }
 
-fn user_info(session: &str, id: &str, created: Option<u128>) -> Value {
-    let mut info = json!({ "id": id, "sessionID": session, "role": "user" });
-    if let Some(created) = created {
-        info["time"] = json!({ "created": created as u64 });
-    }
-    json!({ "sessionID": session, "info": info })
-}
-
-fn settled(running: &Running, end: Option<Value>) -> Value {
-    let mut time = json!({ "created": running.created });
-    let Some(mut end) = end else {
-        return json!({ "time": time });
-    };
-    time["completed"] = json!((nanos() / 1_000_000) as u64);
-    end["time"] = time;
-    end
-}
-
-fn assistant_info(session: &str, id: &str, parent: &str, extra: Value) -> Value {
-    let mut info = json!({
-        "id": id, "sessionID": session, "role": "assistant", "agent": "build", "parentID": parent,
-    });
-    if let (Some(info), Value::Object(extra)) = (info.as_object_mut(), extra) {
-        info.extend(extra);
-    }
-    json!({ "sessionID": session, "info": info })
-}
-
-fn sleep(delay: Duration) {
-    if !delay.is_zero() {
-        std::thread::sleep(delay);
+fn push(session: &mut Value, message: Value) {
+    if let Some(messages) = session["messages"].as_array_mut() {
+        messages.push(message);
     }
 }
 
-fn read_request(stream: &TcpStream) -> Option<Request> {
+/// Sleeps unless the run is stopped first; false once stopped.
+fn pause(delay: Duration, stop: &AtomicBool) -> bool {
+    let until = Instant::now() + delay;
+    while Instant::now() < until {
+        if stop.load(Ordering::SeqCst) {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    !stop.load(Ordering::SeqCst)
+}
+
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after 1970")
+        .as_millis() as u64
+}
+
+fn base64(raw: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = raw.as_bytes();
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn read_request(stream: &TcpStream, auth: &str) -> Option<Request> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).ok()?;
@@ -622,6 +751,7 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let (path, query) = (path.to_string(), query.to_string());
     let mut length = 0;
+    let mut authorized = false;
     loop {
         let mut header = String::new();
         reader.read_line(&mut header).ok()?;
@@ -633,6 +763,9 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
             if name.eq_ignore_ascii_case("content-length") {
                 length = value.trim().parse().unwrap_or(0);
             }
+            if name.eq_ignore_ascii_case("authorization") && value.trim() == auth {
+                authorized = true;
+            }
         }
     }
     let mut body = vec![0; length];
@@ -641,6 +774,7 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
         method,
         path,
         query,
+        authorized,
         body: serde_json::from_slice(&body).unwrap_or(Value::Null),
     })
 }
@@ -653,10 +787,14 @@ fn param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 
 fn respond(mut stream: TcpStream, status: u16, body: &Value) {
     let body = body.to_string();
+    let reason = match status {
+        200 => "OK",
+        401 => "Unauthorized",
+        _ => "Not Found",
+    };
     let _ = write!(
         stream,
-        "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        if status == 200 { "OK" } else { "Not Found" },
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
 }
@@ -666,13 +804,6 @@ fn respond_empty(mut stream: TcpStream) {
 }
 
 fn not_found(stream: TcpStream, id: &str) {
-    let body = json!({ "name": "NotFoundError", "data": { "message": format!("Session not found: {id}") } });
+    let body = json!({ "_tag": "SessionNotFoundError", "sessionID": id, "message": format!("Session not found: {id}") });
     respond(stream, 404, &body)
-}
-
-fn nanos() -> u128 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock after 1970")
-        .as_nanos()
 }
