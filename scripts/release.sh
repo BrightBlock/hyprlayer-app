@@ -91,7 +91,8 @@ fi
 SERVER_VERSION="$(sed -nE 's/^version = "(.*)"$/\1/p' crates/hyprlayer-server/Cargo.toml)"
 [[ -n "$SERVER_VERSION" ]] || { echo "✗ no version line in crates/hyprlayer-server/Cargo.toml"; exit 1; }
 SERVER_TAG="server-v$SERVER_VERSION"
-SERVER_PATHS=(crates/hyprlayer-server crates/hyprlayer-core crates/hyprlayer-models crates/hyprlayer-proto)
+SERVER_PATHS=(crates/hyprlayer-server crates/hyprlayer-core crates/hyprlayer-models crates/hyprlayer-proto
+  crates/ghostty-vt vendor/libghostty-vt vendor/portable-pty)
 NEW_SERVER=1
 if git rev-parse -q --verify "refs/tags/$SERVER_TAG" >/dev/null; then
   NEW_SERVER=0
