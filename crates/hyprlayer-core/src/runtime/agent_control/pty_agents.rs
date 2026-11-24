@@ -866,27 +866,31 @@ struct PtyStore {
 }
 
 impl PtyStore {
+    /// Holds the database weakly: a strong handle here outlives the runtime at exit, so SQLite
+    /// never closes it and never checkpoints the WAL into the main file.
     fn spawn(db: Arc<Db>) -> Self {
+        let db = Arc::downgrade(&db);
         let (tx, rx) = mpsc::channel::<StoreOp>();
         let spawned = std::thread::Builder::new()
             .name("pty-agent-store".into())
             .spawn(move || {
                 for op in rx {
-                    let (id, written) = match op {
-                        StoreOp::Upsert(row) => {
+                    let (id, written) = match (op, db.upgrade()) {
+                        (StoreOp::Flush(done), _) => {
+                            let _ = done.send(());
+                            continue;
+                        }
+                        (_, None) => break,
+                        (StoreOp::Upsert(row), Some(db)) => {
                             (row.terminal_id.clone(), db.upsert_pty_agent(&row))
                         }
-                        StoreOp::Sync(id, sync) => {
+                        (StoreOp::Sync(id, sync), Some(db)) => {
                             let written = db.sync_pty_agent(&id, &sync);
                             (id, written)
                         }
-                        StoreOp::Delete(id) => {
+                        (StoreOp::Delete(id), Some(db)) => {
                             let written = db.delete_pty_agent(&id);
                             (id, written)
-                        }
-                        StoreOp::Flush(done) => {
-                            let _ = done.send(());
-                            continue;
                         }
                     };
                     if let Err(e) = written {
