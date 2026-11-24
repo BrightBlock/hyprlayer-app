@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent } from "react";
 
-export type RovingOption<T extends string> = { value: T; disabled?: boolean };
+type RovingOption<T extends string> = { value: T; disabled?: boolean };
 
 const STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
 

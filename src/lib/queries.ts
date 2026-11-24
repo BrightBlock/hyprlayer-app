@@ -1202,14 +1202,6 @@ export function useCommitFileSides(id: string, sha: string, path: string) {
   });
 }
 
-export function useReviewChangedFiles(id: string, enabled = true) {
-  return useQuery({
-    queryKey: ["workstream", id, "review", "files"],
-    queryFn: () => unwrap(commands.reviewChangedFiles(id)),
-    enabled: enabled && id.length > 0,
-  });
-}
-
 // Whole files in memory: let them go soon after the diff pane leaves them.
 export function useReviewFileSides(id: string, path: string, enabled = true) {
   return useQuery({
@@ -1450,7 +1442,7 @@ export function useSkillAssetText(projectPath: string | null, skillPath: string,
   });
 }
 
-export function invalidateSkills(): void {
+function invalidateSkills(): void {
   void queryClient.invalidateQueries({ queryKey: ["skill-files"] });
   void queryClient.invalidateQueries({ queryKey: ["skill-file"] });
   void queryClient.invalidateQueries({ queryKey: ["skill-asset"] });

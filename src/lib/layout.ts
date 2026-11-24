@@ -4,7 +4,7 @@ export const PROJECT_SIDEBAR_DEFAULT = 268;
 export const PROJECT_SIDEBAR_MAX = 360;
 export const NAV_RAIL_WIDTH = 48;
 export const STATUS_BAR_HEIGHT = 34;
-export const TITLEBAR_INSET_LIGHTS = 92;
+const TITLEBAR_INSET_LIGHTS = 92;
 export const TRAFFIC_LIGHTS = { x: 18, y: 20 };
 
 // Native lights sit at TRAFFIC_LIGHTS * zoom; the gap after them stays a fixed native width.
@@ -16,7 +16,7 @@ export const TITLEBAR_INSET = 12;
 export const NARROW_WIDTH = 900;
 export const COMPACT_WIDTH = 640;
 export const DRAWER_PEEK = 72;
-export const SPLIT_HANDLE_WIDTH = 8;
+const SPLIT_HANDLE_WIDTH = 8;
 export const SPLIT_PANE_MIN = 280;
 
 export function isNarrow(viewport: number): boolean {
@@ -39,13 +39,13 @@ export function splitPaneFloor(size: number, minA = SPLIT_PANE_MIN, minB = SPLIT
   return Math.min(minA, Math.floor(((size - SPLIT_HANDLE_WIDTH) * minA) / (minA + minB)));
 }
 
-export const SPLIT_PANE_HARD_MIN = 160;
+const SPLIT_PANE_HARD_MIN = 160;
 
 export function canSplitExtent(extent: number): boolean {
   return Math.floor((extent - SPLIT_HANDLE_WIDTH) / 2) >= SPLIT_PANE_HARD_MIN;
 }
 
-export const TREE_INDENT_STEP = 14;
+const TREE_INDENT_STEP = 14;
 export function treeIndent(depth: number, base = 8): number {
   return base + depth * TREE_INDENT_STEP;
 }

@@ -65,7 +65,7 @@ export function connectionName(connection: ConnectionStatus | null | undefined):
 /** One test of a host this session, keyed by destination. */
 export type HostProbeResult = { ok: boolean; code?: string; release?: string | null; at: number };
 
-export type ServerState = "ok" | "unreachable" | "unknown";
+type ServerState = "ok" | "unreachable" | "unknown";
 
 export type ServerRow = {
   /** `LOCAL_PROFILE` for this machine, else the destination. */

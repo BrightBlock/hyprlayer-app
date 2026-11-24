@@ -3,25 +3,24 @@ import { persist } from "zustand/middleware";
 
 import { clamp } from "./resize";
 
-export const DIFF_SIDEBAR_WIDTH = 420;
+const DIFF_SIDEBAR_WIDTH = 420;
 
 export const DIFF_SIDEBAR_MIN = 380;
 export const DIFF_SIDEBAR_MAX = 700;
 
-export const SIDE_PANEL_WIDTH = 288;
+const SIDE_PANEL_WIDTH = 288;
 export const SIDE_PANEL_MIN = 220;
-export const SIDE_PANEL_MAX = 480;
 
-export const DOC_RAIL_WIDTH = 300;
+const DOC_RAIL_WIDTH = 300;
 export const DOC_RAIL_MIN = 220;
 export const DOC_RAIL_MAX = 420;
 
-export const WORKSHOP_LIST_WIDTH = 330;
+const WORKSHOP_LIST_WIDTH = 330;
 export const WORKSHOP_LIST_MIN = 260;
 export const WORKSHOP_LIST_MAX = 480;
 
 export const LIBRARY_NAV_WIDTH = 208;
-export const LIBRARY_LIST_WIDTH = 344;
+const LIBRARY_LIST_WIDTH = 344;
 export const LIBRARY_LIST_MIN = 280;
 export const LIBRARY_LIST_MAX = 480;
 

@@ -6,7 +6,7 @@ import { persist } from "zustand/middleware";
 
 import { commands, type OmarchyTheme } from "./bindings";
 
-export type ThemeMode =
+type ThemeMode =
   | "system"
   | "omarchy"
   | "dark"
@@ -16,7 +16,7 @@ export type ThemeMode =
   | "matrix"
   | "solarized";
 
-export type ResolvedTheme =
+type ResolvedTheme =
   | "omarchy"
   | "dark"
   | "light"
@@ -53,7 +53,7 @@ export function appearanceSegment(mode: ThemeMode): AppearanceSegment | null {
   return mode === "light" || mode === "dark" || mode === "system" ? mode : null;
 }
 
-export function resolveTheme(mode: ThemeMode): ResolvedTheme {
+function resolveTheme(mode: ThemeMode): ResolvedTheme {
   if (mode === "system") return prefersDark() ? "dark" : "light";
   return mode;
 }

@@ -19,7 +19,7 @@ import { CODE_TOKEN_STYLES } from "@/lib/codeHighlight";
 import { basename } from "@/lib/path";
 import { intraLineRanges } from "./diff";
 
-export async function langForPath(path: string): Promise<Extension | null> {
+async function langForPath(path: string): Promise<Extension | null> {
   const desc = LanguageDescription.matchFilename(languages, basename(path));
   if (!desc) return null;
   try {

@@ -2,8 +2,8 @@ import MarkdownIt, { type Token } from "markdown-it";
 
 // markdown-it over react-markdown: ~4MB vs ~38MB of garbage per 150KB doc (see markdown.test.ts budget).
 export type CodeBlock = { code: string; lang: string | undefined };
-export type MarkdownHeading = { level: number; text: string; line: number };
-export type RenderedMarkdown = { html: string; codeBlocks: CodeBlock[]; headings: MarkdownHeading[] };
+type MarkdownHeading = { level: number; text: string; line: number };
+type RenderedMarkdown = { html: string; codeBlocks: CodeBlock[]; headings: MarkdownHeading[] };
 
 const LINE_STAMPED = new Set([
   "heading_open",

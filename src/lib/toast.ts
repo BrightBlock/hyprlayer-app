@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export type ToastTone = "ok" | "warn" | "bad";
 
-export interface ToastAction {
+interface ToastAction {
   label: string;
   busyLabel?: string;
   onClick: () => void | Promise<void>;

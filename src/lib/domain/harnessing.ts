@@ -8,7 +8,7 @@ import {
 } from "./models";
 import { permissionFlag } from "./permissions";
 
-export type HarnessOption = { key: Harness; label: string };
+type HarnessOption = { key: Harness; label: string };
 
 export const HARNESSES: HarnessOption[] = [
   { key: "claude", label: "Claude Code" },
@@ -129,7 +129,7 @@ export function actionLaunchArgs(
   };
 }
 
-export type ShellLaunchPicks = {
+type ShellLaunchPicks = {
   harness?: string;
   model?: string;
   effort?: string;
@@ -188,7 +188,7 @@ export function isFreeOpencodeModel(modelId: string): boolean {
   return modelId.toLowerCase().endsWith("-free");
 }
 
-export type OpencodeModelName = { model: string; provider: string };
+type OpencodeModelName = { model: string; provider: string };
 
 export function opencodeModelNames(
   providers: CatalogProvider[],

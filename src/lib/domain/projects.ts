@@ -1,7 +1,7 @@
 
 import type { Project, ProjectSource, Workstream, WorkstreamView } from "@/lib/bindings";
 
-export function isFolderSource(source: ProjectSource): boolean {
+function isFolderSource(source: ProjectSource): boolean {
   return source === "folder";
 }
 

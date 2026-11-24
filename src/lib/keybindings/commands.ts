@@ -1,7 +1,7 @@
 
 import { normalizeChord, type Chord } from "./chord";
 
-export type CommandCategory =
+type CommandCategory =
   | "Navigation"
   | "View"
   | "Workspace"
@@ -358,7 +358,7 @@ export const COMMANDS: CommandDef[] = [
   },
 ];
 
-export const CATEGORY_ORDER: CommandCategory[] = [
+const CATEGORY_ORDER: CommandCategory[] = [
   "Navigation",
   "View",
   "Workspace",

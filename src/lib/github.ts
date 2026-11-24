@@ -1,5 +1,5 @@
 
-export type RepoRef = { owner: string; name: string };
+type RepoRef = { owner: string; name: string };
 
 const URL_REF = /(?:^|[@/])github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i;
 const URL_OWNER = /(?:^|[@/])github\.com[/:]([\w.-]+)\/[^/\s]+/i;

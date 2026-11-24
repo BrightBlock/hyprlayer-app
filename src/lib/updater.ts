@@ -14,7 +14,7 @@ const MANIFEST_BASE = "https://brightblock.ai/hyprlayer/updates";
 const CHANGELOG_URL = `${MANIFEST_BASE}/changelog.json`;
 const CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000;
 
-export interface ChangelogEntry {
+interface ChangelogEntry {
   version: string;
   date: string;
   summary: string;

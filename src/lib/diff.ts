@@ -1,5 +1,5 @@
 
-export type PatchLineKind = "add" | "del" | "hunk" | "context";
+type PatchLineKind = "add" | "del" | "hunk" | "context";
 
 export type PatchLine = { kind: PatchLineKind; text: string };
 

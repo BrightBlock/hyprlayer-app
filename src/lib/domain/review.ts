@@ -2,7 +2,7 @@ import type { FileChangeKind } from "@/lib/bindings";
 
 export type { FileChangeKind };
 
-export type ChangeGlyph = { ch: string; cls: string; label: string };
+type ChangeGlyph = { ch: string; cls: string; label: string };
 
 export const CHANGE_GLYPH: Record<FileChangeKind, ChangeGlyph> = {
   added: { ch: "+", cls: "text-ok", label: "added" },
@@ -18,7 +18,7 @@ const CONFLICT_GLYPH: ChangeGlyph = { ch: "!", cls: "text-bad", label: "conflict
 
 const CHANGE_KINDS = new Set<string>(Object.keys(CHANGE_GLYPH));
 
-export function parseChangeKind(s: string): FileChangeKind {
+function parseChangeKind(s: string): FileChangeKind {
   if (s === "untracked") return "added";
   return CHANGE_KINDS.has(s) ? (s as FileChangeKind) : "other";
 }

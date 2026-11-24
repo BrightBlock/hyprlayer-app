@@ -1,5 +1,5 @@
 
-export type AppLocation = {
+type AppLocation = {
   pathname: string;
   search: Record<string, unknown>;
   href: string;
@@ -9,7 +9,7 @@ type WorkstreamTarget = { projectPath: string; workstreamId: string };
 
 export type ReviewTab = "files" | "plan";
 
-export type ReviewTarget = WorkstreamTarget & { tab?: ReviewTab; file?: string; line?: number };
+type ReviewTarget = WorkstreamTarget & { tab?: ReviewTab; file?: string; line?: number };
 
 let locationGetter: (() => AppLocation) | null = null;
 let workstreamNavigator: ((target: WorkstreamTarget) => void) | null = null;

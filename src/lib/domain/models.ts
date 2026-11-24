@@ -67,7 +67,7 @@ function presetKeyByName(m: ClaudeModel, oneMillion: boolean): string | undefine
   )?.key;
 }
 
-export function liveModelOptions(models: readonly ClaudeModel[]): ModelOption[] {
+function liveModelOptions(models: readonly ClaudeModel[]): ModelOption[] {
   const keys: (string | undefined)[] = models.map(() => undefined);
   const taken = new Set<string>();
   models.forEach((m, i) => {
@@ -152,7 +152,7 @@ export function resumeModelFlag(model: ModelOption): string {
   return model.flag ?? model.resolvedModel ?? "claude-opus-5";
 }
 
-export const ALL_MODEL_KEYS = MODELS.map((m) => m.key);
+const ALL_MODEL_KEYS = MODELS.map((m) => m.key);
 
 const PRE_CATALOG_MODEL_KEYS = [
   "opus",
@@ -169,7 +169,7 @@ const PRE_CATALOG_MODEL_KEYS = [
   "opus-4-1",
 ];
 
-export type ModelSync = { add: string[]; seen: string[] };
+type ModelSync = { add: string[]; seen: string[] };
 
 export function pendingModelSync(
   visibleModels: readonly string[] | null | undefined,
@@ -217,7 +217,7 @@ export function visibleModels(
   return normalizeVisibleModelKeys([...shown], catalog).map((key) => modelOption(key, catalog));
 }
 
-export type EffortOption = { key: string; label: string };
+type EffortOption = { key: string; label: string };
 
 export const EFFORTS: EffortOption[] = [
   { key: "low", label: "Low" },
@@ -230,7 +230,7 @@ export const EFFORTS: EffortOption[] = [
 
 export const DEFAULT_EFFORT_KEY = "high";
 
-export function effortOption(key: string | undefined): EffortOption {
+function effortOption(key: string | undefined): EffortOption {
   return EFFORTS.find((e) => e.key === key) ?? EFFORTS[2];
 }
 
@@ -291,7 +291,7 @@ export const CODEX_EFFORTS: EffortOption[] = ["low", "medium", "high", "xhigh"].
   codexEffortOption,
 );
 
-export const DEFAULT_CODEX_EFFORT_KEY = "medium";
+const DEFAULT_CODEX_EFFORT_KEY = "medium";
 
 export function codexEffortOption(key: string): EffortOption {
   return { key, label: CODEX_EFFORT_LABELS[key] ?? key };

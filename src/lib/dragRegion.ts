@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { IS_LINUX } from "./platform";
 
 
-export type DragRegionMode = "self" | "deep";
+type DragRegionMode = "self" | "deep";
 
 const TAURI_ATTR = "data-tauri-drag-region";
 const LINUX_ATTR = "data-drag-region";
@@ -61,7 +61,7 @@ export function isDragRegion(path: EventTarget[]): boolean {
   return false;
 }
 
-export interface DragRegionHost {
+interface DragRegionHost {
   startDragging: () => void;
   toggleMaximize: () => void;
 }

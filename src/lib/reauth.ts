@@ -4,7 +4,7 @@ import type { Harness } from "./bindings";
 import { currentAppLocation, goToHref, openSettings } from "./appNav";
 
 /** Where an auth card's "Open settings" came from, so a sign-in there goes back. */
-export type PendingReauth = {
+type PendingReauth = {
   sessionId: string;
   harness: Harness;
   returnTo: string | null;

@@ -371,9 +371,7 @@ class XtermEngine implements TerminalEngine {
     // fitAddon.fit() reads xterm's renderer dimensions, which aren't set
     // until the renderer has completed its first paint — a race a fast
     // programmatic mount can lose in a way a human's slower click-then-look
-    // cadence usually doesn't. The previous code set rendererReady only
-    // inside this same try, so a single miss disabled refresh() forever.
-    // Retry on the next frame instead, bounded, and self-heal once ready.
+    // cadence usually doesn't. Retry on the next frame, bounded, and self-heal once ready.
     if (!this.fitAddon) return EMPTY_GRID;
     if (this.following) {
       this.measurePane();

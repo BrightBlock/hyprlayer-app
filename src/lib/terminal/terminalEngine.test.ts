@@ -149,7 +149,7 @@ function newEngine() {
   return createTerminalEngine({ fontSize: 12, fontFamily: "monospace", theme: {} });
 }
 
-// The fix is that dispose() drops the engine's Terminal and FitAddon references,
+// dispose() drops the engine's Terminal and FitAddon references,
 // so reach into them directly — that release is the contract under test, not an
 // incidental detail.
 function refs(engine: unknown) {

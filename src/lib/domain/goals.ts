@@ -128,7 +128,7 @@ export function goalChip(goal: Goal, nowMs: number): string {
   ].join(" · ");
 }
 
-export type GoalMeters = { iterations: number; spend: number; time: number };
+type GoalMeters = { iterations: number; spend: number; time: number };
 
 const fraction = (used: number, max: number | null | undefined) =>
   max && max > 0 ? Math.min(1, Math.max(0, used / max)) : 0;
@@ -177,7 +177,7 @@ export function goalDraft(text: string): string | null {
   return match ? (match[1] ?? "").trim() : null;
 }
 
-export type GoalNotice = { title: string; body: string };
+type GoalNotice = { title: string; body: string };
 
 export function goalNotice(prev: GoalChanged | null | undefined, next: GoalChanged): GoalNotice | null {
   const entered = prev?.status !== next.status;

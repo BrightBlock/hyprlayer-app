@@ -32,7 +32,7 @@ export const TEXT_SIZES = [
   { id: "large", label: "Large", scale: 1.12 },
   { id: "larger", label: "Larger", scale: 1.25 },
 ] as const;
-export type TextSizeId = (typeof TEXT_SIZES)[number]["id"];
+type TextSizeId = (typeof TEXT_SIZES)[number]["id"];
 
 export const SANS_FONTS = [
   { id: "inter", label: "Inter", stack: '"Inter Variable", "Inter", system-ui, sans-serif' },
@@ -52,8 +52,8 @@ export const MONO_FONTS = [
   { id: "geist-mono", label: "Geist Mono", stack: '"Geist Mono Variable", ui-monospace, monospace' },
   { id: "fira-code", label: "Fira Code", stack: '"Fira Code Variable", ui-monospace, monospace' },
 ] as const;
-export type SansFontId = (typeof SANS_FONTS)[number]["id"];
-export type MonoFontId = (typeof MONO_FONTS)[number]["id"];
+type SansFontId = (typeof SANS_FONTS)[number]["id"];
+type MonoFontId = (typeof MONO_FONTS)[number]["id"];
 
 const sansFontStack = (id: SansFontId): string =>
   (SANS_FONTS.find((f) => f.id === id) ?? SANS_FONTS[0]).stack;

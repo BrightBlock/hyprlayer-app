@@ -1,6 +1,6 @@
 import { STAGE_PERMISSION_MODES, type PermissionMode, type Stage } from "@/lib/bindings";
 
-export type PermissionModeOption = {
+type PermissionModeOption = {
   key: PermissionMode;
   label: string;
   short: string;
