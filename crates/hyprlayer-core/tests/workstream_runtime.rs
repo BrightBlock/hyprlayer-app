@@ -1172,6 +1172,49 @@ async fn archiving_an_archived_workstream_keeps_its_keep_flag() {
 }
 
 #[tokio::test]
+async fn restoring_an_in_place_workstream_refuses_a_second_in_place_row() {
+    let (f, repo) = fixture(Some(0)).await;
+    let ws = f.runtime.workstreams();
+    let first = ws.create(inplace_request(&repo, "Main A")).await.unwrap();
+    ws.archive(ArchiveWorkstreamRequest {
+        id: first.item.id.clone(),
+        skip_scripts: true,
+    })
+    .await
+    .unwrap();
+    ws.create(inplace_request(&repo, "Main B")).await.unwrap();
+    let third = ws.create(inplace_request(&repo, "Main C")).await;
+    assert!(
+        matches!(third, Err(CoreError::InplaceWorkstreamExists)),
+        "create enforces one active in-place workstream"
+    );
+
+    let restored = ws
+        .restore(RestoreWorkstreamRequest {
+            id: first.item.id.clone(),
+            target: None,
+        })
+        .await;
+    let active: Vec<String> = ws
+        .list(ListWorkstreamsRequest {
+            project_path: repo.display().to_string(),
+            include_archived: false,
+        })
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(Workstream::is_inplace)
+        .map(|w| format!("{} @ {}", w.title, w.worktree_path))
+        .collect();
+    f.runtime.shutdown().await;
+    assert!(
+        active.len() == 1,
+        "restore -> {:?}; active in-place workstreams: {active:#?}",
+        restored.map(|r| r.item.status)
+    );
+}
+
+#[tokio::test]
 async fn archive_keeps_a_worktree_folder_that_lost_its_dot_git() {
     let (f, repo) = fixture(Some(0)).await;
     let ws = f.runtime.workstreams();

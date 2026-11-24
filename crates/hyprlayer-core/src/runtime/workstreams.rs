@@ -2207,6 +2207,13 @@ impl WorkstreamService<'_> {
                 }
                 self.ensure_unattached(&item.project_path, &path).await?;
             }
+            if item.is_inplace() {
+                let (db, pp) = (self.runtime.db.clone(), item.project_path.clone());
+                let active = blocking(move || db.list_workstreams(&pp, false)).await?;
+                if active.iter().any(|w| w.is_inplace()) {
+                    return Err(CoreError::InplaceWorkstreamExists);
+                }
+            }
             let link = if item.is_folder() {
                 None
             } else {
