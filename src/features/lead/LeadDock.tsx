@@ -16,7 +16,16 @@ import { isWorking, type TranscriptItem } from "@/features/session/transcript";
 import { nextDockPhase, type DockEvent, type DockPhase } from "./dockPhase";
 import { LeadMark } from "./LeadChip";
 import { LeadDockSplit } from "./LeadSplit";
-import { clearLeadNote, useFollowLead, useLeadNote, type LeadAsk, type LeadNote, type ProjectLead } from "./lead";
+import {
+  clearLeadNote,
+  takeLeadDraftOffer,
+  useFollowLead,
+  useLeadDraftOffer,
+  useLeadNote,
+  type LeadAsk,
+  type LeadNote,
+  type ProjectLead,
+} from "./lead";
 
 function latestReply(items: readonly TranscriptItem[]): string | null {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -158,6 +167,15 @@ export function LeadDock({
     return () => window.removeEventListener("keydown", onKey);
   }, [phase]);
 
+  const offer = useLeadDraftOffer(projectPath);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (offer === null) return;
+    takeLeadDraftOffer(projectPath);
+    setDraft(offer);
+    input.current?.focus();
+  }, [offer, projectPath]);
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
@@ -266,6 +284,7 @@ export function LeadDock({
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             <form onSubmit={submit} className="flex items-center gap-2.5 py-1.5 pr-2.5 pl-3.5">
               <input
+                ref={input}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 aria-label="Message the Lead Engineer"

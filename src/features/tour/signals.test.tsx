@@ -1,0 +1,108 @@
+// @vitest-environment jsdom
+import { act, renderHook } from "@testing-library/react";
+import { MutationObserver as QueryMutationObserver } from "@tanstack/react-query";
+import { afterEach, describe, expect, it } from "vitest";
+
+import type { LeadView, Project, WorkstreamView } from "@/lib/bindings";
+import { queryClient } from "@/lib/queryClient";
+import { useUiStore } from "@/lib/uiStore";
+import { agentSpawned, leadAnswered, MESSAGE_LEAD_KEY, projectAdded, useSignal, type SignalInputs } from "./signals";
+
+const project = (path: string) => ({ path }) as Project;
+const ws = (id: string) => ({ item: { id } }) as WorkstreamView;
+const lead = (driving: string[]): LeadView => ({
+  projectPath: "/p",
+  workstreamId: "main",
+  sessionId: "lead",
+  driving,
+  liveChildren: 0,
+  projectRules: null,
+  remoteControl: false,
+  remoteControlUrl: null,
+});
+
+const inputs = (over: Partial<SignalInputs> = {}): SignalInputs => ({
+  projectPath: "/p",
+  projects: [project("/p")],
+  lead: lead([]),
+  workstreams: [],
+  leadAsking: false,
+  tourWorkstreamId: null,
+  ...over,
+});
+
+afterEach(() => queryClient.clear());
+
+describe("signal rules", () => {
+  it("projectAdded names the new project", () => {
+    expect(projectAdded([], [project("/a")])).toEqual({ done: true, project: "/a" });
+    expect(projectAdded(["/a"], [project("/a")]).done).toBe(false);
+  });
+
+  it("agentSpawned takes a newly driven workstream, never the Lead's own", () => {
+    expect(agentSpawned([], lead(["main"]), [ws("main")]).done).toBe(false);
+    expect(agentSpawned([], lead(["w1"]), [])).toEqual({ done: true, workstream: "w1" });
+    expect(agentSpawned(["w0"], lead(["w0"]), [ws("w0"), ws("w2")])).toEqual({ done: true, workstream: "w2" });
+  });
+
+  it("leadAnswered fires when the question clears, or the tour's workstream is archived", () => {
+    expect(leadAnswered(true, false, null, []).done).toBe(true);
+    expect(leadAnswered(false, false, null, []).done).toBe(false);
+    expect(leadAnswered(true, true, null, []).done).toBe(false);
+    expect(leadAnswered(false, false, "w1", [ws("w2")]).done).toBe(true);
+    expect(leadAnswered(false, false, "w1", [ws("w1")]).done).toBe(false);
+  });
+});
+
+describe("useSignal", () => {
+  it("projectAdded measures against the projects at step start", () => {
+    const { result, rerender } = renderHook((p: SignalInputs) => useSignal("projectAdded", p), {
+      initialProps: inputs({ projects: [] }),
+    });
+    expect(result.current.done).toBe(false);
+    rerender(inputs({ projects: [project("/new")] }));
+    expect(result.current).toEqual({ done: true, project: "/new" });
+  });
+
+  it("agentSpawned ignores workstreams that were already there", () => {
+    const { result, rerender } = renderHook((p: SignalInputs) => useSignal("agentSpawned", p), {
+      initialProps: inputs({ workstreams: [ws("old")] }),
+    });
+    expect(result.current.done).toBe(false);
+    rerender(inputs({ workstreams: [ws("old"), ws("tour")] }));
+    expect(result.current).toEqual({ done: true, workstream: "tour" });
+  });
+
+  it("leadMessageSent fires on the message-lead mutation's success for this project", async () => {
+    const { result } = renderHook(() => useSignal("leadMessageSent", inputs()));
+    const send = (projectPath: string) =>
+      act(async () => {
+        await new QueryMutationObserver(queryClient, {
+          mutationKey: [MESSAGE_LEAD_KEY],
+          mutationFn: async () => null,
+        }).mutate({ projectPath, text: "hi" } as never);
+      });
+    await send("/other");
+    expect(result.current.done).toBe(false);
+    await send("/p");
+    expect(result.current.done).toBe(true);
+  });
+
+  it("leadPanelAdjusted fires when the panel is hidden or resized", () => {
+    const { result } = renderHook(() => useSignal("leadPanelAdjusted", inputs()));
+    expect(result.current.done).toBe(false);
+    act(() => useUiStore.getState().toggleLeadPanel());
+    expect(result.current.done).toBe(true);
+    act(() => useUiStore.getState().toggleLeadPanel());
+  });
+
+  it("leadAnswered fires once a question the Lead asked during the step is answered", () => {
+    const { result, rerender } = renderHook((p: SignalInputs) => useSignal("leadAnswered", p), {
+      initialProps: inputs(),
+    });
+    rerender(inputs({ leadAsking: true }));
+    expect(result.current.done).toBe(false);
+    rerender(inputs({ leadAsking: false }));
+    expect(result.current.done).toBe(true);
+  });
+});

@@ -175,6 +175,7 @@
   --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.45);
   --elevation-pop: 0 8px 20px rgba(0, 0, 0, 0.6);
   --ring-active: 0 0 0 3px color-mix(in srgb, var(--color-ink) 13.3%, transparent);
+  --tour-scrim: rgba(0, 0, 0, 0.42);
 }
 
 /* Dark+ gets its own class so the named themes and Omarchy keep the derived base palette. */
@@ -277,6 +278,7 @@ html.light {
   --elevation-sm: 0 1px 2px rgba(0, 0, 0, 0.07);
   --elevation-card: 0 1px 3px rgba(0, 0, 0, 0.05);
   --elevation-pop: 0 8px 20px rgba(0, 0, 0, 0.12);
+  --tour-scrim: rgba(17, 17, 17, 0.16);
   /* The base aliases magenta to accent, which is ink here. */
   --color-ansi-magenta: #c25e3d;
 
@@ -849,6 +851,22 @@ a {
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer::after,
   .animate-sync-in {
+    animation: none;
+  }
+}
+
+/* The guided tour's coach mark and highlight: one entrance, never a loop. */
+@keyframes tour-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+.tour-in {
+  animation: tour-in var(--duration-quick) var(--ease-out) both;
+}
+:root[data-still-motion] .tour-in {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tour-in {
     animation: none;
   }
 }

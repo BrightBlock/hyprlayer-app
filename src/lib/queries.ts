@@ -676,6 +676,8 @@ export function useLeads(enabled = true) {
 
 export function useMessageLead() {
   return useMutation({
+    // The guided tour watches for this key's success.
+    mutationKey: ["message-lead"],
     mutationFn: ({ projectPath, text }: { projectPath: string; text: string }) =>
       unwrap(commands.messageLead(projectPath, text)),
     onSuccess: () => invalidateWorkstreamLists(),

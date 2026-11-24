@@ -105,3 +105,18 @@ export function useLeadDockExpanded(projectPath: string): boolean {
 export function setLeadDockExpanded(projectPath: string, expanded: boolean): void {
   useUiStore.getState().setLeadDockExpanded(projectPath, expanded);
 }
+
+/** A draft another surface offers the dock (the guided tour's first task); the dock takes it once. */
+const useLeadDraftOffers = create<Record<string, string | undefined>>(() => ({}));
+
+export function offerLeadDraft(projectPath: string, text: string): void {
+  useLeadDraftOffers.setState({ [projectPath]: text });
+}
+
+export function useLeadDraftOffer(projectPath: string): string | null {
+  return useLeadDraftOffers((s) => s[projectPath] ?? null);
+}
+
+export function takeLeadDraftOffer(projectPath: string): void {
+  useLeadDraftOffers.setState({ [projectPath]: undefined });
+}

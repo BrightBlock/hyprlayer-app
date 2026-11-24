@@ -150,3 +150,32 @@ describe("endless animations", () => {
     expect(unlisted(ruleFor("data-still-motion", /animation:\s*none/g))).toEqual([]);
   });
 });
+
+// The guided tour moves once, on entrance, and not at all where motion is held still or reduced.
+describe("guided tour motion", () => {
+  const TOUR_CLASSES = [".tour-in"];
+  const stillRules = [...CSS.matchAll(/animation:\s*none/g)].map((m) => selectorBefore(m.index));
+  const reducedBlocks = [...CSS.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/g)]
+    .map((m) => blockAfter(CSS, m.index + m[0].length - 1))
+    .filter((block) => /animation:\s*none/.test(block))
+    .join(" ");
+
+  it("never loops", () => {
+    expect(endless.filter((e) => TOUR_CLASSES.some((c) => e.selector.includes(c)))).toEqual([]);
+    expect(keyframes.get("tour-in")).toBeDefined();
+  });
+
+  it("holds still under data-still-motion", () => {
+    const still = stillRules.filter((s) => s.includes("[data-still-motion]")).join(" ");
+    expect(TOUR_CLASSES.filter((c) => !still.includes(c))).toEqual([]);
+  });
+
+  it("holds still for reduced motion", () => {
+    expect(TOUR_CLASSES.filter((c) => !reducedBlocks.includes(c))).toEqual([]);
+  });
+
+  it("is used by the coach mark and its highlight", () => {
+    const coach = Object.entries(TSX_SOURCES).find(([f]) => f.endsWith("tour/CoachMark.tsx"))?.[1] ?? "";
+    expect(coach.match(/\btour-in\b/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+});
