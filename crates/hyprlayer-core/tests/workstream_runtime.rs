@@ -1136,6 +1136,42 @@ async fn set_base_branch_refuses_a_base_that_git_would_read_as_an_option() {
 }
 
 #[tokio::test]
+async fn archiving_an_archived_workstream_keeps_its_keep_flag() {
+    let (f, repo) = fixture(Some(0)).await;
+    let ws = f.runtime.workstreams();
+    let created = ws.create(isolated_request(&repo, "Keep Me")).await.unwrap();
+    std::fs::write(
+        Path::new(&created.item.worktree_path).join("uncommitted.txt"),
+        "work\n",
+    )
+    .unwrap();
+    let archive = || {
+        ws.archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+    };
+    archive().await.unwrap();
+    ws.keep_archived(&created.item.id).await.unwrap();
+    let before = ws.list_archived_details().await.unwrap().remove(0).info;
+
+    let second = archive().await;
+    let after = ws.list_archived_details().await.unwrap().remove(0).info;
+    f.runtime.shutdown().await;
+    assert!(
+        second.is_ok() && after.kept,
+        "second archive -> {:?}\nbefore: kept={} uncommitted={:?} size={:?}\nafter:  kept={} uncommitted={:?} size={:?}",
+        second.map(|w| w.status),
+        before.kept,
+        before.uncommitted,
+        before.size_bytes,
+        after.kept,
+        after.uncommitted,
+        after.size_bytes
+    );
+}
+
+#[tokio::test]
 async fn archive_keeps_a_worktree_folder_that_lost_its_dot_git() {
     let (f, repo) = fixture(Some(0)).await;
     let ws = f.runtime.workstreams();

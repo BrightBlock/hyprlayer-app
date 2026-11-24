@@ -1893,6 +1893,9 @@ impl WorkstreamService<'_> {
             .lock_pair(&peek.project_path, &id)
             .await;
         let item = self.find(&id).await?;
+        if item.status == WorkstreamStatus::Archived {
+            return Ok(item);
+        }
 
         if !item.app_owns_worktree() {
             let (_, pr) = self.stop_for_archive(&item).await;
