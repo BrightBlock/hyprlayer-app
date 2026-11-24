@@ -602,14 +602,21 @@ fn target(args: &Value) -> Result<Target<'_>, WireError> {
     }
 }
 
-/// A tool that ignored an agent id it doesn't take would act on its default target, often the caller.
-fn refuse_undeclared_target(name: &str, args: &Value) -> Result<(), WireError> {
-    let Some(tool) = tool(name) else {
-        return Ok(());
-    };
-    let schema = (tool.schema)();
+/// A tool that ignored an agent id, because it doesn't take one or because the id isn't a
+/// string, would act on its default target, often the caller.
+fn check_agent_ids(name: &str, args: &Value) -> Result<(), WireError> {
+    let declared = tool(name).map(|t| (t.schema)());
     for key in ["session_id", "terminal_id"] {
-        if args.get(key).is_some() && schema["properties"].get(key).is_none() {
+        let Some(value) = args.get(key) else {
+            continue;
+        };
+        if !value.as_str().is_some_and(|id| !id.is_empty()) {
+            return Err(bad_args(format!("`{key}` is a non-empty string")));
+        }
+        if declared
+            .as_ref()
+            .is_some_and(|schema| schema["properties"].get(key).is_none())
+        {
             return Err(bad_args(format!("`{name}` takes no `{key}`")));
         }
     }
@@ -687,7 +694,7 @@ fn encode<T: serde::Serialize>(value: T) -> Result<Value, WireError> {
 
 /// Runs one tool for the announced agent; the server enforces scope, this only shapes the call.
 pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result<Value, WireError> {
-    refuse_undeclared_target(name, args)?;
+    check_agent_ids(name, args)?;
     let client = &agent.client;
     let me = &agent.whoami;
     let workstream = || {
@@ -1307,11 +1314,21 @@ mod tests {
     #[test]
     fn an_agent_id_a_tool_does_not_take_is_refused() {
         let terminal = json!({ "terminal_id": "t", "title": "x" });
-        assert!(refuse_undeclared_target("set_agent_title", &terminal).is_ok());
-        assert!(refuse_undeclared_target("start_goal", &terminal).is_err());
-        assert!(refuse_undeclared_target("archive_agent", &terminal).is_err());
+        assert!(check_agent_ids("set_agent_title", &terminal).is_ok());
+        assert!(check_agent_ids("start_goal", &terminal).is_err());
+        assert!(check_agent_ids("archive_agent", &terminal).is_err());
         let session = json!({ "session_id": "s" });
-        assert!(refuse_undeclared_target("read_terminal", &session).is_err());
-        assert!(refuse_undeclared_target("message_agent", &session).is_ok());
+        assert!(check_agent_ids("read_terminal", &session).is_err());
+        assert!(check_agent_ids("message_agent", &session).is_ok());
+    }
+
+    #[test]
+    fn an_agent_id_that_is_not_a_non_empty_string_is_refused() {
+        for bad in [json!(null), json!(7), json!(""), json!({})] {
+            for key in ["session_id", "terminal_id"] {
+                let args = json!({ key: bad.clone(), "title": "x" });
+                assert!(check_agent_ids("set_agent_title", &args).is_err(), "{args}");
+            }
+        }
     }
 }
