@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LeadQueueItem, LeadView } from "@/lib/bindings";
+import { queryClient } from "@/lib/queryClient";
 import { LeadPanel } from "./LeadPanel";
 
 const ipc = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ const ipc = vi.hoisted(() => ({
   listLeads: vi.fn(),
   listLeadQueue: vi.fn(),
   removeLeadQueueItem: vi.fn(),
+  reorderLeadQueue: vi.fn(),
   hostStats: vi.fn(),
 }));
 vi.mock("@/lib/bindings", async (importOriginal) => {
@@ -49,6 +51,7 @@ beforeEach(() => {
   ipc.listLeads.mockReturnValue(ok([LEAD]));
   ipc.listLeadQueue.mockReturnValue(ok([item("a", "Login page", 0), item("b", "Billing export", 1)]));
   ipc.removeLeadQueueItem.mockReturnValue(ok(null));
+  ipc.reorderLeadQueue.mockReturnValue(ok(null));
   ipc.hostStats.mockReturnValue(
     ok({ load: [1, 2, 3], cpus: 8, memoryUsed: 1e9, memoryTotal: 2e9, swapUsed: 0, swapTotal: 0 }),
   );
@@ -56,13 +59,14 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  queryClient.clear();
   vi.clearAllMocks();
 });
 
 function renderPanel() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The app's own client: the queue's mutations update it directly.
   render(
-    <QueryClientProvider client={client}>
+    <QueryClientProvider client={queryClient}>
       <LeadPanel projectPath={PROJECT} views={[]} />
     </QueryClientProvider>,
   );
@@ -82,6 +86,41 @@ describe("LeadPanel", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Remove Billing export from the queue" }));
     await vi.waitFor(() => expect(ipc.removeLeadQueueItem).toHaveBeenCalledWith(PROJECT, "b"));
     expect(ipc.removeLeadQueueItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves an item down with the arrow key on its handle, and keeps focus on it", async () => {
+    ipc.reorderLeadQueue.mockImplementation(() => {
+      ipc.listLeadQueue.mockReturnValue(ok([item("b", "Billing export", 0), item("a", "Login page", 1)]));
+      return ok(null);
+    });
+    renderPanel();
+    const handle = await screen.findByRole("button", { name: "Reorder Login page, position 1 of 2" });
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    await vi.waitFor(() => expect(ipc.reorderLeadQueue).toHaveBeenCalledWith(PROJECT, ["b", "a"]));
+    const moved = await screen.findByRole("button", { name: "Reorder Login page, position 2 of 2" });
+    expect(document.activeElement).toBe(moved);
+    expect(screen.getByRole("status").textContent).toBe("Login page moved to position 2 of 2");
+  });
+
+  it("ignores a move past either end", async () => {
+    renderPanel();
+    const handle = await screen.findByRole("button", { name: "Reorder Login page, position 1 of 2" });
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(ipc.reorderLeadQueue).not.toHaveBeenCalled();
+  });
+
+  it("puts the server's order back when the reorder is refused", async () => {
+    ipc.reorderLeadQueue.mockReturnValue(
+      Promise.resolve({ status: "error" as const, error: { code: "internal", message: "no", remedy: null } }),
+    );
+    renderPanel();
+    fireEvent.keyDown(await screen.findByRole("button", { name: "Reorder Login page, position 1 of 2" }), {
+      key: "End",
+    });
+    await vi.waitFor(() => expect(ipc.reorderLeadQueue).toHaveBeenCalledWith(PROJECT, ["b", "a"]));
+    expect(await screen.findByRole("button", { name: "Reorder Login page, position 1 of 2" })).toBeTruthy();
   });
 
   it("shows live agents against the Lead's limit", async () => {

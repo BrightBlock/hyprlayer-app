@@ -18,6 +18,7 @@ import {
   type GoalPatch,
   type Host,
   type HostsFile,
+  type LeadQueueItem,
   type MergeMethod,
   type Project,
   type ScriptKind,
@@ -698,6 +699,22 @@ export function useRemoveLeadQueueItem() {
   return useMutation({
     mutationFn: ({ projectPath, id }: { projectPath: string; id: string }) =>
       unwrap(commands.removeLeadQueueItem(projectPath, id)),
+    onSettled: (_data, _error, { projectPath }) => invalidateLeadQueue(projectPath),
+  });
+}
+
+// Optimistic: the rows move at once, and the refetch after puts the server's order back on a refusal.
+export function useReorderLeadQueue() {
+  return useMutation({
+    mutationFn: ({ projectPath, ids }: { projectPath: string; ids: string[] }) =>
+      unwrap(commands.reorderLeadQueue(projectPath, ids)),
+    onMutate: ({ projectPath, ids }) => {
+      const rank = new Map(ids.map((id, i) => [id, i]));
+      const at = (id: string) => rank.get(id) ?? ids.length;
+      queryClient.setQueryData<LeadQueueItem[]>(["lead-queue", projectPath], (prev) =>
+        prev ? [...prev].sort((a, b) => at(a.id) - at(b.id)) : prev,
+      );
+    },
     onSettled: (_data, _error, { projectPath }) => invalidateLeadQueue(projectPath),
   });
 }

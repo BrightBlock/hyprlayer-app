@@ -1,14 +1,12 @@
 import type { ReactNode } from "react";
 
-import { Icon } from "@/components/Icon";
-import { cx, IconButton } from "@/components/ui";
-import type { LeadQueueItem, WorkstreamView } from "@/lib/bindings";
-import { errorMessage } from "@/lib/ipc";
-import { useHostStats, useLeadQueue, useRemoveLeadQueueItem } from "@/lib/queries";
-import { useToast } from "@/lib/toast";
+import { cx } from "@/components/ui";
+import type { WorkstreamView } from "@/lib/bindings";
+import { useHostStats, useLeadQueue } from "@/lib/queries";
 import { pipelineColumnOf, prNumberOf } from "@/features/board/pipeline";
 import { HostMeters, hostRows } from "@/components/HostMeters";
 import { useProjectLead } from "./lead";
+import { LeadQueueList } from "./LeadQueue";
 
 const STEPS = ["plan", "build", "validate", "merged"];
 
@@ -51,15 +49,7 @@ export function LeadPanel({
   return (
     <div aria-label="Lead" className={cx("flex flex-col overflow-y-auto", className)}>
       <Section title="Queue" count={queued.length}>
-        {queued.length === 0 ? (
-          <Empty>Nothing queued</Empty>
-        ) : (
-          <ul>
-            {queued.map((item) => (
-              <QueueRow key={item.id} item={item} />
-            ))}
-          </ul>
-        )}
+        {queued.length === 0 ? <Empty>Nothing queued</Empty> : <LeadQueueList projectPath={projectPath} items={queued} />}
       </Section>
       <Section title="Running" count={driving.length}>
         {driving.length === 0 ? (
@@ -125,35 +115,6 @@ function HostSection() {
         <HostMeters stats={stats} cpuPercent={cpu} />
       )}
     </Section>
-  );
-}
-
-function QueueRow({ item }: { item: LeadQueueItem }) {
-  const remove = useRemoveLeadQueueItem();
-  const drop = () =>
-    remove.mutate(
-      { projectPath: item.projectPath, id: item.id },
-      {
-        onError: (e) =>
-          useToast.getState().show(`Couldn't remove ${item.title}`, errorMessage(e), { tone: "bad" }),
-      },
-    );
-  return (
-    <li className="group flex items-start gap-2 border-t border-edge-2 py-2 pr-1.5 pl-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-body text-ink">{item.title}</p>
-        <p className="line-clamp-2 text-meta text-ink-dim">{item.summary}</p>
-      </div>
-      <IconButton
-        aria-label={`Remove ${item.title} from the queue`}
-        title="Remove from the queue"
-        disabled={remove.isPending}
-        onClick={drop}
-        className="h-6 w-6"
-      >
-        <Icon name="close" size="xs" />
-      </IconButton>
-    </li>
   );
 }
 
