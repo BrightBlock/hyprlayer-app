@@ -452,6 +452,7 @@ exception like those under "Typography".
 
 **Sizes recorded as exceptions.**
 - The status bar is 34px (`STATUS_BAR_HEIGHT`, `src/lib/layout.ts`).
+- With "Show server stats in status bar" on (machine-local, off by default), the Server button carries the host's stats after its dot: a 12px rule, then each graph 35×12 behind a 12px icon (CPU's last six samples as 5px columns with 1px gaps, memory and swap as tracks ticked on the same 5+1 rhythm; swap only from 10%), then the agent and workstream counts, which compact width drops. Percents live only in its tooltip and the Server menu, which widens to the Lead panel's 360px so the host meters' captions stay on one line, and whose meters skip the Lead panel's settle (`data-still-motion`).
 - Its gear and the Scripts dock toggle are 26×24; the toggle trails the session controls 4px after Effort, with an `sm` icon; the permission pill 24px; a meter's track 34×4; the account button 26×26, its initials or mark 20px.
 - A focused PTY tab has no bar of its own. Its Restart is icon-only, 26×24 with an `sm` icon, and ends the session controls after a divider, so the Scripts dock toggle trails Restart rather than Effort.
 - The Settings nav's rows are 34px, which is not a third `rowClass` tier.

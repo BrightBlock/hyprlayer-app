@@ -29,6 +29,7 @@ import {
 
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { setServerAutoUpdate, useServerAutoUpdate } from "@/features/hosts/serverAutoUpdate";
+import { setServerStatsShown, useServerStatsShown } from "@/features/statusbar/serverStatsShown";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
@@ -82,6 +83,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         {chord && <ChordHint chord={chord} className="text-meta text-ink-dim" />}
       </div>
       <AppearanceRow />
+      <ServerStatsRow />
       {settings ? <ServerBackedRows settings={settings} /> : null}
       <ServerAutoUpdateRow />
       <div className="mx-1 my-1 h-px bg-edge-2" />
@@ -158,6 +160,15 @@ function ServerBackedRows({ settings }: { settings: AppSettings }) {
         </div>
       )}
     </>
+  );
+}
+
+function ServerStatsRow() {
+  const enabled = useServerStatsShown((s) => s.enabled);
+  return (
+    <Toggle className={cx(ROW, "flex w-full")} checked={enabled} onChange={setServerStatsShown}>
+      <span className="flex-1">Show server stats in status bar</span>
+    </Toggle>
   );
 }
 

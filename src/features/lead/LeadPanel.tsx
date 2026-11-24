@@ -7,7 +7,7 @@ import { errorMessage } from "@/lib/ipc";
 import { useHostStats, useLeadQueue, useRemoveLeadQueueItem } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import { pipelineColumnOf, prNumberOf } from "@/features/board/pipeline";
-import { HostMeters, hostRows } from "./HostMeters";
+import { HostMeters, hostRows } from "@/components/HostMeters";
 import { useProjectLead } from "./lead";
 
 const STEPS = ["plan", "build", "validate", "merged"];

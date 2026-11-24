@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConnectionStatus, Host, WorkstreamView } from "@/lib/bindings";
+import type { ConnectionStatus, Host, HostStats, WorkstreamView } from "@/lib/bindings";
 import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import { useHostsUiStore } from "@/features/hosts/hostsUi";
 import { useReconnectStore } from "@/features/hosts/reconnectState";
@@ -15,11 +15,21 @@ import {
   type SessionControlsSnapshot,
 } from "@/features/session/sessionControls";
 import { useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
+import { useServerStatsShown } from "./serverStatsShown";
 import { StatusBar } from "./StatusBar";
 
-const b = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), restartServer: vi.fn() }));
+const b = vi.hoisted(() => ({
+  useConnectionStatus: vi.fn(),
+  restartServer: vi.fn(),
+  useHostStats: vi.fn(),
+  useActiveSessions: vi.fn(),
+  useAllWorkstreams: vi.fn(),
+}));
 vi.mock("@/lib/queries", () => ({
   useConnectionStatus: b.useConnectionStatus,
+  useHostStats: b.useHostStats,
+  useActiveSessions: b.useActiveSessions,
+  useAllWorkstreams: b.useAllWorkstreams,
 }));
 vi.mock("@/lib/bindings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/bindings")>();
@@ -158,8 +168,28 @@ function renderBar(workstream: WorkstreamView | null = makeView()) {
 
 const dot = (el: HTMLElement) => el.querySelector("span[aria-hidden]");
 
+const STATS: HostStats = {
+  load: [9.6, 9, 8.5],
+  cpus: 32,
+  memoryUsed: 12e9,
+  memoryTotal: 60e9,
+  swapUsed: 0,
+  swapTotal: 8e9,
+  cpuPercent: 31,
+  cpuHistory: [26, 29, 34, 31],
+  memoryFree: 20e9,
+};
+
+function mockStats(stats: HostStats | undefined, agents = 4, workstreams = 9) {
+  b.useHostStats.mockReturnValue({ data: stats });
+  b.useActiveSessions.mockReturnValue({ data: Array(agents).fill({}) });
+  b.useAllWorkstreams.mockReturnValue({ data: Array(workstreams).fill({}) });
+}
+
 beforeEach(() => {
   mockStatus(CONNECTED);
+  mockStats(STATS);
+  useServerStatsShown.setState({ enabled: false });
   useHostsUiStore.setState({ open: false, menu: false, update: false });
   useReconnectStore.setState({ lostAt: null, attempting: false, halted: null });
   useServerAutoUpdate.setState({ updating: false });
@@ -576,5 +606,52 @@ describe("StatusBar at compact width", () => {
     expect(sync.textContent).toBe("");
     expect(dot(sync)).not.toBeNull();
     expect(screen.getByText("feat/status-bar")).toBeTruthy();
+  });
+});
+
+describe("StatusBar server stats", () => {
+  const server = () => screen.getByRole("button", { name: /^Server: this machine/ });
+
+  it("stays out of the bar, and polls nothing, until the quick setting turns it on", () => {
+    renderBar();
+    expect(server().title).toBe("Server: this machine");
+    expect(screen.queryByTestId("stats-memory")).toBeNull();
+    expect(b.useHostStats).toHaveBeenCalledWith(false);
+    expect(b.useActiveSessions).toHaveBeenCalledWith(false);
+  });
+
+  it("draws graphs and counts inside the Server button, with the percents only in its tooltip", () => {
+    useServerStatsShown.setState({ enabled: true });
+    renderBar();
+    const button = server();
+    expect(b.useHostStats).toHaveBeenLastCalledWith(true);
+    expect(within(button).getByTestId("stats-cpu")).toBeTruthy();
+    expect(within(button).getByTestId("stats-memory").dataset.percent).toBe("20");
+    expect(within(button).getByTestId("stats-agents").textContent).toBe("4");
+    expect(within(button).getByTestId("stats-workstreams").textContent).toBe("9");
+    expect(button.textContent).not.toContain("%");
+    expect(button.title).toBe("Server: this machine · CPU 31% · Memory 20% · 4 agents running · 9 workstreams");
+    expect(button.getAttribute("aria-label")).toBe(button.title);
+  });
+
+  it("hides the stats and shows offline as before while the connection is lost", () => {
+    useServerStatsShown.setState({ enabled: true });
+    mockStatus(LOST);
+    renderBar();
+    const button = screen.getByRole("button", { name: "Connection to Nexus lost" });
+    expect(button.textContent).toContain("offline");
+    expect(screen.queryByTestId("stats-memory")).toBeNull();
+    expect(b.useHostStats).toHaveBeenLastCalledWith(false);
+  });
+
+  it("drops the counts at compact width and keeps the two graphs", () => {
+    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    useServerStatsShown.setState({ enabled: true });
+    renderBar();
+    const button = server();
+    expect(within(button).getByTestId("stats-cpu")).toBeTruthy();
+    expect(within(button).getByTestId("stats-memory")).toBeTruthy();
+    expect(within(button).queryByTestId("stats-agents")).toBeNull();
+    expect(within(button).queryByTestId("stats-workstreams")).toBeNull();
   });
 });

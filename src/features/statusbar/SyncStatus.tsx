@@ -13,6 +13,8 @@ import { useServerAutoUpdate } from "@/features/hosts/serverAutoUpdate";
 import { connectionName } from "@/lib/domain/hosts";
 import { useConnectionStatus } from "@/lib/queries";
 import { BAR_BUTTON, BAR_PAD_X, Divider, Dot } from "./parts";
+import { ServerStatsReadout, serverStatsSummary, useServerStats } from "./ServerStats";
+import { useServerStatsShown } from "./serverStatsShown";
 import { syncLabel, type SyncTone } from "./statusBarState";
 
 const TONE_DOT: Record<SyncTone, string> = {
@@ -47,6 +49,8 @@ export function SyncStatus({
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
   const label = syncLabel(status.isSuccess ? status.data : null, reconnect, now, updating);
+  const connected = status.data?.state === "connected";
+  const stats = useServerStats(useServerStatsShown((s) => s.enabled) && connected && !updating);
   const ticking = label?.ticking ?? false;
 
   useEffect(() => {
@@ -57,15 +61,16 @@ export function SyncStatus({
   }, [ticking]);
 
   if (!label) return null;
-  const connected = status.data?.state === "connected";
+  const summary = stats ? serverStatsSummary(stats) : "";
+  const title = summary ? `${label.title} · ${summary}` : label.title;
   const server = (
     <button
       ref={anchorRef}
       type="button"
       // The menu needs a live server; while down, the server dialog says why and what to do.
       onClick={connected ? toggleServerMenu : openHostsUi}
-      title={label.title}
-      aria-label={label.title}
+      title={title}
+      aria-label={title}
       aria-haspopup="dialog"
       aria-expanded={menuOpen && connected}
       className={cx(BAR_BUTTON, "text-ink-dim hover:text-ink")}
@@ -77,6 +82,7 @@ export function SyncStatus({
       )}
       {!compact && <span className="whitespace-nowrap">{label.text}</span>}
       <Dot className={TONE_DOT[label.tone]} />
+      {stats && <ServerStatsReadout view={stats} compact={compact} />}
     </button>
   );
   const outdated = !updating && connected && status.data?.serverOutdated;

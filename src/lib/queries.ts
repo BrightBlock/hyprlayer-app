@@ -702,11 +702,12 @@ export function useRemoveLeadQueueItem() {
   });
 }
 
-export function useHostStats() {
+export function useHostStats(enabled = true) {
   return useQuery({
     queryKey: ["host-stats"],
     queryFn: () => unwrap(commands.hostStats()),
     refetchInterval: 3_000,
+    enabled,
   });
 }
 

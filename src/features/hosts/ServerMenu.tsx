@@ -12,7 +12,9 @@ import {
 } from "@/lib/queries";
 import { Icon } from "@/components/Icon";
 import { BAR_POPOVER, BAR_POPOVER_ROW, cx, ErrorNote, Popover } from "@/components/ui";
+import { useServerStatsShown } from "@/features/statusbar/serverStatsShown";
 import { closeServerMenu, openServerMenu, openServerUpdate, useHostsUiStore } from "./hostsUi";
+import { ServerHostStats } from "./ServerHostStats";
 import { useServerAutoUpdate } from "./serverAutoUpdate";
 import { ServerSummary, worktreeCount } from "./ServerSummary";
 import { SwitchServerConfirm, useServerSwitch } from "./SwitchServerConfirm";
@@ -33,6 +35,7 @@ export function ServerMenu({ anchorRef }: { anchorRef: RefObject<HTMLElement | n
   const connected = connection?.state === "connected";
   const shown = open && connected;
   const headingId = useId();
+  const statsShown = useServerStatsShown((s) => s.enabled);
 
   useEffect(() => {
     if (open && !connected) closeServerMenu();
@@ -50,8 +53,15 @@ export function ServerMenu({ anchorRef }: { anchorRef: RefObject<HTMLElement | n
         caret
         trapFocus
         aria-labelledby={headingId}
-        className={BAR_POPOVER}
+        // The host meters' captions need the Lead panel's width to stay on one line.
+        className={cx(BAR_POPOVER, statsShown && "w-[360px]")}
       >
+        {statsShown && (
+          <>
+            <ServerHostStats connection={connection} />
+            <div className="mx-1 mb-1.5 h-px bg-edge-2" />
+          </>
+        )}
         <div className="px-3 pb-1.5 pt-1">
           <span id={headingId} className="lbl">
             Servers

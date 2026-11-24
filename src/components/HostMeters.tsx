@@ -49,7 +49,7 @@ const TONE_INK: Record<MeterTone, string> = {
   warn: "text-meter-warn-ink",
   bad: "text-meter-bad-ink",
 };
-const TONE_FILL: Record<MeterTone, string> = { ok: "bg-meter-ok", warn: "bg-meter-warn", bad: "bg-meter-bad" };
+export const TONE_FILL: Record<MeterTone, string> = { ok: "bg-meter-ok", warn: "bg-meter-warn", bad: "bg-meter-bad" };
 
 export function HostMeters({ stats, cpuPercent }: { stats: HostStats; cpuPercent: number }) {
   const memTotal = stats.memoryTotal ?? 0;
