@@ -10,6 +10,9 @@ import { HOST_KEY_CHANGED } from "./failures";
 import { useReconnectStore } from "./reconnectState";
 
 let running = false;
+// The shell reports a drop once per connection, so one that lands while the
+// post-reconnect refetch runs is the only notice the new connection gets.
+let lostWhileRunning = false;
 // Resolves the wait between attempts. Non-null only while waiting, which is what
 // makes the loop single-flight: a focus during an attempt wakes nothing.
 let wake: (() => void) | null = null;
@@ -54,9 +57,11 @@ export async function retryConnection(): Promise<void> {
     return;
   }
   running = true;
+  lostWhileRunning = false;
   let resume = false;
   try {
     await attempt();
+    lostWhileRunning = false;
     notifyServerReconnected();
     await queryClient.invalidateQueries();
     useReconnectStore.setState({ lostAt: null, halted: null, keyChanged: null });
@@ -71,7 +76,7 @@ export async function retryConnection(): Promise<void> {
   } finally {
     running = false;
   }
-  if (resume) startReconnecting();
+  if (resume || lostWhileRunning) startReconnecting();
 }
 
 let launchSignIn = false;
@@ -84,12 +89,16 @@ export function signInAfterLaunch(): void {
 }
 
 export function startReconnecting(): void {
+  if (running) {
+    lostWhileRunning = true;
+    return;
+  }
   void reconnectLoop();
 }
 
 async function reconnectLoop(): Promise<void> {
-  if (running) return;
   running = true;
+  lostWhileRunning = false;
   const lostAt = Date.now();
   useReconnectStore.setState({ lostAt, halted: null, keyChanged: null });
   let lastCode: string | null = null;
@@ -100,6 +109,7 @@ async function reconnectLoop(): Promise<void> {
       await nextAttempt();
       try {
         await attempt();
+        lostWhileRunning = false;
         log.info(
           "reconnect",
           `reconnected on attempt ${n}, ${Math.round((Date.now() - lostAt) / 1000)}s after the drop`,
@@ -141,6 +151,7 @@ async function reconnectLoop(): Promise<void> {
     }
   } finally {
     running = false;
+    if (lostWhileRunning) startReconnecting();
   }
 }
 

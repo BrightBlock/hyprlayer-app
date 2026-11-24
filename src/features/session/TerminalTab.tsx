@@ -66,9 +66,10 @@ export function TerminalTab({
     const feed = new TerminalFeed(engine, exited, noteActivity, setSizeOwner);
 
     let disposed = false;
+    let startFailed = false;
     let id = terminalId;
     idRef.current = id;
-    void (async () => {
+    const start = async () => {
       if (id) {
         engine.bind(id);
         const ok = await unwrap(commands.terminalAttach(id, null, feed.channel()));
@@ -101,11 +102,15 @@ export function TerminalTab({
         void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
         claimIfFocused(id);
       }
-    })().catch((e) => {
-      // Otherwise the pane stays blank with no reason anywhere.
-      log.error("terminal", "opening the terminal failed", e);
-      if (!disposed) engine.write(`\r\n\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
-    });
+    };
+    const startOrReport = () =>
+      start().catch((e) => {
+        startFailed = true;
+        // Otherwise the pane stays blank with no reason anywhere.
+        log.error("terminal", "opening the terminal failed", e);
+        if (!disposed) engine.write(`\r\n\x1b[31m${errorMessage(e)}\x1b[0m\r\n`);
+      });
+    void startOrReport();
 
     const offPress = claimOnPress(host, () => id);
     const unsubInput = engine.onInput((data) => {
@@ -114,6 +119,11 @@ export function TerminalTab({
 
     // The stream died with the old connection; the new one picks up after the last byte shown.
     const offReconnect = onServerReconnected(() => {
+      if (!disposed && startFailed) {
+        startFailed = false;
+        void startOrReport();
+        return;
+      }
       if (disposed || !streaming || ended || !id) return;
       const { from, channel } = feed.resume();
       void unwrap(commands.terminalAttach(id, from, channel))

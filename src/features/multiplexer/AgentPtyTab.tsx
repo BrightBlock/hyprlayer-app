@@ -134,8 +134,6 @@ export function AgentPtyTab({
       exitShownFor = id;
       eng.write("\r\n\x1b[2m[agent exited]\x1b[0m\r\n");
     };
-    // A reconnect resumes only a stream this mount or restart opened.
-    let streaming = false;
     // Only the current terminal's streams are live, so an exit is that terminal's.
     const feed = new TerminalFeed(
       eng,
@@ -161,7 +159,8 @@ export function AgentPtyTab({
         if (mints && !disposed) setMinting(false);
       }
     };
-    void (async () => {
+    let startFailed = false;
+    const start = async () => {
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
@@ -189,7 +188,12 @@ export function AgentPtyTab({
         started: startedSeed,
         adopted,
       });
-      if (disposed || !launched) return;
+      if (disposed) return;
+      if (!launched) {
+        startFailed = true;
+        eng.write("\r\n\x1b[31mThe agent didn't start. It tries again when the server reconnects.\x1b[0m\r\n");
+        return;
+      }
       if (launched.exited) {
         showExited(launched.terminalId);
         return;
@@ -201,17 +205,24 @@ export function AgentPtyTab({
 
       const { from, channel } =
         spare && id === parkedId ? feed.resume() : { from: null, channel: feed.channel() };
-      streaming = await unwrap(commands.terminalAttach(id, from, channel)).catch(() => false);
+      await unwrap(commands.terminalAttach(id, from, channel)).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
       void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
       claimIfFocused(id);
-    })();
+    };
+    void start();
 
-    // The stream died with the old connection; a gone agent is reported through `onAgentTerminalGone`.
+    // The stream died with the old connection, or never opened; a gone agent is reported through `onAgentTerminalGone`.
     const offReconnect = onServerReconnected(() => {
+      if (disposed) return;
+      if (startFailed) {
+        startFailed = false;
+        void start();
+        return;
+      }
       const id = idRef.current;
-      if (disposed || !streaming || !id || exitShownFor === id) return;
+      if (!id || exitShownFor === id) return;
       const { from, channel } = feed.resume();
       void unwrap(commands.terminalAttach(id, from, channel))
         .then((ok) => {
@@ -227,7 +238,6 @@ export function AgentPtyTab({
       void (async () => {
         closeAgent(workstreamId, shellId);
         idRef.current = undefined;
-        streaming = false;
         eng.reset();
         feed.restart();
         launchedAtRef.current = Date.now();
@@ -250,9 +260,7 @@ export function AgentPtyTab({
         eng.bind(newId);
         setAgentBypass(workstreamId, shellId, opts.bypass);
         onBypassChange?.(opts.bypass);
-        streaming = await unwrap(commands.terminalAttach(newId, null, feed.channel())).catch(
-          () => false,
-        );
+        await unwrap(commands.terminalAttach(newId, null, feed.channel())).catch(() => false);
         if (disposed) return;
         lastGrid = eng.fit();
         void commands.agentResize(newId, lastGrid.cols, lastGrid.rows);

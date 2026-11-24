@@ -51,7 +51,24 @@ const h = vi.hoisted(() => {
   const launches = ["t1", "t2", "t3", "t4"];
   const ok = <T,>(data: T) => ({ status: "ok" as const, data });
   const controls: { onRestart?: (keep: object) => void } = {};
-  return { FakeChannel, FakeScreen, attaches, reconnects, launches, ok, controls, screen: undefined as FakeScreen | undefined };
+  const down = {
+    status: "error" as const,
+    error: { code: "server_unavailable", message: "The server is not connected.", remedy: null },
+  };
+  return {
+    FakeChannel,
+    FakeScreen,
+    attaches,
+    reconnects,
+    launches,
+    ok,
+    down,
+    controls,
+    serverUp: true,
+    launchFails: false,
+    ensures: 0,
+    screen: undefined as FakeScreen | undefined,
+  };
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
@@ -62,9 +79,10 @@ vi.mock("@/lib/bindings", () => ({
   commands: {
     terminalAttach: vi.fn(async (id: string, offset: number | null, ch: InstanceType<typeof h.FakeChannel>) => {
       h.attaches.push({ id, offset, ch });
-      return h.ok(true);
+      return h.serverUp ? h.ok(true) : h.down;
     }),
     agentResize: vi.fn(async () => h.ok(null)),
+    terminalFocus: vi.fn(async () => h.ok(null)),
     terminalRelease: vi.fn(async () => h.ok(null)),
     terminalFrameAck: vi.fn(async () => h.ok(null)),
   },
@@ -91,7 +109,10 @@ vi.mock("@/features/session/scriptsStore", () => ({
   useScriptsStore: (select: (s: { dock: object }) => unknown) => select({ dock: {} }),
 }));
 vi.mock("./agentRuntime", () => ({
-  ensureAgent: vi.fn(async () => ({ terminalId: h.launches.shift() })),
+  ensureAgent: vi.fn(async () => {
+    h.ensures += 1;
+    return h.launchFails ? null : { terminalId: h.launches.shift() };
+  }),
   closeAgent: vi.fn(),
   onAgentTerminalGone: () => () => {},
   resolveResume: vi.fn(async () => false),
@@ -138,7 +159,12 @@ function mount(terminalId: string) {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  h.serverUp = true;
+  h.launchFails = false;
+  h.ensures = 0;
+});
 
 describe("an agent tab's restart", () => {
   it("leaves the new agent's screen and resume point to the new agent", async () => {
@@ -205,5 +231,39 @@ describe("an agent tab shown again", () => {
     await settle();
     const resumed = h.attaches[h.attaches.length - 1];
     expect([resumed.id, resumed.offset]).toEqual(["t5", 120]);
+  });
+});
+
+describe("an agent tab shown while the server is down", () => {
+  it("attaches once the server reconnects", async () => {
+    h.serverUp = false;
+    h.launches.push("t6");
+    mount("t6");
+    await settle();
+    expect(h.attaches[h.attaches.length - 1]?.id).toBe("t6");
+    const before = h.attaches.length;
+
+    h.serverUp = true;
+    await act(async () => h.reconnects.forEach((fn) => fn()));
+    await settle();
+
+    expect(h.attaches.slice(before).map((a) => a.id)).toEqual(["t6"]);
+  });
+
+  it("explains a failed launch and retries it on reconnect", async () => {
+    h.launchFails = true;
+    mount("t7");
+    await settle();
+    h.screen!.parse();
+    expect(h.ensures).toBe(1);
+    expect(h.screen!.shown).toContain("The agent didn't start. It tries again when the server reconnects.");
+
+    h.launchFails = false;
+    h.launches.push("t7");
+    await act(async () => h.reconnects.forEach((fn) => fn()));
+    await settle();
+
+    expect(h.ensures).toBe(2);
+    expect(h.attaches[h.attaches.length - 1]?.id).toBe("t7");
   });
 });

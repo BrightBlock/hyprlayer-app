@@ -46,7 +46,22 @@ const h = vi.hoisted(() => {
   const reconnects: Array<() => void> = [];
   const acks: number[] = [];
   const ok = <T,>(data: T) => ({ status: "ok" as const, data });
-  return { FakeChannel, FakeScreen, attaches, reconnects, acks, ok, screen: undefined as FakeScreen | undefined };
+  const down = {
+    status: "error" as const,
+    error: { code: "server_unavailable", message: "The server is not connected.", remedy: null },
+  };
+  return {
+    FakeChannel,
+    FakeScreen,
+    attaches,
+    reconnects,
+    acks,
+    ok,
+    down,
+    serverUp: true,
+    opens: 0,
+    screen: undefined as FakeScreen | undefined,
+  };
 });
 
 vi.mock("@tauri-apps/api/core", () => ({ Channel: h.FakeChannel }));
@@ -57,7 +72,11 @@ vi.mock("@/lib/bindings", () => ({
   commands: {
     terminalAttach: vi.fn(async (id: string, offset: number | null, ch: InstanceType<typeof h.FakeChannel>) => {
       h.attaches.push({ id, offset, ch });
-      return h.ok(true);
+      return h.serverUp ? h.ok(true) : h.down;
+    }),
+    terminalOpen: vi.fn(async () => {
+      h.opens += 1;
+      return h.serverUp ? h.ok("t-new") : h.down;
     }),
     terminalResize: vi.fn(async () => h.ok(null)),
     terminalRelease: vi.fn(async () => h.ok(null)),
@@ -113,6 +132,8 @@ beforeEach(() => {
   h.attaches.length = 0;
   h.reconnects.length = 0;
   h.acks.length = 0;
+  h.serverUp = true;
+  h.opens = 0;
 });
 afterEach(cleanup);
 
@@ -186,5 +207,22 @@ describe("a terminal tab rendering the server's frames", () => {
     expect(resumed.offset).toBe(12);
     expect(h.screen!.resets).toBe(0);
     expect(h.screen!.shown).toBe("prompt$ ls done");
+  });
+});
+
+describe("a terminal tab shown while the server is down", () => {
+  it("attaches to its terminal once the server reconnects", async () => {
+    h.serverUp = false;
+    await mounted();
+    h.screen!.parse();
+    expect(h.attaches.map((a) => a.id)).toEqual(["t1"]);
+    expect(h.screen!.shown).toContain("The server is not connected.");
+
+    h.serverUp = true;
+    await act(async () => h.reconnects.forEach((fn) => fn()));
+    await settle();
+
+    expect(h.attaches.map((a) => a.id)).toEqual(["t1", "t1"]);
+    expect(h.opens).toBe(0);
   });
 });

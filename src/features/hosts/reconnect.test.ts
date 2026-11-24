@@ -6,13 +6,18 @@ import type { AppError, ConnectionStatus } from "@/lib/bindings";
 const b = vi.hoisted(() => ({
   reconnectServer: vi.fn(),
   paceReconnect: vi.fn(async (_on: boolean) => ({ status: "ok", data: null })),
-  listen: vi.fn(() => Promise.resolve(() => {})),
+  disconnected: null as (() => void) | null,
   due: null as (() => void) | null,
 }));
 vi.mock("@/lib/bindings", () => ({
   commands: { reconnectServer: b.reconnectServer, paceReconnect: b.paceReconnect },
   events: {
-    serverDisconnected: { listen: b.listen },
+    serverDisconnected: {
+      listen: (cb: () => void) => {
+        b.disconnected = cb;
+        return Promise.resolve(() => (b.disconnected = null));
+      },
+    },
     reconnectDue: {
       listen: (cb: () => void) => {
         b.due = cb;
@@ -219,6 +224,24 @@ describe("reconnect", () => {
 
     await due();
     expect(b.reconnectServer).toHaveBeenCalledTimes(3);
+  });
+
+  it("reconnects after a drop during the post-reconnect refetch", async () => {
+    let refetched!: () => void;
+    q.invalidateQueries.mockReturnValueOnce(new Promise<void>((resolve) => (refetched = resolve)));
+    b.reconnectServer.mockResolvedValueOnce(ok());
+    b.disconnected?.();
+    await due();
+    expect(b.reconnectServer).toHaveBeenCalledTimes(1);
+
+    b.disconnected?.();
+    refetched();
+    await vi.advanceTimersByTimeAsync(0);
+
+    b.reconnectServer.mockResolvedValue(fails(DOWN));
+    for (let i = 0; i < 3; i++) await due();
+    expect(useReconnectStore.getState().lostAt).not.toBeNull();
+    expect(b.reconnectServer.mock.calls.length).toBeGreaterThan(1);
   });
 });
 
