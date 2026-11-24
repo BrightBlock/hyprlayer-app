@@ -812,7 +812,8 @@ pub async fn pr_status(
     pr_ref: &str,
     overlay: &[(String, String)],
 ) -> Result<PrAnswer> {
-    let by_number = pr_ref.parse::<u32>().is_ok();
+    let by_number =
+        pr_ref.parse::<u32>().is_ok() && crate::gitops::local_tip(worktree, pr_ref).is_none();
     let (query, vars) = if by_number {
         (BY_NUMBER, [("-F", format!("number={pr_ref}"))])
     } else {

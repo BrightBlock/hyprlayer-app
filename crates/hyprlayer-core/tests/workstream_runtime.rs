@@ -1042,6 +1042,18 @@ async fn saving_project_memory_guards_names_mtimes_and_links() {
     f.runtime.shutdown().await;
 }
 
+fn existing_request(project_path: &Path, title: &str, branch: &str) -> CreateWorkstreamRequest {
+    CreateWorkstreamRequest {
+        project_path: project_path.display().to_string(),
+        title: title.into(),
+        base: None,
+        mode: WorktreeMode::Existing,
+        branch: Some(branch.into()),
+        branch_prefix: None,
+        parent_workstream_id: None,
+    }
+}
+
 fn git_out(repo: &Path, args: &[&str]) -> String {
     let out = std::process::Command::new("git")
         .arg("-C")
@@ -1120,5 +1132,114 @@ async fn set_base_branch_refuses_a_base_that_git_would_read_as_an_option() {
         "set_base_branch({base:?}) -> {set:?}; update_from_base -> {pulled:?}; \
          the command in the base branch name ran: {} exists",
         marker.display()
+    );
+}
+
+fn write_fake_gh_answering(
+    root: &Path,
+    number: u32,
+    state: &str,
+    head: &str,
+) -> (PathBuf, PathBuf) {
+    let log = root.join("gh-calls.log");
+    let script = root.join("fake-gh.sh");
+    let body = r#"#!/bin/sh
+if [ "$1" = "--version" ]; then echo "gh version 2.99.0 (2026-01-01)"; exit 0; fi
+line="gh"
+for a in "$@"; do case "$a" in query=*) line="$line query=<graphql>";; *) line="$line $a";; esac; done
+echo "$line" >> "LOGFILE"
+case "$*" in
+  "pr merge"*) exit 0;;
+  *"number=NUMBER"*) cat <<'JSON'
+{"data":{"repository":{"pullRequest":{"number":NUMBER,"url":"https://ghe.invalid/acme/widgets/pull/NUMBER","title":"A teammate's unrelated PR","state":"STATE","headRefName":"HEAD","baseRefName":"main","headRefOid":"1111111111111111111111111111111111111111","isCrossRepository":false,"commits":{"nodes":[]}}}}}
+JSON
+  exit 0;;
+  *) echo '{"data":{"repository":{"defaultBranchRef":{"name":"main"},"pullRequests":{"nodes":[]}}}}'; exit 0;;
+esac
+"#
+    .replace("LOGFILE", &log.display().to_string())
+    .replace("NUMBER", &number.to_string())
+    .replace("STATE", state)
+    .replace("HEAD", head);
+    std::fs::write(&script, body).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    (script, log)
+}
+
+async fn runtime_with_gh(
+    number: u32,
+    state: &str,
+    head: &str,
+) -> (tempfile::TempDir, Arc<HyprlayerRuntime>, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().to_path_buf();
+    let paths = test_paths(&root.join("profile"));
+    let thoughts_root = root.join("thoughts");
+    std::fs::create_dir_all(&thoughts_root).unwrap();
+    std::fs::create_dir_all(&paths.app_data_dir).unwrap();
+    let repo = fixture_repo(&root, "project");
+    write_config(&paths, &thoughts_root, &[(&repo, "project")]);
+    let (gh, log) = write_fake_gh_answering(&root, number, state, head);
+    std::fs::create_dir_all(&paths.app_config_dir).unwrap();
+    std::fs::write(
+        paths.app_config_dir.join("settings.json"),
+        serde_json::json!({ "binaryOverrides": {
+            "hyprlayer": write_fake_hyprlayer(&root, 0).display().to_string(),
+            "gh": gh.display().to_string(),
+        } })
+        .to_string(),
+    )
+    .unwrap();
+    let runtime = RuntimeBuilder::new(test_environment(&root), paths)
+        .open()
+        .await
+        .unwrap();
+    (dir, runtime, repo, log)
+}
+
+#[tokio::test]
+async fn an_all_digit_branch_is_not_read_as_a_pr_number() {
+    let (_dir, runtime, repo, log) =
+        runtime_with_gh(2024, "OPEN", "teammate/unrelated-feature").await;
+    let ws = runtime.workstreams();
+
+    sh(&repo, &["branch", "2024"]);
+    let created = ws
+        .create(existing_request(&repo, "Issue 2024", "2024"))
+        .await
+        .unwrap();
+    sh(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://ghe.invalid/acme/widgets.git",
+        ],
+    );
+
+    let status = ws
+        .pr_status(
+            hyprlayer_core::runtime::workstreams::WorkstreamPrStatusRequest {
+                id: created.item.id.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let merged = ws
+        .merge_pr(&created.item.id, hyprlayer_core::pr::MergeMethod::Squash)
+        .await;
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    runtime.shutdown().await;
+    let found = status.known().map(|pr| (pr.number, pr.title.clone()));
+    assert!(
+        found.is_none() && !calls.contains("pr merge"),
+        "workstream branch {:?} (pr_number: {:?})\npr_status -> {found:?}\nmerge_pr -> {merged:?}\ngh calls:\n{calls}",
+        created.item.branch,
+        created.item.pr_number
     );
 }

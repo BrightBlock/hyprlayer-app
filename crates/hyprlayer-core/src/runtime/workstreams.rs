@@ -1281,6 +1281,12 @@ impl WorkstreamService<'_> {
         let target = match lookup.as_ref().and_then(PrLookup::known) {
             Some(pr) if !pr.url.is_empty() => pr.url.clone(),
             Some(pr) => pr.number.to_string(),
+            None if matches!(lookup, Some(PrLookup::NoPr)) => {
+                return Err(CoreError::PrNotFound {
+                    pr_number: 0,
+                    detail: format!("No pull request was found for {}.", item.branch),
+                })
+            }
             None => pr_ref.clone().ok_or(CoreError::PrUnknownWhileDetached)?,
         };
         pr::merge_pr(
