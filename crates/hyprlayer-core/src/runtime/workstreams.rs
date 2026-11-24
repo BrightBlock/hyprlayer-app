@@ -2335,6 +2335,12 @@ impl WorkstreamService<'_> {
         if !expanded.is_absolute() {
             return Err(invalid("the path is not absolute"));
         }
+        if expanded
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(invalid("the path contains `..`"));
+        }
         let resolved = canonical_prefix(&expanded);
         let destination = if resolved.is_dir() {
             resolved.join(&item.slug)

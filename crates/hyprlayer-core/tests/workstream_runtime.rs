@@ -1405,3 +1405,47 @@ async fn archive_keeps_a_pushed_branch_whose_commits_no_merged_pr_holds() {
         archived.map(|w| w.status)
     );
 }
+
+#[tokio::test]
+async fn restore_refuses_a_target_with_dot_dot() {
+    let (f, repo) = fixture(Some(0)).await;
+    let ws = f.runtime.workstreams();
+    let created = ws.create(isolated_request(&repo, "Nested")).await.unwrap();
+    ws.archive(ArchiveWorkstreamRequest {
+        id: created.item.id.clone(),
+        skip_scripts: true,
+    })
+    .await
+    .unwrap();
+    let root = std::fs::canonicalize(repo.parent().unwrap()).unwrap();
+    let plain = ws
+        .restore(RestoreWorkstreamRequest {
+            id: created.item.id.clone(),
+            target: Some(root.join("project").join("nested")),
+        })
+        .await;
+    assert!(
+        matches!(plain, Err(CoreError::WorkstreamRestoreTargetInvalid { .. })),
+        "control: a plain path inside the project is refused"
+    );
+
+    let target = root.join("nope").join("..").join("project").join("nested");
+    let restored = ws
+        .restore(RestoreWorkstreamRequest {
+            id: created.item.id.clone(),
+            target: Some(target.clone()),
+        })
+        .await;
+    let inside = repo.join("nested").join(".git").exists();
+    let status = git_out(&repo, &["status", "--short"]);
+    let stray = root.join("nope").exists();
+    f.runtime.shutdown().await;
+    assert!(
+        !inside,
+        "restore to {} -> {:?}\nworktree now inside the project at {}/nested; stray dir {}/nope exists: {stray}\ngit status --short in the project:\n{status}",
+        target.display(),
+        restored.map(|r| r.item.worktree_path),
+        repo.display(),
+        root.display()
+    );
+}
