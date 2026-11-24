@@ -89,10 +89,6 @@ fn is_app_internal(path: &str) -> bool {
             != Some(SETTINGS_FILE)
 }
 
-fn gitlink_mode() -> u32 {
-    u32::from(git2::FileMode::Commit)
-}
-
 fn checked_out_head(worktree: &Path, rel: &str) -> Option<git2::Oid> {
     git2::Repository::open(worktree.join(rel))
         .ok()?
@@ -158,7 +154,7 @@ pub(crate) fn read_changes(repo: &git2::Repository, show: git2::StatusShow) -> R
         let gitlink = [head_side, index_side]
             .iter()
             .flatten()
-            .any(|&(_, mode)| mode == gitlink_mode());
+            .any(|&(_, mode)| mode == u32::from(git2::FileMode::Commit));
         if is_app_internal(path) {
             status.remove(git2::Status::WT_NEW);
         }

@@ -610,8 +610,6 @@ mod tests {
         );
     }
 
-    // Every kind except `hyprlayer` returns `false` from `requires_version`, so before
-    // `probe` checked the path these all reported `Ok` — "Found", with a blank version.
     #[tokio::test]
     async fn an_override_that_cannot_be_run_reports_missing_for_every_kind() {
         let dir = std::env::temp_dir();
