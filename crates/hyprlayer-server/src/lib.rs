@@ -53,7 +53,7 @@ use transport::{
 /// standalone server must land on the same profile (ADR-0009).
 pub const APP_IDENTIFIER: &str = "ai.brightblock.hyprlayer";
 
-const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop|logs|--version|hook <claude|codex> [event]|lead-guard <checkout>|statusline claude|ctl <verb>|mcp [--read-only]]";
+const USAGE: &str = "usage: hyprlayer-server [serve|relay|status|stop [--when-idle]|logs|--version|hook <claude|codex> [event]|lead-guard <checkout>|statusline claude|ctl <verb>|mcp [--read-only]]";
 const STOP_POLLS: u32 = 100;
 /// How much of each log file `logs` prints.
 const LOGS_TAIL_BYTES: u64 = 64 * 1024;
@@ -72,7 +72,9 @@ pub enum Command {
     Serve,
     Relay,
     Status,
-    Stop,
+    Stop {
+        when_idle: bool,
+    },
     /// Prints the tails of this profile's log files: how a client fetches a
     /// remote host's logs over `ssh`, with or without a running server.
     Logs,
@@ -101,7 +103,11 @@ impl Command {
             None | Some("serve") => Command::Serve,
             Some("relay") => Command::Relay,
             Some("status") => Command::Status,
-            Some("stop") => Command::Stop,
+            Some("stop") => match args.next().as_deref() {
+                None => Command::Stop { when_idle: false },
+                Some("--when-idle") => Command::Stop { when_idle: true },
+                Some(other) => return Err(format!("unexpected argument `{other}`\n{USAGE}")),
+            },
             Some("logs") => Command::Logs,
             Some("--version" | "-V") => Command::Version,
             Some("hook") => {
@@ -137,7 +143,7 @@ impl Command {
 /// Runs one subcommand to completion and returns the process exit code.
 pub async fn run(command: Command) -> i32 {
     // A speed bump, not a boundary: refused before any profile dir or socket is touched.
-    if matches!(command, Command::Stop | Command::Relay)
+    if matches!(command, Command::Stop { .. } | Command::Relay)
         && std::env::var_os("HYPRLAYER_AGENT_TOKEN").is_some_and(|t| !t.is_empty())
     {
         eprintln!("hyprlayer-server: this command is not available inside a hyprlayer agent");
@@ -147,7 +153,12 @@ pub async fn run(command: Command) -> i32 {
         Command::Serve => serve().await,
         Command::Relay => relay().await,
         Command::Status => status().await,
-        Command::Stop => stop().await,
+        Command::Stop { when_idle } => {
+            if when_idle {
+                wait_until_idle().await;
+            }
+            stop().await
+        }
         Command::Logs => {
             let (_, data_dir) = app_dirs();
             print!(
@@ -428,6 +439,58 @@ async fn status() -> i32 {
             println!("no server at {} ({e})", path.display());
             1
         }
+    }
+}
+
+const IDLE_POLL: Duration = Duration::from_secs(15);
+const IDLE_SETTLE: Duration = Duration::from_secs(120);
+
+// ponytail: the app's serverAutoUpdate signals minus keystrokes, which only the app
+// sees; a command running in a plain terminal with no agent in it reads as idle.
+async fn wait_until_idle() {
+    use hyprlayer_models::{PtyAgentState, SessionState};
+    let (_, data_dir) = app_dirs();
+    let path = socket::socket_path(&data_dir);
+    let mut idle_since: Option<Instant> = None;
+    loop {
+        let idle = match RpcClient::connect_socket(&path).await {
+            Ok(client) => {
+                let sessions = client.list_active_sessions().await;
+                let ptys = client.list_pty_agents(None).await;
+                let scripts = client.list_running_scripts().await;
+                match (sessions, ptys, scripts) {
+                    (Ok(sessions), Ok(ptys), Ok(scripts)) => {
+                        scripts.is_empty()
+                            && !sessions.iter().any(|a| {
+                                a.session.working
+                                    || matches!(
+                                        a.session.state,
+                                        SessionState::Starting
+                                            | SessionState::AwaitingPermission
+                                            | SessionState::AwaitingQuestion
+                                    )
+                            })
+                            && !ptys.iter().any(|p| {
+                                matches!(
+                                    p.state,
+                                    PtyAgentState::Starting
+                                        | PtyAgentState::Working
+                                        | PtyAgentState::AwaitingPermission
+                                        | PtyAgentState::AwaitingQuestion
+                                )
+                            })
+                    }
+                    _ => false,
+                }
+            }
+            Err(_) => return,
+        };
+        if !idle {
+            idle_since = None;
+        } else if idle_since.get_or_insert_with(Instant::now).elapsed() >= IDLE_SETTLE {
+            return;
+        }
+        tokio::time::sleep(IDLE_POLL).await;
     }
 }
 
@@ -1008,7 +1071,11 @@ mod tests {
         assert_eq!(parse(&["serve"]), Ok(Command::Serve));
         assert_eq!(parse(&["relay"]), Ok(Command::Relay));
         assert_eq!(parse(&["status"]), Ok(Command::Status));
-        assert_eq!(parse(&["stop"]), Ok(Command::Stop));
+        assert_eq!(parse(&["stop"]), Ok(Command::Stop { when_idle: false }));
+        assert_eq!(
+            parse(&["stop", "--when-idle"]),
+            Ok(Command::Stop { when_idle: true })
+        );
         assert_eq!(parse(&["--version"]), Ok(Command::Version));
         assert_eq!(parse(&["-V"]), Ok(Command::Version));
         assert!(parse(&["restart"]).unwrap_err().contains(USAGE));

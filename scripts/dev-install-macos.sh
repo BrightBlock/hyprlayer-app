@@ -31,6 +31,7 @@ FORCE=0
 FETCH=1
 UNINSTALL=0
 VERSION_SUFFIX=1
+RESTART_WHEN_IDLE=0
 REMOTES=()
 
 step() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -48,6 +49,8 @@ usage() {
     '  --no-version-suffix   build a bare x.y.z' \
     '  --remote <ssh-host>   also install this commit on a Linux host and share its' \
     '                        server (repeatable; the host must pin this profile)' \
+    '  --restart-when-idle   stop the running server once nothing runs on it, so the' \
+    '                        app reconnects to the new one (waits in the background)' \
     '  --uninstall           remove the install (keeps its data dir)'
 }
 
@@ -56,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --force)     FORCE=1; shift ;;
     --no-fetch)  FETCH=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --restart-when-idle) RESTART_WHEN_IDLE=1; shift ;;
     --no-version-suffix) VERSION_SUFFIX=0; shift ;;
     --ref)       REF="${2:?--ref needs a value}"; shift 2 ;;
     --remote)    REMOTES+=("${2:?--remote needs a host}"); shift 2 ;;
@@ -106,6 +110,18 @@ SHORT="${SHA:0:8}"  # fixed width: --short varies by repo, and --remote compares
 COMMITS="$(git -C "$SRC_DIR" rev-list --count "$SHA")"
 SUBJECT="$(git -C "$SRC_DIR" log -1 --format=%s "$SHA")"
 
+restart_when_idle() {
+  [[ $RESTART_WHEN_IDLE -eq 1 ]] || return 0
+  local log_dir="$HOME/Library/Logs/$APP_ID"
+  local log="$log_dir/restart-when-idle.log"
+  mkdir -p "$log_dir"
+  step "Stopping the $APP_ID server once it is idle"
+  HYPRLAYER_APP_CONFIG_DIR="$DATA_DIR" HYPRLAYER_APP_DATA_DIR="$DATA_DIR" HYPRLAYER_APP_LOG_DIR="$log_dir" \
+    nohup "$APP_BUNDLE/Contents/MacOS/hyprlayer-server" stop --when-idle >"$log" 2>&1 </dev/null &
+  disown
+  info "waits for 2 minutes with no working agent or script; log in $log"
+}
+
 install_remotes() {
   [[ ${#REMOTES[@]} -gt 0 ]] || return 0
   local server_version flags=() host
@@ -122,6 +138,7 @@ install_remotes() {
 if [[ $FORCE -eq 0 && -d "$APP_BUNDLE" && -f "$STAMP" ]] && grep -qx "$SHA" "$STAMP"; then
   step "Already on $REF ($SHORT — $SUBJECT)"
   info "Nothing to build. Use --force to rebuild anyway."
+  restart_when_idle
   install_remotes
   exit 0
 fi
@@ -250,4 +267,5 @@ else
   info "refresh   $BOOTSTRAP"
 fi
 
+restart_when_idle
 install_remotes
