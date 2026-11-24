@@ -392,14 +392,6 @@ impl OpenCodeServer {
         child.kill_blocking();
     }
 
-    fn context_window(&self, model_id: &str) -> Option<u32> {
-        self.model_context.get(model_id).copied()
-    }
-
-    fn home(&self) -> &Path {
-        &self.home
-    }
-
     pub async fn knows_model(&self, model: &str) -> Option<bool> {
         let (provider, model_id) = model.split_once('/')?;
         let registry = self.provider_models().await?;
@@ -1144,7 +1136,7 @@ impl OpenCodeDriver {
         // cross-harness routing preamble.
         let skill_scan = tokio::task::spawn_blocking({
             let cwd = cwd.to_string();
-            let home = server.home().to_path_buf();
+            let home = server.home.clone();
             move || {
                 crate::skills::list_skills(
                     Some(std::path::Path::new(&cwd)),
@@ -1192,7 +1184,7 @@ impl OpenCodeDriver {
         if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
             let id = format!("{p}/{m}");
             crate::opencode::config::opencode_model_context_window(&id)
-                .or_else(|| server.context_window(&id))
+                .or_else(|| server.model_context.get(&id).copied())
         }) {
             let _ = events.send(SessionEvent::ContextWindow { tokens });
         }
@@ -2174,15 +2166,11 @@ impl Translator {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();
-                let tool = part
-                    .get("tool")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
+                let tool = part.get("tool").and_then(Value::as_str).unwrap_or_default();
                 if tool == "question" {
                     return out;
                 }
-                let state = part.get("state").cloned().unwrap_or(Value::Null);
+                let state = part.get("state").unwrap_or(&Value::Null);
                 let status = state
                     .get("status")
                     .and_then(Value::as_str)
@@ -2192,7 +2180,7 @@ impl Translator {
                     && self.tool_started.insert(call_id.clone())
                 {
                     let (name, input) =
-                        normalize_tool(&tool, state.get("input").cloned().unwrap_or(json!({})));
+                        normalize_tool(tool, state.get("input").cloned().unwrap_or(json!({})));
                     out.push(SessionEvent::ToolUse {
                         id: call_id.clone(),
                         name,

@@ -400,8 +400,7 @@ fn keep_new_tool_events(
 fn is_attachment_line(line: &str) -> bool {
     serde_json::from_str::<Value>(line)
         .ok()
-        .and_then(|v| v.get("type").and_then(Value::as_str).map(str::to_string))
-        .is_some_and(|t| t == "attachment")
+        .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some("attachment"))
 }
 
 fn is_prompt_line(line: &str) -> bool {

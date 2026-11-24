@@ -586,7 +586,7 @@ impl Translator {
                 let questions = p
                     .get("questions")
                     .and_then(Value::as_array)
-                    .cloned()
+                    .map(Vec::as_slice)
                     .unwrap_or_default();
                 let mut by_text = HashMap::new();
                 let ui: Vec<Value> = questions
@@ -904,7 +904,7 @@ fn plan_events(p: &Value) -> Vec<SessionEvent> {
     let steps = p
         .get("plan")
         .and_then(Value::as_array)
-        .cloned()
+        .map(Vec::as_slice)
         .unwrap_or_default();
     if steps.is_empty() {
         return Vec::new();

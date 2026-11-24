@@ -481,7 +481,7 @@ impl ClaudeDriver {
                 detail,
             })?;
         for uuid in uuids[start..].iter().rev() {
-            let outcome = self.rewind_conversation(uuid, true).await?;
+            let outcome = self.rewind_conversation(uuid).await?;
             if !outcome.rewound {
                 return Err(CoreError::OutputParse {
                     program: "claude".into(),
@@ -509,17 +509,13 @@ impl ClaudeDriver {
         .unwrap_or_default()
     }
 
-    async fn rewind_conversation(
-        &self,
-        target_uuid: &str,
-        interrupt_if_running: bool,
-    ) -> Result<RewindOutcome> {
+    async fn rewind_conversation(&self, target_uuid: &str) -> Result<RewindOutcome> {
         let payload = self
             .control(
                 "rewind_conversation",
                 json!({
                     "target_message_uuid": target_uuid,
-                    "interrupt_if_running": interrupt_if_running,
+                    "interrupt_if_running": true,
                     "dry_run": false,
                 }),
                 REWIND_TIMEOUT,

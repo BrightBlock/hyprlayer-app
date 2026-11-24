@@ -138,7 +138,7 @@ fn write_cache(path: &Path, providers: &[CatalogProvider]) {
     }
     let payload = CachedCatalog {
         fetched_at_ms: now_ms(),
-        providers: supported_providers(providers.to_vec()),
+        providers: providers.to_vec(),
     };
     if let Ok(json) = serde_json::to_string(&payload) {
         let tmp = path.with_extension("json.tmp");
