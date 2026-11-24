@@ -602,6 +602,7 @@ impl WorkstreamService<'_> {
         if base.is_empty() {
             return Err(CoreError::WorkstreamBaseBranchEmpty);
         }
+        check_base_name(&base)?;
         if let Ok(gh) = self.runtime.binaries.require(BinaryKind::Gh).await {
             let pr_ref = current_pr_ref(&item);
             let cache = &self.runtime.watchers.pr_cache;
@@ -1695,6 +1696,9 @@ impl WorkstreamService<'_> {
             branch_prefix::validate_prefix(&branch_prefix)?;
         }
         let base_override = base.map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        if let Some(base) = &base_override {
+            check_base_name(base)?;
+        }
         let created = self
             .runtime
             .worktrees
@@ -2707,6 +2711,16 @@ fn last_from_row(item: &Workstream, pr_ref: &str) -> Option<PrStatus> {
         url,
         item.observed_pr_head.clone().unwrap_or_default(),
     ))
+}
+
+/// A base reaches git as a bare argument, where a leading `-` is an option.
+fn check_base_name(base: &str) -> Result<()> {
+    if base.starts_with('-') || !git2::Reference::is_valid_name(&format!("refs/heads/{base}")) {
+        return Err(CoreError::WorkstreamBranchInvalid {
+            branch: base.to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// The ref to look up, or `None` while HEAD has left its branch (a rebase, or the base branch):

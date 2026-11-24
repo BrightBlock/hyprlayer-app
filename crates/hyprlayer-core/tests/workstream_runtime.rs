@@ -1041,3 +1041,84 @@ async fn saving_project_memory_guards_names_mtimes_and_links() {
 
     f.runtime.shutdown().await;
 }
+
+fn git_out(repo: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("git runs");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+#[tokio::test]
+async fn create_refuses_a_base_that_git_would_read_as_an_option() {
+    let (f, repo) = fixture(Some(0)).await;
+    let mut req = isolated_request(&repo, "Option Injection");
+    req.base = Some("--lock".into());
+    let created = f.runtime.workstreams().create(req).await;
+
+    let Ok(created) = created else {
+        f.runtime.shutdown().await;
+        return;
+    };
+    let listing = git_out(&repo, &["worktree", "list", "--porcelain"]);
+    let archived = f
+        .runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await;
+    f.runtime.shutdown().await;
+    panic!(
+        "create accepted base \"--lock\": row base_branch={:?} branch={:?}\n\
+         git worktree list --porcelain:\n{listing}\narchive of it -> {:?}",
+        created.item.base_branch,
+        created.item.branch,
+        archived.map(|w| w.status)
+    );
+}
+
+#[tokio::test]
+async fn set_base_branch_refuses_a_base_that_git_would_read_as_an_option() {
+    let (f, repo) = fixture(Some(0)).await;
+    let root = repo.parent().unwrap().to_path_buf();
+    let bare = root.join("origin.git");
+    sh(&root, &["clone", "--bare", "project", "origin.git"]);
+    sh(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    sh(&repo, &["fetch", "origin"]);
+
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Injected Base"))
+        .await
+        .unwrap();
+    let marker = root.join("PWNED-by-base-branch");
+    let base = format!("--upload-pack=touch {}", marker.display());
+    let set = f
+        .runtime
+        .workstreams()
+        .set_base_branch(&created.item.id, &base)
+        .await;
+    let pulled = f
+        .runtime
+        .workstreams()
+        .update_from_base(&created.item.id)
+        .await;
+    let ran = marker.exists();
+    f.runtime.shutdown().await;
+    assert!(
+        !ran,
+        "set_base_branch({base:?}) -> {set:?}; update_from_base -> {pulled:?}; \
+         the command in the base branch name ran: {} exists",
+        marker.display()
+    );
+}
