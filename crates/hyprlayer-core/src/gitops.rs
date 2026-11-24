@@ -357,6 +357,10 @@ pub(crate) fn pr_head_is_ours(
     Some(branch_tip(&repo, branch).is_some_and(contains) || pushed.is_some_and(contains))
 }
 
+pub(crate) fn has_local_branch(dir: &Path, branch: &str) -> bool {
+    open_repo(dir).is_ok_and(|repo| repo.find_branch(branch, git2::BranchType::Local).is_ok())
+}
+
 pub(crate) fn local_tip(dir: &Path, branch: &str) -> Option<String> {
     branch_tip(&open_repo(dir).ok()?, branch).map(|o| o.to_string())
 }

@@ -1423,6 +1423,34 @@ async fn an_all_digit_branch_is_not_read_as_a_pr_number() {
 }
 
 #[tokio::test]
+async fn attaching_a_pr_by_number_looks_it_up_by_number() {
+    let (_dir, runtime, repo, log) = runtime_with_gh(339, "OPEN", "teammate/other").await;
+    let ws = runtime.workstreams();
+    let created = ws
+        .create(isolated_request(&repo, "Attach By Number"))
+        .await
+        .unwrap();
+    sh(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://ghe.invalid/acme/widgets.git",
+        ],
+    );
+
+    let attached = ws.attach_pr(&created.item.id, 339).await;
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    runtime.shutdown().await;
+    assert!(
+        matches!(&attached, Ok(Some(pr)) if pr.number == 339),
+        "attach_pr(339) -> {:?}\ngh calls:\n{calls}",
+        attached.map(|pr| pr.map(|pr| pr.number))
+    );
+}
+
+#[tokio::test]
 async fn archive_keeps_a_pushed_branch_whose_commits_no_merged_pr_holds() {
     let (dir, runtime, repo, _log) = runtime_with_gh(77, "MERGED", "teammate/other").await;
     let root = dir.path().to_path_buf();
