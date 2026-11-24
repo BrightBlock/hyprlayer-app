@@ -155,7 +155,7 @@ pub fn list_skills(worktree: Option<&Path>, home: &SkillHome) -> Vec<AgentSkill>
     }
     for (root, source) in &roots {
         for entry in scan_skills(&root.join("skills")) {
-            let name = entry.declared.unwrap_or_else(|| entry.dir.clone());
+            let name = entry.declared.unwrap_or(entry.dir);
             if out.iter().any(|s| s.name == name) {
                 continue;
             }

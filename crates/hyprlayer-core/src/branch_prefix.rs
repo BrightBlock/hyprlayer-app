@@ -149,11 +149,7 @@ pub fn resolve_prefixes(
 }
 
 pub fn validate_prefix(prefix: &str) -> Result<()> {
-    let trimmed = prefix.trim();
-    if trimmed.is_empty() {
-        return Ok(());
-    }
-    let Some(caps) = INVALID_PREFIX.captures(trimmed) else {
+    let Some(caps) = INVALID_PREFIX.captures(prefix.trim()) else {
         return Ok(());
     };
     let detail = if caps.name("lead_slash").is_some() {

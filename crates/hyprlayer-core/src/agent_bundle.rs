@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::hyprcli::AiStatus;
+use crate::repos::expand_user_path;
 
 pub const BUNDLE_REFS_URL: &str =
     "https://github.com/BrightBlock/hyprlayer-cli.git/info/refs?service=git-upload-pack";
@@ -96,11 +97,6 @@ pub fn is_manageable_pair(status: &AiStatus) -> bool {
         })
 }
 
-pub(crate) fn expand_tilde(path: &str, home: Option<&Path>) -> std::path::PathBuf {
-    let expanded = shellexpand::tilde_with_context(path, || home.and_then(Path::to_str));
-    std::path::PathBuf::from(expanded.as_ref())
-}
-
 /// `YYYYMMDD-HHMMSS` in UTC, for naming a backup the user can read at a glance.
 pub fn backup_stamp(epoch_secs: u64) -> String {
     let (days, rem) = (epoch_secs / 86_400, epoch_secs % 86_400);
@@ -133,11 +129,11 @@ pub fn clear_link_collisions(
         let Some(target) = platform.location.as_deref() else {
             continue;
         };
-        let target = expand_tilde(target, home);
+        let target = expand_user_path(target, home);
         // codex is linked its skills out of the claude bundle, and its own manifest never
         // mentions them, so every bundle has to be checked against every target
         for source in &status.platforms {
-            let bundle = expand_tilde(root, home).join(version).join(&source.id);
+            let bundle = expand_user_path(root, home).join(version).join(&source.id);
             let one = resolve_collisions(&bundle, &target, stamp);
             report.replaced.extend(one.replaced);
             report.backed_up.extend(one.backed_up);
@@ -614,9 +610,6 @@ fn unit_matches_bundle(unit_dir: &Path, bundle_unit: &Path, expected: &[&Manifes
 /// already match it byte for byte, rename the rest aside as `<name>.bak-<stamp>`.
 pub fn resolve_collisions(bundle_dir: &Path, target: &Path, stamp: &str) -> CollisionReport {
     let bundle_files = read_manifest(&bundle_dir.join("manifest.json"));
-    if bundle_files.is_empty() {
-        return CollisionReport::default();
-    }
     let copied: Vec<String> = read_manifest(&target.join(TARGET_MANIFEST))
         .into_iter()
         .map(|f| f.path)

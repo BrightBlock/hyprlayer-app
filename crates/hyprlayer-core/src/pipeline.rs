@@ -315,32 +315,16 @@ pub struct PromptVars {
 }
 
 pub fn substitute_vars(body: &str, vars: &PromptVars) -> String {
-    let tokens: [(&str, &str); 5] = [
-        ("{{branch}}", &vars.branch),
-        ("{{base_branch}}", &vars.base_branch),
-        ("{{changed_files}}", &vars.changed_files),
-        ("{{diff}}", &vars.diff),
-        ("{{last_commit}}", &vars.last_commit),
-    ];
-    let mut out = String::with_capacity(body.len());
-    let mut rest = body;
-    loop {
-        let next = tokens
-            .iter()
-            .filter_map(|&(tok, val)| rest.find(tok).map(|i| (i, tok, val)))
-            .min_by_key(|&(i, _, _)| i);
-        match next {
-            Some((i, tok, val)) => {
-                out.push_str(&rest[..i]);
-                out.push_str(val);
-                rest = &rest[i + tok.len()..];
-            }
-            None => {
-                out.push_str(rest);
-                return out;
-            }
-        }
-    }
+    fill(
+        body,
+        &[
+            ("{{branch}}", &vars.branch),
+            ("{{base_branch}}", &vars.base_branch),
+            ("{{changed_files}}", &vars.changed_files),
+            ("{{diff}}", &vars.diff),
+            ("{{last_commit}}", &vars.last_commit),
+        ],
+    )
 }
 
 pub const REVISE_PROMPT: &str =

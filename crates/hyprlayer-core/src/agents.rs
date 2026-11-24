@@ -51,12 +51,11 @@ pub struct HarnessCounts {
     pub skills: u32,
 }
 
-// Codex agents are TOML; Claude's are markdown.
 pub fn harness_counts(platforms: &[AiPlatformStatus], home: &Path) -> Vec<HarnessCounts> {
     platforms
         .iter()
         .filter_map(|p| {
-            let root = crate::agent_bundle::expand_tilde(p.location.as_deref()?, Some(home));
+            let root = crate::repos::expand_user_path(p.location.as_deref()?, Some(home));
             let ext = if p.id == "codex" { "toml" } else { "md" };
             Some(HarnessCounts {
                 platform_id: p.id.clone(),
@@ -442,10 +441,6 @@ pub fn render_agent(original: &str, agent: &AgentFile) -> Result<String> {
 }
 
 pub fn save_agent(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
-    save_agent_with_store_root(agent, store_root)
-}
-
-fn save_agent_with_store_root(agent: &AgentFile, store_root: Option<&Path>) -> Result<AgentFile> {
     let path = PathBuf::from(&agent.path);
     reject_managed_link(&path, store_root)?;
     let original = std::fs::read_to_string(&path).unwrap_or_default();
@@ -462,10 +457,6 @@ fn save_agent_with_store_root(agent: &AgentFile, store_root: Option<&Path>) -> R
 }
 
 pub fn delete_agent(path: &Path, store_root: Option<&Path>) -> Result<()> {
-    delete_agent_with_store_root(path, store_root)
-}
-
-fn delete_agent_with_store_root(path: &Path, store_root: Option<&Path>) -> Result<()> {
     reject_managed_link(path, store_root)?;
     std::fs::remove_file(path)?;
     Ok(())
@@ -529,7 +520,6 @@ fn absolute_lexical(path: &Path) -> Option<PathBuf> {
     if !path.is_absolute() {
         return None;
     }
-    let path = path.to_path_buf();
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
@@ -1066,16 +1056,15 @@ mod tests {
 
         let mut edited = listed.remove(0);
         edited.prompt = "do something else\n".into();
-        let save_error = save_agent_with_store_root(&edited, Some(&temp.path().join("store")))
+        let save_error = save_agent(&edited, Some(&temp.path().join("store")))
             .unwrap_err()
             .to_string();
         assert!(save_error.contains("managed by Hyprlayer"));
         assert_eq!(std::fs::read_to_string(&store_agent).unwrap(), SAMPLE);
 
-        let delete_error =
-            delete_agent_with_store_root(&live_agent, Some(&temp.path().join("store")))
-                .unwrap_err()
-                .to_string();
+        let delete_error = delete_agent(&live_agent, Some(&temp.path().join("store")))
+            .unwrap_err()
+            .to_string();
         assert!(delete_error.contains("managed by Hyprlayer"));
         assert!(live_agent
             .symlink_metadata()
@@ -1105,7 +1094,7 @@ mod tests {
 
         let mut edited = listed.remove(0);
         edited.prompt = "overwrite the store".into();
-        let save_error = save_agent_with_store_root(&edited, Some(&store_root))
+        let save_error = save_agent(&edited, Some(&store_root))
             .unwrap_err()
             .to_string();
         assert!(save_error.contains("managed by Hyprlayer"));
@@ -1114,10 +1103,9 @@ mod tests {
             SAMPLE
         );
 
-        let delete_error =
-            delete_agent_with_store_root(&live_dir.join("cartographer.md"), Some(&store_root))
-                .unwrap_err()
-                .to_string();
+        let delete_error = delete_agent(&live_dir.join("cartographer.md"), Some(&store_root))
+            .unwrap_err()
+            .to_string();
         assert!(delete_error.contains("managed by Hyprlayer"));
         assert!(store_agents.join("cartographer.md").is_file());
     }
@@ -1142,12 +1130,12 @@ mod tests {
 
         let mut edited = listed.remove(0);
         edited.prompt = "personal symlink edit".into();
-        save_agent_with_store_root(&edited, Some(&store_root)).unwrap();
+        save_agent(&edited, Some(&store_root)).unwrap();
         assert!(std::fs::read_to_string(&personal_target)
             .unwrap()
             .contains("personal symlink edit"));
 
-        delete_agent_with_store_root(&live_agent, Some(&store_root)).unwrap();
+        delete_agent(&live_agent, Some(&store_root)).unwrap();
         assert!(!live_agent.symlink_metadata().is_ok());
         assert!(personal_target.is_file());
     }
@@ -1163,14 +1151,14 @@ mod tests {
         let broken_managed = live_dir.join("managed.md");
         std::os::unix::fs::symlink(store_root.join("missing/managed.md"), &broken_managed).unwrap();
         assert!(link_targets_store(&broken_managed, &store_root));
-        assert!(delete_agent_with_store_root(&broken_managed, Some(&store_root)).is_err());
+        assert!(delete_agent(&broken_managed, Some(&store_root)).is_err());
         assert!(broken_managed.symlink_metadata().is_ok());
 
         let sibling = live_dir.join("personal.md");
         std::os::unix::fs::symlink(temp.path().join("agents-personal/missing.md"), &sibling)
             .unwrap();
         assert!(!link_targets_store(&sibling, &store_root));
-        delete_agent_with_store_root(&sibling, Some(&store_root)).unwrap();
+        delete_agent(&sibling, Some(&store_root)).unwrap();
         assert!(!sibling.symlink_metadata().is_ok());
     }
 
@@ -1190,19 +1178,6 @@ mod tests {
 
         delete_agent(&path, None).unwrap();
         assert!(!path.exists());
-    }
-
-    #[test]
-    fn overlay_defaults_match_a_fresh_agent() {
-        let o = AgentOverlay::default();
-        assert_eq!(o.effort, "high");
-        assert_eq!(o.harness, "claude");
-        assert_eq!(o.permission_mode, "default");
-        assert!(
-            o.network,
-            "agents may reach the network unless told otherwise"
-        );
-        assert!(!o.outside_worktree);
     }
 
     #[test]

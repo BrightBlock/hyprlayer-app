@@ -35,12 +35,11 @@ pub fn parse(input: &str) -> Result<SkillSourceRef> {
             .map(|r| r.strip_suffix(".git").unwrap_or(r))
             .ok_or_else(invalid)?;
         let slug = format!("{}/{repo}", owner.ok_or_else(invalid)?);
-        let rest: Vec<&str> = match segments.next() {
+        let mut rest: Vec<&str> = match segments.next() {
             None => Vec::new(),
             Some("tree" | "blob") => segments.collect(),
             Some(_) => return Err(invalid()),
         };
-        let mut rest = rest;
         if rest.last() == Some(&"SKILL.md") {
             rest.pop();
         }

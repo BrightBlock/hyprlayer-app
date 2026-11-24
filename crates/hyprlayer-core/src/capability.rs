@@ -83,8 +83,6 @@ pub fn launch_policy(
 pub fn codex_posture(stage: Stage, mode: PermissionMode) -> CodexPosture {
     let mut posture = CodexPosture::from_permission_mode(mode);
     match stage {
-        // A read-only audit: never let the model mutate the tree, whatever mode
-        // the session runs under.
         Stage::Validate => {
             posture.sandbox = "read-only";
             posture.approval_policy = "on-request";
