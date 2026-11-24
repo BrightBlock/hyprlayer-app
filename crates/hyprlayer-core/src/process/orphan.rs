@@ -38,6 +38,11 @@ pub fn reap(pid_file: &Path) -> Option<u32> {
     reap_with(pid_file, cmdline, kill_group)
 }
 
+/// `reap`, with `SIGKILL`: a codex app-server mid-turn ignores `SIGTERM` and keeps its thread.
+pub fn reap_now(pid_file: &Path) -> Option<u32> {
+    reap_with(pid_file, cmdline, kill_group_now)
+}
+
 fn reap_with(
     pid_file: &Path,
     cmdline: impl Fn(u32) -> Option<String>,
@@ -204,6 +209,27 @@ pub fn kill_group(pid: u32) {
 
 #[cfg(not(unix))]
 pub fn kill_group(_pid: u32) {}
+
+/// For a child that may ignore `SIGTERM` while it holds state the next run needs.
+#[cfg(unix)]
+pub fn kill_group_now(pid: u32) {
+    unsafe {
+        libc::kill(-(pid as i32), libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn kill_group_now(_pid: u32) {}
+
+#[cfg(unix)]
+pub fn alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as i32, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+pub fn alive(_pid: u32) -> bool {
+    false
+}
 
 /// Whether a live command line is a harness the session left behind.
 pub fn harness_orphan_matches(cmdline: &str, harness: Harness, session_id: &str) -> bool {

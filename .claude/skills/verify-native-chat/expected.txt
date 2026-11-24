@@ -50,6 +50,11 @@ PASS OpenCodeTurns-stop.InterruptHonored
 PASS RestartWake.TypeOK
 PASS RestartWake.WakeBounded
 PASS RestartWake.NoWakeWhenArchived
+PASS PtyResume.TypeOK
+PASS PtyResume.NoDoubleResume
+PASS PtyResume.ResumeBounded
+PASS PtyResume.NoResumeWhenArchived
+PASS PtyResume.NoResumeOfIdle
 PASS SessionSync.TypeOK
 PASS SessionSync.NoSkippedSeq
 PASS SessionSync.ClientsConverge

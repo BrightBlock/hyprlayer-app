@@ -14,6 +14,7 @@ use tokio::time::Instant;
 
 use super::pty_agents::{asking, PtyAgents, PtySnapshot};
 use super::pty_controls::{self, composing};
+use super::resume::{ResumeCause, Resumed};
 use super::{blocking, denied, in_project, AgentControlService, AgentIdentity};
 use crate::capability::launch_policy;
 use crate::claude::driver::permission_mode_flag;
@@ -25,7 +26,7 @@ use crate::runtime::sessions::{
     MessageSender, SendContext, SessionLineage, StartStageSessionRequest,
 };
 use crate::runtime::terminals::{CloseTerminalRequest, LaunchAgentRequest, PtyLineage};
-use crate::store::{Session, Workstream};
+use crate::store::{PtyAgentRow, Session, Workstream};
 use crate::terminal::{engines, text, PtySession, RingReader};
 
 /// A wait's caller may be gone; the request task still runs to its end, so the end is bounded.
@@ -35,10 +36,10 @@ const POLL: Duration = Duration::from_millis(250);
 /// A spawned PTY has no window yet: it takes the size a desktop last fitted an agent tab to, so
 /// opening its tab resizes nothing. claude reprints its whole transcript on a resize and leaves the
 /// old width's copy in scrollback. This is the size before any desktop has fitted one.
-const SPAWN_COLS: u16 = 120;
-const SPAWN_ROWS: u16 = 32;
+pub(super) const SPAWN_COLS: u16 = 120;
+pub(super) const SPAWN_ROWS: u16 = 32;
 /// A first prompt still waiting on its TUI counts as owed this long past each check.
-const PROMPT_WAIT: Duration = Duration::from_secs(60);
+pub(super) const PROMPT_WAIT: Duration = Duration::from_secs(60);
 /// An unhooked TUI reports no ready state; this much quiet output stands in for one.
 const PROMPT_QUIET: Duration = Duration::from_secs(3);
 /// A paste the TUI swallowed never submits; past this a wait stops counting it as pending.
@@ -183,7 +184,11 @@ impl AgentControlService<'_> {
         })
     }
 
-    async fn admit_child(&self, parent: &AgentCaller, whose: &str) -> Result<OwnedMutexGuard<()>> {
+    pub(super) async fn admit_child(
+        &self,
+        parent: &AgentCaller,
+        whose: &str,
+    ) -> Result<OwnedMutexGuard<()>> {
         let slot = self.runtime.agent_spawn_locks.acquire(parent.id()).await;
         let control = self.runtime.settings.get().await.agent_control;
         let lead = control.lead();
@@ -718,6 +723,7 @@ impl AgentControlService<'_> {
                     depth: check.depth,
                     mode,
                 }),
+                resume_of: None,
             })
             .await?;
         // A claude or codex that came up unhooked (old codex, a user `--settings`) gets the same rule.
@@ -819,6 +825,11 @@ impl AgentControlService<'_> {
         interrupt: bool,
     ) -> Result<MessageDelivery> {
         self.require_full(identity).await?;
+        if let Some(row) = self.stored(terminal_id).await? {
+            if let Some(delivery) = self.resume_with(identity, &row, text).await? {
+                return Ok(delivery);
+            }
+        }
         let target = self.pty_target(identity, terminal_id).await?;
         self.check_descendant(identity, terminal_id, false).await?;
         self.check_unhooked_input(identity, target.agent.hooked)
@@ -878,10 +889,48 @@ impl AgentControlService<'_> {
         Ok(delivery)
     }
 
-    /// Ends a PTY agent the caller spawned, freeing its live-children slot.
+    /// An exited agent the caller spawned, resumed in place with the message as its first turn;
+    /// `None` when something else resumed it first, so the message goes in as to any live one.
+    async fn resume_with(
+        &self,
+        identity: &AgentIdentity,
+        row: &PtyAgentRow,
+        text: &str,
+    ) -> Result<Option<MessageDelivery>> {
+        let terminal_id = row.terminal_id.as_str();
+        self.check_workstream(identity, &row.workstream_id).await?;
+        self.check_descendant(identity, terminal_id, false).await?;
+        if !identity.lead {
+            self.admit_hop(terminal_id, &row.workstream_id, &row.engine_id)
+                .await?;
+        }
+        let label = self.caller_label(identity).await;
+        let text = pipeline::headed(&header(identity, &label), text);
+        match self
+            .resume_pty(terminal_id, ResumeCause::Message(text))
+            .await?
+        {
+            Resumed::Launched => {
+                if !identity.lead {
+                    self.record_hop(terminal_id).await;
+                }
+                Ok(Some(MessageDelivery::Sent))
+            }
+            Resumed::Live => Ok(None),
+            Resumed::Skipped(_) => Err(denied("that agent cannot be resumed")),
+        }
+    }
+
+    /// Ends a PTY agent the caller spawned, freeing its live-children slot; an exited one's row
+    /// goes, so nothing resumes it.
     pub async fn kill_pty_agent(&self, identity: &AgentIdentity, terminal_id: &str) -> Result<()> {
         self.require_full(identity).await?;
-        self.pty_target(identity, terminal_id).await?;
+        match self.stored(terminal_id).await? {
+            Some(row) => self.check_workstream(identity, &row.workstream_id).await?,
+            None => {
+                self.pty_target(identity, terminal_id).await?;
+            }
+        }
         self.check_descendant(identity, terminal_id, false).await?;
         self.runtime
             .terminals()
@@ -1313,6 +1362,13 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
                 .is_some_and(|now| now.agent.state == PtyAgentState::Idle)
                 && paste_refusal(&agents, &terminal_id).is_none()
         };
+        let starting = || {
+            agents
+                .snapshot(&terminal_id)
+                .is_some_and(|now| now.agent.state == PtyAgentState::Starting)
+        };
+        let codex = launch.agent.engine_id == "codex";
+        let mut reader = launch.session.subscribe();
         loop {
             let Some(now) = agents.snapshot(&terminal_id) else {
                 break None;
@@ -1324,6 +1380,17 @@ async fn first_prompt(agents: Arc<PtyAgents>, launch: PtySnapshot, text: String)
                 if idle() {
                     break Some(send().await);
                 }
+            }
+            // codex fires no hook until its first turn, so a quiet screen is its composer, up.
+            if codex && starting() {
+                if !quiet_spell(&mut reader).await {
+                    break None;
+                }
+                let _input = launch.input.lock().await;
+                if starting() {
+                    break Some(send().await);
+                }
+                continue;
             }
             let prompting = now
                 .screen

@@ -2,7 +2,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use hyprlayer_models::{
@@ -17,6 +18,7 @@ use super::pty_controls::{footer_mode, ready};
 use super::rollout::RolloutTail;
 use super::TokenGuard;
 use crate::runtime::terminal_registry::TerminalRegistry;
+use crate::store::{Db, PtyAgentRow, PtyAgentSync};
 use crate::terminal::screen::Screen;
 use crate::terminal::{PtySession, RingReader};
 
@@ -30,12 +32,18 @@ const TITLE_TRIES: u8 = 3;
 const FOOTER_FOLLOW: Duration = Duration::from_millis(1500);
 /// One screen read per burst: claude streams a repaint over many writes.
 const FOOTER_COALESCE: Duration = Duration::from_millis(100);
+const FLUSH_WAIT: Duration = Duration::from_secs(2);
+const APP_SERVER_GRACE: Duration = Duration::from_secs(2);
 
 pub(crate) struct PtyLaunchEntry {
     pub agent: PtyAgent,
     pub session: Arc<PtySession>,
     pub token: Option<TokenGuard>,
     pub remote: Option<Arc<CodexRemote>>,
+    /// What the next server needs to resume it; `None` for a launch it never resumes.
+    pub record: Option<PtyAgentRow>,
+    /// A restart resume whose nudge hasn't started a turn yet, so it still counts as working.
+    pub nudge_owed: bool,
 }
 
 /// What a launch's codex supports.
@@ -84,6 +92,9 @@ struct Entry {
     /// A slash command claude would take in mid-turn as plain text, and the messages sent after it.
     held: VecDeque<String>,
     draining: bool,
+    /// What the store last holds for it; `None` when it isn't stored.
+    saved: Option<PtyAgentSync>,
+    nudge_owed: bool,
     /// Held only to revoke on drop, when the entry goes.
     _token: Option<TokenGuard>,
 }
@@ -105,6 +116,9 @@ pub struct PtyAgents {
     terminals: Arc<TerminalRegistry>,
     links: Arc<AgentLinks>,
     launch_root: PathBuf,
+    store: PtyStore,
+    /// Set once the server stops: exits after it are the server's, so their rows stay to resume.
+    stopping: AtomicBool,
 }
 
 /// One launch as the agent-control verbs see it, unhooked ones included.
@@ -128,6 +142,7 @@ impl PtyAgents {
         events: broadcast::Sender<RuntimeEvent>,
         terminals: Arc<TerminalRegistry>,
         links: Arc<AgentLinks>,
+        db: Arc<Db>,
     ) -> Self {
         let launch_root = app_data_dir.join("agent-control").join("launch");
         if let Err(e) = std::fs::remove_dir_all(&launch_root) {
@@ -145,7 +160,26 @@ impl PtyAgents {
             terminals,
             links,
             launch_root,
+            store: PtyStore::spawn(db),
+            stopping: AtomicBool::new(false),
         }
+    }
+
+    /// Before shutdown kills the PTYs: their exits keep their rows, and every queued write lands.
+    pub(crate) fn server_stopping(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        self.store.flush();
+    }
+
+    /// The tab was closed: no server resumes it, running or not.
+    pub(crate) fn forget(&self, terminal_id: &str) {
+        self.store.send(StoreOp::Delete(terminal_id.to_string()));
+        self.links.unlink(terminal_id);
+    }
+
+    /// Waits for the queued writes, so a read after it sees them.
+    pub(crate) fn flush_store(&self) {
+        self.store.flush();
     }
 
     /// Writes `<launch dir>/<name>` readable by this user only; the exit watcher deletes the dir.
@@ -198,11 +232,23 @@ impl PtyAgents {
             session,
             token,
             remote,
+            record,
+            nudge_owed,
         } = launch;
         let screen = (agent.hooked && agent.engine_id == CLAUDE_ENGINE).then(|| session.screen());
         agent.status.controllable = screen.is_some() || remote.is_some();
         let terminal_id = agent.terminal_id.clone();
         let mut reader = session.subscribe();
+        let saved = record.map(|row| {
+            let saved = PtyAgentSync {
+                provider_session_id: row.provider_session_id.clone(),
+                title: row.title.clone(),
+                working: row.working,
+                turn_done: false,
+            };
+            self.store.send(StoreOp::Upsert(Box::new(row)));
+            saved
+        });
         {
             let mut entries = lock(&self.entries);
             let entry = entries.entry(terminal_id.clone()).or_insert(Entry {
@@ -226,6 +272,8 @@ impl PtyAgents {
                 remote,
                 held: VecDeque::new(),
                 draining: false,
+                saved,
+                nudge_owed,
                 _token: token,
             });
             self.emit(entry);
@@ -251,8 +299,15 @@ impl PtyAgents {
             entry.agent.state = PtyAgentState::Exited;
             self.emit(&mut entry);
         }
-        self.links.unlink(terminal_id);
         self.remove_launch_dir(terminal_id);
+        // A server's own stop leaves the row and the lineage for the next one to resume.
+        if self.stopping.load(Ordering::SeqCst) {
+            return;
+        }
+        if entry.saved.is_some() {
+            self.store.send(StoreOp::Delete(terminal_id.to_string()));
+        }
+        self.links.unlink(terminal_id);
     }
 
     /// Hooked agents, and unhooked ones an agent spawned so a desktop can still adopt them.
@@ -305,12 +360,22 @@ impl PtyAgents {
         }
     }
 
-    /// For shutdown, which doesn't wait for the exit watchers.
+    /// For shutdown, which doesn't wait for the exit watchers: one that ignores `SIGTERM` is
+    /// killed, so the next server's resume of its thread finds no app-server still holding it.
     pub(crate) fn stop_app_servers(&self) {
-        for entry in lock(&self.entries).values() {
-            if let Some(remote) = &entry.remote {
-                remote.stop();
-            }
+        let remotes: Vec<Arc<CodexRemote>> = lock(&self.entries)
+            .values()
+            .filter_map(|e| e.remote.clone())
+            .collect();
+        for remote in &remotes {
+            remote.stop();
+        }
+        let deadline = Instant::now() + APP_SERVER_GRACE;
+        while remotes.iter().any(|r| r.running()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        for remote in remotes.iter().filter(|r| r.running()) {
+            remote.kill_now();
         }
     }
 
@@ -714,6 +779,7 @@ impl PtyAgents {
         if !entry.agent.hooked {
             return;
         }
+        self.save(entry);
         let a = &entry.agent;
         let _ = self.events.send(RuntimeEvent::PtyAgentChanged {
             terminal_id: a.terminal_id.clone(),
@@ -726,6 +792,124 @@ impl PtyAgents {
             title: a.title.clone(),
             status: a.status.clone(),
         });
+    }
+}
+
+impl PtyAgents {
+    fn save(&self, entry: &mut Entry) {
+        let Some(saved) = entry.saved.as_ref() else {
+            return;
+        };
+        if mid_turn(entry.agent.state) {
+            entry.nudge_owed = false;
+        }
+        let Some(next) = next_saved(saved, &entry.agent, entry.nudge_owed) else {
+            return;
+        };
+        let sync = PtyAgentSync {
+            provider_session_id: next.provider_session_id.clone(),
+            title: next.title.clone(),
+            working: next.working,
+            turn_done: next.turn_done,
+        };
+        entry.saved = Some(PtyAgentSync {
+            turn_done: false,
+            ..next
+        });
+        self.store
+            .send(StoreOp::Sync(entry.agent.terminal_id.clone(), sync));
+    }
+}
+
+fn mid_turn(state: PtyAgentState) -> bool {
+    matches!(
+        state,
+        PtyAgentState::Working
+            | PtyAgentState::AwaitingPermission
+            | PtyAgentState::AwaitingQuestion
+    )
+}
+
+/// The row a change leaves, or `None` when it leaves it as it was. A launch or a server's kill
+/// says nothing about the turn, and an owed nudge keeps a resumed agent working until it lands.
+fn next_saved(saved: &PtyAgentSync, agent: &PtyAgent, nudge_owed: bool) -> Option<PtyAgentSync> {
+    let working = match agent.state {
+        PtyAgentState::Starting | PtyAgentState::Exited => saved.working,
+        PtyAgentState::Idle => nudge_owed && saved.working,
+        _ => true,
+    };
+    let next = PtyAgentSync {
+        provider_session_id: agent
+            .provider_session_id
+            .clone()
+            .or_else(|| saved.provider_session_id.clone()),
+        title: agent.title.clone().or_else(|| saved.title.clone()),
+        working,
+        turn_done: saved.working && !working,
+    };
+    let unchanged = next.provider_session_id == saved.provider_session_id
+        && next.title == saved.title
+        && next.working == saved.working;
+    (!unchanged).then_some(next)
+}
+
+enum StoreOp {
+    Upsert(Box<PtyAgentRow>),
+    Sync(String, PtyAgentSync),
+    Delete(String),
+    Flush(mpsc::SyncSender<()>),
+}
+
+/// One writer thread, so the rows change in the order the agents did, off the entries lock.
+struct PtyStore {
+    tx: mpsc::Sender<StoreOp>,
+}
+
+impl PtyStore {
+    fn spawn(db: Arc<Db>) -> Self {
+        let (tx, rx) = mpsc::channel::<StoreOp>();
+        let spawned = std::thread::Builder::new()
+            .name("pty-agent-store".into())
+            .spawn(move || {
+                for op in rx {
+                    let (id, written) = match op {
+                        StoreOp::Upsert(row) => {
+                            (row.terminal_id.clone(), db.upsert_pty_agent(&row))
+                        }
+                        StoreOp::Sync(id, sync) => {
+                            let written = db.sync_pty_agent(&id, &sync);
+                            (id, written)
+                        }
+                        StoreOp::Delete(id) => {
+                            let written = db.delete_pty_agent(&id);
+                            (id, written)
+                        }
+                        StoreOp::Flush(done) => {
+                            let _ = done.send(());
+                            continue;
+                        }
+                    };
+                    if let Err(e) = written {
+                        tracing::warn!("terminal {id}: its resume record was not written: {e}");
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!("PTY agents will not resume after a restart: no store thread: {e}");
+        }
+        Self { tx }
+    }
+
+    fn send(&self, op: StoreOp) {
+        let _ = self.tx.send(op);
+    }
+
+    fn flush(&self) {
+        let (done, flushed) = mpsc::sync_channel(1);
+        self.send(StoreOp::Flush(done));
+        if flushed.recv_timeout(FLUSH_WAIT).is_err() {
+            tracing::warn!("PTY agent records may be behind: their writer did not answer");
+        }
     }
 }
 
@@ -862,7 +1046,7 @@ fn prune_app_servers(dir: &Path) {
     let paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
     let has = |path: &Path, ext: &str| path.extension().is_some_and(|e| e == ext);
     for pid_file in paths.iter().filter(|p| has(p, "pid")) {
-        crate::process::orphan::reap(pid_file);
+        crate::process::orphan::reap_now(pid_file);
     }
     for socket in paths.iter().filter(|p| has(p, "sock")) {
         if let Err(e) = std::fs::remove_file(socket) {
@@ -916,4 +1100,84 @@ fn reply_len(b: &[u8]) -> Option<usize> {
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn agent(state: PtyAgentState) -> PtyAgent {
+        PtyAgent {
+            terminal_id: "t1".into(),
+            workstream_id: "ws".into(),
+            engine_id: CLAUDE_ENGINE.into(),
+            state,
+            provider_session_id: Some("p1".into()),
+            activity: None,
+            last_reply: None,
+            spawned_by: None,
+            hooked: true,
+            title: None,
+            status: Default::default(),
+        }
+    }
+
+    fn saved(working: bool) -> PtyAgentSync {
+        PtyAgentSync {
+            provider_session_id: Some("p1".into()),
+            title: None,
+            working,
+            turn_done: false,
+        }
+    }
+
+    #[test]
+    fn a_turn_starting_marks_the_row_working() {
+        let next = next_saved(&saved(false), &agent(PtyAgentState::Working), false).unwrap();
+        assert!(next.working && !next.turn_done);
+        let asking = next_saved(
+            &saved(false),
+            &agent(PtyAgentState::AwaitingQuestion),
+            false,
+        );
+        assert!(asking.unwrap().working);
+    }
+
+    #[test]
+    fn a_turn_ending_clears_working_and_counts_as_done() {
+        let next = next_saved(&saved(true), &agent(PtyAgentState::Idle), false).unwrap();
+        assert!(!next.working && next.turn_done);
+    }
+
+    #[test]
+    fn the_servers_kill_and_a_relaunch_leave_the_turn_state() {
+        for state in [PtyAgentState::Exited, PtyAgentState::Starting] {
+            assert_eq!(next_saved(&saved(true), &agent(state), false), None);
+            assert_eq!(next_saved(&saved(false), &agent(state), false), None);
+        }
+    }
+
+    #[test]
+    fn a_resumed_agent_stays_working_until_its_nudge_starts_a_turn() {
+        assert_eq!(
+            next_saved(&saved(true), &agent(PtyAgentState::Idle), true),
+            None
+        );
+        // An idle agent resumed by hand owes nothing, and an owed nudge never makes one working.
+        assert_eq!(
+            next_saved(&saved(false), &agent(PtyAgentState::Idle), true),
+            None
+        );
+    }
+
+    #[test]
+    fn a_new_title_or_session_id_is_written_without_touching_the_turn() {
+        let mut titled = agent(PtyAgentState::Idle);
+        titled.title = Some("Fix the build".into());
+        titled.provider_session_id = Some("p2".into());
+        let next = next_saved(&saved(false), &titled, false).unwrap();
+        assert_eq!(next.title.as_deref(), Some("Fix the build"));
+        assert_eq!(next.provider_session_id.as_deref(), Some("p2"));
+        assert!(!next.working && !next.turn_done);
+    }
 }

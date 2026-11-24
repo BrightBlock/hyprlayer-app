@@ -138,6 +138,7 @@ pub(crate) fn access(request: &Request) -> Access {
         Request::AccountFinishSignIn { .. } => Access::Excluded("the Cloud account is the user's"),
         Request::AccountSignOut { .. } => Access::Excluded("the Cloud account is the user's"),
         Request::ListPtyAgents { .. } => Access::Read(Scope::Filtered),
+        Request::ListStoppedPtyAgents { .. } => Access::Read(Scope::Filtered),
         Request::AnnounceAgent { .. } => Access::Read(Scope::Caller),
         Request::NotifyUser { .. } => Access::Read(Scope::Caller),
         Request::RequestAttention { .. } => Access::Read(Scope::Caller),
@@ -527,6 +528,10 @@ pub(crate) fn filter(response: Response, filter: Filter) -> Result<Response> {
         Response::ListPtyAgents(mut v) => {
             v.retain(|a| ours(&a.workstream_id));
             Response::ListPtyAgents(v)
+        }
+        Response::ListStoppedPtyAgents(mut v) => {
+            v.retain(|a| ours(&a.workstream_id));
+            Response::ListStoppedPtyAgents(v)
         }
         Response::ListRunningScripts(mut v) => {
             v.retain(|id| ours(id));

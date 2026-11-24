@@ -146,6 +146,8 @@ pub struct HyprlayerRuntime {
     agent_tokens: AgentTokens,
     agent_hops: AgentHops,
     agent_spawn_locks: SpawnLocks,
+    /// One resume, close or supersede of a PTY agent at a time, by terminal id.
+    pty_resume_locks: SpawnLocks,
     agent_links: Arc<AgentLinks>,
     pty_agents: Arc<PtyAgents>,
     wakes: agent_control::wake::Wakes,
@@ -294,6 +296,7 @@ impl HyprlayerRuntime {
 
         let terminals = Arc::new(TerminalRegistry::new());
         let agent_links = Arc::new(AgentLinks::default());
+        agent_control::resume::restore_links(&db, &agent_links);
         let pty_agents = Arc::new(PtyAgents::new(
             &paths.app_data_dir,
             agent_control
@@ -302,6 +305,7 @@ impl HyprlayerRuntime {
             events.clone(),
             terminals.clone(),
             agent_links.clone(),
+            db.clone(),
         ));
 
         Ok(Arc::new_cyclic(|handle| Self {
@@ -316,6 +320,7 @@ impl HyprlayerRuntime {
             agent_tokens: AgentTokens::default(),
             agent_hops: AgentHops::default(),
             agent_spawn_locks: SpawnLocks::default(),
+            pty_resume_locks: SpawnLocks::default(),
             agent_links,
             pty_agents,
             wakes: agent_control::wake::Wakes::default(),
@@ -742,6 +747,7 @@ impl HyprlayerRuntime {
                 let forced_tasks = shutdown::stop_tasks(tasks).await;
                 self.goal_runners.stop_all().await;
 
+                self.pty_agents.server_stopping();
                 self.pty_agents.stop_app_servers();
                 let terminals = self.terminals.kill_all_blocking();
                 self.session_actors.server_stopping();
@@ -769,6 +775,7 @@ impl HyprlayerRuntime {
 
     pub fn shutdown_now(&self) {
         self.coordinator.shutdown_now(|| {
+            self.pty_agents.server_stopping();
             self.pty_agents.stop_app_servers();
             self.terminals.kill_all_blocking();
             self.session_actors.server_stopping();

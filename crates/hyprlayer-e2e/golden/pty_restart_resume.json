@@ -1,0 +1,87 @@
+{
+  "scenario": "pty_restart_resume",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "exit": 0,
+            "working": true
+          },
+          "guard": "the busy agent reports working, then the server stops cleanly",
+          "ok": true
+        }
+      ],
+      "step": "one agent is mid-turn and one idle when the server stops"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "live": true,
+            "resumeArgs": [
+              "--resume",
+              "$BUSY_SESSION"
+            ]
+          },
+          "guard": "the busy agent is live again under its own terminal id, on --resume of its conversation",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "nudged": true
+          },
+          "guard": "it is told the server restarted and to carry on",
+          "ok": true
+        }
+      ],
+      "step": "the next server resumes the busy agent in place"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "busyStopped": false,
+            "idleLive": false,
+            "idleStopped": true
+          },
+          "guard": "the idle agent was not relaunched, and is listed as stopped with its conversation",
+          "ok": true
+        }
+      ],
+      "step": "the idle agent stays exited, listed as stopped"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "gone": true
+          },
+          "guard": "a closed tab's agent is no longer listed as stopped",
+          "ok": true
+        }
+      ],
+      "step": "closing the idle agent's tab drops it for good"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "live": true,
+            "processes": 1
+          },
+          "guard": "the agent is back again under the same id, with one process",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "exit": 0
+          },
+          "guard": "the server stops cleanly",
+          "ok": true
+        }
+      ],
+      "step": "a second restart before the nudged turn ends resumes it once more, not twice"
+    }
+  ]
+}

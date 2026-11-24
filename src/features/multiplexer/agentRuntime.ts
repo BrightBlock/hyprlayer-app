@@ -121,7 +121,26 @@ function onDetectEvent(rt: Runtime, ev: TerminalEvent): void {
   }
 }
 
-const goneListeners = new Map<string, Set<(terminalId: string) => void>>();
+type TerminalListeners = Map<string, Set<(terminalId: string) => void>>;
+
+const goneListeners: TerminalListeners = new Map();
+const backListeners: TerminalListeners = new Map();
+
+function listen(
+  listeners: TerminalListeners,
+  workstreamId: string,
+  shellId: number,
+  listener: (terminalId: string) => void,
+): () => void {
+  const key = agentKey(workstreamId, shellId);
+  const set = listeners.get(key) ?? new Set();
+  set.add(listener);
+  listeners.set(key, set);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0 && listeners.get(key) === set) listeners.delete(key);
+  };
+}
 
 /** A terminal the server lost without an `exited` event (its server died); the tab's own channel stays silent. */
 export function onAgentTerminalGone(
@@ -129,14 +148,16 @@ export function onAgentTerminalGone(
   shellId: number,
   listener: (terminalId: string) => void,
 ): () => void {
-  const key = agentKey(workstreamId, shellId);
-  const set = goneListeners.get(key) ?? new Set();
-  set.add(listener);
-  goneListeners.set(key, set);
-  return () => {
-    set.delete(listener);
-    if (set.size === 0 && goneListeners.get(key) === set) goneListeners.delete(key);
-  };
+  return listen(goneListeners, workstreamId, shellId, listener);
+}
+
+/** An exited terminal the server resumed under the same id after a restart; the tab attaches again. */
+export function onAgentTerminalBack(
+  workstreamId: string,
+  shellId: number,
+  listener: (terminalId: string) => void,
+): () => void {
+  return listen(backListeners, workstreamId, shellId, listener);
 }
 
 /** A hooked agent holds no stream, so its exit arrives as a state; `/clear` reports `exited`, then a live one. */
@@ -144,8 +165,12 @@ export function onPtyAgentChanged(a: PtyAgent): void {
   for (const rt of runtimes.values()) {
     if (rt.terminalId !== a.terminalId || !isHooked(rt)) continue;
     releaseOutput(rt);
-    if (a.state === "exited") onDetectEvent(rt, { kind: "exited", code: null });
-    else rt.exited = false;
+    if (a.state === "exited") {
+      onDetectEvent(rt, { kind: "exited", code: null });
+    } else if (rt.exited) {
+      rt.exited = false;
+      backListeners.get(rt.key)?.forEach((fn) => fn(a.terminalId));
+    }
   }
 }
 

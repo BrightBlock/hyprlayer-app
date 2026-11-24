@@ -348,6 +348,22 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_lead_queue_project ON lead_queue(project_path, position);
     ",
+    "
+    CREATE TABLE pty_agents (
+        terminal_id         TEXT PRIMARY KEY,
+        workstream_id       TEXT NOT NULL REFERENCES workstreams(id) ON DELETE CASCADE,
+        engine_id           TEXT NOT NULL,
+        launch              TEXT NOT NULL,
+        spawned_by          TEXT,
+        depth               INTEGER NOT NULL DEFAULT 0,
+        mode                TEXT,
+        provider_session_id TEXT,
+        title               TEXT,
+        working             INTEGER NOT NULL DEFAULT 0,
+        resumes             INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_pty_agents_workstream ON pty_agents(workstream_id);
+    ",
 ];
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {

@@ -22,6 +22,7 @@ import { useScriptsStore } from "@/features/session/scriptsStore";
 import {
   closeAgent,
   ensureAgent,
+  onAgentTerminalBack,
   onAgentTerminalGone,
   resolveResume,
   setAgentBypass,
@@ -146,6 +147,20 @@ export function AgentPtyTab({
     feed.next = spare?.next;
     const unsubGone = onAgentTerminalGone(workstreamId, shellId, (id) => {
       if (id === idRef.current) showExited(id);
+    });
+    // A restarted server resumed it in a new process: its output starts over, so the screen does too.
+    const unsubBack = onAgentTerminalBack(workstreamId, shellId, (id) => {
+      if (disposed || id !== idRef.current) return;
+      exitShownFor = undefined;
+      eng.reset();
+      feed.restart();
+      void unwrap(commands.terminalAttach(id, null, feed.channel()))
+        .then((ok) => {
+          if (!ok || disposed) return;
+          lastGrid = eng.fit();
+          void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
+        })
+        .catch((e) => log.warn("agent", "reattaching a resumed agent failed", e));
     });
     // An unhooked codex launch without a session waits on the server's `codex exec` mint (up to 90 s).
     const launch = async (opts: EnsureAgentOpts) => {
@@ -327,6 +342,7 @@ export function AgentPtyTab({
       unsubInput();
       unsubKey();
       unsubGone();
+      unsubBack();
       offReconnect();
       ro.disconnect();
       const id = idRef.current;

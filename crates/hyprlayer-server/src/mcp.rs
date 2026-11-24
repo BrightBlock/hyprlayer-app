@@ -164,7 +164,7 @@ const TOOLS: [Tool; 38] = [
     },
     Tool {
         name: READ_TOOLS[2],
-        description: "Live composer sessions and PTY agents in this project.",
+        description: "Live composer sessions and PTY agents in this project, and under stoppedPtyAgents the PTY agents a server restart or crash left exited, which message_agent resumes.",
         read_only: true,
         schema: no_args,
     },
@@ -292,7 +292,7 @@ const TOOLS: [Tool; 38] = [
     },
     Tool {
         name: "message_agent",
-        description: "Sends a message to a session in this project, or to a PTY agent this agent spawned, marked as from this agent. A message opening with a slash command to a PTY agent that is mid-turn, and any message sent after it, waits for the agent's next idle: the result is then `queued`.",
+        description: "Sends a message to a session in this project, or to a PTY agent this agent spawned, marked as from this agent. An exited PTY agent this agent spawned (list_agents' stoppedPtyAgents) resumes in place, in its own tab and conversation, with the message as its first turn. A message opening with a slash command to a PTY agent that is mid-turn, and any message sent after it, waits for the agent's next idle: the result is then `queued`.",
         read_only: false,
         schema: || {
             with_props(
@@ -717,7 +717,8 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
                 })
                 .collect();
             let terminals = client.list_pty_agents(None).await?;
-            Ok(json!({ "sessions": sessions, "ptyAgents": terminals }))
+            let stopped = client.list_stopped_pty_agents().await?;
+            Ok(json!({ "sessions": sessions, "ptyAgents": terminals, "stoppedPtyAgents": stopped }))
         }
         "read_agent" => {
             let session_id = match target(args)? {

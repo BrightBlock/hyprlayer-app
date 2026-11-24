@@ -8,6 +8,7 @@ use tokio::task::JoinSet;
 use crate::claude::SessionEvent;
 use crate::error::Result;
 use crate::pipeline::RESTART_PROMPT_NAME;
+use crate::runtime::agent_control::resume::resume_after_restart;
 use crate::runtime::goals::{resume_running, GoalRunners, MAX_RESTART_RESUMES, OVERLAY_WAIT};
 use crate::runtime::shutdown::TrackedTask;
 use crate::runtime::HyprlayerRuntime;
@@ -32,12 +33,15 @@ pub(crate) fn spawn_after_restart(
     let restarted_at = utc_minute(SystemTime::now());
     TrackedTask::spawn(move |stop| async move {
         // Waking only after the resumer's pass: a goal it skipped as paused is then this pass's to wake.
-        let pickup = async {
+        let sessions = async {
             resume_running(&runners, &runtime).await;
             wake_stopped(&runtime, &restarted_at).await;
             if let Some(rt) = runtime.upgrade() {
                 super::held::sweep_after_restart(&rt).await;
             }
+        };
+        let pickup = async {
+            tokio::join!(sessions, resume_after_restart(&runtime));
         };
         tokio::select! {
             () = pickup => {}

@@ -15,7 +15,7 @@ use crate::pipeline::{self, Stage};
 use crate::process::binaries::{parse_semver, BinaryKind};
 use crate::process::Exec;
 use crate::settings::Engine;
-use crate::store::Workstream;
+use crate::store::{PtyAgentRow, Workstream};
 use crate::terminal::engines;
 use crate::terminal::{PtySession, RingReader, SpawnTerminal};
 
@@ -23,7 +23,7 @@ use crate::terminal::{PtySession, RingReader, SpawnTerminal};
 use super::agent_control::codex_remote;
 use super::agent_control::codex_remote::CodexRemote;
 use super::agent_control::pty_agents::{is_terminal_reply, CodexGate, PtyLaunchEntry};
-use super::agent_control::{inject, spawn, AgentIdentity};
+use super::agent_control::{inject, resume, spawn, AgentIdentity};
 use super::HyprlayerRuntime;
 
 type CodexGateCell = tokio::sync::OnceCell<CodexGate>;
@@ -126,6 +126,8 @@ pub struct LaunchAgentRequest {
     pub cols: u16,
     pub rows: u16,
     pub lineage: Option<PtyLineage>,
+    /// A stored agent to resume in place, under its own terminal id.
+    pub resume_of: Option<PtyAgentRow>,
 }
 
 /// The agent that asked for a PTY launch; the desktop's own launches have none.
@@ -301,12 +303,50 @@ impl TerminalService<'_> {
 
     pub async fn close(&self, req: CloseTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
-        if let Some(s) = self.runtime.terminals.remove(&req.terminal_id).await {
+        let _resume = self
+            .runtime
+            .pty_resume_locks
+            .acquire(&req.terminal_id)
+            .await;
+        self.end_agent(&req.terminal_id).await
+    }
+
+    /// Kills it and drops its row, so no server resumes it; the caller holds its resume lock.
+    async fn end_agent(&self, terminal_id: &str) -> Result<()> {
+        if let Some(s) = self.runtime.terminals.remove(terminal_id).await {
             s.kill();
         }
         // Not left to the exit watcher: a PTY that never started or never reports its exit would stay listed.
-        self.runtime.pty_agents.release(&req.terminal_id);
-        Ok(())
+        let agents = self.runtime.pty_agents.clone();
+        agents.release(terminal_id);
+        agents.forget(terminal_id);
+        blocking(move || {
+            agents.flush_store();
+            Ok(())
+        })
+        .await
+    }
+
+    /// A launch resuming a conversation a stored agent holds replaces that agent, so two never
+    /// share it; `true` when the replaced one still owed its restart nudge, which the launch takes.
+    async fn supersede(&self, ws: &Workstream, engine_id: &str, session_id: &str) -> Result<bool> {
+        let db = self.runtime.db.clone();
+        let (ws_id, engine, sid) = (ws.id.clone(), engine_id.to_string(), session_id.to_string());
+        let Some(row) = blocking(move || db.pty_agent_holding(&ws_id, &engine, &sid)).await? else {
+            return Ok(false);
+        };
+        let _resume = self
+            .runtime
+            .pty_resume_locks
+            .acquire(&row.terminal_id)
+            .await;
+        let live = self.runtime.pty_agents.snapshot(&row.terminal_id).is_some();
+        tracing::info!(
+            "terminal {}: replaced by a new launch resuming its conversation",
+            row.terminal_id
+        );
+        self.end_agent(&row.terminal_id).await?;
+        Ok(row.working && (!live || row.resumes > 0))
     }
 
     pub async fn open_cli(&self, req: OpenCliTerminalRequest) -> Result<TerminalAttachment> {
@@ -385,12 +425,22 @@ impl TerminalService<'_> {
         if engine.command.trim().is_empty() {
             return Err(CoreError::TerminalCommandEmpty);
         }
+        let resume_of = req.resume_of;
+        let takes_nudge = match req.session.session_id.as_deref() {
+            Some(sid) if req.session.resume && resume_of.is_none() => {
+                self.supersede(&ws, &engine.id, sid).await?
+            }
+            _ => false,
+        };
         let mode = match &req.lineage {
             Some(lineage) => lineage.mode,
             None if req.session.bypass => PermissionMode::BypassPermissions,
             None => PermissionMode::Default,
         };
-        let terminal_id = uuid::Uuid::new_v4().to_string();
+        let terminal_id = resume_of.as_ref().map_or_else(
+            || uuid::Uuid::new_v4().to_string(),
+            |row| row.terminal_id.clone(),
+        );
         let identity = self
             .runtime
             .agent_control()
@@ -445,6 +495,7 @@ impl TerminalService<'_> {
                 .await?;
         }
 
+        let launch_settings = session.clone();
         let (identity_env, token) = identity.unzip();
         let mut env = self.runtime.child_env().await;
         env.extend(identity_env.unwrap_or_default());
@@ -513,6 +564,26 @@ impl TerminalService<'_> {
         // Before the exit watcher starts, so a fast exit cannot leave the link behind.
         let spawned_by = req.lineage.as_ref().map(|l| l.parent.clone());
         let agent_spawned = req.lineage.is_some();
+        let nudge_owed = takes_nudge || resume_of.as_ref().is_some_and(|row| row.working);
+        let record = hooked.then(|| match resume_of {
+            Some(row) => PtyAgentRow {
+                launch: launch_settings,
+                ..row
+            },
+            None => PtyAgentRow {
+                terminal_id: terminal_id.clone(),
+                workstream_id: ws.id.clone(),
+                engine_id: engine.id.clone(),
+                launch: launch_settings,
+                spawned_by: spawned_by.clone(),
+                depth: req.lineage.as_ref().map_or(0, |l| l.depth),
+                mode: req.lineage.as_ref().map(|l| l.mode),
+                provider_session_id: provider_session_id.clone(),
+                title: None,
+                working: takes_nudge,
+                resumes: 0,
+            },
+        });
         if let Some(lineage) = req.lineage {
             self.runtime
                 .agent_links
@@ -535,7 +606,16 @@ impl TerminalService<'_> {
             session: pty.clone(),
             token,
             remote: remote.clone(),
+            record,
+            nudge_owed,
         });
+        if takes_nudge {
+            spawn::send_first_prompt(
+                self.runtime.pty_agents.clone(),
+                &terminal_id,
+                resume::nudge_text(),
+            );
+        }
         // After the spawn, so a launch that fails activates no plan.
         // An agent's spawn sends its own, once it has ruled out an unhooked TUI.
         if let Some(fp) = first_prompt.filter(|_| !agent_spawned) {

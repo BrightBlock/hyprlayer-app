@@ -35,6 +35,9 @@ mod unix {
     pub(crate) const MAX_SOCKET_PATH: usize = 103;
     /// Short, so a failed app-server falls back to the embedded launch quickly.
     const CONNECT_WAIT: Duration = Duration::from_secs(5);
+    /// How long a stopped app-server gets to exit before it is killed: mid-turn it ignores
+    /// `SIGTERM` and keeps its thread, which a resume of that thread then can't load.
+    const STOP_GRACE: Duration = Duration::from_secs(3);
     const CONNECT_POLL: Duration = Duration::from_millis(100);
     const UPGRADE_WAIT: Duration = Duration::from_secs(5);
     const REQUEST_WAIT: Duration = Duration::from_secs(10);
@@ -186,8 +189,11 @@ mod unix {
                 }
             });
             let watcher = Arc::downgrade(&remote);
+            let recorded = remote.pid_file.clone();
             tokio::spawn(async move {
                 let status = child.wait().await;
+                // Only once it has exited: a record of one still running lets the next server reap it.
+                orphan::clear(&recorded);
                 if let Some(remote) = watcher.upgrade() {
                     remote.exited(status);
                 }
@@ -217,7 +223,24 @@ mod unix {
                 return;
             }
             orphan::kill_group(self.pid);
-            discard(&self.socket, &self.pid_file);
+            let _ = std::fs::remove_file(&self.socket);
+            let pid = self.pid;
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    tokio::time::sleep(STOP_GRACE).await;
+                    if orphan::alive(pid) {
+                        orphan::kill_group_now(pid);
+                    }
+                });
+            }
+        }
+
+        pub(crate) fn running(&self) -> bool {
+            orphan::alive(self.pid)
+        }
+
+        pub(crate) fn kill_now(&self) {
+            orphan::kill_group_now(self.pid);
         }
 
         pub(crate) fn mode_reported(&self) -> bool {
@@ -829,6 +852,14 @@ impl CodexRemote {
     }
 
     pub(crate) fn stop(&self) {
+        match *self {}
+    }
+
+    pub(crate) fn running(&self) -> bool {
+        match *self {}
+    }
+
+    pub(crate) fn kill_now(&self) {
         match *self {}
     }
 

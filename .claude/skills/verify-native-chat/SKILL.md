@@ -51,6 +51,17 @@ the same) and the same rule names, so each rule is checked per provider.
 - `RestartWake.tla` covers one session cut off mid-turn by server restarts:
   `settle_stale_sessions` queuing its wake, `wake::check` and `wake_one`, the
   wake turn's echo on its way to the log, and archiving the workstream.
+- `PtyResume.tla` covers one PTY agent's conversation across server restarts:
+  its `pty_agents` row (kept by `PtyAgents::server_stopping`, deleted by
+  `release` on an exit while the server runs and by `TerminalService::close`),
+  the startup pass (`resume::resume_after_restart`, `restart_skip`), a
+  spawner's `message_agent` to it while it is exited, and a desktop launch
+  resuming the same conversation (`TerminalService::supersede`). Each resume
+  goes through `resume_pty`, which takes the terminal's lock in
+  `pty_resume_locks`, re-checks the row and liveness, and launches while still
+  holding it. `launch_agent`'s `hold_unarchived` refuses an archived
+  workstream. The agent's own turns move `working` and `resumes` as
+  `pty_agents::next_saved` writes them.
 - `SessionSync.tla` covers one desktop following one session's log: the actor
   storing events under consecutive seqs, `LiveAttachment::deliver` and its
   `Lagged` slot, `forward_session`'s re-attach, and the desktop's
@@ -78,6 +89,10 @@ first eight; "the harness" is claude, codex or OpenCode.
 | `InterruptHonored` | An interrupt is never dropped while a message sent before it is still to run (codex: while codex runs or is about to run a turn the driver has no id for). | You press stop and the turn runs to the end anyway. |
 | `RestartWake.WakeBounded` | A session cut off mid-turn is woken at most `MAX_RESTART_RESUMES` (3) times before it finishes a turn. | A crash loop: every restart wakes the session again. |
 | `RestartWake.NoWakeWhenArchived` | No restart wake starts a harness in an archived workstream. | An archived workstream's agent comes back and works in a worktree the user put away. |
+| `PtyResume.NoDoubleResume` | No conversation ever has two live PTY processes: the startup pass, a spawner's message, a desktop relaunch and a tab close all take the terminal's resume lock, a resume finds a live agent live, and a desktop's relaunch ends the stored agent before it launches its own. | Two claudes write to one conversation and worktree, each thinking it owns the task. |
+| `PtyResume.ResumeBounded` | A restart resumes a PTY agent at most `MAX_PTY_RESUMES` (3) times before it finishes a turn or a person relaunches it. | A crash loop: every restart brings the agent that kills the server back. |
+| `PtyResume.NoResumeWhenArchived` | No resume starts a PTY agent in an archived workstream. | An archived workstream's agent comes back and works in a worktree the user put away. |
+| `PtyResume.NoResumeOfIdle` | A restart resumes only a PTY agent that was mid-turn or still owed its nudge; an idle or finished one stays exited with its Restart button. | Every idle agent tab restarts on its own after each server restart. |
 | `SessionSync.NoSkippedSeq` | The desktop never folds in a seq with an earlier one missing. | A turn silently missing from the transcript. |
 | `SessionSync.ReopenShowsTurn` | Once everything has landed, a desktop that has the session open, with nothing held, shows a turn working exactly when the actor has one open, including after a reopen whose replay carried no row. | A reloaded desktop shows a running turn as idle until it ends: no Stop, and a send goes out as a new prompt instead of queueing. |
 | `SessionSync.ClientsConverge` | Once the log stops and every frame and pull has landed, a desktop that has the session open holds every stored seq, or still holds another device's items behind the "behind" strip, including after it closed the session, its actor retired, and it opened the session again. | The desktop never catches up after a lag or a reopen, short of a reload. |
@@ -137,14 +152,15 @@ before `gone`, the withdrawn asks awaiting their result; 8 min on nexus with
 `WORKERS=4`),
 `CodexTurns` 0.72 M, `OpenCodeTurns` 255.7 M (8 min on nexus with
 `WORKERS=20`; `-stop` 2.3 M, `-death` 562),
-`SessionSync` 58 k, `RestartWake` 251. `OUT=dir` keeps the logs:
+`SessionSync` 58 k, `RestartWake` 251, `PtyResume` 34.7 k (under a second on nexus with
+`WORKERS=4`). `OUT=dir` keeps the logs:
 `$OUT/<Model>.<Rule>/tlc.out` for each FAIL, `$OUT/<Model>.pass/tlc.out` for the
 run every PASS shares. `check.sh CodexTurns` checks one model and skips the
 comparison.
 
 **Read every result with the pstack `/statechart` skill.** Give it the spec, its
 `.cfg`, and the view module beside it (`SessionTurns-view.ts`,
-`CodexTurns-view.ts`, `OpenCodeTurns-view.ts`, `RestartWake-view.ts`,
+`CodexTurns-view.ts`, `OpenCodeTurns-view.ts`, `RestartWake-view.ts`, `PtyResume-view.ts`,
 `SessionSync-view.ts`), which labels the states and steps
 in the user's words. Add a label there for any new action. It prints each broken
 rule as its shortest path in plain words. Use it for the report, not as the

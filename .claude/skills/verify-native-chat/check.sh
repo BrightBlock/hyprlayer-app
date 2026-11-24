@@ -1,5 +1,5 @@
 #!/bin/sh
-# Model-checks SessionTurns.tla (claude), CodexTurns.tla, OpenCodeTurns.tla, RestartWake.tla and SessionSync.tla one rule at a time and compares with expected.txt.
+# Model-checks SessionTurns.tla (claude), CodexTurns.tla, OpenCodeTurns.tla, RestartWake.tla, PtyResume.tla and SessionSync.tla one rule at a time and compares with expected.txt.
 # Usage: check.sh [Model ...]   SRC=dir checks the .tla and .cfg files in dir instead (a break check).
 # Prints one line per rule, PASS or FAIL, and keeps the TLC logs in $OUT (default: a temp dir):
 # $OUT/<Model>.<Rule>/tlc.out for each FAIL, $OUT/<Model>.pass/tlc.out for the run every PASS shares.
@@ -20,7 +20,7 @@ if [ -z "${JAVA:-}" ] && ! "$java" -version >/dev/null 2>&1; then
 fi
 workers=${WORKERS:-4}
 out=${OUT:-$(mktemp -d)}
-models=${*:-SessionTurns CodexTurns OpenCodeTurns RestartWake SessionSync}
+models=${*:-SessionTurns CodexTurns OpenCodeTurns RestartWake PtyResume SessionSync}
 mkdir -p "$out"
 
 got=$out/result.txt

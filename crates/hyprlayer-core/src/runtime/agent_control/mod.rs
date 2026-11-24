@@ -7,6 +7,7 @@ pub(crate) mod links;
 pub mod pty_agents;
 pub mod pty_controls;
 mod queue;
+pub(crate) mod resume;
 mod rollout;
 pub mod spawn;
 pub mod tokens;
@@ -547,6 +548,10 @@ impl AgentControlService<'_> {
 
     /// A PTY agent this server launched, in the caller's project; plain shells and scripts never pass.
     pub async fn check_terminal(&self, identity: &AgentIdentity, terminal_id: &str) -> Result<()> {
+        // A stored, exited one too: a message resumes it, and a kill drops it.
+        if let Some(row) = self.stored(terminal_id).await? {
+            return self.check_workstream(identity, &row.workstream_id).await;
+        }
         self.pty_target(identity, terminal_id).await.map(|_| ())
     }
 
@@ -744,7 +749,7 @@ pub(crate) struct SpawnLocks {
 }
 
 impl SpawnLocks {
-    async fn acquire(&self, caller_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+    pub(crate) async fn acquire(&self, caller_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
         let lock = {
             let mut locks = self
                 .by_caller

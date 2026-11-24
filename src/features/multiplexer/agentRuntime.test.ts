@@ -110,7 +110,9 @@ vi.mock("@/features/session/workstreamTabs", () => ({
   useWorkstreamTabsStore: { getState: () => ({ byWs: {} }) },
 }));
 
-const { ensureAgent, onAgentTerminalGone, reconcileAgentTerminals } = await import("./agentRuntime");
+const { ensureAgent, onAgentTerminalBack, onAgentTerminalGone, reconcileAgentTerminals } = await import(
+  "./agentRuntime"
+);
 const { ptyAgentBridge } = await import("./ptyAgentBridge");
 const { agentKey, useMultiplexerStore } = await import("./multiplexerStore");
 
@@ -226,5 +228,41 @@ describe("a reconnect", () => {
 
     expect(h.server.sent - before, "base64 bytes replayed").toBe(0);
     expect(sentDuring(() => h.output(id, 1, FRAME)), "the new stream carries new output").toBe(FRAME.length);
+  });
+});
+
+describe("a server restart", () => {
+  it("brings a gone hooked agent back to its tab when the server resumes it under the same id", async () => {
+    const o = opts(true);
+    const id = await launch(o);
+    h.server.terminals.delete(id);
+    const gone = vi.fn();
+    const back = vi.fn();
+    const unsubGone = onAgentTerminalGone(o.workstreamId, 1, gone);
+    const unsubBack = onAgentTerminalBack(o.workstreamId, 1, back);
+
+    await reconcileAgentTerminals();
+    expect(gone).toHaveBeenCalledWith(id);
+    h.server.terminals.set(id, { workstreamId: o.workstreamId, hooked: true, streams: new Set(), printed: [] });
+    h.emit(id, "starting");
+    h.emit(id, "working");
+    unsubGone();
+    unsubBack();
+
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(back).toHaveBeenCalledWith(id);
+    const launches = h.server.launches;
+    expect((await ensureAgent(o))?.terminalId).toBe(id);
+    expect(h.server.launches).toBe(launches);
+  });
+
+  it("never calls a live agent back", async () => {
+    const o = opts(true);
+    const id = await launch(o);
+    const back = vi.fn();
+    const unsub = onAgentTerminalBack(o.workstreamId, 1, back);
+    h.emit(id, "working");
+    unsub();
+    expect(back).not.toHaveBeenCalled();
   });
 });

@@ -2480,6 +2480,14 @@ impl Dispatch for Server {
             .list_pty_agents(workstream_id.as_deref()))
     }
 
+    async fn list_stopped_pty_agents(&self) -> Result<Vec<PtyAgent>, WireError> {
+        self.runtime
+            .agent_control()
+            .list_stopped_pty_agents()
+            .await
+            .wire()
+    }
+
     /// Tags the connection before the level check, so at `off` its later calls are still refused as an agent's.
     async fn announce_agent(&self, token: String) -> Result<AgentWhoami, WireError> {
         let conn = connection("announce_agent")?;

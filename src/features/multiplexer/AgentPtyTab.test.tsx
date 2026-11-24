@@ -64,6 +64,7 @@ const h = vi.hoisted(() => {
     ok,
     down,
     controls,
+    back: [] as Array<(terminalId: string) => void>,
     serverUp: true,
     launchFails: false,
     ensures: 0,
@@ -115,6 +116,10 @@ vi.mock("./agentRuntime", () => ({
   }),
   closeAgent: vi.fn(),
   onAgentTerminalGone: () => () => {},
+  onAgentTerminalBack: (_ws: string, _shell: number, fn: (terminalId: string) => void) => {
+    h.back.push(fn);
+    return () => h.back.splice(h.back.indexOf(fn), 1);
+  },
   resolveResume: vi.fn(async () => false),
   setAgentBypass: vi.fn(),
 }));
@@ -265,5 +270,34 @@ describe("an agent tab shown while the server is down", () => {
 
     expect(h.ensures).toBe(2);
     expect(h.attaches[h.attaches.length - 1]?.id).toBe("t7");
+  });
+});
+
+describe("an agent tab whose agent a restarted server resumed", () => {
+  it("starts its screen over and attaches the new process from its first byte", async () => {
+    h.launches.push("t8");
+    mount("t8");
+    await settle();
+    h.attaches[h.attaches.length - 1].ch.onmessage(output(0, "before the restart"));
+    h.screen!.parse();
+
+    await act(async () => h.back.forEach((fn) => fn("t8")));
+    await settle();
+    const resumed = h.attaches[h.attaches.length - 1];
+    resumed.ch.onmessage(output(0, "resumed"));
+    h.screen!.parse();
+
+    expect([resumed.id, resumed.offset]).toEqual(["t8", null]);
+    expect(h.screen!.shown).toBe("resumed");
+  });
+
+  it("ignores another terminal coming back", async () => {
+    h.launches.push("t9");
+    mount("t9");
+    await settle();
+    const before = h.attaches.length;
+    await act(async () => h.back.forEach((fn) => fn("someone-else")));
+    await settle();
+    expect(h.attaches.length).toBe(before);
   });
 });

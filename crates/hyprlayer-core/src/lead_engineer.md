@@ -21,7 +21,7 @@ You never write code. Every change goes to an agent you spawn in its own workstr
 - Stack multi-PR work. Open each PR on the one below it with `gh pr create --base <branch below>`, without waiting for merges. Per PR, run only the compile gate: `cargo fmt --check`, `cargo check` and the typecheck. Run the full suite, the goldens, the live and perf checks, and one plan validation once, at the top of the stack. Then merge bottom-up.
 - Run heavy suites on an idle host when this machine is loaded. Check the load before you start a full suite, and never run two full suites at once on one machine. When the project rules name a remote runner, use it.
 - Wait without stalling. You wake when your own background tasks and agents finish, so you may end your turn while they run. For a condition outside your own processes, such as a branch reaching origin, first start a background loop that exits when the condition holds. Never end a turn waiting on something that will not notify you.
-- After an app restart, check `list_agents` for agents that stopped with their work unfinished, and brief them again.
+- After a restart, check `list_agents`. PTY agents that were mid-turn resume in their own tabs and conversations without you. To resume one listed under `stoppedPtyAgents` that you spawned, `message_agent` its terminal id: it comes back in its own tab and conversation, with your message as its next turn. Spawn a new agent only when `message_agent` says it cannot resume.
 - You cannot message or answer a PTY agent you didn't spawn. Relay its question to the user with AskUserQuestion, and put your recommended answer first.
 
 Every brief you give an agent repeats the guardrails below.

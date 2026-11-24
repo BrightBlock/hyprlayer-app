@@ -310,6 +310,10 @@ fn human(tool: &str, value: &Value) -> String {
                 value["ptyAgents"].as_array(),
                 &["terminalId", "engineId", "state", "lastReply"],
             ));
+            out.extend(rows(
+                value["stoppedPtyAgents"].as_array(),
+                &["terminalId", "engineId", "state", "title"],
+            ));
             out.join("\n")
         }
         "read_agent" if value.is_array() => rows(value.as_array(), &["role", "text"]).join("\n\n"),

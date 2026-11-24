@@ -846,6 +846,7 @@ pub(crate) async fn prepare_stream(
                     cols,
                     rows,
                     lineage: None,
+                    resume_of: None,
                 })
                 .await
                 .wire()?;

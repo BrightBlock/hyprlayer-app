@@ -358,6 +358,7 @@ hyprlayer_proto::commands! {
     PtyAgentSetEffort: pty_agent_set_effort(terminal_id: String, effort: String) -> ();
     PtyAgentSetPermissionMode: pty_agent_set_permission_mode(terminal_id: String, mode: String) -> ();
     ListPtyAgents: list_pty_agents(workstream_id: Option<String>) -> Vec<PtyAgent>;
+    ListStoppedPtyAgents: list_stopped_pty_agents() -> Vec<PtyAgent>;
     AnnounceAgent: announce_agent(token: String) -> AgentWhoami;
     NotifyUser: notify_user(title: String, body: String) -> ();
     RequestAttention: request_attention(reason: String) -> ();
