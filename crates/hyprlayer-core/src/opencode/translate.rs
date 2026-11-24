@@ -403,25 +403,44 @@ pub(crate) fn normalize_tool(tool: &str, mut input: Value) -> (String, Value) {
     (name.to_string(), input)
 }
 
-/// What a permission ask shows: OpenCode's action and the resources it names.
+/// A permission ask as the tool call it holds, named and shaped as that call's own row.
 pub(crate) fn permission_ask(data: &Value) -> SessionEvent {
     let action = data
         .get("action")
         .and_then(Value::as_str)
+        .filter(|a| !a.is_empty())
+        .unwrap_or("tool");
+    let resources: Vec<&str> = data
+        .get("resources")
+        .and_then(Value::as_array)
+        .map(|r| r.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
+    let first = resources.first().copied().unwrap_or_default();
+    // The ask carries the action's resources, not the call's input, so rebuild the input
+    // the tool's own row shows.
+    let input = match action {
+        "shell" => json!({ "command": resources.join("\n") }),
+        "read" | "write" | "edit" => json!({ "path": first }),
+        "grep" | "glob" => json!({ "pattern": first }),
+        "webfetch" => json!({ "url": first }),
+        _ => json!({ "patterns": resources }),
+    };
+    let (tool_name, input) = normalize_tool(action, input);
+    let source = data.get("source");
+    let tool_use_id = source
+        .filter(|s| s.get("type").and_then(Value::as_str) == Some("tool"))
+        .and_then(|s| s.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
     SessionEvent::PermissionAsk {
         request_id: data
             .get("id")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        tool_use_id: None,
-        tool_name: if action.is_empty() { "tool" } else { action }.to_string(),
-        input: json!({
-            "patterns": data.get("resources").cloned().unwrap_or(json!([])),
-            "metadata": data.get("metadata").cloned().unwrap_or(json!({})),
-        })
-        .to_string(),
+        tool_use_id,
+        tool_name,
+        input: input.to_string(),
     }
 }
 
@@ -831,27 +850,53 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_permission_names_its_action_and_resources() {
-        let ask = permission_ask(
-            &json!({ "id": "per_1", "sessionID": "s", "action": "read", "resources": [".env"] }),
-        );
-        match ask {
+    fn asked(data: Value) -> (String, String, Value, Option<String>) {
+        match permission_ask(&data) {
             SessionEvent::PermissionAsk {
                 request_id,
                 tool_name,
                 input,
                 tool_use_id,
-            } => {
-                assert_eq!((request_id.as_str(), tool_name.as_str()), ("per_1", "read"));
-                assert!(tool_use_id.is_none());
-                assert_eq!(
-                    serde_json::from_str::<Value>(&input).unwrap()["patterns"],
-                    json!([".env"])
-                );
-            }
+            } => (
+                request_id,
+                tool_name,
+                serde_json::from_str(&input).unwrap(),
+                tool_use_id,
+            ),
             other => panic!("expected a PermissionAsk, got {other:?}"),
         }
+    }
+
+    // As 2.4.1 sends it: the action and its resources, and the call it holds in `source`.
+    #[test]
+    fn a_shell_permission_reads_as_its_bash_call() {
+        let (request_id, tool, input, tool_use_id) = asked(json!({
+            "id": "per_1", "sessionID": "s", "action": "shell",
+            "resources": ["ls -la"], "save": ["ls *"],
+            "source": { "type": "tool", "messageID": "msg_1", "id": "call_1" },
+        }));
+        assert_eq!((request_id.as_str(), tool.as_str()), ("per_1", "Bash"));
+        assert_eq!(input, json!({ "command": "ls -la" }));
+        assert_eq!(tool_use_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn a_file_permission_names_the_file() {
+        let (_, tool, input, tool_use_id) =
+            asked(json!({ "id": "per_2", "action": "read", "resources": [".env"] }));
+        assert_eq!(tool, "Read");
+        assert_eq!(input, json!({ "file_path": ".env" }));
+        assert!(tool_use_id.is_none());
+    }
+
+    #[test]
+    fn an_unknown_permission_keeps_its_action_and_resources() {
+        let (_, tool, input, _) = asked(json!({
+            "id": "per_3", "action": "external_directory", "resources": ["/etc/*"],
+            "source": { "type": "session" },
+        }));
+        assert_eq!(tool, "external_directory");
+        assert_eq!(input, json!({ "patterns": ["/etc/*"] }));
     }
 
     #[test]

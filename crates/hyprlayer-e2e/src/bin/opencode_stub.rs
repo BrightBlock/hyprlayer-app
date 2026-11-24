@@ -500,7 +500,7 @@ impl Stub {
                 "options": [{ "value": "yes", "label": "Yes" }],
             }] })
         } else {
-            json!({ "id": ask, "sessionID": owner, "action": "bash", "resources": ["echo stub"],
+            json!({ "id": ask, "sessionID": owner, "action": "shell", "resources": ["echo stub"],
                     "source": { "type": "tool", "messageID": assistant, "id": format!("call_{ask}") } })
         };
         let asked = request.clone();
@@ -589,7 +589,7 @@ impl Stub {
             self.emit(
                 "permission.asked",
                 json!({ "id": format!("per_{}", self.next()), "sessionID": id,
-                "action": "bash", "resources": ["echo stub"] }),
+                "action": "shell", "resources": ["echo stub"] }),
             );
         }
         stop.store(true, Ordering::SeqCst);
