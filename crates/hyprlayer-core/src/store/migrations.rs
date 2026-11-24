@@ -362,8 +362,10 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         let version = (i + 1) as u32;
         if current < version {
             tracing::info!("migrating the database schema to {version}");
-            conn.execute_batch(sql)?;
-            conn.pragma_update(None, "user_version", version)?;
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", version)?;
+            tx.commit()?;
         }
     }
     Ok(())
@@ -374,6 +376,30 @@ mod tests {
     use rusqlite::params;
 
     use super::*;
+
+    #[test]
+    fn a_step_that_fails_midway_rolls_back_and_retries_cleanly() {
+        let step = MIGRATIONS
+            .iter()
+            .position(|m| m.contains("ADD COLUMN parent_session_id"))
+            .unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        for sql in &MIGRATIONS[..step] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", step as u32)
+            .unwrap();
+        conn.execute_batch("ALTER TABLE sessions ADD COLUMN origin TEXT")
+            .unwrap();
+        assert!(migrate(&conn).is_err());
+        conn.execute_batch("ALTER TABLE sessions DROP COLUMN origin")
+            .unwrap();
+        migrate(&conn).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as u32);
+    }
 
     /// Schema v10, the state migration 11 backfills from.
     fn v10_schema() -> Connection {
