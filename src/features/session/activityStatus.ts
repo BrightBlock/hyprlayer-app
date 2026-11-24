@@ -21,7 +21,7 @@ export type ActivityInput = SessionView &
   >;
 
 /** Background agents and workflows still running when the turn ended. */
-export type PendingWork = { agents: number; workflows: number };
+type PendingWork = { agents: number; workflows: number };
 
 export type LastTurn = { ms: number; endedAt: number; waiting?: PendingWork };
 
@@ -40,7 +40,7 @@ export type Activity = {
   recap?: string;
 };
 
-export type ActivityContext = {
+type ActivityContext = {
   harnessLabel: string;
   /** Set while another device owns the running turn, including its waits. */
   otherDevice: string | null;

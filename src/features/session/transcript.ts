@@ -16,7 +16,7 @@ import { parseToolInput } from "./toolDisplay";
 export type { Question, QuestionOption, SessionState };
 
 // "expired": the ask died with its harness process, so no answer can reach it.
-export type PermissionDecision = "allow" | "deny" | "expired" | "withdrawn";
+type PermissionDecision = "allow" | "deny" | "expired" | "withdrawn";
 
 export type PendingQuestion = {
   requestId: string;
@@ -84,7 +84,7 @@ type Sequenced = { seq?: number | null };
 
 const SKILL_BODY_PREFIX = "Base directory for this skill:";
 
-export function skillBodyName(text: string): string | null {
+function skillBodyName(text: string): string | null {
   if (!text.startsWith(SKILL_BODY_PREFIX)) return null;
   const nl = text.indexOf("\n");
   const dir = (nl === -1 ? text : text.slice(0, nl)).slice(SKILL_BODY_PREFIX.length).trim();
@@ -108,7 +108,7 @@ const STOP_HOOK_FEEDBACK = "Stop hook feedback:\n";
 // Claude's native /goal names its condition in brackets.
 const NATIVE_GOAL_FEEDBACK = /^\[[^\]\n]*\]:\s*/;
 
-export type NativeContinuation = { reason: string; native: "hook" | "goal" };
+type NativeContinuation = { reason: string; native: "hook" | "goal" };
 
 function nativeContinuation(text: string): NativeContinuation | null {
   if (!text.startsWith(STOP_HOOK_FEEDBACK)) return null;
@@ -1053,7 +1053,7 @@ export function settleUnwaitedAsks(view: SessionView, open: ReadonlySet<string>)
   return { ...next, state: parkedState(next) };
 }
 
-export function expirePendingPrompts(view: SessionView): SessionView {
+function expirePendingPrompts(view: SessionView): SessionView {
   const items: TranscriptItem[] = view.items.map((it) =>
     it.kind === "permission" && it.decision === null ? { ...it, decision: "expired" as const } : it,
   );
@@ -1081,7 +1081,7 @@ export function cancelPendingPrompts(view: SessionView): SessionView {
 }
 
 
-export type StatusTone = "ok" | "warn" | "bad" | "dim" | "accent";
+type StatusTone = "ok" | "warn" | "bad" | "dim" | "accent";
 
 export function describeState(
   state: SessionState,

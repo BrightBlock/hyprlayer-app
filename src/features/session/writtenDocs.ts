@@ -16,7 +16,7 @@ type WrittenDocsState = { byWorkstream: Record<string, WrittenDocs> };
 
 const MAX_ENTRIES = 200;
 
-export function migrateWrittenDocs(): WrittenDocsState {
+function migrateWrittenDocs(): WrittenDocsState {
   return { byWorkstream: {} };
 }
 

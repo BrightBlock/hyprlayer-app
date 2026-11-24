@@ -781,7 +781,7 @@ export function SessionChat({
   const terminal = (session ? isTerminal(session.state) : false) || gone;
   const pendingQuestion = session?.pendingQuestion ?? null;
   const draft = shell.draft;
-  const attachments = shell.attachments ?? [];
+  const attachments = shell.attachments;
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const otherTurnRunning = Boolean(sync?.workingDevice) || (session?.turnAuthor === "other" && working);
   const tail = useMemo<SkeletonTail | null>(() => {

@@ -35,7 +35,7 @@ export const useTranscriptSync = create<TranscriptSyncStore>(() => ({
 export const rev = (v: number | null): number => v ?? 0;
 
 // Registered by the session store, which imports this module.
-export type SyncHandlers = {
+type SyncHandlers = {
   pull: (sessionId: string) => void;
   reload: (sessionId: string) => void;
   flush: (sessionId: string) => void;

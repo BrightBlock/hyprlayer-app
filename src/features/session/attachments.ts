@@ -8,7 +8,7 @@ import { useConnectionStatus } from "@/lib/queries";
 import { b64ToBytes } from "@/lib/terminal/terminalCodec";
 import { baseName } from "./toolDisplay";
 
-export type AttachmentKind = "image" | "file";
+type AttachmentKind = "image" | "file";
 
 export type Attachment = {
   path: string;
@@ -37,7 +37,7 @@ function extOf(path: string): string {
   return path.split(".").pop()?.toLowerCase() ?? "";
 }
 
-export function isImagePath(path: string): boolean {
+function isImagePath(path: string): boolean {
   return IMAGE_EXT.has(extOf(path));
 }
 
@@ -123,7 +123,7 @@ const EXT_FOR_MIME: Record<string, string> = {
   "image/avif": "avif",
 };
 
-export function clipboardImageName(file: File): string {
+function clipboardImageName(file: File): string {
   if (file.name && file.name !== "image.png") return file.name;
   const ext = EXT_FOR_MIME[file.type] ?? "png";
   return `pasted-image.${ext}`;

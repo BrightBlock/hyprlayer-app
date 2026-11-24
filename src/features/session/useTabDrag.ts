@@ -10,9 +10,9 @@ export type TabDragHandlers = {
   canEdgeSplit: (id: number, paneId: PaneId, edge: Edge) => boolean;
 };
 
-export type DropTarget = { paneId: PaneId; edge: Edge | null } | null;
+type DropTarget = { paneId: PaneId; edge: Edge | null } | null;
 
-export function paneAtPoint(x: number, y: number): PaneId | null {
+function paneAtPoint(x: number, y: number): PaneId | null {
   const el = document.elementFromPoint(x, y) as HTMLElement | null;
   return el?.closest<HTMLElement>("[data-pane]")?.dataset.pane || null;
 }
@@ -38,7 +38,7 @@ function dropIndexAt(pane: PaneId, x: number, draggedId: number): number {
   return index;
 }
 
-export type TabDragState = { id: number; title: string; x: number; y: number } | null;
+type TabDragState = { id: number; title: string; x: number; y: number } | null;
 
 export function useTabDrag(handlersRef: RefObject<TabDragHandlers>) {
   const [drag, setDrag] = useState<TabDragState>(null);

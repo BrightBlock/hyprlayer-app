@@ -24,7 +24,7 @@ import type { CustomPrompt } from "@/lib/bindings";
 
 type Trigger = { type: "command" | "file"; start: number; query: string };
 
-export type Suggestion = {
+type Suggestion = {
   value: string;
   label: string;
   detail: string;

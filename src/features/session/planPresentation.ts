@@ -6,7 +6,7 @@ import type { WrittenDocs } from "./writtenDocs";
 // Every plan that exists only as text in the transcript (codex plan mode, a fileless ExitPlanMode) shares one key.
 export const INLINE_PLAN_KEY = "inline";
 
-export type PlanPresentationTool = "ExitPlanMode" | "ProposedPlan" | "plan_exit";
+type PlanPresentationTool = "ExitPlanMode" | "ProposedPlan" | "plan_exit";
 
 // A harness handing its plan to the user: Claude's ExitPlanMode, codex's proposed plan, OpenCode's plan_exit.
 export type PlanPresentation = {

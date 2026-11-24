@@ -38,7 +38,7 @@ export type ArchivedRow = {
 const NONE_LOCAL: ArchivedShell[] = [];
 const NONE_SESSIONS: Session[] = [];
 
-export function archivedModelLabel(shell: ShellTab, catalog: readonly ModelOption[]): string {
+function archivedModelLabel(shell: ShellTab, catalog: readonly ModelOption[]): string {
   if (shell.ptyAgent) return engineLabel(shell.ptyAgent.engineId);
   if (shell.harness === "opencode") return shell.opencodeModel ?? "OpenCode";
   if (shell.harness === "codex") return shell.codexModel ?? "Codex";
@@ -58,7 +58,7 @@ function sessionModelLabel(session: Session, catalog: readonly ModelOption[]): s
 }
 
 // A local tab still archived here shows even when the server never heard of the archive.
-export function archivedRows(
+function archivedRows(
   local: readonly ArchivedShell[],
   sessions: readonly Session[],
   catalog: readonly ModelOption[],
@@ -121,7 +121,7 @@ export function restoreArchivedRow(workstreamId: string, row: ArchivedRow): void
   }
 }
 
-export function deleteArchivedAgent(workstreamId: string, shellId: number): void {
+function deleteArchivedAgent(workstreamId: string, shellId: number): void {
   let sessionId: string | undefined;
   updateWorkstreamTabs((all) => {
     const current = all[workstreamId];

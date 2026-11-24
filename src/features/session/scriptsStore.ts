@@ -32,7 +32,7 @@ type ScriptsState = {
 export const DOCK_HEIGHT_MIN = 140;
 export const DOCK_HEIGHT_MAX = 760;
 
-export type DockPosition = "bottom" | "right";
+type DockPosition = "bottom" | "right";
 
 const DEFAULT_DOCK: DockState = {
   open: false,

@@ -78,7 +78,7 @@ export type PermissionHandlers = {
   onDeny: (requestId: string) => void;
 };
 
-export type AuthPromptHandlers = {
+type AuthPromptHandlers = {
   openId: string | null;
   harnessLabel: string;
   retrying: boolean;

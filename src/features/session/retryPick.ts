@@ -5,7 +5,7 @@ import type { ShellTab } from "./workstreamTabs";
 type ShellPicks = Pick<ShellTab, "model" | "effort" | "opencodeModel" | "codexModel" | "codexEffort">;
 
 /** This tab's own pick for the harness; without one, a failed start's tab shows the row's model. */
-export function tabPick(harness: Harness, shell: ShellPicks): { model?: string; effort?: string } {
+function tabPick(harness: Harness, shell: ShellPicks): { model?: string; effort?: string } {
   switch (harness) {
     case "opencode":
       return { model: shell.opencodeModel };

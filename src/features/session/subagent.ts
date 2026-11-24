@@ -5,7 +5,7 @@ import { todosFromTodoWrite } from "./planTasks";
 import type { TranscriptItem } from "./transcript";
 import { parseToolInput, toolFilePath, toolSummary } from "./toolDisplay";
 
-export type SubagentSteps = { done: number; total: number; current: string | null };
+type SubagentSteps = { done: number; total: number; current: string | null };
 
 export type RunningSubagent = {
   toolUseId: string;

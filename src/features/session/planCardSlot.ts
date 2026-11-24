@@ -15,6 +15,6 @@ export function planCardComponent(): ComponentType<PlanCardProps> | null {
   return PlanCardComponent;
 }
 
-export type PlanCards = { sessionId: string; workstreamId: string; revisions: ReadonlyMap<string, PlanRevision> };
+type PlanCards = { sessionId: string; workstreamId: string; revisions: ReadonlyMap<string, PlanRevision> };
 
 export const PlanCardsContext = createContext<PlanCards | null>(null);

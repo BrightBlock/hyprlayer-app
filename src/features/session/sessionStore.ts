@@ -177,7 +177,7 @@ export type SessionEntry = SessionView & {
 };
 
 /** A rewind counts turns from the session's first message, so it waits on either. */
-export type OlderTurns = "loading" | "failed";
+type OlderTurns = "loading" | "failed";
 
 export type QueuedMessage = {
   text: string;
@@ -193,7 +193,7 @@ export type QueuedMessage = {
 };
 
 /** "dropped": the session left the store before anything was sent or queued. */
-export type SendOutcome = "sent" | "queued" | "dropped";
+type SendOutcome = "sent" | "queued" | "dropped";
 
 type State = { sessions: Record<string, SessionEntry> };
 
@@ -1604,7 +1604,7 @@ export function draftWithQueued(draft: string, messages: QueuedMessage[]): strin
 }
 
 /** Takes back every queued message the harness hasn't started; one it already took in stays. */
-export async function withdrawQueued(sessionId: string): Promise<QueuedMessage[]> {
+async function withdrawQueued(sessionId: string): Promise<QueuedMessage[]> {
   const current = entryOf(sessionId);
   if (!current || current.queued.length === 0) return [];
   const chips = current.queued;
@@ -2692,7 +2692,7 @@ export async function reattachRunningGoal(sessionId: string, goal: GoalBrief | n
   }
 }
 
-export function goalBrief(goal: Goal): GoalBrief {
+function goalBrief(goal: Goal): GoalBrief {
   const { id, status, step, pauseReason, iteration } = goal;
   return { id, status, step, pauseReason, iteration, maxIterations: goal.limits.maxIterations };
 }
@@ -2740,7 +2740,7 @@ export function useSession(sessionId: string | undefined): SessionEntry | undefi
   return useSessionStore((s) => (sessionId ? s.sessions[sessionId] : undefined));
 }
 
-export type CreatedDoc = { path: string; kind: DocType; title: string };
+type CreatedDoc = { path: string; kind: DocType; title: string };
 
 // `plans/x.md`: a plan and its research often share a file name.
 function docKey(path: string): string {

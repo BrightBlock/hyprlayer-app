@@ -390,7 +390,7 @@ export function resultPreview(content: string, isError: boolean): string {
   return cleaned || (isError ? "(error)" : "(no output)");
 }
 
-export type ResultLine = { text: string; more: number };
+type ResultLine = { text: string; more: number };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

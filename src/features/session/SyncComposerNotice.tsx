@@ -5,7 +5,7 @@ import { Button, Skeleton, Spinner } from "@/components/ui";
 import { formatRelativeTime } from "@/lib/format";
 import { deviceLabel, type HeldView, type SyncState } from "./transcriptSync";
 
-export type SyncNotice =
+type SyncNotice =
   | { kind: "behind"; count: number; device: string; at: number | null }
   | { kind: "retry"; count: number; seconds: number }
   | { kind: "syncing"; count: number }
