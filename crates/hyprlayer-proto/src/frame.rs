@@ -151,11 +151,8 @@ fn encode_stream_event(stream_id: u64, event: &[&[u8]]) -> Vec<u8> {
 /// `None` for a payload too short to carry the id, which is always a bug on
 /// the sending side rather than a wire condition to recover from.
 pub fn decode_stream_frame(payload: &[u8]) -> Option<(u64, &[u8])> {
-    if payload.len() < 8 {
-        return None;
-    }
-    let (id_bytes, rest) = payload.split_at(8);
-    Some((u64::from_le_bytes(id_bytes.try_into().ok()?), rest))
+    let (id, rest) = payload.split_first_chunk::<8>()?;
+    Some((u64::from_le_bytes(*id), rest))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

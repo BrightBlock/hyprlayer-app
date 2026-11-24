@@ -428,16 +428,12 @@ mod tests {
 
     #[test]
     fn only_the_older_side_of_a_mismatch_gets_a_remedy() {
-        // We are older than the peer: we have no self-upgrade path, so the
-        // error we construct about ourselves carries the remedy.
         let older = WireError::version_mismatch(1, 2);
         assert_eq!(
             older.remedy.as_deref(),
             Some("Update this app to match the newer server.")
         );
 
-        // We are newer than the peer: no remedy — we're about to evict them
-        // (Phase 4 §5) and already know what happens next.
         let newer = WireError::version_mismatch(2, 1);
         assert_eq!(newer.remedy, None);
     }
