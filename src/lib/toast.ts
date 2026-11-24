@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { errorMessage } from "./ipc";
+
 export type ToastTone = "ok" | "warn" | "bad";
 
 interface ToastAction {
@@ -18,6 +20,7 @@ interface ShowOptions {
 
 interface ToastState {
   visible: boolean;
+  shown: number;
   title: string;
   message: string;
   tone: ToastTone;
@@ -30,6 +33,7 @@ interface ToastState {
 
 export const useToast = create<ToastState>((set, get) => ({
   visible: false,
+  shown: 0,
   title: "",
   message: "",
   tone: "ok",
@@ -37,18 +41,23 @@ export const useToast = create<ToastState>((set, get) => ({
   timed: false,
   onDismiss: null,
   show: (title, message, opts) =>
-    set({
+    set((s) => ({
       visible: true,
+      shown: s.shown + 1,
       title,
       message,
       tone: opts?.tone ?? "ok",
       action: opts?.action ?? null,
       timed: opts?.timed ?? false,
       onDismiss: opts?.onDismiss ?? null,
-    }),
+    })),
   hide: () => {
     const cb = get().onDismiss;
     set({ visible: false, onDismiss: null });
     cb?.();
   },
 }));
+
+export function showFailure(title: string): (e: unknown) => void {
+  return (e) => useToast.getState().show(title, errorMessage(e), { tone: "bad" });
+}

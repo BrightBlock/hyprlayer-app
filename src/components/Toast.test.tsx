@@ -86,4 +86,14 @@ describe("Toast", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
     expect(useToast.getState().visible).toBe(false);
   });
+
+  it("gives a replacement toast its own full duration", () => {
+    render(<Toast />);
+    act(() => useToast.getState().show("Agents", "Folder created"));
+    act(() => vi.advanceTimersByTime(DURATION_MS - 500));
+    act(() => useToast.getState().show("Delete failed", "permission denied", { tone: "bad" }));
+    act(() => vi.advanceTimersByTime(1000));
+    expect(useToast.getState().visible).toBe(true);
+    expect(screen.getByText("permission denied")).toBeTruthy();
+  });
 });

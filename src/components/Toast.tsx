@@ -24,7 +24,7 @@ function ToastIcon({ tone }: { tone: ToastTone }) {
 }
 
 export function Toast() {
-  const { visible, title, message, tone, action, timed, hide } = useToast();
+  const { visible, shown, title, message, tone, action, timed, hide } = useToast();
   const dismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const unmountRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,7 +72,7 @@ export function Toast() {
       if (dismissRef.current) clearTimeout(dismissRef.current);
       if (tickRef.current) clearInterval(tickRef.current);
     };
-  }, [visible, sticky, hide]);
+  }, [visible, shown, sticky, hide]);
 
   if (!mounted) return null;
 
