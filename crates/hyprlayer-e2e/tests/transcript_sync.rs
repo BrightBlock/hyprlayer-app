@@ -379,7 +379,7 @@ async fn transcript_sync() {
     j.step("an app follow-up belongs to the client whose turn triggered it");
     let (ship, _, _, mut ship_events) = a
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::Ship,
             "E2E_SHIP".into(),
             vec![],
@@ -631,7 +631,7 @@ async fn transcript_sync() {
         )
     });
     let (_, _, _, mut c_stream) = c
-        .resume_session_stream(sid.clone(), None, None, None, Some(LogCursor::Empty))
+        .resume_session_stream(sid, None, None, None, Some(LogCursor::Empty))
         .await
         .expect("C resumes on the typed wrapper");
     let first_bare = tokio::time::timeout(IO, c_stream.recv())

@@ -50,7 +50,7 @@ async fn goal_permission_ask() {
 
     let (session, _prompt, _stream_id, mut events) = a
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::General,
             "hello".into(),
             vec![],
@@ -186,7 +186,7 @@ async fn goal_permission_ask() {
     j.call(
         &a,
         Request::AnswerQuestion {
-            session_id: sid.clone(),
+            session_id: sid,
             request_id: question_id.clone().unwrap_or_default(),
             answers: QuestionAnswers(BTreeMap::from([("Ship".to_string(), "Yes".to_string())])),
         },

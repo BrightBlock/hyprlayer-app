@@ -365,7 +365,7 @@ async fn long_session_open() {
     j.step("a tail read carries the ask the harness still waits on");
     let (response, _, mut asking) = desktop
         .open_session_stream(StreamRequest::StartStageSession {
-            workstream_id: ws.clone(),
+            workstream_id: ws,
             stage: Stage::General,
             input: "ASK_FIRST".into(),
             attached_docs: vec![],

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use hyprlayer_proto::Features;
 use hyprlayer_server::client::RpcClient;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
 const MIB: u64 = 1024 * 1024;
@@ -27,17 +27,6 @@ pub struct Link {
     /// When each runtime event reached the client.
     pub events: Arc<Mutex<Vec<Instant>>>,
     pub delivered: AtomicU64,
-}
-
-impl Link {
-    pub fn first_event_after(&self, from: Instant) -> Option<Duration> {
-        let events = self.events.lock().unwrap();
-        events.iter().find(|at| **at >= from).map(|at| *at - from)
-    }
-}
-
-pub async fn phone(socket: &Path, deep: bool) -> (Arc<RpcClient>, Arc<Link>) {
-    far_phone(socket, deep, Duration::ZERO, false).await
 }
 
 /// `deep`: the link takes up to `DEEP_LINK_BYTES` from the server at once and
@@ -169,50 +158,6 @@ pub async fn far_phone_announcing(
     .expect("handshake");
     drain_events(&client, link.events.clone());
     (client, link)
-}
-
-/// A far link with no bandwidth cap: each direction late by `one_way`, nothing throttled.
-pub async fn uncapped(socket: &Path, one_way: Duration) -> Arc<RpcClient> {
-    let unix = tokio::net::UnixStream::connect(socket)
-        .await
-        .expect("connect to the sandbox socket");
-    let (srv_rd, srv_wr) = unix.into_split();
-    let (client_end, proxy_end) = tokio::io::duplex(1024 * 1024);
-    let (cli_rd, cli_wr) = tokio::io::split(proxy_end);
-    tokio::spawn(delayed(cli_rd, srv_wr, one_way));
-    tokio::spawn(delayed(srv_rd, cli_wr, one_way));
-    let client = RpcClient::connect(client_end).await.expect("handshake");
-    drain_events(&client, Arc::default());
-    client
-}
-
-async fn delayed<R, W>(mut rd: R, mut wr: W, one_way: Duration)
-where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
-{
-    let (tx, mut rx) = mpsc::unbounded_channel::<(Instant, Vec<u8>)>();
-    tokio::spawn(async move {
-        while let Some((due, bytes)) = rx.recv().await {
-            tokio::time::sleep_until(due.into()).await;
-            if wr.write_all(&bytes).await.is_err() {
-                break;
-            }
-        }
-    });
-    let mut buf = vec![0u8; 64 * 1024];
-    loop {
-        let n = match rd.read(&mut buf).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => n,
-        };
-        if tx
-            .send((Instant::now() + one_way, buf[..n].to_vec()))
-            .is_err()
-        {
-            break;
-        }
-    }
 }
 
 async fn pace(bytes: usize, bps: u64) {

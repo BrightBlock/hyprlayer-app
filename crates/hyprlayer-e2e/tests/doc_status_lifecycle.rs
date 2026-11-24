@@ -475,7 +475,7 @@ async fn doc_status_lifecycle() {
     let idle_polls = fake_gh::calls(&gh_state, &w1_branch) - before;
     let idle_status = status_of(&after_merge);
     let _ = client
-        .call(Request::FetchWorkstreamRemote { id: w1_id.clone() })
+        .call(Request::FetchWorkstreamRemote { id: w1_id })
         .await;
     let kicked = eventually(Duration::from_secs(5), || {
         fake_gh::calls(&gh_state, &w1_branch) > before + idle_polls
@@ -511,7 +511,7 @@ async fn doc_status_lifecycle() {
     j.call(
         &client,
         Request::WatchWorktree {
-            workstream_id: Some(w2_id.clone()),
+            workstream_id: Some(w2_id),
         },
     )
     .await
@@ -690,7 +690,7 @@ async fn doc_status_lifecycle() {
     j.call(
         &client,
         Request::ArchiveWorkstream {
-            id: w3_id.clone(),
+            id: w3_id,
             skip_scripts: true,
         },
     )

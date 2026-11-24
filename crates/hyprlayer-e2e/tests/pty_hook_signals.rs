@@ -1051,7 +1051,7 @@ async fn claude_worktree_create() {
 
     j.step("the parent lists its active children with their changed files");
     let mut children = c
-        .list_child_workstreams(lead.clone())
+        .list_child_workstreams(lead)
         .await
         .expect("list_child_workstreams");
     // Created at the same instant, so their list order varies.

@@ -153,7 +153,7 @@ async fn goal_harness_crash() {
         d.iterations.get(1).is_some_and(|i| i.outcome.is_some())
     })
     .await;
-    let crashed_note = note_of(&after_crash, 0);
+    let crashed_note = after_crash.iterations.first().and_then(|i| i.note);
     let crashed_checked = after_crash.iterations.first().and_then(|i| i.outcome);
     let next_outcome = after_crash.iterations.get(1).and_then(|i| i.outcome);
     j.guard(
@@ -495,10 +495,6 @@ fn goal_lines(stdin_log: &Path, condition: &str) -> usize {
         .lines()
         .filter(|l| l.contains(r#""type":"user""#) && l.contains(condition))
         .count()
-}
-
-fn note_of(detail: &GoalDetail, index: usize) -> Option<GoalIterationNote> {
-    detail.iterations.get(index).and_then(|i| i.note)
 }
 
 /// The session row's `requestedPermissionMode`; null is Auto.

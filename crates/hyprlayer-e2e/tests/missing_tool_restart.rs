@@ -62,7 +62,7 @@ async fn missing_tool_restart() {
     j.call(
         &client,
         Request::TerminalClose {
-            terminal_id: terminal.clone(),
+            terminal_id: terminal,
         },
     )
     .await

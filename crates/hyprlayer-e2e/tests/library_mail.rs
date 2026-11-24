@@ -753,7 +753,7 @@ async fn library_mail() {
     j.guard(
         "a type filter narrows every box but the type boxes, which replace it; projects and authors ignore it",
         filtered == expected_filtered,
-        filtered.clone(),
+        filtered,
     );
     let active_only = ThoughtQuery {
         statuses: vec!["active".into()],
@@ -798,8 +798,8 @@ async fn library_mail() {
         .map(|f| (f.name.to_string(), f.id.clone()))
         .collect();
     named.push(("old".into(), old.id.clone()));
-    named.push(("demo-seed".into(), demo_seed_id.clone()));
-    named.push(("other-seed".into(), other_seed_id.clone()));
+    named.push(("demo-seed".into(), demo_seed_id));
+    named.push(("other-seed".into(), other_seed_id));
     let fresh: Vec<&str> = fixtures.iter().map(|f| f.name).collect();
     let expected_state = |unread: &[&str]| -> serde_json::Map<String, Value> {
         named
@@ -1204,7 +1204,7 @@ async fn library_mail() {
     let mut expected_pairs = vec![
         (live_id.clone(), session.id.clone()),
         (seeded_id.clone(), CODEX_SESSION.to_string()),
-        (seeded_note_id.clone(), CODEX_SESSION.to_string()),
+        (seeded_note_id, CODEX_SESSION.to_string()),
     ];
     expected_pairs.sort();
     let seeded_span: Vec<(f64, f64)> = rows
@@ -1364,7 +1364,7 @@ async fn library_mail() {
     j.call(
         &client,
         Request::ArchiveWorkstream {
-            id: ws.clone(),
+            id: ws,
             skip_scripts: true,
         },
     )

@@ -254,7 +254,7 @@ async fn session_stream_payload() {
     std::fs::write(sandbox.root.join("turn.jsonl"), long_turn()).expect("write the turn");
     let (response, desktop_stream_id, mut desktop_stream) = desktop
         .open_session_stream(StreamRequest::StartStageSession {
-            workstream_id: ws.clone(),
+            workstream_id: ws,
             stage: Stage::General,
             input: "read".into(),
             attached_docs: vec![],
@@ -499,7 +499,7 @@ async fn session_stream_payload() {
     let turn_seq = log.last().map_or(last_seq, |e| e.seq);
     phone_wire.take();
     client
-        .send_user_message(sid.clone(), "again".into(), vec![], None, None, None)
+        .send_user_message(sid, "again".into(), vec![], None, None, None)
         .await
         .expect("send_user_message");
     until_turn_done(&mut phone_stream, turn_seq).await;

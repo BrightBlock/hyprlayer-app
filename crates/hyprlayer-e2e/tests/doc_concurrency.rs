@@ -248,7 +248,7 @@ async fn doc_concurrency() {
         .call(
             &client,
             Request::ReadAttachment {
-                path: imported_path.clone(),
+                path: imported_path,
             },
         )
         .await
@@ -262,7 +262,7 @@ async fn doc_concurrency() {
         .call(
             &client,
             Request::SaveAttachment {
-                workstream_id: ws_id.clone(),
+                workstream_id: ws_id,
                 file_name: "pasted.png".into(),
                 data: B64.encode([0x89, 0x50, 0x4e, 0x47]),
             },

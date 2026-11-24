@@ -84,7 +84,7 @@ async fn workstream_lifecycle() {
         Request::InitThoughtsRepo {
             user: "e2e".into(),
             source: ThoughtsSource::Create {
-                path: thoughts_path.clone(),
+                path: thoughts_path,
             },
         },
     )

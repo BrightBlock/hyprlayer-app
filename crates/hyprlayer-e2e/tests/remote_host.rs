@@ -231,7 +231,7 @@ async fn remote_host() {
         .call(
             &relay.client,
             Request::ListWorkstreams {
-                project_path: project_path.clone(),
+                project_path,
                 include_archived: false,
             },
         )

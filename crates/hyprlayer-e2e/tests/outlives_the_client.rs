@@ -172,7 +172,7 @@ async fn work_outlives_the_client() {
         .call(
             &client,
             Request::ListWorkstreams {
-                project_path: project.clone(),
+                project_path: project,
                 include_archived: false,
             },
         )

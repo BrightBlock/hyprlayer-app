@@ -355,7 +355,7 @@ async fn agent_files() {
         .call(
             &client,
             Request::ListAgentFiles {
-                project_path: Some(project.clone()),
+                project_path: Some(project),
             },
         )
         .await

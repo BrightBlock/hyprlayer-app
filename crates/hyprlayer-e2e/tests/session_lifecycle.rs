@@ -172,12 +172,7 @@ async fn session_lifecycle() {
         json!({ "kinds": kinds }),
     );
     let sessions = j
-        .call(
-            &client,
-            Request::ListSessions {
-                workstream_id: ws.clone(),
-            },
-        )
+        .call(&client, Request::ListSessions { workstream_id: ws })
         .await
         .expect("list_sessions");
     j.guard(

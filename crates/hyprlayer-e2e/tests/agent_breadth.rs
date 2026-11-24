@@ -636,10 +636,7 @@ async fn agent_breadth() {
     let token = env_var(&lead_env, "HYPRLAYER_AGENT_TOKEN").to_string();
     let agent = server.connect().await;
     drop(agent.take_events());
-    agent
-        .announce_agent(token.clone())
-        .await
-        .expect("announce_agent");
+    agent.announce_agent(token).await.expect("announce_agent");
     let global = j
         .call(
             &c,
@@ -857,7 +854,7 @@ async fn agent_breadth() {
             .err(),
     );
     let kept = c
-        .get_goal(goal_id.clone())
+        .get_goal(goal_id)
         .await
         .expect("get_goal")
         .goal
@@ -946,7 +943,7 @@ async fn agent_breadth() {
     j.step("reveal reaches desktops");
     drain(&mut rx);
     let asks = [
-        ("doc", plan.clone()),
+        ("doc", plan),
         ("file", "README.md".to_string()),
         ("diff", "README.md".to_string()),
     ];

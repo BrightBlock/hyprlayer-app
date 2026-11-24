@@ -56,7 +56,7 @@ async fn streaming_attach() {
     j.step("a turn streams half a text block and holds it open");
     let (session, _prompt, _stream_id, mut first) = client
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::General,
             "E2E_STREAM".into(),
             vec![],

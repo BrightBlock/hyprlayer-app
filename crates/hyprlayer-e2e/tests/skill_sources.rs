@@ -1602,7 +1602,7 @@ async fn skill_sources() {
         .call(
             &client,
             Request::RemoveSkill {
-                project_path: Some(project.clone()),
+                project_path: Some(project),
                 scope: SkillScope::Project,
                 name: "handmade".into(),
             },

@@ -201,7 +201,7 @@ async fn script_lifecycle() {
         .call(
             &client,
             Request::GetScriptOutput {
-                workstream_id: ws.clone(),
+                workstream_id: ws,
                 kind: ScriptKind::Run,
             },
         )

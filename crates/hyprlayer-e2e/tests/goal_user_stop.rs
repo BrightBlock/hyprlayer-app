@@ -382,7 +382,7 @@ async fn goal_user_stop() {
         .call(
             &client,
             Request::SetSessionArchived {
-                session_id: occupied.clone(),
+                session_id: occupied,
                 archived: true,
             },
         )
@@ -514,7 +514,7 @@ async fn goal_user_stop() {
     j.call(
         &client,
         Request::InterruptSession {
-            session_id: takeover.clone(),
+            session_id: takeover,
         },
     )
     .await
@@ -555,7 +555,7 @@ async fn goal_user_stop() {
     .await;
     wait_sent(&client, &goal.id, 1).await;
     let restarted = client
-        .restart_session_stream(restart.clone(), None, None, None)
+        .restart_session_stream(restart, None, None, None)
         .await
         .expect("restart_session");
     let ended = wait_ended(&client, &goal.id).await;
@@ -713,7 +713,7 @@ async fn goal_user_stop() {
     j.call(
         &client,
         Request::ArchiveWorkstream {
-            id: archived_ws.clone(),
+            id: archived_ws,
             skip_scripts: true,
         },
     )

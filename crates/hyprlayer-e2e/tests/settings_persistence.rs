@@ -175,7 +175,7 @@ async fn settings_persistence() {
         .call(
             &client,
             Request::GetBranchPrefixes {
-                project_path: project.clone(),
+                project_path: project,
             },
         )
         .await

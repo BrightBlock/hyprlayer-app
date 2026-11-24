@@ -324,7 +324,7 @@ async fn archive_retention() {
     j.guard(
         "purging by id deletes exactly the requested archive",
         report == json!({ "deleted": 1, "failed": 0 }),
-        report.clone(),
+        report,
     );
     let listed = list(&mut j, &client).await;
     j.guard(

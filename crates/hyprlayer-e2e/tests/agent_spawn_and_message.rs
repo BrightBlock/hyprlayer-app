@@ -492,7 +492,7 @@ async fn agent_spawn_and_message() {
     j.call(
         &c,
         Request::ArchiveWorkstream {
-            id: shelf.clone(),
+            id: shelf,
             skip_scripts: true,
         },
     )
@@ -1198,7 +1198,7 @@ async fn agent_spawn_and_message() {
     j.call(
         &c,
         Request::WatchWorktree {
-            workstream_id: Some(ws.clone()),
+            workstream_id: Some(ws),
         },
     )
     .await

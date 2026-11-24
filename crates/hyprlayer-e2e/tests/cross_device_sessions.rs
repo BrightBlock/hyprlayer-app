@@ -562,7 +562,7 @@ async fn cross_device_sessions() {
         deleted.await,
         json!({}),
     );
-    let rows = a.list_sessions(ws.clone()).await.expect("list_sessions");
+    let rows = a.list_sessions(ws).await.expect("list_sessions");
     let gone = rows.iter().all(|s| s.id != session.id);
     let log = a.get_session_log(session.id.clone()).await;
     let log_gone = log.as_ref().is_ok_and(Vec::is_empty);

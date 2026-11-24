@@ -389,7 +389,7 @@ async fn mid_turn_messages() {
     j.step("a stopped Ship turn sends no follow-up");
     let (ship, _prompt, _stream_id, mut ship_events) = client
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::Ship,
             "E2E_STOP ship it".into(),
             vec![],

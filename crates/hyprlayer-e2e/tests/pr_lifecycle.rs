@@ -217,7 +217,7 @@ async fn pr_lifecycle() {
         json!({ "state": merged.pointer("/state") }),
     );
     let after = j
-        .call(&client, Request::WorkstreamPrStatus { id: id.clone() })
+        .call(&client, Request::WorkstreamPrStatus { id })
         .await
         .expect("workstream_pr_status");
     j.guard(

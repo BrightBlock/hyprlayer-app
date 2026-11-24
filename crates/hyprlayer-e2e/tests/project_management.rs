@@ -268,7 +268,7 @@ async fn project_management() {
     // confirmed on disk.
     let on_disk = std::fs::read_to_string(&target).unwrap_or_default();
     let after = j
-        .call(&client, Request::ListProjectMemory { id: ws.clone() })
+        .call(&client, Request::ListProjectMemory { id: ws })
         .await
         .expect("list_project_memory");
     j.guard(
@@ -286,7 +286,7 @@ async fn project_management() {
         .call(
             &client,
             Request::GetThoughtsGitStatus {
-                project_path: project.clone(),
+                project_path: project,
             },
         )
         .await

@@ -76,7 +76,7 @@ async fn auth_required() {
     j.step("the first message hits an expired login");
     let (session, _prompt, _stream_id, mut events) = client
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::General,
             "E2E_PROMPT_ONE".into(),
             vec![],

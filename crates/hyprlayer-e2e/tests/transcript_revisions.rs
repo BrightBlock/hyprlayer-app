@@ -75,7 +75,7 @@ async fn transcript_revisions() {
     j.step("A starts a session");
     let (session, _prompt, _stream_id, mut events) = client
         .start_stage_session_stream(
-            ws.clone(),
+            ws,
             Stage::General,
             "E2E_PROMPT_ONE".into(),
             vec![],

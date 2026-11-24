@@ -325,8 +325,8 @@ async fn worktree_files() {
         .call(
             &client,
             Request::WorktreeCommitFileSides {
-                id: id.clone(),
-                sha: sha.clone(),
+                id,
+                sha,
                 path: "src/keep.rs".into(),
             },
         )

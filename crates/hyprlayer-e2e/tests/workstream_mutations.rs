@@ -228,7 +228,7 @@ async fn workstream_mutations() {
         .call(
             &client,
             Request::CreateWorkstream {
-                project_path: project.clone(),
+                project_path: project,
                 title: "Inplace work".into(),
                 base: None,
                 mode: WorktreeMode::Inplace,
@@ -277,9 +277,7 @@ async fn workstream_mutations() {
     // The guard that stops it resurrecting a worktree as a bare symlink farm
     // with no .git, which would block a later restore.
     std::fs::remove_dir_all(Path::new(&worktree)).expect("remove the worktree");
-    let refused = j
-        .call(&client, Request::ReprovisionWorkstream { id: id.clone() })
-        .await;
+    let refused = j.call(&client, Request::ReprovisionWorkstream { id }).await;
     let evidence = match &refused {
         Err(e) => json!({ "code": e.code }),
         Ok(_) => json!({ "accepted": true }),

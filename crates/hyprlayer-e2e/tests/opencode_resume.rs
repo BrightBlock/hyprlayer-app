@@ -594,7 +594,7 @@ async fn opencode_resume() {
     };
     let notice = seen.iter().any(reload_notice);
     let stored_notices = client
-        .get_session_log(retried.clone())
+        .get_session_log(retried)
         .await
         .expect("get_session_log")
         .iter()

@@ -568,7 +568,7 @@ async fn connection_backpressure() {
     }
     announce(&toggler, "toggler").await;
     let flood_ends = Instant::now() + FLOOD_FOR;
-    let toggling = tokio::spawn(toggle_viewers(toggler.clone(), session.clone(), flood_ends));
+    let toggling = tokio::spawn(toggle_viewers(toggler, session.clone(), flood_ends));
     let rereads = Arc::new(Mutex::new(Vec::new()));
     let rereading = {
         let (phone, rereads, session) = (phone.clone(), rereads.clone(), session.clone());
@@ -637,7 +637,7 @@ async fn connection_backpressure() {
         .map(|i| (i * 31 % 251) as u8)
         .collect();
     let shared = desktop
-        .save_attachment(ws.clone(), "shared.bin".into(), STANDARD.encode(&blob))
+        .save_attachment(ws, "shared.bin".into(), STANDARD.encode(&blob))
         .await
         .expect("save_attachment");
     let (slow, slow_link) = connect_phone(server.socket()).await;
@@ -682,7 +682,7 @@ async fn connection_backpressure() {
     };
     tokio::time::sleep(Duration::from_secs(2)).await;
     let read_from = Instant::now();
-    let during = timed_read(slow.clone(), shared.clone()).await;
+    let during = timed_read(slow, shared).await;
     let read_to = Instant::now();
     flooding.store(false, Relaxed);
     let mut turns = flood.await.expect("the flood's turns");

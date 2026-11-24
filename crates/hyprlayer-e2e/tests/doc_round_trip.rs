@@ -718,7 +718,7 @@ async fn doc_round_trip() {
         Request::SaveDocParts {
             id: unknown.id.clone(),
             body: text(&uk_doc, "/body"),
-            frontmatter: FrontmatterEdit::Raw(raw_edit.clone()),
+            frontmatter: FrontmatterEdit::Raw(raw_edit),
             base_mtime_ms: f64_at(&uk_doc, "/mtime_ms"),
         },
     )
@@ -760,7 +760,7 @@ async fn doc_round_trip() {
             &client,
             Request::ResolveRelatedDocs {
                 id: related.id.clone(),
-                values: related_values.clone(),
+                values: related_values,
             },
         )
         .await

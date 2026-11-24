@@ -749,7 +749,7 @@ async fn review_lifecycle() {
         .call(
             &client,
             Request::CreateWorkstream {
-                project_path: project.clone(),
+                project_path: project,
                 title: "Other work".into(),
                 base: None,
                 mode: WorktreeMode::Isolated,
@@ -962,7 +962,7 @@ async fn review_lifecycle() {
         .expect("open the sidecar");
     std::io::Write::write_all(&mut tail, b"\n").expect("finish the line");
     let finished = review(&mut j, &client, &id).await;
-    let mut with_partial = expected.clone();
+    let mut with_partial = expected;
     with_partial.push(
         json!({ "path": "src/new.rs", "line": 1, "currentLine": 1, "kind": "note",
         "body": "Added after the first commit.", "task": "Phase 2: new", "resolved": false }),
@@ -1146,7 +1146,7 @@ async fn review_lifecycle() {
         &client,
         AddReviewCommentRequest {
             workstream_id: other_id.clone(),
-            reply_to_note_id: Some(call_note_id.clone()),
+            reply_to_note_id: Some(call_note_id),
             ..comment_on(&other_id, "src/edit.rs", ReviewSide::Modified, 6, "")
         },
     )

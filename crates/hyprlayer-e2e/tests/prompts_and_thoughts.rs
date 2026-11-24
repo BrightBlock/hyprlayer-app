@@ -104,7 +104,7 @@ async fn prompts_and_thoughts() {
             &client,
             Request::ApplyPromptImport {
                 decision: PromptImportDecision {
-                    source: bundle.clone(),
+                    source: bundle,
                     expected_source_sha256: sha,
                     mode: PromptImportMode::Merge,
                     conflict_actions: Default::default(),
@@ -133,7 +133,7 @@ async fn prompts_and_thoughts() {
         .call(
             &client,
             Request::SyncThoughts {
-                path: project.clone(),
+                path: project,
                 message: Some("e2e sync".into()),
             },
         )

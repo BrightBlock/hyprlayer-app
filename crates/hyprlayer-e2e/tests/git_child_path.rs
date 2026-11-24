@@ -50,7 +50,7 @@ async fn git_child_path() {
         .call(
             &client,
             Request::CreateWorkstream {
-                project_path: project.clone(),
+                project_path: project,
                 title: "Filtered checkout".into(),
                 base: None,
                 mode: WorktreeMode::Isolated,

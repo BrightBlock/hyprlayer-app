@@ -674,14 +674,9 @@ async fn failed_start() {
         json!({ "sent": sent() }),
     );
     drop(restarted);
-    j.call(
-        &client,
-        Request::KillSession {
-            session_id: quiet.clone(),
-        },
-    )
-    .await
-    .expect("kill_session");
+    j.call(&client, Request::KillSession { session_id: quiet })
+        .await
+        .expect("kill_session");
 
     j.step("a second launch call leaves a healthy session running");
     let (healthy, mut healthy_events) = start_claude(&client, &ws, "E2E_HEALTHY_PROMPT").await;
@@ -739,7 +734,7 @@ async fn failed_start() {
             && settled["failed"] == true
             && settled["prompt"] == true
             && settled["exits"] == 1,
-        settled.clone(),
+        settled,
     );
     let stored = first_user_text(&mut j, &client, &abandoned).await;
     j.guard(

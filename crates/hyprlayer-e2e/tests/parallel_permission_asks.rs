@@ -152,7 +152,7 @@ async fn parallel_permission_asks() {
         .call(
             &client,
             Request::GetSessionLog {
-                session_id: session.clone(),
+                session_id: session,
             },
         )
         .await

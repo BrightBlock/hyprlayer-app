@@ -278,10 +278,7 @@ async fn agent_spawn_in_cli() {
         &mcp.call("spawn_agent", json!({ "prompt": "E2E_FALLBACK" }))
             .await,
     );
-    let ptys = c
-        .list_pty_agents(Some(ws.clone()))
-        .await
-        .expect("list_pty_agents");
+    let ptys = c.list_pty_agents(Some(ws)).await.expect("list_pty_agents");
     // Only the reviewer's: the unhooked one was closed before the spawn returned.
     let closed = ptys.len() == 1;
     j.guard(
@@ -421,7 +418,7 @@ async fn agent_spawn_in_cli() {
             shelf.clone(),
             "claude-code".into(),
             PtyLaunchSession {
-                session_id: Some(shelved_session.clone()),
+                session_id: Some(shelved_session),
                 resume: true,
                 bypass: true,
                 model: None,
@@ -451,7 +448,7 @@ async fn agent_spawn_in_cli() {
         .call(
             &c,
             Request::RestoreWorkstream {
-                id: shelf.clone(),
+                id: shelf,
                 target: None,
             },
         )
