@@ -61,7 +61,6 @@ export function launchActionInCli(workstreamId: string, action: ActionAgent): Pr
       title: action.title,
       titleLocked: true,
       mode: "general",
-      draft: "",
       docs: [],
       attachments: [],
       paneId: focusedPaneId(current),

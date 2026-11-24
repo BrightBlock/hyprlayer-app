@@ -44,6 +44,7 @@ import {
 import { resolveCustomPrompt, runCustomPrompt } from "@/features/prompts/runPrompt";
 import { AttachmentCards } from "./AttachmentCard";
 import { fitComposerHeight, MAX_COMPOSER_HEIGHT } from "./composerAutosize";
+import { setComposerDraft, useComposerDraft } from "./composerDrafts";
 import {
   importDroppedPaths,
   saveClipboardImage,
@@ -337,7 +338,6 @@ type Props = {
   view: WorkstreamView;
   shell: ShellTab;
   focused: boolean;
-  onDraftChange: (value: string) => void;
   onModeChange: (mode: StageKey) => void;
   onModelChange: (key: string) => void;
   onEffortChange: (key: string) => void;
@@ -367,7 +367,6 @@ export function SessionChat({
   view,
   shell,
   focused,
-  onDraftChange,
   onModeChange,
   onModelChange,
   onEffortChange,
@@ -762,12 +761,10 @@ export function SessionChat({
 
   const sid = shell.sessionId;
   // A tab letting go of its session stops watching it, as closing the tab does.
-  // ProjectPage hands down fresh callbacks on every keystroke; reading them through refs keeps the
-  // memoized transcript from re-rendering with the draft.
+  // ProjectPage hands down fresh callbacks on every render; reading them through a ref keeps the
+  // memoized transcript from re-rendering with the page.
   const resetSessionRef = useRef(onResetSession);
   resetSessionRef.current = onResetSession;
-  const draftChangeRef = useRef(onDraftChange);
-  draftChangeRef.current = onDraftChange;
   const resetSession = useCallback(() => {
     resetSessionRef.current();
     if (sid) dropSession(sid);
@@ -789,7 +786,11 @@ export function SessionChat({
   const working = session ? isWorking(session) : false;
   const terminal = (session ? isTerminal(session.state) : false) || gone;
   const pendingQuestion = session?.pendingQuestion ?? null;
-  const draft = shell.draft;
+  const draft = useComposerDraft(workstreamId, shell.id);
+  const setDraft = useCallback(
+    (text: string) => setComposerDraft(workstreamId, shell.id, text),
+    [workstreamId, shell.id],
+  );
   const attachments = shell.attachments;
   const canSubmit = draft.trim().length > 0 || attachments.length > 0;
   const otherTurnRunning = Boolean(sync?.workingDevice) || (session?.turnAuthor === "other" && working);
@@ -825,7 +826,7 @@ export function SessionChat({
       if (!res) return;
       setHistoryNav(res.nav);
       recalledValueRef.current = res.draft;
-      onDraftChange(res.draft);
+      setDraft(res.draft);
       requestAnimationFrame(() => {
         const ta = textareaRef.current;
         if (!ta) return;
@@ -834,7 +835,7 @@ export function SessionChat({
         ta.setSelectionRange(n, n);
       });
     },
-    [onDraftChange],
+    [setDraft],
   );
 
   useEffect(() => {
@@ -1038,7 +1039,7 @@ export function SessionChat({
     workstreamId,
     projectPath: view.item.projectPath,
     value: draft,
-    onChange: onDraftChange,
+    onChange: setDraft,
     textareaRef,
     enabled: !pendingQuestion,
     harness: harness.key,
@@ -1079,7 +1080,7 @@ export function SessionChat({
       void runCustomPrompt(view, prompt, shell.id);
       return;
     }
-    onDraftChange(prefillSlashCommand(draft, slug));
+    setDraft(prefillSlashCommand(draft, slug));
     const caret = slug.length + 2;
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -1098,7 +1099,7 @@ export function SessionChat({
       text,
       target: sid ? { sessionId: sid } : { newSession: { stage: mode, shellId: shell.id } },
     });
-    onDraftChange("");
+    setDraft("");
     setHistoryNav(IDLE_NAV);
     recalledValueRef.current = null;
   };
@@ -1142,7 +1143,7 @@ export function SessionChat({
       onSessionStarted(created.id);
       // The tab keeps the mode it launched with; a reload rebuilds the session from the tab.
       if (shell.permissionMode === undefined && requestedMode) onPermissionModeChange(requestedMode);
-      onDraftChange("");
+      setDraft("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;
       onClearAttachments();
@@ -1170,7 +1171,7 @@ export function SessionChat({
         attachments.length === 0 &&
         (await interceptSend({ sessionId: sid, workstreamId: view.item.id, shell, text }));
       if (intercepted) {
-        onDraftChange("");
+        setDraft("");
         setHistoryNav(IDLE_NAV);
         recalledValueRef.current = null;
         return;
@@ -1183,7 +1184,7 @@ export function SessionChat({
       if (armed) resumeGoal.mutate(armed, { onError: (e) => setError(errorMessage(e)) });
       setDivider(sid, null);
       transcriptRef.current?.scrollToBottom();
-      onDraftChange("");
+      setDraft("");
       setHistoryNav(IDLE_NAV);
       recalledValueRef.current = null;
       onClearAttachments();
@@ -1235,7 +1236,7 @@ export function SessionChat({
 
   const handleClearAndResume = async () => {
     await handleClear({ skipConfirm: true });
-    if (draft.trim() === "") onDraftChange("/resume_handoff");
+    if (draft.trim() === "") setDraft("/resume_handoff");
   };
 
   const handlePermissionModeChange = async (key: string) => {
@@ -1319,7 +1320,7 @@ export function SessionChat({
           useToast.getState().show(refused.title, refused.body, { tone: "warn" });
           return;
         }
-        draftChangeRef.current(text);
+        setDraft(text);
         if (isFirstUserTurn(sid, itemId)) {
           resetSession();
         } else {
@@ -1334,7 +1335,7 @@ export function SessionChat({
         onRetry: () => void retryAuth(),
       },
     }),
-    [sid, olderTurns, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
+    [sid, olderTurns, setDraft, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
   );
 
   usePublishSessionControls(
@@ -1596,7 +1597,7 @@ export function SessionChat({
                           setHistoryNav(IDLE_NAV);
                         }
                         recalledValueRef.current = null;
-                        onDraftChange(val);
+                        setDraft(val);
                         autocomplete.syncCaret();
                       }}
                       onFocus={() => setComposerFocused(true)}

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Session } from "@/lib/bindings";
+import { flushPersistedWrites } from "@/lib/persistedStorage";
 
+import { composerDraft, setComposerDraft, useComposerDraftsStore } from "./composerDrafts";
 import { leaf, leaves, type LayoutNode, type PaneId } from "./paneTree";
 import { takeSeenTitle } from "./titleSeen";
 import {
   activeShellIn,
+  appendShell,
   bindSessionToShell,
   defaultTabState,
   archiveShellState,
@@ -25,6 +28,7 @@ import {
   selectTabAt,
   splitPaneState,
   unarchiveShellState,
+  updateWorkstreamTabs,
   useComposerFocusStore,
   useWorkstreamTabsStore,
   visibleShells,
@@ -37,7 +41,6 @@ const shell = (id: number, paneId: PaneId = "p1"): ShellTab => ({
   id,
   title: `Agent ${id}`,
   mode: "general",
-  draft: "",
   docs: [],
   attachments: [],
   paneId,
@@ -139,6 +142,39 @@ const archived = (id: number, archivedAt = 1000): ArchivedShell => ({
 
 describe("persisted workstream migration", () => {
   const v6 = (id: number, panel: "main" | "right") => ({ id, title: `Agent ${id}`, panel });
+
+  beforeEach(() => useComposerDraftsStore.setState({ byWs: {} }));
+
+  it("moves each tab's unsent text, open or archived, into its composer draft", () => {
+    const migrated = migratePersistedWorkstreamTabs({
+      byWs: {
+        ws: {
+          ...onePane(1, 1, 2),
+          shells: [{ ...shell(1), draft: "half a thought" }, { ...shell(2), draft: "" }],
+          archived: [{ ...archived(3), shell: { ...shell(3), draft: "parked text" } }],
+        },
+      },
+    });
+
+    expect(composerDraft("ws", 1)).toBe("half a thought");
+    expect(composerDraft("ws", 2)).toBe("");
+    expect(composerDraft("ws", 3)).toBe("parked text");
+    for (const s of [...migrated.byWs.ws.shells, ...migrated.byWs.ws.archived!.map((a) => a.shell)]) {
+      expect(s).not.toHaveProperty("draft");
+    }
+  });
+
+  it("keeps unsent text through the upgrade from a v8 store", async () => {
+    const { name } = useWorkstreamTabsStore.persist.getOptions();
+    flushPersistedWrites();
+    const v8 = { ...onePane(1, 1), shells: [{ ...shell(1), draft: "typed before the upgrade" }] };
+    localStorage.setItem(name!, JSON.stringify({ state: { byWs: { ws: v8 } }, version: 8 }));
+
+    await useWorkstreamTabsStore.persist.rehydrate();
+
+    expect(composerDraft("ws", 1)).toBe("typed before the upgrade");
+    expect(useWorkstreamTabsStore.getState().byWs.ws.shells[0]).not.toHaveProperty("draft");
+  });
 
   it("clears legacy Copilot picks from active and archived shells case-insensitively", () => {
     const current = { ...shell(1), opencodeModel: "GitHub-Copilot/gpt-5" };
@@ -665,19 +701,65 @@ describe("unarchiveShellState", () => {
   });
 
   it("round-trips a shell without losing its session binding", () => {
-    const bound: ShellTab = { ...shell(2), sessionId: "sess-abc", draft: "wip" };
+    const bound: ShellTab = { ...shell(2), sessionId: "sess-abc" };
     const start: WsTabState = { ...onePane(1), shells: [shell(1), bound] };
     const archivedState = archiveShellState(start, 2, "done", 0);
     const restored = unarchiveShellState(archivedState, 2);
-    expect(restored.shells.find((s) => s.id === 2)).toMatchObject({
-      sessionId: "sess-abc",
-      draft: "wip",
-    });
+    expect(restored.shells.find((s) => s.id === 2)).toMatchObject({ sessionId: "sess-abc" });
   });
 
   it("is a no-op for an id that isn't archived", () => {
     const state: WsTabState = { ...onePane(1, 1), archived: [archived(5)] };
     expect(unarchiveShellState(state, 9)).toBe(state);
+  });
+});
+
+describe("a tab's composer draft", () => {
+  const WS = "ws-drafts";
+  const tabs = () => useWorkstreamTabsStore.getState().byWs[WS];
+  const update = (fn: (state: WsTabState) => WsTabState) =>
+    updateWorkstreamTabs((all) => ({ ...all, [WS]: fn(all[WS]) }));
+
+  beforeEach(() => {
+    useComposerDraftsStore.setState({ byWs: {} });
+    useWorkstreamTabsStore.setState({ byWs: { [WS]: onePane(1, 1, 2) } });
+  });
+
+  it("survives archiving and comes back with the restored tab", () => {
+    setComposerDraft(WS, 2, "keep me");
+    update((s) => archiveShellState(s, 2, "idle", 0));
+    expect(composerDraft(WS, 2)).toBe("keep me");
+
+    update((s) => unarchiveShellState(s, 2));
+    expect(composerDraft(WS, 2)).toBe("keep me");
+  });
+
+  it("goes with a closed tab, so the next tab to take its id starts empty", () => {
+    setComposerDraft(WS, 2, "closed with the tab");
+    update((s) => removeShellState(s, 2));
+    const id = nextShellId(tabs().shells, tabs().archived);
+    update((s) => appendShell(s, shell(id)));
+
+    expect(id).toBe(2);
+    expect(composerDraft(WS, 2)).toBe("");
+  });
+
+  it("goes when its archived tab is deleted, or the workstream's tabs are", () => {
+    setComposerDraft(WS, 1, "open");
+    setComposerDraft(WS, 2, "parked");
+    update((s) => archiveShellState(s, 2, "idle", 0));
+    update((s) => ({ ...s, archived: [] }));
+    expect(composerDraft(WS, 2)).toBe("");
+    expect(composerDraft(WS, 1)).toBe("open");
+
+    updateWorkstreamTabs(({ [WS]: _removed, ...rest }) => rest);
+    expect(composerDraft(WS, 1)).toBe("");
+  });
+
+  it("leaves other workstreams' drafts alone", () => {
+    setComposerDraft("ws-other", 2, "theirs");
+    update((s) => removeShellState(s, 2));
+    expect(composerDraft("ws-other", 2)).toBe("theirs");
   });
 });
 
@@ -775,7 +857,6 @@ describe("openSessionTab", () => {
             id: 1,
             title: "Dedicated",
             mode: stage,
-            draft: "",
             docs: [],
             attachments: [],
             sessionId: "current",

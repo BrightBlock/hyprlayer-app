@@ -167,8 +167,8 @@ describe("useFocusedSessionControls", () => {
   function splitTabs(activePaneId: string): WsTabState {
     return {
       shells: [
-        { id: 1, title: "Claude", mode: "general", draft: "", docs: [], attachments: [], paneId: "p1" },
-        { id: 2, title: "Codex", mode: "general", draft: "", docs: [], attachments: [], paneId: "p2" },
+        { id: 1, title: "Claude", mode: "general", docs: [], attachments: [], paneId: "p1" },
+        { id: 2, title: "Codex", mode: "general", docs: [], attachments: [], paneId: "p2" },
       ],
       layout: { type: "split", dir: "row", ratio: 0.5, a: leaf("p1"), b: leaf("p2") },
       panes: { p1: { activeId: 1 }, p2: { activeId: 2 } },

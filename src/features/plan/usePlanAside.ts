@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { useSession } from "@/features/session/sessionStore";
+import { useSessionStore } from "@/features/session/sessionStore";
 import { useUiStore } from "@/lib/uiStore";
 
 import { asideShowsPlan, openPlanPreview, setPlanPreviewNarrow } from "./planPreviewStore";
@@ -14,10 +14,12 @@ const seenWithoutPlan = new Set<string>();
 export function usePlanAside(sessionId: string | undefined, narrow: boolean) {
   const own = useSessionPlanKey(sessionId);
   const path = usePlanKey(sessionId);
-  const entry = useSession(sessionId);
-  const implementing = entry?.stage === "implement";
-  const live = Boolean(entry?.live);
-  const hydrated = (entry?.items.length ?? 0) > 0 && !entry?.reloading;
+  const implementing = useSessionStore((s) => (sessionId ? s.sessions[sessionId]?.stage === "implement" : false));
+  const live = useSessionStore((s) => Boolean(sessionId && s.sessions[sessionId]?.live));
+  const hydrated = useSessionStore((s) => {
+    const entry = sessionId ? s.sessions[sessionId] : undefined;
+    return Boolean(entry && entry.items.length > 0 && !entry.reloading);
+  });
   const asideView = useUiStore((s) => s.asideView);
   const setAsideView = useUiStore((s) => s.setAsideView);
 

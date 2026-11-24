@@ -8,11 +8,11 @@ import {
   type PlanPresentation,
 } from "@/features/session/planPresentation";
 import { planTaskTimeline } from "@/features/session/planTasks";
-import { useSession, type SessionEntry } from "@/features/session/sessionStore";
+import { useSession, useSessionStore, type SessionEntry } from "@/features/session/sessionStore";
 import { runningSubagent, type RunningSubagent } from "@/features/session/subagent";
-import { describeState, isBusy, isTerminal, isWorking } from "@/features/session/transcript";
+import { describeState, isBusy, isTerminal, isWorking, type TranscriptItem } from "@/features/session/transcript";
 import { parseToolInput, toolDisplayName } from "@/features/session/toolDisplay";
-import { useWrittenDocs } from "@/features/session/writtenDocs";
+import { useWrittenDocs, type WrittenDocs } from "@/features/session/writtenDocs";
 import { basename } from "@/lib/path";
 
 import type { PlanDoc } from "./planDoc";
@@ -100,19 +100,33 @@ export type PlanTrackerResult = {
   changed: ReadonlySet<string>;
 };
 
+// Keyed on the transcript array, so an event that leaves it alone costs a lookup, and every
+// reader of the session shares one scan.
+const planKeys = new WeakMap<TranscriptItem[], { stage: string; written: WrittenDocs; key: string | null }>();
+
+function planKeyOf(entry: SessionEntry | undefined, written: WrittenDocs): string | null {
+  if (!entry) return null;
+  const hit = planKeys.get(entry.items);
+  if (hit && hit.stage === entry.stage && hit.written === written) return hit.key;
+  const key = planKeyForSession(entry.items, entry.stage, written);
+  planKeys.set(entry.items, { stage: entry.stage, written, key });
+  return key;
+}
+
+function useSessionWorkstreamId(sessionId: string | undefined): string | null {
+  return useSessionStore((s) => (sessionId ? (s.sessions[sessionId]?.workstreamId ?? null) : null));
+}
+
 // The session's own plan, ignoring any card selection.
 export function useSessionPlanKey(sessionId: string | undefined): string | null {
-  const entry = useSession(sessionId);
-  const written = useWrittenDocs(entry?.workstreamId ?? null);
-  const items = entry?.items;
-  const stage = entry?.stage ?? "";
-  return useMemo(() => (items ? planKeyForSession(items, stage, written) : null), [items, stage, written]);
+  const written = useWrittenDocs(useSessionWorkstreamId(sessionId));
+  return useSessionStore((s) => planKeyOf(sessionId ? s.sessions[sessionId] : undefined, written));
 }
 
 // The last clicked card wins over the session's latest plan.
 export function usePlanKey(sessionId: string | undefined): string | null {
   const own = useSessionPlanKey(sessionId);
-  const workstreamId = useSession(sessionId)?.workstreamId ?? null;
+  const workstreamId = useSessionWorkstreamId(sessionId);
   return useResolvedPlanSelection(sessionId, workstreamId)?.key ?? own;
 }
 

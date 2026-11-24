@@ -1607,13 +1607,6 @@ export async function steerQueued(sessionId: string): Promise<void> {
   for (const message of waiting) await steerMessage(sessionId, message);
 }
 
-export function draftWithQueued(draft: string, messages: QueuedMessage[]): string {
-  return [...messages.map((m) => m.text), draft]
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 /** Takes back every queued message the harness hasn't started; one it already took in stays. */
 async function withdrawQueued(sessionId: string): Promise<QueuedMessage[]> {
   const current = entryOf(sessionId);

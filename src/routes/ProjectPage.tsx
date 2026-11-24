@@ -73,14 +73,13 @@ import { ScriptDock } from "@/features/session/ScriptDock";
 import { requestRun, setActiveWorkstream, useScriptsStore } from "@/features/session/scriptsStore";
 import { openProjectSettings } from "@/features/projects/projectSettingsStore";
 import { useTabDrag, type TabDragHandlers } from "@/features/session/useTabDrag";
+import { composerDraft, returnQueuedToDraft } from "@/features/session/composerDrafts";
 import {
   agentStillWorking,
-  draftWithQueued,
   dropSession,
   endSession,
   stopSession,
   transcriptToText,
-  useSession,
   useSessionStore,
   type QueuedMessage,
 } from "@/features/session/sessionStore";
@@ -289,9 +288,11 @@ function ProjectCommands(props: {
   onToggleReview: (() => void) | null;
   onReturnQueued: (messages: QueuedMessage[]) => void;
 }) {
-  const session = useSession(props.sessionId);
-  const running = Boolean(props.sessionId && session && isBusy(session));
   const sid = props.sessionId;
+  const running = useSessionStore((s) => {
+    const session = sid ? s.sessions[sid] : undefined;
+    return Boolean(session && isBusy(session));
+  });
   useCommand("tab.new", props.onNewTab);
   useCommand("tab.archive", props.onArchiveTab);
   useCommand("tab.close", props.onCloseTab);
@@ -508,7 +509,6 @@ export function ProjectPage() {
           id: nextShellId(current.shells, current.archived),
           title,
           mode: "general",
-          draft: "",
           docs: [],
           attachments: [],
           paneId: focusedPaneId(current),
@@ -607,7 +607,6 @@ export function ProjectPage() {
         | "title"
         | "titleLocked"
         | "mode"
-        | "draft"
         | "docs"
         | "attachments"
         | "model"
@@ -656,7 +655,6 @@ export function ProjectPage() {
     id,
     title: `Agent ${id}`,
     mode: "general",
-    draft: "",
     docs: [],
     attachments: [],
     paneId,
@@ -928,7 +926,7 @@ export function ProjectPage() {
     });
   };
   const returnQueuedToShell = (shellId: number, messages: QueuedMessage[]) => {
-    modifyShell(shellId, (s) => ({ ...s, draft: draftWithQueued(s.draft, messages) }));
+    if (wsId) returnQueuedToDraft(wsId, shellId, messages);
     addAttachmentsToShell(shellId, messages.flatMap((m) => m.attachments));
   };
   const removeAttachmentFromShell = (shellId: number, path: string) =>
@@ -967,7 +965,6 @@ export function ProjectPage() {
     view: activeView!,
     shell,
     focused: shell.id === focusedShell?.id,
-    onDraftChange: (value: string) => patchShell(shell.id, { draft: value }),
     onModeChange: (key: StageKey) => changeShellMode(shell, key),
     onModelChange: (key: string) => patchShell(shell.id, { model: key }),
     onEffortChange: (key: string) => patchShell(shell.id, { effort: key }),
@@ -1030,7 +1027,7 @@ export function ProjectPage() {
   const copyShellTranscript = (shell: ShellTab) => {
     const body = shell.sessionId
       ? transcriptToText(shell.sessionId)
-      : `Draft (no session started yet):\n${shell.draft || "(empty)"}`;
+      : `Draft (no session started yet):\n${(wsId && composerDraft(wsId, shell.id)) || "(empty)"}`;
     const transcript = [
       `# ${activeView?.item.title ?? project.mappedName} · ${shell.title}`,
       `Project: ${project.mappedName}`,

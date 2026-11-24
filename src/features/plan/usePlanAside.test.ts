@@ -12,7 +12,7 @@ function makeStore() {
   );
 }
 vi.mock("@/features/session/sessionStore", () => ({
-  useSession: (id: string | undefined) => store.current((s) => (id ? s.sessions[id] : undefined)),
+  useSessionStore: <T,>(select: (s: ReturnType<ReturnType<typeof makeStore>["getState"]>) => T) => store.current(select),
 }));
 vi.mock("@/lib/bindings", () => ({ events: {}, commands: {} }));
 

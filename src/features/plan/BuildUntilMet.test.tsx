@@ -69,7 +69,7 @@ const SPEC: GoalSpec = {
   limits: { maxIterations: 10, maxCostUsd: 10, maxTokens: null, maxActiveSecs: 3600 },
 };
 
-const SHELL = { id: 1, title: "Plan", mode: "plan", draft: "", docs: [], attachments: [], paneId: "p1" } as ShellTab;
+const SHELL = { id: 1, title: "Plan", mode: "plan", docs: [], attachments: [], paneId: "p1" } as ShellTab;
 
 function goal(): Goal {
   return {

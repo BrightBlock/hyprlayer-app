@@ -40,13 +40,12 @@ function seedTab(sessionId: string, title: string): void {
     byWs: {
       [WS]: {
         shells: [
-          { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], paneId: "p1" },
+          { id: 1, title: "Agent", mode: "general", docs: [], attachments: [], paneId: "p1" },
           {
             id: 2,
             title,
             titleLocked: true,
             mode: "general",
-            draft: "",
             docs: [],
             attachments: [],
             sessionId,

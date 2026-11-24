@@ -9,6 +9,7 @@ import { queryClient } from "@/lib/queryClient";
 import { actionEngine, resolveMultiplexer } from "@/features/multiplexer/engines";
 
 import type { Attachment } from "./attachments";
+import { adoptComposerDrafts, keepComposerDrafts, type ComposerDrafts } from "./composerDrafts";
 import { debouncedJSONStorage } from "@/lib/persistedStorage";
 import {
   isSupportedOpencodeModel,
@@ -41,7 +42,6 @@ export type ShellTab = {
   mode: StageKey;
   /** The session's real stage when `mode` is downgraded to "general" (a picked ship/commit/revise session). */
   sessionStage?: StageKey;
-  draft: string;
   docs: AttachedDoc[];
   dismissedSuggestions?: string[];
   handoffNudgeDismissed?: boolean;
@@ -98,7 +98,7 @@ export type ArchivedShell = {
 
 export const defaultTabState = (): WsTabState => ({
   shells: [
-    { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], paneId: "p1" },
+    { id: 1, title: "Agent", mode: "general", docs: [], attachments: [], paneId: "p1" },
   ],
   layout: leaf("p1"),
   panes: { p1: { activeId: 1 } },
@@ -295,7 +295,7 @@ function normalizePersistedShell(shell: ShellTab): ShellTab {
   };
 }
 
-type LegacyShell = ShellTab & { panel?: "main" | "right" };
+type LegacyShell = ShellTab & { panel?: "main" | "right"; draft?: string };
 type LegacyWs = Partial<WsTabState> & {
   shells: LegacyShell[];
   activeId?: number;
@@ -359,12 +359,28 @@ function migrateWorkstream(ws: LegacyWs): void {
   for (const a of archived) delete (a.shell as LegacyShell).panel;
 }
 
+function takeDrafts(ws: LegacyWs): Record<number, string> {
+  const drafts: Record<number, string> = {};
+  const shells: (LegacyShell | undefined)[] = [...(ws.shells ?? []), ...(ws.archived ?? []).map((a) => a?.shell)];
+  for (const shell of shells) {
+    if (!shell) continue;
+    if (typeof shell.draft === "string" && shell.draft) drafts[shell.id] = shell.draft;
+    delete shell.draft;
+  }
+  return drafts;
+}
+
+/** Also moves each tab's unsent text into the composer drafts store. */
 export function migratePersistedWorkstreamTabs(persisted: unknown): TabsStore {
   const state = persisted as TabsStore | undefined;
   if (!state?.byWs) return { byWs: {} };
-  for (const ws of Object.values(state.byWs)) {
-    if (ws) migrateWorkstream(ws);
+  const drafts: ComposerDrafts = {};
+  for (const [workstreamId, ws] of Object.entries(state.byWs)) {
+    if (!ws) continue;
+    drafts[workstreamId] = takeDrafts(ws);
+    migrateWorkstream(ws);
   }
+  adoptComposerDrafts(drafts);
   return state;
 }
 
@@ -372,7 +388,7 @@ export const useWorkstreamTabsStore = create<TabsStore>()(
   persist(() => ({ byWs: {} }), {
     name: scopedKey("hyprlayer:workstream-tabs"),
     storage: debouncedJSONStorage(),
-    version: 8,
+    version: 9,
     migrate: migratePersistedWorkstreamTabs,
   }),
 );
@@ -395,8 +411,16 @@ export function updateWorkstreamTabs(
   // persist serialises the whole store on every setState, even one that returns the same state.
   const prev = useWorkstreamTabsStore.getState().byWs;
   const byWs = next(prev);
-  if (byWs !== prev) useWorkstreamTabsStore.setState({ byWs });
+  if (byWs === prev) return;
+  useWorkstreamTabsStore.setState({ byWs });
+  // A closed tab's id goes to the next new tab, so its draft must go with it.
+  for (const workstreamId of new Set([...Object.keys(prev), ...Object.keys(byWs)])) {
+    if (prev[workstreamId] !== byWs[workstreamId]) keepComposerDrafts(workstreamId, tabIds(byWs[workstreamId]));
+  }
 }
+
+const tabIds = (tabs: WsTabState | undefined): Set<number> | null =>
+  tabs ? new Set([...tabs.shells, ...(tabs.archived ?? []).map((a) => a.shell)].map((s) => s.id)) : null;
 
 /** The tabs a workstream starts with: its first agent opens where app actions do. */
 export function initialTabState(): WsTabState {
@@ -522,7 +546,6 @@ export function openSessionTab(
       ...(opts?.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       ...(opts?.launched ? shellSeedFromDefaults({ harness: session.harness, ...opts.launched }) : {}),
       harness: session.harness,
-      draft: "",
       docs: [],
       attachments: [],
       sessionId: session.id,
@@ -608,7 +631,6 @@ export function openAgentTerminalTab(
       id,
       title: `Agent ${id}`,
       mode: "general",
-      draft: "",
       docs: [],
       attachments: [],
       paneId: focusedPaneId(current),
@@ -699,7 +721,6 @@ export function openViewerTabInBackground(workstreamId: string, patch: ViewerPat
       id: nextShellId(current.shells, current.archived),
       title,
       mode: "general",
-      draft: "",
       docs: [],
       attachments: [],
       paneId: focusedPaneId(current),
@@ -718,7 +739,6 @@ export function openPromptTab(workstreamId: string, sessionId: string, title: st
         id: nextShellId(current.shells, current.archived),
         title,
         mode: "general",
-        draft: "",
         docs: [],
         attachments: [],
         sessionId,
@@ -741,7 +761,6 @@ export function openDocPreviewTab(workstreamId: string, path: string, title: str
             id: nextShellId(current.shells, current.archived),
             title,
             mode: "general",
-            draft: "",
             docs: [],
             attachments: [],
             docPreviewPath: path,
@@ -821,7 +840,6 @@ function openDedicatedTab(
         id: nextShellId(current.shells, current.archived),
         title,
         mode,
-        draft: "",
         docs: [],
         attachments: [],
         sessionId,
@@ -847,7 +865,6 @@ export function openPlanStageTab(
         id: nextShellId(current.shells, current.archived),
         title: stageLabel(stage),
         mode: stage,
-        draft: "",
         docs: [{ path: planPath, role: "plan" }],
         attachments: [],
         harness: from?.harness,

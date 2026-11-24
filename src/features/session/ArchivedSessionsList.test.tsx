@@ -67,7 +67,6 @@ const shell = (id: number, over: Partial<ShellTab> = {}): ShellTab => ({
   id,
   title: `Agent ${id}`,
   mode: "general",
-  draft: "",
   docs: [],
   attachments: [],
   paneId: "p1",

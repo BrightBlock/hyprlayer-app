@@ -92,6 +92,7 @@ const { queryClient } = await import("@/lib/queryClient");
 const { SessionChat } = await import("./SessionChat");
 const { controlsKey, useSessionControlsStore } = await import("./sessionControls");
 const { dropSession, useSessionStore } = await import("./sessionStore");
+const { setComposerDraft, useComposerDraftsStore } = await import("./composerDrafts");
 
 const WS = "ws1";
 const SID = "s1";
@@ -126,7 +127,7 @@ const TURN_DONE: SessionEvent = { kind: "turnDone", costUsd: null, numTurns: nul
 const FAILED: SessionEvent = { kind: "exited", outcome: "spawn_failed", code: null, stderrTail: "required binary `opencode` was not found" };
 
 const CALLBACKS = [
-  "onDraftChange", "onModeChange", "onModelChange", "onEffortChange", "onPermissionModeChange", "onHarnessChange",
+  "onModeChange", "onModelChange", "onEffortChange", "onPermissionModeChange", "onHarnessChange",
   "onOpencodeModelChange", "onCodexModelChange", "onCodexEffortChange", "onOpenHarnessSettings", "onSessionStarted",
   "onResetSession", "onOpenDoc", "onDetachDoc", "onSuggestDoc", "onDismissHandoffNudge", "onAttachHandoffDoc",
   "onAddFiles", "onAddScreenshots", "onAddAttachments", "onRemoveAttachment", "onClearAttachments", "onReturnQueued",
@@ -137,7 +138,7 @@ function chat(shell: Record<string, unknown> = {}, callbacks: Record<string, unk
     ...Object.fromEntries(CALLBACKS.map((name) => [name, vi.fn()])),
     ...callbacks,
     view: VIEW,
-    shell: { id: 1, title: "Agent", mode: "general", draft: "", docs: [], attachments: [], paneId: "p1", sessionId: SID, ...shell },
+    shell: { id: 1, title: "Agent", mode: "general", docs: [], attachments: [], paneId: "p1", sessionId: SID, ...shell },
     focused: true,
     onBrowseDocs: null,
   } as unknown as Parameters<typeof SessionChat>[0];
@@ -165,6 +166,7 @@ const argsOf = (name: string) => h.calls.find((c) => c.name === name)!.args;
 
 beforeEach(() => {
   queryClient.clear();
+  useComposerDraftsStore.setState({ byWs: {} });
   useSessionStore.setState({ sessions: {} });
   useSessionControlsStore.setState({ byShell: {} });
   h.calls.length = 0;
@@ -357,7 +359,8 @@ describe("a tab starting a session", () => {
     h.state.planDefault = true;
     h.state.rows = [sessionRow({ harness: "claude" })];
     const onPermissionModeChange = vi.fn();
-    renderChat({ harness: "claude", sessionId: undefined, draft: "hi" }, { onPermissionModeChange });
+    setComposerDraft(WS, 1, "hi");
+    renderChat({ harness: "claude", sessionId: undefined }, { onPermissionModeChange });
     await settle();
 
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
