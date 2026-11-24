@@ -200,7 +200,7 @@ impl ScriptService<'_> {
             self.runtime.events.clone(),
             self.runtime.scripts.clone(),
             session.clone(),
-            workstream_id.clone(),
+            workstream_id,
             kind,
             terminal_id.clone(),
         );

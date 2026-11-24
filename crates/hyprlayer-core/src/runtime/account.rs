@@ -166,8 +166,8 @@ impl AccountService<'_> {
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token,
             expires_at: now_secs().saturating_add(tokens.expires_in),
-            name: identity.name.clone(),
-            email: identity.email.clone(),
+            name: identity.name,
+            email: identity.email,
         };
         {
             let _file = self.state().file.lock().await;
@@ -307,19 +307,15 @@ impl AccountService<'_> {
         let Some(mut account) = self.read_own() else {
             return Ok(self.settle(AccountStatus::SignedOut));
         };
-        let mut refreshed = false;
         if force || now_secs().saturating_add(STALE_MARGIN) >= account.expires_at {
             if self.backing_off() {
                 return Ok(self.cached());
             }
             match self.refresh(&mut account).await? {
-                Refresh::Done => refreshed = true,
+                Refresh::Done => self.update_identity(&mut account).await?,
                 Refresh::SignedOut => return Ok(self.settle(AccountStatus::SignedOut)),
                 Refresh::Transient => return Ok(self.cached()),
             }
-        }
-        if refreshed {
-            self.update_identity(&mut account).await?;
         }
         Ok(self.settle(status_of(&account)))
     }

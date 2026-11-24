@@ -71,11 +71,6 @@ async fn rollback_dir(path: &Path, err: CoreError) -> CoreError {
     }
 }
 
-async fn remove_dir_all_bg(path: &Path) -> Result<()> {
-    let owned = path.to_path_buf();
-    blocking(move || std::fs::remove_dir_all(owned).map_err(CoreError::Io)).await
-}
-
 fn project_name(directory_name: Option<String>, source: &str, repo: &Path) -> String {
     directory_name
         .map(|d| d.trim().to_string())
@@ -581,7 +576,6 @@ impl ProjectService<'_> {
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn register_repo(
         &self,
         git: &Path,
@@ -660,10 +654,10 @@ impl ProjectService<'_> {
 
         match status {
             repos::RepoPathStatus::Missing => {
-                return Err(CoreError::PathNotADirectory { path: path.clone() });
+                return Err(CoreError::PathNotADirectory { path });
             }
             repos::RepoPathStatus::Bare => {
-                return Err(CoreError::BareRepo { path: path.clone() });
+                return Err(CoreError::BareRepo { path });
             }
             _ => {}
         }
@@ -681,7 +675,7 @@ impl ProjectService<'_> {
         };
         if existing.is_some_and(|r| !r.source.is_git()) {
             return Err(CoreError::ProjectKindConflict {
-                path: path.clone(),
+                path,
                 existing_kind: "local folder",
             });
         }
@@ -736,10 +730,10 @@ impl ProjectService<'_> {
         let dir = Path::new(&path);
         match repos::classify_repo_path(dir) {
             repos::RepoPathStatus::Missing => {
-                return Err(CoreError::PathNotADirectory { path: path.clone() });
+                return Err(CoreError::PathNotADirectory { path });
             }
             repos::RepoPathStatus::NonGit => {}
-            _ => return Err(CoreError::FolderIsGitRepo { path: path.clone() }),
+            _ => return Err(CoreError::FolderIsGitRepo { path }),
         }
 
         let dir = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
@@ -752,7 +746,7 @@ impl ProjectService<'_> {
         };
         if existing.is_some_and(|r| r.source.is_git()) {
             return Err(CoreError::ProjectKindConflict {
-                path: path.clone(),
+                path,
                 existing_kind: "repository",
             });
         }
@@ -865,7 +859,6 @@ impl ProjectService<'_> {
         Ok(self.find(&path).await.ok().flatten())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn publish_to_github(
         &self,
         progress: &Progress<'_>,
@@ -1239,7 +1232,10 @@ impl ProjectService<'_> {
         }
 
         if delete_files && repo.is_dir() {
-            if let Err(e) = remove_dir_all_bg(&repo).await {
+            let owned = repo.clone();
+            if let Err(e) =
+                blocking(move || std::fs::remove_dir_all(owned).map_err(CoreError::Io)).await
+            {
                 tracing::warn!("could not delete {}: {e}", repo.display());
             }
         }
@@ -1505,8 +1501,9 @@ impl ProjectService<'_> {
 
     pub async fn ai_status(&self) -> Result<AiStatus> {
         ensure_running(self.runtime)?;
-        let cwd = self.runtime.environment.home_dir.clone();
-        HyprCli::new(&self.runtime.binaries).ai_status(&cwd).await
+        HyprCli::new(&self.runtime.binaries)
+            .ai_status(&self.runtime.environment.home_dir)
+            .await
     }
 
     pub fn probe_default_thoughts(&self) -> ThoughtsProbe {

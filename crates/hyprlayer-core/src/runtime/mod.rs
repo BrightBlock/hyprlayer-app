@@ -710,7 +710,7 @@ impl HyprlayerRuntime {
             .shutdown(async move {
                 let start = std::time::Instant::now();
                 let tasks = std::mem::take(&mut *self.tasks.lock().await);
-                let (forced_tasks, _) = shutdown::stop_tasks(tasks).await;
+                let forced_tasks = shutdown::stop_tasks(tasks).await;
                 self.goal_runners.stop_all().await;
 
                 self.pty_agents.stop_app_servers();
@@ -929,8 +929,6 @@ impl HyprlayerRuntime {
         self.opencode.install_child_for_test(child).await;
     }
 
-    /// Test-only view of the workstreams a worktree watcher is open on, sorted.
-    /// Not part of the supported facade.
     #[doc(hidden)]
     pub async fn test_watched_workstreams(&self) -> Vec<String> {
         let watched = self.watchers.worktree_watch.lock().await;

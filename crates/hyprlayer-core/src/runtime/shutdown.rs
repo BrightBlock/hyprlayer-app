@@ -133,7 +133,7 @@ impl ShutdownCoordinator {
 /// Stops every tracked task within the overall deadline, aborting whatever is
 /// left once it's spent; the caller adds any forced-process count from
 /// registered child processes (sessions, terminals, …) on top of this.
-pub async fn stop_tasks(tasks: Vec<TrackedTask>) -> (usize, Duration) {
+pub async fn stop_tasks(tasks: Vec<TrackedTask>) -> usize {
     let start = Instant::now();
     let mut forced = 0usize;
     for task in tasks {
@@ -143,5 +143,5 @@ pub async fn stop_tasks(tasks: Vec<TrackedTask>) -> (usize, Duration) {
             forced += 1;
         }
     }
-    (forced, start.elapsed())
+    forced
 }

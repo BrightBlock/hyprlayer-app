@@ -399,9 +399,6 @@ impl PromptService<'_> {
         ensure_running(self.runtime)?;
         check_size(&decision.source)?;
         let text = decision.source;
-        // The client now holds the exact bytes it previewed, so this can no
-        // longer catch a concurrent edit (there is no shared file on disk
-        // between the two calls) — it's a corruption/round-trip check now.
         if sha256_hex(&text) != decision.expected_source_sha256 {
             return Err(CoreError::PromptsSourceChanged);
         }
@@ -417,8 +414,8 @@ impl PromptService<'_> {
             .iter()
             .map(|entry| conflict_for(&entry.name, &base.custom))
             .collect();
-        let mut builtin_bodies = base.builtin_bodies.clone();
-        let mut custom = base.custom.clone();
+        let mut builtin_bodies = base.builtin_bodies;
+        let mut custom = base.custom;
         let mut taken: BTreeSet<String> = decision
             .taken_chords
             .iter()

@@ -131,7 +131,6 @@ pub struct LaunchAgentRequest {
 /// The agent that asked for a PTY launch; the desktop's own launches have none.
 pub struct PtyLineage {
     pub parent: AgentCaller,
-    /// The new agent's depth.
     pub depth: u32,
     pub mode: PermissionMode,
 }

@@ -197,7 +197,7 @@ impl AttachmentService<'_> {
         ensure_running(self.runtime)?;
         let db = self.runtime.db.clone();
         let worktrees = blocking(move || db.list_worktree_paths()).await?;
-        blocking(move || read_attachment_bytes(&worktrees, &PathBuf::from(&path))).await
+        blocking(move || read_attachment_bytes(&worktrees, Path::new(&path))).await
     }
 }
 
@@ -252,10 +252,6 @@ mod tests {
         assert_eq!(bytes, b"some bytes");
     }
 
-    /// An `inplace` workstream's worktree is the repo itself, which never lives
-    /// under `worktree_root()`. The first cut of this guard tested against that
-    /// root and so refused every attachment belonging to one — write-only
-    /// against a remote host, which is the exact bug the read half exists to fix.
     #[test]
     fn read_attachment_bytes_accepts_an_inplace_worktree_outside_the_worktree_root() {
         let dir = tempfile::tempdir().unwrap();

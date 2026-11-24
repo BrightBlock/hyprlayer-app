@@ -2624,7 +2624,7 @@ fn branch_rename(item: &Workstream, title: &str) -> Option<BranchRename> {
 }
 
 /// What `gh` should look up: the attached number, else the branch the worktree is really on.
-pub(crate) fn pr_lookup_ref(item: &Workstream) -> String {
+fn pr_lookup_ref(item: &Workstream) -> String {
     moved_head(item).unwrap_or_else(|| item.pr_ref())
 }
 
