@@ -2070,7 +2070,10 @@ impl WorkstreamService<'_> {
             && item.app_owns_branch()
             // A PR found on a renamed or switched branch says nothing about the app's branch.
             && pr_ref.is_some_and(|r| r == item.pr_ref())
-            && pr.as_ref().is_some_and(|s| s.state == pr::PrState::Merged)
+            && pr.as_ref().is_some_and(|s| {
+                s.state == pr::PrState::Merged
+                    && crate::gitops::fully_merged(project_path, &item.branch, &s.head_ref_oid)
+            })
         {
             if let Err(e) = worktree::delete_remote_branch(
                 &git,

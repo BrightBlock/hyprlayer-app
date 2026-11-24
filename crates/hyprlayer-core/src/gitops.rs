@@ -369,6 +369,26 @@ pub(crate) fn remote_tip(dir: &Path, remote: &str, branch: &str) -> Option<Strin
     Some(oid.to_string())
 }
 
+/// Every local and pushed commit of `branch` is in the merged head `head_oid`.
+pub(crate) fn fully_merged(dir: &Path, branch: &str, head_oid: &str) -> bool {
+    let Ok(repo) = open_repo(dir) else {
+        return false;
+    };
+    let Some(head) = git2::Oid::from_str(head_oid)
+        .ok()
+        .filter(|h| has_object(&repo, *h))
+    else {
+        return false;
+    };
+    let pushed = repo
+        .refname_to_id(&format!("refs/remotes/origin/{branch}"))
+        .ok();
+    [branch_tip(&repo, branch), pushed]
+        .into_iter()
+        .flatten()
+        .all(|tip| tip == head || repo.graph_descendant_of(head, tip).unwrap_or(false))
+}
+
 pub(crate) fn has_work_past(
     dir: &Path,
     branch: &str,

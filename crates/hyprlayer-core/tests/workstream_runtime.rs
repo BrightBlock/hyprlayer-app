@@ -1243,3 +1243,54 @@ async fn an_all_digit_branch_is_not_read_as_a_pr_number() {
         created.item.pr_number
     );
 }
+
+#[tokio::test]
+async fn archive_keeps_a_pushed_branch_whose_commits_no_merged_pr_holds() {
+    let (dir, runtime, repo, _log) = runtime_with_gh(77, "MERGED", "teammate/other").await;
+    let root = dir.path().to_path_buf();
+    let ws = runtime.workstreams();
+    sh(&root, &["clone", "--bare", "project", "origin.git"]);
+    let bare = root.join("origin.git");
+    sh(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    sh(&repo, &["fetch", "origin"]);
+
+    let created = ws
+        .create(isolated_request(&repo, "Unmerged Work"))
+        .await
+        .unwrap();
+    let worktree = PathBuf::from(&created.item.worktree_path);
+    let branch = created.item.branch.clone();
+    std::fs::write(worktree.join("feature.rs"), "// not merged anywhere\n").unwrap();
+    sh(&worktree, &["add", "feature.rs"]);
+    sh(
+        &worktree,
+        &["commit", "-m", "work that only lives on this branch"],
+    );
+    sh(&worktree, &["push", "origin", &branch]);
+    sh(
+        &repo,
+        &[
+            "remote",
+            "add",
+            "upstream",
+            "https://ghe.invalid/acme/widgets.git",
+        ],
+    );
+    let before = git_out(&repo, &["ls-remote", "origin", &branch]);
+
+    let attached = ws.attach_pr(&created.item.id, 77).await;
+    let archived = ws
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await;
+    let after = git_out(&repo, &["ls-remote", "origin", &branch]);
+    runtime.shutdown().await;
+    assert!(
+        after.contains(&branch),
+        "attach_pr(77) -> {:?}; archive -> {:?}\nls-remote origin {branch} before archive: {before:?}\nls-remote origin {branch} after archive:  {after:?}",
+        attached.map(|pr| pr.map(|pr| (pr.number, pr.state))),
+        archived.map(|w| w.status)
+    );
+}
