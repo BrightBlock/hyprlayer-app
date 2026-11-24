@@ -54,7 +54,6 @@ export async function approvePlanUntilMet(
   from: ShellTab,
   spec: GoalSpec,
 ): Promise<Goal> {
-  await activatePlan(planPath);
   const { launch, permissionKey } = planBuildAgent(
     queryClient.getQueryData<Bootstrap>(["bootstrap"])?.settings,
     from,
@@ -66,6 +65,7 @@ export async function approvePlanUntilMet(
       spec,
     }),
   );
+  await activatePlan(planPath);
   invalidateGoals(goal.id);
   void queryClient.invalidateQueries({ queryKey: ["workstream-sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["active-sessions"] });

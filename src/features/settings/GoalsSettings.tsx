@@ -69,11 +69,8 @@ export function GoalsSettings({ settings }: { settings: AppSettings }) {
             <NumberField
               label="Active minutes"
               value={goals.maxActiveSecs / 60}
-              parse={(n) => {
-                const secs = Math.round(n * 60);
-                return secs >= 60 && secs <= 172_800 ? secs : null;
-              }}
-              onCommit={(maxActiveSecs) => patch({ maxActiveSecs })}
+              parse={(n) => (n >= 1 && n <= 2880 ? n : null)}
+              onCommit={(minutes) => patch({ maxActiveSecs: Math.round(minutes * 60) })}
             />
           }
         />

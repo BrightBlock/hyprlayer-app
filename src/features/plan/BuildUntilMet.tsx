@@ -135,7 +135,8 @@ export function BuildUntilMet({
 
   const phases = inScope(labels, scope, from, to, one);
   const derive = useDeriveGoal({ workstreamId, source: "plan", harness: launch.harness, planPath, phases });
-  const spec = derive.data ? withLimits(derive.data, edits) : null;
+  const limitsValid = Object.values(edits).every((v) => v === undefined || Number(v) > 0);
+  const spec = derive.data && limitsValid ? withLimits(derive.data, edits) : null;
   const commands = spec?.checks.flatMap((c) => (c.kind === "command" ? [c.command] : [])) ?? [];
   const manual = tracker.phases
     .filter((p) => phases.length === 0 || phases.includes(p.label))

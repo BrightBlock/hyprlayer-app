@@ -182,4 +182,28 @@ describe("BuildUntilMet", () => {
     expect(request?.manual).toEqual(["The widget renders at narrow widths"]);
     expect(b.deriveGoal).toHaveBeenCalledTimes(1);
   });
+
+  it("blocks approval while a limit is empty", async () => {
+    renderFooter();
+    fireEvent.change(await screen.findByLabelText("Iterations"), { target: { value: "" } });
+    const approve = screen.getByRole("button", { name: "Approve & build until met" }) as HTMLButtonElement;
+    expect(approve.disabled).toBe(true);
+    fireEvent.click(approve);
+    expect(b.startGoal).not.toHaveBeenCalled();
+  });
+
+  it("leaves the plan a draft when the goal fails to start", async () => {
+    b.startGoal.mockReturnValue(
+      Promise.resolve({
+        status: "error",
+        error: { code: "goal_invalid", message: "Iterations must be between 1 and 200.", remedy: null },
+      }),
+    );
+    const { onError } = renderFooter();
+    await screen.findByLabelText("Iterations");
+    fireEvent.click(await screen.findByRole("button", { name: "Approve & build until met" }));
+    await waitFor(() => expect(onError).toHaveBeenCalled());
+    expect(b.startGoal).toHaveBeenCalled();
+    expect(b.patchDocFrontmatter).not.toHaveBeenCalled();
+  });
 });
