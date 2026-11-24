@@ -77,7 +77,7 @@ describe("PathField", () => {
       data: listing("/srv/work", "/srv", ["a.txt"]),
     });
     fireEvent.click(screen.getByRole("button", { name: "Browse" }));
-    // The listed path now lives in the picker's own path input, not a label.
+    // The listed path lives in the picker's own path input, not a label.
     await waitFor(() =>
       expect(pathInput().value).toBe("/srv/work/"),
     );
@@ -151,9 +151,7 @@ describe("PathField", () => {
   });
 
   it("walks up with the server's own parent, and stops at the top", async () => {
-    // `DirListing.parent` was fetched on every listing and read by nothing:
-    // descending was a click while ascending was a backspaced path. The
-    // server supplies the parent, so no separator is guessed client-side.
+    // The server supplies the parent, so no separator is guessed client-side.
     setup(NEXUS);
     m.browseDirectory.mockResolvedValue({ status: "ok", data: listing("/home/jt/projects", "/home/jt", ["app"]) });
     fireEvent.click(screen.getByRole("button", { name: "Browse" }));

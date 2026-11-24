@@ -206,9 +206,7 @@ function ServerPicker({
     >
       <div className="mb-2 flex items-center gap-2">
         {/* Descending is a click, so ascending should be too. `parent` is the
-            server's own answer, so no separator is guessed here — the plan
-            specified this control and the first cut shipped without it,
-            leaving the only way out of a directory a backspaced path. */}
+            server's own answer, so no separator is guessed here. */}
         <Button
           type="button"
           className="px-2 py-1 text-ui"

@@ -1,21 +1,5 @@
 import type { CSSProperties } from "react";
 
-export function HyprlayerLogo({ height = 28 }: { height?: number }) {
-  return (
-    <span className="relative inline-flex select-none items-center" aria-label="Hyprlayer">
-      <span className="absolute right-full mr-2.5 flex items-center">
-        <HyprlayerMark size={height} />
-      </span>
-      <span
-        className="font-semibold tracking-tight text-ink"
-        style={{ fontSize: height * 0.62, lineHeight: 1 }}
-      >
-        Hyprlayer
-      </span>
-    </span>
-  );
-}
-
 export function HyprlayerMark({
   size = 28,
   animated = false,

@@ -919,7 +919,7 @@ export function ProjectPage() {
   const addAttachmentsToShell = (shellId: number, atts: Attachment[]) => {
     if (atts.length === 0) return;
     modifyShell(shellId, (s) => {
-      const existing = s.attachments ?? [];
+      const existing = s.attachments;
       const have = new Set(existing.map((a) => a.path));
       const added = atts.filter((a) => !have.has(a.path));
       return added.length ? { ...s, attachments: [...existing, ...added] } : s;
@@ -932,7 +932,7 @@ export function ProjectPage() {
   const removeAttachmentFromShell = (shellId: number, path: string) =>
     modifyShell(shellId, (s) => ({
       ...s,
-      attachments: (s.attachments ?? []).filter((a) => a.path !== path),
+      attachments: s.attachments.filter((a) => a.path !== path),
     }));
   const clearShellAttachments = (shellId: number) => patchShell(shellId, { attachments: [] });
   const addFilesToShell = async (shellId: number, imagesOnly: boolean) => {
@@ -952,7 +952,7 @@ export function ProjectPage() {
     modifyShell(shellId, (s) => {
       const dismissed = s.dismissedSuggestions ?? [];
       const manual = s.docs.filter((d) => !d.suggested);
-      const staged = (s.attachments ?? []).some((a) => a.path === path);
+      const staged = s.attachments.some((a) => a.path === path);
       const alreadyManual = path != null && (staged || manual.some((d) => d.path === path));
       const keepSuggested =
         path && !alreadyManual && !dismissed.includes(path)

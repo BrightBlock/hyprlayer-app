@@ -5,12 +5,11 @@ import { cx } from "./ui";
 export const SETTINGS_CARD_TITLE = "text-title text-ink";
 export const SETTINGS_CARD_DESCRIPTION = "text-ui leading-prose text-ink-dim";
 
-/** SettingsCard's title, for settings cards laid out by hand. */
 export function SettingsCardTitle({ className, ...rest }: HTMLAttributes<HTMLHeadingElement>) {
   return <h2 className={cx("mb-3", SETTINGS_CARD_TITLE, className)} {...rest} />;
 }
 
-/** v4 settings card. `flush` hands the body to rows that bring their own padding and rules. */
+/** `flush` hands the body to rows that bring their own padding and rules. */
 export function SettingsCard({
   title,
   description,

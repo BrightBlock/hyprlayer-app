@@ -49,7 +49,7 @@ const onboardingRoute = createRoute({
   component: Onboarding,
 });
 
-export type SettingsSearch = {
+type SettingsSearch = {
   section?: string;
   project?: string;
 };
@@ -73,7 +73,7 @@ const archiveRoute = createRoute({
   },
 });
 
-export type PromptsSearch = {
+type PromptsSearch = {
   prompt?: string;
 };
 
@@ -89,7 +89,7 @@ const promptsRoute = createRoute({
   },
 });
 
-export type AgentsSearch = {
+type AgentsSearch = {
   agent?: string;
   tab?: string;
   section?: string;
@@ -164,7 +164,7 @@ const libraryRoute = createRoute({
   }),
 });
 
-export type ProjectSearch = {
+type ProjectSearch = {
   item?: string;
   create?: boolean;
   stage?: LaunchStage;

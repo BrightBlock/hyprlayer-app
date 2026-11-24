@@ -14,9 +14,9 @@ import { PaneFrame } from "./paneFrame";
 import { RepoAvatar } from "./RepoAvatar";
 import { Badge, cx, Popover } from "./ui";
 
-export const WORKSHOP_NAV_WIDTH = 220;
+const WORKSHOP_NAV_WIDTH = 220;
 
-export type WorkshopNavSection = {
+type WorkshopNavSection = {
   key: string;
   label: string;
   icon: IconName;
@@ -123,7 +123,7 @@ export function WorkshopNav({
   );
 }
 
-export function NavSectionRow({
+function NavSectionRow({
   icon,
   label,
   count,
@@ -208,7 +208,7 @@ export function NavGroupLabel({ children, trailing }: { children: ReactNode; tra
   );
 }
 
-export function WorkshopScopePicker({
+function WorkshopScopePicker({
   projects,
   value,
   onChange,

@@ -953,7 +953,7 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
 // is a left `::before` bar, not a background fill — see ADR-0006.
 export const RAIL_ICON_BASE =
   "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
-export const RAIL_ACTIVE_BAR =
+const RAIL_ACTIVE_BAR =
   "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
   "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";
 export const railNavClass = (active: boolean): string =>
@@ -1241,9 +1241,9 @@ export function MenuSeparator() {
   return <div className="my-1 h-px bg-edge" />;
 }
 
-export type RowTier = "compact" | "standard";
+type RowTier = "compact" | "standard";
 
-export type RowSelection = "none" | "tint" | "spine";
+type RowSelection = "none" | "tint" | "spine";
 
 const ROW_TIER: Record<RowTier, string> = {
   compact: "h-7 rounded-md",
