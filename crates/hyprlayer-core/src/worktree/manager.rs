@@ -518,12 +518,10 @@ impl WorktreeManager {
         cleanup: BranchCleanup,
     ) -> Result<()> {
         let overlay = self.child_env().await;
-        // Each step is best effort; the log is the only record of what was left.
         if archive.exists() {
-            if let Err(e) = std::fs::remove_dir_all(archive) {
-                tracing::warn!("purge left {}: {e}", archive.display());
-            }
+            std::fs::remove_dir_all(archive)?;
         }
+        // Each step after the archive is best effort; the log is the only record of what was left.
         if let Err(e) = git_in(git, project_repo, &["worktree", "prune"], &overlay)
             .run()
             .await

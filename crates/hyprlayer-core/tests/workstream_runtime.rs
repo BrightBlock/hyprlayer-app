@@ -1214,6 +1214,73 @@ async fn restoring_an_in_place_workstream_refuses_a_second_in_place_row() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn purge_keeps_the_row_when_the_archive_cannot_be_deleted() {
+    use std::os::unix::fs::PermissionsExt;
+    let (f, repo) = fixture(Some(0)).await;
+    let ws = f.runtime.workstreams();
+    let created = ws.create(isolated_request(&repo, "Stuck")).await.unwrap();
+    let locked = Path::new(&created.item.worktree_path).join("docker-output");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::write(locked.join("artifact.bin"), "built by a container\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    ws.archive(ArchiveWorkstreamRequest {
+        id: created.item.id.clone(),
+        skip_scripts: true,
+    })
+    .await
+    .unwrap();
+    let archive_path = archive_dir_for(&repo, &created.item.slug);
+    let purged = ws
+        .purge(PurgeWorkstreamRequest {
+            id: created.item.id.clone(),
+        })
+        .await;
+    let row = ws
+        .list_all()
+        .await
+        .unwrap()
+        .into_iter()
+        .chain(ws.list_archived().await.unwrap())
+        .any(|w| w.id == created.item.id);
+    let left: Vec<String> = walk(&archive_path);
+    let worktrees = git_out(&repo, &["worktree", "list"]);
+    let branch_left = branch_exists(&repo, &created.item.branch);
+    let _ = std::fs::set_permissions(
+        archive_path.join("docker-output"),
+        std::fs::Permissions::from_mode(0o755),
+    );
+    f.runtime.shutdown().await;
+    assert!(
+        !archive_path.exists() || (purged.is_err() && row),
+        "purge -> {purged:?}; row still in the database: {row}; branch {} still exists: {branch_left}\n\
+         left on disk under {}:\n{left:#?}\ngit worktree list:\n{worktrees}",
+        created.item.branch,
+        archive_path.display()
+    );
+}
+
+fn walk(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        out.push(path.strip_prefix(dir).unwrap().display().to_string());
+        if path.is_dir() && !path.is_symlink() {
+            out.extend(
+                walk(&path)
+                    .into_iter()
+                    .map(|p| format!("{}/{p}", entry.file_name().to_string_lossy())),
+            );
+        }
+    }
+    out
+}
+
 #[tokio::test]
 async fn archive_keeps_a_worktree_folder_that_lost_its_dot_git() {
     let (f, repo) = fixture(Some(0)).await;
