@@ -940,6 +940,26 @@ impl AgentControlService<'_> {
             .await
     }
 
+    /// Renames a running PTY agent the caller spawned. An exited one is refused: its tab is gone.
+    pub async fn set_pty_agent_title(
+        &self,
+        identity: &AgentIdentity,
+        terminal_id: &str,
+        title: &str,
+    ) -> Result<()> {
+        self.require_full(identity).await?;
+        self.pty_target(identity, terminal_id).await?;
+        self.check_descendant(identity, terminal_id, false).await?;
+        let title = title.trim();
+        if title.is_empty() {
+            return Err(denied("a title cannot be blank"));
+        }
+        self.runtime
+            .pty_agents
+            .set_title(terminal_id, title.to_string());
+        Ok(())
+    }
+
     /// Esc, the TUI's interrupt, into a PTY agent the caller spawned; never a human turn.
     pub async fn interrupt_pty_agent(
         &self,

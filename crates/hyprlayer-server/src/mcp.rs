@@ -358,12 +358,13 @@ const TOOLS: [Tool; 38] = [
     },
     Tool {
         name: "set_agent_title",
-        description: "Renames this agent's own session or one it spawned.",
+        description: "Renames this agent's own session, or a session or running PTY agent it spawned.",
         read_only: false,
         schema: || {
             json!({ "type": "object", "required": ["title"], "properties": {
                 "title": { "type": "string" },
-                "session_id": { "type": "string", "description": "Defaults to this agent's own session." },
+                "session_id": { "type": "string", "description": "A composer session; with neither id, this agent's own session." },
+                "terminal_id": { "type": "string", "description": "A running PTY agent; or give session_id." },
             } })
         },
     },
@@ -601,6 +602,20 @@ fn target(args: &Value) -> Result<Target<'_>, WireError> {
     }
 }
 
+/// A tool that ignored an agent id it doesn't take would act on its default target, often the caller.
+fn refuse_undeclared_target(name: &str, args: &Value) -> Result<(), WireError> {
+    let Some(tool) = tool(name) else {
+        return Ok(());
+    };
+    let schema = (tool.schema)();
+    for key in ["session_id", "terminal_id"] {
+        if args.get(key).is_some() && schema["properties"].get(key).is_none() {
+            return Err(bad_args(format!("`{name}` takes no `{key}`")));
+        }
+    }
+    Ok(())
+}
+
 fn positive(args: &Value, key: &str) -> Option<u64> {
     let value = args.get(key)?;
     value
@@ -672,6 +687,7 @@ fn encode<T: serde::Serialize>(value: T) -> Result<Value, WireError> {
 
 /// Runs one tool for the announced agent; the server enforces scope, this only shapes the call.
 pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result<Value, WireError> {
+    refuse_undeclared_target(name, args)?;
     let client = &agent.client;
     let me = &agent.whoami;
     let workstream = || {
@@ -920,16 +936,21 @@ pub(crate) async fn call_tool(agent: &Agent, name: &str, args: &Value) -> Result
             Ok(json!("answered"))
         }
         "set_agent_title" => {
-            let session_id = match (arg(args, "session_id"), &me.caller) {
-                (Some(id), _) => id.to_string(),
-                (None, AgentCaller::Session { session_id }) => session_id.clone(),
-                (None, AgentCaller::Terminal { .. }) => {
-                    return Err(bad_args("`session_id` is required from a terminal agent"))
+            let title = required(args, "title")?.to_string();
+            let named = arg(args, "session_id").is_some() || arg(args, "terminal_id").is_some();
+            let target = match (named, &me.caller) {
+                (true, _) => target(args)?,
+                (false, AgentCaller::Session { session_id }) => Target::Session(session_id),
+                (false, AgentCaller::Terminal { .. }) => {
+                    return Err(bad_args(
+                        "a terminal agent names `session_id` or `terminal_id`",
+                    ))
                 }
             };
-            client
-                .set_session_title(session_id, Some(required(args, "title")?.into()))
-                .await?;
+            match target {
+                Target::Session(id) => client.set_session_title(id.into(), Some(title)).await?,
+                Target::Terminal(id) => client.set_pty_agent_title(id.into(), title).await?,
+            }
             Ok(json!("renamed"))
         }
         "queue_add" => encode(
@@ -1281,5 +1302,16 @@ mod tests {
             "a"
         );
         assert!(message_text(&json!({ "session_id": "s" })).is_err());
+    }
+
+    #[test]
+    fn an_agent_id_a_tool_does_not_take_is_refused() {
+        let terminal = json!({ "terminal_id": "t", "title": "x" });
+        assert!(refuse_undeclared_target("set_agent_title", &terminal).is_ok());
+        assert!(refuse_undeclared_target("start_goal", &terminal).is_err());
+        assert!(refuse_undeclared_target("archive_agent", &terminal).is_err());
+        let session = json!({ "session_id": "s" });
+        assert!(refuse_undeclared_target("read_terminal", &session).is_err());
+        assert!(refuse_undeclared_target("message_agent", &session).is_ok());
     }
 }

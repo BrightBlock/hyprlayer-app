@@ -448,10 +448,55 @@ async fn agent_breadth() {
         .await,
     );
     let typed_after = lines(&launch_log(&sandbox, &plain_term).join("stdin.log")).len();
+    let renamed = mcp
+        .call(
+            "set_agent_title",
+            json!({ "terminal_id": plain_term, "title": "Renamed PTY" }),
+        )
+        .await;
+    let renamed_title = pty_agent(&mut j, &c, &ws, &plain_term).await["title"].clone();
     let killed = mcp
         .call("kill_agent", json!({ "terminal_id": plain_term }))
         .await;
     let gone = gone_from_list(&c, &ws, &plain_term).await;
+    let gone_rename = refusal(
+        &mcp.call(
+            "set_agent_title",
+            json!({ "terminal_id": plain_term, "title": "Gone PTY" }),
+        )
+        .await,
+    );
+    let lead_after_gone = session_row(&mut j, &c, &ws, &lead).await["title"].clone();
+    let unknown_rename = refusal(
+        &mcp.call(
+            "set_agent_title",
+            json!({ "session_id": "no-such-session", "title": "Nobody" }),
+        )
+        .await,
+    );
+    let goal_on_terminal = refusal(
+        &mcp.call(
+            "start_goal",
+            json!({
+                "terminal_id": plain_term,
+                "condition": "never",
+                "work_prompt": "never",
+                "checks": [{ "kind": "evaluator" }],
+            }),
+        )
+        .await,
+    );
+    let self_named = mcp
+        .call(
+            "set_agent_title",
+            json!({ "session_id": lead, "title": "Lead (self)" }),
+        )
+        .await;
+    let self_title = session_row(&mut j, &c, &ws, &lead).await["title"].clone();
+    let defaulted = mcp
+        .call("set_agent_title", json!({ "title": "Lead" }))
+        .await;
+    let default_title = session_row(&mut j, &c, &ws, &lead).await["title"].clone();
     j.guard(
         "an agent-spawned unhooked PTY is listed unhooked, readable, and its wait is refused",
         listed["hooked"] == json!(false)
@@ -471,6 +516,36 @@ async fn agent_breadth() {
         "the caller can kill the PTY it spawned",
         !tool_failed(&killed) && gone,
         json!({ "kill": tool_text(&killed), "unlisted": gone }),
+    );
+    j.guard(
+        "set_agent_title renames the running PTY it names",
+        !tool_failed(&renamed) && renamed_title == json!("Renamed PTY"),
+        json!({ "rename": tool_text(&renamed), "title": renamed_title }),
+    );
+    j.guard(
+        "renaming a gone PTY is refused and leaves the caller's own title alone",
+        gone_rename.starts_with("agent_control_denied: ")
+            && gone_rename.contains("not a running PTY agent")
+            && lead_after_gone == json!("Lead"),
+        json!({ "refusal": gone_rename, "leadTitle": lead_after_gone }),
+    );
+    j.guard(
+        "renaming a session that does not exist is refused",
+        unknown_rename != "ok",
+        json!({ "refusal": unknown_rename }),
+    );
+    j.guard(
+        "a tool given an agent id it does not take refuses it rather than acting on the caller",
+        goal_on_terminal == "invalid_arguments: `start_goal` takes no `terminal_id`",
+        json!({ "refusal": goal_on_terminal }),
+    );
+    j.guard(
+        "set_agent_title renames the caller when it names itself, and by default",
+        !tool_failed(&self_named)
+            && self_title == json!("Lead (self)")
+            && !tool_failed(&defaulted)
+            && default_title == json!("Lead"),
+        json!({ "explicit": self_title, "default": default_title }),
     );
 
     j.step("a non-reply terminal_write resets a PTY's hops");

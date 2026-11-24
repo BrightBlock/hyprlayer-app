@@ -180,6 +180,9 @@ pub(crate) fn access(request: &Request) -> Access {
             Access::Full(Scope::Terminal(terminal_id.clone()))
         }
         Request::KillPtyAgent { terminal_id } => Access::Full(Scope::Terminal(terminal_id.clone())),
+        Request::SetPtyAgentTitle { terminal_id, .. } => {
+            Access::Full(Scope::Terminal(terminal_id.clone()))
+        }
         Request::ArchiveWorkstreamForAgent { workstream_id, .. } => {
             Access::Full(Scope::Workstream(workstream_id.clone()))
         }

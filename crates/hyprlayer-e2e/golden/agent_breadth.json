@@ -196,6 +196,44 @@
           },
           "guard": "the caller can kill the PTY it spawned",
           "ok": true
+        },
+        {
+          "evidence": {
+            "rename": "\"renamed\"",
+            "title": "Renamed PTY"
+          },
+          "guard": "set_agent_title renames the running PTY it names",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "leadTitle": "Lead",
+            "refusal": "agent_control_denied: agent control refused this: that is not a running PTY agent"
+          },
+          "guard": "renaming a gone PTY is refused and leaves the caller's own title alone",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "session_not_found: No live session with id no-such-session"
+          },
+          "guard": "renaming a session that does not exist is refused",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "refusal": "invalid_arguments: `start_goal` takes no `terminal_id`"
+          },
+          "guard": "a tool given an agent id it does not take refuses it rather than acting on the caller",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "default": "Lead",
+            "explicit": "Lead (self)"
+          },
+          "guard": "set_agent_title renames the caller when it names itself, and by default",
+          "ok": true
         }
       ],
       "step": "unhooked agents cannot be waited on"

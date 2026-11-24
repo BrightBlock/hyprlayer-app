@@ -2624,6 +2624,19 @@ impl Dispatch for Server {
             .wire()
     }
 
+    async fn set_pty_agent_title(
+        &self,
+        terminal_id: String,
+        title: String,
+    ) -> Result<(), WireError> {
+        let identity = self.agent_identity("set_pty_agent_title")?;
+        self.runtime
+            .agent_control()
+            .set_pty_agent_title(&identity, &terminal_id, &title)
+            .await
+            .wire()
+    }
+
     async fn archive_workstream_for_agent(
         &self,
         workstream_id: String,
