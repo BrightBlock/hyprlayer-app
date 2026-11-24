@@ -676,6 +676,22 @@
       "guards": [
         {
           "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: an agent cannot archive its own workstream",
+            "statuses": [
+              "Active",
+              "Active"
+            ]
+          },
+          "guard": "archiving the spawner's workstream with its children is refused, and both stay active",
+          "ok": true
+        }
+      ],
+      "step": "an agent cannot archive its own workstream as a child of its spawner's"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

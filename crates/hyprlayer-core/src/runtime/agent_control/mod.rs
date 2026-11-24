@@ -456,6 +456,9 @@ impl AgentControlService<'_> {
         }
         let workstreams = self.runtime.workstreams();
         let children = workstreams.active_children(id).await?;
+        if include_children && children.iter().any(|c| c.id == identity.workstream_id) {
+            return Err(denied("an agent cannot archive its own workstream"));
+        }
         let archive = |id: &str| {
             workstreams.archive(super::workstreams::ArchiveWorkstreamRequest {
                 id: id.to_string(),

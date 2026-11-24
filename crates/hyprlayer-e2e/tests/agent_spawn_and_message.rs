@@ -1322,6 +1322,52 @@ async fn agent_spawn_and_message() {
         json!({ "firstGone": first_gone, "refusal": refused.starts_with("agent_limit_reached"), "firstLive": first_live }),
     );
 
+    j.step("an agent cannot archive its own workstream as a child of its spawner's");
+    let made = parsed(
+        &limited_mcp
+            .call("create_workstream", json!({ "title": "Inner" }))
+            .await,
+    );
+    let inner = text(&made, "/id");
+    j.alias(&inner, "$INNER_WS");
+    let inner_agent = text(
+        &parsed(
+            &limited_mcp
+                .call(
+                    "spawn_agent",
+                    json!({ "prompt": "E2E_Y", "title": "Y", "workstream_id": inner }),
+                )
+                .await,
+        ),
+        "/sessionId",
+    );
+    j.alias(&inner_agent, "$INNER_AGENT");
+    wait_idle(&mut limited_mcp, &inner_agent).await;
+    let mut inner_mcp = driver(&mut j, &sandbox, &inner_agent, "$INNER_TOKEN").await;
+    let via_spawner = refusal(
+        &inner_mcp
+            .call(
+                "archive_workstream",
+                json!({ "workstream_id": ws, "include_children": true }),
+            )
+            .await,
+    );
+    let statuses: Vec<String> = c
+        .list_workstreams(project.clone(), true)
+        .await
+        .expect("list_workstreams")
+        .iter()
+        .filter(|w| w.item.id == inner || w.item.id == ws)
+        .map(|w| format!("{:?}", w.item.status))
+        .collect();
+    j.guard(
+        "archiving the spawner's workstream with its children is refused, and both stay active",
+        via_spawner.starts_with("agent_control_denied") && statuses == ["Active", "Active"],
+        json!({ "refusal": via_spawner, "statuses": statuses }),
+    );
+    drop(inner_mcp);
+    drop(limited_mcp);
+
     j.step("shutdown");
     let stopped = server.shutdown(&c).await;
     j.guard(
