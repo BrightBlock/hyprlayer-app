@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { PromptLibrary } from "./PromptLibrary";
 import type { WorkshopChrome } from "@/components/workshop";
-import type { AppSettings } from "@/lib/bindings";
+import type { AppSettings, CustomPrompt } from "@/lib/bindings";
 import { useToast } from "@/lib/toast";
 
 const chrome: WorkshopChrome = {
@@ -315,5 +315,58 @@ describe("PromptLibrary", () => {
     await vi.waitFor(() => expect(useToast.getState().title).toBe("Import failed"));
     expect(useToast.getState()).toMatchObject({ message: "That file is too large.", tone: "bad" });
     expect(ipc.previewPromptImport).not.toHaveBeenCalled();
+  });
+});
+
+const prompt = (id: string, name: string): CustomPrompt => ({
+  id,
+  name,
+  body: "b",
+  overrides: {},
+  chord: null,
+  pinned: false,
+});
+
+describe("PromptLibrary with another client's change", () => {
+  it("shows a prompt another client added", () => {
+    const { rerender } = render(<Harness settings={{ prompts: { custom: [prompt("p1", "Mine")] } }} />);
+    rerender(<Harness settings={{ prompts: { custom: [prompt("p1", "Mine"), prompt("p2", "Theirs")] } }} />);
+
+    expect(screen.queryByText("Theirs")).not.toBeNull();
+  });
+
+  it("keeps the other client's prompt on the next local edit", () => {
+    const { rerender } = render(<Harness settings={{ prompts: { custom: [prompt("p1", "Mine")] } }} />);
+    rerender(<Harness settings={{ prompts: { custom: [prompt("p1", "Mine"), prompt("p2", "Theirs")] } }} />);
+    fireEvent.click(screen.getByText("Mine"));
+    fireEvent.click(screen.getByLabelText("Pin to composer"));
+
+    const saved = mutate.mock.calls[mutate.mock.calls.length - 1][0] as AppSettings;
+    expect(saved.prompts?.custom?.map((p) => p.id)).toEqual(["p1", "p2"]);
+  });
+});
+
+describe("PromptLibrary import confirm", () => {
+  it("applies once when pressed twice", async () => {
+    ipc.readPromptImport.mockResolvedValue({ status: "ok", data: PROMPTS_JSON });
+    ipc.previewPromptImport.mockResolvedValue({
+      status: "ok",
+      data: {
+        sourceSha256: "abc",
+        sourceVersion: 1,
+        source: null,
+        prompts: [{ key: "0", name: "Imported", body: "b", chord: null, chordTaken: false, unknownProjects: [] }],
+        conflicts: [],
+      },
+    });
+    ipc.applyPromptImport.mockReturnValue(new Promise(() => {}));
+    render(<Harness settings={EMPTY} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Import prompts" }));
+    const confirm = await screen.findByRole("button", { name: "Import 1 prompt" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(ipc.applyPromptImport).toHaveBeenCalledTimes(1);
   });
 });

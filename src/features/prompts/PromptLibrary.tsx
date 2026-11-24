@@ -152,21 +152,39 @@ export function PromptLibrary({
   const promptsRef = useRef(prompts);
   promptsRef.current = prompts;
   const timer = useRef<number | null>(null);
+  const sentRef = useRef<string | null>(null);
 
+  const send = (extra?: Partial<AppSettings>) => {
+    const out = sanitizedForSave(promptsRef.current);
+    sentRef.current = JSON.stringify(out);
+    save.mutate({ ...settingsRef.current, prompts: out, ...extra });
+  };
   const persistNow = (extra?: Partial<AppSettings>) => {
     if (timer.current !== null) {
       window.clearTimeout(timer.current);
       timer.current = null;
     }
-    save.mutate({ ...settingsRef.current, prompts: sanitizedForSave(promptsRef.current), ...extra });
+    send(extra);
   };
   const persistSoon = () => {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       timer.current = null;
-      save.mutate({ ...settingsRef.current, prompts: sanitizedForSave(promptsRef.current) });
+      send();
     }, SAVE_DEBOUNCE_MS);
   };
+
+  // Another client's edit replaces the copy here, unless an edit of ours is still waiting to save.
+  useEffect(() => {
+    const incoming = settings.prompts;
+    if (!incoming || timer.current !== null || JSON.stringify(incoming) === sentRef.current) return;
+    const next = {
+      builtinBodies: { ...(incoming.builtinBodies ?? {}) },
+      custom: (incoming.custom ?? []).map((p) => ({ ...p })),
+    };
+    promptsRef.current = next;
+    setPrompts(next);
+  }, [settings.prompts]);
   const flushPending = () => {
     if (timer.current !== null) persistNow();
   };
@@ -174,7 +192,7 @@ export function PromptLibrary({
     () => () => {
       if (timer.current !== null) {
         window.clearTimeout(timer.current);
-        save.mutate({ ...settingsRef.current, prompts: sanitizedForSave(promptsRef.current) });
+        send();
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -507,6 +525,7 @@ export function PromptLibrary({
   const runImport = async (decisions: Record<string, ImportDecision>) => {
     if (!importFile) return;
     const from = importFile.fileName;
+    setImportFile(null);
     const res = await commands.applyPromptImport({
       source: importFile.contents,
       expectedSourceSha256: importFile.sourceSha256,
@@ -514,7 +533,6 @@ export function PromptLibrary({
       conflictActions: conflictActions(importFile.rows, decisions),
       takenChords,
     });
-    setImportFile(null);
     if (res.status === "error") {
       useToast.getState().show("Import failed", res.error.message || "Couldn't import that file.", {
         tone: "bad",
