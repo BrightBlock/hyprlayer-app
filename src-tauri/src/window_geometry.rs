@@ -118,7 +118,7 @@ fn try_restore(app: &AppHandle) -> tauri::Result<()> {
         height: h,
     })?;
 
-    if saved.map(|s| s.maximized).unwrap_or(false) {
+    if saved.is_some_and(|s| s.maximized) {
         win.maximize()?;
     }
     Ok(())

@@ -562,8 +562,6 @@ pub fn run() {
             // VS Code Remote-SSH's rule (plan Phase 1 §5): open the window
             // regardless of whether the connection succeeded, `runtime_in_use`
             // included.
-            // `app.manage(AppState::new(..))` moves above `runtime_events::spawn`
-            // (plan Phase 1 §5): the spawned task now needs `handle.state::<AppState>()`.
             let mut client = match outcome {
                 supervisor::Outcome::Connected { client, outdated } => {
                     app.manage(AppState::new(client.clone(), target.clone(), outdated));
@@ -610,7 +608,7 @@ pub fn run() {
                 }
             }
 
-            if let Some(live) = client.clone() {
+            if let Some(live) = client {
                 tauri::async_runtime::block_on(attach_client(app.handle(), live, &target));
             }
 

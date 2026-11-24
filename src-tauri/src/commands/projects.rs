@@ -254,8 +254,6 @@ pub async fn inspect_repo_path(
         .map_err(AppError::from)
 }
 
-// The server-side read half of `PathField`'s remote picker; every path command
-// here now takes its path from the machine the path lives on.
 #[tauri::command]
 #[specta::specta]
 pub async fn browse_directory(

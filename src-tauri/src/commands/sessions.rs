@@ -98,10 +98,6 @@ impl From<SessionFrame> for SessionStreamItemDto {
     }
 }
 
-/// Pumps one server-side session stream into the Tauri channel the frontend
-/// holds. Lag recovery now happens inside the server's own stream forwarder
-/// (`hyprlayer-server::streams::run_stream`), so this is just `pump`'s shape
-/// with an early return on the terminal `Exited` event.
 fn spawn_live_pump(
     state: &AppState,
     client: Arc<RpcClient>,

@@ -391,11 +391,6 @@ pub async fn connect_remote(host: &Host, app_data_dir: &Path, ssh: &Ssh) -> Outc
     }
 }
 
-/// Spawns the relay at the version-keyed path this client installed
-/// (`provision::relay_command`) and performs the RPC handshake. The caller
-/// owns the returned child's lifetime — `connect_remote` detaches it to live
-/// as long as the connection; `probe_remote` kills it the moment the probe is
-/// done, since nothing here should outlive a test press.
 /// The `ssh … relay` child and what it has written to stderr, which is where
 /// both ssh and the remote relay say why a connection ended.
 struct Relay {
@@ -428,6 +423,11 @@ fn host_name(host: &Host) -> String {
     Target::Remote(host.clone()).name()
 }
 
+/// Spawns the relay at the version-keyed path this client installed
+/// (`provision::relay_command`) and performs the RPC handshake. The caller
+/// owns the returned child's lifetime — `connect_remote` detaches it to live
+/// as long as the connection; `probe_remote` kills it the moment the probe is
+/// done, since nothing here should outlive a test press.
 /// `allow_too_old` keeps a server below `MIN_SERVER_VERSION`, for reading what runs on it.
 async fn ssh_relay_connect(
     host: &Host,
@@ -950,11 +950,6 @@ fn spawn_detached(
     Ok((child, written))
 }
 
-/// Drains a spawned child's stderr into a shared buffer, both to recognise a
-/// `runtime_in_use` exit and so a *surviving* server never blocks writing to
-/// a full, unread pipe once this task is its only reader. The buffer is only
-/// filled at EOF, so a caller that saw the child exit must await the handle
-/// before reading it.
 /// Every other spawn in the tree sets this (`core::process`, `claude::probe`,
 /// `claude::driver`); the shell's own `ssh`/`curl` calls did not, and on Windows
 /// a GUI process spawning a console program without it flashes a console window
@@ -970,6 +965,11 @@ pub(crate) fn hide_console(cmd: &mut tokio::process::Command) {
     let _ = cmd;
 }
 
+/// Drains a spawned child's stderr into a shared buffer, both to recognise a
+/// `runtime_in_use` exit and so a *surviving* server never blocks writing to
+/// a full, unread pipe once this task is its only reader. The buffer is only
+/// filled at EOF, so a caller that saw the child exit must await the handle
+/// before reading it.
 fn drain_stderr(mut stderr: tokio::process::ChildStderr) -> (Arc<Mutex<String>>, JoinHandle<()>) {
     let tail = Arc::new(Mutex::new(String::new()));
     let sink = tail.clone();

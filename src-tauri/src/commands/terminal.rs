@@ -170,8 +170,10 @@ pub async fn terminal_take_size(state: State<'_, AppState>, terminal_id: String)
         return Ok(());
     }
     // server-compat: gated on size_owner
-    let taken = client.terminal_take_size(terminal_id).await;
-    taken.map_err(AppError::from)
+    client
+        .terminal_take_size(terminal_id)
+        .await
+        .map_err(AppError::from)
 }
 
 #[tauri::command]
