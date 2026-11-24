@@ -663,7 +663,7 @@ where
                 "conn {conn}: refused a client speaking protocol {protocol_version}; \
                  this server speaks {PROTOCOL_VERSION}"
             );
-            writer.write_control(&Control::Refused { error }).await?;
+            let refused = writer.write_control(&Control::Refused { error }).await;
             // A version mismatch normally ends the connection here. The one
             // exception (Phase 4 §5): a client strictly newer than us is
             // mid-upgrade and gets one more read, to ask us to step aside —
@@ -678,7 +678,7 @@ where
                     stop.notify_one();
                 }
             }
-            Ok(None)
+            refused.map(|()| None)
         }
         Some(other) => {
             tracing::warn!("conn {conn}: expected hello, got {}", label(&other));

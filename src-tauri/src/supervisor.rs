@@ -1174,9 +1174,11 @@ fn newest_mtime(dir: &Path) -> Option<SystemTime> {
     newest
 }
 
-/// Sends our hello, takes the peer's, then `Shutdown` — the one frame a
-/// refused connection still accepts, and only from a strictly newer peer
-/// (`serve_connection`'s post-`Refused` read).
+/// Sends our hello, then `Shutdown` once the peer has refused it — the one
+/// frame a refused connection still accepts, and only from a strictly newer
+/// peer (`serve_connection`'s post-`Refused` read). Hanging up before the
+/// `Refused` is written fails that write, and a released server then never
+/// reads the `Shutdown`; so this waits for the refusal, then for the close.
 async fn request_shutdown_of_refusing_server(socket_path: &Path) -> std::io::Result<()> {
     let stream = socket::connect(socket_path).await?;
     let (rd, wr) = tokio::io::split(stream);
@@ -1191,8 +1193,20 @@ async fn request_shutdown_of_refusing_server(socket_path: &Path) -> std::io::Res
             stream_window: None,
         })
         .await?;
-    let _ = reader.next_control().await?;
-    writer.write_control(&Control::Shutdown).await
+    let refused = async {
+        while let Some(frame) = reader.next_control().await? {
+            if matches!(frame, Control::Refused { .. }) {
+                break;
+            }
+        }
+        std::io::Result::Ok(())
+    };
+    tokio::time::timeout(DRAIN_TIMEOUT, refused)
+        .await
+        .unwrap_or(Ok(()))?;
+    writer.write_control(&Control::Shutdown).await?;
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, reader.next_control()).await;
+    Ok(())
 }
 
 async fn wait_for_socket_gone(socket_path: &Path, attempts: u32, delay: Duration) -> bool {
@@ -1481,5 +1495,37 @@ mod tests {
         // not delivering the command, not a remote program's exit.
         let err = classify_ssh_failure(&host(), RemoteCall::Server, None, "");
         assert_eq!(err.code, "remote_unreachable");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_released_server_that_refuses_late_still_reads_the_shutdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut listener = socket::Listener::bind(dir.path()).unwrap();
+        let released_server = tokio::spawn(async move {
+            let (rd, wr) = tokio::io::split(listener.accept().await?);
+            let (mut reader, mut writer) = (FrameReader::new(rd), FrameWriter::new(wr));
+            writer
+                .write_control(&Control::Hello {
+                    protocol_version: PROTOCOL_VERSION - 1,
+                    build: None,
+                    version: None,
+                    features: Vec::new(),
+                    stream_window: None,
+                })
+                .await?;
+            reader.next_control().await?;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let error = WireError::protocol("older protocol");
+            writer.write_control(&Control::Refused { error }).await?;
+            std::io::Result::Ok(matches!(
+                reader.next_control().await?,
+                Some(Control::Shutdown)
+            ))
+        });
+        request_shutdown_of_refusing_server(&socket::socket_path(dir.path()))
+            .await
+            .unwrap();
+        assert!(released_server.await.unwrap().unwrap());
     }
 }
