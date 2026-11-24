@@ -253,7 +253,7 @@ async fn open_reaps_an_opencode_server_orphaned_by_a_previous_run() {
         .join(hyprlayer_core::opencode::runtime::OPENCODE_PID_FILE);
     hyprlayer_core::process::orphan::record(&pid_file, pid, "sleep 30");
 
-    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths.clone())
+    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths)
         .open()
         .await
         .expect("open");
@@ -534,7 +534,7 @@ async fn core_tracing_events_reach_the_log_facade_with_no_subscriber_installed()
     std::fs::create_dir_all(paths.hyprlayer_config_file.parent().unwrap()).unwrap();
     std::fs::write(&paths.hyprlayer_config_file, r#"{"version": 2}"#).unwrap();
 
-    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths.clone())
+    let runtime = RuntimeBuilder::new(test_environment(home.path()), paths)
         .with_config_cli(Arc::new(FixedConfigCli {
             result: failing_storage_info,
         }))

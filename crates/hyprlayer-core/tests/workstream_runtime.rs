@@ -409,7 +409,6 @@ async fn thoughts_failure_removes_only_the_app_created_worktree_and_branch() {
         "the worktree directory this call created must be removed"
     );
 
-    // main survives untouched -- only the app-created branch is deleted.
     assert!(branch_exists(&repo, "main"));
 
     f.runtime.shutdown().await;
@@ -500,7 +499,7 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
     f.runtime
         .workstreams()
         .archive(ArchiveWorkstreamRequest {
-            id: other.item.id.clone(),
+            id: other.item.id,
             skip_scripts: true,
         })
         .await
@@ -515,7 +514,7 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
     f.runtime
         .workstreams()
         .archive(ArchiveWorkstreamRequest {
-            id: watched.item.id.clone(),
+            id: watched.item.id,
             skip_scripts: true,
         })
         .await
@@ -560,7 +559,7 @@ async fn failed_archive_move_keeps_the_worktree_watched() {
     );
     assert_eq!(
         f.runtime.test_watched_workstreams().await,
-        vec![created.item.id.clone()],
+        vec![created.item.id],
         "the UI stays on this workstream and only re-arms on navigation"
     );
 
@@ -629,7 +628,7 @@ async fn purge_deletes_the_branch_only_when_the_app_owns_it() {
         .await
         .unwrap();
     assert!(owned.item.app_owns_branch());
-    let owned_branch = owned.item.branch.clone();
+    let owned_branch = owned.item.branch;
 
     f.runtime
         .workstreams()
@@ -641,9 +640,7 @@ async fn purge_deletes_the_branch_only_when_the_app_owns_it() {
         .unwrap();
     f.runtime
         .workstreams()
-        .purge(PurgeWorkstreamRequest {
-            id: owned.item.id.clone(),
-        })
+        .purge(PurgeWorkstreamRequest { id: owned.item.id })
         .await
         .unwrap();
     assert!(
@@ -681,7 +678,7 @@ async fn purge_deletes_the_branch_only_when_the_app_owns_it() {
     f.runtime
         .workstreams()
         .purge(PurgeWorkstreamRequest {
-            id: adopted.item.id.clone(),
+            id: adopted.item.id,
         })
         .await
         .unwrap();
@@ -755,7 +752,7 @@ async fn head_branch_adoption_moves_only_the_workstreams_that_follow_head() {
     }
     assert_eq!(
         announced,
-        Some((inplace.id.clone(), "feature".into(), inplace.branch.clone())),
+        Some((inplace.id, "feature".into(), inplace.branch)),
         "the adoption must reach the runtime event stream"
     );
 
@@ -887,7 +884,7 @@ async fn project_memory_lists_the_projects_claude_memory() {
         })
         .await
         .unwrap();
-    let session_id = started.session.id.clone();
+    let session_id = started.session.id;
 
     let transcript_dir = f.paths.claude_config_dir.join("projects").join(&key);
     std::fs::create_dir_all(&transcript_dir).unwrap();

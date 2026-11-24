@@ -31,7 +31,7 @@ async fn a_resolved_binary_spawns_directly() {
     let resolver = BinaryResolver::initialize(&real_environment(), HashMap::new());
     resolver.enrich_with_login_shell().await;
     let status = resolver.status(BinaryKind::OpenCode).await;
-    let path = status.path.clone().expect("opencode should resolve");
+    let path = status.path.expect("opencode should resolve");
     println!("opencode: {path}");
 
     let out = tokio::process::Command::new(&path)

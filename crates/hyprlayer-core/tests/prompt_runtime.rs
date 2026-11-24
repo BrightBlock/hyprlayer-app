@@ -83,8 +83,6 @@ async fn fixture_with(prompts: serde_json::Value) -> Fixture {
 }
 
 impl Fixture {
-    /// The file's would-be contents — carried as a string now, never written
-    /// to disk, since core no longer reads a prompts file from a path.
     fn source_text(&self, doc: serde_json::Value) -> String {
         serde_json::to_string_pretty(&doc).unwrap()
     }
@@ -160,8 +158,6 @@ async fn exported(fx: &Fixture, selection: PromptExportSelection) -> serde_json:
         .unwrap();
     serde_json::from_str(&result.content).unwrap()
 }
-
-// ---------------------------------------------------------------- export
 
 #[tokio::test]
 async fn export_round_trips_through_parse_with_chords_and_overrides_on() {
@@ -294,8 +290,6 @@ async fn export_reports_the_prompt_count() {
     fx.runtime.shutdown().await;
 }
 
-// ----------------------------------------------------------------- parse
-
 #[test]
 fn parse_rejects_non_json() {
     let err = parse_prompts_file("not json {").unwrap_err();
@@ -348,9 +342,6 @@ fn parse_errors_when_there_is_nothing_importable() {
 #[tokio::test]
 async fn preview_rejects_a_source_over_the_size_cap() {
     let fx = fixture().await;
-    // Once `read_source`'s `fs::metadata` check, now a plain length check on
-    // the incoming string — the client holds the bytes, there's no file to
-    // stat.
     let huge = "x".repeat(4 * 1024 * 1024 + 1);
 
     let err = fx
@@ -366,8 +357,6 @@ async fn preview_rejects_a_source_over_the_size_cap() {
 
     fx.runtime.shutdown().await;
 }
-
-// ------------------------------------------------------------- preview
 
 fn planning_file() -> serde_json::Value {
     file(serde_json::json!([
@@ -421,8 +410,6 @@ async fn preview_detects_a_taken_chord_and_unknown_override_projects() {
 
     fx.runtime.shutdown().await;
 }
-
-// --------------------------------------------------------------- apply
 
 async fn persisted(fx: &Fixture) -> PromptSettings {
     fx.runtime.prompts().list().await.unwrap()
@@ -635,10 +622,6 @@ async fn apply_rejects_a_source_whose_hash_does_not_match_the_preview() {
     let source = fx.source_text(file(serde_json::json!([{ "name": "Fresh", "body": "b" }])));
     let preview = fx.preview(&source, &[]).await;
 
-    // With the client holding the exact bytes it previewed, this can no
-    // longer fire from a concurrent disk edit — there's no shared file. It's
-    // a corruption/round-trip check now: the source handed to `apply_import`
-    // must be the same one `preview_import` hashed.
     let swapped = fx.source_text(file(
         serde_json::json!([{ "name": "Swapped", "body": "different" }]),
     ));
@@ -648,7 +631,7 @@ async fn apply_rejects_a_source_whose_hash_does_not_match_the_preview() {
         .prompts()
         .apply_import(PromptImportDecision {
             source: swapped,
-            expected_source_sha256: preview.source_sha256.clone(),
+            expected_source_sha256: preview.source_sha256,
             mode: PromptImportMode::Merge,
             conflict_actions: BTreeMap::new(),
             taken_chords: Vec::new(),
@@ -678,8 +661,8 @@ async fn apply_defaults_absent_keys_to_the_requested_mode() {
         .runtime
         .prompts()
         .apply_import(PromptImportDecision {
-            source: source.clone(),
-            expected_source_sha256: preview.source_sha256.clone(),
+            source,
+            expected_source_sha256: preview.source_sha256,
             mode: PromptImportMode::Replace,
             conflict_actions: BTreeMap::new(),
             taken_chords: Vec::new(),

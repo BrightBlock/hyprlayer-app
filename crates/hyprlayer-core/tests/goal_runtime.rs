@@ -152,7 +152,7 @@ async fn a_turn_done_before_the_echo_is_ignored() {
 async fn a_foreign_message_in_the_quiet_window_extends_the_iteration() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut watch = handle.watch("s1").await;
     let ingress = handle.ingress("s1").await;
 
@@ -219,7 +219,7 @@ async fn a_lagged_watch_recovers_from_the_log() {
 async fn the_cap_interrupts_then_kills() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     // Spawn the actor and take the attachment before pausing time.
     let mut watch = handle.watch("s1").await;
     let driver = CountingDriver::default();

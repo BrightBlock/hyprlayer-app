@@ -10,7 +10,6 @@ fn clears_a_codex_skills_collision_sourced_from_the_claude_bundle() {
     let bundle = tmp.path().join("claude");
     let codex = tmp.path().join("dot-codex");
 
-    // bundle ships skills/commit/SKILL.md
     std::fs::create_dir_all(bundle.join("skills/commit")).unwrap();
     std::fs::write(bundle.join("skills/commit/SKILL.md"), "new").unwrap();
     let sha = "8ecf4d4d1e4e7d4e0b7a0a3b0a8a3d0e3e2b6a1c9f8d7e6c5b4a3928170615ff";
@@ -20,7 +19,6 @@ fn clears_a_codex_skills_collision_sourced_from_the_claude_bundle() {
     )
     .unwrap();
 
-    // the target holds an older real directory where the link belongs
     std::fs::create_dir_all(codex.join("skills/commit")).unwrap();
     std::fs::write(codex.join("skills/commit/SKILL.md"), "old").unwrap();
 

@@ -83,7 +83,6 @@ fn client_ref(id: &str) -> ClientRef {
     }
 }
 
-/// The fields of a `SessionRevised` worth asserting on.
 struct Revised {
     rev: u64,
     author: Option<ClientRef>,
@@ -160,7 +159,7 @@ async fn legacy_raw_row_reaches_attach_replay() {
     db.append_session_event("s1", 0, "questionAsk", legacy)
         .unwrap();
 
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let attachment = handle.attach("s1", false).await.unwrap();
 
     assert_eq!(attachment.replay.len(), 1);
@@ -628,7 +627,7 @@ async fn live_delivery_preserves_the_order_events_were_ingressed() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
 
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let attachment = handle.attach("s1", false).await.unwrap();
     let mut live = attachment.live;
     let ingress = handle.ingress("s1").await;
@@ -1098,7 +1097,7 @@ async fn already_applied_does_not_bump_rev_again() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // A fresh third actor reads the db's rev directly.
-    let handle3 = SessionRuntimeHandle::new(db.clone());
+    let handle3 = SessionRuntimeHandle::new(db);
     let turns = handle3
         .list_turns("s1", LogCursor::Empty, 100, None)
         .await
@@ -1252,7 +1251,7 @@ async fn a_reservation_whose_user_message_failed_to_persist_does_not_leak() {
 async fn a_leaked_reservation_expires_after_the_ttl() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     // Spawn the actor (and its startup blocking read) before pausing time.
     let _ingress = handle.ingress("s1").await;
     let mut events = handle.subscribe_events();
@@ -1288,7 +1287,7 @@ async fn a_leaked_reservation_expires_after_the_ttl() {
 async fn a_second_authors_reservation_is_refused_while_the_first_is_still_in_flight() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let a = client_ref("client-a");
     let b = client_ref("client-b");
 
@@ -1467,7 +1466,7 @@ async fn authorless_and_pre_spawn_history_are_foreign_to_every_client() {
     );
 
     // (b) history that predates a fresh actor's spawn
-    let fresh = SessionRuntimeHandle::new(db.clone());
+    let fresh = SessionRuntimeHandle::new(db);
     let b = client_ref("client-b");
     let err = fresh
         .reserve_user_turn("s1", "b1".into(), Some(0), Some(b))
@@ -1494,7 +1493,7 @@ async fn authorless_and_pre_spawn_history_are_foreign_to_every_client() {
 async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut events = handle.subscribe_events();
     let ingress = handle.ingress("s1").await;
 
@@ -1605,7 +1604,7 @@ async fn a_mid_turn_user_message_keeps_the_running_turns_author_until_turndone()
 async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut events = handle.subscribe_events();
     let ingress = handle.ingress("s1").await;
     let a = client_ref("client-a");
@@ -1639,7 +1638,7 @@ async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
         .await
         .unwrap();
     let revised = next_session_revised(&mut events).await;
-    assert_eq!(revised.author, Some(b.clone()));
+    assert_eq!(revised.author, Some(b));
     ingress.send(turn_done(1.0)).await.unwrap();
     let revised = next_session_revised(&mut events).await;
     assert!(
@@ -1692,7 +1691,7 @@ async fn a_harness_merging_a_mid_turn_message_leaves_the_session_idle() {
 async fn release_user_turn_announces_only_when_a_reservation_actually_existed() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut events = handle.subscribe_events();
     let a = client_ref("client-a");
 
@@ -1817,7 +1816,7 @@ async fn exited_clears_any_reservations_left_in_flight() {
 async fn an_exit_bumps_rev_without_making_a_send_stale() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut events = handle.subscribe_events();
     let ingress = handle.ingress("s1").await;
 
@@ -1922,7 +1921,7 @@ async fn a_rewind_bumps_rev_sets_reset_rev_raises_the_foreign_floor_and_emits_se
 async fn a_session_revised_carries_its_riders_a_fresh_rev_and_working_state() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let mut events = handle.subscribe_events();
     let ingress = handle.ingress("s1").await;
 
@@ -2091,7 +2090,7 @@ async fn list_turns_resumes_past_an_undecodable_trailing_row() {
 async fn list_turns_in_flight_excludes_the_callers_own_reservations() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");
-    let handle = SessionRuntimeHandle::new(db.clone());
+    let handle = SessionRuntimeHandle::new(db);
     let a = client_ref("client-a");
     let b = client_ref("client-b");
 

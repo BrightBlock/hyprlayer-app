@@ -301,7 +301,6 @@ async fn a_prompt_after_idle_runs_as_its_own_turn() {
     );
 }
 
-/// The id the driver's `Init` reports.
 async fn opened_session(events: &mut broadcast::Receiver<SessionEvent>) -> String {
     loop {
         if let SessionEvent::Init {

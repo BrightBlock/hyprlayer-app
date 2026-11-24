@@ -46,7 +46,7 @@ fn watcher_indexes_created_modified_and_removed_files() {
     let (tx, rx) = mpsc::channel::<IndexEvent>();
     let handle = watch_roots(
         Arc::clone(&index),
-        vec![root.clone()],
+        vec![root],
         Box::new(move |event| {
             let _ = tx.send(event);
         }),
@@ -152,7 +152,7 @@ fn watcher_handles_renames_as_remove_plus_upsert() {
     let (tx, rx) = mpsc::channel::<IndexEvent>();
     let _handle = watch_roots(
         Arc::clone(&index),
-        vec![root.clone()],
+        vec![root],
         Box::new(move |event| {
             let _ = tx.send(event);
         }),

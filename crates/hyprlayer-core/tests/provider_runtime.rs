@@ -210,8 +210,6 @@ async fn the_opencode_default_model_lands_in_settings_and_the_supplied_config() 
     runtime.shutdown().await;
 }
 
-// --- Change group 2: the tracked OpenCode migration ledger ---
-
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR"))

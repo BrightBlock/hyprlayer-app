@@ -366,7 +366,7 @@ async fn a_save_reindexes_the_document_and_emits_a_thoughts_index_update() {
         "the save must be visible through the index"
     );
 
-    let id = meta.id.clone();
+    let id = meta.id;
     assert!(
         wait_for_event(&mut rx, |event| matches!(
             event,
