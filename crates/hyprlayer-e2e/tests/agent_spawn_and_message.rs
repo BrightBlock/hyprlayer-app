@@ -755,6 +755,10 @@ async fn agent_spawn_and_message() {
     );
 
     j.step("goal sessions are origin goal");
+    update_settings(&mut j, &c, |s| {
+        s.providers.claude.default_model = Some("haiku".into())
+    })
+    .await;
     let agent_goal = parsed(
         &lead_mcp
             .call(
@@ -814,6 +818,29 @@ async fn agent_spawn_and_message() {
             && agent_goal_end == Some(GoalStatus::Met),
         json!({ "origin": agent_row["origin"], "parentSessionId": agent_row["parentSessionId"], "status": agent_goal_end.map(GoalStatus::as_str) }),
     );
+
+    let launched_model = |id: &str| {
+        let log = sandbox.root.join("goal-control").join(id).join("argv.log");
+        let first = std::fs::read_to_string(log).unwrap_or_default();
+        let argv: Vec<&str> = first
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .split(' ')
+            .collect();
+        argv.iter()
+            .position(|a| *a == "--model")
+            .and_then(|i| argv.get(i + 1))
+            .map(|m| m.to_string())
+    };
+    let agent_model = launched_model(&agent_goal_session);
+    let desktop_model = launched_model(&desktop_goal_session);
+    j.guard(
+        "an agent's goal session that names no model runs the configured default; a desktop's runs the model it sent",
+        agent_model.as_deref() == Some("haiku") && desktop_model.is_none(),
+        json!({ "agent": agent_model, "desktop": desktop_model }),
+    );
+    update_settings(&mut j, &c, |s| s.providers.claude.default_model = None).await;
 
     j.step("a validation links to its implement session without being its spawn");
     let live_count = |r: &str| {

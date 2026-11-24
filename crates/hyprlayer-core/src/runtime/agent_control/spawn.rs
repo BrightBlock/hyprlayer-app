@@ -238,6 +238,16 @@ impl AgentControlService<'_> {
         })
     }
 
+    /// A child that names no model runs the user's default for its harness, as a new chat does;
+    /// an engine with no composer harness keeps its own.
+    async fn child_model(&self, asked: Option<String>, harness: Option<Harness>) -> Option<String> {
+        if asked.is_some() {
+            return asked;
+        }
+        let providers = self.runtime.settings.get().await.providers;
+        harness.and_then(|h| providers.default_model(h))
+    }
+
     async fn is_lead(&self, caller: &AgentCaller) -> bool {
         let AgentCaller::Session { session_id } = caller else {
             return false;
@@ -284,6 +294,9 @@ impl AgentControlService<'_> {
                 &attached_docs,
             )
             .await?;
+        let model = self
+            .child_model(model, Some(check.harness.unwrap_or_default()))
+            .await;
         let label = self.caller_label(identity).await;
         let sessions = self.runtime.sessions();
         let started = sessions
@@ -662,6 +675,9 @@ impl AgentControlService<'_> {
             session_fallback,
         } = child;
         let configured = self.runtime.settings.get().await.multiplexer.engines;
+        let model = self
+            .child_model(model, engines::harness_of(&engine_id))
+            .await;
         // An unknown id would launch as a bare command, a shell the agent could then type into.
         if !engines::is_known(&configured, &engine_id) {
             return Err(denied(&format!("{engine_id} is not a configured engine")));
@@ -1085,6 +1101,9 @@ impl AgentControlService<'_> {
                         &attached_docs,
                     )
                     .await?;
+                let model = self
+                    .child_model(model, Some(check.harness.unwrap_or_default()))
+                    .await;
                 let target = GoalTarget::NewSession {
                     workstream_id,
                     stage,
@@ -1503,7 +1522,7 @@ fn mode_name(mode: PermissionMode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use hyprlayer_models::{AgentCaller, AgentControlLevel, PermissionMode};
+    use hyprlayer_models::{AgentCaller, AgentControlLevel, Harness, PermissionMode};
 
     use super::super::{test_runtime, AgentIdentity};
     use crate::error::CoreError;
@@ -1551,6 +1570,37 @@ mod tests {
             harness: None,
             lead,
         }
+    }
+
+    #[tokio::test]
+    async fn a_child_runs_the_model_it_names_else_the_default_for_its_harness() {
+        let dir = tempfile::tempdir().unwrap();
+        let rt = runtime(dir.path()).await;
+        rt.settings
+            .update(|s| {
+                s.providers.claude.default_model = Some("haiku".into());
+                s.providers.codex.default_model = Some("gpt-5.5".into());
+            })
+            .await
+            .unwrap();
+        let control = rt.agent_control();
+        let model =
+            |asked: Option<&str>, harness| control.child_model(asked.map(str::to_string), harness);
+        assert_eq!(
+            model(None, Some(Harness::Claude)).await.as_deref(),
+            Some("haiku")
+        );
+        assert_eq!(
+            model(None, Some(Harness::Codex)).await.as_deref(),
+            Some("gpt-5.5")
+        );
+        assert_eq!(
+            model(Some("sonnet"), Some(Harness::Claude))
+                .await
+                .as_deref(),
+            Some("sonnet")
+        );
+        assert_eq!(model(None, None).await, None);
     }
 
     async fn spawn_into(

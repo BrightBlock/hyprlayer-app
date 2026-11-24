@@ -57,7 +57,7 @@ fn engine_session(engine_id: &str) -> EngineSession {
             resume_by_id: Some(|id| owned(&["resume", id])),
             resume_latest: &["resume", "--last"],
             bypass: &["--dangerously-bypass-approvals-and-sandbox"],
-            model: None,
+            model: Some("--model"),
             permission_mode: None,
             effort: None,
         },
@@ -162,4 +162,31 @@ pub fn session_argv(
         argv.extend([flag.to_string(), effort.clone()]);
     }
     (argv, session_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv_for(engine_id: &str, model: Option<&str>) -> Vec<String> {
+        let session = PtyLaunchSession {
+            model: model.map(str::to_string),
+            ..PtyLaunchSession::default()
+        };
+        session_argv(&resolve(&[], engine_id), &session, false).0
+    }
+
+    #[test]
+    fn claude_and_codex_launch_the_model_asked_for() {
+        for engine_id in ["claude-code", "codex"] {
+            let argv = argv_for(engine_id, Some("haiku"));
+            let at = argv.iter().position(|a| a == "--model");
+            assert_eq!(
+                at.and_then(|i| argv.get(i + 1)).map(String::as_str),
+                Some("haiku"),
+                "{engine_id}: {argv:?}"
+            );
+            assert!(!argv_for(engine_id, None).contains(&"--model".to_string()));
+        }
+    }
 }

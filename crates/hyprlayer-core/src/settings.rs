@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 
-use hyprlayer_models::{AgentControlLevel, PermissionMode};
+use hyprlayer_models::{AgentControlLevel, Harness, PermissionMode};
 use serde::{Deserialize, Deserializer, Serialize};
 use tokio::sync::RwLock;
 
@@ -394,6 +394,42 @@ pub struct ProviderSettings {
     pub opencode: OpenCodeSettings,
     pub ollama: OllamaSettings,
     pub codex: CodexSettings,
+}
+
+impl ProviderSettings {
+    /// The model a new chat on `harness` launches with when none is asked for. `None` launches
+    /// the harness's own default: opencode reads the one Settings writes into its config.
+    pub fn default_model(&self, harness: Harness) -> Option<String> {
+        match harness {
+            Harness::Claude => self
+                .claude
+                .default_model
+                .as_deref()
+                .and_then(claude_model_flag),
+            Harness::Codex => self.codex.default_model.clone().filter(|m| !m.is_empty()),
+            Harness::Opencode => None,
+        }
+    }
+}
+
+/// Settings store a Claude model as the desktop's catalog key (`src/lib/domain/models.ts`);
+/// claude takes its flag. `opus` is the catalog's Default, the model claude picks with no flag.
+fn claude_model_flag(key: &str) -> Option<String> {
+    let flag = match key {
+        "" | "opus" => return None,
+        "sonnet-1m" => "sonnet[1m]",
+        "sonnet-4-6" => "claude-sonnet-4-6",
+        "sonnet-4-6-1m" => "claude-sonnet-4-6[1m]",
+        "opus-4-8" => "claude-opus-4-8",
+        "opus-4-8-1m" => "claude-opus-4-8[1m]",
+        "opus-4-7" => "claude-opus-4-7",
+        "opus-4-7-1m" => "claude-opus-4-7[1m]",
+        "opus-4-6" => "claude-opus-4-6",
+        "opus-4-6-1m" => "claude-opus-4-6[1m]",
+        "opus-4-1" => "claude-opus-4-1",
+        other => other,
+    };
+    Some(flag.to_string())
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -987,6 +1023,26 @@ mod tests {
         let s: AppSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(s.providers.claude.default_model, None);
         assert_eq!(s.providers.codex.default_model, None);
+    }
+
+    #[test]
+    fn a_new_chat_takes_the_configured_model_as_its_harness_flag() {
+        let mut p = ProviderSettings::default();
+        assert_eq!(p.default_model(Harness::Claude), None);
+        for (key, flag) in [
+            ("haiku", Some("haiku")),
+            ("sonnet-1m", Some("sonnet[1m]")),
+            ("opus-4-8-1m", Some("claude-opus-4-8[1m]")),
+            ("claude-opus-5-5", Some("claude-opus-5-5")),
+            ("opus", None),
+        ] {
+            p.claude.default_model = Some(key.into());
+            assert_eq!(p.default_model(Harness::Claude).as_deref(), flag, "{key}");
+        }
+        p.codex.default_model = Some("gpt-5.5".into());
+        assert_eq!(p.default_model(Harness::Codex).as_deref(), Some("gpt-5.5"));
+        p.opencode.default_model = Some("anthropic/claude-sonnet-4-5".into());
+        assert_eq!(p.default_model(Harness::Opencode), None);
     }
 
     #[test]

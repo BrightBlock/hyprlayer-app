@@ -46,6 +46,7 @@ async fn agent_spawn_in_cli() {
     update_settings(&mut j, &c, |s| {
         s.multiplexer.enabled = true;
         s.agent_control.max_live_children = 10;
+        s.providers.claude.default_model = Some("haiku".into());
     })
     .await;
     let lead = start_lead(&mut j, &c, &ws).await;
@@ -79,6 +80,13 @@ async fn agent_spawn_in_cli() {
         "a PTY agent, not a session, typed the prompt with the caller's header and spawner note after it",
         !terminal.is_empty() && spawned.get("sessionId").is_none() && typed,
         json!({ "engineId": spawned["engineId"], "hasSessionId": spawned.get("sessionId").is_some(), "matchesThePaste": typed }),
+    );
+    let argv = lines(&log.join("argv"));
+    let model = flag_value(&argv, "--model");
+    j.guard(
+        "a spawn that names no model launches the configured default claude model",
+        model.as_deref() == Some("haiku"),
+        json!({ "model": model }),
     );
 
     j.step("archiving a workstream ends the PTY agent spawned into it, and only that one");
@@ -373,7 +381,7 @@ async fn agent_spawn_in_cli() {
     let pinned = parsed(
         &mcp.call(
             "spawn_agent",
-            json!({ "prompt": "E2E_PINNED", "harness": "claude" }),
+            json!({ "prompt": "E2E_PINNED", "harness": "claude", "model": "sonnet" }),
         )
         .await,
     );
@@ -381,6 +389,12 @@ async fn agent_spawn_in_cli() {
         "the caller's harness choice outranks the engine",
         pinned["sessionId"].is_string() && pinned.get("terminalId").is_none(),
         json!({ "hasSessionId": pinned["sessionId"].is_string(), "hasTerminalId": pinned.get("terminalId").is_some() }),
+    );
+    let model = session_model(&sandbox, &pinned).await;
+    j.guard(
+        "a session spawn that names a model launches it over the default",
+        model.as_deref() == Some("sonnet"),
+        json!({ "model": model }),
     );
 
     j.step("with app actions in a chat, spawns stay sessions");
@@ -393,6 +407,12 @@ async fn agent_spawn_in_cli() {
         "spawn_agent starts a composer session",
         chat["sessionId"].is_string() && chat.get("terminalId").is_none(),
         json!({ "hasSessionId": chat["sessionId"].is_string(), "hasTerminalId": chat.get("terminalId").is_some() }),
+    );
+    let model = session_model(&sandbox, &chat).await;
+    j.guard(
+        "a session spawn that names no model launches the configured default",
+        model.as_deref() == Some("haiku"),
+        json!({ "model": model }),
     );
 
     j.step("an archived workstream's agents never start again, across a server restart");
@@ -770,6 +790,23 @@ async fn lead_turn(c: &RpcClient, lead: &str, needle: &str) -> Option<String> {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     None
+}
+
+fn flag_value(argv: &[String], flag: &str) -> Option<String> {
+    argv.iter()
+        .position(|a| a == flag)
+        .and_then(|i| argv.get(i + 1).cloned())
+}
+
+/// The `--model` the spawned session's first launch named, from `goal_stub`'s `argv.log`.
+async fn session_model(sandbox: &Sandbox, spawned: &Value) -> Option<String> {
+    let id = spawned["sessionId"].as_str().unwrap_or_default();
+    let log = sandbox.root.join("goal-control").join(id).join("argv.log");
+    let read = || std::fs::read_to_string(&log).unwrap_or_default();
+    eventually(IO, || !read().is_empty()).await;
+    let first = read().lines().next().unwrap_or_default().to_string();
+    let argv: Vec<String> = first.split_whitespace().map(str::to_string).collect();
+    flag_value(&argv, "--model")
 }
 
 fn parsed(result: &Value) -> Value {

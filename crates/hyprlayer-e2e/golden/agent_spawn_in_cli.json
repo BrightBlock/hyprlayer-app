@@ -11,6 +11,13 @@
           },
           "guard": "a PTY agent, not a session, typed the prompt with the caller's header and spawner note after it",
           "ok": true
+        },
+        {
+          "evidence": {
+            "model": "haiku"
+          },
+          "guard": "a spawn that names no model launches the configured default claude model",
+          "ok": true
         }
       ],
       "step": "spawn_agent opens the default engine"
@@ -167,6 +174,13 @@
           },
           "guard": "the caller's harness choice outranks the engine",
           "ok": true
+        },
+        {
+          "evidence": {
+            "model": "sonnet"
+          },
+          "guard": "a session spawn that names a model launches it over the default",
+          "ok": true
         }
       ],
       "step": "a pinned harness keeps a session"
@@ -179,6 +193,13 @@
             "hasTerminalId": false
           },
           "guard": "spawn_agent starts a composer session",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "model": "haiku"
+          },
+          "guard": "a session spawn that names no model launches the configured default",
           "ok": true
         }
       ],
