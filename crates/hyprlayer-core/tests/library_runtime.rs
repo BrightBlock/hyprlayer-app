@@ -480,3 +480,24 @@ async fn create_refuses_a_date_that_escapes_the_thoughts_tree() {
     assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
     fx.runtime.shutdown().await;
 }
+
+#[tokio::test]
+async fn removing_an_unregistered_path_with_its_files_deletes_nothing() {
+    let fx = fixture().await;
+    let victim = fx._dir.path().join("never-registered");
+    std::fs::create_dir_all(victim.join("src")).unwrap();
+    std::fs::write(victim.join("src/precious.txt"), "keep me").unwrap();
+
+    let result = fx
+        .runtime
+        .projects()
+        .remove(&victim.display().to_string(), true)
+        .await;
+
+    assert!(
+        matches!(result, Err(CoreError::ProjectNotFound { .. })),
+        "{result:?}"
+    );
+    assert!(victim.join("src/precious.txt").exists());
+    fx.runtime.shutdown().await;
+}

@@ -1182,6 +1182,17 @@ impl ProjectService<'_> {
     pub async fn remove(&self, path: &str, delete_files: bool) -> Result<()> {
         ensure_running(self.runtime)?;
         let repo = PathBuf::from(path);
+        if delete_files {
+            let (db, key) = (self.runtime.db.clone(), path.to_string());
+            if blocking(move || db.get_project_record(&key))
+                .await?
+                .is_none()
+            {
+                return Err(CoreError::ProjectNotFound {
+                    path: path.to_string(),
+                });
+            }
+        }
 
         let db = self.runtime.db.clone();
         let active = {
