@@ -97,6 +97,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+shift+l", other: "mod+shift+l" },
   },
   {
+    id: "lead.open",
+    label: "Open Lead Engineer",
+    category: "Navigation",
+    when: "project",
+    defaults: { mac: "mod+shift+e", other: "mod+shift+e" },
+  },
+  {
     id: "view.toggleArchivedAgents",
     label: "Toggle Archived Sessions",
     category: "View",

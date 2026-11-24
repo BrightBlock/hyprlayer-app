@@ -22,9 +22,9 @@ describe("WhatsNewCard", () => {
     const before = document.activeElement;
     act(() => openWhatsNewCard());
     render(<WhatsNewCard />);
-    expect(screen.getByRole("region", { name: "The Lead got a few new tricks" })).toBeTruthy();
-    expect(screen.getByText("What’s new since 0.8.24")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /^Show me:/ })).toHaveLength(5);
+    expect(screen.getByRole("region", { name: "Meet the Lead Engineer" })).toBeTruthy();
+    expect(screen.getByText("New since 0.8.24")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^Show me:/ })).toHaveLength(3);
     expect(document.activeElement).toBe(before);
   });
 
@@ -39,8 +39,19 @@ describe("WhatsNewCard", () => {
   it("Show me starts the tour at that row's step", () => {
     act(() => openWhatsNewCard());
     render(<WhatsNewCard />);
-    fireEvent.click(screen.getByRole("button", { name: "Show me: Reorder or cancel queued work" }));
-    expect(activeTour(useTourStore.getState())?.step.id).toBe("wn.queue");
+    fireEvent.click(screen.getByRole("button", { name: "Show me: Remote Control" }));
+    expect(activeTour(useTourStore.getState())?.step.id).toBe("wn.remote");
+    expect(screen.queryByRole("region")).toBeNull();
+  });
+
+  it("leads with the Lead and its walkthrough, which runs the first run and settles the card", () => {
+    act(() => openWhatsNewCard());
+    render(<WhatsNewCard />);
+    fireEvent.click(screen.getByRole("button", { name: "Take the 3-minute walkthrough" }));
+    const s = useTourStore.getState();
+    expect(activeTour(s)).toMatchObject({ path: "firstRun", index: 0 });
+    expect(activeTour(s)?.step.id).toBe("fr.intro");
+    expect(s.lastSeenVersion).toBe("0.8.25");
     expect(screen.queryByRole("region")).toBeNull();
   });
 
@@ -48,7 +59,7 @@ describe("WhatsNewCard", () => {
     const content = cardContent("0.8.25", []);
     expect(content.replay).toBe(true);
     expect(content.steps.map((s) => s.id)).toEqual(pathSteps("whatsNew").map((s) => s.id));
-    expect(cardContent("0.8.24", ["lead.queue"]).steps.map((s) => s.id)).not.toContain("wn.queue");
+    expect(cardContent("0.8.24", ["lead.remoteControl"]).steps.map((s) => s.id)).not.toContain("wn.remote");
   });
 });
 
@@ -62,9 +73,9 @@ describe("TourResumeButton", () => {
     });
     expect(screen.queryByRole("button", { name: /Resume the tour/ })).toBeNull();
     act(() => pauseTour());
-    fireEvent.click(screen.getByRole("button", { name: "Resume the tour: First run, step 2 of 6" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resume the tour: First run, step 2 of 9" }));
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
-    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.lead");
+    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.how");
   });
 
   it("End the tour ends it for good", () => {

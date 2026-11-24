@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { LeadView, Project, Workstream, WorkstreamView } from "@/lib/bindings";
+import type { LeadView, Project, Session, Workstream, WorkstreamView } from "@/lib/bindings";
 import { queryClient } from "@/lib/queryClient";
 import { useUiStore } from "@/lib/uiStore";
 import type { Signal } from "./steps";
@@ -16,6 +16,10 @@ export type SignalInputs = {
   /** The Lead session's pending question, if any. */
   leadAsking: boolean;
   tourWorkstreamId: string | null;
+  /** The project's board, where the Lead's dock lives, is on screen. */
+  onBoard: boolean;
+  /** The Lead's dock is expanded into its full chat. */
+  leadExpanded: boolean;
 };
 
 export type SignalResult = { done: boolean; project?: string; workstream?: string; sentAt?: number };
@@ -58,18 +62,38 @@ export function taskWorkstream(
   sentAt: number,
   leadWorkstreamId: string | null,
   candidates: readonly Workstream[],
+  exclude: readonly string[] = [],
 ): string | null {
   if (!leadWorkstreamId) return null;
   const made = candidates
     .filter(
       (w) =>
         w.id !== leadWorkstreamId &&
+        !exclude.includes(w.id) &&
         w.parentWorkstreamId === leadWorkstreamId &&
         w.createdAt !== null &&
         w.createdAt >= sentAt - CLOCK_SKEW_MS,
     )
     .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
   return made[0]?.id ?? null;
+}
+
+/**
+ * The agent the Lead spawned for the task: its newest child session started after the send. A Lead can run a
+ * child in any workstream, its own included, so this looks by parent, not by the task's workstream.
+ */
+export function taskAgentSession(
+  sentAt: number,
+  leadSessionId: string | null,
+  sessions: readonly Session[],
+): Session | null {
+  if (!leadSessionId) return null;
+  const children = sessions
+    .filter(
+      (s) => s.parentSessionId === leadSessionId && s.startedAt !== null && s.startedAt >= sentAt - CLOCK_SKEW_MS,
+    )
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+  return children[0] ?? null;
 }
 
 /** The Lead's question was answered, or the tour's workstream is gone from the list because it was archived. */
@@ -82,6 +106,31 @@ export function leadAnswered(
   if (askedDuringStep && !asking) return { done: true };
   if (tourWorkstreamId && workstreams && !workstreams.some((w) => w.item.id === tourWorkstreamId)) return { done: true };
   return NOT_YET;
+}
+
+/** The user clicked the project's row in the sidebar, or came to its board from somewhere else in the step. */
+export function leadOpened(startedOnBoard: boolean, onBoard: boolean, clicked: boolean): SignalResult {
+  return clicked || (!startedOnBoard && onBoard) ? { done: true } : NOT_YET;
+}
+
+/** The dock was collapsed at some point in the step and is expanded now. */
+export function leadExpanded(sawCollapsed: boolean, expanded: boolean): SignalResult {
+  return sawCollapsed && expanded ? { done: true } : NOT_YET;
+}
+
+/** A click on this project's row in the sidebar, while `enabled`. */
+function useProjectRowClicked(projectPath: string | null, enabled: boolean): boolean {
+  const [clicked, setClicked] = useState(false);
+  useEffect(() => {
+    if (!enabled || !projectPath) return;
+    const onClick = (e: MouseEvent) => {
+      const row = (e.target as Element | null)?.closest?.<HTMLElement>('[data-tour="sidebar.project"]');
+      if (row && (row.dataset.tourScope === undefined || row.dataset.tourScope === projectPath)) setClicked(true);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [projectPath, enabled]);
+  return clicked;
 }
 
 /** When a `message-lead` mutation for this project, submitted after `since`, succeeded; null until then. */
@@ -116,6 +165,10 @@ export function useSignal(signal: Signal | null, inputs: SignalInputs): SignalRe
   const hidden = useUiStore((s) => s.leadPanelHidden);
   const width = useUiStore((s) => s.leadDockWidth);
   const sent = useMessageSent(inputs.projectPath, since, signal === "leadMessageSent");
+  const rowClicked = useProjectRowClicked(inputs.projectPath, signal === "leadOpened");
+  const startedOnBoard = useRef(inputs.onBoard).current;
+  const sawCollapsed = useRef(false);
+  if (!inputs.leadExpanded) sawCollapsed.current = true;
 
   if (baselineProjects.current === null && inputs.projects) {
     baselineProjects.current = inputs.projects.map((p) => p.path);
@@ -140,6 +193,10 @@ export function useSignal(signal: Signal | null, inputs: SignalInputs): SignalRe
     switch (signal) {
       case "projectAdded":
         return baselineProjects.current ? projectAdded(baselineProjects.current, inputs.projects) : NOT_YET;
+      case "leadOpened":
+        return leadOpened(startedOnBoard, inputs.onBoard, rowClicked);
+      case "leadExpanded":
+        return leadExpanded(sawCollapsed.current, inputs.leadExpanded);
       case "leadMessageSent":
         return sent !== null ? { done: true, sentAt: sent } : NOT_YET;
       case "agentSpawned":

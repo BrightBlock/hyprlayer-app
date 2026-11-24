@@ -5,13 +5,27 @@ import { Button } from "@/components/ui";
 import type { BinaryStatus, Project, WorkstreamView } from "@/lib/bindings";
 import { useEscape, runCommand } from "@/lib/keybindings/registry";
 import { openSettings } from "@/lib/appNav";
-import { useArchivedWorkstreams, useBootstrap, useConnectionStatus, useWorkstreams } from "@/lib/queries";
+import {
+  useActiveSessions,
+  useArchivedWorkstreams,
+  useBootstrap,
+  useConnectionStatus,
+  useWorkstreams,
+  workstreamSessionsQuery,
+} from "@/lib/queries";
+import { queryClient } from "@/lib/queryClient";
 import { useUiStore } from "@/lib/uiStore";
-import { offerLeadDraft, setLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
-import { focusShell, updateWorkstreamTabs, useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
+import { offerLeadDraft, setLeadDockExpanded, useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
+import {
+  focusShell,
+  openSessionTab,
+  updateWorkstreamTabs,
+  useWorkstreamTabsStore,
+} from "@/features/session/workstreamTabs";
 import { useSessionStore } from "@/features/session/sessionStore";
 import { chordText, CoachMark } from "./CoachMark";
-import { taskWorkstream, useSignal } from "./signals";
+import { selectAgentTab } from "@/features/search/selectAgentTab";
+import { taskAgentSession, taskWorkstream, useSignal } from "./signals";
 import type { Need, Reveal } from "./steps";
 import {
   activeTour,
@@ -89,12 +103,20 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
   const tourWorkstreamId = useTourStore((s) => s.tourWorkstreamId);
   const projectPath = tourProject(routeProject(pathname), remembered, bootstrap?.projects);
   const lead = useProjectLead(projectPath ?? "");
+  const leadExpanded = useLeadDockExpanded(projectPath ?? "") && !!lead?.view.sessionId;
+  const onBoard = projectPath !== null && routeProject(pathname) === projectPath && openItem === null;
   const workstreams = useWorkstreams(projectPath ?? "").data;
   const leadPanelHidden = useUiStore((s) => s.leadPanelHidden);
   const leadAsking = useSessionStore((s) =>
     lead?.view.sessionId ? s.sessions[lead.view.sessionId]?.pendingQuestion != null : false,
   );
   const tabs = useWorkstreamTabsStore((s) => (tourWorkstreamId ? s.byWs[tourWorkstreamId] : undefined));
+  const taskSentAt = useTourStore((s) => s.taskSentAt);
+  const active = useActiveSessions(step.reveal === "tourAgentTab").data;
+  const taskAgent =
+    taskSentAt === null
+      ? null
+      : taskAgentSession(taskSentAt, lead?.view.sessionId ?? null, (active ?? []).map((a) => a.session));
   const overrides = bootstrap?.settings.keybindings?.overrides ?? {};
   const [attempt, setAttempt] = useState(0);
 
@@ -113,23 +135,36 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
     workstreams: workstreams?.filter((w) => w.item.id !== lead?.view.workstreamId),
     leadAsking,
     tourWorkstreamId,
+    onBoard,
+    leadExpanded,
   });
 
   useEffect(() => {
     if (signal.project) setTourProject(signal.project);
-    if (signal.sentAt !== undefined) setTaskSentAt(signal.sentAt);
+    if (signal.sentAt !== undefined) setTaskSentAt(signal.sentAt, (workstreams ?? []).map((w) => w.item.id));
     else if (signal.workstream) setTourWorkstream(signal.workstream);
+    // Only the send's own moment matters for `workstreams`; later changes mustn't re-record it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signal.project, signal.workstream, signal.sentAt]);
 
   useTaskWorkstream(path === "firstRun", projectPath, lead?.view.workstreamId ?? null, workstreams);
   const taskGone =
     tourWorkstreamId !== null && workstreams !== undefined && !workstreams.some((w) => w.item.id === tourWorkstreamId);
-  const agentFinished = step.reveal === "tourAgentTab" && taskGone;
+  const agentFinished = step.reveal === "tourAgentTab" && taskGone && !taskAgent;
 
   const reveal = useRef<(r: Reveal) => void>(() => {});
   reveal.current = (r: Reveal) => {
     if (!projectPath || r === "none") return;
     if (r === "tourAgentTab") {
+      if (taskAgent) {
+        void navigate({
+          to: "/projects/$projectPath",
+          params: { projectPath },
+          search: { item: taskAgent.workstreamId },
+        });
+        void selectAgentTab(taskAgent.workstreamId, taskAgent.id);
+        return;
+      }
       if (!tourWorkstreamId) return;
       void navigate({ to: "/projects/$projectPath", params: { projectPath }, search: { item: tourWorkstreamId } });
       const shell = tabs?.shells.find((s) => s.ptyAgent || s.sessionId);
@@ -138,6 +173,8 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
           const ws = all[tourWorkstreamId];
           return ws ? { ...all, [tourWorkstreamId]: focusShell(ws, shell.id) } : all;
         });
+      } else {
+        void openNewestAgentTab(tourWorkstreamId);
       }
       return;
     }
@@ -148,11 +185,15 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
   };
 
   const blocked = unmet !== null || agentFinished;
+  const taskAgentId = taskAgent?.id ?? null;
   useEffect(() => {
     if (!blocked) reveal.current(step.reveal);
-  }, [blocked, step.reveal, attempt]);
+    // The task's agent can turn up after the step starts; the reveal runs again for it.
+  }, [blocked, step.reveal, attempt, taskAgentId]);
 
-  const anchor = useAnchor(blocked ? null : step.anchor, attempt);
+  const intro = step.anchor === null;
+  const anchor = useAnchor(blocked ? null : step.anchor, attempt, projectPath);
+  const also = useAnchor(blocked || !step.also ? null : step.also.anchor, attempt, projectPath);
   useEscape(pauseTour);
   useF6BackToCoach();
 
@@ -169,12 +210,12 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
   let anchored = anchor.status === "found" ? anchor.rect : null;
   if (agentFinished) {
     notice = "The agent has already finished, and the Lead archived its workstream, so its tab is closed.";
-  } else if (!unmet && anchor.status === "missing" && !step.anchorOptional) {
+  } else if (!unmet && !intro && anchor.status === "missing" && !step.anchorOptional) {
     notice = "What this step points at isn’t on screen.";
     anchored = null;
   }
   if (unmet?.need === "leadPanel" && shortcut) notice = `${unmet.notice} Press ${shortcut} to show it.`;
-  if (anchor.status === "searching" && !unmet) return null;
+  if (anchor.status === "searching" && !unmet && !intro) return null;
 
   return (
     <CoachMark
@@ -183,10 +224,12 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
       index={index}
       total={steps.length}
       anchor={anchored}
+      intro={intro}
+      also={anchored && also.status === "found" && step.also ? { rect: also.rect, label: step.also.label } : undefined}
       notice={notice}
       fix={
         fix ??
-        (!blocked && anchor.status === "missing" && !step.anchorOptional ? (
+        (!blocked && !intro && anchor.status === "missing" && !step.anchorOptional ? (
           <Button size="sm" onClick={() => setAttempt((a) => a + 1)}>
             Take me there
           </Button>
@@ -222,6 +265,7 @@ function useTaskWorkstream(
 ) {
   const sentAt = useTourStore((s) => s.taskSentAt);
   const known = useTourStore((s) => s.tourWorkstreamId);
+  const exclude = useTourStore((s) => s.taskExclude);
   const looking = firstRun && sentAt !== null && known === null;
   const archived = useArchivedWorkstreams(looking).data;
   useEffect(() => {
@@ -230,9 +274,16 @@ function useTaskWorkstream(
       ...(live ?? []).map((w) => w.item),
       ...(archived ?? []).map((w) => w.item).filter((w) => w.projectPath === projectPath),
     ];
-    const id = taskWorkstream(sentAt, leadWorkstreamId, candidates);
+    const id = taskWorkstream(sentAt, leadWorkstreamId, candidates, exclude);
     if (id) setTourWorkstream(id);
-  }, [looking, sentAt, leadWorkstreamId, live, archived, projectPath]);
+  }, [looking, sentAt, leadWorkstreamId, live, archived, projectPath, exclude]);
+}
+
+/** The Lead's agent runs in a workstream nobody has opened yet, so it has no tab until one is opened for it. */
+async function openNewestAgentTab(workstreamId: string): Promise<void> {
+  const sessions = await queryClient.fetchQuery(workstreamSessionsQuery(workstreamId)).catch(() => []);
+  const newest = [...sessions].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+  if (newest) openSessionTab(workstreamId, newest);
 }
 
 /** F6 from anywhere in the app returns to the coach mark; from the coach mark it goes to the anchor. */

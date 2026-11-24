@@ -159,5 +159,11 @@ describe("actionResultsFor", () => {
     expect(actionResultsFor("tour", false).map((r) => r.title)).toEqual(["Take the Tour"]);
     expect(actionResultsFor("tour", true).map((r) => r.title)).toEqual(["Take the Tour", "Resume the Tour"]);
     expect(actionResultsFor("what", false)[0]).toMatchObject({ kind: "action", nav: { type: "command", id: "help.whatsNew" } });
+    expect(actionResultsFor("lead eng", false).map((r) => r.title)).not.toContain("Open Lead Engineer");
+    expect(actionResultsFor("lead eng", false, true)[0]).toMatchObject({
+      title: "Open Lead Engineer",
+      subtitle: "Lead",
+      nav: { type: "command", id: "lead.open" },
+    });
   });
 });

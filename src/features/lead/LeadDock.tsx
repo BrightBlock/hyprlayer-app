@@ -220,7 +220,10 @@ export function LeadDock({
       };
 
   const header = (expandedHeader: boolean) => (
-    <div className="flex h-[34px] shrink-0 items-center gap-2.5 pr-1.5 pl-6">
+    <div
+      data-tour={expandedHeader ? undefined : "lead.dock.header"}
+      className="flex h-[34px] shrink-0 items-center gap-2.5 pr-1.5 pl-6"
+    >
       <button
         type="button"
         onClick={() => go(expandedHeader ? "minimize" : "expand")}
@@ -249,6 +252,7 @@ export function LeadDock({
       {sessionId && (
         <button
           ref={expandedHeader ? undefined : expandControl}
+          data-tour={expandedHeader ? undefined : "lead.dock.expand"}
           type="button"
           aria-label={expandedHeader ? "Minimize the Lead" : "Expand the Lead"}
           aria-expanded={expandedHeader}

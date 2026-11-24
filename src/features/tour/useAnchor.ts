@@ -11,10 +11,12 @@ export type AnchorState =
   | { status: "found"; element: HTMLElement; rect: Rect }
   | { status: "missing" };
 
-export function findAnchor(id: AnchorId, root: ParentNode = document): HTMLElement | null {
+/** `scope` picks one of several marks with the same id: the sidebar marks every project's row. */
+export function findAnchor(id: AnchorId, root: ParentNode = document, scope: string | null = null): HTMLElement | null {
   const all = root.querySelectorAll<HTMLElement>("[data-tour]");
   for (const el of Array.from(all)) {
     if (el.dataset.tour !== id) continue;
+    if (scope !== null && el.dataset.tourScope !== undefined && el.dataset.tourScope !== scope) continue;
     const r = el.getBoundingClientRect();
     if (isVisible(r, { width: window.innerWidth, height: window.innerHeight })) return el;
   }
@@ -33,7 +35,7 @@ const same = (a: Rect, b: Rect) =>
  * Finds the element marked `data-tour={id}` and follows its rect: DOM changes, its own resizes and window
  * resizes re-measure it, with no animated follow. `attempt` restarts the wait (after a reveal or a fix).
  */
-export function useAnchor(id: AnchorId | null, attempt = 0): AnchorState {
+export function useAnchor(id: AnchorId | null, attempt = 0, scope: string | null = null): AnchorState {
   const [state, setState] = useState<AnchorState>({ status: "searching" });
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export function useAnchor(id: AnchorId | null, attempt = 0): AnchorState {
     const resize = new ResizeObserver(schedule);
     const check = () => {
       frame = 0;
-      const el = findAnchor(id);
+      const el = findAnchor(id, document, scope);
       if (el !== current) {
         if (current) resize.unobserve(current);
         current = el;
@@ -91,7 +93,7 @@ export function useAnchor(id: AnchorId | null, attempt = 0): AnchorState {
       window.removeEventListener("resize", schedule);
       window.removeEventListener("scroll", schedule, true);
     };
-  }, [id, attempt]);
+  }, [id, attempt, scope]);
 
   return state;
 }

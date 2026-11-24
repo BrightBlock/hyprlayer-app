@@ -21,6 +21,7 @@ const facts = vi.hoisted(() => ({
   engine: true,
   projects: [{ path: "/repo" }],
   archived: [] as { item: { id: string; projectPath: string; createdAt: number; parentWorkstreamId: string } }[],
+  active: [] as { session: { id: string; workstreamId: string; parentSessionId: string; startedAt: number } }[],
 }));
 
 vi.mock("@/lib/queries", () => ({
@@ -34,7 +35,12 @@ vi.mock("@/lib/queries", () => ({
   useConnectionStatus: () => ({ data: { state: facts.connected ? "connected" : "lost" } }),
   useWorkstreams: () => ({ data: [] }),
   useArchivedWorkstreams: (enabled: boolean) => ({ data: enabled ? facts.archived : undefined }),
+  useActiveSessions: () => ({ data: facts.active }),
+  workstreamSessionsQuery: (id: string) => ({ queryKey: ["workstream-sessions", id], queryFn: async () => [] }),
 }));
+
+const selectAgentTab = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("@/features/search/selectAgentTab", () => ({ selectAgentTab }));
 
 vi.mock("@/features/lead/lead", () => ({
   useProjectLead: () =>
@@ -42,6 +48,7 @@ vi.mock("@/features/lead/lead", () => ({
       ? { view: { projectPath: "/repo", workstreamId: "main", sessionId: "s", driving: [] }, settings: {} }
       : null,
   setLeadDockExpanded: vi.fn(),
+  useLeadDockExpanded: () => false,
   offerLeadDraft: vi.fn(),
 }));
 
@@ -58,7 +65,8 @@ function anchor(id: string) {
 
 beforeEach(() => {
   useTourStore.setState(fresh, true);
-  Object.assign(facts, { lead: true, connected: true, engine: true, projects: [{ path: "/repo" }], archived: [] });
+  Object.assign(facts, { lead: true, connected: true, engine: true, projects: [{ path: "/repo" }], archived: [], active: [] });
+  selectAgentTab.mockClear();
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
   vi.stubGlobal(
@@ -86,10 +94,10 @@ function startAt(id: string) {
 
 describe("TourHost", () => {
   it("points at the anchor and moves focus to the coach mark's title", async () => {
-    anchor("lead.dock");
-    startAt("fr.lead");
+    anchor("sidebar.project");
+    startAt("fr.open");
     render(<TourHost />);
-    const title = await screen.findByRole("heading", { name: "Meet your Lead Engineer" });
+    const title = await screen.findByRole("heading", { name: "Open your project’s Lead" });
     expect(document.activeElement).toBe(title);
     const dialog = screen.getByRole("dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("false");
@@ -98,7 +106,7 @@ describe("TourHost", () => {
 
   it("shows the step unanchored, with a way back, when its anchor never mounts", async () => {
     vi.useFakeTimers();
-    startAt("fr.lead");
+    startAt("fr.open");
     render(<TourHost />);
     expect(screen.queryByRole("dialog")).toBeNull();
     await act(async () => {
@@ -122,41 +130,41 @@ describe("TourHost", () => {
 
   it("waits on a server that's offline", async () => {
     facts.connected = false;
-    startAt("fr.lead");
+    startAt("fr.open");
     render(<TourHost />);
     expect(await screen.findByText(/The server isn’t answering/)).toBeTruthy();
   });
 
   it("Esc pauses the tour and keeps its place", async () => {
-    anchor("lead.dock");
-    startAt("fr.lead");
+    anchor("sidebar.project");
+    startAt("fr.open");
     render(<TourHost />);
     await screen.findByRole("dialog");
     act(() => {
       runCommand(ESCAPE_COMMAND_ID);
     });
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.lead");
+    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.open");
   });
 
   it("F6 moves focus to the anchor and back", async () => {
-    const el = anchor("lead.dock");
-    startAt("fr.lead");
+    const el = anchor("sidebar.project");
+    startAt("fr.open");
     render(<TourHost />);
     const dialog = await screen.findByRole("dialog");
     fireEvent.keyDown(dialog, { key: "F6" });
     expect(document.activeElement).toBe(el.querySelector("button"));
     fireEvent.keyDown(window, { key: "F6" });
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Meet your Lead Engineer" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Open your project’s Lead" }));
   });
 
   it("keeps Next shut on a TRY IT step until its signal fires, but Skip this step moves on", async () => {
-    anchor("lead.dock.input");
+    anchor("lead.dock");
     startAt("fr.prompt");
     render(<TourHost />);
     expect((await screen.findByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Skip this step" }));
-    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.handoff");
+    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.expand");
   });
 
   it("shows a step whose anchor is optional as a plain card when the anchor isn't there", async () => {
@@ -173,7 +181,7 @@ describe("TourHost", () => {
 
   it("finishes the first run when the Lead's agent came and went before its steps", async () => {
     anchor("lead.panel.running");
-    anchor("lead.dock");
+    anchor("lead.panel.host");
     startAt("fr.handoff");
     setTaskSentAt(1_000_000);
     facts.archived = [{ item: { id: "child", projectPath: "/repo", createdAt: 1_000_500, parentWorkstreamId: "main" } }];
@@ -186,7 +194,71 @@ describe("TourHost", () => {
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Take me there" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("heading", { name: "See what the server is carrying" });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect((await screen.findByRole("button", { name: "Finish" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("TourHost v2 steps", () => {
+  it("opens with an intro card: centred over a scrim, no highlight, no missing-anchor notice", async () => {
+    vi.useFakeTimers();
+    startTour("firstRun", pathSteps("firstRun"));
+    render(<TourHost />);
+    await act(async () => {
+      vi.advanceTimersByTime(ANCHOR_WAIT_MS + 50);
+    });
+    expect(screen.getByRole("heading", { name: "Meet your Lead Engineer" })).toBeTruthy();
+    expect(document.querySelector("[data-tour-scrim]")).not.toBeNull();
+    expect(document.querySelector("[data-tour-highlight]")).toBeNull();
+    expect(screen.queryByText("What this step points at isn’t on screen.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+  });
+
+  it("lists the Lead's four jobs on the second intro card", async () => {
+    startAt("fr.how");
+    render(<TourHost />);
+    await screen.findByRole("heading", { name: "What the Lead does for you" });
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getByText("Lands it")).toBeTruthy();
+  });
+
+  it("points at this project's row in the sidebar, not another project's", async () => {
+    facts.projects = [{ path: "/other" }, { path: "/repo" }];
+    const other = anchor("sidebar.project");
+    other.dataset.tourScope = "/other";
+    const mine = anchor("sidebar.project");
+    mine.dataset.tourScope = "/repo";
+    mine.getBoundingClientRect = () => ({ left: 50, top: 100, width: 240, height: 36, right: 290, bottom: 136, x: 50, y: 100, toJSON() {} });
+    startAt("fr.open");
+    render(<TourHost />);
+    await screen.findByRole("dialog");
+    const hl = document.querySelector<HTMLElement>("[data-tour-highlight]")!;
+    expect(hl.style.top).toBe("98px");
+    fireEvent.click(mine.querySelector("button")!);
+    expect(await screen.findByText("The Lead’s dock is open")).toBeTruthy();
+  });
+
+  it("outlines the dock's title line on the prompt step, labelled as the way to expand", async () => {
+    anchor("lead.dock");
+    anchor("lead.dock.header");
+    startAt("fr.prompt");
+    render(<TourHost />);
+    await screen.findByRole("dialog");
+    expect(document.querySelector("[data-tour-also]")).not.toBeNull();
+    expect(screen.getByText("Click the title line or the arrow to expand")).toBeTruthy();
+  });
+});
+
+describe("TourHost agent step", () => {
+  it("opens the Lead's newest child session, in whichever workstream it runs", async () => {
+    startAt("fr.agent");
+    setTaskSentAt(1_000_000);
+    facts.active = [{ session: { id: "child-s", workstreamId: "main", parentSessionId: "s", startedAt: 1_000_200 } }];
+    render(<TourHost />);
+    await act(async () => {});
+    expect(selectAgentTab).toHaveBeenCalledWith("main", "child-s");
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ search: { item: "main" } }));
   });
 });
 

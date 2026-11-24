@@ -148,6 +148,7 @@ import { chipLabel } from "@/features/workstreams/WorkstreamDocChips";
 import { ProjectPipeline } from "@/features/board/ProjectPipeline";
 import { LeadPanel } from "@/features/lead/LeadPanel";
 import { useLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
+import { useOpenLeadCommand } from "@/features/lead/useOpenLead";
 import { planGoalTarget, usePlanPath } from "@/features/board/pipelineData";
 import { AttachPrDialog } from "@/features/workstreams/AttachPrDialog";
 import {
@@ -333,6 +334,7 @@ export function ProjectPage() {
   const selectedId = search.item;
   const lead = useProjectLead(projectPath);
   const leadExpanded = useLeadDockExpanded(projectPath);
+  useOpenLeadCommand(projectPath);
 
   const tabsByWs = useWorkstreamTabsStore((s) => s.byWs);
   const views = (workstreams.data ?? []).filter((view) => view.item.status === "active");

@@ -1,10 +1,16 @@
 import { compareVersions, maxVersion, pathSteps, whatsNewSteps } from "./selection";
 import { PRE_TOUR_VERSION, type TourStep } from "./steps";
-import { openWhatsNewCard, resumeTour, startTour, useTourStore } from "./tourStore";
+import { dismissWhatsNewCard, openWhatsNewCard, resumeTour, startTour, useTourStore } from "./tourStore";
 
 /** Help › Take the tour: first run, always from step 1. */
 export function takeTheTour(): void {
   startTour("firstRun", pathSteps("firstRun"));
+}
+
+/** The what's-new card's walkthrough: the first run, which settles the card's version too. */
+export function takeTheWalkthrough(shown: readonly TourStep[]): void {
+  dismissWhatsNewCard(shown);
+  takeTheTour();
 }
 
 /** Help › What's new: the card, replaying the newest version's steps once nothing is new. */

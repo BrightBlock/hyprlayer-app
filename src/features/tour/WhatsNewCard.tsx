@@ -3,13 +3,11 @@ import { useId, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "@/components/Icon";
 import { Button } from "@/components/ui";
 import { STATUS_BAR_HEIGHT } from "@/lib/layout";
-import { useCardContent } from "./actions";
-import { ALSO_NEW, CARD_LINES, CARD_TITLES } from "./steps";
+import { takeTheWalkthrough, useCardContent } from "./actions";
+import { ALSO_NEW, CARD_INTRO, CARD_LINES, CARD_TITLES } from "./steps";
 import { dismissWhatsNewCard, startTour, useTourStore } from "./tourStore";
 
 const ROW_ICON: Record<string, IconName> = {
-  "wn.panel": "panels",
-  "wn.queue": "queued",
   "wn.remote": "leadRemote",
   "wn.resume": "history",
   "wn.server": "server",
@@ -32,7 +30,9 @@ export function WhatsNewCard() {
     e.stopPropagation();
     dismiss();
   };
-  const also = ALSO_NEW[steps[0].since];
+  const since0 = steps[0].since;
+  const also = ALSO_NEW[since0];
+  const intro = CARD_INTRO[since0];
 
   return (
     <section
@@ -47,7 +47,7 @@ export function WhatsNewCard() {
       </p>
       <div className="flex items-center gap-2 pt-3 pr-2 pl-4">
         <span className="text-label text-ink-dim uppercase">
-          {replay ? `What’s new in ${since}` : `What’s new since ${since}`}
+          {replay ? `What’s new in ${since}` : `New since ${since}`}
         </span>
         <span className="flex-1" />
         <button
@@ -60,9 +60,29 @@ export function WhatsNewCard() {
           <Icon name="close" size="xs" />
         </button>
       </div>
-      <h2 id={titleId} className="px-4 pt-1.5 pb-1 text-title text-ink">
-        The Lead got a few new tricks
-      </h2>
+      {intro ? (
+        <div className="px-4 pt-2">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-ink text-ink">
+              <Icon name="lead" size="sm" />
+            </span>
+            <h2 id={titleId} className="text-h3 text-ink">
+              {intro.title}
+            </h2>
+          </div>
+          <p className="mt-2.5 text-body text-ink-2">{intro.body}</p>
+          <Button variant="primary" className="mt-3.5 w-full" onClick={() => takeTheWalkthrough(steps)}>
+            <Icon name="run" size="xs" />
+            Take the 3-minute walkthrough
+          </Button>
+          <p className="mt-1.5 text-center text-meta text-ink-dim">{intro.note}</p>
+          <p className="mt-3.5 text-label text-ink-dim uppercase">Also new</p>
+        </div>
+      ) : (
+        <h2 id={titleId} className="px-4 pt-1.5 pb-1 text-title text-ink">
+          New in this version
+        </h2>
+      )}
       <ul className="pr-3 pl-4">
         {steps.map((step) => (
           <li key={step.id} className="flex items-start gap-2.5 border-t border-edge-2 py-2.5">
@@ -92,10 +112,12 @@ export function WhatsNewCard() {
           Later
         </button>
         <span className="flex-1" />
-        <Button size="sm" variant="primary" onClick={() => startTour("whatsNew", steps)}>
-          <Icon name="run" size="xs" />
-          Take the {steps.length}-step tour
-        </Button>
+        {!intro && (
+          <Button size="sm" variant="primary" onClick={() => startTour("whatsNew", steps)}>
+            <Icon name="run" size="xs" />
+            Take the {steps.length}-step tour
+          </Button>
+        )}
       </div>
     </section>
   );

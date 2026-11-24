@@ -22,6 +22,8 @@ type Persisted = {
   tourWorkstreamId: string | null;
   /** When the first-run task reached the Lead: the Lead's children made after it are the tour's. */
   taskSentAt: number | null;
+  /** Workstreams that can't be this run's task: an earlier run's, and those already there at the send. */
+  taskExclude: string[];
 };
 
 type TourState = Persisted & {
@@ -51,6 +53,7 @@ const initial = (): TourState => ({
   projectPath: null,
   tourWorkstreamId: null,
   taskSentAt: null,
+  taskExclude: [],
   cardOpen: false,
   appVersion: "",
 });
@@ -68,6 +71,7 @@ export const useTourStore = create<TourState>()(
       projectPath,
       tourWorkstreamId,
       taskSentAt,
+      taskExclude,
     }): Persisted => ({
       lastSeenVersion,
       seen,
@@ -76,6 +80,7 @@ export const useTourStore = create<TourState>()(
       projectPath,
       tourWorkstreamId,
       taskSentAt,
+      taskExclude,
     }),
   }),
 );
@@ -140,7 +145,13 @@ export function startTour(path: TourPath, steps: readonly TourStep[], startAt?: 
     [o]: s[o].status === "active" ? { ...s[o], status: "paused" } : s[o],
     cardOpen: false,
     // A new first run sends a new task; the last run's workstream would complete its steps at once.
-    ...(path === "firstRun" ? { tourWorkstreamId: null, taskSentAt: null } : {}),
+    ...(path === "firstRun"
+      ? {
+          tourWorkstreamId: null,
+          taskSentAt: null,
+          taskExclude: s.tourWorkstreamId ? keepRecent([...s.taskExclude, s.tourWorkstreamId]) : s.taskExclude,
+        }
+      : {}),
   }));
   persistNow();
 }
@@ -235,7 +246,14 @@ export function setTourWorkstream(workstreamId: string | null): void {
   persistNow();
 }
 
-export function setTaskSentAt(at: number): void {
-  set({ taskSentAt: at, tourWorkstreamId: null });
+const EXCLUDE_KEPT = 50;
+
+function keepRecent(ids: string[]): string[] {
+  return [...new Set(ids)].slice(-EXCLUDE_KEPT);
+}
+
+/** `present`: the workstreams already there when the task was sent, which can't be the one it makes. */
+export function setTaskSentAt(at: number, present: readonly string[] = []): void {
+  set((s) => ({ taskSentAt: at, tourWorkstreamId: null, taskExclude: keepRecent([...s.taskExclude, ...present]) }));
   persistNow();
 }

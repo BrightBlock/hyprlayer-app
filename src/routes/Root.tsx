@@ -1382,6 +1382,8 @@ export function Root() {
                         <Link
                           to="/projects/$projectPath"
                           params={{ projectPath: p.path }}
+                          data-tour="sidebar.project"
+                          data-tour-scope={p.path}
                           draggable={false}
                           onClick={(e) => {
                             if (projectDragSuppress.current) e.preventDefault();

@@ -11,17 +11,19 @@ import { COMMANDS } from "@/lib/keybindings/commands";
 import { useHasCommand } from "@/lib/keybindings/registry";
 import { useHasPausedTour } from "@/features/tour/tourStore";
 
-/** Help commands, by name: typed for, never listed for an empty query. */
-export function actionResultsFor(query: string, tourPaused: boolean): SearchResult[] {
+/** Help commands, and Open Lead Engineer in a project with a Lead, by name: typed for, never listed for an empty query. */
+export function actionResultsFor(query: string, tourPaused: boolean, leadOpen = false): SearchResult[] {
   if (!query.trim()) return [];
-  return COMMANDS.filter((c) => c.category === "Help" && (c.id !== "help.resumeTour" || tourPaused)).flatMap(
-    (c): SearchResult[] => {
-      const score = fuzzyScore(`${c.label} help`, query);
-      return score === null
-        ? []
-        : [{ kind: "action", key: `action:${c.id}`, title: c.label, subtitle: "Help", score, nav: { type: "command", id: c.id } }];
-    },
-  );
+  return COMMANDS.filter(
+    (c) =>
+      (c.category === "Help" && (c.id !== "help.resumeTour" || tourPaused)) || (c.id === "lead.open" && leadOpen),
+  ).flatMap((c): SearchResult[] => {
+    const subtitle = c.category === "Help" ? "Help" : "Lead";
+    const score = fuzzyScore(`${c.label} ${subtitle.toLowerCase()}`, query);
+    return score === null
+      ? []
+      : [{ kind: "action", key: `action:${c.id}`, title: c.label, subtitle, score, nav: { type: "command", id: c.id } }];
+  });
 }
 
 function sessionStateToActivity(state: string): WorkstreamActivity {
@@ -138,7 +140,8 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
 
   const resumable = useHasCommand("help.resumeTour");
   const paused = useHasPausedTour() && resumable;
-  const actionResults = useMemo(() => actionResultsFor(query, paused), [query, paused]);
+  const leadOpen = useHasCommand("lead.open");
+  const actionResults = useMemo(() => actionResultsFor(query, paused, leadOpen), [query, paused, leadOpen]);
 
   return useMemo(
     () => [...actionResults, ...wsResults, ...agentResults, ...fileResults, ...docResults],

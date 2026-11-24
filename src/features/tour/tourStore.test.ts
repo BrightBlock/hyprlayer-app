@@ -46,12 +46,15 @@ describe("tour progress", () => {
     expect(useTourStore.getState().tourWorkstreamId).toBe("w2");
     startTour("firstRun", pathSteps("firstRun"));
     expect(useTourStore.getState()).toMatchObject({ taskSentAt: null, tourWorkstreamId: null });
+    expect(useTourStore.getState().taskExclude).toContain("w2");
+    setTaskSentAt(3000, ["live-1"]);
+    expect(stored()).toMatchObject({ taskExclude: ["w2", "live-1"] });
   });
 
   it("walks forward and back, and finishing marks the path's features seen", () => {
     const steps = pathSteps("firstRun");
     startTour("firstRun", steps);
-    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.project");
+    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.intro");
     nextStep();
     nextStep();
     prevStep();
@@ -68,17 +71,17 @@ describe("tour progress", () => {
     nextStep();
     pauseTour();
     expect(activeTour(useTourStore.getState())).toBeNull();
-    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.lead");
+    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.how");
     resumeTour();
-    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.lead");
+    expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.how");
   });
 
   it("runs one tour at a time: starting what's new pauses first run in place", () => {
     startTour("firstRun", pathSteps("firstRun"));
     nextStep();
-    startTour("whatsNew", pathSteps("whatsNew"), "wn.queue");
+    startTour("whatsNew", pathSteps("whatsNew"), "wn.server");
     const s = useTourStore.getState();
-    expect(activeTour(s)?.step.id).toBe("wn.queue");
+    expect(activeTour(s)?.step.id).toBe("wn.server");
     expect(s.firstRun).toMatchObject({ status: "paused", index: 1 });
   });
 
@@ -120,6 +123,6 @@ describe("persistence", () => {
     flushPersistedWrites();
     localStorage.setItem(TOUR_STORE_KEY, JSON.stringify({ state: saved, version: 1 }));
     await useTourStore.persist.rehydrate();
-    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.prompt");
+    expect(pausedTour(useTourStore.getState())?.step.id).toBe("fr.open");
   });
 });

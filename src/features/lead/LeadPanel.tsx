@@ -62,14 +62,16 @@ export function LeadPanel({
           </ul>
         )}
       </Section>
-      <Section title="Stats">
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 pb-3 text-meta">
-          <Stat label="Agents" value={`${lead.view.liveChildren}/${lead.settings.maxLiveChildren}`} />
-          <Stat label="Workstreams" value={String(others.length)} />
-          <Stat label="Open PRs" value={String(others.filter(hasOpenPr).length)} />
-        </dl>
-      </Section>
-      <HostSection />
+      <div data-tour="lead.panel.host">
+        <Section title="Stats">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 pb-3 text-meta">
+            <Stat label="Agents" value={`${lead.view.liveChildren}/${lead.settings.maxLiveChildren}`} />
+            <Stat label="Workstreams" value={String(others.length)} />
+            <Stat label="Open PRs" value={String(others.filter(hasOpenPr).length)} />
+          </dl>
+        </Section>
+        <HostSection />
+      </div>
     </div>
   );
 }

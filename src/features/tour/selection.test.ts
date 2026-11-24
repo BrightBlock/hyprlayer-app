@@ -72,8 +72,22 @@ describe("launchPlan", () => {
 
 describe("steps", () => {
   it("keeps each path to the length the design sets", () => {
-    expect(pathSteps("firstRun")).toHaveLength(6);
-    expect(pathSteps("whatsNew")).toHaveLength(5);
+    expect(pathSteps("firstRun")).toHaveLength(9);
+    expect(pathSteps("whatsNew")).toHaveLength(3);
+  });
+
+  it("introduces the Lead before any coach mark, then opens it before talking to it", () => {
+    const ids = pathSteps("firstRun").map((s) => s.id);
+    expect(ids.slice(0, 2)).toEqual(["fr.intro", "fr.how"]);
+    expect(pathSteps("firstRun").slice(0, 2).every((s) => s.anchor === null)).toBe(true);
+    expect(pathSteps("firstRun").slice(2).every((s) => s.anchor !== null)).toBe(true);
+    expect(ids.indexOf("fr.open")).toBeLessThan(ids.indexOf("fr.prompt"));
+    expect(ids.indexOf("fr.prompt")).toBeLessThan(ids.indexOf("fr.expand"));
+    expect(ids.indexOf("fr.expand")).toBeLessThan(ids.indexOf("fr.stats"));
+  });
+
+  it("names the Open Lead Engineer shortcut where it teaches opening the Lead", () => {
+    expect(STEPS.find((s) => s.id === "fr.open")?.body).toContain("{chord:lead.open}");
   });
 
   it("gives every step a unique id and a TRY IT a waiting and a done line", () => {

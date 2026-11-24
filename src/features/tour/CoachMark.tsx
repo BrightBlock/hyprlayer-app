@@ -10,6 +10,7 @@ import { placeCoach, type Placement, type Rect } from "./place";
 import type { Side, TourPath, TourStep } from "./steps";
 
 const WIDTH = 344;
+const INTRO_WIDTH = 480;
 const PATH_LABEL: Record<TourPath, string> = { firstRun: "First run", whatsNew: "What’s new" };
 
 /** Renders `{chord:<command id>}` as the user's binding for that command. */
@@ -41,6 +42,10 @@ export type CoachMarkProps = {
   total: number;
   /** Null: shown unanchored in the main area, with `notice` saying why. */
   anchor: Rect | null;
+  /** An intro card: wider, centred, over a scrim. */
+  intro?: boolean;
+  /** A second control the step names, outlined with a label. */
+  also?: { rect: Rect; label: string };
   notice?: ReactNode;
   fix?: ReactNode;
   tryState?: TryState;
@@ -64,7 +69,8 @@ const CARET_EDGE: Record<Side, string> = {
 };
 
 export function CoachMark(props: CoachMarkProps) {
-  const { step, path, index, total, anchor, tryState, canAdvance, overrides } = props;
+  const { step, path, index, total, anchor, intro, also, tryState, canAdvance, overrides } = props;
+  const width = intro ? INTRO_WIDTH : WIDTH;
   const panel = useRef<HTMLDivElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const [place, setPlace] = useState<Placement | null>(null);
@@ -100,12 +106,24 @@ export function CoachMark(props: CoachMarkProps) {
       ? { left: place.left, top: place.top }
       : { left: -10000, top: 0 }
     : // Unanchored: centred, with numbers rather than a transform the entrance keyframes would fight.
-      { left: Math.max(8, (window.innerWidth - WIDTH) / 2), top: Math.round(window.innerHeight * 0.3) };
+      {
+        left: Math.max(8, (window.innerWidth - width) / 2),
+        top: Math.round(window.innerHeight * (intro ? 0.14 : 0.3)),
+      };
 
   const last = index === total - 1;
   return createPortal(
     <>
       {anchor && <Highlight rect={anchor} />}
+      {anchor && also && <AlsoMark rect={also.rect} label={also.label} />}
+      {intro && (
+        <div
+          aria-hidden="true"
+          data-tour-scrim=""
+          className="tour-in pointer-events-none fixed inset-0 z-[59]"
+          style={{ background: "var(--tour-scrim)" }}
+        />
+      )}
       <div
         ref={panel}
         role="dialog"
@@ -115,7 +133,7 @@ export function CoachMark(props: CoachMarkProps) {
         data-tour-coach=""
         onKeyDown={onKeyDown}
         className="tour-in fixed z-[60] rounded-card border border-edge bg-panel shadow-pop"
-        style={{ width: WIDTH, ...style }}
+        style={{ width, ...style }}
       >
         {anchor && place && (
           <span
@@ -125,14 +143,18 @@ export function CoachMark(props: CoachMarkProps) {
           />
         )}
         <div className="flex items-center gap-2.5 pt-3 pr-2 pl-4">
-          <span className="text-label text-ink-dim uppercase">
+          <span className="text-label whitespace-nowrap text-ink-dim uppercase">
             {PATH_LABEL[path]} · {index + 1} of {total}
           </span>
           <span aria-hidden="true" className="flex gap-[3px]">
             {Array.from({ length: total }, (_, i) => (
               <span
                 key={i}
-                className={cx("h-[3px] w-[18px] rounded-[1px]", i < index ? "bg-ok" : i === index ? "bg-accent" : "bg-edge")}
+                className={cx(
+                  "h-[3px] rounded-[1px]",
+                  total > 6 ? "w-[11px]" : "w-[18px]",
+                  i < index ? "bg-ok" : i === index ? "bg-accent" : "bg-edge",
+                )}
               />
             ))}
           </span>
@@ -147,13 +169,27 @@ export function CoachMark(props: CoachMarkProps) {
             <Icon name="close" size="xs" />
           </button>
         </div>
-        <div className="px-4 pt-2">
-          <h2 ref={title} id={titleId} tabIndex={-1} className="text-title text-ink focus:outline-none">
+        <div className={intro ? "px-5 pt-3" : "px-4 pt-2"}>
+          <h2
+            ref={title}
+            id={titleId}
+            tabIndex={-1}
+            className={cx(intro ? "text-h3" : "text-title", "text-ink focus:outline-none")}
+          >
             {step.title}
           </h2>
-          <p id={bodyId} className="mt-1.5 text-body text-ink-2">
-            <StepBody text={step.body} overrides={overrides} />
-          </p>
+          <div id={bodyId} className={cx("mt-1.5 flex flex-col gap-2 text-ink-2", intro ? "text-body-lg" : "text-body")}>
+            {step.body
+              .split("\n\n")
+              .filter(Boolean)
+              .map((para, i) => (
+                <p key={i}>
+                  <StepBody text={para} overrides={overrides} />
+                </p>
+              ))}
+            {step.points && <Points points={step.points} />}
+            {step.note && <p className="text-meta text-ink-dim">{step.note}</p>}
+          </div>
           {props.notice && (
             <div className="mt-3 rounded-card border border-edge bg-surface px-3 py-2.5 text-meta text-ink-2">
               {props.notice}
@@ -246,6 +282,52 @@ function TryIt({
         )}
       </div>
     </div>
+  );
+}
+
+function Points({ points }: { points: NonNullable<TourStep["points"]> }) {
+  return (
+    <ol className="mt-1 rounded-card border border-edge bg-surface">
+      {points.map((p, i) => (
+        <li key={p.title} className="grid grid-cols-[22px_1fr] gap-2.5 border-t border-edge-2 px-3.5 py-2.5 first:border-t-0">
+          <span
+            aria-hidden="true"
+            className="flex h-[22px] w-[22px] items-center justify-center rounded-full border border-edge font-mono text-meta text-ink"
+          >
+            {i + 1}
+          </span>
+          <span>
+            <span className="block text-ui font-semibold text-ink">{p.title}</span>
+            <span className="block text-body text-ink-2">{p.text}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The step's second control: a dashed outline and a label, above the scrim; takes no click. */
+function AlsoMark({ rect, label }: { rect: Rect; label: string }) {
+  const above = rect.top > 32;
+  return (
+    <>
+      <div
+        aria-hidden="true"
+        data-tour-also=""
+        className="tour-in pointer-events-none fixed z-[59] rounded-card border border-dashed border-ink-dim"
+        style={{ left: rect.left - 2, top: rect.top - 2, width: rect.width + 4, height: rect.height + 4 }}
+      />
+      <span
+        aria-hidden="true"
+        className="tour-in pointer-events-none fixed z-[59] rounded-control border border-edge bg-panel px-1.5 py-0.5 text-meta whitespace-nowrap text-ink-2"
+        style={{
+          right: Math.max(8, window.innerWidth - (rect.left + rect.width)),
+          top: above ? rect.top - 28 : rect.top + rect.height + 6,
+        }}
+      >
+        {label}
+      </span>
+    </>
   );
 }
 

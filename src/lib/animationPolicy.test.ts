@@ -174,8 +174,15 @@ describe("guided tour motion", () => {
     expect(TOUR_CLASSES.filter((c) => !reducedBlocks.includes(c))).toEqual([]);
   });
 
-  it("is used by the coach mark and its highlight", () => {
+  it("is the only motion on the coach mark, its highlight, the intro scrim and the second outline", () => {
     const coach = Object.entries(TSX_SOURCES).find(([f]) => f.endsWith("tour/CoachMark.tsx"))?.[1] ?? "";
-    expect(coach.match(/\btour-in\b/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(coach.match(/\btour-in\b/g)?.length).toBeGreaterThanOrEqual(5);
+    expect(coach).not.toMatch(/\b(animate-|transition)/);
+  });
+
+  it("is the card's only motion", () => {
+    const card = Object.entries(TSX_SOURCES).find(([f]) => f.endsWith("tour/WhatsNewCard.tsx"))?.[1] ?? "";
+    expect(card).toMatch(/\btour-in\b/);
+    expect(card).not.toMatch(/\b(animate-|transition)/);
   });
 });

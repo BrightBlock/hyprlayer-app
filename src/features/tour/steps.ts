@@ -3,11 +3,15 @@ export type TourPath = "firstRun" | "whatsNew";
 /** A real element carries `data-tour="<id>"`; ids, never class selectors, so a restyle can't break the tour. */
 export type AnchorId =
   | "projects.add"
+  | "sidebar.project"
   | "lead.dock"
+  | "lead.dock.header"
+  | "lead.dock.expand"
   | "lead.dock.input"
   | "lead.dock.remote"
   | "lead.panel.running"
   | "lead.panel.queue"
+  | "lead.panel.host"
   | "lead.panel.edge"
   | "agent.tab"
   | "statusbar.server";
@@ -18,7 +22,14 @@ export type Side = "top" | "bottom" | "left" | "right";
 export type Reveal = "none" | "projectBoard" | "leadExpanded" | "tourAgentTab";
 
 /** The existing signal that completes a TRY IT step. */
-export type Signal = "projectAdded" | "leadMessageSent" | "agentSpawned" | "leadPanelAdjusted" | "leadAnswered";
+export type Signal =
+  | "projectAdded"
+  | "leadOpened"
+  | "leadMessageSent"
+  | "leadExpanded"
+  | "agentSpawned"
+  | "leadPanelAdjusted"
+  | "leadAnswered";
 
 /** What must hold before the step can run in place. */
 export type Need = "project" | "lead" | "engine" | "server" | "leadPanel";
@@ -30,15 +41,22 @@ export type TourStep = {
   feature: string;
   /** The app version the feature shipped in. */
   since: string;
-  anchor: AnchorId;
+  /** Null: an intro card, shown in the middle of the window over a scrim. */
+  anchor: AnchorId | null;
+  /** A second control the step names, outlined but not pointed at. Left out when it isn't on screen. */
+  also?: { anchor: AnchorId; label: string };
   /** The step reads fine without its anchor (it explains behaviour, not a control): no "isn't on screen". */
   anchorOptional?: boolean;
   side: Side;
   reveal: Reveal;
   needs: Need[];
   title: string;
-  /** `{chord:<command id>}` renders the user's binding for that command. */
+  /** Paragraphs split on a blank line. `{chord:<command id>}` renders the user's binding for that command. */
   body: string;
+  /** A numbered list under the body. */
+  points?: { title: string; text: string }[];
+  /** A dimmer last line. */
+  note?: string;
   tryIt?: { signal: Signal; waiting: string; done: string; prompt?: string; promptLabel?: string };
 };
 
@@ -51,53 +69,105 @@ export const SAFE_FIRST_TASK =
 export const PRE_TOUR_VERSION = "0.8.24";
 const LEAD_RELEASE = "0.8.25";
 
+const FIRST_RUN_TAIL = "Take the tour again any time from Help in quick settings.";
+
 export const STEPS: TourStep[] = [
   {
-    id: "fr.project",
+    id: "fr.intro",
     path: "firstRun",
-    feature: "projects.open",
+    feature: "lead.intro",
     since: LEAD_RELEASE,
-    anchor: "projects.add",
-    side: "right",
+    anchor: null,
+    side: "bottom",
     reveal: "none",
-    needs: ["server"],
-    title: "Start with a project",
-    body: "Pick a repository you know. The tour only reads it: nothing in your checkout changes.",
-    tryIt: { signal: "projectAdded", waiting: "Waiting for a project", done: "Project added" },
-  },
-  {
-    id: "fr.lead",
-    path: "firstRun",
-    feature: "lead.dock",
-    since: LEAD_RELEASE,
-    anchor: "lead.dock",
-    side: "top",
-    reveal: "projectBoard",
-    needs: ["server", "project", "lead"],
+    needs: [],
     title: "Meet your Lead Engineer",
     body:
-      "Every project has one, here at the bottom of the board. Tell it what you want. It doesn't write code: " +
-      "it opens a workstream for each piece of work (its own worktree and branch), spawns an agent into it on " +
-      "your default engine, watches it, and merges the PR once it validates.",
+      "Every project gets a Lead Engineer: an engineering lead you talk to. Tell it what you want, and it gets " +
+      "the work done through other agents.\n\nIt never writes code itself. It plans the work, starts an agent for " +
+      "each piece, keeps an eye on them, and comes to you when it needs a decision.",
+    note: "If you’ve only run one agent at a time before, you’ll now ask for outcomes and leave the agents to the Lead.",
+  },
+  {
+    id: "fr.how",
+    path: "firstRun",
+    feature: "lead.how",
+    since: LEAD_RELEASE,
+    anchor: null,
+    side: "bottom",
+    reveal: "none",
+    needs: [],
+    title: "What the Lead does for you",
+    body: "",
+    points: [
+      { title: "Plans", text: "Breaks your request into pieces. Work it hasn’t started waits in a queue you can reorder." },
+      {
+        title: "Starts the work",
+        text:
+          "Gives each piece a workstream, with its own worktree and branch, and spawns an agent there with a " +
+          "written brief, on your default engine.",
+      },
+      { title: "Watches", text: "Follows every agent. When one has a question, the Lead brings it to you." },
+      { title: "Lands it", text: "Checks the result, merges the PR once it validates, and archives the workstream." },
+    ],
+    note:
+      "Next you’ll open the Lead, give it one small read-only job, and watch it start an agent, follow it and " +
+      "report back. Nothing in your checkout changes. It takes about 3 minutes.",
+  },
+  {
+    id: "fr.open",
+    path: "firstRun",
+    feature: "lead.open",
+    since: LEAD_RELEASE,
+    anchor: "sidebar.project",
+    side: "right",
+    reveal: "none",
+    needs: ["server", "project", "lead"],
+    title: "Open your project’s Lead",
+    body:
+      "Each project in the sidebar has its own Lead. Click the project’s name to open its board: the Lead’s dock " +
+      "sits at the bottom. From anywhere in the project, {chord:lead.open} opens the Lead’s chat.\n\nThe " +
+      "project’s icon glows amber when the Lead, or one of its agents, needs you.",
+    tryIt: { signal: "leadOpened", waiting: "Click the project in the sidebar", done: "The Lead’s dock is open" },
   },
   {
     id: "fr.prompt",
     path: "firstRun",
     feature: "lead.prompt",
     since: LEAD_RELEASE,
-    anchor: "lead.dock.input",
+    anchor: "lead.dock",
+    also: { anchor: "lead.dock.header", label: "Click the title line or the arrow to expand" },
     side: "top",
     reveal: "projectBoard",
     needs: ["server", "project", "lead", "engine"],
-    title: "Give it something small",
-    body: "Start with a job that only reads. The Lead makes a scratch worktree for it, so your checkout stays as it is.",
+    title: "Talk to the Lead here",
+    body:
+      "This bar at the bottom of the board is the Lead’s dock. Ask it for work in plain words, and it replies " +
+      "here.\n\nTo see the whole conversation, click the dock’s title line or the arrow at its right end. That " +
+      "opens the full chat.\n\nStart with a job that only reads. The Lead gives it a scratch worktree, so your " +
+      "checkout stays as it is.",
     tryIt: {
       signal: "leadMessageSent",
       waiting: "Waiting for you to press Send",
-      done: "Sent. The Lead is reading the project.",
+      done: "Sent. The Lead is planning.",
       prompt: SAFE_FIRST_TASK,
       promptLabel: "Put it in the Lead’s box",
     },
+  },
+  {
+    id: "fr.expand",
+    path: "firstRun",
+    feature: "lead.expand",
+    since: LEAD_RELEASE,
+    anchor: "lead.dock.expand",
+    side: "top",
+    reveal: "projectBoard",
+    needs: ["server", "project", "lead"],
+    title: "Open the full chat",
+    body:
+      "The dock shows the Lead’s latest line. Click that line, or the arrow, to open the whole conversation with " +
+      "the Lead panel beside it.\n\nEsc shrinks it back to the dock.",
+    tryIt: { signal: "leadExpanded", waiting: "Waiting for you to open the chat", done: "The full chat is open" },
   },
   {
     id: "fr.handoff",
@@ -110,9 +180,9 @@ export const STEPS: TourStep[] = [
     needs: ["server", "project", "lead", "leadPanel"],
     title: "It plans, then hands off",
     body:
-      "The Lead opens a workstream and spawns an agent into it. This panel shows its Queue, what’s Running and " +
-      "how far each piece has got. Drag a queued item’s handle to reorder it, or remove it to cancel it. " +
-      "Drag the panel’s edge to resize it; {chord:view.toggleLeadPanel} hides it.",
+      "The Lead opens a workstream and spawns an agent into it. Running shows each piece and how far it has got: " +
+      "plan, build, validate, merged.\n\nPlanned work waits in Queue. Drag an item, or focus it and press ↑ or ↓, " +
+      "to reorder it; remove it to cancel. Drag the panel’s edge to resize it; {chord:view.toggleLeadPanel} hides it.",
     tryIt: { signal: "agentSpawned", waiting: "Waiting for the Lead to spawn an agent", done: "Agent spawned" },
   },
   {
@@ -124,57 +194,50 @@ export const STEPS: TourStep[] = [
     side: "bottom",
     reveal: "tourAgentTab",
     needs: ["server", "project"],
-    title: "Agents work in their own tabs",
+    title: "Each agent works in its own tab",
     body:
-      "Open one to watch it. It runs on your default engine and in your permission mode, bypass included. " +
-      "Messages from the Lead are marked “from Lead Engineer”. If the agent has a question, it goes to the " +
-      "Lead, and the Lead brings it to you.",
+      "Open it to watch. The first message is the Lead’s brief, marked “from Lead Engineer”: the job, the limits, " +
+      "and how to report back.\n\nThe agent runs on your default engine, in your permission mode. When it has a " +
+      "question, it asks the Lead, and the Lead asks you.",
+  },
+  {
+    id: "fr.stats",
+    path: "firstRun",
+    feature: "lead.panel.host",
+    since: LEAD_RELEASE,
+    anchor: "lead.panel.host",
+    also: { anchor: "statusbar.server", label: "The same numbers, a click away" },
+    side: "left",
+    reveal: "leadExpanded",
+    needs: ["server", "project", "lead", "leadPanel"],
+    title: "See what the server is carrying",
+    body:
+      "Every agent runs on one server. Stats counts live agents against the Lead’s limit, with workstreams and " +
+      "open PRs.\n\nHost shows the server itself. CPU is how busy it is right now. Memory is what’s in use, with " +
+      "cache in the paler part. Swap climbs when memory runs out. When memory stays full or swap climbs, start " +
+      "fewer agents.\n\nClick the Server button in the status bar for the same numbers. To keep them on the button, " +
+      "turn on Show server stats in status bar in quick settings.",
   },
   {
     id: "fr.report",
     path: "firstRun",
     feature: "lead.report",
     since: LEAD_RELEASE,
-    anchor: "lead.dock",
-    side: "top",
-    reveal: "projectBoard",
-    needs: ["server", "project", "lead"],
-    title: "It reports back, and asks",
-    body:
-      "When the agent finishes, the Lead reads its result and answers here. It asks before it archives a " +
-      "workstream, unless you run in bypass mode. Next time, ask for a real change: it’ll open a PR and merge " +
-      "it once it validates.",
-    tryIt: { signal: "leadAnswered", waiting: "Answer the Lead’s question", done: "The workstream is archived" },
-  },
-  {
-    id: "wn.panel",
-    path: "whatsNew",
-    feature: "lead.panel.resize",
-    since: LEAD_RELEASE,
-    anchor: "lead.panel.edge",
+    anchor: "lead.panel.running",
     side: "left",
     reveal: "leadExpanded",
     needs: ["server", "project", "lead", "leadPanel"],
-    title: "Resize the Lead panel, or hide it",
+    title: "It reports back, then tidies up",
     body:
-      "Drag this edge to give the chat more room. {chord:view.toggleLeadPanel} or the panel button in the top " +
-      "bar hides the panel and brings it back. It now ends with live host meters.",
-    tryIt: { signal: "leadPanelAdjusted", waiting: "Press the shortcut, or drag the edge", done: "Panel adjusted" },
-  },
-  {
-    id: "wn.queue",
-    path: "whatsNew",
-    feature: "lead.queue",
-    since: LEAD_RELEASE,
-    anchor: "lead.panel.queue",
-    side: "left",
-    reveal: "leadExpanded",
-    needs: ["server", "project", "lead", "leadPanel"],
-    title: "The queue is yours to edit",
-    body:
-      "Planned work the Lead hasn’t started waits here. Drag an item’s handle, or focus it and press ↑ and ↓, " +
-      "to change the order. Remove an item and it’s cancelled: the Lead checks the queue again right before it " +
-      "starts anything.",
+      "When the agent finishes, the Lead reads its result and sums it up in the chat. Then it archives the " +
+      "workstream, which leaves Running. It asks first, unless you run in bypass mode.\n\nNext time, ask for a " +
+      "real change. The Lead opens a PR for it and merges it once it validates.",
+    note: FIRST_RUN_TAIL,
+    tryIt: {
+      signal: "leadAnswered",
+      waiting: "Answer the Lead’s question in the chat",
+      done: "The workstream is archived",
+    },
   },
   {
     id: "wn.remote",
@@ -216,27 +279,35 @@ export const STEPS: TourStep[] = [
     needs: [],
     title: "Your server, at a glance",
     body:
-      "The app is a client of a hyprlayer-server, on this machine or over ssh. The Server button shows that " +
-      "host’s CPU, memory and running agents; click it for detail or to switch servers. Turn the stats off in " +
-      "quick settings.",
+      "The app is a client of a hyprlayer-server, on this machine or over ssh. Click the Server button for that " +
+      "host’s CPU, memory and running agents, or to switch servers. Turn on Show server stats in status bar, in " +
+      "quick settings, to keep them on the button.",
   },
 ];
 
+/** The what's-new card's lead-in per version: what a user upgrading from it has never seen. */
+export const CARD_INTRO: Record<string, { title: string; body: string; note: string }> = {
+  [LEAD_RELEASE]: {
+    title: "Meet the Lead Engineer",
+    body:
+      "Every project now has a Lead Engineer: an engineering lead you talk to. Say what you want. It plans the " +
+      "work, starts agents in their own workstreams, brings you their questions, and merges what validates. It " +
+      "never writes code itself.",
+    note: "One small read-only job. Nothing in your checkout changes.",
+  },
+};
+
 /** The card's one-liners per step, and its "Also" line per version: no step, no anchor. */
 export const CARD_LINES: Record<string, string> = {
-  "wn.panel": "Queue, Running, Stats and host meters, beside the Lead’s chat.",
-  "wn.queue": "Drag to reorder planned work; remove an item to cancel it.",
   "wn.remote": "Reach the Lead from the Claude app on your phone.",
   "wn.resume": "In their own tabs, mid-conversation.",
-  "wn.server": "Host stats in the status bar; switch servers from the same menu.",
+  "wn.server": "CPU, memory and agents for the server you’re on.",
 };
 
 export const CARD_TITLES: Record<string, string> = {
-  "wn.panel": "A Lead panel you can resize and hide",
-  "wn.queue": "Reorder or cancel queued work",
   "wn.remote": "Remote Control",
-  "wn.resume": "Agents resume after a server restart",
-  "wn.server": "Host stats in the Server button",
+  "wn.resume": "Agents resume after a restart",
+  "wn.server": "Server stats in the status bar",
 };
 
 export const ALSO_NEW: Record<string, string> = {
