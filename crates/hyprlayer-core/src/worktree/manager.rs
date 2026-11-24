@@ -454,8 +454,12 @@ impl WorktreeManager {
             let _ = git_in(git, project_repo, &["worktree", "prune"], &overlay)
                 .run()
                 .await;
-            if worktree.exists() {
-                let _ = std::fs::remove_dir_all(worktree);
+            let holds_files = std::fs::read_dir(worktree).is_ok_and(|mut d| d.next().is_some());
+            if holds_files {
+                prepare_archive_destination(dest)?;
+                std::fs::rename(worktree, dest)?;
+            } else {
+                let _ = std::fs::remove_dir(worktree);
             }
             return Ok(false);
         }

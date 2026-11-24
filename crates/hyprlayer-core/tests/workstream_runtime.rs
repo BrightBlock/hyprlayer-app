@@ -1135,6 +1135,38 @@ async fn set_base_branch_refuses_a_base_that_git_would_read_as_an_option() {
     );
 }
 
+#[tokio::test]
+async fn archive_keeps_a_worktree_folder_that_lost_its_dot_git() {
+    let (f, repo) = fixture(Some(0)).await;
+    let ws = f.runtime.workstreams();
+    let created = ws
+        .create(isolated_request(&repo, "No Dot Git"))
+        .await
+        .unwrap();
+    let worktree = PathBuf::from(&created.item.worktree_path);
+    std::fs::write(worktree.join("notes.txt"), "a day of uncommitted work\n").unwrap();
+    std::fs::remove_file(worktree.join(".git")).unwrap();
+
+    let archived = ws
+        .archive(ArchiveWorkstreamRequest {
+            id: created.item.id.clone(),
+            skip_scripts: true,
+        })
+        .await;
+    let archive_path = archive_dir_for(&repo, &created.item.slug);
+    let survived = worktree.join("notes.txt").exists() || archive_path.join("notes.txt").exists();
+    f.runtime.shutdown().await;
+    assert!(
+        survived,
+        "archive -> {:?}; notes.txt is in neither {} (exists: {}) nor {} (exists: {})",
+        archived.map(|w| w.status),
+        worktree.display(),
+        worktree.exists(),
+        archive_path.display(),
+        archive_path.exists()
+    );
+}
+
 fn write_fake_gh_answering(
     root: &Path,
     number: u32,
