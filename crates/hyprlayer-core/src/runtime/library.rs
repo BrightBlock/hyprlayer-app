@@ -456,6 +456,11 @@ impl LibraryService<'_> {
             tags: req.tags,
         };
         let doc = new_doc(&template);
+        if doc.file_name.contains(['/', '\\']) {
+            return Err(CoreError::DocOutsideRoots {
+                path: doc.file_name,
+            });
+        }
 
         let abs = dir.join(&doc.file_name);
         if abs.exists() {

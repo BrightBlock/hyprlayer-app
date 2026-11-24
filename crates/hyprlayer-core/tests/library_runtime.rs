@@ -462,3 +462,21 @@ async fn thoughts_git_status_declines_a_backend_that_does_not_sync_through_git()
 
     f.runtime.shutdown().await;
 }
+
+#[tokio::test]
+async fn create_refuses_a_date_that_escapes_the_thoughts_tree() {
+    let fx = fixture().await;
+    let outside = fx._dir.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let mut req = plan_request("Escape");
+    req.date = "../../../../outside/pwn".into();
+
+    let result = fx.runtime.library().create(req).await;
+
+    assert!(
+        matches!(result, Err(CoreError::DocOutsideRoots { .. })),
+        "{result:?}"
+    );
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
+    fx.runtime.shutdown().await;
+}
