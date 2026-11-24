@@ -691,6 +691,41 @@ async fn repeated_attach_and_drop_does_not_leak_attachment_state() {
 }
 
 #[tokio::test]
+async fn an_attach_says_when_the_open_turn_began() {
+    let db = Arc::new(Db::open_in_memory().unwrap());
+    seed_session(&db, "s1");
+    let handle = SessionRuntimeHandle::new(db.clone());
+    assert_eq!(
+        handle.attach("s1", false).await.unwrap().turn_started_at,
+        None
+    );
+
+    let ingress = handle.ingress("s1").await;
+    let before = hyprlayer_core::store::now_ms();
+    ingress
+        .send(SessionEvent::UserMessage {
+            text: "run it".into(),
+            stage: None,
+            prompt_name: None,
+            client_message_id: Some("m1".into()),
+            author: None,
+        })
+        .await
+        .unwrap();
+    wait_for_log_len(&db, "s1", 1).await;
+    let mid_turn = handle.attach("s1", false).await.unwrap();
+    let started = mid_turn.turn_started_at.expect("a turn is open");
+    assert!(started >= before && started <= hyprlayer_core::store::now_ms());
+
+    ingress.send(turn_done(0.0)).await.unwrap();
+    wait_for_log_len(&db, "s1", 2).await;
+    assert_eq!(
+        handle.attach("s1", false).await.unwrap().turn_started_at,
+        None
+    );
+}
+
+#[tokio::test]
 async fn a_user_message_reaches_only_attachments_that_opted_in() {
     let db = Arc::new(Db::open_in_memory().unwrap());
     seed_session(&db, "s1");

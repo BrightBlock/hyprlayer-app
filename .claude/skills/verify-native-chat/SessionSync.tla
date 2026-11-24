@@ -6,6 +6,9 @@
    flush, skip), pullNow over list_turns pages, mergeEntries and trimHeld; and the
    actor's lifetime: the harness ending and resuming, the desktop closing and
    reopening the session (attach_from its cursor), and an idle actor retiring.
+   Rows open and close turns: the actor's in_turn follows them, and the view's working
+   state follows the rows it folds; a reopen seeds it from the actor's in_turn, which
+   resume_session returns as turn_started_at.
    SKILL.md maps every action to the code. *)
 EXTENDS Integers, Sequences
 
@@ -34,11 +37,16 @@ VARIABLES
   actor,      \* the session's actor runs
   viewing,    \* the desktop has the session open (an attachment, or one on its way)
   reopens,
-  lost        \* the relay sent an event to an actor that had retired
+  lost,       \* the relay sent an event to an actor that had retired
+  kind,       \* kind[s]: "open" (a user message), "close" (turnDone or an exit) or "item"
+  inTurn,     \* the actor's in_turn
+  vWorking    \* the view shows the turn working (streaming)
 
 vars == <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-          held, pull, lags, skipped, harness, actor, viewing, reopens, lost>>
+          held, pull, lags, skipped, harness, actor, viewing, reopens, lost,
+          kind, inTurn, vWorking>>
 lifeVars == <<harness, actor, viewing, reopens, lost>>
+turnVars == <<kind, inTurn, vWorking>>
 
 Init ==
   /\ next = 0 /\ author = [s \in Seqs |-> "own"]
@@ -46,11 +54,23 @@ Init ==
   /\ wire = <<>> /\ applied = -1 /\ appliedSet = {}
   /\ held = <<>> /\ pull = "none" /\ lags = 0 /\ skipped = FALSE
   /\ harness = TRUE /\ actor = TRUE /\ viewing = TRUE /\ reopens = 0 /\ lost = FALSE
+  /\ kind = [s \in Seqs |-> "item"] /\ inTurn = FALSE /\ vWorking = FALSE
+
+\* The view's working state after folding `rows` in order: the last open or close decides.
+RECURSIVE WorkingAfter(_, _)
+WorkingAfter(w, rows) ==
+  IF rows = <<>> THEN w
+  ELSE WorkingAfter(CASE kind[Head(rows)] = "open" -> TRUE
+                      [] kind[Head(rows)] = "close" -> FALSE
+                      [] OTHER -> w, Tail(rows))
 
 \* handle_event: store at seq `next`, then deliver to the attachment.
 Store ==
   /\ next < N /\ harness /\ actor
   /\ \E who \in {"own", "other"} : author' = [author EXCEPT ![next] = who]
+  /\ \E k \in {"open", "close", "item"} :
+       /\ kind' = [kind EXCEPT ![next] = k]
+       /\ inTurn' = CASE k = "open" -> TRUE [] k = "close" -> FALSE [] OTHER -> inTurn
   /\ next' = next + 1
   /\ IF detached
        THEN UNCHANGED <<att, lastQueued, detached, lags>>
@@ -62,7 +82,7 @@ Store ==
             att' = Append(att, <<"lagged", lastQueued>>) /\ detached' = TRUE
             /\ lags' = lags + 1 /\ UNCHANGED lastQueued
        ELSE FALSE
-  /\ UNCHANGED <<wire, applied, appliedSet, held, pull, skipped, lifeVars>>
+  /\ UNCHANGED <<wire, applied, appliedSet, held, pull, skipped, lifeVars, vWorking>>
 
 RECURSIVE Range(_, _)
 Range(lo, hi) == IF lo > hi THEN <<>> ELSE <<lo>> \o Range(lo + 1, hi)
@@ -79,7 +99,7 @@ Forward ==
             /\ wire' = wire \o replay
             /\ att' = <<>> /\ detached' = FALSE
             /\ lastQueued' = IF replay = <<>> THEN f[2] ELSE next - 1
-  /\ UNCHANGED <<next, author, applied, appliedSet, held, pull, lags, skipped, lifeVars>>
+  /\ UNCHANGED <<next, author, applied, appliedSet, held, pull, lags, skipped, lifeVars, turnVars>>
 
 \* dispatch -> route: skip what is already folded in, hold another device's item, and on
 \* this desktop's own item apply the held queue first (flush).
@@ -88,20 +108,20 @@ Receive ==
   /\ LET s == Head(wire) IN
      /\ wire' = Tail(wire)
      /\ CASE s <= applied ->
-               UNCHANGED <<applied, appliedSet, held, skipped>>
+               UNCHANGED <<applied, appliedSet, held, skipped, vWorking>>
           [] held /= <<>> /\ author[s] = "own" ->
                LET run == held \o <<s>> IN
                /\ skipped' = (skipped \/ \E i \in 1..Len(run) :
                                  run[i] > (IF i = 1 THEN applied ELSE run[i - 1]) + 1)
                /\ applied' = s /\ appliedSet' = appliedSet \cup {run[i] : i \in 1..Len(run)}
-               /\ held' = <<>>
+               /\ held' = <<>> /\ vWorking' = WorkingAfter(vWorking, run)
           [] held /= <<>> \/ author[s] = "other" ->
-               held' = Append(held, s) /\ UNCHANGED <<applied, appliedSet, skipped>>
+               held' = Append(held, s) /\ UNCHANGED <<applied, appliedSet, skipped, vWorking>>
           [] OTHER ->
                /\ skipped' = (skipped \/ s > applied + 1)
                /\ applied' = s /\ appliedSet' = appliedSet \cup {s}
-               /\ held' = held
-  /\ UNCHANGED <<next, author, att, lastQueued, detached, pull, lags, lifeVars>>
+               /\ held' = held /\ vWorking' = WorkingAfter(vWorking, <<s>>)
+  /\ UNCHANGED <<next, author, att, lastQueued, detached, pull, lags, lifeVars, kind, inTurn>>
 
 \* pullNow: list_turns after the view's cursor, one page; the read is one actor turn.
 PullRead ==
@@ -109,7 +129,7 @@ PullRead ==
   /\ LET hi == IF applied + PageLimit < next - 1 THEN applied + PageLimit ELSE next - 1 IN
      pull' = <<Range(applied + 1, hi), next - 1 - hi>>
   /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-                 held, lags, skipped, lifeVars>>
+                 held, lags, skipped, lifeVars, turnVars>>
 
 \* mergeEntries keeps rows past appliedSeq; trimHeld drops held items it covered; a page
 \* with rows remaining pulls again.
@@ -124,50 +144,55 @@ PullApply ==
      /\ appliedSet' = appliedSet \cup {fresh[i] : i \in 1..Len(fresh)}
      /\ held' = SelectSeq(held, LAMBDA s : s > top)
      /\ pull' = "none"
-  /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, lags, lifeVars>>
+     /\ vWorking' = WorkingAfter(vWorking, fresh)
+  /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, lags, lifeVars, kind, inTurn>>
 
 \* The harness exits: its relay ends and drops the actor's ingress.
+\* Its exit row closes any open turn, so the harness ends outside one.
 End ==
-  /\ harness /\ harness' = FALSE
+  /\ harness /\ ~inTurn /\ harness' = FALSE
   /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-                 held, pull, lags, skipped, actor, viewing, reopens, lost>>
+                 held, pull, lags, skipped, actor, viewing, reopens, lost, turnVars>>
 
 \* launch_driver: the relay takes `ingress()`, which spawns an actor if none runs.
 Resume ==
   /\ ~harness /\ next < N
   /\ harness' = TRUE /\ actor' = TRUE
   /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-                 held, pull, lags, skipped, viewing, reopens, lost>>
+                 held, pull, lags, skipped, viewing, reopens, lost, turnVars>>
 
 \* The tab closes: its stream and any page in flight are dropped; the entry keeps what it folded.
 Close ==
   /\ viewing /\ viewing' = FALSE
   /\ att' = <<>> /\ detached' = TRUE /\ wire' = <<>> /\ pull' = "none"
   /\ UNCHANGED <<next, author, lastQueued, applied, appliedSet, held, lags, skipped,
-                 harness, actor, reopens, lost>>
+                 harness, actor, reopens, lost, turnVars>>
 
 \* An idle actor retires (Control::Retire): no attachment, and no relay holding its ingress.
 Retire ==
   /\ actor /\ ~viewing /\ ~harness
   /\ actor' = FALSE
   /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-                 held, pull, lags, skipped, harness, viewing, reopens, lost>>
+                 held, pull, lags, skipped, harness, viewing, reopens, lost, turnVars>>
 
 \* A relay still feeding a retired actor: its send fails and the event is never stored.
 Lose ==
   /\ harness /\ ~actor /\ next < N /\ ~lost
   /\ lost' = TRUE
   /\ UNCHANGED <<next, author, att, lastQueued, detached, wire, applied, appliedSet,
-                 held, pull, lags, skipped, harness, actor, viewing, reopens>>
+                 held, pull, lags, skipped, harness, actor, viewing, reopens, turnVars>>
 
 \* The tab opens again: attach_from(cursor) on the actor, spawned again if it retired, replays the
-\* log after the view's cursor and registers a fresh attachment in the same actor turn.
+\* log after the view's cursor and registers a fresh attachment in the same actor turn. Its reply
+\* says whether a turn is open there (turn_started_at), and the view takes that before the replay.
 Reopen ==
   /\ ~viewing /\ reopens < MaxReopens
   /\ viewing' = TRUE /\ actor' = TRUE /\ reopens' = reopens + 1
   /\ wire' = Range(applied + 1, next - 1)
   /\ att' = <<>> /\ detached' = FALSE /\ lastQueued' = next - 1
-  /\ UNCHANGED <<next, author, applied, appliedSet, held, pull, lags, skipped, harness, lost>>
+  /\ vWorking' = inTurn
+  /\ UNCHANGED <<next, author, applied, appliedSet, held, pull, lags, skipped, harness, lost,
+                 kind, inTurn>>
 
 Quiet == next = N /\ att = <<>> /\ wire = <<>> /\ pull = "none"
 
@@ -186,6 +211,11 @@ NoSkippedSeq == ~skipped
 ClientsConverge ==
   (Quiet /\ viewing) => (appliedSet = Seqs \/ held /= <<>>)
 
+\* Once everything has landed, an open view with nothing held shows a turn working exactly
+\* when the actor has one open, including after a reopen whose replay carried no row.
+ReopenShowsTurn ==
+  (Quiet /\ viewing /\ held = <<>>) => vWorking = inTurn
+
 \* No event a live harness emits is lost to a retired actor.
 NoLostEvent == ~lost
 
@@ -193,4 +223,5 @@ TypeOK ==
   /\ next \in 0..N /\ applied \in -1..(N - 1) /\ appliedSet \subseteq Seqs
   /\ detached \in BOOLEAN /\ skipped \in BOOLEAN
   /\ harness \in BOOLEAN /\ actor \in BOOLEAN /\ viewing \in BOOLEAN /\ lost \in BOOLEAN
+  /\ inTurn \in BOOLEAN /\ vWorking \in BOOLEAN
 =============================================================================

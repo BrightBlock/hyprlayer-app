@@ -542,10 +542,13 @@ RelayResend ==
                    delivered, lastEnd, executing, foreign, pending, closed, older, doneOwed, stopCancels,
                    live, inTurn, nextTurn, stored, failed, held, dropped, viewVars, ruleVars>>
 
+\* The attach's reply says whether the forwarder's turn is open (turn_started_at); the view
+\* shows it working unless an ask parks it, as restoredView does.
 ClientReload ==
   /\ vLive /\ live
   /\ vOpen' = pending \cap stored
-  /\ UNCHANGED <<ocVars, drvVars, svcVars, vLive, streaming, clicked, sends, chip, stopped, ruleVars>>
+  /\ streaming' = (inTurn /\ pending \cap stored = {})
+  /\ UNCHANGED <<ocVars, drvVars, svcVars, vLive, clicked, sends, chip, stopped, ruleVars>>
 
 (* ---- the rules ---- *)
 

@@ -416,11 +416,14 @@ RelayResend ==
 
 \* A tail read: list_turns re-sends the stored asks pending_requests names; settleUnwaitedAsks
 \* closes the rest.
+\* The attach's reply says whether the forwarder's turn is open (turn_started_at); the view
+\* shows it working unless an ask parks it, as restoredView does.
 ClientReload ==
   /\ vLive /\ live
   /\ vSeq' = SetToSeq(pending \cap stored)
+  /\ streaming' = (inTurn /\ pending \cap stored = {})
   /\ UNCHANGED <<heldVars, codexVars, driverVars, live, procs, exits, inTurn, stored,
-                 vLive, streaming, clicked, chip, sends, accepted, failed, delivered,
+                 vLive, clicked, chip, sends, accepted, failed, delivered,
                  interrupts, droppedStop>>
 
 \* The desktop window reloads, as in SessionTurns: the view refolds and the kept sends come back.

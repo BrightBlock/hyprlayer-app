@@ -1300,6 +1300,8 @@ async function resumeOnce(
       permissionMode = result.permissionMode;
       harness = result.session.harness;
       goal = result.session.goal;
+      // Before the buffered events: a turnDone among them closes the turn again.
+      showOpenTurn(sessionId, result.turnStartedAt ?? null);
       activate(sessionId);
       break;
     } catch (e) {
@@ -1340,6 +1342,15 @@ async function resumeOnce(
     });
     if (opts.flush !== false) flushQueuedMessage(sessionId);
   }
+}
+
+// The log can't say whether its last turn still runs; the attach can. A view parked on an ask
+// stays parked rather than showing a running turn.
+function showOpenTurn(sessionId: string, startedAt: number | null): void {
+  const entry = entryOf(sessionId);
+  if (startedAt === null || !entry || isTerminal(entry.state)) return;
+  if (entry.pendingQuestion !== null || hasPendingPermission(entry)) return;
+  setEntry(sessionId, { ...entry, streaming: true, state: "running" }, { at: startedAt });
 }
 
 async function restartSession(

@@ -1875,6 +1875,8 @@ export type ResolvedBranchPrefixes = {
 export type ResumedSession = {
 	session: Session,
 	permissionMode: PermissionMode | null,
+	/**  When the turn open at the attach began; null when none is, or from a server before it. */
+	turnStartedAt: number | null,
 };
 
 export type RevealTarget = { kind: "doc"; path: string } | { kind: "file"; path: string } | { kind: "diff"; path: string };

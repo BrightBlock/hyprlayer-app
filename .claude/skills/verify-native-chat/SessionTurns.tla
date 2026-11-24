@@ -404,11 +404,14 @@ RelayResend ==
 \* A tail read refolds the log: list_turns re-sends the stored asks open_request_ids
 \* (pending_requests) names, even when their results lie outside the page, and
 \* settleUnwaitedAsks closes every other one.
+\* The attach's reply says whether the forwarder's turn is open (turn_started_at); the view
+\* shows it working unless an ask parks it, as restoredView does.
 ClientReload ==
   /\ vLive /\ live
   /\ vOpen' = pending \cap stored
+  /\ streaming' = (inTurn /\ pending \cap stored = {})
   /\ UNCHANGED <<heldVars, claudeVars, driverVars, live, procs, exits, inTurn, stored,
-                 vLive, streaming, clicked, chip, sends, accepted, failed, delivered,
+                 vLive, clicked, chip, sends, accepted, failed, delivered,
                  interrupts, droppedStop>>
 
 \* The desktop window reloads: its view refolds from the log (open asks as in ClientReload; an

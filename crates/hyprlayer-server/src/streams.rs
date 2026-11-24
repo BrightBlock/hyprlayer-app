@@ -166,6 +166,15 @@ pub enum StreamRequest {
     },
 }
 
+pub struct ResumedStream {
+    pub session: Session,
+    pub permission_mode: Option<PermissionMode>,
+    pub stream_id: u64,
+    /// When the turn open at the attach began; None when none is.
+    pub turn_started_at: Option<f64>,
+    pub events: EventStream<SessionEvent>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StreamResponse {
@@ -185,6 +194,9 @@ pub enum StreamResponse {
         stream_id: u64,
         #[serde(default)]
         permission_mode: Option<PermissionMode>,
+        /// When the turn open at the attach began; a server before it sends none.
+        #[serde(default)]
+        turn_started_at: Option<f64>,
     },
     StartStageSession {
         session: Session,
@@ -961,20 +973,20 @@ pub(crate) async fn prepare_stream(
 
             if sessions.is_live(&session_id).await {
                 // Another client may be mid-turn; changing modes is restart_session's job.
-                let (replay, live, rev) = match cursor {
+                let (replay, live, rev, turn_started_at) = match cursor {
                     Some(c) => {
                         let a = sessions
                             .attach_from(&session_id, c, echo_user_messages)
                             .await
                             .wire()?;
-                        (a.replay, a.live, a.rev)
+                        (a.replay, a.live, a.rev, a.turn_started_at)
                     }
                     None => {
                         let a = sessions
                             .attach(&session_id, echo_user_messages)
                             .await
                             .wire()?;
-                        (Vec::new(), a.live, a.rev)
+                        (Vec::new(), a.live, a.rev, a.turn_started_at)
                     }
                 };
                 let running = sessions.permission_mode(&session_id).await;
@@ -984,6 +996,7 @@ pub(crate) async fn prepare_stream(
                         session,
                         stream_id,
                         permission_mode: running,
+                        turn_started_at,
                     },
                     Some(StreamSource::Session {
                         session_id,
@@ -1006,20 +1019,20 @@ pub(crate) async fn prepare_stream(
             // The relaunch replays too, for uniformity: a session that exited in
             // the gap between the client's log read and this resume ends with
             // `Exited` on the stream rather than silently vanishing.
-            let (replay, live, rev) = match cursor {
+            let (replay, live, rev, turn_started_at) = match cursor {
                 Some(c) => {
                     let a = sessions
                         .attach_from(&session_id, c, echo_user_messages)
                         .await
                         .wire()?;
-                    (a.replay, a.live, a.rev)
+                    (a.replay, a.live, a.rev, a.turn_started_at)
                 }
                 None => {
                     let a = sessions
                         .attach(&session_id, echo_user_messages)
                         .await
                         .wire()?;
-                    (Vec::new(), a.live, a.rev)
+                    (Vec::new(), a.live, a.rev, a.turn_started_at)
                 }
             };
             let stream_id = server.streams().next_id();
@@ -1045,6 +1058,7 @@ pub(crate) async fn prepare_stream(
                     session,
                     stream_id,
                     permission_mode: running,
+                    turn_started_at,
                 },
                 Some(StreamSource::Session {
                     session_id,
@@ -1105,6 +1119,7 @@ pub(crate) async fn prepare_stream(
                     session,
                     stream_id,
                     permission_mode: running,
+                    turn_started_at: attachment.turn_started_at,
                 },
                 Some(StreamSource::Session {
                     session_id,
@@ -1963,6 +1978,21 @@ impl RpcClient {
         ),
         WireError,
     > {
+        let r = self
+            .resume_session_attach(session_id, model, effort, permission_mode, cursor)
+            .await?;
+        Ok((r.session, r.permission_mode, r.stream_id, r.events))
+    }
+
+    /// `resume_session_stream`, with when the turn open at the attach began.
+    pub async fn resume_session_attach(
+        &self,
+        session_id: String,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: Option<PermissionMode>,
+        cursor: Option<LogCursor>,
+    ) -> Result<ResumedStream, WireError> {
         let (response, rx) = self
             .call_stream(StreamRequest::ResumeSession {
                 session_id,
@@ -1980,12 +2010,14 @@ impl RpcClient {
                 session,
                 stream_id,
                 permission_mode,
-            } => Ok((
+                turn_started_at,
+            } => Ok(ResumedStream {
                 session,
                 permission_mode,
                 stream_id,
-                EventStream::new(expect_stream(rx, "resume_session")?),
-            )),
+                turn_started_at,
+                events: EventStream::new(expect_stream(rx, "resume_session")?),
+            }),
             other => Err(unexpected("resume_session", &other)),
         }
     }
@@ -2021,6 +2053,7 @@ impl RpcClient {
                 session,
                 stream_id,
                 permission_mode,
+                ..
             } => Ok((
                 session,
                 permission_mode,

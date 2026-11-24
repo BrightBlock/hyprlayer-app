@@ -473,6 +473,8 @@ struct ActorState {
     foreign_floor: u64,
     rev_by_author: HashMap<String, u64>,
     in_turn: bool,
+    /// When the open turn began; an attach hands it on, so a reloaded view shows the turn.
+    turn_since: Option<f64>,
     turn_author: Option<ClientRef>,
     /// A message that arrived mid-turn, and its author; opens the next turn on its first item.
     next_turn: Option<Option<ClientRef>>,
@@ -563,6 +565,7 @@ impl ActorState {
             foreign_floor: snapshot.foreign_floor,
             rev_by_author: snapshot.rev_by_author,
             in_turn: false,
+            turn_since: None,
             turn_author: None,
             next_turn: None,
             riders: Vec::new(),
@@ -637,6 +640,7 @@ impl ActorState {
             replay,
             live,
             rev: self.rev,
+            turn_started_at: self.turn_started_at(),
         })
     }
 
@@ -732,6 +736,7 @@ impl ActorState {
             replay,
             live,
             rev: self.rev,
+            turn_started_at: self.turn_started_at(),
         }
     }
 
@@ -1158,8 +1163,7 @@ impl ActorState {
             // A parked message's turn opens with its first item, if the harness didn't merge it.
             if !self.in_turn && event.turn_kind().is_some() {
                 if let Some(parked) = self.next_turn.take() {
-                    self.in_turn = true;
-                    self.turn_author = parked;
+                    self.open_turn(parked);
                 }
             }
             return self.current_author();
@@ -1176,8 +1180,7 @@ impl ActorState {
             // The running turn keeps its author; the harness may answer this after it or with it.
             self.next_turn = Some(author.clone());
         } else {
-            self.in_turn = true;
-            self.turn_author = author.clone();
+            self.open_turn(author.clone());
             self.next_turn = None;
         }
         author
@@ -1213,6 +1216,16 @@ impl ActorState {
         }
     }
 
+    fn open_turn(&mut self, author: Option<ClientRef>) {
+        self.in_turn = true;
+        self.turn_since = Some(crate::store::now_ms());
+        self.turn_author = author;
+    }
+
+    fn turn_started_at(&self) -> Option<f64> {
+        self.turn_since.filter(|_| self.in_turn)
+    }
+
     fn current_author(&self) -> Option<ClientRef> {
         self.turn_author.clone().filter(|_| self.in_turn)
     }
@@ -1220,6 +1233,7 @@ impl ActorState {
     /// Always closes: a parked mid-turn author waits for its turn's first item.
     fn close_turn(&mut self, exited: bool) {
         self.in_turn = false;
+        self.turn_since = None;
         self.turn_author = None;
         if exited {
             self.next_turn = None;
@@ -1316,6 +1330,7 @@ impl ActorState {
         self.rev_by_author.clear();
         self.riders.clear();
         self.in_turn = false;
+        self.turn_since = None;
         self.turn_author = None;
         self.next_turn = None;
         let _ = self.events.send(RuntimeEvent::SessionReset {

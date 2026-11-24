@@ -1,0 +1,53 @@
+{
+  "scenario": "reload_mid_turn",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnOpen": true
+          },
+          "guard": "claude: an attach mid-turn says the turn is open, and since before it",
+          "ok": true
+        }
+      ],
+      "step": "claude: a turn holds a Bash call open"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnOpen": false
+          },
+          "guard": "claude: an attach after the turn ended says none is open",
+          "ok": true
+        }
+      ],
+      "step": "claude: the call returns and the turn ends"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnOpen": true
+          },
+          "guard": "opencode: an attach mid-turn says the turn is open, and since before it",
+          "ok": true
+        }
+      ],
+      "step": "opencode: a run holds its reply"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "turnOpen": false
+          },
+          "guard": "opencode: an attach after the turn ended says none is open",
+          "ok": true
+        }
+      ],
+      "step": "opencode: the reply lands and the turn ends"
+    }
+  ]
+}

@@ -62,6 +62,8 @@ pub struct StartedSession {
 pub struct ResumedSession {
     pub session: Session,
     pub permission_mode: Option<PermissionMode>,
+    /// When the turn open at the attach began; null when none is, or from a server before it.
+    pub turn_started_at: Option<f64>,
 }
 
 /// `seq`/`rev`/`author` are null for an ephemeral event and for a server without transcript sync.
@@ -293,6 +295,7 @@ pub async fn resume_session(
     let StreamResponse::Session {
         session,
         permission_mode,
+        turn_started_at,
         ..
     } = response
     else {
@@ -302,6 +305,7 @@ pub async fn resume_session(
     Ok(ResumedSession {
         session,
         permission_mode,
+        turn_started_at,
     })
 }
 

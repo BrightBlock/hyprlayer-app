@@ -1199,6 +1199,72 @@ describe("restoring a stored session log", () => {
     return entryOf(id);
   }
 
+  describe("reloaded while a tool runs", () => {
+    const T0 = 1_700_000_200_000;
+    const PROMPT: SessionEvent = { kind: "userMessage", text: "run it", stage: "general" };
+    const SLEEP: SessionEvent = {
+      kind: "toolUse",
+      id: "t1",
+      name: "Bash",
+      input: JSON.stringify({ command: "sleep 20" }),
+      parentId: null,
+    };
+    const midTool = [entry(0, INIT), entry(1, PROMPT), entry(2, SLEEP)];
+
+    // The attach's reply: the turn open there began at `startedAt`, or none is open.
+    function attachReports(startedAt: number | null): void {
+      h.resumeSession.mockImplementationOnce(async (...args: unknown[]) => {
+        h.state.lastChannel = args[args.length - 1] as InstanceType<typeof h.FakeChannel>;
+        return { status: "ok", data: { ...h.RESUMED, turnStartedAt: startedAt } };
+      });
+    }
+
+    it("shows the turn running, timed from when it began", async () => {
+      attachReports(T0);
+      const restored = await restoreLog(midTool, { live: true });
+      expect(restored.streaming).toBe(true);
+      expect(isWorking(restored)).toBe(true);
+      expect(restored.turnSince).toBe(T0);
+    });
+
+    it("queues a message sent before the turn ends", async () => {
+      attachReports(T0);
+      const id = "reload-queue";
+      await restoreLog(midTool, { live: true, id });
+      await sendMessage(id, "later");
+      expect(queued(id)).toEqual(["later"]);
+      expect(h.sendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("times the finished turn from its start, not from the reload", async () => {
+      attachReports(Date.now() - 20_000);
+      const id = "reload-timed";
+      await restoreLog(midTool, { live: true, id });
+      emit(TURN_DONE);
+      expect(isWorking(entryOf(id))).toBe(false);
+      expect(entryOf(id).lastTurn?.ms).toBeGreaterThanOrEqual(20_000);
+      expect(entryOf(id).lastTurn?.ms).toBeLessThan(21_000);
+    });
+
+    it("leaves a session parked on a permission parked, not running", async () => {
+      attachReports(T0);
+      const restored = await restoreLog(
+        [...midTool, entry(3, { kind: "permissionAsk", requestId: "r1", toolName: "Bash", input: "{}" })],
+        { live: true },
+      );
+      expect(restored.state).toBe("awaiting_permission");
+      expect(restored.streaming).toBe(false);
+      expect(isWorking(restored)).toBe(false);
+    });
+
+    it("shows nothing running when the attach reports no open turn", async () => {
+      attachReports(null);
+      const restored = await restoreLog(midTool, { live: true });
+      expect(restored.streaming).toBe(false);
+      expect(isWorking(restored)).toBe(false);
+    });
+  });
+
   it("attaches to a restored session the server still reports live", async () => {
     // Its own id: the resume registers a channel that outlives the store reset.
     h.getSessionLog.mockResolvedValueOnce({ status: "ok", data: [entry(0, INIT)] });

@@ -44,6 +44,8 @@ pub struct SessionAttachment {
     pub replay: Vec<SessionLogEntry>,
     pub live: LiveReceiver,
     pub rev: u64,
+    /// When the turn open after `replay` began; None when none is.
+    pub turn_started_at: Option<f64>,
 }
 
 pub struct LiveReceiver(mpsc::Receiver<Result<SessionStreamItem, SessionStreamError>>);
