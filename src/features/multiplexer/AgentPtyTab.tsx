@@ -38,6 +38,8 @@ const CAPTURE_TRIES = 20;
 // A tab shown again paints its last screen while it reattaches, not an empty pane.
 // Each parked one keeps a WebGL context, and WebKit drops the oldest past about 16.
 const PARKED_MAX = 4;
+// A splitter or window drag reaches the program as one resize, at the size it ends on.
+const RESIZE_SETTLE_MS = 150;
 const parked = new Map<string, { eng: TerminalEngine; next: number | undefined }>();
 
 export function AgentPtyTab({
@@ -87,8 +89,12 @@ export function AgentPtyTab({
   const excludeRef = useRef<string[]>(excludeSessionIds ?? []);
   excludeRef.current = excludeSessionIds ?? [];
   const restartRef = useRef<((opts: Omit<AgentLaunchSession, "sessionId">) => void) | null>(null);
+  // Only the focused pane sizes the agent: any other pane, or another desktop, shows it at the size it has.
+  const sizesRef = useRef(!!autoFocus);
+  sizesRef.current = !!autoFocus;
+  const sizeNowRef = useRef<(() => void) | null>(null);
 
-  const fontSize = useTerminalZoom(engineRef, idRef);
+  const fontSize = useTerminalZoom(engineRef, idRef, sizesRef);
   useTerminalThemeSync(engineRef);
 
   const agent = useAgentState(workstreamId, shellId);
@@ -126,6 +132,9 @@ export function AgentPtyTab({
     engineRef.current = eng;
     let lastGrid = eng.fit();
     if (autoFocus) eng.focus();
+    const fitAgent = (id: string) => {
+      if (sizesRef.current) void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
+    };
 
     let disposed = false;
     // A terminal can end both ways at once (its exit races a reconnect's check); it says so once.
@@ -158,7 +167,7 @@ export function AgentPtyTab({
         .then((ok) => {
           if (!ok || disposed) return;
           lastGrid = eng.fit();
-          void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
+          fitAgent(id);
         })
         .catch((e) => log.warn("agent", "reattaching a resumed agent failed", e));
     });
@@ -223,7 +232,7 @@ export function AgentPtyTab({
       await unwrap(commands.terminalAttach(id, from, channel)).catch(() => false);
       if (disposed) return;
       lastGrid = eng.fit();
-      void commands.agentResize(id, lastGrid.cols, lastGrid.rows);
+      fitAgent(id);
       claimIfFocused(id);
     };
     void start();
@@ -243,7 +252,7 @@ export function AgentPtyTab({
         .then((ok) => {
           if (!ok || disposed) return;
           // A new connection is a new viewer with no fit. No claim: a reconnect isn't the user acting.
-          void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
+          if (sizesRef.current) void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
         })
         .catch((e) => log.warn("agent", "reattaching after a reconnect failed", e));
     });
@@ -278,7 +287,7 @@ export function AgentPtyTab({
         await unwrap(commands.terminalAttach(newId, null, feed.channel())).catch(() => false);
         if (disposed) return;
         lastGrid = eng.fit();
-        void commands.agentResize(newId, lastGrid.cols, lastGrid.rows);
+        fitAgent(newId);
         claimIfFocused(newId);
       })();
     };
@@ -302,13 +311,28 @@ export function AgentPtyTab({
     });
 
     let raf = 0;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    let sent: { cols: number; rows: number } | undefined;
+    const sendFit = () => {
+      settle = undefined;
+      const id = idRef.current;
+      if (disposed || !id || !sizesRef.current) return;
+      if (sent && sent.cols === lastGrid.cols && sent.rows === lastGrid.rows) return;
+      sent = lastGrid;
+      void commands.terminalResize(id, lastGrid.cols, lastGrid.rows);
+    };
+    sizeNowRef.current = () => {
+      sent = undefined;
+      sendFit();
+    };
     const doFit = () => {
       raf = 0;
       if (disposed || host.clientWidth === 0 || host.clientHeight === 0) return;
       const next = eng.fit();
       if (next.cols !== lastGrid.cols || next.rows !== lastGrid.rows) {
         lastGrid = next;
-        if (idRef.current) void commands.terminalResize(idRef.current, next.cols, next.rows);
+        if (settle) clearTimeout(settle);
+        settle = setTimeout(sendFit, RESIZE_SETTLE_MS);
       }
       eng.refresh();
     };
@@ -336,8 +360,10 @@ export function AgentPtyTab({
       disposed = true;
       focusCancelled = true;
       restartRef.current = null;
+      sizeNowRef.current = null;
       unlistenFocus?.();
       if (raf) cancelAnimationFrame(raf);
+      if (settle) clearTimeout(settle);
       offPress();
       unsubInput();
       unsubKey();
@@ -363,15 +389,18 @@ export function AgentPtyTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workstreamId, shellId]);
 
+  // The dock opening or closing changes the pane; the mount's own fit is the launch's.
+  const dockSeenRef = useRef(dockOpen);
   useEffect(() => {
     const eng = engineRef.current;
-    if (!eng) return;
+    if (!eng || dockSeenRef.current === dockOpen) return;
+    dockSeenRef.current = dockOpen;
     let cancelled = false;
     const raf = requestAnimationFrame(() =>
       requestAnimationFrame(() => {
         if (cancelled) return;
         const g = eng.fit();
-        if (idRef.current) void commands.agentResize(idRef.current, g.cols, g.rows);
+        if (idRef.current && sizesRef.current) void commands.agentResize(idRef.current, g.cols, g.rows);
         eng.refresh();
       }),
     );
@@ -380,6 +409,14 @@ export function AgentPtyTab({
       cancelAnimationFrame(raf);
     };
   }, [dockOpen]);
+
+  // A pane that becomes the focused one sizes the agent to itself; a mount's fit is the launch's.
+  const focusSeenRef = useRef(!!autoFocus);
+  useEffect(() => {
+    if (focusSeenRef.current === !!autoFocus) return;
+    focusSeenRef.current = !!autoFocus;
+    if (autoFocus) sizeNowRef.current?.();
+  }, [autoFocus]);
 
   // The launch result and hook-reported changes (`/clear`, in-TUI resume) land here.
   useEffect(() => {
@@ -445,7 +482,9 @@ export function AgentPtyTab({
       />
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="absolute inset-2 overflow-hidden" />
-        {sizeOwner === false && <TakeSizeButton terminalId={() => idRef.current} />}
+        {sizeOwner === false && (
+          <TakeSizeButton terminalId={() => idRef.current} fit={() => engineRef.current?.fit()} />
+        )}
         {minting && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface/70 backdrop-blur-[1px]">
             <span className="inline-flex items-center gap-2 text-meta text-ink-dim">

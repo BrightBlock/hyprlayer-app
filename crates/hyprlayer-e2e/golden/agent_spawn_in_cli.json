@@ -134,6 +134,20 @@
       "guards": [
         {
           "evidence": {
+            "size": [
+              "32 120"
+            ]
+          },
+          "guard": "a size from a desktop that left is not used: the spawn starts at 120x32",
+          "ok": true
+        }
+      ],
+      "step": "a desktop fits an agent tab and disconnects, and the next spawn starts at the default size"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "error": null,
             "hasSessionId": true,
             "stage": "validate"

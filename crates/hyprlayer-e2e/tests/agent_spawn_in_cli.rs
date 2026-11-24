@@ -19,8 +19,11 @@ use hyprlayer_e2e::agent_stub::{
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::goal_stub::GOAL_CLAUDE;
 use hyprlayer_e2e::{eventually, json, text, Journey, Request, Sandbox, Server, Value};
+use hyprlayer_proto::PROTOCOL_VERSION;
 use hyprlayer_server::client::RpcClient;
 use hyprlayer_server::streams::StreamStartOpts;
+use hyprlayer_server::transport::{Control, FrameReader, FrameWriter};
+use tokio::net::UnixStream;
 
 const IO: Duration = Duration::from_secs(30);
 const PLAN: &str =
@@ -328,6 +331,27 @@ async fn agent_spawn_in_cli() {
         first == ["32 120"] && fitted == ["45 150"],
         json!({ "reviewer": first, "implementer": fitted }),
     );
+
+    j.step("a desktop fits an agent tab and disconnects, and the next spawn starts at the default size");
+    fit_and_disconnect(server.socket(), &terminal, 200, 60).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let late = terminal_of(
+        &mcp.call(
+            "spawn_agent",
+            json!({ "prompt": "E2E_REVIEW", "title": "Late reviewer" }),
+        )
+        .await,
+    );
+    j.alias(&late, "$LATE");
+    let size_file = launch_log(&sandbox, &late).join("size");
+    let started = eventually(IO, || size_file.is_file()).await;
+    let late_size = lines(&size_file);
+    j.guard(
+        "a size from a desktop that left is not used: the spawn starts at 120x32",
+        started && late_size == ["32 120"],
+        json!({ "size": late_size }),
+    );
+    let _ = c.terminal_close(late).await;
 
     j.step("a stage on an engine that can't apply its guardrails keeps a session");
     update_settings(&mut j, &c, |s| {
@@ -753,4 +777,40 @@ fn parsed(result: &Value) -> Value {
         return json!({ "error": tool_text(result) });
     }
     serde_json::from_str(&tool_text(result)).unwrap_or(Value::Null)
+}
+
+/// A desktop that fits an agent tab and closes its socket: a dropped `RpcClient` stays connected.
+async fn fit_and_disconnect(socket: &Path, terminal: &str, cols: u16, rows: u16) {
+    let stream = UnixStream::connect(socket).await.expect("connect");
+    let (rd, wr) = tokio::io::split(stream);
+    let (mut reader, mut writer) = (FrameReader::new(rd), FrameWriter::new(wr));
+    let hello = reader.next_control().await.expect("read hello");
+    assert!(matches!(hello, Some(Control::Hello { .. })), "{hello:?}");
+    writer
+        .write_control(&Control::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            build: None,
+            version: None,
+            features: Vec::new(),
+            stream_window: None,
+        })
+        .await
+        .expect("hello");
+    writer
+        .write_control(&Control::Request {
+            id: 1,
+            body: Request::AgentResize {
+                terminal_id: terminal.to_string(),
+                cols,
+                rows,
+            },
+        })
+        .await
+        .expect("agent_resize");
+    loop {
+        match reader.next_control().await.expect("read the reply") {
+            Some(Control::Response { id: 1, .. }) | None => return,
+            Some(_) => continue,
+        }
+    }
 }

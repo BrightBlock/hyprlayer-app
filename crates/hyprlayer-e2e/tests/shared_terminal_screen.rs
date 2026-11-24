@@ -5,6 +5,7 @@
 //! program wrote; frame desktops C and D must show what that model holds, cells and history.
 #![cfg(unix)]
 
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
@@ -721,7 +722,24 @@ async fn drawn(tap: &RawDesktop, a: &FrameDesktop, b: &FrameDesktop, paint: u64)
 
 fn stub_command(sandbox: &Sandbox) -> String {
     let stub = install(sandbox, "screen-tui", SCREEN_TUI);
-    format!("'{}' '{FIXTURE}'", stub.display())
+    format!(
+        "'{}' '{FIXTURE}' '{}'",
+        stub.display(),
+        winches_log(sandbox).display()
+    )
+}
+
+fn winches_log(sandbox: &Sandbox) -> PathBuf {
+    sandbox.root.join("winches.log")
+}
+
+/// Each size the program was resized to, as `rows cols`.
+fn winches(sandbox: &Sandbox) -> Vec<String> {
+    std::fs::read_to_string(winches_log(sandbox))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1057,6 +1075,29 @@ async fn shared_terminal_screen() {
         json!({ "repaints": a.paints() - paints }),
     );
 
+    j.step("D opens the agent while A owns the size, then A's agent tab changes size");
+    let (d_stream, _) = d.attach(None).await;
+    let before = winches(&sandbox).len();
+    d.client
+        .agent_resize(terminal.clone(), 70, 20)
+        .await
+        .expect("agent_resize");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let opened_elsewhere = winches(&sandbox)[before..].to_vec();
+    let before = winches(&sandbox).len();
+    a.client
+        .agent_resize(terminal.clone(), 100, 32)
+        .await
+        .expect("agent_resize");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let resized = winches(&sandbox)[before..].to_vec();
+    j.guard(
+        "the program is not resized for D, and A's new size reaches it in one resize, with no nudge first",
+        opened_elsewhere.is_empty() && resized == ["32 100"],
+        json!({ "for_d": opened_elsewhere, "for_a": resized }),
+    );
+
+    d.leave(d_stream).await;
     a.leave(a_stream).await;
     let _ = server.client().terminal_close(terminal).await;
     j.finish();

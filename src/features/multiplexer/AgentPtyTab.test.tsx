@@ -28,7 +28,7 @@ const h = vi.hoisted(() => {
     }
     mount() {}
     fit() {
-      return { cols: 80, rows: 24 };
+      return { ...grid };
     }
     focus() {}
     bind() {}
@@ -46,6 +46,8 @@ const h = vi.hoisted(() => {
       return () => {};
     }
   }
+  const grid = { cols: 80, rows: 24 };
+  const observers: Array<() => void> = [];
   const attaches: Array<{ id: string; offset: number | null; ch: FakeChannel }> = [];
   const reconnects: Array<() => void> = [];
   const launches = ["t1", "t2", "t3", "t4"];
@@ -58,6 +60,8 @@ const h = vi.hoisted(() => {
   return {
     FakeChannel,
     FakeScreen,
+    grid,
+    observers,
     attaches,
     reconnects,
     launches,
@@ -83,6 +87,7 @@ vi.mock("@/lib/bindings", () => ({
       return h.serverUp ? h.ok(true) : h.down;
     }),
     agentResize: vi.fn(async () => h.ok(null)),
+    terminalResize: vi.fn(async () => h.ok(null)),
     terminalFocus: vi.fn(async () => h.ok(null)),
     terminalRelease: vi.fn(async () => h.ok(null)),
     terminalFrameAck: vi.fn(async () => h.ok(null)),
@@ -133,12 +138,20 @@ vi.mock("./PtySessionControls", () => ({
 }));
 
 globalThis.ResizeObserver = class {
-  observe() {}
-  disconnect() {}
+  constructor(private cb: () => void) {}
+  observe() {
+    h.observers.push(this.cb);
+  }
+  disconnect() {
+    h.observers.splice(h.observers.indexOf(this.cb), 1);
+  }
 } as unknown as typeof ResizeObserver;
+Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 800 });
+Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 600 });
 globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as typeof requestAnimationFrame;
 
 const { AgentPtyTab } = await import("./AgentPtyTab");
+const { commands } = await import("@/lib/bindings");
 
 const output = (offset: number, text: string) => ({ kind: "output", data: btoa(text), offset });
 const frame = (seq: number, history: number, text: string) => ({
@@ -149,8 +162,12 @@ const frame = (seq: number, history: number, text: string) => ({
 });
 const settle = () => act(() => new Promise((r) => setTimeout(r, 10)));
 
-function mount(terminalId: string) {
-  render(
+function mount(terminalId: string, autoFocus?: boolean) {
+  return render(tab(terminalId, autoFocus));
+}
+
+function tab(terminalId: string, autoFocus?: boolean) {
+  return (
     <AgentPtyTab
       workstreamId="ws"
       shellId={1}
@@ -158,14 +175,27 @@ function mount(terminalId: string) {
       projectPath="/p"
       workstreamTitle="t"
       terminalId={terminalId}
+      autoFocus={autoFocus}
       onTerminalId={() => {}}
       notifyOnBlocked={false}
-    />,
+    />
   );
+}
+
+/** The pane is dragged through `sizes`, a frame each, ending on the last. */
+async function drag(...sizes: Array<[number, number]>) {
+  for (const [cols, rows] of sizes) {
+    Object.assign(h.grid, { cols, rows });
+    await act(async () => h.observers.forEach((fn) => fn()));
+    await act(() => new Promise((r) => setTimeout(r, 5)));
+  }
 }
 
 afterEach(() => {
   cleanup();
+  Object.assign(h.grid, { cols: 80, rows: 24 });
+  vi.mocked(commands.agentResize).mockClear();
+  vi.mocked(commands.terminalResize).mockClear();
   h.serverUp = true;
   h.launchFails = false;
   h.ensures = 0;
@@ -299,5 +329,42 @@ describe("an agent tab whose agent a restarted server resumed", () => {
     await act(async () => h.back.forEach((fn) => fn("someone-else")));
     await settle();
     expect(h.attaches.length).toBe(before);
+  });
+});
+
+describe("an agent tab's size", () => {
+  const sizesSent = () => [
+    ...vi.mocked(commands.agentResize).mock.calls,
+    ...vi.mocked(commands.terminalResize).mock.calls,
+  ];
+
+  it("is left alone by a pane that isn't focused, however that pane changes", async () => {
+    h.launches.push("t10");
+    mount("t10", false);
+    await settle();
+    await drag([100, 30], [60, 20]);
+    await act(() => new Promise((r) => setTimeout(r, 200)));
+    expect(sizesSent()).toEqual([]);
+  });
+
+  it("follows the focused pane once a drag settles, at the size it ends on", async () => {
+    h.launches.push("t11");
+    mount("t11", true);
+    await settle();
+    expect(vi.mocked(commands.agentResize).mock.calls).toEqual([["t11", 80, 24]]);
+    await drag([90, 24], [100, 26], [110, 28]);
+    expect(vi.mocked(commands.terminalResize).mock.calls).toEqual([]);
+    await act(() => new Promise((r) => setTimeout(r, 200)));
+    expect(vi.mocked(commands.terminalResize).mock.calls).toEqual([["t11", 110, 28]]);
+  });
+
+  it("moves to a pane when it becomes the focused one", async () => {
+    h.launches.push("t12");
+    const { rerender } = mount("t12", false);
+    await settle();
+    await drag([120, 40]);
+    rerender(tab("t12", true));
+    await settle();
+    expect(sizesSent()).toEqual([["t12", 120, 40]]);
   });
 });

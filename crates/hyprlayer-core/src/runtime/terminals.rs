@@ -269,12 +269,19 @@ impl TerminalService<'_> {
     pub async fn resize(&self, req: ResizeTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
         if self.runtime.pty_agents.snapshot(&req.terminal_id).is_some() {
-            self.runtime.terminals.note_agent_fit(req.cols, req.rows);
+            self.runtime
+                .terminals
+                .note_agent_fit(req.viewer, req.cols, req.rows);
         }
         if let Some(s) = self.runtime.terminals.get(&req.terminal_id).await {
             s.fit(req.viewer, req.cols, req.rows);
         }
         Ok(())
+    }
+
+    /// A desktop that disconnected no longer sizes the agents it spawns.
+    pub fn forget_viewer(&self, viewer: u64) {
+        self.runtime.terminals.forget_agent_fit(viewer);
     }
 
     /// The viewer's person is at this terminal, so it takes their fit.
@@ -896,14 +903,17 @@ impl TerminalService<'_> {
 
     pub async fn resize_agent(&self, req: ResizeAgentTerminalRequest) -> Result<()> {
         ensure_running(self.runtime)?;
-        self.runtime.terminals.note_agent_fit(req.cols, req.rows);
+        self.runtime
+            .terminals
+            .note_agent_fit(req.viewer, req.cols, req.rows);
         let Some(session) = self.runtime.terminals.get(&req.terminal_id).await else {
             return Ok(());
         };
         let nudge = req.rows.saturating_sub(1).max(2);
-        // A frame viewer needs no repaint to catch up, and every frame viewer would show the nudge's size.
-        let unchanged = req.frames && session.size() == (req.rows, req.cols);
-        if nudge != req.rows && !unchanged {
+        // Only a raw viewer at an unchanged size needs the program to repaint: a frame viewer
+        // gets the screen without one, and a new size makes the program repaint anyway.
+        let repaint = !req.frames && session.size() == (req.rows, req.cols);
+        if nudge != req.rows && repaint {
             session.fit(req.viewer, req.cols, nudge);
             tokio::time::sleep(Duration::from_millis(30)).await;
         }

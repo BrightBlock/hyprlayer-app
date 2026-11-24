@@ -8,7 +8,14 @@ use crate::terminal::PtySession;
 #[derive(Default)]
 pub struct TerminalRegistry {
     live: Mutex<HashMap<String, Arc<PtySession>>>,
-    agent_fit: SyncMutex<Option<(u16, u16)>>,
+    agent_fit: SyncMutex<Option<AgentFit>>,
+}
+
+/// The last agent tab's size and the desktop that reported it.
+#[derive(Clone, Copy)]
+struct AgentFit {
+    viewer: Option<u64>,
+    size: (u16, u16),
 }
 
 impl TerminalRegistry {
@@ -35,18 +42,30 @@ impl TerminalRegistry {
         });
     }
 
-    pub fn note_agent_fit(&self, cols: u16, rows: u16) {
+    pub fn note_agent_fit(&self, viewer: Option<u64>, cols: u16, rows: u16) {
         if cols > 0 && rows > 0 {
-            *self
-                .agent_fit
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some((cols, rows));
+            *self.lock_fit() = Some(AgentFit {
+                viewer,
+                size: (cols, rows),
+            });
         }
     }
 
+    /// A spawn takes the size of the agent tab the desktop that reported it would open in.
     pub fn agent_fit(&self) -> Option<(u16, u16)> {
-        *self
-            .agent_fit
+        self.lock_fit().map(|fit| fit.size)
+    }
+
+    /// A desktop that left can no longer open the agent, so its tab's size is stale.
+    pub fn forget_agent_fit(&self, viewer: u64) {
+        let mut fit = self.lock_fit();
+        if fit.is_some_and(|fit| fit.viewer == Some(viewer)) {
+            *fit = None;
+        }
+    }
+
+    fn lock_fit(&self) -> std::sync::MutexGuard<'_, Option<AgentFit>> {
+        self.agent_fit
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
@@ -92,5 +111,20 @@ impl TerminalRegistry {
                 s.kill();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_departed_desktop_takes_its_agent_fit_with_it() {
+        let registry = TerminalRegistry::new();
+        registry.note_agent_fit(Some(1), 150, 45);
+        registry.forget_agent_fit(2);
+        assert_eq!(registry.agent_fit(), Some((150, 45)));
+        registry.forget_agent_fit(1);
+        assert_eq!(registry.agent_fit(), None);
     }
 }

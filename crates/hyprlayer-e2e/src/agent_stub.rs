@@ -559,6 +559,9 @@ printf '\033[?2031h'
 cr=$(printf '\r')
 n=0; hl=0; winched=""; floods=0; ruled=""; full=""
 trap 'winched=1' WINCH
+# Each SIGWINCH's size goes to the log the second argument names. sh runs a trap only between
+# commands, so two signals 30 ms apart would land as one; a sleeping perl catches each.
+[ -z "$2" ] || perl -e '$SIG{WINCH} = sub { open my $f, ">>", $ARGV[0]; print $f `stty size </dev/tty` }; sleep 1 while 1' "$2" &
 label() { case $1 in 0) l=low ;; 1) l=medium ;; *) l=high ;; esac; }
 # Anchored to the bottom row, as claude's fullscreen renderer is, so a flood can't move it.
 paint() {

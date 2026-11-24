@@ -381,6 +381,21 @@
         }
       ],
       "step": "A reattaches and asks for an agent fit at the size the terminal already has"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "for_a": [
+              "32 100"
+            ],
+            "for_d": []
+          },
+          "guard": "the program is not resized for D, and A's new size reaches it in one resize, with no nudge first",
+          "ok": true
+        }
+      ],
+      "step": "D opens the agent while A owns the size, then A's agent tab changes size"
     }
   ]
 }

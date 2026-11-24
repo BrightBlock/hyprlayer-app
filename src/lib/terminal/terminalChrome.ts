@@ -37,9 +37,11 @@ export function syncTerminalColorScheme(): void {
   window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", sendColorScheme);
 }
 
+/** `sizes`, when given, says whether this view may resize the pty; unset, it always may. */
 export function useTerminalZoom(
   engineRef: RefObject<TerminalEngine | null>,
   idRef: RefObject<string | undefined>,
+  sizes?: RefObject<boolean>,
 ): number {
   const fontSize = useTerminalFontSize((s) => s.fontSize);
   const zoomIn = useTerminalFontSize((s) => s.zoomIn);
@@ -50,7 +52,7 @@ export function useTerminalZoom(
   useCommand("terminal.zoomOut", zoomOut);
   useCommand("terminal.zoomReset", zoomReset);
 
-  useTerminalFontSync(engineRef, idRef);
+  useTerminalFontSync(engineRef, idRef, sizes);
 
   return fontSize;
 }
@@ -58,10 +60,12 @@ export function useTerminalZoom(
 export function useTerminalFontSync(
   engineRef: RefObject<TerminalEngine | null>,
   idRef?: RefObject<string | undefined>,
+  sizes?: RefObject<boolean>,
 ): void {
   useEffect(() => {
     const resize = (g: TerminalGrid) => {
       const id = idRef?.current;
+      if (sizes && !sizes.current) return;
       if (id && g.cols > 0 && g.rows > 0) void commands.terminalResize(id, g.cols, g.rows);
     };
     const unsubFamily = useAppearance.subscribe((s, prev) => {
@@ -77,7 +81,7 @@ export function useTerminalFontSync(
       unsubFamily();
       unsubSize();
     };
-  }, [engineRef, idRef]);
+  }, [engineRef, idRef, sizes]);
 }
 
 export function useTerminalThemeSync(engineRef: RefObject<TerminalEngine | null>): void {
