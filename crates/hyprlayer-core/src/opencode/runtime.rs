@@ -1,4 +1,7 @@
-use std::collections::VecDeque;
+//! The shared `opencode serve` (OpenCode 2, `@opencode/cli` 2.4+) each profile runs, and the
+//! HTTP and event-stream plumbing its sessions use.
+
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -10,47 +13,30 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::runtime::Handle;
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 
-use crate::agent::{declined_message, AgentDriver, KillFlag, UsageSoFar};
+pub use crate::opencode::driver::OpenCodeDriver;
+
 use crate::claude::{ExitOutcome, SessionEvent};
-use crate::error::Result as CoreResult;
-use crate::models::session::QuestionAnswers;
+use crate::opencode::driver::model_ref;
 use crate::opencode::support::opencode_provider_is_supported;
-use crate::store::session_event_codec::questions_from_value;
+use crate::opencode::translate::{parse_sse_record, OcEvent};
 
 const EVENT_CAP: usize = 1024;
 const EXIT_POLL: Duration = Duration::from_millis(250);
-/// Under the desktop's three seconds before a stop escalates to a kill.
-const DELETE_TRIES: u32 = 20;
-const DELETE_RETRY: Duration = Duration::from_millis(100);
-const RESYNC_MESSAGES: u32 = 50;
-const RESYNC_WAIT: Duration = Duration::from_secs(5);
+const MODEL_WAIT_TRIES: u32 = 40;
+/// OpenCode 2's Basic-auth username; only the password can change.
+const SERVER_USER: &str = "opencode";
+/// The label of the credentials hyprlayer stores; the sync leaves every other one alone.
+const KEY_LABEL: &str = "hyprlayer";
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
 
-fn supported_auth_content(content: &str) -> Option<String> {
-    let Value::Object(mut auth) = serde_json::from_str::<Value>(content).ok()? else {
-        return None;
-    };
-    auth.retain(|provider, _| opencode_provider_is_supported(provider));
-    serde_json::to_string(&Value::Object(auth)).ok()
-}
-
-#[derive(Clone)]
-struct OcEvent {
-    kind: String,
-    properties: Value,
-}
-
-impl OcEvent {
-    fn new(kind: &str, properties: Value) -> Self {
-        Self {
-            kind: kind.to_string(),
-            properties,
-        }
-    }
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 pub struct OpenCodeServerConfig {
@@ -108,7 +94,7 @@ impl OpenCodeManager {
     ) -> Result<Arc<OpenCodeServer>, String> {
         let mut guard = self.inner.lock().await;
         if let Some(s) = guard.as_ref() {
-            if s.is_healthy().await {
+            if s.is_ready().await {
                 return Ok(s.clone());
             }
         }
@@ -147,15 +133,17 @@ impl OpenCodeManager {
         let (events, _) = broadcast::channel(EVENT_CAP);
         let server = Arc::new(OpenCodeServer {
             base_url: String::new(),
+            password: String::new(),
             client: reqwest::Client::new(),
             events,
             exited: watch::channel(None).0,
-            model_context: std::collections::HashMap::new(),
+            model_context: HashMap::new(),
             home: PathBuf::new(),
             tasks: Handle::current(),
             pid_file: PathBuf::new(),
             child: StdMutex::new(child),
             retired: AtomicBool::default(),
+            stops: StdMutex::default(),
         });
         server.watch_exit(Arc::default());
         *self.inner.lock().await = Some(server);
@@ -164,10 +152,12 @@ impl OpenCodeManager {
 
 pub struct OpenCodeServer {
     base_url: String,
+    /// Generated per spawn and handed over only through `OPENCODE_SERVER_PASSWORD`; never logged.
+    password: String,
     client: reqwest::Client,
     events: broadcast::Sender<OcEvent>,
     exited: watch::Sender<Option<SessionEvent>>,
-    model_context: std::collections::HashMap<String, u32>,
+    model_context: HashMap<String, u32>,
     home: PathBuf,
     // The sync `AgentDriver` methods fire their HTTP calls from whatever thread
     // ends a session — including the app's non-async exit hook — so they need a
@@ -176,6 +166,8 @@ pub struct OpenCodeServer {
     pid_file: PathBuf,
     child: StdMutex<crate::process::SupervisedChild>,
     retired: AtomicBool,
+    /// Per session, the stop an ended driver still has in flight; the next driver waits on it.
+    stops: StdMutex<HashMap<String, watch::Receiver<bool>>>,
 }
 
 /// `kill_on_drop` signals only the server; its process group also holds whatever it spawned.
@@ -202,6 +194,14 @@ fn orphan_program(bin: &Path, args: &[String]) -> String {
     format!("{name} {}", args.join(" "))
 }
 
+fn generate_password() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
 impl OpenCodeServer {
     async fn start(config: OpenCodeServerConfig) -> Result<Arc<Self>, String> {
         let OpenCodeServerConfig {
@@ -215,6 +215,7 @@ impl OpenCodeServer {
         } = config;
         let port = free_port()?;
         let base_url = format!("http://127.0.0.1:{port}");
+        let password = generate_password();
         let _ = std::fs::create_dir_all(&data_dir);
 
         let serve_args = [
@@ -232,21 +233,13 @@ impl OpenCodeServer {
             .env("PATH", &path)
             .env("XDG_DATA_HOME", &data_dir)
             .envs(overlay)
+            // OpenCode prefers `OPENCODE_PASSWORD`; one inherited from the user's shell would
+            // replace the password this server is reached with.
+            .env_remove("OPENCODE_PASSWORD")
+            .env("OPENCODE_SERVER_PASSWORD", &password)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        if let Some(content) = std::fs::read_to_string(&auth_file)
-            .ok()
-            .filter(|c| !c.trim().is_empty())
-        {
-            let filtered = supported_auth_content(&content).unwrap_or_else(|| {
-                tracing::warn!(
-                    "opencode auth.json did not parse as a JSON object; passing it through unfiltered"
-                );
-                content
-            });
-            cmd.env("OPENCODE_AUTH_CONTENT", filtered);
-        }
         #[cfg(unix)]
         cmd.process_group(0);
         #[cfg(windows)]
@@ -271,71 +264,239 @@ impl OpenCodeServer {
         let client = reqwest::Client::builder()
             .build()
             .map_err(|e| e.to_string())?;
+        let tasks = Handle::current();
+        let (events, _) = broadcast::channel(EVENT_CAP);
+        let (exited, _) = watch::channel(None);
+        let mut server = Self {
+            base_url,
+            password,
+            client,
+            events,
+            exited,
+            model_context: HashMap::new(),
+            home,
+            tasks,
+            pid_file,
+            child: StdMutex::new(child),
+            retired: AtomicBool::default(),
+            stops: StdMutex::default(),
+        };
 
-        let mut healthy = false;
+        let mut ready = false;
         let mut last_check = String::from("no answer");
         for _ in 0..60 {
-            // A crashed server and a slow one look alike to the health check.
-            if let Ok(Some(status)) = child.try_wait() {
+            // A crashed server and a slow one look alike to the readiness check.
+            let polled = server
+                .child
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner)
+                .try_wait();
+            if let Ok(Some(status)) = polled {
                 let said = stderr_text(&stderr);
                 tracing::error!("opencode serve exited during startup ({status}): {said}");
                 return Err(format!(
                     "`opencode serve` exited during startup ({status}): {said}"
                 ));
             }
-            match client
-                .get(format!("{base_url}/global/health"))
-                .timeout(Duration::from_secs(2))
-                .send()
-                .await
-            {
-                Ok(resp) => match resp.json::<Value>().await {
-                    Ok(v) if v.get("healthy").and_then(Value::as_bool) == Some(true) => {
-                        healthy = true;
-                        break;
-                    }
-                    Ok(v) => last_check = format!("reported {v}"),
-                    Err(e) => last_check = e.to_string(),
-                },
-                Err(e) => last_check = e.to_string(),
+            match server.info().await {
+                Ok(()) => {
+                    ready = true;
+                    break;
+                }
+                Err(e) => last_check = e,
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
-        if !healthy {
+        if !ready {
             tracing::error!(
-                "opencode serve on port {port} was not healthy after 15s ({last_check}); it said: {}",
+                "opencode serve on port {port} was not ready after 15s ({last_check}); it said: {}",
                 stderr_text(&stderr)
             );
-            return Err("`opencode serve` did not become healthy in time".into());
+            return Err("`opencode serve` did not become ready in time".into());
         }
 
-        let model_context = fetch_model_context(&client, &base_url).await;
-        let tasks = Handle::current();
-
-        let (events, _) = broadcast::channel(EVENT_CAP);
-        let (exited, _) = watch::channel(None);
-        spawn_sse(
-            &tasks,
-            base_url.clone(),
-            client.clone(),
-            events.clone(),
-            exited.subscribe(),
-        );
-
-        let server = Arc::new(Self {
-            base_url,
-            client,
-            events,
-            exited,
-            model_context,
-            home,
-            tasks,
-            pid_file,
-            child: StdMutex::new(child),
-            retired: AtomicBool::default(),
-        });
+        server.sync_credentials(&auth_file).await;
+        server.model_context = server.fetch_model_context().await;
+        if server.model_context.is_empty() {
+            tracing::warn!("opencode serve on port {port} listed no models in time");
+        }
+        spawn_sse(&server);
+        let server = Arc::new(server);
         server.watch_exit(stderr);
         Ok(server)
+    }
+
+    /// A request to the server's API, authenticated.
+    pub(crate) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.client
+            .request(method, format!("{}/api{path}", self.base_url))
+            .basic_auth(SERVER_USER, Some(&self.password))
+    }
+
+    pub(crate) fn spawn<F>(&self, task: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: std::future::Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.tasks.spawn(task)
+    }
+
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<OcEvent> {
+        self.events.subscribe()
+    }
+
+    pub(crate) fn exit_watch(&self) -> watch::Receiver<Option<SessionEvent>> {
+        self.exited.subscribe()
+    }
+
+    pub(crate) fn home(&self) -> &Path {
+        &self.home
+    }
+
+    pub(crate) fn retired(&self) -> bool {
+        self.retired.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn model_context(&self, model: &str) -> Option<u32> {
+        self.model_context.get(model).copied()
+    }
+
+    pub(crate) fn stopping(&self, session: &str, done: watch::Receiver<bool>) {
+        let mut stops = self.stops.lock().unwrap_or_else(PoisonError::into_inner);
+        stops.retain(|_, stop| !*stop.borrow());
+        stops.insert(session.to_string(), done);
+    }
+
+    pub(crate) fn stop_in_flight(&self, session: &str) -> Option<watch::Receiver<bool>> {
+        let stops = self.stops.lock().unwrap_or_else(PoisonError::into_inner);
+        stops.get(session).cloned()
+    }
+
+    async fn info(&self) -> Result<(), String> {
+        let resp = self
+            .request(reqwest::Method::GET, "/info")
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+            .map_err(|e| e.without_url().to_string())?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("answered {}", resp.status()))
+        }
+    }
+
+    async fn is_ready(&self) -> bool {
+        self.info().await.is_ok()
+    }
+
+    async fn get_data(&self, path: &str) -> Result<Value, String> {
+        let mut body: Value = self
+            .request(reqwest::Method::GET, path)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(body.get_mut("data").map(Value::take).unwrap_or(Value::Null))
+    }
+
+    /// The server's API-key credentials made to match the app's `auth.json`: a key is added or
+    /// replaced, one whose entry the user removed is deleted. OpenCode 2 cannot take a v1
+    /// sign-in (it records no sign-in method), so such an entry is skipped and named in the log.
+    /// Only credentials hyprlayer labelled are touched.
+    async fn sync_credentials(&self, auth_file: &Path) {
+        let wanted = match crate::opencode::config::api_keys(auth_file) {
+            Ok(keys) => keys,
+            Err(e) => {
+                tracing::warn!("opencode credentials not synced: {e}");
+                return;
+            }
+        };
+        for provider in &wanted.unusable {
+            tracing::warn!(
+                "opencode provider {provider} has a sign-in OpenCode 2 cannot use; its sessions run without it"
+            );
+        }
+        let existing = match self.get_data("/credential").await {
+            Ok(Value::Array(existing)) => existing,
+            Ok(_) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("opencode credentials not synced: {e}");
+                return;
+            }
+        };
+        let mut kept = HashSet::new();
+        for credential in &existing {
+            let field = |key: &str| {
+                credential
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            };
+            let (id, integration, label) = (field("id"), field("integrationID"), field("label"));
+            if label != KEY_LABEL {
+                continue;
+            }
+            let key = credential.pointer("/value/key").and_then(Value::as_str);
+            let matches = wanted
+                .keys
+                .get(integration)
+                .is_some_and(|k| Some(k.as_str()) == key);
+            if matches && kept.insert(integration.to_string()) {
+                continue;
+            }
+            let removed = self
+                .request(reqwest::Method::DELETE, &format!("/credential/{id}"))
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status);
+            if let Err(e) = removed {
+                tracing::warn!(
+                    "opencode credential for {integration} not removed: {}",
+                    e.without_url()
+                );
+            }
+        }
+        for (provider, key) in wanted.keys {
+            if kept.contains(&provider) || !opencode_provider_is_supported(&provider) {
+                continue;
+            }
+            let body = json!({
+                "integrationID": provider,
+                "label": KEY_LABEL,
+                "value": { "type": "key", "key": key },
+            });
+            let added = self
+                .request(reqwest::Method::POST, "/credential")
+                .json(&body)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status);
+            if let Err(e) = added {
+                tracing::warn!(
+                    "opencode credential for {provider} not stored: {}",
+                    e.without_url()
+                );
+            }
+        }
+    }
+
+    async fn fetch_model_context(&self) -> HashMap<String, u32> {
+        for _ in 0..MODEL_WAIT_TRIES {
+            match self.get_data("/model").await {
+                Ok(models) if models.as_array().is_some_and(|m| !m.is_empty()) => {
+                    return parse_model_context(&models);
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!("opencode /api/model read failed: {e}"),
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        HashMap::new()
     }
 
     fn watch_exit(self: &Arc<Self>, stderr: Arc<StdMutex<VecDeque<String>>>) {
@@ -392,9 +553,10 @@ impl OpenCodeServer {
         child.kill_blocking();
     }
 
+    /// `None` when the server lists no models at all: it has not loaded them yet.
     pub async fn knows_model(&self, model: &str) -> Option<bool> {
         let (provider, model_id) = model.split_once('/')?;
-        let registry = self.provider_models().await?;
+        let registry = self.provider_models().await.filter(|r| !r.is_empty())?;
         Some(
             registry
                 .get(provider)
@@ -402,55 +564,44 @@ impl OpenCodeServer {
         )
     }
 
-    pub async fn provider_models(
-        &self,
-    ) -> Option<std::collections::HashMap<String, Vec<(String, String)>>> {
-        let body = self
-            .client
-            .get(format!("{}/config/providers", self.base_url))
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .text()
-            .await
-            .ok()?;
-        parse_provider_model_names(&body)
+    pub async fn provider_models(&self) -> Option<HashMap<String, Vec<(String, String)>>> {
+        let models = self.get_data("/model").await.ok()?;
+        Some(parse_provider_model_names(&models))
     }
 
-    async fn create_session(&self, cwd: &str) -> Result<String, String> {
+    pub(crate) async fn create_session(
+        &self,
+        cwd: &str,
+        model: Option<&(String, String)>,
+    ) -> Result<String, String> {
+        let mut body = json!({ "title": "Hyprlayer session", "location": { "directory": cwd } });
+        if let Some(model) = model {
+            body["model"] = model_ref(model);
+        }
         let created: Value = self
-            .client
-            .post(format!("{}/session", self.base_url))
-            .query(&[("directory", cwd)])
-            .json(&json!({ "title": "Hyprlayer session" }))
+            .request(reqwest::Method::POST, "/session")
+            .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?
-            .error_for_status()
+            .and_then(reqwest::Response::error_for_status)
             .map_err(|e| e.to_string())?
             .json()
             .await
             .map_err(|e| e.to_string())?;
         created
-            .get("id")
+            .pointer("/data/id")
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| "OpenCode session create returned no id".into())
     }
 
     /// The client error OpenCode answers once it lost `id`, as a reset of its data dir does.
-    async fn missing_session(
+    pub(crate) async fn missing_session(
         &self,
         id: &str,
-        cwd: &str,
     ) -> Result<Option<reqwest::StatusCode>, String> {
         let status = self
-            .client
-            .get(format!("{}/session/{id}", self.base_url))
-            .query(&[("directory", cwd)])
+            .request(reqwest::Method::GET, &format!("/session/{id}"))
             .timeout(Duration::from_secs(5))
             .send()
             .await
@@ -465,14 +616,33 @@ impl OpenCodeServer {
         Ok(None)
     }
 
-    async fn is_healthy(&self) -> bool {
-        self.client
-            .get(format!("{}/global/health", self.base_url))
-            .timeout(Duration::from_secs(2))
+    /// The `field` of each item a location-scoped list route returns, for the session's cwd.
+    pub(crate) async fn names(
+        &self,
+        route: &str,
+        field: &str,
+        cwd: &str,
+    ) -> Result<HashSet<String>, String> {
+        let body: Value = self
+            .request(reqwest::Method::GET, route)
+            .query(&[("location[directory]", cwd)])
+            .timeout(Duration::from_secs(5))
             .send()
             .await
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| e.to_string())?
+            .json()
+            .await
+            .map_err(|e| e.to_string())?;
+        let entries = body
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("OpenCode {route} returned no list"))?;
+        Ok(entries
+            .iter()
+            .filter_map(|entry| entry.get(field).and_then(Value::as_str))
+            .map(str::to_string)
+            .collect())
     }
 }
 
@@ -509,18 +679,26 @@ fn stderr_text(kept: &StdMutex<VecDeque<String>>) -> String {
     }
 }
 
-fn spawn_sse(
-    tasks: &Handle,
-    base_url: String,
-    client: reqwest::Client,
-    tx: broadcast::Sender<OcEvent>,
-    mut exited: watch::Receiver<Option<SessionEvent>>,
-) {
+/// Reads `/api/event` until the server exits, reconnecting after a gap; OpenCode starts each
+/// stream with `server.connected`, which tells a session to read back what it missed.
+fn spawn_sse(server: &OpenCodeServer) {
+    let request = server
+        .client
+        .get(format!("{}/api/event", server.base_url))
+        .basic_auth(SERVER_USER, Some(&server.password));
+    let base_url = server.base_url.clone();
+    let tx = server.events.clone();
+    let mut exited = server.exited.subscribe();
     let stream = async move {
         // One warning per outage: this retries every half second until the server exits.
         let mut connected = true;
         loop {
-            let response = client.get(format!("{base_url}/global/event")).send().await;
+            let response = request
+                .try_clone()
+                .expect("a bodiless GET clones")
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status);
             match &response {
                 Ok(_) if !connected => {
                     tracing::info!("opencode event stream at {base_url} is back");
@@ -547,34 +725,12 @@ fn spawn_sse(
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     };
-    tasks.spawn(async move {
+    server.tasks.spawn(async move {
         tokio::select! {
             () = stream => {}
             _ = exited.wait_for(Option::is_some) => {}
         }
     });
-}
-
-fn parse_sse_record(record: &str) -> Option<OcEvent> {
-    let mut data = String::new();
-    for line in record.lines() {
-        if let Some(rest) = line.strip_prefix("data:") {
-            data.push_str(rest.trim_start());
-        }
-    }
-    if data.is_empty() {
-        return None;
-    }
-    let v: Value = serde_json::from_str(&data).ok()?;
-    let event = v.get("payload").unwrap_or(&v);
-    let kind = event.get("type")?.as_str()?.to_string();
-    if kind == "server.heartbeat" {
-        return None;
-    }
-    Some(OcEvent {
-        kind,
-        properties: event.get("properties").cloned().unwrap_or(Value::Null),
-    })
 }
 
 fn free_port() -> Result<u16, String> {
@@ -584,1713 +740,42 @@ fn free_port() -> Result<u16, String> {
         .map_err(|e| format!("allocate a local port: {e}"))
 }
 
-async fn fetch_model_context(
-    client: &reqwest::Client,
-    base_url: &str,
-) -> std::collections::HashMap<String, u32> {
-    let body = match client
-        .get(format!("{base_url}/config/providers"))
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-        .and_then(reqwest::Response::error_for_status)
-    {
-        Ok(r) => match r.text().await {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!("opencode /config/providers read failed: {e}");
-                return std::collections::HashMap::new();
-            }
-        },
-        Err(e) => {
-            tracing::warn!("opencode /config/providers fetch failed: {e}");
-            return std::collections::HashMap::new();
-        }
-    };
-    parse_model_context(&body)
+fn model_key(model: &Value) -> Option<String> {
+    let provider = model.get("providerID").and_then(Value::as_str)?;
+    let id = model.get("id").and_then(Value::as_str)?;
+    Some(format!("{provider}/{id}"))
 }
 
-async fn fetch_command_names(
-    client: &reqwest::Client,
-    base_url: &str,
-    cwd: &str,
-) -> Result<std::collections::HashSet<String>, String> {
-    let value: Value = client
-        .get(format!("{base_url}/command"))
-        .query(&[("directory", cwd)])
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    let entries = value
+/// `GET /api/model`'s context limits, by `provider/model`.
+fn parse_model_context(models: &Value) -> HashMap<String, u32> {
+    models
         .as_array()
-        .ok_or_else(|| "OpenCode /command returned a non-array response".to_string())?;
-    Ok(entries
-        .iter()
-        .filter_map(|entry| entry.get("name").and_then(Value::as_str))
-        .map(str::to_string)
-        .collect())
-}
-
-fn parse_model_context(body: &str) -> std::collections::HashMap<String, u32> {
-    #[derive(serde::Deserialize)]
-    struct Resp {
-        #[serde(default)]
-        providers: Vec<ProviderEntry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct ProviderEntry {
-        id: String,
-        #[serde(default)]
-        models: std::collections::HashMap<String, ModelEntry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct ModelEntry {
-        #[serde(default)]
-        limit: Option<LimitEntry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct LimitEntry {
-        #[serde(default)]
-        context: Option<u64>,
-    }
-
-    let mut out = std::collections::HashMap::new();
-    let Ok(parsed) = serde_json::from_str::<Resp>(body) else {
-        tracing::warn!("opencode /config/providers parse failed");
-        return out;
-    };
-    for p in parsed.providers {
-        for (model_id, m) in p.models {
-            if let Some(ctx) = m.limit.and_then(|l| l.context).filter(|c| *c > 0) {
-                out.insert(
-                    format!("{}/{model_id}", p.id),
-                    ctx.min(u32::MAX as u64) as u32,
-                );
-            }
-        }
-    }
-    out
-}
-
-fn parse_provider_model_names(
-    body: &str,
-) -> Option<std::collections::HashMap<String, Vec<(String, String)>>> {
-    #[derive(serde::Deserialize)]
-    struct Resp {
-        #[serde(default)]
-        providers: Vec<ProviderEntry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct ProviderEntry {
-        id: String,
-        #[serde(default)]
-        models: std::collections::HashMap<String, ModelEntry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct ModelEntry {
-        #[serde(default)]
-        id: Option<String>,
-        #[serde(default)]
-        name: Option<String>,
-    }
-
-    let parsed = serde_json::from_str::<Resp>(body).ok()?;
-    Some(
-        parsed
-            .providers
-            .into_iter()
-            .map(|p| {
-                let models = p
-                    .models
-                    .into_iter()
-                    .map(|(key, m)| {
-                        let id = m.id.unwrap_or(key);
-                        let name = m.name.unwrap_or_else(|| id.clone());
-                        (id, name)
-                    })
-                    .collect();
-                (p.id, models)
-            })
-            .collect(),
-    )
-}
-
-pub struct OpenCodeDriver {
-    server: Arc<OpenCodeServer>,
-    session_id: String,
-    cwd: String,
-    skills: std::collections::HashSet<String>,
-    commands: std::collections::HashSet<String>,
-    model: std::sync::Mutex<Option<(String, String)>>,
-    events: broadcast::Sender<SessionEvent>,
-    kill_flag: Arc<KillFlag>,
-    filter_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
-    asks: Asks,
-    /// The translator's running `cost_total`, published after every event it handles.
-    cost_so_far: Arc<std::sync::Mutex<Option<f64>>>,
-    sent: SharedTurn,
-    posts: Posts,
-}
-
-/// A request OpenCode waits on; a question keeps its questions to order the answers.
-enum Ask {
-    Permission,
-    Question(Value),
-}
-
-type Asks = Arc<StdMutex<std::collections::HashMap<String, Ask>>>;
-
-/// Mirrors OpenCode's own pending lists; a reply can also settle the session's other asks.
-/// Returns the row that closes an ask a reply took, unless this driver answered it first.
-fn track_ask(asks: &Asks, ev: &OcEvent) -> Option<SessionEvent> {
-    let p = &ev.properties;
-    let field = |key| p.get(key).and_then(Value::as_str).map(str::to_string);
-    let mut asks = asks.lock().unwrap_or_else(PoisonError::into_inner);
-    match ev.kind.as_str() {
-        "permission.asked" => {
-            asks.insert(field("id")?, Ask::Permission);
-            None
-        }
-        "question.asked" => {
-            let questions = p.get("questions").cloned().unwrap_or(json!([]));
-            asks.insert(field("id")?, Ask::Question(questions));
-            None
-        }
-        "permission.replied" | "question.replied" | "question.rejected" => {
-            let id = field("requestID")?;
-            let ask = asks.remove(&id)?;
-            Some(closing(
-                id,
-                &ask,
-                field("reply").as_deref() != Some("reject"),
-            ))
-        }
-        _ => None,
-    }
-}
-
-/// OpenCode's abort cancels its asks without a reply event, and an idle session holds none.
-fn decline_all(asks: &Asks) -> Vec<SessionEvent> {
-    let mut cancelled: Vec<(String, Ask)> = asks
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .drain()
-        .collect();
-    cancelled.sort_by(|a, b| a.0.cmp(&b.0));
-    cancelled
         .into_iter()
-        .map(|(request_id, ask)| closing(request_id, &ask, false))
+        .flatten()
+        .filter_map(|model| {
+            let context = model.pointer("/limit/context").and_then(Value::as_u64)?;
+            let key = model_key(model).filter(|_| context > 0)?;
+            Some((key, context.min(u32::MAX as u64) as u32))
+        })
         .collect()
 }
 
-/// The row that closes an ask; a question's carries no decision.
-fn closing(request_id: String, ask: &Ask, allow: bool) -> SessionEvent {
-    match ask {
-        Ask::Permission => SessionEvent::PermissionResolved {
-            request_id,
-            allow,
-            withdrawn: false,
-        },
-        Ask::Question(_) => SessionEvent::QuestionAnswered { request_id },
-    }
-}
-
-/// The user message id this driver gave its latest turn; OpenCode 1.0.224 to 1.18.32 keep it.
-#[derive(Clone, Default)]
-struct SentTurn {
-    id: String,
-    /// Unix ms; OpenCode creates the turn's user message no earlier.
-    sent_at: u64,
-    interrupted: bool,
-    /// Denied a permission or question; 1.18.32 then stops on a `tool-calls` step.
-    refused: bool,
-    ended: bool,
-}
-
-#[derive(Default)]
-struct Turns {
-    latest: Option<SentTurn>,
-    /// Sent while a turn ran, by message id: OpenCode holds each for its next step, which reads
-    /// every user message older than the one it answers, so the echo waits for that step.
-    waiting: Vec<(String, SessionEvent)>,
-}
-
-impl Turns {
-    fn running(&self) -> bool {
-        self.latest.as_ref().is_some_and(|turn| !turn.ended)
-    }
-
-    fn begin(&mut self) -> String {
-        let sent_at = now_ms();
-        let id = message_id(sent_at);
-        self.latest = Some(SentTurn {
-            id: id.clone(),
-            sent_at,
-            ..SentTurn::default()
-        });
-        id
-    }
-
-    fn read_up_to(&mut self, answered: &str) -> Vec<SessionEvent> {
-        let (read, unread) = std::mem::take(&mut self.waiting)
-            .into_iter()
-            .partition(|(id, _)| id.as_str() <= answered);
-        self.waiting = unread;
-        read.into_iter().map(|(_, echo)| echo).collect()
-    }
-}
-
-type SharedTurn = Arc<StdMutex<Turns>>;
-
-fn turns(shared: &SharedTurn) -> std::sync::MutexGuard<'_, Turns> {
-    shared.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// OpenCode keeps a stopped turn's queued messages, and a later turn would read them; one it
-/// deletes is handed back, and one it will not delete waits for the step that reads it.
-async fn forget_unread(
-    delete: &impl Fn(&str) -> reqwest::RequestBuilder,
-    unread: Vec<(String, SessionEvent)>,
-    shared: &SharedTurn,
-) -> Vec<SessionEvent> {
-    let mut handed_back = Vec::new();
-    for (id, echo) in unread {
-        if delete_message(delete, &id).await {
-            handed_back.extend(declined_message(&echo));
-        } else {
-            turns(shared).waiting.push((id, echo));
-        }
-    }
-    handed_back
-}
-
-fn message_delete(
-    server: &OpenCodeServer,
-    session_id: &str,
-    directory: &str,
-) -> impl Fn(&str) -> reqwest::RequestBuilder + Send + 'static {
-    let client = server.client.clone();
-    let messages = format!("{}/session/{session_id}/message", server.base_url);
-    let directory = directory.to_string();
-    move |id| {
-        client
-            .delete(format!("{messages}/{id}"))
-            .query(&[("directory", &directory)])
-    }
-}
-
-/// OpenCode 1.2.14 added the route; a busy session answers 409 until the abort lands.
-async fn delete_message(delete: &impl Fn(&str) -> reqwest::RequestBuilder, id: &str) -> bool {
-    for _ in 0..DELETE_TRIES {
-        match delete(id).send().await {
-            Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
-                tokio::time::sleep(DELETE_RETRY).await;
-            }
-            Ok(resp) if resp.status().is_success() => return true,
-            Ok(resp) => {
-                tracing::warn!("opencode DELETE message {id} returned {}", resp.status());
-                return false;
-            }
-            Err(e) => {
-                tracing::warn!("opencode DELETE message {id} failed: {e}");
-                return false;
-            }
-        }
-    }
-    tracing::warn!("opencode DELETE message {id}: the session stayed busy");
-    false
-}
-
-async fn read_json(request: reqwest::RequestBuilder) -> Option<Value> {
-    let response = request.send().await.ok()?.error_for_status().ok()?;
-    response.json().await.ok()
-}
-
-type Post = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
-
-type Posts = mpsc::UnboundedSender<(Post, Option<String>)>;
-
-/// Sends each post that starts or stops a turn once the one before is answered and the driver
-/// has read the user message of the last prompt sent: OpenCode answers prompt_async before it
-/// creates that message, drops an abort that arrives first, and can create two prompts' user
-/// messages out of order. Neither wait holds the queue for longer than `UNPLACED_WAIT`.
-fn spawn_posts(tasks: &Handle, mut user_read: watch::Receiver<String>) -> Posts {
-    let (posts, mut queued) = mpsc::unbounded_channel::<(Post, Option<String>)>();
-    let handle = tasks.clone();
-    tasks.spawn(async move {
-        let mut last: Option<String> = None;
-        while let Some((post, prompt)) = queued.recv().await {
-            if let Some(last) = &last {
-                let read = user_read.wait_for(|read| read.as_str() >= last.as_str());
-                let _ = tokio::time::timeout(UNPLACED_WAIT, read).await;
-            }
-            let _ = tokio::time::timeout(UNPLACED_WAIT, handle.spawn(post)).await;
-            last = prompt.or(last);
-        }
-    });
-    posts
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
-}
-
-struct Intake {
-    root: String,
-    family: std::collections::HashSet<String>,
-    asks: Asks,
-    tx: broadcast::Sender<SessionEvent>,
-    user_read: watch::Sender<String>,
-}
-
-impl Intake {
-    fn take(&mut self, xlate: &mut Translator, ev: &OcEvent) -> Vec<SessionEvent> {
-        if !admits(&mut self.family, &self.root, ev) {
-            return Vec::new();
-        }
-        // One read back after a gap may arrive again live; once is enough.
-        let asked = matches!(ev.kind.as_str(), "permission.asked" | "question.asked");
-        let id = str_field(&ev.properties, "id");
-        if asked
-            && self
-                .asks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .contains_key(&id)
-        {
-            return Vec::new();
-        }
-        if ev.kind == "message.updated"
-            && ev.properties.pointer("/info/role").and_then(Value::as_str) == Some("user")
-        {
-            let id = ev.properties.pointer("/info/id").and_then(Value::as_str);
-            let id = id.unwrap_or_default();
-            self.user_read.send_if_modified(|read| {
-                let newer = id > read.as_str();
-                if newer {
-                    *read = id.to_string();
-                }
-                newer
-            });
-        }
-        if let Some(closed) = track_ask(&self.asks, ev) {
-            let _ = self.tx.send(closed);
-        }
-        if ev.kind == "session.idle" {
-            for closed in decline_all(&self.asks) {
-                let _ = self.tx.send(closed);
-            }
-        }
-        xlate.handle(ev)
-    }
-
-    /// An ask read with no turn open can trail a resync that already ended its turn; one OpenCode
-    /// no longer lists was answered meanwhile.
-    async fn gone_ask(
-        &self,
-        get: &impl Fn(&str) -> reqwest::RequestBuilder,
-        xlate: &Translator,
-        ev: &OcEvent,
-    ) -> bool {
-        let list = match ev.kind.as_str() {
-            "permission.asked" => "/permission",
-            "question.asked" => "/question",
-            _ => return false,
+/// `GET /api/model`'s models grouped by provider, as `(id, name)`.
+fn parse_provider_model_names(models: &Value) -> HashMap<String, Vec<(String, String)>> {
+    let mut out: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for model in models.as_array().into_iter().flatten() {
+        let (Some(provider), Some(id)) = (
+            model.get("providerID").and_then(Value::as_str),
+            model.get("id").and_then(Value::as_str),
+        ) else {
+            continue;
         };
-        if xlate.open_turn().is_some() {
-            return false;
-        }
-        let id = str_field(&ev.properties, "id");
-        read_json(get(list))
-            .await
-            .as_ref()
-            .and_then(Value::as_array)
-            .is_some_and(|open| !open.iter().any(|ask| ask["id"] == id))
+        let name = model.get("name").and_then(Value::as_str).unwrap_or(id);
+        out.entry(provider.to_string())
+            .or_default()
+            .push((id.to_string(), name.to_string()));
     }
-
-    async fn resync(
-        &mut self,
-        get: &impl Fn(&str) -> reqwest::RequestBuilder,
-        since: u64,
-        xlate: &mut Translator,
-    ) -> (Vec<SessionEvent>, bool) {
-        let (missed, busy) = self.missed(get, since, &xlate.settled).await;
-        let translated = missed.iter().flat_map(|ev| self.take(xlate, ev)).collect();
-        (translated, busy)
-    }
-
-    async fn missed(
-        &self,
-        get: &impl Fn(&str) -> reqwest::RequestBuilder,
-        since: u64,
-        settled: &std::collections::HashSet<String>,
-    ) -> (Vec<OcEvent>, bool) {
-        let root = &self.root;
-        let messages =
-            get(&format!("/session/{root}/message")).query(&[("limit", RESYNC_MESSAGES)]);
-        let (permissions, questions, status, messages) = tokio::join!(
-            read_json(get("/permission")),
-            read_json(get("/question")),
-            read_json(get("/session/status")),
-            read_json(messages),
-        );
-        let mut missed = Vec::new();
-        let unsettled = |m: &&Value| {
-            let created = m.pointer("/info/time/created").and_then(Value::as_u64);
-            let id = m.pointer("/info/id").and_then(Value::as_str);
-            created.is_some_and(|at| at >= since) && id.is_some_and(|id| !settled.contains(id))
-        };
-        for message in messages
-            .as_ref()
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter(unsettled)
-        {
-            let info = json!({ "sessionID": root, "info": message["info"] });
-            missed.push(OcEvent::new("message.updated", info));
-            for part in message["parts"].as_array().into_iter().flatten() {
-                let part = json!({ "sessionID": root, "part": part });
-                missed.push(OcEvent::new("message.part.updated", part));
-            }
-        }
-        if let (Some(Value::Array(permissions)), Some(Value::Array(questions))) =
-            (&permissions, &questions)
-        {
-            let listed = |id: &str| permissions.iter().chain(questions).any(|a| a["id"] == id);
-            let gone: Vec<String> = self
-                .asks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .keys()
-                .filter(|id| !listed(id))
-                .cloned()
-                .collect();
-            for id in gone {
-                let reply = json!({ "sessionID": root, "requestID": id, "reply": "reject" });
-                missed.push(OcEvent::new("permission.replied", reply));
-            }
-            for (kind, open) in [
-                ("permission.asked", permissions),
-                ("question.asked", questions),
-            ] {
-                let ours = |ask: &&Value| {
-                    ask["sessionID"]
-                        .as_str()
-                        .is_some_and(|from| self.family.contains(from))
-                };
-                for ask in open.iter().filter(ours) {
-                    missed.push(OcEvent::new(kind, ask.clone()));
-                }
-            }
-        }
-        let busy = status
-            .as_ref()
-            .map(|all| all.get(root).is_some_and(|s| s["type"] != "idle"));
-        if busy == Some(false) {
-            missed.push(OcEvent::new("session.idle", json!({ "sessionID": root })));
-        }
-        (missed, busy == Some(true))
-    }
-}
-
-/// An id in OpenCode's ascending format, which orders a session's messages: the low 48 bits of
-/// `ms * 0x1000 + counter`. Counter 0 sorts before any id OpenCode mints that millisecond.
-fn message_id(ms: u64) -> String {
-    static LAST: StdMutex<u64> = StdMutex::new(0);
-    let now = ms.wrapping_mul(0x1000);
-    let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
-    *last = now.max(*last + 1);
-    let suffix = uuid::Uuid::new_v4().simple().to_string();
-    format!("msg_{:012x}{}", *last & 0xffff_ffff_ffff, &suffix[..14])
-}
-
-impl OpenCodeDriver {
-    pub async fn spawn(
-        server: Arc<OpenCodeServer>,
-        cwd: &str,
-        model: Option<String>,
-        resume: Option<&str>,
-    ) -> Result<(Arc<Self>, broadcast::Receiver<SessionEvent>), String> {
-        let (session_id, lost) = match resume {
-            Some(id) => match server.missing_session(id, cwd).await? {
-                None => (id.to_string(), None),
-                Some(status) => (server.create_session(cwd).await?, Some((id, status))),
-            },
-            None => (server.create_session(cwd).await?, None),
-        };
-
-        let model = model.as_deref().and_then(parse_model);
-        // OpenCode's HTTP prompt endpoint does not parse slash commands, so typed
-        // invocations route through /session/{id}/command. The routable set is the
-        // server's own command registry (its builtins, commands, and skills alike);
-        // the local skill index only decides which invocations carry the
-        // cross-harness routing preamble.
-        let skill_scan = tokio::task::spawn_blocking({
-            let cwd = cwd.to_string();
-            let home = server.home.clone();
-            move || {
-                crate::skills::list_skills(
-                    Some(std::path::Path::new(&cwd)),
-                    &crate::skills::SkillHome::under(&home),
-                )
-                .into_iter()
-                .map(|skill| skill.name)
-                .collect::<std::collections::HashSet<String>>()
-            }
-        });
-        let (skills, commands) = tokio::join!(
-            skill_scan,
-            fetch_command_names(&server.client, &server.base_url, cwd)
-        );
-        let skills = skills.unwrap_or_default();
-        let commands = match commands {
-            Ok(names) => names,
-            Err(error) => {
-                tracing::warn!(
-                    "opencode command discovery failed; explicit invocations fall back to plain prompts: {error}"
-                );
-                std::collections::HashSet::new()
-            }
-        };
-
-        let (events, _) = broadcast::channel(EVENT_CAP);
-        let primary_rx = events.subscribe();
-
-        let _ = events.send(SessionEvent::Init {
-            provider_session_id: session_id.clone(),
-            model: model.as_ref().map(|(p, m)| format!("{p}/{m}")),
-            mcp_servers: None,
-        });
-
-        if let Some((lost, status)) = lost {
-            tracing::warn!(
-                "opencode no longer has session {lost} ({status}); continuing in {session_id} without its earlier turns"
-            );
-            let _ = events.send(SessionEvent::ProtocolError {
-                detail: "OpenCode no longer has this conversation; it continues without the earlier turns".into(),
-                raw: format!("OpenCode answered {status} for session {lost}; started {session_id}"),
-            });
-        }
-
-        if let Some(tokens) = model.as_ref().and_then(|(p, m)| {
-            let id = format!("{p}/{m}");
-            crate::opencode::config::opencode_model_context_window(&id)
-                .or_else(|| server.model_context.get(&id).copied())
-        }) {
-            let _ = events.send(SessionEvent::ContextWindow { tokens });
-        }
-
-        let mut sse_rx = server.events.subscribe();
-        let asks = Asks::default();
-        let (user_read, read_up_to) = watch::channel(String::new());
-        let posts = spawn_posts(&server.tasks, read_up_to);
-        let mut intake = Intake {
-            root: session_id.clone(),
-            family: std::collections::HashSet::from([session_id.clone()]),
-            asks: asks.clone(),
-            tx: events.clone(),
-            user_read,
-        };
-        let tx = events.clone();
-        let since = now_ms();
-        let get = {
-            let client = server.client.clone();
-            let base_url = server.base_url.clone();
-            let directory = cwd.to_string();
-            move |path: &str| {
-                client
-                    .get(format!("{base_url}{path}"))
-                    .query(&[("directory", &directory)])
-                    .timeout(RESYNC_WAIT)
-            }
-        };
-        let cost_so_far = Arc::new(std::sync::Mutex::new(None));
-        let published_cost = cost_so_far.clone();
-        let sent = SharedTurn::default();
-        let xlate_sent = sent.clone();
-        let mut server_exit = server.exited.subscribe();
-        let exit_tx = events.clone();
-        let delete = message_delete(&server, &session_id, cwd);
-        let translate = async move {
-            let mut xlate = Translator {
-                sent: xlate_sent,
-                ..Translator::default()
-            };
-            let mut older: usize = 0;
-            loop {
-                let next = match xlate.deadline() {
-                    Some(at) => tokio::time::timeout_at(at.into(), sse_rx.recv()).await.ok(),
-                    None => Some(sse_rx.recv().await),
-                };
-                let translated = match next {
-                    None => xlate.expire(),
-                    Some(Ok(ev)) if ev.kind != "server.connected" => {
-                        // An idle or error queued before a read-back that found the session busy
-                        // ended an earlier run, not the one OpenCode runs now.
-                        let ended = matches!(ev.kind.as_str(), "session.idle" | "session.error");
-                        let ours = event_session_id(&ev) == Some(intake.root.as_str());
-                        let superseded = older > 0 && ended && ours;
-                        older = older.saturating_sub(1);
-                        if superseded || intake.gone_ask(&get, &xlate, &ev).await {
-                            Vec::new()
-                        } else {
-                            intake.take(&mut xlate, &ev)
-                        }
-                    }
-                    // OpenCode starts every event stream with it, so one here follows a gap.
-                    Some(Ok(_) | Err(broadcast::error::RecvError::Lagged(_))) => {
-                        let queued = sse_rx.len();
-                        let (translated, busy) = intake.resync(&get, since, &mut xlate).await;
-                        older = if busy { queued } else { 0 };
-                        translated
-                    }
-                    Some(Err(broadcast::error::RecvError::Closed)) => break,
-                };
-                if let Ok(mut so_far) = published_cost.lock() {
-                    *so_far = Some(xlate.cost_total);
-                }
-                // Handed back ahead of the turn's end, and before a held end can be let out, so
-                // a resend after it reads alone.
-                let unread = std::mem::take(&mut xlate.unread);
-                let handed_back = forget_unread(&delete, unread, &xlate.sent).await;
-                for se in handed_back.into_iter().chain(translated) {
-                    let _ = tx.send(se);
-                }
-            }
-        };
-        let server_exited = async move {
-            let exited = server_exit.wait_for(Option::is_some).await.ok()?;
-            exited.clone()
-        };
-        let task = server.tasks.spawn(async move {
-            tokio::select! {
-                biased;
-                () = translate => {}
-                Some(exited) = server_exited => {
-                    let _ = exit_tx.send(exited);
-                }
-            }
-        });
-
-        let driver = Arc::new(Self {
-            server,
-            session_id,
-            cwd: cwd.to_string(),
-            skills,
-            commands,
-            model: std::sync::Mutex::new(model),
-            events,
-            kill_flag: Arc::new(KillFlag::default()),
-            filter_task: Mutex::new(Some(task)),
-            asks,
-            cost_so_far,
-            sent,
-            posts,
-        });
-        Ok((driver, primary_rx))
-    }
-
-    /// OpenCode resolves a request that names no directory in its own cwd, where a worktree
-    /// session's questions are not found.
-    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
-        self.server
-            .client
-            .request(method, format!("{}{path}", self.server.base_url))
-            .query(&[("directory", &self.cwd)])
-    }
-
-    fn end(&self, outcome: ExitOutcome) {
-        let unread = std::mem::take(&mut turns(&self.sent).waiting);
-        let abort_path = format!("/session/{}/abort", self.session_id);
-        let abort = self
-            .request(reqwest::Method::POST, &abort_path)
-            .json(&json!({}));
-        let delete = message_delete(&self.server, &self.session_id, &self.cwd);
-        let shared = self.sent.clone();
-        self.server.tasks.spawn(async move {
-            if let Err(e) = abort.send().await {
-                tracing::warn!("opencode POST {abort_path} failed: {e}");
-            }
-            forget_unread(&delete, unread, &shared).await;
-        });
-        if let Ok(mut guard) = self.filter_task.try_lock() {
-            if let Some(handle) = guard.take() {
-                handle.abort();
-            }
-        }
-        let _ = self.events.send(SessionEvent::Exited {
-            outcome,
-            code: None,
-            stderr_tail: String::new(),
-        });
-    }
-
-    fn post_async(&self, path: String, body: Value) {
-        let request = self.request(reqwest::Method::POST, &path).json(&body);
-        self.server.tasks.spawn(async move {
-            match request.send().await {
-                Ok(resp) if !resp.status().is_success() => {
-                    tracing::warn!("opencode POST {path} returned {}", resp.status());
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("opencode POST {path} failed: {e}"),
-            }
-        });
-    }
-
-    fn prompt_async(&self, body: Value, message_id: String) {
-        let path = format!("/session/{}/prompt_async", self.session_id);
-        let request = self.request(reqwest::Method::POST, &path).json(&body);
-        let events = self.events.clone();
-        let post = Box::pin(async move {
-            let result = request
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            if let Err(e) = result {
-                tracing::warn!("opencode request failed: {e}");
-                let _ = events.send(SessionEvent::AssistantText {
-                    text: format!("⚠ OpenCode request failed: {e}"),
-                    parent_id: None,
-                    injected: false,
-                    auth_required: false,
-                });
-                let _ = events.send(SessionEvent::TurnDone {
-                    cost_usd: None,
-                    num_turns: None,
-                    context_tokens: None,
-                    turn_status: Some("failed".into()),
-                    thread_tokens: None,
-                });
-            }
-        });
-        let _ = self.posts.send((post, Some(message_id)));
-    }
-
-    fn command_async(
-        &self,
-        command: &str,
-        arguments: &str,
-        original_text: &str,
-        message_id: String,
-    ) {
-        let model = self.model.lock().ok().and_then(|model| model.clone());
-        let arguments = if self.skills.contains(command) {
-            routed_skill_arguments(skill_base_for_model(model.as_ref()), arguments)
-        } else {
-            arguments.to_string()
-        };
-        let mut body = json!({
-            "command": command,
-            "arguments": arguments,
-            "messageID": &message_id,
-        });
-        let mut fallback = json!({ "parts": [{ "type": "text", "text": original_text }] });
-        if let Some((provider, model)) = &model {
-            body["model"] = json!(format!("{provider}/{model}"));
-            fallback["model"] = json!({ "providerID": provider, "modelID": model });
-        }
-
-        let events = self.events.clone();
-        let command = self.request(
-            reqwest::Method::POST,
-            &format!("/session/{}/command", self.session_id),
-        );
-        let prompt = self.request(
-            reqwest::Method::POST,
-            &format!("/session/{}/prompt_async", self.session_id),
-        );
-        let turn = self.sent.clone();
-        let run = async move {
-            let sent = command
-                .json(&body)
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            let Err(command_error) = sent else { return };
-            tracing::warn!(
-                "opencode command failed; delivering the turn as a plain prompt: {command_error}"
-            );
-            fallback["messageID"] = json!(turns(&turn).begin());
-            let delivered = prompt
-                .json(&fallback)
-                .send()
-                .await
-                .and_then(reqwest::Response::error_for_status);
-            if let Err(e) = delivered {
-                tracing::warn!("opencode request failed: {e}");
-                let _ = events.send(SessionEvent::AssistantText {
-                    text: format!("⚠ OpenCode request failed: {e}"),
-                    parent_id: None,
-                    injected: false,
-                    auth_required: false,
-                });
-                let _ = events.send(SessionEvent::TurnDone {
-                    cost_usd: None,
-                    num_turns: None,
-                    context_tokens: None,
-                    turn_status: Some("failed".into()),
-                    thread_tokens: None,
-                });
-            }
-        };
-        let tasks = self.server.tasks.clone();
-        // Sent in turn, but not awaited: /command answers only when its turn ends.
-        let started = Box::pin(async move {
-            tasks.spawn(run);
-        });
-        let _ = self.posts.send((started, Some(message_id)));
-    }
-
-    fn take_ask(&self, request_id: &str) -> Option<Ask> {
-        self.asks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(request_id)
-    }
-
-    fn mark_turn(&self, mark: impl FnOnce(&mut SentTurn)) {
-        if let Some(turn) = turns(&self.sent).latest.as_mut() {
-            mark(turn);
-        }
-    }
-
-    pub async fn delete_session(&self) {
-        let path = format!("/session/{}", self.session_id);
-        if let Err(e) = self
-            .request(reqwest::Method::DELETE, &path)
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-        {
-            tracing::warn!("opencode session delete failed: {e}");
-        }
-    }
-}
-
-impl AgentDriver for OpenCodeDriver {
-    fn subscribe(&self) -> broadcast::Receiver<SessionEvent> {
-        self.events.subscribe()
-    }
-
-    fn send_user_turn(
-        &self,
-        text: &str,
-        stage: Option<&str>,
-        prompt_name: Option<&str>,
-        client_message_id: Option<&str>,
-    ) -> CoreResult<()> {
-        let echo = SessionEvent::UserMessage {
-            text: text.to_string(),
-            stage: stage.map(str::to_string),
-            prompt_name: prompt_name.map(str::to_string),
-            client_message_id: client_message_id.map(str::to_string),
-            author: None,
-        };
-        let message_id = {
-            let mut sent = turns(&self.sent);
-            let running = sent.running();
-            let id = sent.begin();
-            if running && client_message_id.is_some() {
-                sent.waiting.push((id.clone(), echo));
-            } else {
-                let _ = self.events.send(echo);
-            }
-            id
-        };
-        if let Some(invocation) = leading_skill_invocation(text, &self.commands, prompt_name) {
-            self.command_async(invocation.name, invocation.arguments, text, message_id);
-            return Ok(());
-        }
-        let mut body = json!({
-            "parts": [{ "type": "text", "text": text }],
-            "messageID": message_id,
-        });
-        if let Some((provider, model)) = self.model.lock().ok().and_then(|m| m.clone()) {
-            body["model"] = json!({ "providerID": provider, "modelID": model });
-        }
-        self.prompt_async(body, message_id);
-        Ok(())
-    }
-
-    fn set_model(&self, model: Option<String>) {
-        if let Ok(mut m) = self.model.lock() {
-            *m = model.as_deref().and_then(parse_model);
-        }
-    }
-
-    fn respond_permission(
-        &self,
-        request_id: &str,
-        allow: bool,
-        _message: Option<&str>,
-    ) -> CoreResult<()> {
-        if let Some(ask) = self.take_ask(request_id) {
-            let _ = self
-                .events
-                .send(closing(request_id.to_string(), &ask, allow));
-        }
-        if !allow {
-            self.mark_turn(|turn| turn.refused = true);
-        }
-        let response = if allow { "once" } else { "reject" };
-        self.post_async(
-            format!("/session/{}/permissions/{}", self.session_id, request_id),
-            json!({ "response": response }),
-        );
-        Ok(())
-    }
-
-    fn answer_question(&self, request_id: &str, answers: QuestionAnswers) -> CoreResult<()> {
-        let taken = self.take_ask(request_id);
-        if let Some(ask) = &taken {
-            let _ = self.events.send(closing(request_id.to_string(), ask, true));
-        }
-        let questions = match taken {
-            Some(Ask::Question(questions)) => Some(questions),
-            _ => None,
-        };
-        if answers.is_empty() {
-            self.mark_turn(|turn| turn.refused = true);
-            self.post_async(format!("/question/{request_id}/reject"), json!({}));
-            return Ok(());
-        }
-        let ordered: Vec<Vec<String>> = questions
-            .as_ref()
-            .and_then(Value::as_array)
-            .map(|qs| {
-                qs.iter()
-                    .map(|q| {
-                        let text = q
-                            .get("question")
-                            .and_then(Value::as_str)
-                            .unwrap_or_default();
-                        answers
-                            .get(text)
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.split(", ").map(str::to_string).collect())
-                            .unwrap_or_default()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        self.post_async(
-            format!("/question/{request_id}/reply"),
-            json!({ "answers": ordered }),
-        );
-        Ok(())
-    }
-
-    fn pending_requests(&self) -> Option<Vec<String>> {
-        let asks = self.asks.lock().unwrap_or_else(PoisonError::into_inner);
-        Some(asks.keys().cloned().collect())
-    }
-
-    fn interrupt(&self) -> CoreResult<()> {
-        for closed in decline_all(&self.asks) {
-            let _ = self.events.send(closed);
-        }
-        self.mark_turn(|turn| turn.interrupted = true);
-        let path = format!("/session/{}/abort", self.session_id);
-        let abort = self.request(reqwest::Method::POST, &path).json(&json!({}));
-        let post = Box::pin(async move {
-            match abort.send().await {
-                Ok(resp) if !resp.status().is_success() => {
-                    tracing::warn!("opencode POST {path} returned {}", resp.status());
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("opencode POST {path} failed: {e}"),
-            }
-        });
-        let _ = self.posts.send((post, None));
-        Ok(())
-    }
-
-    fn usage_so_far(&self) -> UsageSoFar {
-        UsageSoFar {
-            cost_usd: self.cost_so_far.lock().ok().and_then(|cost| *cost),
-            thread_tokens: None,
-        }
-    }
-
-    fn kill(&self) {
-        if self.kill_flag.mark_killed() {
-            self.end(ExitOutcome::Killed);
-        }
-    }
-
-    fn kill_detached(&self) {
-        if self.kill_flag.mark_detached() {
-            self.end(ExitOutcome::Detached);
-        }
-    }
-
-    fn pid(&self) -> Option<u32> {
-        None
-    }
-
-    fn provider_settings_outdated(&self) -> bool {
-        self.server.retired.load(Ordering::SeqCst)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SkillBase {
-    Claude,
-    Codex,
-}
-
-fn skill_base_for_model(model: Option<&(String, String)>) -> SkillBase {
-    let Some((provider, model)) = model else {
-        return SkillBase::Codex;
-    };
-    let id = format!("{provider}/{model}").to_ascii_lowercase();
-    if provider.eq_ignore_ascii_case("anthropic") || id.contains("claude") {
-        SkillBase::Claude
-    } else {
-        SkillBase::Codex
-    }
-}
-
-struct SkillInvocation<'a> {
-    name: &'a str,
-    arguments: &'a str,
-}
-
-fn leading_skill_invocation<'a>(
-    text: &'a str,
-    known: &std::collections::HashSet<String>,
-    prompt_name: Option<&str>,
-) -> Option<SkillInvocation<'a>> {
-    // Custom prompts have already been expanded by the app. Their bodies are
-    // ordinary user text even if the first line happens to resemble a skill.
-    if prompt_name.is_some() {
-        return None;
-    }
-    let text = text.trim_start();
-    let rest = text.strip_prefix('/').or_else(|| text.strip_prefix('$'))?;
-    let name_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-    let name = &rest[..name_end];
-    if name.is_empty() || !known.contains(name) {
-        return None;
-    }
-    Some(SkillInvocation {
-        name,
-        arguments: rest[name_end..].trim_start(),
-    })
-}
-
-fn routed_skill_arguments(base: SkillBase, arguments: &str) -> String {
-    let (platform, agent_source) = match base {
-        SkillBase::Claude => ("Claude", "the matching .claude/agents/<name>.md persona"),
-        SkillBase::Codex => (
-            "Codex",
-            "the matching .codex/agents/<name>.toml persona, or ~/.claude/agents/<name>.md when no TOML exists",
-        ),
-    };
-    let routing = format!(
-        "<hyprlayer-skill-routing>\n\
-         Base platform: {platform}. Where this skill distinguishes harness behavior, follow its \
-         {platform} path. OpenCode is only the execution harness: if it cannot load a named \
-         {platform} agent directly, read {agent_source} and carry those instructions into a \
-         generic subagent.\n\
-         </hyprlayer-skill-routing>"
-    );
-    if arguments.is_empty() {
-        routing
-    } else {
-        format!("{routing}\n\n{arguments}")
-    }
-}
-
-fn parse_model(id: &str) -> Option<(String, String)> {
-    id.split_once('/')
-        .map(|(p, m)| (p.to_string(), m.to_string()))
-        .filter(|(p, m)| !p.is_empty() && !m.is_empty())
-}
-
-// 1.0.x names a message event's session only on its `info` or `part`.
-fn event_session_id(ev: &OcEvent) -> Option<&str> {
-    let p = &ev.properties;
-    [
-        p.get("sessionID"),
-        p.pointer("/info/sessionID"),
-        p.pointer("/part/sessionID"),
-    ]
-    .into_iter()
-    .flatten()
-    .find_map(Value::as_str)
-}
-
-/// The session's own events, and only the asks of the subagent sessions under it, which
-/// OpenCode announces with a `parentID` and which wait on the same user.
-fn admits(family: &mut std::collections::HashSet<String>, root: &str, ev: &OcEvent) -> bool {
-    let Some(from) = event_session_id(ev) else {
-        return false;
-    };
-    if from == root {
-        return true;
-    }
-    let parent = ev
-        .properties
-        .pointer("/info/parentID")
-        .and_then(Value::as_str);
-    if matches!(ev.kind.as_str(), "session.created" | "session.updated")
-        && parent.is_some_and(|parent| family.contains(parent))
-    {
-        family.insert(from.to_string());
-    }
-    family.contains(from)
-        && matches!(
-            ev.kind.as_str(),
-            "permission.asked"
-                | "question.asked"
-                | "permission.replied"
-                | "question.replied"
-                | "question.rejected"
-        )
-}
-
-#[derive(Default)]
-struct Translator {
-    roles: std::collections::HashMap<String, String>,
-    text_len: std::collections::HashMap<String, usize>,
-    text_done: std::collections::HashSet<String>,
-    delta_parts: std::collections::HashSet<String>,
-    part_types: std::collections::HashMap<String, String>,
-    tool_started: std::collections::HashSet<String>,
-    tool_done: std::collections::HashSet<String>,
-    cost_total: f64,
-    context_tokens: Option<u32>,
-    planning: bool,
-    /// `session.idle` and `session.error` name no turn, so only the driver's own turn ends.
-    sent: SharedTurn,
-    /// The sent turn's id, and the id OpenCode gave its user message.
-    anchor: Option<(String, String)>,
-    /// The sent turn OpenCode finished answering.
-    answered: Option<String>,
-    /// An idle or error that came before the anchor, when, and the sent turn it waits on.
-    unplaced: Option<(std::time::Instant, String, OcEvent)>,
-    open_reply: Option<String>,
-    held_end: Option<(std::time::Instant, Vec<SessionEvent>)>,
-    unread: Vec<(String, SessionEvent)>,
-    settled: std::collections::HashSet<String>,
-}
-
-/// How long an unplaced idle or error waits for the anchor before it ends the turn anyway.
-const UNPLACED_WAIT: Duration = Duration::from_secs(5);
-
-/// How long a turn's end waits for its open reply; 1.18.18 settles an aborted one within 300 ms.
-const SETTLE_WAIT: Duration = Duration::from_secs(3);
-
-/// A step's message completes with `finish: tool-calls` while the turn goes on.
-fn reply_finished(info: &Value) -> bool {
-    let set = |v: Option<&Value>| v.is_some_and(|v| !v.is_null());
-    set(info.get("error"))
-        || (set(info.pointer("/time/completed"))
-            && info.get("finish").and_then(Value::as_str) != Some("tool-calls"))
-}
-
-fn message_settled(info: &Value) -> bool {
-    let set = |v: Option<&Value>| v.is_some_and(|v| !v.is_null());
-    set(info.get("error")) || set(info.pointer("/time/completed"))
-}
-
-fn is_abort(p: &Value) -> bool {
-    p.pointer("/error/name").and_then(Value::as_str) == Some("MessageAbortedError")
-        || p.pointer("/error/data/message").and_then(Value::as_str) == Some("Aborted")
-}
-
-fn error_events(p: &Value) -> Vec<SessionEvent> {
-    let err = p.get("error");
-    let name = err
-        .and_then(|e| e.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let msg = err
-        .and_then(|e| e.get("data"))
-        .and_then(|d| d.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("OpenCode reported an error")
-        .to_string();
-    if is_abort(p) {
-        return vec![SessionEvent::TurnDone {
-            cost_usd: None,
-            num_turns: None,
-            context_tokens: None,
-            turn_status: Some("interrupted".into()),
-            thread_tokens: None,
-        }];
-    }
-    let auth_failed = name == "ProviderAuthError"
-        || (name == "APIError"
-            && err
-                .and_then(|e| e.pointer("/data/statusCode"))
-                .and_then(Value::as_u64)
-                == Some(401));
-    vec![
-        SessionEvent::AssistantText {
-            text: format!("⚠ OpenCode error: {msg}"),
-            parent_id: None,
-            injected: false,
-            auth_required: auth_failed,
-        },
-        SessionEvent::TurnDone {
-            cost_usd: None,
-            num_turns: None,
-            context_tokens: None,
-            turn_status: Some("failed".into()),
-            thread_tokens: None,
-        },
-    ]
-}
-
-impl Translator {
-    fn open_turn(&self) -> Option<SentTurn> {
-        turns(&self.sent).latest.clone().filter(|turn| !turn.ended)
-    }
-
-    fn end(&mut self, turn: &SentTurn) {
-        let mut sent = turns(&self.sent);
-        if let Some(latest) = sent.latest.as_mut().filter(|t| t.id == turn.id) {
-            latest.ended = true;
-        }
-        if turn.interrupted {
-            self.unread = std::mem::take(&mut sent.waiting);
-        }
-    }
-
-    fn anchor_of(&self, turn: &SentTurn) -> Option<&str> {
-        self.anchor
-            .as_ref()
-            .filter(|(sent, _)| *sent == turn.id)
-            .map(|(_, anchor)| anchor.as_str())
-    }
-
-    fn ended_as(&self, status: &str) -> SessionEvent {
-        SessionEvent::TurnDone {
-            cost_usd: Some(self.cost_total),
-            num_turns: None,
-            context_tokens: self.context_tokens,
-            turn_status: Some(status.into()),
-            thread_tokens: None,
-        }
-    }
-
-    fn deadline(&self) -> Option<std::time::Instant> {
-        let unplaced = self.unplaced.as_ref().map(|(at, _, _)| *at + UNPLACED_WAIT);
-        let held = self.held_end.as_ref().map(|(at, _)| *at + SETTLE_WAIT);
-        unplaced.into_iter().chain(held).min()
-    }
-
-    fn expire(&mut self) -> Vec<SessionEvent> {
-        let mut out = self.release_end();
-        out.extend(self.expire_unplaced());
-        self.open_reply = None;
-        out
-    }
-
-    /// No user message matched the prompt, so the held event ends the turn as any
-    /// idle or error did before turns were bound to their reply.
-    fn expire_unplaced(&mut self) -> Vec<SessionEvent> {
-        let Some((_, waited_on, held)) = self.unplaced.take() else {
-            return Vec::new();
-        };
-        let Some(turn) = self
-            .open_turn()
-            .filter(|turn| turn.id == waited_on && self.anchor_of(turn).is_none())
-        else {
-            return Vec::new();
-        };
-        tracing::warn!(
-            "no opencode user message matched prompt {}; ending its turn on {}",
-            turn.id,
-            held.kind
-        );
-        self.end(&turn);
-        let mut out = vec![SessionEvent::ProtocolError {
-            detail: "OpenCode reported no message matching this prompt, so its turn ended on the next idle or error".into(),
-            raw: format!("prompt {}; ended on {}", turn.id, held.kind),
-        }];
-        if held.kind == "session.error" {
-            out.extend(error_events(&held.properties));
-        } else if turn.interrupted {
-            out.push(self.ended_as("interrupted"));
-        } else {
-            out.push(self.ended_as("completed"));
-        }
-        out
-    }
-
-    /// OpenCode ends a turn before it settles the parts of the reply it cut short, so the end
-    /// waits for that reply, and goes out before anything of a turn sent after it.
-    fn end_turn(&mut self, turn: &SentTurn, events: Vec<SessionEvent>) -> Vec<SessionEvent> {
-        self.end(turn);
-        if self.open_reply.is_none() {
-            return events;
-        }
-        self.held_end = Some((std::time::Instant::now(), events));
-        Vec::new()
-    }
-
-    fn release_end(&mut self) -> Vec<SessionEvent> {
-        match self.held_end.take() {
-            Some((_, events)) => {
-                self.open_reply = None;
-                events
-            }
-            None => Vec::new(),
-        }
-    }
-
-    fn handle(&mut self, ev: &OcEvent) -> Vec<SessionEvent> {
-        let mut out = match self.open_turn() {
-            Some(_) => self.release_end(),
-            None => Vec::new(),
-        };
-        out.extend(self.translate(ev));
-        if self.open_reply.is_none() {
-            out.extend(self.release_end());
-        }
-        out
-    }
-
-    fn translate(&mut self, ev: &OcEvent) -> Vec<SessionEvent> {
-        let p = &ev.properties;
-        let open = self.open_turn();
-        match ev.kind.as_str() {
-            "message.updated" => {
-                let Some(info) = p.get("info") else {
-                    return Vec::new();
-                };
-                let mut out = Vec::new();
-                if let (Some(id), Some(role)) = (
-                    info.get("id").and_then(Value::as_str),
-                    info.get("role").and_then(Value::as_str),
-                ) {
-                    if let Some(turn) = &open {
-                        let created = info.pointer("/time/created").and_then(Value::as_u64);
-                        let ours = id == turn.id || created.is_some_and(|at| at >= turn.sent_at);
-                        if role == "user" && ours && self.anchor_of(turn).is_none() {
-                            self.anchor = Some((turn.id.clone(), id.to_string()));
-                            self.unplaced = None;
-                        }
-                        // Ids ascend, and a step after compaction answers compaction's message.
-                        let newer = id > self.anchor_of(turn).unwrap_or(&turn.id);
-                        if role == "assistant" && newer && reply_finished(info) {
-                            self.answered = Some(turn.id.clone());
-                        }
-                        // Any reply still running, though older than a message sent mid-turn.
-                        if role == "assistant" && !message_settled(info) {
-                            self.open_reply = Some(id.to_string());
-                        }
-                    }
-                    if message_settled(info) && self.open_reply.as_deref() == Some(id) {
-                        self.open_reply = None;
-                    }
-                    if role == "user" || message_settled(info) {
-                        self.settled.insert(id.to_string());
-                    }
-                    if let Some(parent) = info.get("parentID").and_then(Value::as_str) {
-                        out = turns(&self.sent).read_up_to(parent);
-                    }
-                    self.roles.insert(id.to_string(), role.to_string());
-                }
-                // Every message names the agent answering it; `plan` is OpenCode's plan mode.
-                let Some(agent) = info.get("agent").and_then(Value::as_str) else {
-                    return out;
-                };
-                let planning = agent == "plan";
-                if planning != self.planning {
-                    self.planning = planning;
-                    out.push(SessionEvent::PlanModeChanged { active: planning });
-                }
-                out
-            }
-            "message.part.delta" => {
-                let mid = p
-                    .get("messageID")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if self.roles.get(mid).map(String::as_str) != Some("assistant") {
-                    return Vec::new();
-                }
-                let pid = p.get("partID").and_then(Value::as_str).unwrap_or_default();
-                if !pid.is_empty() {
-                    self.delta_parts.insert(pid.to_string());
-                }
-                if self.part_types.get(pid).map(String::as_str) == Some("reasoning")
-                    || self.text_done.contains(pid)
-                {
-                    return Vec::new();
-                }
-                let field = p.get("field").and_then(Value::as_str).unwrap_or("text");
-                let delta = p.get("delta").and_then(Value::as_str).unwrap_or_default();
-                if field == "text" && !delta.is_empty() {
-                    vec![SessionEvent::PartialText {
-                        text: delta.to_string(),
-                        parent_id: None,
-                    }]
-                } else {
-                    Vec::new()
-                }
-            }
-            "message.part.updated" => self.handle_part(p.get("part").unwrap_or(&Value::Null)),
-            "permission.asked" => vec![SessionEvent::PermissionAsk {
-                request_id: str_field(p, "id"),
-                tool_use_id: None,
-                tool_name: {
-                    let t = str_field(p, "permission");
-                    if t.is_empty() {
-                        "tool".to_string()
-                    } else {
-                        t
-                    }
-                },
-                input: json!({
-                    "patterns": p.get("patterns").cloned().unwrap_or(json!([])),
-                    "metadata": p.get("metadata").cloned().unwrap_or(json!({})),
-                })
-                .to_string(),
-            }],
-            "question.asked" => vec![SessionEvent::QuestionAsk {
-                request_id: str_field(p, "id"),
-                questions: questions_from_value(p.get("questions")),
-                subject: None,
-            }],
-            "session.idle" => {
-                let Some(turn) = open else {
-                    return Vec::new();
-                };
-                let answered = self.answered.as_ref() == Some(&turn.id) || turn.refused;
-                if answered {
-                    let done = self.ended_as("completed");
-                    return self.end_turn(&turn, vec![done]);
-                }
-                // The stop goes out once OpenCode created the prompt's user message; an idle
-                // before that is not its.
-                if turn.interrupted && self.anchor_of(&turn).is_some() {
-                    let done = self.ended_as("interrupted");
-                    return self.end_turn(&turn, vec![done]);
-                }
-                self.hold_unplaced(&turn, ev);
-                Vec::new()
-            }
-            "session.error" => {
-                let Some(turn) = open else {
-                    return Vec::new();
-                };
-                // An abort is this turn's only if this driver asked; any error only once anchored.
-                let ours = self.anchor_of(&turn).is_some() && (turn.interrupted || !is_abort(p));
-                if !ours {
-                    self.hold_unplaced(&turn, ev);
-                    return Vec::new();
-                }
-                self.end_turn(&turn, error_events(p))
-            }
-            _ => Vec::new(),
-        }
-    }
-
-    fn hold_unplaced(&mut self, turn: &SentTurn, ev: &OcEvent) {
-        let held_for_it = matches!(&self.unplaced, Some((_, id, _)) if *id == turn.id);
-        if self.anchor_of(turn).is_none() && !held_for_it {
-            self.unplaced = Some((std::time::Instant::now(), turn.id.clone(), ev.clone()));
-        }
-    }
-
-    fn handle_part(&mut self, part: &Value) -> Vec<SessionEvent> {
-        let pid = part
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let ptype = part.get("type").and_then(Value::as_str).unwrap_or_default();
-        let known = !pid.is_empty()
-            && self
-                .part_types
-                .insert(pid.clone(), ptype.to_string())
-                .is_some();
-        let mid = part
-            .get("messageID")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if self.roles.get(mid).map(String::as_str) != Some("assistant") {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-
-        match ptype {
-            "text" => {
-                let full = part.get("text").and_then(Value::as_str).unwrap_or_default();
-                if !self.delta_parts.contains(&pid) {
-                    let emitted = self.text_len.get(&pid).copied().unwrap_or(0);
-                    if full.len() > emitted {
-                        out.push(SessionEvent::PartialText {
-                            text: full[emitted..].to_string(),
-                            parent_id: None,
-                        });
-                        self.text_len.insert(pid.clone(), full.len());
-                    }
-                }
-                if part_ended(part) && self.text_done.insert(pid) {
-                    out.push(SessionEvent::AssistantText {
-                        text: full.to_string(),
-                        parent_id: None,
-                        injected: false,
-                        auth_required: false,
-                    });
-                }
-            }
-            "reasoning" => {
-                if part_ended(part) && self.text_done.insert(pid) {
-                    let full = part.get("text").and_then(Value::as_str).unwrap_or_default();
-                    out.push(SessionEvent::Thinking {
-                        text: full.to_string(),
-                        parent_id: None,
-                    });
-                }
-            }
-            "tool" => {
-                let call_id = part
-                    .get("callID")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let tool = part.get("tool").and_then(Value::as_str).unwrap_or_default();
-                if tool == "question" {
-                    return out;
-                }
-                let state = part.get("state").unwrap_or(&Value::Null);
-                let status = state
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if !call_id.is_empty()
-                    && status != "pending"
-                    && self.tool_started.insert(call_id.clone())
-                {
-                    let (name, input) =
-                        normalize_tool(tool, state.get("input").cloned().unwrap_or(json!({})));
-                    out.push(SessionEvent::ToolUse {
-                        id: call_id.clone(),
-                        name,
-                        input: input.to_string(),
-                        parent_id: None,
-                    });
-                }
-                match status {
-                    "completed" if self.tool_done.insert(call_id.clone()) => {
-                        out.push(SessionEvent::ToolResult {
-                            tool_use_id: call_id,
-                            content: value_to_text(state.get("output")),
-                            is_error: false,
-                            parent_id: None,
-                        });
-                    }
-                    "error" if self.tool_done.insert(call_id.clone()) => {
-                        out.push(SessionEvent::ToolResult {
-                            tool_use_id: call_id,
-                            content: value_to_text(state.get("error")),
-                            is_error: true,
-                            parent_id: None,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            "step-finish" if !known => {
-                let cost = part.get("cost").and_then(Value::as_f64);
-                let ctx = part.get("tokens").map(|t| {
-                    let f = |k: &str| t.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-                    let total = f("total");
-                    (if total > 0.0 {
-                        total
-                    } else {
-                        f("input") + f("output")
-                    }) as u32
-                });
-                self.cost_total += cost.unwrap_or(0.0);
-                if let Some(ctx) = ctx {
-                    self.context_tokens = Some(ctx);
-                    out.push(SessionEvent::Usage {
-                        context_tokens: ctx,
-                        thread_tokens: None,
-                    });
-                }
-            }
-            _ => {}
-        }
-        out
-    }
-}
-
-fn str_field(v: &Value, k: &str) -> String {
-    v.get(k)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn normalize_tool(tool: &str, mut input: Value) -> (String, Value) {
-    fn rename(input: &mut Value, from: &str, to: &str) {
-        if let Some(obj) = input.as_object_mut() {
-            if let Some(v) = obj.remove(from) {
-                obj.insert(to.to_string(), v);
-            }
-        }
-    }
-    let name = match tool {
-        "read" => {
-            rename(&mut input, "filePath", "file_path");
-            "Read"
-        }
-        "write" => {
-            rename(&mut input, "filePath", "file_path");
-            "Write"
-        }
-        "edit" => {
-            rename(&mut input, "filePath", "file_path");
-            rename(&mut input, "oldString", "old_string");
-            rename(&mut input, "newString", "new_string");
-            "Edit"
-        }
-        "bash" => "Bash",
-        "grep" => "Grep",
-        "glob" => "Glob",
-        "webfetch" => "WebFetch",
-        "task" => {
-            rename(&mut input, "subagentType", "subagent_type");
-            if let Some(obj) = input.as_object_mut() {
-                obj.insert("run_in_background".into(), Value::Bool(false));
-            }
-            "Task"
-        }
-        "todowrite" => "TodoWrite",
-        _ => return (tool.to_string(), input),
-    };
-    (name.to_string(), input)
-}
-
-fn part_ended(part: &Value) -> bool {
-    part.get("time").and_then(|t| t.get("end")).is_some()
-}
-
-fn value_to_text(v: Option<&Value>) -> String {
-    match v {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(other) => other.to_string(),
-    }
+    out
 }
 
 #[cfg(test)]
@@ -2298,631 +783,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auth_content_keeps_credentials_for_supported_providers_only() {
-        let filtered = supported_auth_content(
-            r#"{
-                "openai": {"type":"api","key":"supported"},
-                "GitHub-Copilot": {"type":"api","key":"retired"}
-            }"#,
-        )
-        .unwrap();
-        let Value::Object(auth) = serde_json::from_str(&filtered).unwrap() else {
-            panic!("filtered auth content should be an object");
-        };
-        assert!(auth.contains_key("openai"));
-        assert!(!auth
-            .keys()
-            .any(|provider| provider.eq_ignore_ascii_case("github-copilot")));
-    }
-
-    #[test]
-    fn normalize_file_tools_to_claude_vocabulary() {
-        let (name, input) = normalize_tool("read", json!({ "filePath": "/w/a.txt" }));
-        assert_eq!(name, "Read");
-        assert_eq!(input, json!({ "file_path": "/w/a.txt" }));
-
-        let (name, input) =
-            normalize_tool("write", json!({ "filePath": "/w/b.txt", "content": "x" }));
-        assert_eq!(name, "Write");
-        assert_eq!(input, json!({ "file_path": "/w/b.txt", "content": "x" }));
-
-        let (name, input) = normalize_tool(
-            "edit",
-            json!({ "filePath": "/w/a.txt", "oldString": "a", "newString": "b" }),
-        );
-        assert_eq!(name, "Edit");
+    fn the_model_list_indexes_context_and_names_by_provider() {
+        let models = json!([
+            { "id": "big-pickle", "providerID": "opencode", "name": "Big Pickle", "limit": { "context": 200000, "output": 1 } },
+            { "id": "no-limit", "providerID": "openrouter", "name": "No Limit" },
+            { "id": "zero", "providerID": "openrouter", "limit": { "context": 0, "output": 1 } },
+        ]);
+        let context = parse_model_context(&models);
+        assert_eq!(context.get("opencode/big-pickle"), Some(&200_000));
+        assert_eq!(context.len(), 1);
+        let names = parse_provider_model_names(&models);
         assert_eq!(
-            input,
-            json!({ "file_path": "/w/a.txt", "old_string": "a", "new_string": "b" })
+            names["opencode"],
+            [("big-pickle".to_string(), "Big Pickle".to_string())]
         );
+        assert_eq!(names["openrouter"].len(), 2);
+        assert!(parse_model_context(&json!("garbage")).is_empty());
     }
 
     #[test]
-    fn an_opencode_task_reads_as_a_subagent_that_finishes_inside_its_turn() {
-        let (name, input) = normalize_tool(
-            "task",
-            json!({ "description": "Run echo", "prompt": "echo hi", "subagentType": "general" }),
-        );
-        assert_eq!(name, "Task");
-        assert_eq!(
-            input,
-            json!({
-                "description": "Run echo",
-                "prompt": "echo hi",
-                "subagent_type": "general",
-                "run_in_background": false
-            })
-        );
-    }
-
-    #[test]
-    fn parse_model_context_indexes_by_provider_slash_model() {
-        let body = r#"{
-            "providers": [
-                {
-                    "id": "fireworks-ai",
-                    "name": "Fireworks AI",
-                    "models": {
-                        "accounts/fireworks/routers/kimi-k2p6-turbo": {
-                            "id": "accounts/fireworks/routers/kimi-k2p6-turbo",
-                            "limit": { "context": 262000, "output": 262000 }
-                        }
-                    }
-                },
-                {
-                    "id": "openrouter",
-                    "models": {
-                        "no-limit-model": { "id": "no-limit-model" },
-                        "zero-ctx-model": { "id": "zero-ctx-model", "limit": { "context": 0 } }
-                    }
-                }
-            ]
-        }"#;
-        let map = parse_model_context(body);
-        assert_eq!(
-            map.get("fireworks-ai/accounts/fireworks/routers/kimi-k2p6-turbo"),
-            Some(&262_000)
-        );
-        assert!(!map.contains_key("openrouter/no-limit-model"));
-        assert!(!map.contains_key("openrouter/zero-ctx-model"));
-        assert_eq!(map.len(), 1);
-    }
-
-    #[test]
-    fn parse_model_context_tolerates_garbage() {
-        assert!(parse_model_context("not json").is_empty());
-        assert!(parse_model_context(r#"{"providers":[]}"#).is_empty());
-    }
-
-    #[test]
-    fn opencode_routes_only_claude_family_models_to_the_claude_base() {
-        for id in [
-            "anthropic/claude-sonnet-4-6",
-            "openrouter/anthropic/claude-opus-4.1",
-            "amazon-bedrock/us.anthropic.claude-4",
-            "vertex/claude-sonnet-4-5",
-        ] {
-            let model = parse_model(id).unwrap();
-            assert_eq!(
-                skill_base_for_model(Some(&model)),
-                SkillBase::Claude,
-                "{id}"
-            );
-        }
-        for id in [
-            "openai/gpt-5.4",
-            "google/gemini-3-pro",
-            "ollama/qwen3-coder",
-            "deepseek/deepseek-v4",
-        ] {
-            let model = parse_model(id).unwrap();
-            assert_eq!(skill_base_for_model(Some(&model)), SkillBase::Codex, "{id}");
-        }
-        assert_eq!(skill_base_for_model(None), SkillBase::Codex);
-    }
-
-    #[test]
-    fn explicit_known_skills_route_with_either_platform_sigil() {
-        let known = std::collections::HashSet::from(["research_codebase".to_string()]);
-
-        let slash = leading_skill_invocation(
-            "  /research_codebase focus here\n\nRelevant documents:\n- plan.md",
-            &known,
-            None,
-        )
-        .unwrap();
-        assert_eq!(slash.name, "research_codebase");
-        assert_eq!(
-            slash.arguments,
-            "focus here\n\nRelevant documents:\n- plan.md"
-        );
-
-        let dollar = leading_skill_invocation("$research_codebase", &known, None).unwrap();
-        assert_eq!(dollar.name, "research_codebase");
-        assert_eq!(dollar.arguments, "");
-    }
-
-    #[test]
-    fn free_text_and_expanded_custom_prompts_are_not_reinterpreted_as_skills() {
-        let known = std::collections::HashSet::from(["research_codebase".to_string()]);
-
-        assert!(leading_skill_invocation("discuss /research_codebase", &known, None).is_none());
-        assert!(leading_skill_invocation("/not-installed normal text", &known, None).is_none());
-        assert!(leading_skill_invocation(
-            "/research_codebase is just the custom prompt's first line",
-            &known,
-            Some("My prompt"),
-        )
-        .is_none());
-    }
-
-    #[test]
-    fn routed_skill_arguments_select_the_platform_persona_tree() {
-        let claude = routed_skill_arguments(SkillBase::Claude, "focus on sessions");
-        assert!(claude.contains("Base platform: Claude"));
-        assert!(claude.contains(".claude/agents/<name>.md"));
-        assert!(claude.ends_with("\n\nfocus on sessions"));
-
-        let codex = routed_skill_arguments(SkillBase::Codex, "");
-        assert!(codex.contains("Base platform: Codex"));
-        assert!(codex.contains(".codex/agents/<name>.toml"));
-        assert!(codex.ends_with("</hyprlayer-skill-routing>"));
-    }
-
-    #[test]
-    fn normalize_passes_through_unknown_tools() {
-        let original = json!({ "anything": 1 });
-        let (name, input) = normalize_tool("some_mcp_tool", original.clone());
-        assert_eq!(name, "some_mcp_tool");
-        assert_eq!(input, original);
-    }
-
-    #[test]
-    fn normalize_renames_non_file_tools_without_touching_input() {
-        let (name, input) = normalize_tool("grep", json!({ "pattern": "DONE", "path": "/w" }));
-        assert_eq!(name, "Grep");
-        assert_eq!(input, json!({ "pattern": "DONE", "path": "/w" }));
-
-        let (name, _) = normalize_tool("bash", json!({ "command": "echo hi" }));
-        assert_eq!(name, "Bash");
-    }
-
-    fn oc(kind: &str, properties: Value) -> OcEvent {
-        OcEvent {
-            kind: kind.to_string(),
-            properties,
-        }
-    }
-
-    fn statuses(events: Vec<SessionEvent>) -> Vec<String> {
-        events
-            .into_iter()
-            .filter_map(|e| match e {
-                SessionEvent::TurnDone { turn_status, .. } => turn_status,
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn user(id: &str) -> OcEvent {
-        oc(
-            "message.updated",
-            json!({ "info": { "id": id, "role": "user" } }),
-        )
-    }
-
-    fn reply(id: &str, finish: Option<&str>) -> OcEvent {
-        oc(
-            "message.updated",
-            json!({ "info": {
-                "id": id, "role": "assistant", "finish": finish,
-                "time": { "completed": finish.map(|_| 1) },
-            } }),
-        )
-    }
-
-    fn idle() -> OcEvent {
-        oc("session.idle", json!({}))
-    }
-
-    fn error(name: &str) -> OcEvent {
-        oc(
-            "session.error",
-            json!({ "error": { "name": name, "data": { "message": "boom" } } }),
-        )
-    }
-
-    fn send(x: &Translator, id: &str) {
-        x.sent.lock().unwrap().latest = Some(SentTurn {
-            id: id.into(),
-            ..SentTurn::default()
-        });
-    }
-
-    fn interrupt(x: &Translator) {
-        x.sent.lock().unwrap().latest.as_mut().unwrap().interrupted = true;
-    }
-
-    #[test]
-    fn a_turn_ends_once_on_its_own_reply() {
-        // Before this driver sends, an earlier turn's echo, reply, abort and idle end nothing.
-        let mut x = Translator::default();
-        let mut early = x.handle(&user("msg_1"));
-        early.extend(x.handle(&reply("msg_2", Some("stop"))));
-        early.extend(x.handle(&error("MessageAbortedError")));
-        early.extend(x.handle(&idle()));
-        assert_eq!(statuses(early), [] as [String; 0]);
-
-        send(&x, "msg_3");
-        let mut own = x.handle(&user("msg_1"));
-        own.extend(x.handle(&idle()));
-        own.extend(x.handle(&reply("msg_2", Some("stop"))));
-        own.extend(x.handle(&idle()));
-        own.extend(x.handle(&user("msg_3")));
-        own.extend(x.handle(&reply("msg_4", Some("tool-calls"))));
-        own.extend(x.handle(&idle()));
-        own.extend(x.handle(&reply("msg_5", None)));
-        own.extend(x.handle(&idle()));
-        assert_eq!(
-            statuses(own),
-            [] as [String; 0],
-            "only its final reply ends it"
-        );
-        let mut done = x.handle(&reply("msg_5", Some("stop")));
-        done.extend(x.handle(&idle()));
-        done.extend(x.handle(&user("msg_3")));
-        done.extend(x.handle(&idle()));
-        done.extend(x.handle(&error("ProviderError")));
-        assert_eq!(statuses(done), ["completed"]);
-
-        // A turn that fails before any reply ends on its error, once.
-        send(&x, "msg_6");
-        let mut failed = x.handle(&user("msg_6"));
-        failed.extend(x.handle(&error("ProviderError")));
-        failed.extend(x.handle(&idle()));
-        failed.extend(x.handle(&error("ProviderError")));
-        assert_eq!(statuses(failed), ["failed"]);
-
-        // An abort ends a turn only when this driver asked for it.
-        send(&x, "msg_7");
-        let unasked = [user("msg_7"), error("MessageAbortedError")];
-        let unasked: Vec<_> = unasked.iter().flat_map(|e| x.handle(e)).collect();
-        assert_eq!(statuses(unasked), [] as [String; 0]);
-        interrupt(&x);
-        let mut stopped = x.handle(&error("MessageAbortedError"));
-        stopped.extend(x.handle(&idle()));
-        stopped.extend(x.handle(&reply("msg_8", None)));
-        stopped.extend(x.handle(&idle()));
-        assert_eq!(statuses(stopped), ["interrupted"]);
-
-        // Stopped before OpenCode took the prompt, it ends on the idle after its prompt's message.
-        send(&x, "msg_9");
-        interrupt(&x);
-        assert_eq!(statuses(x.handle(&idle())), [] as [String; 0]);
-        let mut stopped = x.handle(&user("msg_9"));
-        stopped.extend(x.handle(&idle()));
-        assert_eq!(statuses(stopped), ["interrupted"]);
-
-        // A denied permission ends the turn on its last step, though that step called a tool.
-        send(&x, "msg_a");
-        let mut denied = x.handle(&user("msg_a"));
-        denied.extend(x.handle(&reply("msg_b", Some("tool-calls"))));
-        x.sent.lock().unwrap().latest.as_mut().unwrap().refused = true;
-        denied.extend(x.handle(&idle()));
-        assert_eq!(statuses(denied), ["completed"]);
-
-        // OpenCode's own id anchors the turn: the user message it created after the send.
-        let user_at = |id: &str, created: u64| {
-            oc(
-                "message.updated",
-                json!({ "info": { "id": id, "role": "user", "time": { "created": created } } }),
-            )
-        };
-        x.sent.lock().unwrap().latest = Some(SentTurn {
-            id: "msg_c".into(),
-            sent_at: 100,
-            ..SentTurn::default()
-        });
-        let mut own = x.handle(&user_at("msg_0old", 50));
-        own.extend(x.handle(&error("ProviderError")));
-        assert_eq!(statuses(own), [] as [String; 0], "an echo anchors nothing");
-        assert!(x.deadline().is_some());
-        own = x.handle(&user_at("msg_d", 100));
-        own.extend(x.handle(&error("ProviderError")));
-        assert_eq!(statuses(own), ["failed"]);
-        assert!(x.deadline().is_none(), "the anchor drops the held error");
-
-        // With nothing to anchor on, the held idle ends the turn after the wait, and says so.
-        send(&x, "msg_e");
-        let mut held = x.handle(&user("msg_0bare"));
-        held.extend(x.handle(&idle()));
-        assert_eq!(statuses(held), [] as [String; 0]);
-        let expired = x.expire();
-        assert!(matches!(expired[0], SessionEvent::ProtocolError { .. }));
-        assert_eq!(statuses(expired), ["completed"]);
-
-        // A held event belongs to its own turn, never to one sent after it.
-        send(&x, "msg_g");
-        x.handle(&idle());
-        send(&x, "msg_h");
-        assert_eq!(statuses(x.expire()), [] as [String; 0]);
-    }
-
-    #[test]
-    fn a_stopped_turn_ends_after_the_parts_opencode_settles_for_it() {
-        let part = |part: Value| oc("message.part.updated", json!({ "part": part }));
-        let aborted = |id: &str| {
-            oc(
-                "message.updated",
-                json!({ "info": {
-                    "id": id, "role": "assistant",
-                    "error": { "name": "MessageAbortedError", "data": { "message": "Aborted" } },
-                    "time": { "completed": 2 },
-                } }),
-            )
-        };
-        let ends_last = |events: &[SessionEvent]| {
-            let done = events
-                .iter()
-                .position(|e| matches!(e, SessionEvent::TurnDone { .. }));
-            done.is_some_and(|at| at + 1 == events.len())
-        };
-        let mut x = Translator::default();
-
-        // 1.18.18 settles the running tool after the abort's error and idle, then the reply.
-        send(&x, "msg_1");
-        let tool = |state: Value| {
-            part(json!({
-                "id": "prt_t", "type": "tool", "messageID": "msg_2", "callID": "call_1",
-                "tool": "bash", "state": state,
-            }))
-        };
-        let mut events = Vec::new();
-        for ev in [
-            user("msg_1"),
-            reply("msg_2", None),
-            tool(json!({ "status": "running", "input": { "command": "sleep 40" } })),
-        ] {
-            events.extend(x.handle(&ev));
-        }
-        interrupt(&x);
-        for ev in [
-            error("MessageAbortedError"),
-            idle(),
-            tool(json!({
-                "status": "completed", "input": { "command": "sleep 40" },
-                "output": "(no output)\n\n<shell_metadata>\nUser aborted the command\n</shell_metadata>",
-            })),
-            aborted("msg_2"),
-            idle(),
-        ] {
-            events.extend(x.handle(&ev));
-        }
-        assert!(
-            ends_last(&events),
-            "the tool's result follows the turn's end: {events:?}"
-        );
-        assert!(events.iter().any(
-            |e| matches!(e, SessionEvent::ToolResult { tool_use_id, .. } if tool_use_id == "call_1")
-        ));
-        assert_eq!(statuses(events), ["interrupted"]);
-
-        send(&x, "msg_3");
-        let mut events = Vec::new();
-        for ev in [
-            user("msg_3"),
-            reply("msg_4", None),
-            oc(
-                "message.part.delta",
-                json!({ "messageID": "msg_4", "partID": "prt_x", "field": "text", "delta": "1\n2" }),
-            ),
-        ] {
-            events.extend(x.handle(&ev));
-        }
-        interrupt(&x);
-        for ev in [
-            error("MessageAbortedError"),
-            idle(),
-            part(json!({
-                "id": "prt_x", "type": "text", "messageID": "msg_4", "text": "1\n2\n3",
-                "time": { "start": 1, "end": 2 },
-            })),
-            aborted("msg_4"),
-            idle(),
-        ] {
-            events.extend(x.handle(&ev));
-        }
-        assert!(
-            ends_last(&events),
-            "the text follows the turn's end: {events:?}"
-        );
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::AssistantText { text, .. } if text == "1\n2\n3")));
-
-        send(&x, "msg_5");
-        x.handle(&user("msg_5"));
-        x.handle(&reply("msg_6", None));
-        interrupt(&x);
-        let mut events = x.handle(&error("MessageAbortedError"));
-        events.extend(x.handle(&idle()));
-        if events.is_empty() {
-            assert!(x.deadline().is_some(), "a held end never expires");
-            events = x.expire();
-        }
-        assert_eq!(statuses(events), ["interrupted"]);
-
-        send(&x, "msg_7");
-        x.handle(&user("msg_7"));
-        send(&x, "msg_9");
-        let mut events = x.handle(&reply("msg_8", None));
-        events.extend(x.handle(&user("msg_9")));
-        interrupt(&x);
-        for ev in [
-            error("MessageAbortedError"),
-            idle(),
-            part(json!({
-                "id": "prt_y", "type": "text", "messageID": "msg_8", "text": "cut short",
-                "time": { "start": 1, "end": 2 },
-            })),
-            aborted("msg_8"),
-            idle(),
-        ] {
-            events.extend(x.handle(&ev));
-        }
-        assert!(
-            ends_last(&events),
-            "the running reply's text follows the turn's end: {events:?}"
-        );
-        assert_eq!(statuses(events), ["interrupted"]);
-    }
-
-    #[test]
-    fn a_message_sent_mid_turn_echoes_at_the_step_that_reads_it_and_a_stop_leaves_the_rest() {
-        let mut x = Translator::default();
-        send(&x, "msg_1");
-        let echo = |id: &str| SessionEvent::UserMessage {
-            text: id.into(),
-            stage: None,
-            prompt_name: None,
-            client_message_id: Some(id.into()),
-            author: None,
-        };
-        x.sent.lock().unwrap().waiting = vec![
-            ("msg_2".into(), echo("two")),
-            ("msg_3".into(), echo("three")),
-        ];
-        x.handle(&user("msg_1"));
-        let step = |id: &str, parent: &str| {
-            oc(
-                "message.updated",
-                json!({ "info": {
-                    "id": id, "role": "assistant", "parentID": parent,
-                    "finish": "tool-calls", "time": { "completed": 1 },
-                } }),
-            )
-        };
-        let echoed = |events: Vec<SessionEvent>| -> Vec<String> {
-            events
-                .into_iter()
-                .filter_map(|e| match e {
-                    SessionEvent::UserMessage {
-                        client_message_id, ..
-                    } => client_message_id,
-                    _ => None,
-                })
-                .collect()
-        };
-        assert!(echoed(x.handle(&step("msg_1a", "msg_1"))).is_empty());
-        assert_eq!(echoed(x.handle(&step("msg_2a", "msg_2"))), ["two"]);
-        interrupt(&x);
-        assert_eq!(
-            statuses(x.handle(&error("MessageAbortedError"))),
-            ["interrupted"]
-        );
-        let unread: Vec<_> = x.unread.iter().map(|(id, _)| id.as_str()).collect();
-        assert_eq!(unread, ["msg_3"]);
-        assert!(x.sent.lock().unwrap().waiting.is_empty());
-    }
-
-    #[test]
-    fn a_multi_step_turn_emits_exactly_one_turn_done_carrying_summed_usage() {
-        let mut x = Translator::default();
-        send(&x, "m0");
-        x.handle(&oc(
-            "message.updated",
-            json!({ "info": { "id": "m1", "role": "assistant" } }),
-        ));
-
-        let mut events = Vec::new();
-        for (id, cost, total) in [("s1", 0.25, 100), ("s2", 0.75, 250)] {
-            events.extend(x.handle(&oc(
-                "message.part.updated",
-                json!({ "part": {
-                    "id": id, "type": "step-finish", "messageID": "m1",
-                    "cost": cost, "tokens": { "total": total },
-                } }),
-            )));
-        }
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, SessionEvent::TurnDone { .. })),
-            "step-finish is a per-step boundary and must not end the turn: {events:?}"
-        );
-
-        events.extend(x.handle(&reply("m1", Some("stop"))));
-        events.extend(x.handle(&idle()));
-        let done: Vec<_> = events
-            .iter()
-            .filter(|e| matches!(e, SessionEvent::TurnDone { .. }))
-            .collect();
-        assert_eq!(done.len(), 1, "expected one TurnDone, got {events:?}");
-        match done[0] {
-            SessionEvent::TurnDone {
-                cost_usd,
-                context_tokens,
-                ..
-            } => {
-                assert_eq!(*cost_usd, Some(1.0));
-                assert_eq!(*context_tokens, Some(250));
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn reasoning_announced_before_role_is_not_leaked_as_text() {
-        let mut x = Translator::default();
-
-        let out = x.handle(&oc(
-            "message.part.updated",
-            json!({ "part": { "id": "r1", "type": "reasoning", "messageID": "m1" } }),
-        ));
-        assert!(out.is_empty());
-
-        x.handle(&oc(
-            "message.updated",
-            json!({ "info": { "id": "m1", "role": "assistant" } }),
-        ));
-
-        let out = x.handle(&oc(
-            "message.part.delta",
-            json!({ "messageID": "m1", "partID": "r1", "field": "text", "delta": "secret plan" }),
-        ));
-        assert!(
-            out.is_empty(),
-            "reasoning delta leaked as a live event: {out:?}"
-        );
-
-        let out = x.handle(&oc(
-            "message.part.updated",
-            json!({ "part": { "id": "r1", "type": "reasoning", "messageID": "m1", "text": "secret plan", "time": { "end": 1 } } }),
-        ));
-        assert_eq!(out.len(), 1);
-        match &out[0] {
-            SessionEvent::Thinking { text, .. } => assert_eq!(text, "secret plan"),
-            other => panic!("expected Thinking, got {other:?}"),
-        }
-        assert!(
-            !out.iter().any(|e| matches!(
-                e,
-                SessionEvent::PartialText { .. } | SessionEvent::AssistantText { .. }
-            )),
-            "reasoning surfaced as assistant text"
-        );
-    }
-
-    #[test]
-    fn global_event_record_unwraps_payload() {
-        let rec = "data: {\"directory\":\"/w\",\"payload\":{\"type\":\"message.updated\",\"properties\":{\"x\":1}}}";
-        let ev = parse_sse_record(rec).expect("payload event parses");
-        assert_eq!(ev.kind, "message.updated");
-        assert_eq!(ev.properties, json!({ "x": 1 }));
-
-        let flat = "data: {\"type\":\"session.idle\",\"properties\":{}}";
-        assert_eq!(parse_sse_record(flat).unwrap().kind, "session.idle");
-
-        assert!(parse_sse_record("data: {\"type\":\"server.heartbeat\"}").is_none());
+    fn each_spawn_gets_its_own_long_password() {
+        let (a, b) = (generate_password(), generate_password());
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 64);
     }
 }

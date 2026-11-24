@@ -25,6 +25,34 @@ pub fn opencode_model_context_window(model_id: &str) -> Option<u32> {
 pub struct OpencodeAuthEntry {
     pub provider: String,
     pub kind: String,
+    /// Set when OpenCode 2 cannot use the entry: a v1 sign-in, which records no sign-in method.
+    pub remedy: Option<String>,
+}
+
+/// The `auth.json` entries hyprlayer hands its OpenCode server: API keys by provider, and the
+/// providers whose sign-in OpenCode 2 cannot take.
+pub struct ApiKeys {
+    pub keys: std::collections::BTreeMap<String, String>,
+    pub unusable: Vec<String>,
+}
+
+fn unusable_remedy(provider: &str) -> String {
+    format!("OpenCode 2 can't use this sign-in. Add an API key for {provider} here.")
+}
+
+pub fn api_keys(path: &Path) -> Result<ApiKeys> {
+    let mut keys = std::collections::BTreeMap::new();
+    let mut unusable = Vec::new();
+    for (provider, entry) in read_object(path, "opencode auth.json")? {
+        let kind = entry.get("type").and_then(Value::as_str).unwrap_or("api");
+        match (kind, entry.get("key").and_then(Value::as_str)) {
+            ("api", Some(key)) if !key.is_empty() => {
+                keys.insert(provider, key.to_string());
+            }
+            _ => unusable.push(provider),
+        }
+    }
+    Ok(ApiKeys { keys, unusable })
 }
 
 pub fn list_auth(path: &Path) -> Result<Vec<OpencodeAuthEntry>> {
@@ -37,7 +65,16 @@ pub fn list_auth(path: &Path) -> Result<Vec<OpencodeAuthEntry>> {
                 .and_then(Value::as_str)
                 .unwrap_or("api")
                 .to_string();
-            OpencodeAuthEntry { provider, kind }
+            let keyed = kind == "api"
+                && v.get("key")
+                    .and_then(Value::as_str)
+                    .is_some_and(|k| !k.is_empty());
+            let remedy = (!keyed).then(|| unusable_remedy(&provider));
+            OpencodeAuthEntry {
+                provider,
+                kind,
+                remedy,
+            }
         })
         .collect();
     out.sort_by(|a, b| a.provider.cmp(&b.provider));
@@ -249,6 +286,26 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         (dir.join("auth.json"), dir.join("opencode.json"))
+    }
+
+    #[test]
+    fn a_sign_in_opencode_2_cannot_use_is_flagged_and_left_out_of_the_keys() {
+        let (auth_path, _) = temp_paths("oauth");
+        std::fs::write(
+            &auth_path,
+            r#"{"openai":{"type":"api","key":"sk-1"},"anthropic":{"type":"oauth","refresh":"r","access":"a","expires":1}}"#,
+        )
+        .unwrap();
+        let keys = api_keys(&auth_path).unwrap();
+        assert_eq!(keys.keys.get("openai").map(String::as_str), Some("sk-1"));
+        assert_eq!(keys.unusable, ["anthropic"]);
+        let entries = list_auth(&auth_path).unwrap();
+        assert_eq!(entries[0].provider, "anthropic");
+        assert_eq!(
+            entries[0].remedy.as_deref(),
+            Some("OpenCode 2 can't use this sign-in. Add an API key for anthropic here.")
+        );
+        assert!(entries[1].remedy.is_none());
     }
 
     #[test]

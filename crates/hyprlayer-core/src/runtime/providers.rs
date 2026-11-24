@@ -806,8 +806,8 @@ impl ProviderService<'_> {
         // refresh may start the shared server to get that registry; a passive read
         // only consults one that is already running.
         let server = if force {
-            match self.runtime.binaries.resolve(BinaryKind::OpenCode).await {
-                Some(bin) => match self.start_opencode_server(bin).await {
+            match self.runtime.binaries.require(BinaryKind::OpenCode).await {
+                Ok(bin) => match self.start_opencode_server(bin).await {
                     Ok(server) => Some(server),
                     Err(error) => {
                         tracing::warn!(
@@ -816,7 +816,7 @@ impl ProviderService<'_> {
                         None
                     }
                 },
-                None => None,
+                Err(_) => None,
             }
         } else {
             self.opencode_server_if_running().await
@@ -853,7 +853,7 @@ impl ProviderService<'_> {
         }
         let auth_file = &self.runtime.paths.opencode_auth_file;
         opencode_config::set_provider_key(auth_file, provider, key)?;
-        // `opencode serve` reads auth.json only when it spawns.
+        // The server syncs its credentials from auth.json only when it spawns.
         self.invalidate_opencode_server().await;
         opencode_config::list_auth(auth_file)
     }

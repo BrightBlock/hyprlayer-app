@@ -1503,6 +1503,8 @@ export type OpenCodeSettings = {
 export type OpencodeAuthEntry = {
 	provider: string,
 	kind: string,
+	/**  Set when OpenCode 2 cannot use the entry: a v1 sign-in, which records no sign-in method. */
+	remedy: string | null,
 };
 
 export type OpencodeCatalog = {
