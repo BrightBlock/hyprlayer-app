@@ -19,10 +19,13 @@ import { Button, Dialog, ErrorNote, Spinner, TextInput } from "@/components/ui";
 export function OpenCodeSignInDialog({
   providerName,
   methods,
+  onSignedIn,
   onClose,
 }: {
   providerName: string;
   methods: OpencodeSignInMethod[];
+  onSignedIn: () => void;
+  /** Dismissed before the sign-in finished; an attempt under way is cancelled. */
   onClose: () => void;
 }) {
   const begin = useBeginOpencodeSignIn();
@@ -44,8 +47,8 @@ export function OpenCodeSignInDialog({
   useEffect(() => {
     if (state !== "complete") return;
     reauthSucceeded("opencode");
-    onClose();
-  }, [state, onClose]);
+    onSignedIn();
+  }, [state, onSignedIn]);
 
   async function start(method: OpencodeSignInMethod) {
     const started = await begin.mutateAsync({ provider: method.provider, methodId: method.methodId });

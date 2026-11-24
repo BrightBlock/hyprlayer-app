@@ -304,6 +304,7 @@ export function OpenCodeHarnessTab({
         <OpenCodeSignInDialog
           providerName={providerName.get(signingIn.toLowerCase()) ?? signingIn}
           methods={methodsFor(signingIn)}
+          onSignedIn={() => setSigningIn(null)}
           onClose={() => setSigningIn(null)}
         />
       )}

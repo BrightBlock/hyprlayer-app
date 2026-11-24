@@ -375,6 +375,21 @@
       "guards": [
         {
           "evidence": {
+            "listed": [
+              "openai"
+            ],
+            "statusAfterCancel": "not found"
+          },
+          "guard": "the cancelled attempt is gone and the provider is not signed in",
+          "ok": true
+        }
+      ],
+      "step": "cancelling a sign-in closes its attempt on the OpenCode server"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "binary": {
               "min": "2.4.0",
               "state": "tooOld"

@@ -18,7 +18,9 @@ use tokio::sync::{broadcast, watch, Mutex};
 pub use crate::opencode::driver::OpenCodeDriver;
 
 use crate::claude::{ExitOutcome, SessionEvent};
-use crate::opencode::config::{OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus};
+use crate::opencode::config::{
+    OpencodeSignInAttempt, OpencodeSignInMethod, OpencodeSignInStatus, SignInRecords,
+};
 use crate::opencode::driver::model_ref;
 use crate::opencode::support::opencode_provider_is_supported;
 use crate::opencode::translate::{parse_sse_record, OcEvent};
@@ -31,6 +33,9 @@ const SERVER_USER: &str = "opencode";
 /// The labels of the credentials hyprlayer stores; the sync leaves every other one alone.
 const KEY_LABEL: &str = "hyprlayer";
 const SIGN_IN_LABEL: &str = "hyprlayer-sign-in";
+const SIGN_IN_FOLLOW_EVERY: Duration = Duration::from_secs(2);
+/// A bound for an attempt that never reports an end; the pending record outlives it.
+const SIGN_IN_FOLLOW_LIMIT: Duration = Duration::from_secs(30 * 60);
 
 /// Name, under the app data dir, of the record `HyprlayerRuntime::open` reaps.
 pub const OPENCODE_PID_FILE: &str = "opencode-server.pid";
@@ -47,8 +52,7 @@ pub struct OpenCodeServerConfig {
     pub data_dir: PathBuf,
     pub home: PathBuf,
     pub auth_file: PathBuf,
-    /// The providers signed in through this server (`config::list_sign_ins`).
-    pub sign_ins_file: PathBuf,
+    pub sign_ins: SignInRecords,
     pub pid_file: PathBuf,
     /// The attaching client's env overlay, baked in at spawn. First attach wins:
     /// this server is cached for the profile's lifetime (ADR-0009).
@@ -214,7 +218,7 @@ impl OpenCodeServer {
             data_dir,
             home,
             auth_file,
-            sign_ins_file,
+            sign_ins,
             pid_file,
             overlay,
         } = config;
@@ -320,7 +324,7 @@ impl OpenCodeServer {
             return Err("`opencode serve` did not become ready in time".into());
         }
 
-        server.sync_credentials(&auth_file, &sign_ins_file).await;
+        server.sync_credentials(&auth_file, &sign_ins).await;
         server.model_context = server.fetch_model_context().await;
         if server.model_context.is_empty() {
             tracing::warn!("opencode serve on port {port} listed no models in time");
@@ -411,10 +415,12 @@ impl OpenCodeServer {
 
     /// The server's credentials made to match the app's records: an API key from `auth.json` is
     /// added or replaced and one the user removed is deleted; a sign-in made here stays while
-    /// its provider is still signed in. OpenCode 2 cannot take a v1 sign-in (it records no
-    /// sign-in method), so such an entry is skipped and named in the log. Only credentials
-    /// hyprlayer labelled are touched.
-    async fn sync_credentials(&self, auth_file: &Path, sign_ins_file: &Path) {
+    /// its provider is signed in or has a sign-in pending, and a pending one it finds is
+    /// recorded as signed in. A pending sign-in that left no credential is dropped: an attempt
+    /// still live on a retired server is recorded by its follower. OpenCode 2 cannot take a v1 sign-in (it records no sign-in
+    /// method), so such an entry is skipped and named in the log. Only credentials hyprlayer
+    /// labelled are touched.
+    async fn sync_credentials(&self, auth_file: &Path, sign_ins: &SignInRecords) {
         let wanted = match crate::opencode::config::api_keys(auth_file) {
             Ok(keys) => keys,
             Err(e) => {
@@ -422,7 +428,7 @@ impl OpenCodeServer {
                 return;
             }
         };
-        let signed_in = crate::opencode::config::list_sign_ins(sign_ins_file);
+        let (signed_in, pending) = (sign_ins.signed_in(), sign_ins.pending());
         for provider in wanted.unusable.iter().filter(|p| !signed_in.contains(p)) {
             tracing::warn!(
                 "opencode provider {provider} has a sign-in OpenCode 2 cannot use; its sessions run without it"
@@ -437,6 +443,7 @@ impl OpenCodeServer {
             }
         };
         let mut kept = HashSet::new();
+        let mut found = HashSet::new();
         for credential in &existing {
             let field = |key: &str| {
                 credential
@@ -454,11 +461,23 @@ impl OpenCodeServer {
                         .is_some_and(|k| Some(k.as_str()) == key);
                     matches && kept.insert(integration.to_string())
                 }
+                SIGN_IN_LABEL if pending.iter().any(|p| p == integration) => {
+                    if let Err(e) = sign_ins.completed(integration) {
+                        tracing::warn!("opencode sign-in for {integration} not recorded: {e}");
+                    }
+                    found.insert(integration.to_string());
+                    true
+                }
                 SIGN_IN_LABEL => signed_in.iter().any(|p| p == integration),
                 _ => true,
             };
             if !keep {
                 self.delete_credential(id, integration).await;
+            }
+        }
+        for provider in pending.iter().filter(|p| !found.contains(*p)) {
+            if let Err(e) = sign_ins.abandoned(provider) {
+                tracing::warn!("opencode sign-in for {provider} not cleared: {e}");
             }
         }
         for (provider, key) in wanted.keys {
@@ -669,6 +688,37 @@ impl OpenCodeServer {
             .and_then(reqwest::Response::error_for_status)
             .map(|_| ())
             .map_err(|e| e.without_url().to_string())
+    }
+
+    /// Reads the attempt until it ends and records the outcome, so a sign-in the browser
+    /// finishes while no client polls still counts. It holds the server: a retired one stays up
+    /// for the attempt, whose loopback it serves.
+    pub fn follow_sign_in(
+        self: &Arc<Self>,
+        provider: String,
+        attempt: String,
+        sign_ins: SignInRecords,
+    ) -> tokio::task::JoinHandle<()> {
+        let server = self.clone();
+        self.spawn(async move {
+            let deadline = tokio::time::Instant::now() + SIGN_IN_FOLLOW_LIMIT;
+            let recorded = loop {
+                match server.sign_in_status(&provider, &attempt).await {
+                    Ok(OpencodeSignInStatus::Complete) => break sign_ins.completed(&provider),
+                    Ok(OpencodeSignInStatus::Failed { .. }) => break sign_ins.abandoned(&provider),
+                    // A server that stopped answering leaves the pending record to the next sync.
+                    Err(_) => return,
+                    Ok(OpencodeSignInStatus::Pending) => {}
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    return;
+                }
+                tokio::time::sleep(SIGN_IN_FOLLOW_EVERY).await;
+            };
+            if let Err(e) = recorded {
+                tracing::warn!("opencode sign-in for {provider} not recorded: {e}");
+            }
+        })
     }
 
     pub async fn cancel_sign_in(&self, provider: &str, attempt: &str) {
@@ -1015,5 +1065,173 @@ mod tests {
         let (a, b) = (generate_password(), generate_password());
         assert_ne!(a, b);
         assert_eq!(a.len(), 64);
+    }
+
+    /// The credential and sign-in routes of OpenCode 2's API, over one store that outlives any
+    /// one `OpenCodeServer`, as its data dir outlives a restart.
+    #[derive(Default)]
+    struct FakeApi {
+        credentials: Vec<Value>,
+        attempts: HashMap<String, &'static str>,
+        status_reads: u32,
+        deleted: Vec<String>,
+    }
+
+    type Fake = Arc<StdMutex<FakeApi>>;
+
+    async fn serve_fake(api: Fake) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(answer_fake(stream, api.clone()));
+            }
+        });
+        url
+    }
+
+    async fn answer_fake(mut stream: tokio::net::TcpStream, api: Fake) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+            match stream.read(&mut buf).await {
+                Ok(0) | Err(_) => return,
+                Ok(n) => raw.extend_from_slice(&buf[..n]),
+            }
+        }
+        let head = String::from_utf8_lossy(&raw).to_string();
+        let mut words = head.split_whitespace();
+        let (method, path) = (words.next().unwrap_or(""), words.next().unwrap_or(""));
+        let segments: Vec<&str> = path.trim_start_matches("/api/").split('/').collect();
+        let data = {
+            let mut api = api.lock().unwrap();
+            match (method, segments.as_slice()) {
+                ("GET", ["credential"]) => Some(json!(api.credentials)),
+                ("DELETE", ["credential", id]) => {
+                    api.credentials.retain(|c| c["id"] != *id);
+                    api.deleted.push(id.to_string());
+                    Some(Value::Null)
+                }
+                ("GET", ["integration", _, "connect", "oauth", attempt]) => {
+                    api.status_reads += 1;
+                    api.attempts
+                        .get(*attempt)
+                        .map(|status| json!({ "status": status }))
+                }
+                _ => None,
+            }
+        };
+        let (status, body) = match data {
+            Some(data) => ("200 OK", json!({ "data": data }).to_string()),
+            None => (
+                "404 Not Found",
+                json!({ "_tag": "NotFoundError" }).to_string(),
+            ),
+        };
+        let reply = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(reply.as_bytes()).await;
+    }
+
+    #[cfg(unix)]
+    fn server_on(base_url: &str) -> Arc<OpenCodeServer> {
+        let mut placeholder = Command::new("sleep");
+        placeholder.arg("60");
+        let (events, _) = broadcast::channel(EVENT_CAP);
+        Arc::new(OpenCodeServer {
+            base_url: base_url.to_string(),
+            password: generate_password(),
+            client: reqwest::Client::new(),
+            events,
+            exited: watch::channel(None).0,
+            model_context: HashMap::new(),
+            home: PathBuf::new(),
+            tasks: Handle::current(),
+            pid_file: PathBuf::new(),
+            child: StdMutex::new(crate::process::spawn_supervised(&mut placeholder).unwrap()),
+            retired: AtomicBool::default(),
+            stops: StdMutex::default(),
+        })
+    }
+
+    fn sign_in_credential(id: &str, provider: &str) -> Value {
+        json!({ "id": id, "integrationID": provider, "label": SIGN_IN_LABEL,
+                "value": { "type": "oauth", "methodID": "device" } })
+    }
+
+    fn records(dir: &Path) -> (PathBuf, SignInRecords) {
+        let auth = dir.join("auth.json");
+        std::fs::write(&auth, "{}").unwrap();
+        let sign_ins = SignInRecords {
+            signed_in: dir.join("sign-ins.json"),
+            pending: dir.join("sign-ins-pending.json"),
+        };
+        (auth, sign_ins)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_sign_in_finished_while_nobody_polls_survives_the_next_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let (auth, sign_ins) = records(dir.path());
+        let api = Fake::default();
+        api.lock()
+            .unwrap()
+            .attempts
+            .insert("con_1".into(), "pending");
+        let url = serve_fake(api.clone()).await;
+
+        sign_ins.begun("openai").unwrap();
+        let follower =
+            server_on(&url).follow_sign_in("openai".into(), "con_1".into(), sign_ins.clone());
+        while api.lock().unwrap().status_reads == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(sign_ins.signed_in().is_empty());
+        {
+            let mut api = api.lock().unwrap();
+            api.attempts.insert("con_1".into(), "complete");
+            api.credentials.push(sign_in_credential("crd_1", "openai"));
+        }
+        tokio::time::timeout(Duration::from_secs(10), follower)
+            .await
+            .expect("the follower reads the attempt's end")
+            .unwrap();
+        assert_eq!(sign_ins.signed_in(), ["openai"]);
+        assert!(sign_ins.pending().is_empty());
+
+        server_on(&url).sync_credentials(&auth, &sign_ins).await;
+        let api = api.lock().unwrap();
+        assert!(api.deleted.is_empty(), "deleted {:?}", api.deleted);
+        assert_eq!(api.credentials[0]["id"], "crd_1");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_start_before_the_attempt_is_read_keeps_and_records_its_sign_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let (auth, sign_ins) = records(dir.path());
+        let api = Fake::default();
+        {
+            let mut api = api.lock().unwrap();
+            api.credentials.push(sign_in_credential("crd_1", "openai"));
+            api.credentials.push(sign_in_credential("crd_2", "xai"));
+        }
+        let url = serve_fake(api.clone()).await;
+        sign_ins.begun("openai").unwrap();
+        sign_ins.begun("poe").unwrap();
+
+        server_on(&url).sync_credentials(&auth, &sign_ins).await;
+        assert_eq!(sign_ins.signed_in(), ["openai"]);
+        assert!(sign_ins.pending().is_empty());
+        let api = api.lock().unwrap();
+        assert_eq!(
+            api.deleted,
+            ["crd_2"],
+            "a sign-in nobody began or kept goes"
+        );
     }
 }

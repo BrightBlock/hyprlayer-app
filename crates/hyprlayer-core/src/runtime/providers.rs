@@ -11,13 +11,15 @@ use crate::error::{CoreError, Result};
 use crate::opencode::catalog::{self, OpencodeCatalog};
 use crate::opencode::config::{
     self as opencode_config, OpencodeAuthEntry, OpencodeSignInAttempt, OpencodeSignInMethod,
-    OpencodeSignInStatus,
+    OpencodeSignInStatus, SignInRecords,
 };
 use crate::opencode::runtime::{OpenCodeDriver, OpenCodeServer, OpenCodeServerConfig};
 use crate::opencode::support::{opencode_model_is_supported, opencode_provider_is_supported};
 
-/// Under the app data dir: the providers signed in through hyprlayer's OpenCode server.
+/// Under the app data dir: the providers signed in through hyprlayer's OpenCode server, and
+/// those with a sign-in begun whose outcome it has not read.
 const OPENCODE_SIGN_INS_FILE: &str = "opencode-sign-ins.json";
+const OPENCODE_PENDING_SIGN_INS_FILE: &str = "opencode-sign-ins-pending.json";
 use crate::process::binaries::BinaryKind;
 use crate::process::Exec;
 use crate::settings::ClaudeSettings;
@@ -785,7 +787,7 @@ impl ProviderService<'_> {
                 data_dir: self.runtime.paths.app_data_dir.join("opencode"),
                 home: self.runtime.environment.home_dir.clone(),
                 auth_file: self.runtime.paths.opencode_auth_file.clone(),
-                sign_ins_file: self.opencode_sign_ins_file(),
+                sign_ins: self.opencode_sign_ins(),
                 pid_file: self
                     .runtime
                     .paths
@@ -842,14 +844,18 @@ impl ProviderService<'_> {
         })
     }
 
-    fn opencode_sign_ins_file(&self) -> std::path::PathBuf {
-        self.runtime.paths.app_data_dir.join(OPENCODE_SIGN_INS_FILE)
+    fn opencode_sign_ins(&self) -> SignInRecords {
+        let dir = &self.runtime.paths.app_data_dir;
+        SignInRecords {
+            signed_in: dir.join(OPENCODE_SIGN_INS_FILE),
+            pending: dir.join(OPENCODE_PENDING_SIGN_INS_FILE),
+        }
     }
 
     fn opencode_auth_entries(&self) -> Result<Vec<OpencodeAuthEntry>> {
         opencode_config::list_auth_with_sign_ins(
             &self.runtime.paths.opencode_auth_file,
-            &self.opencode_sign_ins_file(),
+            &self.opencode_sign_ins(),
         )
     }
 
@@ -868,7 +874,9 @@ impl ProviderService<'_> {
 
     /// Starts a sign-in on hyprlayer's own OpenCode server, so the credential lands in its data
     /// dir. The desktop opens the returned page; a remote server's loopback is out of the
-    /// browser's reach, and the attempt then takes the address the browser landed on.
+    /// browser's reach, and the attempt then takes the address the browser landed on. The
+    /// provider is recorded as pending before the attempt exists and the server follows it to
+    /// its end, so a credential the browser creates is kept whether or not the desktop polls.
     pub async fn opencode_begin_sign_in(
         &self,
         provider: &str,
@@ -880,10 +888,17 @@ impl ProviderService<'_> {
             });
         }
         let server = self.opencode_server().await?;
-        server
-            .begin_sign_in(provider, method_id)
-            .await
-            .map_err(|detail| CoreError::Opencode { detail })
+        let sign_ins = self.opencode_sign_ins();
+        sign_ins.begun(provider)?;
+        let attempt = match server.begin_sign_in(provider, method_id).await {
+            Ok(attempt) => attempt,
+            Err(detail) => {
+                sign_ins.abandoned(provider)?;
+                return Err(CoreError::Opencode { detail });
+            }
+        };
+        server.follow_sign_in(provider.to_string(), attempt.attempt_id.clone(), sign_ins);
+        Ok(attempt)
     }
 
     pub async fn opencode_sign_in_status(
@@ -896,8 +911,10 @@ impl ProviderService<'_> {
             .sign_in_status(provider, attempt_id)
             .await
             .map_err(|detail| CoreError::Opencode { detail })?;
-        if status == OpencodeSignInStatus::Complete {
-            opencode_config::set_signed_in(&self.opencode_sign_ins_file(), provider, true)?;
+        match status {
+            OpencodeSignInStatus::Complete => self.opencode_sign_ins().completed(provider)?,
+            OpencodeSignInStatus::Failed { .. } => self.opencode_sign_ins().abandoned(provider)?,
+            OpencodeSignInStatus::Pending => {}
         }
         Ok(status)
     }
@@ -945,7 +962,7 @@ impl ProviderService<'_> {
         ensure_running(self.runtime)?;
         let auth_file = &self.runtime.paths.opencode_auth_file;
         opencode_config::remove_provider(auth_file, provider)?;
-        opencode_config::set_signed_in(&self.opencode_sign_ins_file(), provider, false)?;
+        self.opencode_sign_ins().removed(provider)?;
         if let Some(server) = self.opencode_server_if_running().await {
             server.remove_sign_in(provider).await;
         }

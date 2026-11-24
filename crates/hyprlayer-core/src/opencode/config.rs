@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -83,21 +83,61 @@ pub fn list_sign_ins(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub fn set_signed_in(path: &Path, provider: &str, signed_in: bool) -> Result<()> {
+fn set_listed(path: &Path, provider: &str, listed: bool) -> Result<()> {
     let _guard = write_lock();
     let mut all = list_sign_ins(path);
     all.retain(|p| p != provider);
-    if signed_in {
+    if listed {
         all.push(provider.to_string());
         all.sort();
     }
     write_json_atomic(path, &json!(all), 0o600)
 }
 
+/// hyprlayer's record of its sign-ins: the providers signed in, and those with a sign-in begun
+/// whose outcome it has not read yet. OpenCode stores the credential the moment the browser
+/// finishes, whoever is watching, so a pending provider's sign-in credential is the user's.
+#[derive(Debug, Clone)]
+pub struct SignInRecords {
+    pub signed_in: PathBuf,
+    pub pending: PathBuf,
+}
+
+impl SignInRecords {
+    pub fn signed_in(&self) -> Vec<String> {
+        list_sign_ins(&self.signed_in)
+    }
+
+    pub fn pending(&self) -> Vec<String> {
+        list_sign_ins(&self.pending)
+    }
+
+    pub fn begun(&self, provider: &str) -> Result<()> {
+        set_listed(&self.pending, provider, true)
+    }
+
+    pub fn completed(&self, provider: &str) -> Result<()> {
+        set_listed(&self.signed_in, provider, true)?;
+        set_listed(&self.pending, provider, false)
+    }
+
+    pub fn abandoned(&self, provider: &str) -> Result<()> {
+        set_listed(&self.pending, provider, false)
+    }
+
+    pub fn removed(&self, provider: &str) -> Result<()> {
+        set_listed(&self.signed_in, provider, false)?;
+        set_listed(&self.pending, provider, false)
+    }
+}
+
 /// `auth.json`'s entries with the sign-ins made through hyprlayer: a provider signed in that way
 /// reads as such, in place of an `auth.json` entry OpenCode 2 cannot use.
-pub fn list_auth_with_sign_ins(auth: &Path, sign_ins: &Path) -> Result<Vec<OpencodeAuthEntry>> {
-    let signed: Vec<String> = list_sign_ins(sign_ins);
+pub fn list_auth_with_sign_ins(
+    auth: &Path,
+    sign_ins: &SignInRecords,
+) -> Result<Vec<OpencodeAuthEntry>> {
+    let signed = sign_ins.signed_in();
     let mut out: Vec<OpencodeAuthEntry> = list_auth(auth)?
         .into_iter()
         .filter(|e| !(e.remedy.is_some() && signed.contains(&e.provider)))
@@ -386,14 +426,22 @@ mod tests {
     #[test]
     fn a_sign_in_made_here_replaces_the_flagged_entry() {
         let (auth_path, config_path) = temp_paths("signin");
-        let sign_ins = config_path.with_file_name("sign-ins.json");
+        let sign_ins = SignInRecords {
+            signed_in: config_path.with_file_name("sign-ins.json"),
+            pending: config_path.with_file_name("sign-ins-pending.json"),
+        };
         std::fs::write(
             &auth_path,
             r#"{"openai":{"type":"oauth","refresh":"r","access":"a","expires":1},"xai":{"type":"api","key":"k"}}"#,
         )
         .unwrap();
-        set_signed_in(&sign_ins, "openai", true).unwrap();
-        set_signed_in(&sign_ins, "poe", true).unwrap();
+        sign_ins.completed("openai").unwrap();
+        sign_ins.begun("poe").unwrap();
+        sign_ins.begun("xai").unwrap();
+        assert_eq!(sign_ins.pending(), ["poe", "xai"]);
+        sign_ins.completed("poe").unwrap();
+        sign_ins.abandoned("xai").unwrap();
+        assert!(sign_ins.pending().is_empty());
         let entries = list_auth_with_sign_ins(&auth_path, &sign_ins).unwrap();
         let shown: Vec<(&str, &str, bool)> = entries
             .iter()
@@ -407,8 +455,8 @@ mod tests {
                 ("xai", "api", false)
             ]
         );
-        set_signed_in(&sign_ins, "poe", false).unwrap();
-        assert_eq!(list_sign_ins(&sign_ins), ["openai"]);
+        sign_ins.removed("poe").unwrap();
+        assert_eq!(sign_ins.signed_in(), ["openai"]);
     }
 
     #[test]

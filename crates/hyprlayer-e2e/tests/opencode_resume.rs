@@ -700,6 +700,29 @@ async fn opencode_resume() {
         json!({ "listed": after_remove.iter().map(|e| e.provider.clone()).collect::<Vec<_>>() }),
     );
 
+    j.step("cancelling a sign-in closes its attempt on the OpenCode server");
+    let cancelled = client
+        .opencode_begin_sign_in("stubauth".into(), "device".into())
+        .await
+        .expect("opencode_begin_sign_in");
+    client
+        .opencode_cancel_sign_in("stubauth".into(), cancelled.attempt_id.clone())
+        .await
+        .expect("opencode_cancel_sign_in");
+    let after_cancel = client
+        .opencode_sign_in_status("stubauth".into(), cancelled.attempt_id.clone())
+        .await;
+    let listed = client
+        .opencode_auth_list()
+        .await
+        .expect("opencode_auth_list");
+    j.guard(
+        "the cancelled attempt is gone and the provider is not signed in",
+        after_cancel.is_err() && !listed.iter().any(|e| e.provider == "stubauth"),
+        json!({ "statusAfterCancel": after_cancel.as_ref().map_or("not found", |_| "still open"),
+                "listed": listed.iter().map(|e| e.provider.clone()).collect::<Vec<_>>() }),
+    );
+
     j.step("an OpenCode 1 binary is refused before it runs, with how to fix it");
     drop(events);
     sandbox.stage_tool("opencode", "#!/bin/sh\necho 1.19.6\n");

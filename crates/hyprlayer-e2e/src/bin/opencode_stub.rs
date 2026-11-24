@@ -15,7 +15,8 @@
 //! type>"` closes every event stream in place of the next event of that type; the events sent
 //! before the driver reconnects are lost, and each new stream starts with `server.connected`.
 //! `stubauth` offers an OAuth device sign-in: its attempt completes on the second status read and
-//! stores a credential under the label the sign-in asked for.
+//! stores a credential under the label the sign-in asked for. A `DELETE` of the attempt closes it,
+//! and a closed attempt reads as not found.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -179,6 +180,13 @@ impl Stub {
                         }
                         respond(stream, 200, &json!({ "data": { "status": "complete" } }))
                     }
+                }
+            }
+            ("DELETE", ["integration", "stubauth", "connect", "oauth", attempt]) => {
+                if self.attempts.lock().unwrap().remove(*attempt).is_some() {
+                    respond_empty(stream)
+                } else {
+                    respond(stream, 404, &json!({ "_tag": "NotFoundError" }))
                 }
             }
             ("GET", ["credential"]) => respond(stream, 200, &json!({ "data": self.credentials() })),

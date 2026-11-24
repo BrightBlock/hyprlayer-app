@@ -184,10 +184,11 @@ function KeyEntry({
         <OpenCodeSignInDialog
           providerName={provider.name}
           methods={methods}
-          onClose={() => {
+          onSignedIn={() => {
             setSigningIn(false);
             onDone();
           }}
+          onClose={() => setSigningIn(false)}
         />
       )}
 
