@@ -114,6 +114,9 @@ pub enum CoreError {
     #[error("agent control refused this: {detail}")]
     AgentControlDenied { detail: String },
 
+    #[error("agent control refused this: a Lead's agents never run in its own workstream")]
+    LeadOwnWorkstream,
+
     #[error("an agent limit was reached: {detail}")]
     AgentLimitReached { detail: String },
 
@@ -638,6 +641,9 @@ impl CoreError {
             CoreError::AgentControlDenied { .. } => {
                 Some("Ask the user to do this in Hyprlayer.".into())
             }
+            CoreError::LeadOwnWorkstream => Some(
+                "Call create_workstream first, then spawn_agent with its workstream_id.".into(),
+            ),
             CoreError::AgentLimitReached { .. } => Some(
                 "Ask the user to step in, or to raise that limit in Settings → Agent control."
                     .into(),
@@ -883,6 +889,7 @@ impl CoreError {
             CoreError::RuntimeStopped => "runtime_stopped",
             CoreError::AgentControlOff => "agent_control_off",
             CoreError::AgentControlDenied { .. } => "agent_control_denied",
+            CoreError::LeadOwnWorkstream => "agent_control_denied",
             CoreError::AgentLimitReached { .. } => "agent_limit_reached",
             CoreError::LeadDisabled => "lead_disabled",
             CoreError::LeadNeedsGit { .. } => "lead_needs_git",

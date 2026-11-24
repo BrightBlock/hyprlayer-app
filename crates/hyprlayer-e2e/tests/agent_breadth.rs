@@ -1052,7 +1052,7 @@ async fn agent_breadth() {
         json!({ "reveals": reveals }),
     );
 
-    j.step("a Lead's own live-children limit sits above every agent's");
+    j.step("the project's Lead starts on its main checkout");
     let project_lead = j
         .call(
             &c,
@@ -1068,12 +1068,38 @@ async fn agent_breadth() {
     first_turn_done(&c, &project_lead).await;
     let mut lead_mcp = McpDriver::start(&env_of(&sandbox, &project_lead).await, false);
     lead_mcp.initialize("2025-06-18").await;
+
+    j.step("a Lead's spawn into its own checkout is refused, by default or by name");
+    let lead_ws = text(
+        &parsed(&lead_mcp.call("whoami", json!({})).await),
+        "/workstreamId",
+    );
+    let mut on_main = Vec::new();
+    for named in [None, Some(lead_ws.as_str())] {
+        let mut args = json!({ "prompt": "E2E_LEAD_ON_MAIN", "harness": "claude" });
+        if let Some(id) = named {
+            args["workstream_id"] = json!(id);
+        }
+        on_main.push(tool_text(&lead_mcp.call("spawn_agent", args).await));
+    }
+    j.guard(
+        "both are agent_control_denied, with create_workstream as the remedy",
+        on_main.iter().all(|r| {
+            r.starts_with("agent_control_denied: ")
+                && r.ends_with(
+                    "Call create_workstream first, then spawn_agent with its workstream_id.",
+                )
+        }),
+        json!({ "refusals": on_main }),
+    );
+
+    j.step("a Lead's own live-children limit sits above every agent's");
     let mut lead_children = Vec::new();
     for n in 1..=5 {
         let spawned = lead_mcp
             .call(
                 "spawn_agent",
-                json!({ "prompt": format!("E2E_LEAD_CHILD_{n}"), "title": format!("Lead child {n}"), "harness": "claude" }),
+                json!({ "prompt": format!("E2E_LEAD_CHILD_{n}"), "title": format!("Lead child {n}"), "harness": "claude", "workstream_id": ws }),
             )
             .await;
         let id = text(&parsed(&spawned), "/sessionId");

@@ -525,11 +525,32 @@
       "step": "reveal reaches desktops"
     },
     {
+      "guards": [],
+      "step": "the project's Lead starts on its main checkout"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusals": [
+              "agent_control_denied: agent control refused this: a Lead's agents never run in its own workstream\nCall create_workstream first, then spawn_agent with its workstream_id.",
+              "agent_control_denied: agent control refused this: a Lead's agents never run in its own workstream\nCall create_workstream first, then spawn_agent with its workstream_id."
+            ]
+          },
+          "guard": "both are agent_control_denied, with create_workstream as the remedy",
+          "ok": true
+        }
+      ],
+      "step": "a Lead's spawn into its own checkout is refused, by default or by name"
+    },
+    {
       "guards": [
         {
           "evidence": {
             "listed": {
-              "driving": [],
+              "driving": [
+                "$WS"
+              ],
               "liveChildren": 5,
               "projectPath": "$SANDBOX/home/code/demo",
               "projectRules": null,

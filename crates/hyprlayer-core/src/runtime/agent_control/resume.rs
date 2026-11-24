@@ -504,17 +504,14 @@ mod tests {
 
     #[cfg(unix)]
     mod guard {
-        use std::collections::BTreeMap;
-        use std::ffi::OsString;
         use std::path::Path;
         use std::time::Duration;
 
         use hyprlayer_models::{PtyAgentState, PtyLaunchSession};
 
+        use super::super::super::test_runtime;
         use super::super::{ResumeCause, Resumed};
         use crate::claude::memory::project_key;
-        use crate::env::{RuntimeEnvironment, RuntimePaths};
-        use crate::runtime::builder::RuntimeBuilder;
         use crate::runtime::terminals::{CloseTerminalRequest, LaunchAgentRequest};
         use crate::runtime::HyprlayerRuntime;
         use crate::store::{NewWorkstream, PtyAgentRow, WorktreeMode};
@@ -536,40 +533,6 @@ mod tests {
             .unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             path.display().to_string()
-        }
-
-        async fn runtime(root: &Path) -> std::sync::Arc<HyprlayerRuntime> {
-            let home = root.join("home");
-            std::fs::create_dir_all(&home).unwrap();
-            let mut process_env = BTreeMap::new();
-            if let Some(path) = std::env::var_os("PATH") {
-                process_env.insert(OsString::from("PATH"), path);
-            }
-            let environment = RuntimeEnvironment {
-                home_dir: home.clone(),
-                process_cwd: home,
-                process_env,
-                env_overlay: Default::default(),
-            };
-            let paths = RuntimePaths {
-                hyprlayer_config_file: root.join("hyprlayer-config.json"),
-                app_config_dir: root.join("app-config"),
-                app_data_dir: root.join("app-data"),
-                default_worktree_root: root.join("worktrees"),
-                default_repos_root: root.join("repos"),
-                opencode_config_file: root.join("opencode.json"),
-                opencode_auth_file: root.join("opencode-auth.json"),
-                opencode_data_dir: root.join("opencode-data"),
-                claude_config_dir: root.join("claude"),
-                claude_managed_settings_files: Vec::new(),
-                codex_home: root.join("codex"),
-                agent_roots: Vec::new(),
-                download_dir: root.join("downloads"),
-            };
-            RuntimeBuilder::new(environment, paths)
-                .open()
-                .await
-                .unwrap()
         }
 
         /// A stored agent cut off mid-turn, its conversation on disk, its engine the stub.
@@ -649,7 +612,7 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn a_restart_and_a_message_racing_to_resume_launch_it_once() {
             let root = tempfile::tempdir().unwrap();
-            let rt = runtime(root.path()).await;
+            let rt = test_runtime(root.path()).await;
             let id = stored_agent(&rt, root.path()).await;
             let control = rt.agent_control();
 
@@ -689,7 +652,7 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn a_desktop_resuming_the_conversation_replaces_the_stored_agent() {
             let root = tempfile::tempdir().unwrap();
-            let rt = runtime(root.path()).await;
+            let rt = test_runtime(root.path()).await;
             let id = stored_agent(&rt, root.path()).await;
             let ws = rt.db.pty_agent(&id).unwrap().unwrap().workstream_id;
             let (_, launched) = rt
@@ -725,7 +688,7 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn a_closed_tab_is_never_resumed() {
             let root = tempfile::tempdir().unwrap();
-            let rt = runtime(root.path()).await;
+            let rt = test_runtime(root.path()).await;
             let id = stored_agent(&rt, root.path()).await;
             rt.terminals()
                 .close(CloseTerminalRequest {
@@ -743,7 +706,7 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn an_archived_workstream_drops_the_agent_unlaunched() {
             let root = tempfile::tempdir().unwrap();
-            let rt = runtime(root.path()).await;
+            let rt = test_runtime(root.path()).await;
             let id = stored_agent(&rt, root.path()).await;
             let ws = rt.db.pty_agent(&id).unwrap().unwrap().workstream_id;
             rt.db

@@ -273,7 +273,7 @@ const TOOLS: [Tool; 38] = [
                 "prompt": { "type": "string", "description": "Required for a composer session; a PTY agent gets it once its TUI is ready." },
                 "terminal_engine": { "type": "string", "description": "A multiplexer engine id, such as claude-code or codex, to start a PTY agent instead." },
                 "bypass": { "type": "boolean", "description": "PTY agents only; needs this agent to be in bypass mode." },
-                "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream." },
+                "workstream_id": { "type": "string", "description": "Defaults to this agent's workstream. A Lead names one it created; its own is refused." },
                 "stage": { "type": "string", "enum": ["general", "research", "plan", "implement", "validate", "commit", "ship", "revise"] },
                 "harness": { "type": "string", "enum": ["claude", "codex", "opencode"], "description": "Only when the user names one: forces a composer session in that harness. Unset, the agent gets the user's default engine." },
                 "model": { "type": "string" },

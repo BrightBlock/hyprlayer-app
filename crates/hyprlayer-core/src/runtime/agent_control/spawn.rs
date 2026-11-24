@@ -113,7 +113,8 @@ pub(super) struct LastTurn {
 }
 
 impl AgentControlService<'_> {
-    /// Every refusal a spawn can meet, run before anything is written: level, project, docs, depth, children, escalation.
+    /// Every refusal a spawn can meet, run before anything is written: level, project, a Lead's own
+    /// workstream, docs, depth, children, escalation.
     pub async fn check_spawn(
         &self,
         identity: &AgentIdentity,
@@ -126,6 +127,9 @@ impl AgentControlService<'_> {
         self.require_full(identity).await?;
         let workstream = self.runtime.workstreams().find(workstream_id).await?;
         in_project(identity, &workstream.project_path)?;
+        if identity.lead && workstream.id == identity.workstream_id {
+            return Err(CoreError::LeadOwnWorkstream);
+        }
         // An Implement or Validate start activates the plans it attaches, which writes them.
         let activates = matches!(stage, Stage::Implement | Stage::Validate);
         for doc in attached_docs {
@@ -1494,5 +1498,107 @@ fn mode_name(mode: PermissionMode) -> &'static str {
         PermissionMode::Auto => "auto",
         PermissionMode::DontAsk => "dont-ask",
         PermissionMode::BypassPermissions => "bypass",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hyprlayer_models::{AgentCaller, AgentControlLevel, PermissionMode};
+
+    use super::super::{test_runtime, AgentIdentity};
+    use crate::error::CoreError;
+    use crate::pipeline::Stage;
+    use crate::runtime::HyprlayerRuntime;
+    use crate::store::{NewWorkstream, WorktreeMode};
+
+    const PROJECT: &str = "/projects/app";
+
+    async fn runtime(root: &std::path::Path) -> std::sync::Arc<HyprlayerRuntime> {
+        let rt = test_runtime(root).await;
+        rt.settings
+            .update(|s| s.agent_control.level = AgentControlLevel::Full)
+            .await
+            .unwrap();
+        rt
+    }
+
+    fn workstream(rt: &HyprlayerRuntime, slug: &str, mode: WorktreeMode) -> String {
+        rt.db
+            .insert_workstream(NewWorkstream {
+                project_path: PROJECT.into(),
+                title: slug.into(),
+                slug: slug.into(),
+                branch: slug.into(),
+                worktree_path: format!("{PROJECT}/{slug}"),
+                base_branch: "origin/main".into(),
+                worktree_mode: mode,
+            })
+            .unwrap()
+            .id
+    }
+
+    fn caller(workstream_id: &str, lead: bool) -> AgentIdentity {
+        AgentIdentity {
+            caller: AgentCaller::Session {
+                session_id: "caller".into(),
+            },
+            workstream_id: workstream_id.into(),
+            project_path: PROJECT.into(),
+            depth: 0,
+            parent: None,
+            launch_mode: Some(PermissionMode::Default),
+            report_only: false,
+            harness: None,
+            lead,
+        }
+    }
+
+    async fn spawn_into(
+        rt: &HyprlayerRuntime,
+        identity: &AgentIdentity,
+        workstream_id: &str,
+    ) -> crate::error::Result<()> {
+        rt.agent_control()
+            .check_spawn(identity, workstream_id, Stage::General, None, None, &[])
+            .await
+            .map(drop)
+    }
+
+    #[tokio::test]
+    async fn a_lead_cannot_spawn_into_its_own_workstream() {
+        let root = tempfile::tempdir().unwrap();
+        let rt = runtime(root.path()).await;
+        let main = workstream(&rt, "main", WorktreeMode::Inplace);
+        let lead = caller(&main, true);
+
+        let refused = spawn_into(&rt, &lead, &main).await.unwrap_err();
+
+        assert!(matches!(refused, CoreError::LeadOwnWorkstream));
+        assert_eq!(refused.code(), "agent_control_denied");
+        assert_eq!(
+            refused.remedy().as_deref(),
+            Some("Call create_workstream first, then spawn_agent with its workstream_id.")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_lead_spawns_into_a_workstream_it_created() {
+        let root = tempfile::tempdir().unwrap();
+        let rt = runtime(root.path()).await;
+        let main = workstream(&rt, "main", WorktreeMode::Inplace);
+        let created = workstream(&rt, "fix-1", WorktreeMode::Isolated);
+
+        spawn_into(&rt, &caller(&main, true), &created)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_is_not_a_lead_spawns_into_its_own_workstream() {
+        let root = tempfile::tempdir().unwrap();
+        let rt = runtime(root.path()).await;
+        let own = workstream(&rt, "fix-1", WorktreeMode::Isolated);
+
+        spawn_into(&rt, &caller(&own, false), &own).await.unwrap();
     }
 }

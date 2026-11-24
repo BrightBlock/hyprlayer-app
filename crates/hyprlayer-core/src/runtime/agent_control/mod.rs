@@ -802,6 +802,42 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
     }
 }
 
+/// A runtime on a scratch profile under `root`.
+#[cfg(test)]
+pub(super) async fn test_runtime(root: &std::path::Path) -> Arc<HyprlayerRuntime> {
+    let home = root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut process_env = std::collections::BTreeMap::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        process_env.insert(std::ffi::OsString::from("PATH"), path);
+    }
+    let environment = crate::env::RuntimeEnvironment {
+        home_dir: home.clone(),
+        process_cwd: home,
+        process_env,
+        env_overlay: Default::default(),
+    };
+    let paths = crate::env::RuntimePaths {
+        hyprlayer_config_file: root.join("hyprlayer-config.json"),
+        app_config_dir: root.join("app-config"),
+        app_data_dir: root.join("app-data"),
+        default_worktree_root: root.join("worktrees"),
+        default_repos_root: root.join("repos"),
+        opencode_config_file: root.join("opencode.json"),
+        opencode_auth_file: root.join("opencode-auth.json"),
+        opencode_data_dir: root.join("opencode-data"),
+        claude_config_dir: root.join("claude"),
+        claude_managed_settings_files: Vec::new(),
+        codex_home: root.join("codex"),
+        agent_roots: Vec::new(),
+        download_dir: root.join("downloads"),
+    };
+    crate::runtime::builder::RuntimeBuilder::new(environment, paths)
+        .open()
+        .await
+        .unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
