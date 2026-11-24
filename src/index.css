@@ -564,20 +564,20 @@ a {
   }
 }
 
+/* An animated box-shadow repaints every frame; the glow stays still and the dot pulses. */
 @keyframes work-pulse {
   0%,
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 currentColor;
     opacity: 0.85;
   }
   50% {
     transform: scale(1.05);
-    box-shadow: 0 0 2px 0 currentColor;
     opacity: 1;
   }
 }
 .animate-work-pulse {
+  box-shadow: 0 0 2px 0 currentColor;
   animation: work-pulse 1.5s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -648,13 +648,32 @@ a {
   }
 }
 
-:root[data-window-blurred] .kg-pulse,
-:root[data-window-blurred] .animate-work-pulse,
-:root[data-window-blurred] .hl-layer,
-:root[data-window-blurred] .animate-pulse,
-:root[data-window-blurred] .animate-ping,
-:root[data-window-blurred] .animate-shimmer {
+/* Endless animations pause while the window is in the background. */
+:root[data-window-blurred]
+  :is(.kg-pulse, .animate-work-pulse, .hl-layer, .animate-pulse, .animate-ping, .animate-spin, .animate-plan-pulse),
+:root[data-window-blurred] .animate-shimmer::after {
   animation-play-state: paused;
+}
+
+/* A WebKitGTK without its DMA-BUF renderer (src-tauri/src/webkit_env.rs) repaints the whole window
+   on every animated frame, so endless indicators hold still there and read by colour and glow. */
+:root[data-still-motion]
+  :is(.kg-pulse, .animate-work-pulse, .hl-layer, .animate-pulse, .animate-ping, .animate-spin, .animate-plan-pulse),
+:root[data-still-motion] .animate-shimmer::after {
+  animation: none;
+}
+:root[data-still-motion] .hl-layer {
+  opacity: var(--hl-base);
+}
+:root[data-still-motion] .kg-pulse {
+  opacity: 0.3;
+}
+:root[data-still-motion] .animate-ping {
+  transform: scale(1.6);
+  opacity: 0.35;
+}
+:root[data-still-motion] .animate-shimmer::after {
+  opacity: 0;
 }
 
 @keyframes toast-in {
@@ -723,18 +742,24 @@ a {
 
 /* A highlight sweeping over the bar's own fill, so it reads on every theme. */
 @keyframes shimmer {
-  0%   { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 .animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.animate-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
   background-image: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in srgb, var(--color-ink) 10%, transparent) 50%,
     transparent 100%
   );
-  background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
 
@@ -748,7 +773,7 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-shimmer,
+  .animate-shimmer::after,
   .animate-sync-in {
     animation: none;
   }

@@ -21,6 +21,22 @@ pub fn apply() {
 #[cfg(not(target_os = "linux"))]
 pub fn apply() {}
 
+/// Without the DMA-BUF renderer (or with compositing off) WebKitGTK composites
+/// nothing: every frame of an endless CSS animation repaints and copies the
+/// whole window on the web process's main thread, which held it at 35–85%
+/// while an agent worked. The page shows those indicators still when this is true.
+#[cfg(target_os = "linux")]
+pub fn still_motion() -> bool {
+    [DISABLE_DMABUF, "WEBKIT_DISABLE_COMPOSITING_MODE"]
+        .iter()
+        .any(|name| std::env::var_os(name).is_some_and(|v| v != "0"))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn still_motion() -> bool {
+    false
+}
+
 #[cfg(target_os = "linux")]
 fn nvidia_driver_loaded() -> bool {
     std::path::Path::new("/sys/module/nvidia").exists()

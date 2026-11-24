@@ -499,8 +499,9 @@ pub fn run() {
         .plugin(
             tauri::plugin::Builder::<tauri::Wry>::new("hyprlayer-profile")
                 .js_init_script(format!(
-                    "window.__HYPRLAYER_PROFILE__ = {};",
-                    serde_json::to_string(&profile).expect("a string serializes")
+                    "window.__HYPRLAYER_PROFILE__ = {}; window.__HYPRLAYER_STILL_MOTION__ = {};",
+                    serde_json::to_string(&profile).expect("a string serializes"),
+                    webkit_env::still_motion()
                 ))
                 .build(),
         );
