@@ -2,13 +2,14 @@ import type { WorkstreamActivity } from "@/features/session/sessionStore";
 
 export { fuzzyScore } from "@/lib/fuzzy";
 
-type SearchResultKind = "workstream" | "agent" | "doc" | "file";
+type SearchResultKind = "action" | "workstream" | "agent" | "doc" | "file";
 
 type NavTarget =
   | { type: "workstream"; projectPath: string; workstreamId: string }
   | { type: "agent"; projectPath: string; workstreamId: string; sessionId: string }
   | { type: "doc"; id: string }
-  | { type: "file"; workstreamId: string; path: string };
+  | { type: "file"; workstreamId: string; path: string }
+  | { type: "command"; id: string };
 
 export type SearchResult = {
   kind: SearchResultKind;
@@ -24,6 +25,7 @@ export type SearchResult = {
 export type SearchGroup = { kind: SearchResultKind; label: string; results: SearchResult[] };
 
 const GROUP_ORDER: { kind: SearchResultKind; label: string }[] = [
+  { kind: "action", label: "Actions" },
   { kind: "workstream", label: "Workstreams" },
   { kind: "agent", label: "Agents" },
   { kind: "file", label: "Files" },

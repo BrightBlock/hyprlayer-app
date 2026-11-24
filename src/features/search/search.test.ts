@@ -151,3 +151,13 @@ describe("flattenGroups", () => {
     expect(flat.map((r) => r.score)).toEqual([20, 10, 5]);
   });
 });
+
+describe("actionResultsFor", () => {
+  it("offers the Help commands by name, and Resume only while a tour is paused", async () => {
+    const { actionResultsFor } = await import("./useSearchSources");
+    expect(actionResultsFor("", false)).toEqual([]);
+    expect(actionResultsFor("tour", false).map((r) => r.title)).toEqual(["Take the Tour"]);
+    expect(actionResultsFor("tour", true).map((r) => r.title)).toEqual(["Take the Tour", "Resume the Tour"]);
+    expect(actionResultsFor("what", false)[0]).toMatchObject({ kind: "action", nav: { type: "command", id: "help.whatsNew" } });
+  });
+});

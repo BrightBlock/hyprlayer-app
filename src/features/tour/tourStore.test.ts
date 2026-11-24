@@ -12,6 +12,8 @@ import {
   prevStep,
   resumeTour,
   setAppVersion,
+  setTaskSentAt,
+  setTourWorkstream,
   startTour,
   TOUR_STORE_KEY,
   useTourStore,
@@ -33,6 +35,19 @@ const stored = () => {
 };
 
 describe("tour progress", () => {
+  it("a new first run forgets the last run's task, and a new send forgets its workstream", () => {
+    setTaskSentAt(1000);
+    setTourWorkstream("w1");
+    expect(stored()).toMatchObject({ taskSentAt: 1000, tourWorkstreamId: "w1" });
+    setTaskSentAt(2000);
+    expect(useTourStore.getState()).toMatchObject({ taskSentAt: 2000, tourWorkstreamId: null });
+    setTourWorkstream("w2");
+    startTour("whatsNew", pathSteps("whatsNew"));
+    expect(useTourStore.getState().tourWorkstreamId).toBe("w2");
+    startTour("firstRun", pathSteps("firstRun"));
+    expect(useTourStore.getState()).toMatchObject({ taskSentAt: null, tourWorkstreamId: null });
+  });
+
   it("walks forward and back, and finishing marks the path's features seen", () => {
     const steps = pathSteps("firstRun");
     startTour("firstRun", steps);

@@ -6,7 +6,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { LeadView, Project, WorkstreamView } from "@/lib/bindings";
 import { queryClient } from "@/lib/queryClient";
 import { useUiStore } from "@/lib/uiStore";
-import { agentSpawned, leadAnswered, MESSAGE_LEAD_KEY, projectAdded, useSignal, type SignalInputs } from "./signals";
+import type { Workstream } from "@/lib/bindings";
+import {
+  agentSpawned,
+  CLOCK_SKEW_MS,
+  leadAnswered,
+  MESSAGE_LEAD_KEY,
+  projectAdded,
+  taskWorkstream,
+  useSignal,
+  type SignalInputs,
+} from "./signals";
 
 const project = (path: string) => ({ path }) as Project;
 const ws = (id: string) => ({ item: { id } }) as WorkstreamView;
@@ -43,6 +53,23 @@ describe("signal rules", () => {
     expect(agentSpawned([], lead(["main"]), [ws("main")]).done).toBe(false);
     expect(agentSpawned([], lead(["w1"]), [])).toEqual({ done: true, workstream: "w1" });
     expect(agentSpawned(["w0"], lead(["w0"]), [ws("w0"), ws("w2")])).toEqual({ done: true, workstream: "w2" });
+  });
+
+  it("agentSpawned is done once the tour knows its workstream, even one in the baseline or already archived", () => {
+    expect(agentSpawned(["w1"], lead(["w1"]), [ws("w1")], "w1")).toEqual({ done: true, workstream: "w1" });
+    expect(agentSpawned([], lead([]), [], "gone")).toEqual({ done: true, workstream: "gone" });
+  });
+
+  it("taskWorkstream takes the Lead's first child made after the send, live or archived", () => {
+    const item = (id: string, createdAt: number | null, parent: string | null = "main") =>
+      ({ id, createdAt, parentWorkstreamId: parent }) as Workstream;
+    const sent = 10 * CLOCK_SKEW_MS;
+    expect(taskWorkstream(sent, null, [item("w1", sent + 5)])).toBeNull();
+    expect(taskWorkstream(sent, "main", [item("main", sent + 1, null)])).toBeNull();
+    expect(taskWorkstream(sent, "main", [item("mine", sent + 5, null)])).toBeNull();
+    expect(taskWorkstream(sent, "main", [item("old", sent - CLOCK_SKEW_MS - 1)])).toBeNull();
+    expect(taskWorkstream(sent, "main", [item("later", sent + 9), item("first", sent + 2)])).toBe("first");
+    expect(taskWorkstream(sent, "main", [item("skewed", sent - 1000)])).toBe("skewed");
   });
 
   it("leadAnswered fires when the question clears, or the tour's workstream is archived", () => {
@@ -86,14 +113,16 @@ describe("useSignal", () => {
     expect(result.current.done).toBe(false);
     await send("/p");
     expect(result.current.done).toBe(true);
+    expect(typeof result.current.sentAt).toBe("number");
   });
 
-  it("leadPanelAdjusted fires when the panel is hidden or resized", () => {
+  it("leadPanelAdjusted fires when the panel is hidden or resized, and stays done when it comes back", () => {
     const { result } = renderHook(() => useSignal("leadPanelAdjusted", inputs()));
     expect(result.current.done).toBe(false);
     act(() => useUiStore.getState().toggleLeadPanel());
     expect(result.current.done).toBe(true);
     act(() => useUiStore.getState().toggleLeadPanel());
+    expect(result.current.done).toBe(true);
   });
 
   it("leadAnswered fires once a question the Lead asked during the step is answered", () => {

@@ -81,6 +81,13 @@ describe("LeadPanel", () => {
     expect(screen.getByText("Login page summary")).toBeTruthy();
   });
 
+  it("keeps the tour's queue anchor when nothing is queued", async () => {
+    ipc.listLeadQueue.mockReturnValue(ok([]));
+    renderPanel();
+    await screen.findByText("Nothing queued");
+    expect(document.querySelector('[data-tour="lead.panel.queue"]')?.textContent).toContain("Nothing queued");
+  });
+
   it("removes the item whose remove button is pressed", async () => {
     renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "Remove Billing export from the queue" }));

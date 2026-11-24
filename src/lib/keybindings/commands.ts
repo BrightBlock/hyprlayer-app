@@ -7,7 +7,8 @@ type CommandCategory =
   | "Workspace"
   | "Terminal"
   | "Session"
-  | "Library";
+  | "Library"
+  | "Help";
 
 export type CommandWhen = "always" | "project" | "workstream" | "session";
 
@@ -363,6 +364,27 @@ export const COMMANDS: CommandDef[] = [
     when: "always",
     defaults: { mac: "mod+n", other: "mod+n" },
   },
+  {
+    id: "help.tour",
+    label: "Take the Tour",
+    category: "Help",
+    when: "always",
+    defaults: { mac: null, other: null },
+  },
+  {
+    id: "help.whatsNew",
+    label: "What's New",
+    category: "Help",
+    when: "always",
+    defaults: { mac: null, other: null },
+  },
+  {
+    id: "help.resumeTour",
+    label: "Resume the Tour",
+    category: "Help",
+    when: "always",
+    defaults: { mac: null, other: null },
+  },
 ];
 
 const CATEGORY_ORDER: CommandCategory[] = [
@@ -372,6 +394,7 @@ const CATEGORY_ORDER: CommandCategory[] = [
   "Terminal",
   "Session",
   "Library",
+  "Help",
 ];
 
 export const COMMANDS_BY_CATEGORY: ReadonlyArray<{

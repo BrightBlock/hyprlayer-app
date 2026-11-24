@@ -7,6 +7,7 @@ import { BAR_PAD_X, RepoStatus } from "./parts";
 import { SessionControlsCluster } from "./SessionControlsCluster";
 import { repoSummary } from "./statusBarState";
 import { SyncStatus } from "./SyncStatus";
+import { TourResumeButton } from "@/features/tour/TourResumeButton";
 
 /**
  * Sits under the agent view: the open workstream's repo state and the focused session's
@@ -39,6 +40,7 @@ export function StatusBar({
       style={{ height: STATUS_BAR_HEIGHT, paddingLeft: BAR_PAD_X, paddingRight: BAR_PAD_X }}
     >
       {repo && <RepoStatus repo={repo} compact={compact} />}
+      <TourResumeButton />
       <div className="flex-1" />
       <div className="flex min-w-0 items-center gap-1">
         <SessionControlsCluster workstreamId={workstreamId} compact={compact} />

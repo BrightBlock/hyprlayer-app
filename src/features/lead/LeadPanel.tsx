@@ -48,7 +48,7 @@ export function LeadPanel({
 
   return (
     <div aria-label="Lead" className={cx("flex flex-col overflow-y-auto", className)}>
-      <Section title="Queue" count={queued.length}>
+      <Section title="Queue" count={queued.length} tour="lead.panel.queue">
         {queued.length === 0 ? <Empty>Nothing queued</Empty> : <LeadQueueList projectPath={projectPath} items={queued} />}
       </Section>
       <Section title="Running" count={driving.length} tour="lead.panel.running">

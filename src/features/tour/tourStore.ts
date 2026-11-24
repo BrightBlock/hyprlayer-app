@@ -20,6 +20,8 @@ type Persisted = {
   /** The project and the workstream the first-run task made, so later steps find them. */
   projectPath: string | null;
   tourWorkstreamId: string | null;
+  /** When the first-run task reached the Lead: the Lead's children made after it are the tour's. */
+  taskSentAt: number | null;
 };
 
 type TourState = Persisted & {
@@ -48,6 +50,7 @@ const initial = (): TourState => ({
   whatsNew: IDLE,
   projectPath: null,
   tourWorkstreamId: null,
+  taskSentAt: null,
   cardOpen: false,
   appVersion: "",
 });
@@ -57,13 +60,22 @@ export const useTourStore = create<TourState>()(
     name: TOUR_STORE_KEY,
     version: 1,
     storage: debouncedJSONStorage<Persisted>(),
-    partialize: ({ lastSeenVersion, seen, firstRun, whatsNew, projectPath, tourWorkstreamId }): Persisted => ({
+    partialize: ({
       lastSeenVersion,
       seen,
       firstRun,
       whatsNew,
       projectPath,
       tourWorkstreamId,
+      taskSentAt,
+    }): Persisted => ({
+      lastSeenVersion,
+      seen,
+      firstRun,
+      whatsNew,
+      projectPath,
+      tourWorkstreamId,
+      taskSentAt,
     }),
   }),
 );
@@ -98,6 +110,10 @@ export function pausedTour(s: Pick<TourState, "firstRun" | "whatsNew">): ActiveT
   return null;
 }
 
+export function useHasPausedTour(): boolean {
+  return useTourStore((s) => pausedTour(s) !== null);
+}
+
 const set = useTourStore.setState;
 const get = useTourStore.getState;
 
@@ -123,6 +139,8 @@ export function startTour(path: TourPath, steps: readonly TourStep[], startAt?: 
     // One tour at a time: the other one waits, paused where it was.
     [o]: s[o].status === "active" ? { ...s[o], status: "paused" } : s[o],
     cardOpen: false,
+    // A new first run sends a new task; the last run's workstream would complete its steps at once.
+    ...(path === "firstRun" ? { tourWorkstreamId: null, taskSentAt: null } : {}),
   }));
   persistNow();
 }
@@ -214,4 +232,10 @@ export function setTourProject(projectPath: string): void {
 
 export function setTourWorkstream(workstreamId: string | null): void {
   set({ tourWorkstreamId: workstreamId });
+  persistNow();
+}
+
+export function setTaskSentAt(at: number): void {
+  set({ taskSentAt: at, tourWorkstreamId: null });
+  persistNow();
 }

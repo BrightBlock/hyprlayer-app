@@ -31,6 +31,8 @@ export type TourStep = {
   /** The app version the feature shipped in. */
   since: string;
   anchor: AnchorId;
+  /** The step reads fine without its anchor (it explains behaviour, not a control): no "isn't on screen". */
+  anchorOptional?: boolean;
   side: Side;
   reveal: Reveal;
   needs: Need[];
@@ -194,6 +196,7 @@ export const STEPS: TourStep[] = [
     feature: "agents.resume",
     since: LEAD_RELEASE,
     anchor: "agent.tab",
+    anchorOptional: true,
     side: "bottom",
     reveal: "none",
     needs: ["server"],

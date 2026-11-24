@@ -7,6 +7,22 @@ import { useDebounced } from "@/lib/useDebounced";
 import { fuzzyScore, type SearchResult } from "./search";
 import type { WorkstreamActivity } from "@/features/session/sessionStore";
 import { basename } from "@/lib/path";
+import { COMMANDS } from "@/lib/keybindings/commands";
+import { useHasCommand } from "@/lib/keybindings/registry";
+import { useHasPausedTour } from "@/features/tour/tourStore";
+
+/** Help commands, by name: typed for, never listed for an empty query. */
+export function actionResultsFor(query: string, tourPaused: boolean): SearchResult[] {
+  if (!query.trim()) return [];
+  return COMMANDS.filter((c) => c.category === "Help" && (c.id !== "help.resumeTour" || tourPaused)).flatMap(
+    (c): SearchResult[] => {
+      const score = fuzzyScore(`${c.label} help`, query);
+      return score === null
+        ? []
+        : [{ kind: "action", key: `action:${c.id}`, title: c.label, subtitle: "Help", score, nav: { type: "command", id: c.id } }];
+    },
+  );
+}
 
 function sessionStateToActivity(state: string): WorkstreamActivity {
   if (state === "awaiting_permission" || state === "awaiting_question") return "needs-you";
@@ -120,8 +136,12 @@ export function useSearchSources(query: string, activeWorkstreamId?: string): Se
     );
   }, [filesQuery.data, activeWorkstreamId]);
 
+  const resumable = useHasCommand("help.resumeTour");
+  const paused = useHasPausedTour() && resumable;
+  const actionResults = useMemo(() => actionResultsFor(query, paused), [query, paused]);
+
   return useMemo(
-    () => [...wsResults, ...agentResults, ...fileResults, ...docResults],
-    [wsResults, agentResults, fileResults, docResults],
+    () => [...actionResults, ...wsResults, ...agentResults, ...fileResults, ...docResults],
+    [actionResults, wsResults, agentResults, fileResults, docResults],
   );
 }

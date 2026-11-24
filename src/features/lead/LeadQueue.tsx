@@ -123,7 +123,7 @@ export function LeadQueueList({ projectPath, items }: { projectPath: string; ite
 
   return (
     <>
-      <ul ref={listRef} data-tour="lead.panel.queue">
+      <ul ref={listRef}>
         {items.map((item, index) => (
           <LeadQueueRow
             key={item.id}

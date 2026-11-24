@@ -2,16 +2,16 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui";
-import type { BinaryStatus, Project } from "@/lib/bindings";
+import type { BinaryStatus, Project, WorkstreamView } from "@/lib/bindings";
 import { useEscape, runCommand } from "@/lib/keybindings/registry";
 import { openSettings } from "@/lib/appNav";
-import { useBootstrap, useConnectionStatus, useWorkstreams } from "@/lib/queries";
+import { useArchivedWorkstreams, useBootstrap, useConnectionStatus, useWorkstreams } from "@/lib/queries";
 import { useUiStore } from "@/lib/uiStore";
 import { offerLeadDraft, setLeadDockExpanded, useProjectLead } from "@/features/lead/lead";
 import { focusShell, updateWorkstreamTabs, useWorkstreamTabsStore } from "@/features/session/workstreamTabs";
 import { useSessionStore } from "@/features/session/sessionStore";
 import { chordText, CoachMark } from "./CoachMark";
-import { useSignal } from "./signals";
+import { taskWorkstream, useSignal } from "./signals";
 import type { Need, Reveal } from "./steps";
 import {
   activeTour,
@@ -19,6 +19,7 @@ import {
   nextStep,
   pauseTour,
   prevStep,
+  setTaskSentAt,
   setTourProject,
   setTourWorkstream,
   skipStep,
@@ -116,8 +117,14 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
 
   useEffect(() => {
     if (signal.project) setTourProject(signal.project);
-    if (signal.workstream) setTourWorkstream(signal.workstream);
-  }, [signal.project, signal.workstream]);
+    if (signal.sentAt !== undefined) setTaskSentAt(signal.sentAt);
+    else if (signal.workstream) setTourWorkstream(signal.workstream);
+  }, [signal.project, signal.workstream, signal.sentAt]);
+
+  useTaskWorkstream(path === "firstRun", projectPath, lead?.view.workstreamId ?? null, workstreams);
+  const taskGone =
+    tourWorkstreamId !== null && workstreams !== undefined && !workstreams.some((w) => w.item.id === tourWorkstreamId);
+  const agentFinished = step.reveal === "tourAgentTab" && taskGone;
 
   const reveal = useRef<(r: Reveal) => void>(() => {});
   reveal.current = (r: Reveal) => {
@@ -140,7 +147,7 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
     setLeadDockExpanded(projectPath, r === "leadExpanded");
   };
 
-  const blocked = unmet !== null;
+  const blocked = unmet !== null || agentFinished;
   useEffect(() => {
     if (!blocked) reveal.current(step.reveal);
   }, [blocked, step.reveal, attempt]);
@@ -160,7 +167,9 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
 
   let notice: ReactNode = unmet?.notice;
   let anchored = anchor.status === "found" ? anchor.rect : null;
-  if (!unmet && anchor.status === "missing") {
+  if (agentFinished) {
+    notice = "The agent has already finished, and the Lead archived its workstream, so its tab is closed.";
+  } else if (!unmet && anchor.status === "missing" && !step.anchorOptional) {
     notice = "What this step points at isn’t on screen.";
     anchored = null;
   }
@@ -177,7 +186,7 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
       notice={notice}
       fix={
         fix ??
-        (!unmet && anchor.status === "missing" ? (
+        (!blocked && anchor.status === "missing" && !step.anchorOptional ? (
           <Button size="sm" onClick={() => setAttempt((a) => a + 1)}>
             Take me there
           </Button>
@@ -199,6 +208,31 @@ function ActiveStep({ tour }: { tour: ActiveTour }) {
       }
     />
   );
+}
+
+/**
+ * Adopts the workstream the Lead made for the first-run task, whichever step is showing: a fast Lead can
+ * spawn, finish and archive it while the user is still reading the step that sent it.
+ */
+function useTaskWorkstream(
+  firstRun: boolean,
+  projectPath: string | null,
+  leadWorkstreamId: string | null,
+  live: readonly WorkstreamView[] | undefined,
+) {
+  const sentAt = useTourStore((s) => s.taskSentAt);
+  const known = useTourStore((s) => s.tourWorkstreamId);
+  const looking = firstRun && sentAt !== null && known === null;
+  const archived = useArchivedWorkstreams(looking).data;
+  useEffect(() => {
+    if (!looking || sentAt === null) return;
+    const candidates = [
+      ...(live ?? []).map((w) => w.item),
+      ...(archived ?? []).map((w) => w.item).filter((w) => w.projectPath === projectPath),
+    ];
+    const id = taskWorkstream(sentAt, leadWorkstreamId, candidates);
+    if (id) setTourWorkstream(id);
+  }, [looking, sentAt, leadWorkstreamId, live, archived, projectPath]);
 }
 
 /** F6 from anywhere in the app returns to the coach mark; from the coach mark it goes to the anchor. */

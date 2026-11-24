@@ -4,7 +4,10 @@ import { useEffect, useRef } from "react";
 import { useBootstrap } from "@/lib/queries";
 import { log } from "@/lib/log";
 import { launchPlan, pathSteps } from "./selection";
+import { useCommand } from "@/lib/keybindings/registry";
+import { resumeTheTour, showWhatsNew, takeTheTour } from "./actions";
 import { TourHost } from "./TourHost";
+import { WhatsNewCard } from "./WhatsNewCard";
 import { openWhatsNewCard, setAppVersion, startTour, TOUR_STORED_AT_LAUNCH, useTourStore } from "./tourStore";
 
 /** Decides once per launch, after setup, whether first run starts or the what's-new card opens. */
@@ -30,13 +33,23 @@ export function useTourLaunch(suspended: boolean): void {
       hasProjects: bootstrap.projects.length > 0,
       firstRunStatus: s.firstRun.status,
     });
+    const underWay = s.whatsNew.status === "active" || s.whatsNew.status === "paused";
     if (plan?.path === "firstRun") startTour("firstRun", pathSteps("firstRun"));
-    else if (plan?.path === "whatsNew") openWhatsNewCard();
+    else if (plan?.path === "whatsNew" && !underWay) openWhatsNewCard();
   }, [suspended, version, bootstrap]);
 }
 
 /** The app shell's one mount point for the guided tour. `suspended` while setup runs. */
 export function Tour({ suspended }: { suspended: boolean }) {
   useTourLaunch(suspended);
-  return suspended ? null : <TourHost />;
+  useCommand("help.tour", suspended ? null : takeTheTour);
+  useCommand("help.whatsNew", suspended ? null : showWhatsNew);
+  useCommand("help.resumeTour", suspended ? null : resumeTheTour);
+  if (suspended) return null;
+  return (
+    <>
+      <TourHost />
+      <WhatsNewCard />
+    </>
+  );
 }

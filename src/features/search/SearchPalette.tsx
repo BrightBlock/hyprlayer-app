@@ -9,11 +9,12 @@ import { openDocPreviewTab } from "@/features/session/workstreamTabs";
 import { Icon, type IconName } from "@/components/Icon";
 import { ActivityDot } from "@/components/ActivityDot";
 import { Kbd, rowClass } from "@/components/ui";
-import { useEscape } from "@/lib/keybindings/registry";
+import { runCommand, useEscape } from "@/lib/keybindings/registry";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
 
 const KIND_ICON: Record<SearchResult["kind"], IconName> = {
+  action: "run",
   workstream: "branch",
   agent: "terminal",
   doc: "library",
@@ -52,6 +53,11 @@ function dispatchNav(
       break;
     case "file":
       break;
+    case "command":
+      // Closed first, so the action's own surface opens over the app rather than under the palette.
+      closeSearch();
+      runCommand(nav.id);
+      return;
   }
   closeSearch();
 }

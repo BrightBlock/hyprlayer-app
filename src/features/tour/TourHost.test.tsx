@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ESCAPE_COMMAND_ID, runCommand } from "@/lib/keybindings/registry";
 import { pathSteps } from "./selection";
 import { firstUnmet, hasEngine, routeProject, TourHost, tourProject } from "./TourHost";
-import { activeTour, nextStep, pausedTour, startTour, useTourStore } from "./tourStore";
+import { activeTour, nextStep, pausedTour, setTaskSentAt, startTour, useTourStore } from "./tourStore";
 import { ANCHOR_WAIT_MS } from "./useAnchor";
 
 const navigate = vi.fn();
@@ -15,7 +15,13 @@ vi.mock("@tanstack/react-router", () => ({
     select({ location: { pathname: "/projects/%2Frepo", search: {} } }),
 }));
 
-const facts = vi.hoisted(() => ({ lead: true, connected: true, engine: true, projects: [{ path: "/repo" }] }));
+const facts = vi.hoisted(() => ({
+  lead: true,
+  connected: true,
+  engine: true,
+  projects: [{ path: "/repo" }],
+  archived: [] as { item: { id: string; projectPath: string; createdAt: number; parentWorkstreamId: string } }[],
+}));
 
 vi.mock("@/lib/queries", () => ({
   useBootstrap: () => ({
@@ -27,6 +33,7 @@ vi.mock("@/lib/queries", () => ({
   }),
   useConnectionStatus: () => ({ data: { state: facts.connected ? "connected" : "lost" } }),
   useWorkstreams: () => ({ data: [] }),
+  useArchivedWorkstreams: (enabled: boolean) => ({ data: enabled ? facts.archived : undefined }),
 }));
 
 vi.mock("@/features/lead/lead", () => ({
@@ -51,7 +58,7 @@ function anchor(id: string) {
 
 beforeEach(() => {
   useTourStore.setState(fresh, true);
-  Object.assign(facts, { lead: true, connected: true, engine: true, projects: [{ path: "/repo" }] });
+  Object.assign(facts, { lead: true, connected: true, engine: true, projects: [{ path: "/repo" }], archived: [] });
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0));
   vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
   vi.stubGlobal(
@@ -150,6 +157,36 @@ describe("TourHost", () => {
     expect((await screen.findByRole("button", { name: "Next" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Skip this step" }));
     expect(activeTour(useTourStore.getState())?.step.id).toBe("fr.handoff");
+  });
+
+  it("shows a step whose anchor is optional as a plain card when the anchor isn't there", async () => {
+    vi.useFakeTimers();
+    startTour("whatsNew", pathSteps("whatsNew"), "wn.resume");
+    render(<TourHost />);
+    await act(async () => {
+      vi.advanceTimersByTime(ANCHOR_WAIT_MS + 50);
+    });
+    expect(screen.getByRole("heading", { name: "Agents pick up where they left off" })).toBeTruthy();
+    expect(screen.queryByText("What this step points at isn’t on screen.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Take me there" })).toBeNull();
+  });
+
+  it("finishes the first run when the Lead's agent came and went before its steps", async () => {
+    anchor("lead.panel.running");
+    anchor("lead.dock");
+    startAt("fr.handoff");
+    setTaskSentAt(1_000_000);
+    facts.archived = [{ item: { id: "child", projectPath: "/repo", createdAt: 1_000_500, parentWorkstreamId: "main" } }];
+    render(<TourHost />);
+    await screen.findByText("Agent spawned");
+    expect(useTourStore.getState().tourWorkstreamId).toBe("child");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(
+      await screen.findByText("The agent has already finished, and the Lead archived its workstream, so its tab is closed."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Take me there" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect((await screen.findByRole("button", { name: "Finish" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

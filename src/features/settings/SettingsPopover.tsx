@@ -30,6 +30,8 @@ import {
 import { openArchivedWorktrees } from "@/features/archive/archivedWorktreesStore";
 import { setServerAutoUpdate, useServerAutoUpdate } from "@/features/hosts/serverAutoUpdate";
 import { setServerStatsShown, useServerStatsShown } from "@/features/statusbar/serverStatsShown";
+import { showWhatsNew, takeTheTour, useCardContent } from "@/features/tour/actions";
+import { pathSteps } from "@/features/tour/selection";
 
 import { HarnessPicker } from "./HarnessPicker";
 import { quickSettings, withConfirmQuit, withDefaultHarness, withNotify } from "./settingsPatches";
@@ -41,6 +43,8 @@ const APPEARANCE: Array<{ value: AppearanceSegment; label: string }> = [
   { value: "dark", label: "Dark" },
   { value: "system", label: "Auto" },
 ];
+
+const FIRST_RUN_LENGTH = pathSteps("firstRun").length;
 
 const ROW = "flex items-center justify-between gap-3 px-3 py-2 text-ui text-ink-2";
 
@@ -94,6 +98,7 @@ function PopoverBody({ headingId, onClose }: { headingId: string; onClose: () =>
         <Meta>{serversMeta(useServerCounts())}</Meta>
       </Link>
       <ArchivedLink onClose={onClose} />
+      <HelpRows onClose={onClose} />
       <Link
         to="/settings"
         search={{}}
@@ -216,6 +221,34 @@ function ArchivedLink({ onClose }: { onClose: () => void }) {
       )}
       <Icon name="chevronRight" size="sm" className="text-ink-dim" />
     </button>
+  );
+}
+
+function HelpRows({ onClose }: { onClose: () => void }) {
+  const { steps } = useCardContent();
+  const run = (action: () => void) => () => {
+    onClose();
+    action();
+  };
+  return (
+    <>
+      <div className="mx-1 my-1 h-px bg-edge-2" />
+      <p className="lbl px-3 pt-1.5 pb-1">Help</p>
+      <button type="button" onClick={run(takeTheTour)} className={cx(BAR_POPOVER_ROW, "w-full text-left")}>
+        <Icon name="run" size="sm" className="text-ink-dim" />
+        <span className="flex-1">Take the tour</span>
+        <Meta>{FIRST_RUN_LENGTH} steps</Meta>
+      </button>
+      <button type="button" onClick={run(showWhatsNew)} className={cx(BAR_POPOVER_ROW, "w-full text-left")}>
+        <Icon name="queued" size="sm" className="text-ink-dim" />
+        <span className="flex-1">What’s new</span>
+        {steps[0] && <Meta>{steps[0].since}</Meta>}
+      </button>
+      <Link to="/settings" search={{ section: "keyboard" }} onClick={onClose} className={BAR_POPOVER_ROW}>
+        <Icon name="keyboard" size="sm" className="text-ink-dim" />
+        <span className="flex-1">Keyboard shortcuts</span>
+      </Link>
+    </>
   );
 }
 
