@@ -171,8 +171,6 @@ pub(crate) fn codex_used_percent(tokens: u32, window: u32) -> u32 {
     }
     let effective = window - BASELINE;
     let used = (f64::from(tokens) - BASELINE).max(0.0);
-    let left = ((effective - used).max(0.0) / effective * 100.0)
-        .clamp(0.0, 100.0)
-        .round();
+    let left = ((effective - used).max(0.0) / effective * 100.0).round();
     100 - left as u32
 }

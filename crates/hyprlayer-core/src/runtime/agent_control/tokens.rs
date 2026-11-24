@@ -54,7 +54,6 @@ impl AgentTokens {
     }
 }
 
-/// Revokes its token on drop.
 pub struct TokenGuard {
     token: String,
     tokens: AgentTokens,
